@@ -1,0 +1,59 @@
+#!/bin/bash
+# Formatter. Returns 0 if all files are well-formatted, 1 if any has been formatted by the script.
+
+TMP=$(mktemp)
+
+CODE=0
+CHECKING=0
+
+if [[ $* == "all" ]]; then
+    LOC="."
+elif [[ $* == "check" ]]; then
+    LOC="."
+    CHECKING=1
+elif [[ $* == "" ]]; then
+    LOC1=$(git diff --name-only --staged)
+    LOC2=$(git diff --name-only)
+    LOC="${LOC1} ${LOC2}"
+else
+    LOC=$*
+fi
+if [[ -z ${LOC// } ]]; then
+    echo "No modified file, do nothing"
+    exit 0
+fi
+
+if [ -f /usr/bin/buildifier ]; then
+    find $LOC \( -not -path "*/.*" \) -and \
+        \( -name BUILD -o -name WORKSPACE -o -name *.bzl \) \
+        | xargs buildifier -v
+fi
+
+for f in $(find $LOC -name *.py -and -not -path "*/.*"); do
+    cp "$f" "$TMP";
+    yapf -i "$f";
+    if ! cmp --silent "$f" $TMP; then
+      echo "yapf-ed $f";
+      CODE=1;
+      if [[ $CHECKING == 1 ]]; then
+        diff $TMP "$f";
+        echo;
+      fi
+    fi
+done
+
+for f in $(find $LOC \( -name *.h -o -name *.cc -o -name *.proto \) -and -not -path "*/.*"); do
+    cp "$f" "$TMP";
+    clang-format -i $f;
+    if ! cmp --silent $f $TMP; then
+      echo "clang-formatted $f";
+      CODE=1;
+      if [[ $CHECKING == 1 ]]; then
+        diff $TMP "$f";
+        echo;
+      fi
+    fi
+done
+
+rm -f $TMP
+exit $CODE

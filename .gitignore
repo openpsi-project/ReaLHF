@@ -3,6 +3,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+slurm_outs
+_data
+*.nfs*
+output
+logs
+
 # C extensions
 *.so
 
@@ -158,3 +164,8 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# openai api key
+api_key.txt
+api_key.json
+
