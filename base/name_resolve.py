@@ -230,12 +230,11 @@ class MemoryNameRecordRepository(NameRecordRepository):
 
 
 class NfsNameRecordRepository(NameRecordRepository):
-    if socket.gethostname().startswith("frl") or socket.gethostname().startswith(
-            "dev") or socket.gethostname().startswith("slurm"):
-        RECORD_ROOT = "/data/aigc/llm/name_resolve"
-    else:
-        RECORD_ROOT = "/tmp/marl_name_resolve"
-    os.makedirs(RECORD_ROOT, exist_ok=True)
+    # if socket.gethostname().startswith("frl") or socket.gethostname().startswith("dev"):
+    #     RECORD_ROOT = "/data/aigc/llm/name_resolve"
+    # else:
+    #     RECORD_ROOT = "/tmp/marl_name_resolve"
+    RECORD_ROOT = "/home/aigc/llm/name_resolve"
 
     def __init__(self, **kwargs):
         self.__to_delete = set()
@@ -255,7 +254,7 @@ class NfsNameRecordRepository(NameRecordRepository):
             raise NameEntryExistsError(path)
         local_id = str(uuid.uuid4())[:8]
         with open(path + f".tmp.{local_id}", "w") as f:
-            f.write(value)
+            f.write(str(value))
         os.rename(path + f".tmp.{local_id}", path)
         if delete_on_exit:
             self.__to_delete.add(name)

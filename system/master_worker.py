@@ -115,7 +115,8 @@ def wrap_func(
 
 
 class MasterWorker(worker_base.Worker):
-    MODEL_SAVE_ROOT = f"/data/aigc/llm/{getpass.getuser()}/checkpoints"
+    # MODEL_SAVE_ROOT = f"/data/aigc/llm/{getpass.getuser()}/checkpoints"
+    MODEL_SAVE_ROOT = f"/home/aigc/llm/{getpass.getuser()}/checkpoints"
     os.makedirs(MODEL_SAVE_ROOT, exist_ok=True)
 
     def __init__(self, server=None):

@@ -9,6 +9,7 @@ import torch
 
 import base.name_resolve as name_resolve
 import base.names as names
+
 import base.network as network
 
 logger = logging.getLogger("System-GPU")
@@ -85,7 +86,7 @@ def set_cuda_device(device):
 def reveal_ddp_identity(expr_name, trial_name, model_name, worker_index):
     global_peer_name = names.trainer_ddp_peer(expr_name, trial_name, model_name)
     name_resolve.add_subentry(global_peer_name, worker_index, keepalive_ttl=30)
-    local_peer_name = names.trainer_ddp_local_peer(expr_name, trial_name, socket.gethostname())
+    local_peer_name = names.trainer_ddp_local_peer(expr_name, trial_name, socket.gethostname(), model_name)
     name_resolve.add_subentry(local_peer_name, worker_index, keepalive_ttl=30)
 
 
@@ -105,6 +106,7 @@ def setup_ddp(expr_name, trial_name, model_name, worker_index, use_gpu: bool = T
         expr_name,
         trial_name,
         socket.gethostname(),
+        model_name,
     )
     local_peers = list([str(x) for x in sorted([int(x) for x in name_resolve.get_subtree(local_peer_name)])])
     local_peer_index = local_peers.index(str(worker_index))
@@ -139,12 +141,18 @@ def setup_ddp(expr_name, trial_name, model_name, worker_index, use_gpu: bool = T
             raise TimeoutError(f"DDP trainer(index:{worker_index}), rank {ddp_rank} for model "
                                f"{model_name} wait for ddp_init_method timeout.")
 
+    torch_dist_kwargs = dict(world_size=world_size,
+                             rank=ddp_rank,
+                             init_method=ddp_init_address,
+                             backend='nccl')
     if use_gpu:
         # Set local rank and make all devices visible. These variables are used by DeepSpeed.
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(local_gpu_id)
+        torch.cuda.set_device(0)
+
         os.environ['LOCAL_RANK'] = str(local_gpu_id)
         os.environ['CUDA_VISIBLE_DEVICES'] = ",".join([str(i) for i in range(gpu_count())])
 
-        torch.cuda.set_device(local_gpu_id)
         dist_kwrags = dict(world_size=world_size,
                            rank=ddp_rank,
                            init_method=ddp_init_address,
@@ -152,8 +160,7 @@ def setup_ddp(expr_name, trial_name, model_name, worker_index, use_gpu: bool = T
                            auto_mpi_discovery=False)
         deepspeed.init_distributed(**dist_kwrags)
     else:
-        dist_kwrags = dict(world_size=world_size, rank=ddp_rank, init_method=ddp_init_address,
-                           backend='gloo')  # this key word differs from deepspeed.
-        torch.distributed.init_process_group(**dist_kwrags)
+        torch_dist_kwargs['backend'] = 'gloo'  # this key word differs from deepspeed.
+        torch.distributed.init_process_group(**torch_dist_kwargs)
 
     return world_size, ddp_rank, local_gpu_id

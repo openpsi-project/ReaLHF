@@ -52,8 +52,8 @@ def trainer_ddp_peer(experiment_name, trial_name, model_name):
     return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/trainer_ddp_peer/{model_name}"
 
 
-def trainer_ddp_local_peer(experiment_name, trial_name, host_name):
-    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/trainer_ddp_local_peer/{host_name}"
+def trainer_ddp_local_peer(experiment_name, trial_name, host_name, model_name):
+    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/trainer_ddp_local_peer/{host_name}/{model_name}"
 
 
 def trainer_ddp_master(experiment_name, trial_name, model_name):

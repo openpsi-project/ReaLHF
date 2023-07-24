@@ -10,6 +10,8 @@ import system.worker_base as worker_base
 
 logger = logging.getLogger("Data Worker")
 
+DATA_WORKER_NAME = "_data_worker"
+
 
 class DataWorker(worker_base.Worker):
 
@@ -35,14 +37,14 @@ class DataWorker(worker_base.Worker):
 
         self.__stream = request_reply_stream.make_reply_server(config.worker_info, config.stream)
 
-        gpu_utils.reveal_ddp_identity(self.__experiment_name, self.__trial_name, "data_worker",
+        gpu_utils.reveal_ddp_identity(self.__experiment_name, self.__trial_name, DATA_WORKER_NAME,
                                       self.__worker_index)
         return config.worker_info
 
     def __setup_datasets(self):
         self.__world_size, *_ = gpu_utils.setup_ddp(self.__experiment_name,
                                                     self.__trial_name,
-                                                    "data_worker",
+                                                    DATA_WORKER_NAME,
                                                     self.__worker_index,
                                                     use_gpu=False)
         # initialize data sets

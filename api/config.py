@@ -10,21 +10,26 @@ import sys
 import yaml
 
 import api.ecs
+import os
 
-PYTORCH_KERNEL_CACHE_PATH = f"/data/aigc/llm/{getpass.getuser()}/.cache/torch/kernels"
-DATASET_CACHE_PATH = f'/data/aigc/llm/{getpass.getuser()}/.datacache/'
+PYTORCH_KERNEL_CACHE_PATH = f"/home/aigc/llm/{getpass.getuser()}/.cache/torch/kernels"
+TRITON_CACHE_PATH = f"/home/aigc/llm/{getpass.getuser()}/.cache/triton"
+DATASET_CACHE_PATH = f'/home/aigc/llm/{getpass.getuser()}/.cache/datasets'
+# PYTORCH_KERNEL_CACHE_PATH = f"/data/aigc/llm/{getpass.getuser()}/.cache/torch/kernels"
+# DATASET_CACHE_PATH = f'/data/aigc/llm/{getpass.getuser()}/.datacache/'
 
 _LLM_ENVVARS = {
     "NCCL_P2P_DISABLE": "1",
     "NCCL_IB_DISABLE": "1",
     "TRANSFORMERS_OFFLINE": "1",
     "PYTORCH_KERNEL_CACHE_PATH": PYTORCH_KERNEL_CACHE_PATH,
+    "TRITON_CACHE_DIR": TRITON_CACHE_PATH,
     "TOKENIZERS_PARALLELISM": "true",
     "CUDA_LAUNCH_BLOCKING": "1",
     "TORCH_USE_CUDA_DSA": "1",
 }
-_LLM_GPU_IMAGE = "meizy/deepspeed:0.9.2"
-_LLM_CPU_IMAGE = "fw/marl-cpu-llm"
+_LLM_GPU_IMAGE = "root/llm-gpu"
+_LLM_CPU_IMAGE = "root/llm-cpu"
 
 
 @dataclasses.dataclass
@@ -200,7 +205,7 @@ class ExperimentScheduling:
     data_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
     model_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
     master_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
-    controller_image: str = "marl/marl-cpu"
+    controller_image: str = _LLM_CPU_IMAGE
 
 
 @dataclasses.dataclass

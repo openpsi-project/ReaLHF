@@ -47,12 +47,11 @@ class WpsRewardModelingExperiment(Experiment):
                 scheduling=Scheduling.data_worker_default(
                     cpu=4,
                     mem=10000,
-                    nodelist="frl2g030",
                 ),
             ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=8, mem=50000, nodelist="frl2g030"),
+                scheduling=Scheduling.master_worker_default(cpu=8, mem=50000),
             ),
             model_worker=TasksGroup(
                 count=self.n_models,
@@ -66,15 +65,16 @@ class WpsRewardModelingExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
+        root_dir = "/home"
         if self.base_model == 'starcoder':
-            model_path = "/data/marl/checkpoints/fw/starcoder-wps-best/"
+            model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
         else:
-            model_path = "/data/marl/checkpoints/fw/codegen2b-wps/"
+            model_path = f"{root_dir}/aigc/llm/checkpoints/codegen2b-wps/"
         train_batch_size_per_device = 6
         eval_batch_size_per_device = 12
         max_seq_len = 512
 
-        # with open("/data/aigc/llm/fw/datasets/rw-unpaired/train.jsonl", 'r') as f:
+        # with open(f"{root_dir}/aigc/llm/fw/datasets/rw-unpaired/train.jsonl", 'r') as f:
         #     data = [json.loads(ff) for ff in f]
         #     n_pos = len([d for d in data if d['correctness_label']])
         #     n_neg = len(data) - n_pos
@@ -85,7 +85,7 @@ class WpsRewardModelingExperiment(Experiment):
         dataset = Dataset(
             'excel_reward_modeling_unpaired',
             args=dict(
-                dataset_path="/data/aigc/llm/fw/datasets/rw-unpaired/train.jsonl",
+                dataset_path=f"{root_dir}/aigc/llm/datasets/rw-unpaired/train.jsonl",
                 tokenizer_name_or_path=model_path,
                 max_seq_len=max_seq_len,
             ),
@@ -108,7 +108,7 @@ class WpsRewardModelingExperiment(Experiment):
         ]
 
         eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args['dataset_path'] = "/data/aigc/llm/fw/datasets/rw-unpaired/valid.jsonl"
+        eval_dataset.args['dataset_path'] = f"{root_dir}/aigc/llm/fw/datasets/rw-unpaired/valid.jsonl"
         eval_dataloader = DataLoader("default_eval", args=dict(batch_size=eval_batch_size_per_device))
 
         if self.base_model == 'starcoder':

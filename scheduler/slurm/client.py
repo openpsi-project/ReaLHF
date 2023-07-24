@@ -55,9 +55,8 @@ class SlurmSchedulerClient(SchedulerClient):
                      gpu=0,
                      mem=1024,
                      env_vars=None,
-                     container_image="marl/marl-cpu",
-                     container_mounts="/data:/data,/hddlustre:/hddlustre"
-                     if os.environ.get("LLM_A800", "0") == "1" else "/home:/data",
+                     container_image="root/llm-cpu",
+                     container_mounts="/home:/home",
                      nodelist=None,
                      exclude=None,
                      hostfile=False):

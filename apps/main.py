@@ -64,7 +64,8 @@ def main_start(args):
     sched.submit("setup",
                  scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
                  env_vars=simple_env_vars,
-                 exclude='frl2g[084-086],frl2g008,frl2g093,frl2g094,frl8g[136-137]')
+                #  exclude='frl2g[084-086],frl2g008,frl2g093,frl2g094,frl8g[136-137]',
+                 )
 
     sched.wait(timeout=120, update=True)
     logger.info(f"Resetting name resolving repo... Done.")
@@ -79,7 +80,8 @@ def main_start(args):
                        gpu=0,
                        mem=1024,
                        env_vars=simple_env_vars,
-                       exclude='frl2g[084-086],frl2g008,frl2g093,frl2g094,frl8g[136-137]')
+                    #    exclude='frl2g[084-086],frl2g008,frl2g093,frl2g094,frl8g[136-137]',
+                       )
 
     workers_configs = ((k, getattr(setup, k)) for k in system.WORKER_TYPES)
 
