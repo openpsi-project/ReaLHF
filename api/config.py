@@ -5,16 +5,17 @@ import dataclasses
 import enum
 import getpass
 import math
+import os
 import sys
 
 import yaml
 
 import api.ecs
-import os
 
 PYTORCH_KERNEL_CACHE_PATH = f"/home/aigc/llm/{getpass.getuser()}/.cache/torch/kernels"
 TRITON_CACHE_PATH = f"/home/aigc/llm/{getpass.getuser()}/.cache/triton"
 DATASET_CACHE_PATH = f'/home/aigc/llm/{getpass.getuser()}/.cache/datasets'
+TORCH_EXTENSIONS_DIR = f"/home/aigc/llm/{getpass.getuser()}/.cache/torch/extensions"
 # PYTORCH_KERNEL_CACHE_PATH = f"/data/aigc/llm/{getpass.getuser()}/.cache/torch/kernels"
 # DATASET_CACHE_PATH = f'/data/aigc/llm/{getpass.getuser()}/.datacache/'
 
@@ -25,9 +26,13 @@ _LLM_ENVVARS = {
     "PYTORCH_KERNEL_CACHE_PATH": PYTORCH_KERNEL_CACHE_PATH,
     "TRITON_CACHE_DIR": TRITON_CACHE_PATH,
     "TOKENIZERS_PARALLELISM": "true",
+    "TORCH_EXTENSIONS_DIR": TORCH_EXTENSIONS_DIR,
     "CUDA_LAUNCH_BLOCKING": "1",
     "TORCH_USE_CUDA_DSA": "1",
 }
+for k, v in _LLM_ENVVARS.items():
+    os.environ[k] = v
+
 _LLM_GPU_IMAGE = "root/llm-gpu"
 _LLM_CPU_IMAGE = "root/llm-cpu"
 
@@ -37,7 +42,7 @@ class Scheduling:
     cpu: int
     gpu: int
     mem: int
-    gpu_type: str = "geforce"
+    gpu_type: str = "tesla"
     nodelist: str = None
     exclude: str = None
     container_image: str = _LLM_CPU_IMAGE

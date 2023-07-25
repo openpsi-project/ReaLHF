@@ -4,13 +4,15 @@ import logging
 import multiprocessing
 import os
 
+# HACK: we must let each slurm job have its own CUDA_VISIBLE_DEVICES
+os.environ['CUDA_VISIBLE_DEVICES'] = str(int(os.environ["SLURM_PROCID"]) % 8)
 multiprocessing.set_start_method("spawn", force=True)
 
-from system import make_controller, run_worker
 import api.config
 import base.name_resolve
 import base.names
 import experiments
+import system
 
 try:
     import impl.data
@@ -36,10 +38,10 @@ def main_worker(args):
     logger.info(f"Run {args.worker_type} worker with args: %s", args)
     assert not args.experiment_name.startswith(
         "/"), f"Invalid experiment_name \"{args.experiment_name}\" starts with \"/\""
-    run_worker(worker_type=args.worker_type,
-               experiment_name=args.experiment_name,
-               trial_name=args.trial_name,
-               worker_name=f"{args.worker_type}/{args.group_id}")
+    system.run_worker(worker_type=args.worker_type,
+                      experiment_name=args.experiment_name,
+                      trial_name=args.trial_name,
+                      worker_name=f"{args.worker_type}/{args.group_id}")
 
 
 def main_controller(args):
@@ -53,7 +55,7 @@ def main_controller(args):
     """
     logger.info("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
-    controller = make_controller(experiment_name=args.experiment_name, trial_name=args.trial_name)
+    controller = system.make_controller(experiment_name=args.experiment_name, trial_name=args.trial_name)
     experiment = api.config.make_experiment(args.experiment_name)
     controller.start(
         experiment=experiment,

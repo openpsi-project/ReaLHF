@@ -134,10 +134,10 @@ class SlurmSchedulerClient(SchedulerClient):
             f"--ntasks={ntasks}",
             f"--cpus-per-task={cpu}",
             f"--gpus-per-task={gpu_type}:1" if gpu == 1 else "",
-            f"--mem-per-cpu={mem // max(1, cpu)}",
+            f"--mem-per-cpu={mem // max(1, cpu)}M",
             f"--container-image={spec.container_image}",
             f"--container-mounts={spec.container_mounts}",
-            f"--container-mount-home",
+            # f"--container-mount-home",
             f"--export={','.join(str(k)+'='+str(v) for k, v in spec.env_vars.items())}"
             if spec.env_vars is not None else "",
             f"--multi-prog",

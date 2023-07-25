@@ -140,7 +140,8 @@ def make_dataset(
         return dataset_cls(seed, ddp_rank, world_size, **cfg.args)
 
     # Create and check cache path.
-    if (not cache_root.startswith("/data") and not cache_root.startswith("/hddlustre") and not cache_root.startswith("/home")):
+    if (not cache_root.startswith("/data") and not cache_root.startswith("/hddlustre")
+            and not cache_root.startswith("/home")):
         raise ValueError(f"Data cache path {cache_root} is not on NFS"
                          " (either '/home', '/data' or '/hddlustre').")
     if "_" in experiment_name or "_" in trial_name:

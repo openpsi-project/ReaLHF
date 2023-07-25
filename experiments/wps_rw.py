@@ -26,8 +26,8 @@ def train_rw(
 class WpsRewardModelingExperiment(Experiment):
 
     def __init__(self,
-                 n_data_workers=2,
-                 n_models=4,
+                 n_data_workers=4,
+                 n_models=16,
                  seed=1,
                  weight_decay=0.0,
                  remove_code_comments=True,
@@ -70,8 +70,8 @@ class WpsRewardModelingExperiment(Experiment):
             model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
         else:
             model_path = f"{root_dir}/aigc/llm/checkpoints/codegen2b-wps/"
-        train_batch_size_per_device = 6
-        eval_batch_size_per_device = 12
+        train_batch_size_per_device = 2
+        eval_batch_size_per_device = 4
         max_seq_len = 512
 
         # with open(f"{root_dir}/aigc/llm/fw/datasets/rw-unpaired/train.jsonl", 'r') as f:
@@ -111,26 +111,14 @@ class WpsRewardModelingExperiment(Experiment):
         eval_dataset.args['dataset_path'] = f"{root_dir}/aigc/llm/fw/datasets/rw-unpaired/valid.jsonl"
         eval_dataloader = DataLoader("default_eval", args=dict(batch_size=eval_batch_size_per_device))
 
-        if self.base_model == 'starcoder':
-            rw_model = Model(
-                "wps_reward_lora",
-                args=dict(
-                    model_name_or_path=model_path,
-                    disable_dropout=True,
-                    load_state_dict=False,
-                    lora_dim=8,
-                    lora_module_name='attn',
-                ),
-            )
-        else:
-            rw_model = Model(
-                "wps_reward",
-                args=dict(
-                    model_name_or_path=model_path,
-                    disable_dropout=True,
-                    load_state_dict=False,
-                ),
-            )
+        rw_model = Model(
+            "wps_reward",
+            args=dict(
+                model_name_or_path=model_path,
+                disable_dropout=True,
+                load_state_dict=False,
+            ),
+        )
         backend = ModelBackend('ds_train',
                                args=dict(
                                    optimizer_name='adam',

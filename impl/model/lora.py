@@ -1,8 +1,8 @@
 import math
 
-from deepspeed.compression.helper import recursive_getattr, recursive_setattr
 from torch import nn
 import deepspeed
+import deepspeed.compression.helper
 import torch
 import torch.nn.functional as F
 
@@ -82,10 +82,10 @@ def convert_linear_layer_to_lora(model, part_module_name, lora_dim=0, lora_scali
         if isinstance(module, nn.Linear) and part_module_name in name:
             replace_name.append(name)
     for name in replace_name:
-        module = recursive_getattr(model, name)
+        module = deepspeed.compression.helper.recursive_getattr(model, name)
         tmp = LinearLayer_LoRA(module.weight, lora_dim, lora_scaling, lora_droppout,
                                module.bias).to(module.weight.device).to(module.weight.dtype)
-        recursive_setattr(model, name, tmp)
+        deepspeed.compression.helper.recursive_setattr(model, name, tmp)
     return model
 
 
@@ -103,7 +103,7 @@ def convert_lora_to_linear_layer(model):
         if isinstance(module, LinearLayer_LoRA):
             repalce_name.append(name)
     for name in repalce_name:
-        module = recursive_getattr(model, name)
+        module = deepspeed.compression.helper.recursive_getattr(model, name)
         zero_stage_3 = hasattr(module.weight, 'ds_id')
         with deepspeed.zero.GatheredParameters(_z3_params_to_fetch(
             [module.weight, module.bias, module.lora_left_weight, module.lora_right_weight]),
@@ -119,7 +119,7 @@ def unfuse_lora_after_saving(model):
         if isinstance(module, LinearLayer_LoRA):
             repalce_name.append(name)
     for name in repalce_name:
-        module = recursive_getattr(model, name)
+        module = deepspeed.compression.helper.recursive_getattr(model, name)
         zero_stage_3 = hasattr(module.weight, 'ds_id')
         with deepspeed.zero.GatheredParameters(_z3_params_to_fetch(
             [module.weight, module.bias, module.lora_left_weight, module.lora_right_weight]),

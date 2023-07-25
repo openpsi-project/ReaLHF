@@ -3,7 +3,6 @@ import logging
 import api.config as config_pkg
 import api.data as data_api
 import api.model as model_api
-import base.gpu_utils as gpu_utils
 import base.seeding as seeding
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
@@ -28,32 +27,20 @@ class DataWorker(worker_base.Worker):
 
     def _configure(self, config: config_pkg.DataWorker):
         self.config = config
-
-        self.__experiment_name = self.config.worker_info.experiment_name
-        self.__trial_name = self.config.worker_info.trial_name
+        self.__worker_count = self.config.worker_info.worker_count
         self.__worker_index = self.config.worker_info.worker_index
-
         seeding.set_random_seed(self.config.seed)
-
         self.__stream = request_reply_stream.make_reply_server(config.worker_info, config.stream)
-
-        gpu_utils.reveal_ddp_identity(self.__experiment_name, self.__trial_name, DATA_WORKER_NAME,
-                                      self.__worker_index)
         return config.worker_info
 
     def __setup_datasets(self):
-        self.__world_size, *_ = gpu_utils.setup_ddp(self.__experiment_name,
-                                                    self.__trial_name,
-                                                    DATA_WORKER_NAME,
-                                                    self.__worker_index,
-                                                    use_gpu=False)
         # initialize data sets
         self.__dataset = data_api.ConcatDataset([
             data_api.make_dataset(
                 d,
                 self.config.seed,
                 self.__worker_index,
-                self.__world_size,
+                self.__worker_count,
                 self.config.worker_info.experiment_name,
                 self.config.worker_info.trial_name,
                 cache_root=(None if not self.config.use_dataset_cache else self.config.dataset_cahce_root),

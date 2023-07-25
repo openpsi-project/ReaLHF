@@ -7,11 +7,9 @@ import socket
 import threading
 import time
 
-import deepspeed
 import numpy as np
 import torch
 import torch.utils.data
-import transformers
 
 import api.config as config
 import api.data
@@ -94,7 +92,7 @@ class ModelWorker(worker_base.Worker):
             eval_dataloader = None
         self.__eval_dataloader = eval_dataloader
 
-        self.__device = torch.device('cuda', local_gpu_id)
+        self.__device = torch.device('cuda:0')
         self.__model = api.model.make_model(
             self.config.model,
             name=self.model_name,

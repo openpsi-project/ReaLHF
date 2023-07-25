@@ -1,9 +1,9 @@
 import dataclasses
 import enum
+import os
 import subprocess
 
 import base.names
-import os
 
 
 def log_path(job_name, task_name):
