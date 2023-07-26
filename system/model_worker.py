@@ -111,7 +111,8 @@ class ModelWorker(worker_base.Worker):
             return worker_base.PollResult(0, 0)
 
         tik = time.perf_counter()
-        self.logger.info(f"Model worker {self.model_name} received request {request.handle_name}.")
+        if self.__worker_index == 0:
+            self.logger.info(f"Model worker {self.model_name} received request {request.handle_name}.")
         try:
             if request.handle_name == 'initialize':
                 self.__model = self.__backend.initialize(self.__model, request.data)
@@ -131,8 +132,9 @@ class ModelWorker(worker_base.Worker):
         except RuntimeError as e:
             self.print_monitor_info()
             raise e
-        self.logger.info(f"Model worker {self.model_name} handle request {request.handle_name}"
-                         f" in {time.perf_counter() - tik:.4f}s")
+        if self.__worker_index == 0:
+            self.logger.info(f"Model worker {self.model_name} handle request {request.handle_name}"
+                             f" in {time.perf_counter() - tik:.4f}s")
         reply = request_reply_stream.Reply(data=res)
 
         self.__stream.post_reply(reply)

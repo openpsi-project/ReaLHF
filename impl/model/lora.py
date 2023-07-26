@@ -148,17 +148,25 @@ def only_optimize_lora_parameters(model: nn.Module, exclude_module_names: List[s
 
 def lora_wrap_fn(cls_):
 
-    def wrapped_cls(lora_dim, lora_module_name, additional_module_names_to_opt=None, **kwargs):
+    def wrapped_cls(lora_dim,
+                    lora_module_name,
+                    additional_module_names_to_opt=None,
+                    lora_scaling=1.0,
+                    lora_dropout=0.0,
+                    **kwargs):
         model: api.model.Model = cls_(**kwargs)
         if additional_module_names_to_opt is None:
             additional_module_names_to_opt = []
         elif isinstance(additional_module_names_to_opt, str):
             additional_module_names_to_opt = [additional_module_names_to_opt]
         elif not isinstance(additional_module_names_to_opt, list):
-            raise RuntimeError(
-                f"additional_module_names_to_opt should be a list of strings. {type(additional_module_names_to_opt)}"
-            )
-        model.module = convert_linear_layer_to_lora(model.module, lora_module_name, lora_dim=lora_dim)
+            raise RuntimeError(f"additional_module_names_to_opt should be a "
+                               f"list of strings. {type(additional_module_names_to_opt)}")
+        model.module = convert_linear_layer_to_lora(model.module,
+                                                    lora_module_name,
+                                                    lora_dim=lora_dim,
+                                                    lora_scaling=lora_scaling,
+                                                    lora_droppout=lora_dropout)
         model.module = only_optimize_lora_parameters(model.module, additional_module_names_to_opt)
         model.module = model.module.to(model.device)
         return model

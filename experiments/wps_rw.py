@@ -114,6 +114,17 @@ class WpsRewardModelingExperiment(Experiment):
         eval_dataset.args['dataset_path'] = f"{root_dir}/aigc/llm/fw/datasets/rw-unpaired/valid.jsonl"
         eval_dataloader = DataLoader("default_eval", args=dict(batch_size=eval_batch_size_per_device))
 
+        backend = ModelBackend('ds_train',
+                               args=dict(
+                                   optimizer_name='adam',
+                                   optimizer_config=dict(lr=1e-5,
+                                                         weight_decay=self.weight_decay,
+                                                         betas=(0.9, 0.95)),
+                                   warmup_steps_proportion=0.0,
+                                   min_lr_ratio=0.0,
+                                   zero_stage=2,
+                               ))
+
         if not self.lora:
             rw_model = Model(
                 "wps_reward",
@@ -133,18 +144,11 @@ class WpsRewardModelingExperiment(Experiment):
                     lora_dim=self.lora_dim,
                     lora_module_name='attn',
                     additional_module_names_to_opt=["v_head"],
+                    lora_scaling=self.lora_dim,  # equivalent to increasing learning rate
                 ),
             )
-        backend = ModelBackend('ds_train',
-                               args=dict(
-                                   optimizer_name='adam',
-                                   optimizer_config=dict(lr=1e-5 if not self.lora else 1e-4,
-                                                         weight_decay=self.weight_decay,
-                                                         betas=(0.9, 0.95)),
-                                   warmup_steps_proportion=0.0,
-                                   min_lr_ratio=0.0,
-                                   zero_stage=2,
-                               ))
+            backend.args['optimizer_config']['lr'] = 4e-3
+
         interface = ModelInterface('wps_reward_unpaired',
                                    args=dict(pos_weight=pos_weight,
                                              remove_code_comments=self.remove_code_comments))
@@ -182,7 +186,7 @@ weight_decay = [0.0, 0.1]
 remove_code_comments = [True, False]
 base_model = ['starcoder', 'codegen2b']
 lora = [True, False]
-lora_dim = [8, 16, 32, 512, 1024, 2048]
+lora_dim = [8, 16, 32, 128, 512, 1024, 2048]
 for s, wd, rcm, bm, l, ld in itertools.product(seed, weight_decay, remove_code_comments, base_model, lora,
                                                lora_dim):
     exp_name = f"wps-rw-s{s}-wd{wd}-{bm}"
