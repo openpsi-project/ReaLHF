@@ -1,4 +1,5 @@
 from typing import List
+import logging
 import math
 
 from torch import nn
@@ -6,7 +7,6 @@ import deepspeed
 import deepspeed.compression.helper
 import torch
 import torch.nn.functional as F
-import logging
 
 import api.config
 import api.model

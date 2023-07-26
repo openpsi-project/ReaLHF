@@ -110,7 +110,7 @@ def train_critic(
 
 class WpsRLHFExperiment(Experiment):
 
-    def __init__(self, n_actors=8, n_critics=0, n_rewards=1, n_refs=3, n_data_workers=4, seed=1):
+    def __init__(self, n_actors=8, n_critics=2, n_rewards=2, n_refs=3, n_data_workers=4, seed=1):
         self.n_actors = n_actors
         self.n_rewards = n_rewards
         self.n_refs = n_refs
@@ -127,23 +127,21 @@ class WpsRLHFExperiment(Experiment):
             data_worker=TasksGroup(
                 count=self.n_data_workers,
                 scheduling=Scheduling.data_worker_default(
-                    cpu=4,
+                    cpu=2,
                     mem=10000,
-                    nodelist="frl2g030",
                 ),
             ),
             master_worker=TasksGroup(
                 count=1,
                 scheduling=Scheduling.master_worker_default(
-                    cpu=8,
-                    mem=50000,
-                    nodelist="frl2g030",
+                    cpu=4,
+                    mem=10000,
                 ),
             ),
             model_worker=TasksGroup(
                 count=self.n_total,
                 scheduling=Scheduling.model_worker_default(
-                    cpu=8,
+                    cpu=4,
                     gpu=1,
                     gpu_type='tesla',
                     mem=60000,
@@ -152,25 +150,19 @@ class WpsRLHFExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        # actor_path = "/data/marl/checkpoints/fw/codegen2b-wps/"
-        actor_path = "/data/marl/checkpoints/fw/starcoder-wps-best/"
+        actor_path = "/home/aigc/llm/checkpoints/starcoder-wps-best/"
         rw_paths = [
-            '/data/aigc/llm/fw/checkpoints/dschat-rm-labeled/20230711-1/epoch1',
-            # '/data/aigc/llm/fw/checkpoints/dschat-rm-labeled/20230711-s1/epoch1',
-            # '/data/aigc/llm/fw/checkpoints/dschat-rm-labeled/20230711-s2/epoch1',
-            # '/data/aigc/llm/fw/checkpoints/dschat-rm-labeled/20230711-s3/epoch1',
-            # '/data/aigc/llm/fw/checkpoints/dschat-rm-labeled/20230711-s4/epoch1',
-            # '/data/aigc/llm/fw/checkpoints/dschat-rm-labeled/20230711-s5/epoch1',
+            '/home/aigc/llm/root/checkpoints/wps-rw-s1-wd0.0-starcoder-cm/20230725/default/epoch1step0/',
         ]
         critic_path = rw_paths[0]
 
-        mini_batch_size_per_device = 1
-        batch_size_per_device = 4
+        mini_batch_size_per_device = 4
+        batch_size_per_device = 32
         max_prompt_len = max_answer_len = 256
 
         dataset = Dataset('excel_prompt',
                           args=dict(
-                              dataset_path="/data/aigc/llm/fw/datasets/prompts/train50000.jsonl",
+                              dataset_path="/home/aigc/llm/datasets/prompts/train50000.jsonl",
                               tokenizer_name_or_path=actor_path,
                               max_seq_len=max_prompt_len,
                           ))
@@ -191,14 +183,24 @@ class WpsRLHFExperiment(Experiment):
         ]
 
         generation_kwargs = dict(max_new_tokens=max_answer_len,
-                                 do_sample=False,
+                                 do_sample=True,
                                  top_p=1.0,
                                  top_k=-1,
                                  temperature=1.0,
                                  num_beams=1,
                                  num_beam_groups=1,
                                  num_return_sequences=1)
-        actor_model = ref_model = Model(
+        actor_model = Model(
+            "causal_lm_lora",
+            args=dict(
+                model_name_or_path=actor_path,
+                disable_dropout=True,
+                generation_kwargs=generation_kwargs,
+                lora_dim=32,
+                lora_module_name="attn",
+            ),
+        )
+        ref_model = Model(
             'causal_lm',
             args=dict(
                 model_name_or_path=actor_path,
@@ -214,11 +216,14 @@ class WpsRLHFExperiment(Experiment):
             ),
         )
         critic_model = Model(
-            "wps_reward",
+            "wps_reward_lora",
             args=dict(
                 model_name_or_path=critic_path,
                 load_state_dict=True,
                 disable_dropout=False,
+                lora_dim=32,
+                lora_module_name='attn',
+                additional_module_names_to_opt=['v_head'],
             ),
         )
 
@@ -247,12 +252,12 @@ class WpsRLHFExperiment(Experiment):
         ppo_kwargs = dict(
             ppo_epochs=1,
             mini_batch_size=mini_batch_size_per_device,
-            kl_ctl=0.02,
+            kl_ctl=0.1,
             discount=1.0,
-            gae_lambda=1.0,
+            gae_lambda=0.95,
             eps_clip=0.2,
             value_eps_clip=0.2,
-            max_reward_clip=2.0,
+            max_reward_clip=5.0,
         )
         actor_interface = ref_interface = ModelInterface(
             'wps_starcoder_actor',

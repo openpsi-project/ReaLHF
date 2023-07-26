@@ -144,10 +144,10 @@ class WpsRewardModelingExperiment(Experiment):
                     lora_dim=self.lora_dim,
                     lora_module_name='attn',
                     additional_module_names_to_opt=["v_head"],
-                    lora_scaling=self.lora_dim,  # equivalent to increasing learning rate
                 ),
             )
-            backend.args['optimizer_config']['lr'] = 4e-3
+            # TODO: sweep lr and lora_scaling
+            backend.args['optimizer_config']['lr'] = 2e-3
 
         interface = ModelInterface('wps_reward_unpaired',
                                    args=dict(pos_weight=pos_weight,
