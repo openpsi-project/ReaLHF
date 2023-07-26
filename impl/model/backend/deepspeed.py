@@ -173,11 +173,6 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
                                       min_lr_ratio=self.min_lr_ratio)
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-        import os
-        import socket
-        logger.info(
-            f">>>>>> {model.device}, {socket.gethostname()}, {os.environ['CUDA_VISIBLE_DEVICES']}, {os.environ['LOCAL_RANK']}"
-        )
         module, *_ = deepspeed.initialize(model=module,
                                           optimizer=optimizer,
                                           config=ds_config,

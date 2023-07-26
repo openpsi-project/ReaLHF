@@ -126,6 +126,8 @@ class MasterWorker(worker_base.Worker):
 
         self._epoch = -1
         self._epoch_step = self._global_step = 0
+        self._ft_spec = None
+        self._train_start_time = None
 
     @property
     def commands(self):
@@ -197,6 +199,8 @@ class MasterWorker(worker_base.Worker):
             gather_all_replies(all_model_streams)
 
             self.__initialized = True
+            self._ft_spec = ft_spec
+            self._train_start_time = time.perf_counter()
 
         # fetch data from dataloader
         fetch_data_start = time.perf_counter()
@@ -270,8 +274,16 @@ class MasterWorker(worker_base.Worker):
             [future.result() for future in futures]
             logger.info(f"Execute tasks level {i + 1} in {time.perf_counter() - tik:.3f}s.")
         self.data_registry.clear()
-        logger.info(f"Epoch {epoch + 1} step {epoch_step + 1} (global step {global_step + 1}) finishes. "
-                    f"Execution time consumption: {time.perf_counter() - execution_start:.3f}s.")
+        total_time_consumption = time.perf_counter() - self._train_start_time
+        time_per_step = total_time_consumption / (global_step + 1)
+        logger.info(
+            f"Epoch {epoch + 1}/{self._ft_spec.total_train_epochs} "
+            f"step {epoch_step + 1}/{self._ft_spec.steps_per_epoch} "
+            f"(global step {global_step + 1}/{self._ft_spec.total_train_steps}) finishes. "
+            f"Execution time consumption: {time.perf_counter() - execution_start:.3f}s. "
+            f"Total time consumption: {total_time_consumption:.3f}s. "
+            f"Estimated remaining time: {time_per_step * (self._ft_spec.total_train_steps - global_step - 1):.3f}s."
+        )
 
         bs = sample[list(sample.keys())[0]].shape[0]
         return worker_base.PollResult(sample_count=bs, batch_count=1)

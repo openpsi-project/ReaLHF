@@ -1,3 +1,4 @@
+from typing import List
 import math
 
 from torch import nn
@@ -5,9 +6,12 @@ import deepspeed
 import deepspeed.compression.helper
 import torch
 import torch.nn.functional as F
+import logging
 
 import api.config
 import api.model
+
+logger = logging.getLogger("LoRA")
 
 
 class LinearLayer_LoRA(nn.Module):
@@ -129,22 +133,33 @@ def unfuse_lora_after_saving(model):
     return model
 
 
-def only_optimize_lora_parameters(model):
+def only_optimize_lora_parameters(model: nn.Module, exclude_module_names: List[str]):
     # turn off the gradient of all the parameters except the LoRA parameters
     for name, param in model.named_parameters():
-        if "lora_right_weight" in name or "lora_left_weight" in name:
-            param.requires_grad = True
-        else:
-            param.requires_grad = False
+        requires_grad = "lora_right_weight" in name or "lora_left_weight" in name
+        for exclude_module_name in exclude_module_names:
+            requires_grad |= exclude_module_name in name
+        param.requires_grad = requires_grad
+    logger.info(
+        f"Parameter names to be optimized: {list(n for n, p in model.named_parameters() if p.requires_grad)}."
+    )
     return model
 
 
 def lora_wrap_fn(cls_):
 
-    def wrapped_cls(lora_dim, lora_module_name, **kwargs):
+    def wrapped_cls(lora_dim, lora_module_name, additional_module_names_to_opt=None, **kwargs):
         model: api.model.Model = cls_(**kwargs)
-        model.module = only_optimize_lora_parameters(
-            convert_linear_layer_to_lora(model.module, lora_module_name, lora_dim=lora_dim))
+        if additional_module_names_to_opt is None:
+            additional_module_names_to_opt = []
+        elif isinstance(additional_module_names_to_opt, str):
+            additional_module_names_to_opt = [additional_module_names_to_opt]
+        elif not isinstance(additional_module_names_to_opt, list):
+            raise RuntimeError(
+                f"additional_module_names_to_opt should be a list of strings. {type(additional_module_names_to_opt)}"
+            )
+        model.module = convert_linear_layer_to_lora(model.module, lora_module_name, lora_dim=lora_dim)
+        model.module = only_optimize_lora_parameters(model.module, additional_module_names_to_opt)
         model.module = model.module.to(model.device)
         return model
 
