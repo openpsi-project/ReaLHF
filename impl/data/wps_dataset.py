@@ -14,7 +14,8 @@ logger = logging.getLogger("WPS Excel Dataset")
 
 
 def get_prompt(head, task):
-    return f"我的表格格式是：{head}，请写一段JavaScript代码完成下述任务：{task}。代码如下：\n"
+    # This is specially for StarCoder (the "Answer: " postfix)
+    return f"我的表格格式是：{head}，请写一段JavaScript代码完成下述任务：{task}。代码如下：\nAnswer: "
 
 
 def get_prompt_and_chosen(sample):

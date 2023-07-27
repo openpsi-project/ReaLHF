@@ -266,7 +266,6 @@ class WPSActorInterface(api.model.ModelInterface):
 
     @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
-        # FIXME: the "answer:" prefix
         module = model.module
         tokenizer = model.tokenizer
         module.eval()
