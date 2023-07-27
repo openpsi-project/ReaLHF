@@ -313,12 +313,21 @@ class WPSActorInterface(api.model.ModelInterface):
 
     def _ppo_actor_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                         tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
+        # FIXME:
+        module.eval()
+        logits_ignoring_mask = sample['logits_ignoring_mask']
+        new_logits: torch.FloatTensor = module(input_ids=sample['input_ids'],
+                                               attention_mask=sample['attention_mask']).logits
+        # FIXME:
+        # new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
+        new_logp = gather_shifted_log_probs(new_logits, sample['input_ids'])
+
         old_logp: torch.Tensor = sample['logp']
         ref_logp: torch.Tensor = sample['ref_logp']
 
         prompt_len = sample['prompts'].size()[-1]
         shifted_start = prompt_len - 1
-        loss_mask = sample['attention_mask'][:, 1:]
+        loss_mask = sample['attention_mask'][:, 1:].clone()
         # Mask the probability of prompts. All tokens after EOS (including EOS) are masked, too.
         loss_mask[:, :shifted_start] = 0
 
@@ -420,12 +429,14 @@ class WPSCriticInterface(api.model.ModelInterface):
 
     def _ppo_critic_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                          tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
+        new_values = module(input_ids=sample['input_ids'], attention_mask=sample['attention_mask'])[:, :-1]
+
         old_logp: torch.Tensor = sample['logp']
         ref_logp: torch.Tensor = sample['ref_logp']
 
         prompt_len = sample['prompts'].size()[-1]
         shifted_start = prompt_len - 1
-        loss_mask = sample['attention_mask'][:, 1:]
+        loss_mask = sample['attention_mask'][:, 1:].clone()
         # Mask the probability of prompts. All tokens after EOS (including EOS) are masked, too.
         loss_mask[:, :shifted_start] = 0
 
