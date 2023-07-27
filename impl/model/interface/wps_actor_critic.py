@@ -54,12 +54,14 @@ def get_eos_indices(
 
 @dataclasses.dataclass
 class WPSRewardUnpairedInterface(api.model.ModelInterface):
-    remove_code_comments: bool = True
+    remove_code_comments: bool = False
     pos_weight: float = 1.0
 
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
+        data = recursive_apply(data, lambda x: x.to(model.device))
         scores: torch.FloatTensor = module(input_ids=data['input_ids'], attention_mask=data['attention_mask'])
         prompt_len = data['prompts'].size()[-1]
         eos_indices = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
@@ -154,10 +156,10 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
 api.model.register_interface("wps_reward_unpaired", WPSRewardUnpairedInterface)
 
 
-def gather_shifted_log_probs(logits, labels):
+def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor):
     logits = logits[:, :-1, :]
     labels = labels[:, 1:]
-    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+    log_probs = torch.nn.functional.log_softmax(logits - logits.max(-1, keepdim=True).values, dim=-1)
     log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1))
     return log_probs_labels.squeeze(-1)
 
@@ -257,6 +259,7 @@ class WPSActorInterface(api.model.ModelInterface):
 
     @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+        # FIXME: the "answer:" prefix
         module = model.module
         tokenizer = model.tokenizer
         module.eval()
@@ -269,6 +272,7 @@ class WPSActorInterface(api.model.ModelInterface):
         else:
             max_token_len = module.generation_config.max_length
 
+        data = recursive_apply(data, lambda x: x.to(model.device))
         seq = module.generate(data.prompts,
                               attention_mask=data.prompt_att_mask,
                               generation_config=module.generation_config)
@@ -283,25 +287,29 @@ class WPSActorInterface(api.model.ModelInterface):
         logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits
         logits_ignoring_mask = generate_logits_ignoring_mask(logits, module.generation_config.top_p,
                                                              module.generation_config.top_k)
-        logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(logits.dtype).min)
+        # FIXME: add logits mask
+        # logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(logits.dtype).min)
         logp = gather_shifted_log_probs(logits, seq)
 
-        return from_dict(
+        res = from_dict(
             dict(
+                debug_id=debug_id,
                 seq=seq,
                 attention_mask=attention_mask,
                 logp=logp,
                 logits_ignoring_mask=logits_ignoring_mask,
             ),)
+        return recursive_apply(res, lambda x: x.cpu())
 
     @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
+        data = recursive_apply(data, lambda x: x.to(model.device))
         logits = module(input_ids=data['input_ids'], attention_mask=data['attention_mask']).logits
-        logits.masked_fill_(data['logits_ignoring_mask'].bool(), torch.finfo(logits.dtype).min)
+        # logits.masked_fill_(data['logits_ignoring_mask'].bool(), torch.finfo(logits.dtype).min)
         logp = gather_shifted_log_probs(logits, data['input_ids'])
-        return from_dict(dict(logp=logp))
+        return from_dict(dict(logp=logp.cpu()))
 
     def _ppo_actor_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                         tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
@@ -314,7 +322,7 @@ class WPSActorInterface(api.model.ModelInterface):
         # Mask the probability of prompts. All tokens after EOS (including EOS) are masked, too.
         loss_mask[:, :shifted_start] = 0
 
-        eos_indices = get_eos_indices(sample['input_ids'][prompt_len:], tokenizer)
+        eos_indices = get_eos_indices(sample['input_ids'][:, prompt_len:], tokenizer)
         eos_indices = eos_indices + prompt_len
 
         kl_rewards, rewards = compute_rewards(self.kl_ctl, self.max_reward_clip, old_logp, ref_logp,
@@ -329,7 +337,8 @@ class WPSActorInterface(api.model.ModelInterface):
         logits_ignoring_mask = sample['logits_ignoring_mask']
         new_logits: torch.FloatTensor = module(input_ids=sample['input_ids'],
                                                attention_mask=sample['attention_mask']).logits
-        new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
+        # FIXME:
+        # new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
         new_logp = gather_shifted_log_probs(new_logits, sample['input_ids'])
 
         loss, clip_ratio, importance_weight = actor_loss_fn(new_logp, old_logp, adv_norm, loss_mask,
@@ -355,6 +364,8 @@ class WPSActorInterface(api.model.ModelInterface):
         model.train()
         assert sample['input_ids'].shape[0] % self.mini_batch_size == 0
         n_minibatch = sample['input_ids'].shape[0] // self.mini_batch_size
+
+        sample = recursive_apply(sample, lambda x: x.to(model_.device))
 
         train_stats = collections.defaultdict(lambda: 0)
         for ppo_i in range(self.ppo_epochs):
@@ -399,8 +410,10 @@ class WPSCriticInterface(api.model.ModelInterface):
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
+        data = recursive_apply(data, lambda x: x.to(model.device))
         scores = module(input_ids=data['input_ids'], attention_mask=data['attention_mask'])
-        eos_indices = get_eos_indices(data['input_ids'], model.tokenizer)
+        prompt_len = data['prompts'].shape[1]
+        eos_indices = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
         for i in range(scores.shape[0]):
             scores[i, eos_indices[i]:] = 0
         return from_dict(dict(scores=scores[:, :-1]))
@@ -416,7 +429,7 @@ class WPSCriticInterface(api.model.ModelInterface):
         # Mask the probability of prompts. All tokens after EOS (including EOS) are masked, too.
         loss_mask[:, :shifted_start] = 0
 
-        eos_indices = get_eos_indices(sample['input_ids'][prompt_len:], tokenizer)
+        eos_indices = get_eos_indices(sample['input_ids'][:, prompt_len:], tokenizer)
         eos_indices = eos_indices + prompt_len
 
         _, rewards = compute_rewards(self.kl_ctl, self.max_reward_clip, old_logp, ref_logp, sample['rewards'],
@@ -440,6 +453,8 @@ class WPSCriticInterface(api.model.ModelInterface):
         model.train()
         assert sample['input_ids'].shape[0] % self.mini_batch_size == 0
         n_minibatch = sample['input_ids'].shape[0] // self.mini_batch_size
+
+        sample = recursive_apply(sample, lambda x: x.to(model_.device))
 
         train_stats = collections.defaultdict(lambda: 0)
         for ppo_i in range(self.ppo_epochs):
