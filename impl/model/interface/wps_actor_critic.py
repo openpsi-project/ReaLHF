@@ -43,7 +43,13 @@ def get_eos_indices(
     input_ids: torch.LongTensor,
     tokenizer: transformers.PreTrainedTokenizerFast,
 ) -> torch.LongTensor:
-    assert not torch.any(input_ids[:, 0] == tokenizer.eos_token_id)
+    if torch.any(input_ids[:, 0] == tokenizer.eos_token_id):
+        indices = (input_ids[:, 0] == tokenizer.eos_token_id).nonzero().flatten()
+        bad_input_ids = input_ids[indices]
+        bad_strs = tokenizer.batch_decode(bad_input_ids,
+                                          skip_special_tokens=True,
+                                          clean_up_tokenization_spaces=True)
+        raise RuntimeError(f"Generated sequence terminates unexpectedly early: {bad_strs}")
     seq_len = input_ids.shape[1]
     eos_mask = (input_ids == tokenizer.eos_token_id).float()
     seq_no_eos_mask = (eos_mask.sum(1) == 0).float()
@@ -349,6 +355,15 @@ class WPSActorInterface(api.model.ModelInterface):
         module.backward(loss)
         module.step()
 
+        prompts: torch.LongTensor = sample['prompts']
+        ans: torch.LongTensor = sample['input_ids'][:, prompt_len:]
+        prompt_non_pad_ratio = (prompts != tokenizer.pad_token_id).mean()
+        prompt_truncate_ratio = (prompts[:, 0] != tokenizer.pad_token_id).mean()
+        generated_non_pad_ratio = (ans != tokenizer.pad_token_id).mean()
+        generated_truncate_ratio = (ans[:, -1] != tokenizer.pad_token_id).mean()
+
+        ignoring_logits_ratio = logits_ignoring_mask.mean()
+
         return dict(
             reward=rewards.mean().detach(),
             kl_reward=kl_rewards.mean().detach(),
@@ -356,6 +371,11 @@ class WPSActorInterface(api.model.ModelInterface):
             clip_ratio=clip_ratio.detach(),
             importance_weight=importance_weight.detach(),
             actor_loss=loss.detach(),
+            prompt_non_pad_ratio=prompt_non_pad_ratio,
+            prompt_truncate_ratio=prompt_truncate_ratio,
+            generated_non_pad_ratio=generated_non_pad_ratio,
+            generated_truncate_ratio=generated_truncate_ratio,
+            ignoring_logits_ratio=ignoring_logits_ratio,
         )
 
     def train_step(self, model_: api.model.Model, sample: NamedArray) -> Dict:

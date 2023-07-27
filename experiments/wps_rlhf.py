@@ -188,8 +188,9 @@ class WpsRLHFExperiment(Experiment):
         ]
 
         generation_kwargs = dict(max_new_tokens=max_answer_len,
+                                 min_new_tokens=10,
                                  do_sample=True,
-                                 top_p=0.95,
+                                 top_p=1.0,
                                  top_k=100,
                                  temperature=1.0,
                                  num_beams=1,
