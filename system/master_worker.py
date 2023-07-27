@@ -254,13 +254,14 @@ class MasterWorker(worker_base.Worker):
                 f"Evaluation results at epoch {self._epoch + 1} step {self._epoch_step + 1}: {eval_stats}")
 
         # Save if necessary.
-        step_should_save = self.__save_step_freq_ctl.check()
-        if epoch_should_save or step_should_save:
-            head_model_streams = [v[0] for v in self.model_streams.values()]
-            model_types = list(self.model_streams.keys())
-            model_save_dirs = [os.path.join(self.MODEL_SAVE_ROOT, model_type) for model_type in model_types]
-            request_all(head_model_streams, 'save', model_save_dirs)
-            gather_all_replies(head_model_streams)
+        # FIXME: for debug only
+        # step_should_save = self.__save_step_freq_ctl.check()
+        # if epoch_should_save or step_should_save:
+        #     head_model_streams = [v[0] for v in self.model_streams.values()]
+        #     model_types = list(self.model_streams.keys())
+        #     model_save_dirs = [os.path.join(self.MODEL_SAVE_ROOT, model_type) for model_type in model_types]
+        #     request_all(head_model_streams, 'save', model_save_dirs)
+        #     gather_all_replies(head_model_streams)
 
         if self._epoch >= self.__total_train_epochs:
             raise RuntimeError(f"Training completes! Yeah!!!")

@@ -17,19 +17,19 @@ def rollout(
     commands.set_data('logp', res['logp'])
     commands.set_data('attention_mask', res['attention_mask'])
     commands.set_data('logits_ignoring_mask', res['logits_ignoring_mask'])
-    commands.set_data('critic_seq', res['critic_seq'])
-    commands.set_data('critic_attention_mask', res['critic_attention_mask'])
 
 
 def inference_reward(
     commands: Commands,
     model: ModelQuery['reward'],
-    seq: DataQuery['critic_seq'],
-    attention_mask: DataQuery['critic_attention_mask'],
+    seq: DataQuery['seq'],
+    attention_mask: DataQuery['attention_mask'],
+    prompts: DataQuery['prompts'],
 ):
     inputs = commands.build_model_inputs(
         input_ids=seq,
         attention_mask=attention_mask,
+        prompts=prompts,
     )
     res = model(inputs)
     commands.set_data('rewards', res['scores'])
@@ -52,10 +52,15 @@ def inference_ref_logits(
 def inference_values(
     commands: Commands,
     model: ModelQuery['critic'],
-    seq: DataQuery['critic_seq'],
-    attention_mask: DataQuery['critic_attention_mask'],
+    prompts: DataQuery['prompts'],
+    seq: DataQuery['seq'],
+    attention_mask: DataQuery['attention_mask'],
 ):
-    inputs = commands.build_model_inputs(input_ids=seq, attention_mask=attention_mask)
+    inputs = commands.build_model_inputs(
+        input_ids=seq,
+        prompts=prompts,
+        attention_mask=attention_mask,
+    )
     res = model(inputs)
     commands.set_data('values', res['scores'])
 
@@ -110,7 +115,7 @@ def train_critic(
 
 class WpsRLHFExperiment(Experiment):
 
-    def __init__(self, n_actors=8, n_critics=2, n_rewards=2, n_refs=3, n_data_workers=4, seed=1):
+    def __init__(self, n_actors=8, n_critics=2, n_rewards=2, n_refs=4, n_data_workers=4, seed=1):
         self.n_actors = n_actors
         self.n_rewards = n_rewards
         self.n_refs = n_refs
@@ -184,8 +189,8 @@ class WpsRLHFExperiment(Experiment):
 
         generation_kwargs = dict(max_new_tokens=max_answer_len,
                                  do_sample=True,
-                                 top_p=1.0,
-                                 top_k=-1,
+                                 top_p=0.95,
+                                 top_k=100,
                                  temperature=1.0,
                                  num_beams=1,
                                  num_beam_groups=1,
@@ -209,9 +214,10 @@ class WpsRLHFExperiment(Experiment):
             ),
         )
         rw_model = Model(
-            "zipped_wps_reward",
+            "wps_reward",
             args=dict(
-                model_name_or_paths=rw_paths,
+                model_name_or_path=rw_paths[0],
+                load_state_dict=True,
                 disable_dropout=True,
             ),
         )
@@ -220,7 +226,7 @@ class WpsRLHFExperiment(Experiment):
             args=dict(
                 model_name_or_path=critic_path,
                 load_state_dict=True,
-                disable_dropout=False,
+                disable_dropout=True,
                 lora_dim=32,
                 lora_module_name='attn',
                 additional_module_names_to_opt=['v_head'],
@@ -231,7 +237,7 @@ class WpsRLHFExperiment(Experiment):
             'ds_train',
             args=dict(
                 optimizer_name='adam',
-                optimizer_config=dict(lr=9.65e-6, betas=(0.9, 0.95)),
+                optimizer_config=dict(lr=1e-4, betas=(0.9, 0.95)),
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.1,
                 zero_stage=2,
@@ -241,7 +247,7 @@ class WpsRLHFExperiment(Experiment):
             'ds_train',
             args=dict(
                 optimizer_name='adam',
-                optimizer_config=dict(lr=5e-6, betas=(0.9, 0.95)),
+                optimizer_config=dict(lr=5e-4, betas=(0.9, 0.95)),
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.1,
                 zero_stage=2,
@@ -260,13 +266,14 @@ class WpsRLHFExperiment(Experiment):
             max_reward_clip=5.0,
         )
         actor_interface = ref_interface = ModelInterface(
-            'wps_starcoder_actor',
-            args=dict(critic_model_name_or_path=critic_path, **ppo_kwargs),
-        )
-        critic_interface = rw_interface = ModelInterface(
-            'wps_codegen_critic',
+            'wps_actor',
             args=ppo_kwargs,
         )
+        critic_interface = ModelInterface(
+            'wps_critic',
+            args=ppo_kwargs,
+        )
+        rw_interface = ModelInterface('wps_reward_unpaired')
 
         actor_streams = [RequestReplyStream(f"actor{i}") for i in range(self.n_actors)]
         reward_streams = [RequestReplyStream(f"reward{i}") for i in range(self.n_rewards)]

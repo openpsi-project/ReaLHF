@@ -62,7 +62,8 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
-        scores: torch.FloatTensor = module(input_ids=data['input_ids'], attention_mask=data['attention_mask'])
+        scores: torch.FloatTensor = module(input_ids=data['input_ids'],
+                                           attention_mask=data['attention_mask']).float()
         prompt_len = data['prompts'].size()[-1]
         eos_indices = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
         chosen_end_scores = scores.gather(-1, eos_indices.unsqueeze(-1)).squeeze(-1)
@@ -75,7 +76,7 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
             logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
         #####################################################
 
-        return from_dict(dict(scores=chosen_end_scores))
+        return from_dict(dict(scores=chosen_end_scores.cpu()))
 
     def train_step(self, model: api.model.Model, batch: NamedArray) -> NamedArray:
         device = model.device
@@ -156,17 +157,17 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
 api.model.register_interface("wps_reward_unpaired", WPSRewardUnpairedInterface)
 
 
-def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor):
+def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.FloatTensor:
     logits = logits[:, :-1, :]
     labels = labels[:, 1:]
-    log_probs = torch.nn.functional.log_softmax(logits - logits.max(-1, keepdim=True).values, dim=-1)
+    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
     log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1))
     return log_probs_labels.squeeze(-1)
 
 
 def generate_logits_ignoring_mask(logits: torch.FloatTensor,
                                   top_p: Optional[float] = 1.0,
-                                  top_k: Optional[int] = -1):
+                                  top_k: Optional[int] = -1) -> torch.BoolTensor:
     if top_p is None:
         top_p = 1.0
     if top_k is None:
@@ -192,7 +193,7 @@ def generate_logits_ignoring_mask(logits: torch.FloatTensor,
     return top_p_indices_to_remove.logical_or(top_k_indices_to_remove).bool()
 
 
-def actor_loss_fn(logprobs: torch.Tensor, old_logprobs: torch.Tensor, advantages: torch.Tensor,
+def actor_loss_fn(logprobs: torch.FloatTensor, old_logprobs: torch.FloatTensor, advantages: torch.FloatTensor,
                   loss_mask: torch.FloatTensor, eps_clip: float):
     ## policy gradient loss
     ratio = torch.exp(logprobs - old_logprobs)
@@ -203,8 +204,8 @@ def actor_loss_fn(logprobs: torch.Tensor, old_logprobs: torch.Tensor, advantages
     return pg_loss, clip_ratio.detach(), (ratio.detach() * loss_mask).sum() / loss_mask.sum()
 
 
-def critic_loss_fn(value: torch.Tensor, old_value: torch.Tensor, target_value: torch.Tensor,
-                   loss_mask: torch.FloatTensor, value_eps_clip: float):
+def critic_loss_fn(value: torch.FloatTensor, old_value: torch.FloatTensor, target_value: torch.FloatTensor,
+                   loss_mask: torch.FloatTensor, value_eps_clip: float) -> torch.FloatTensor:
     value_loss_original = (value - target_value).pow(2)
     value_clipped = old_value + (value - old_value).clamp(-value_eps_clip, value_eps_clip)
     value_loss_clipped = (value_clipped - target_value).pow(2)
@@ -284,16 +285,14 @@ class WPSActorInterface(api.model.ModelInterface):
             seq = torch.nn.functional.pad(seq, pad=(0, pad_length), mode='constant', value=pad_token_id)
         attention_mask = torch.logical_and(seq.not_equal(pad_token_id), (seq.not_equal(eos_token_id))).long()
 
-        logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits
+        logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits.float()
         logits_ignoring_mask = generate_logits_ignoring_mask(logits, module.generation_config.top_p,
                                                              module.generation_config.top_k)
-        # FIXME: add logits mask
-        # logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(logits.dtype).min)
+        logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(logits.dtype).min)
         logp = gather_shifted_log_probs(logits, seq)
 
         res = from_dict(
             dict(
-                debug_id=debug_id,
                 seq=seq,
                 attention_mask=attention_mask,
                 logp=logp,
@@ -306,20 +305,18 @@ class WPSActorInterface(api.model.ModelInterface):
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
-        logits = module(input_ids=data['input_ids'], attention_mask=data['attention_mask']).logits
-        # logits.masked_fill_(data['logits_ignoring_mask'].bool(), torch.finfo(logits.dtype).min)
+        logits: torch.FloatTensor = module(input_ids=data['input_ids'],
+                                           attention_mask=data['attention_mask']).logits.float()
+        logits.masked_fill_(data['logits_ignoring_mask'].bool(), torch.finfo(logits.dtype).min)
         logp = gather_shifted_log_probs(logits, data['input_ids'])
         return from_dict(dict(logp=logp.cpu()))
 
     def _ppo_actor_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                         tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
-        # FIXME:
-        module.eval()
         logits_ignoring_mask = sample['logits_ignoring_mask']
         new_logits: torch.FloatTensor = module(input_ids=sample['input_ids'],
-                                               attention_mask=sample['attention_mask']).logits
-        # FIXME:
-        # new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
+                                               attention_mask=sample['attention_mask']).logits.float()
+        new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
         new_logp = gather_shifted_log_probs(new_logits, sample['input_ids'])
 
         old_logp: torch.Tensor = sample['logp']
@@ -342,13 +339,6 @@ class WPSActorInterface(api.model.ModelInterface):
         # adv_norm = masked_normalization(advantages)
         adv_norm = advantages
         adv_norm = torch.cat([torch.zeros_like(sample['values'][:, :shifted_start]), adv_norm], dim=1)
-
-        logits_ignoring_mask = sample['logits_ignoring_mask']
-        new_logits: torch.FloatTensor = module(input_ids=sample['input_ids'],
-                                               attention_mask=sample['attention_mask']).logits
-        # FIXME:
-        # new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
-        new_logp = gather_shifted_log_probs(new_logits, sample['input_ids'])
 
         loss, clip_ratio, importance_weight = actor_loss_fn(new_logp, old_logp, adv_norm, loss_mask,
                                                             self.eps_clip)
@@ -420,7 +410,7 @@ class WPSCriticInterface(api.model.ModelInterface):
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
-        scores = module(input_ids=data['input_ids'], attention_mask=data['attention_mask'])
+        scores = module(input_ids=data['input_ids'], attention_mask=data['attention_mask']).float()
         prompt_len = data['prompts'].shape[1]
         eos_indices = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
         for i in range(scores.shape[0]):
@@ -429,7 +419,8 @@ class WPSCriticInterface(api.model.ModelInterface):
 
     def _ppo_critic_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                          tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
-        new_values = module(input_ids=sample['input_ids'], attention_mask=sample['attention_mask'])[:, :-1]
+        new_values = module(input_ids=sample['input_ids'],
+                            attention_mask=sample['attention_mask']).float()[:, :-1]
 
         old_logp: torch.Tensor = sample['logp']
         ref_logp: torch.Tensor = sample['ref_logp']
@@ -450,7 +441,6 @@ class WPSCriticInterface(api.model.ModelInterface):
                                                                                              shifted_start:])
         returns = torch.cat([torch.zeros_like(sample['values'][:, :shifted_start]), returns], dim=1)
 
-        new_values = module(input_ids=sample['input_ids'], attention_mask=sample['attention_mask'])[:, :-1]
         loss = critic_loss_fn(new_values, sample['values'], returns, loss_mask, self.value_eps_clip)
 
         module.backward(loss)
