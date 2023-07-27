@@ -3,6 +3,8 @@ import getpass
 import itertools
 import json
 import os
+import math
+import random
 
 from api.config import *
 from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
@@ -25,23 +27,17 @@ def train_rw(
 
 class WpsRewardModelingExperiment(Experiment):
 
-    def __init__(self,
-                 n_models=16,
-                 seed=1,
-                 weight_decay=0.0,
-                 remove_code_comments=True,
-                 base_model='starcoder',
-                 lora: bool = False,
-                 lora_dim: int = 8):
+    def __init__(self, n_models=16, seed=1):
         self.n_models = self.n_data_workers = n_models
         self.seed = seed
-        self.weight_decay = weight_decay
-        self.remove_code_comments = remove_code_comments
 
-        self.base_model = base_model
-
-        self.lora = lora
-        self.lora_dim = lora_dim
+        wd_low = math.log(1e-6)
+        wd_high = math.log(0.1)
+        self.weight_decay = math.exp(wd_low + (wd_high - wd_low) * random.random())
+        self.lora_dim = random.choice([8, 32, 128, 512])
+        lr_low = math.log(1e-5)
+        lr_high = math.log(1e-2)
+        self.lora_lr = math.exp(lr_low + (lr_high - lr_low) * random.random())
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -69,10 +65,7 @@ class WpsRewardModelingExperiment(Experiment):
 
     def initial_setup(self) -> ExperimentConfig:
         root_dir = "/home"
-        if self.base_model == 'starcoder':
-            model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
-        else:
-            model_path = f"{root_dir}/aigc/llm/checkpoints/codegen2b-wps/"
+        model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
         train_batch_size_per_device = 2
         eval_batch_size_per_device = 12
         max_seq_len = 512
@@ -83,7 +76,7 @@ class WpsRewardModelingExperiment(Experiment):
         #     n_neg = len(data) - n_pos
         #     pos_weight = n_neg / n_pos
         # print(pos_weight)
-        pos_weight = 2.0380411018801925
+        pos_weight = 3.5757243195785775
 
         dataset = Dataset(
             'excel_reward_modeling_unpaired',
@@ -125,33 +118,20 @@ class WpsRewardModelingExperiment(Experiment):
                                    zero_stage=2,
                                ))
 
-        if not self.lora:
-            rw_model = Model(
-                "wps_reward",
-                args=dict(
-                    model_name_or_path=model_path,
-                    disable_dropout=True,
-                    load_state_dict=False,
-                ),
-            )
-        else:
-            rw_model = Model(
-                "wps_reward_lora",
-                args=dict(
-                    model_name_or_path=model_path,
-                    disable_dropout=True,
-                    load_state_dict=False,
-                    lora_dim=self.lora_dim,
-                    lora_module_name='attn',
-                    additional_module_names_to_opt=["v_head"],
-                ),
-            )
-            # TODO: sweep lr and lora_scaling
-            backend.args['optimizer_config']['lr'] = 2e-3
+        rw_model = Model(
+            "wps_reward_lora",
+            args=dict(
+                model_name_or_path=model_path,
+                disable_dropout=True,
+                load_state_dict=False,
+                lora_dim=self.lora_dim,
+                lora_module_name='attn',
+                additional_module_names_to_opt=["v_head"],
+            ),
+        )
+        backend.args['optimizer_config']['lr'] = self.lora_lr
 
-        interface = ModelInterface('wps_reward_unpaired',
-                                   args=dict(pos_weight=pos_weight,
-                                             remove_code_comments=self.remove_code_comments))
+        interface = ModelInterface('wps_reward_unpaired', args=dict(pos_weight=pos_weight))
 
         streams = [RequestReplyStream(f"model{i}") for i in range(self.n_models)]
 
@@ -181,30 +161,13 @@ class WpsRewardModelingExperiment(Experiment):
         )
 
 
-seed = range(1, 6)
-weight_decay = [0.0, 0.1]
-remove_code_comments = [True, False]
-base_model = ['starcoder', 'codegen2b']
-lora = [True, False]
-lora_dim = [8, 16, 32, 128, 512, 1024, 2048]
-for s, wd, rcm, bm, l, ld in itertools.product(seed, weight_decay, remove_code_comments, base_model, lora,
-                                               lora_dim):
-    exp_name = f"wps-rw-s{s}-wd{wd}-{bm}"
-    if (not l) and ld != lora_dim[0]:
-        continue
-    if l:
-        exp_name += f"-lora{ld}"
-    if not rcm:
-        exp_name += "-cm"
+seeds = range(1, 6)
+for s in seeds:
+    exp_name = f"wps-rw-s{s}"
     register_experiment(
         exp_name,
         functools.partial(
             WpsRewardModelingExperiment,
             seed=s,
-            weight_decay=wd,
-            remove_code_comments=rcm,
-            base_model=bm,
-            lora=l,
-            lora_dim=ld,
         ),
     )

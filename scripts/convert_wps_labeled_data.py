@@ -45,7 +45,7 @@ def make_data(
     for (head, task), inf_results in prompt2infresult.items():
         inf_results = inf_results[:max_n_labels]
         data += [
-            dict(head=head, task=task, code=x[0], correctness_label=int(x[criterion_idx]))
+            dict(head=head, task=task, code=x[0].strip(), correctness_label=int(x[criterion_idx]))
             for x in inf_results
         ]
         n_pos += sum([x[criterion_idx] for x in inf_results])
@@ -53,16 +53,67 @@ def make_data(
     return data
 
 
+def cross_task_code_augmentation(data):
+    augment_size = len(data) // 2
+    augment_record = set()
+    augment_data = []
+    while len(augment_data) < augment_size:
+        idx1, idx2 = np.random.randint(0, len(data), (2,)).tolist()
+        if idx1 > idx2:
+            idx2, idx1 = idx1, idx2
+        if (idx1, idx2) in augment_record:
+            continue
+        if data[idx1]['head'] == data[idx2]['head'] or data[idx1]['task'] == data[idx2]['task']:
+            continue
+        augment_record.add((idx1, idx2))
+        augment_data += [
+            dict(head=data[idx1]['head'],
+                 task=data[idx1]['task'],
+                 code=data[idx2]['code'],
+                 correctness_label=0),
+            dict(head=data[idx2]['head'],
+                 task=data[idx2]['task'],
+                 code=data[idx1]['code'],
+                 correctness_label=0)
+        ]
+    return data + augment_data
+
+
+RUBBISH_CODE_COLLECTIONS = [
+    "const sheet = Application.ActiveSheet;\nconst usedRange = sheet.UsedRange;\nconst rowCount = usedRange.Rows.Count;",
+    "const sheet = Application.ActiveSheet\nconst usedRange = sheet.UsedRange\nconst rowCount = usedRange.Rows.Count",
+    "const sheet = Application.ActiveSheet\nconst usedRange = sheet.UsedRange\nconst rowCount = usedRange.Rows.Count\nfor(let i = usedRange.Row + 1; i <= rowCount; i++) {\n}",
+]
+
+
+def rubbish_compilable_code_augmentation(head_tasks, data):
+    augment_size = 1000
+    augment_data = []
+    indices = np.random.choice(len(head_tasks), augment_size, replace=False)
+    for idx in indices:
+        head, task = head_tasks[idx]
+        augment_data.append(
+            dict(
+                head=head,
+                task=task,
+                code=np.random.choice(RUBBISH_CODE_COLLECTIONS),
+                correctness_label=0,
+            ),)
+    return data
+
+
 if __name__ == "__main__":
     train_proportion = 0.9
 
-    raw_file_name = "/data/aigc/public/wps-excel/json/starcoder_compile_5000_flatten_labels0625.json"
+    raw_file_name = "/home/aigc/llm/raw/starcoder_compile_5000_flatten_labels0625.json"
     with open(raw_file_name, "r") as f:
         data = json.load(f)
     print(f"Raw dataset size: {len(data)}")
 
     prompt2infresult = labeled2code_and_result(data)
     data = make_data(prompt2infresult, criterion='label', max_n_labels=10)
+    data = cross_task_code_augmentation(data)
+    data = rubbish_compilable_code_augmentation(list(prompt2infresult.keys()), data)
 
     fn = "tmp.json"
     with open(fn, "w") as f:
@@ -94,4 +145,6 @@ if __name__ == "__main__":
 
     print(f"Number of train data: {len(train_data)}, number of validation data: {len(valid_data)}.")
     n_pos = sum([x['correctness_label'] for x in train_data])
-    print(f"Number of positive samples: {n_pos}/{len(train_data)}")
+    n_neg = len(train_data) - n_pos
+    pos_weight = n_neg / n_pos
+    print(f"Number of positive samples: {n_pos}/{len(train_data)}, pos weight {pos_weight}")
