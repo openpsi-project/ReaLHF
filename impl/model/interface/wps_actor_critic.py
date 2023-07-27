@@ -357,14 +357,15 @@ class WPSActorInterface(api.model.ModelInterface):
 
         prompts: torch.LongTensor = sample['prompts']
         ans: torch.LongTensor = sample['input_ids'][:, prompt_len:]
-        prompt_non_pad_ratio = (prompts != tokenizer.pad_token_id).mean()
-        prompt_truncate_ratio = (prompts[:, 0] != tokenizer.pad_token_id).mean()
-        generated_non_pad_ratio = (ans != tokenizer.pad_token_id).mean()
-        generated_truncate_ratio = (ans[:, -1] != tokenizer.pad_token_id).mean()
+        prompt_non_pad_ratio = (prompts != tokenizer.pad_token_id).float().mean()
+        prompt_truncate_ratio = (prompts[:, 0] != tokenizer.pad_token_id).float().mean()
+        generated_non_pad_ratio = (ans != tokenizer.pad_token_id).float().mean()
+        generated_truncate_ratio = (ans[:, -1] != tokenizer.pad_token_id).float().mean()
 
-        ignoring_logits_ratio = logits_ignoring_mask.mean()
+        ignoring_logits_ratio = logits_ignoring_mask.float().mean()
 
         return dict(
+            task_reward=sample['rewards'].mean().detach(),
             reward=rewards.mean().detach(),
             kl_reward=kl_rewards.mean().detach(),
             advantage=advantages.mean().detach(),
