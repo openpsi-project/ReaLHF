@@ -27,17 +27,38 @@ def train_rw(
 
 class WpsRewardModelingExperiment(Experiment):
 
-    def __init__(self, n_models=16, seed=1):
+    def __init__(self, n_models=16, seed=1, weight_decay=None, lora_dim=None, lora_scaling=None, lr=None):
         self.n_models = self.n_data_workers = n_models
         self.seed = seed
 
-        wd_low = math.log(1e-6)
-        wd_high = math.log(0.1)
-        self.weight_decay = math.exp(wd_low + (wd_high - wd_low) * random.random())
-        self.lora_dim = random.choice([8, 32, 128, 512])
-        lr_low = math.log(1e-5)
-        lr_high = math.log(1e-2)
-        self.lora_lr = math.exp(lr_low + (lr_high - lr_low) * random.random())
+        self.enable_sweep = (weight_decay is None) or (lora_dim is None) or (lora_scaling
+                                                                             is None) or (lr is None)
+
+        if weight_decay is None:
+            wd_low = math.log(1e-6)
+            wd_high = math.log(0.1)
+            self.weight_decay = math.exp(wd_low + (wd_high - wd_low) * random.random())
+        else:
+            self.weight_decay = weight_decay
+
+        if lora_dim is None:
+            self.lora_dim = random.choice([8, 32, 128, 512])
+        else:
+            self.lora_dim = lora_dim
+
+        if lr is None:
+            lr_low = math.log(1e-5)
+            lr_high = math.log(1e-2)
+            self.lora_lr = math.exp(lr_low + (lr_high - lr_low) * random.random())
+        else:
+            self.lora_lr = lr
+
+        if lora_scaling is None:
+            scaling_low = math.log(0.5)
+            scaling_high = math.log(self.lora_dim * 4)
+            self.lora_scaling = math.exp(scaling_low + (scaling_high - scaling_low) * random.random())
+        else:
+            self.lora_scaling = lora_scaling
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -127,6 +148,7 @@ class WpsRewardModelingExperiment(Experiment):
                 lora_dim=self.lora_dim,
                 lora_module_name='attn',
                 additional_module_names_to_opt=["v_head"],
+                lora_scaling=self.lora_scaling,
             ),
         )
         backend.args['optimizer_config']['lr'] = self.lora_lr
@@ -150,7 +172,7 @@ class WpsRewardModelingExperiment(Experiment):
 
         ecs = MasterWorkerECS(model_worker).add_systems([train_rw])
 
-        return ExperimentConfig(
+        cfg = ExperimentConfig(
             total_train_epochs=1,
             save_frequency_steps=None,
             save_frequency_epochs=None,
@@ -160,6 +182,9 @@ class WpsRewardModelingExperiment(Experiment):
             data_worker=data_worker,
             model_worker=model_worker,
         )
+        if not self.enable_sweep:
+            cfg.save_frequency_epochs = 1
+        return cfg
 
 
 seeds = range(1, 6)
