@@ -152,8 +152,9 @@ class WpsRewardModelingExperiment(Experiment):
 
         return ExperimentConfig(
             total_train_epochs=1,
-            save_frequency_epochs=1,
-            save_frequency_seconds=3600,
+            save_frequency_steps=None,
+            save_frequency_epochs=None,
+            save_frequency_seconds=None,
             eval_frequency_epochs=1,
             master_ecs=ecs,
             data_worker=data_worker,
