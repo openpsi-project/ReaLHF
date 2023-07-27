@@ -196,7 +196,7 @@ def generate_logits_ignoring_mask(logits: torch.FloatTensor,
 def actor_loss_fn(logprobs: torch.FloatTensor, old_logprobs: torch.FloatTensor, advantages: torch.FloatTensor,
                   loss_mask: torch.FloatTensor, eps_clip: float):
     ## policy gradient loss
-    ratio = torch.exp(logprobs - old_logprobs)
+    ratio = torch.exp((logprobs - old_logprobs) * loss_mask)
     pg_loss1 = -advantages * ratio
     pg_loss2 = -advantages * torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
     pg_loss = (torch.max(pg_loss1, pg_loss2) * loss_mask).sum() / loss_mask.sum()
@@ -285,6 +285,7 @@ class WPSActorInterface(api.model.ModelInterface):
             seq = torch.nn.functional.pad(seq, pad=(0, pad_length), mode='constant', value=pad_token_id)
         attention_mask = torch.logical_and(seq.not_equal(pad_token_id), (seq.not_equal(eos_token_id))).long()
 
+        module.train()
         logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits.float()
         logits_ignoring_mask = generate_logits_ignoring_mask(logits, module.generation_config.top_p,
                                                              module.generation_config.top_k)
@@ -313,9 +314,11 @@ class WPSActorInterface(api.model.ModelInterface):
 
     def _ppo_actor_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                         tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
+        module.train()
         logits_ignoring_mask = sample['logits_ignoring_mask']
         new_logits: torch.FloatTensor = module(input_ids=sample['input_ids'],
-                                               attention_mask=sample['attention_mask']).logits.float()
+                                               attention_mask=sample['attention_mask'],
+                                               use_cache=False).logits.float()
         new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
         new_logp = gather_shifted_log_probs(new_logits, sample['input_ids'])
 
@@ -408,7 +411,7 @@ class WPSCriticInterface(api.model.ModelInterface):
     @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
-        module.eval()
+        module.train()
         data = recursive_apply(data, lambda x: x.to(model.device))
         scores = module(input_ids=data['input_ids'], attention_mask=data['attention_mask']).float()
         prompt_len = data['prompts'].shape[1]
@@ -419,8 +422,10 @@ class WPSCriticInterface(api.model.ModelInterface):
 
     def _ppo_critic_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                          tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
+        module.train()
         new_values = module(input_ids=sample['input_ids'],
-                            attention_mask=sample['attention_mask']).float()[:, :-1]
+                            attention_mask=sample['attention_mask'],
+                            use_cache=False).float()[:, :-1]
 
         old_logp: torch.Tensor = sample['logp']
         ref_logp: torch.Tensor = sample['ref_logp']

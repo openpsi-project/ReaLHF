@@ -237,7 +237,7 @@ class WpsRLHFExperiment(Experiment):
             'ds_train',
             args=dict(
                 optimizer_name='adam',
-                optimizer_config=dict(lr=1e-4, betas=(0.9, 0.95)),
+                optimizer_config=dict(lr=2e-3, betas=(0.9, 0.95)),
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.1,
                 zero_stage=2,
@@ -247,7 +247,7 @@ class WpsRLHFExperiment(Experiment):
             'ds_train',
             args=dict(
                 optimizer_name='adam',
-                optimizer_config=dict(lr=5e-4, betas=(0.9, 0.95)),
+                optimizer_config=dict(lr=1e-3, betas=(0.9, 0.95)),
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.1,
                 zero_stage=2,
