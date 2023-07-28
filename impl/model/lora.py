@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 import logging
 import math
 
@@ -7,9 +7,12 @@ import deepspeed
 import deepspeed.compression.helper
 import torch
 import torch.nn.functional as F
+import transformers
+import os
 
 import api.config
 import api.model
+import api.utils
 
 logger = logging.getLogger("LoRA")
 
@@ -17,7 +20,7 @@ logger = logging.getLogger("LoRA")
 class LinearLayer_LoRA(nn.Module):
     # an simple implementation of LoRA
     # for now only support Linear Layer
-    def __init__(self, weight, lora_dim=0, lora_scaling=1, lora_droppout=0, bias=None):
+    def __init__(self, weight, lora_dim=0, lora_scaling=1, lora_dropout=0, bias=None):
         super(LinearLayer_LoRA, self).__init__()
         self.weight = weight
         self.bias = bias
@@ -35,8 +38,8 @@ class LinearLayer_LoRA(nn.Module):
         self.lora_left_weight = nn.Parameter(torch.zeros(lora_dim, rows))
         self.lora_scaling = lora_scaling / lora_dim
 
-        if lora_droppout > 0:
-            self.lora_dropout = nn.Dropout(lora_droppout)
+        if lora_dropout > 0:
+            self.lora_dropout = nn.Dropout(lora_dropout)
         else:
             self.lora_dropout = nn.Identity()
 
@@ -80,14 +83,24 @@ class LinearLayer_LoRA(nn.Module):
 
 
 # convert the linear layer to LoRA
-def convert_linear_layer_to_lora(model, part_module_name, lora_dim=0, lora_scaling=1, lora_droppout=0):
+def convert_linear_layer_to_lora(model,
+                                 part_module_name,
+                                 lora_dim=0,
+                                 lora_scaling=1,
+                                 lora_dropout=0,
+                                 lora_exclude_module_names=None):
+    if lora_exclude_module_names is None:
+        lora_exclude_module_names = []
+
     replace_name = []
     for name, module in model.named_modules():
-        if isinstance(module, nn.Linear) and part_module_name in name:
+        if (isinstance(module, nn.Linear) and part_module_name in name
+                and not any(x in name for x in lora_exclude_module_names)):
             replace_name.append(name)
+
     for name in replace_name:
         module = deepspeed.compression.helper.recursive_getattr(model, name)
-        tmp = LinearLayer_LoRA(module.weight, lora_dim, lora_scaling, lora_droppout,
+        tmp = LinearLayer_LoRA(module.weight, lora_dim, lora_scaling, lora_dropout,
                                module.bias).to(module.weight.device).to(module.weight.dtype)
         deepspeed.compression.helper.recursive_setattr(model, name, tmp)
     return model
@@ -133,12 +146,12 @@ def unfuse_lora_after_saving(model):
     return model
 
 
-def only_optimize_lora_parameters(model: nn.Module, exclude_module_names: List[str]):
+def only_optimize_lora_parameters(model: nn.Module, additional_module_names_to_opt: List[str]):
     # turn off the gradient of all the parameters except the LoRA parameters
     for name, param in model.named_parameters():
         requires_grad = "lora_right_weight" in name or "lora_left_weight" in name
-        for exclude_module_name in exclude_module_names:
-            requires_grad |= exclude_module_name in name
+        for x in additional_module_names_to_opt:
+            requires_grad |= x in name
         param.requires_grad = requires_grad
     logger.info(
         f"Parameter names to be optimized: {list(n for n, p in model.named_parameters() if p.requires_grad)}."
@@ -150,11 +163,13 @@ def lora_wrap_fn(cls_):
 
     def wrapped_cls(lora_dim,
                     lora_module_name,
+                    lora_exclude_module_names=None,
                     additional_module_names_to_opt=None,
                     lora_scaling=1.0,
                     lora_dropout=0.0,
                     **kwargs):
         model: api.model.Model = cls_(**kwargs)
+
         if additional_module_names_to_opt is None:
             additional_module_names_to_opt = []
         elif isinstance(additional_module_names_to_opt, str):
@@ -162,12 +177,23 @@ def lora_wrap_fn(cls_):
         elif not isinstance(additional_module_names_to_opt, list):
             raise RuntimeError(f"additional_module_names_to_opt should be a "
                                f"list of strings. {type(additional_module_names_to_opt)}")
+
+        if lora_exclude_module_names is None:
+            lora_exclude_module_names = []
+        elif isinstance(lora_exclude_module_names, str):
+            lora_exclude_module_names = [lora_exclude_module_names]
+        elif not isinstance(lora_exclude_module_names, list):
+            raise RuntimeError(f"lora_exclude_module_names should be a "
+                               f"list of strings. {type(lora_exclude_module_names)}")
+
         model.module = convert_linear_layer_to_lora(model.module,
                                                     lora_module_name,
                                                     lora_dim=lora_dim,
                                                     lora_scaling=lora_scaling,
-                                                    lora_droppout=lora_dropout)
-        model.module = only_optimize_lora_parameters(model.module, additional_module_names_to_opt)
+                                                    lora_dropout=lora_dropout,
+                                                    lora_exclude_module_names=lora_exclude_module_names)
+        model.module = only_optimize_lora_parameters(
+            model.module, additional_module_names_to_opt=additional_module_names_to_opt)
         model.module = model.module.to(model.device)
         return model
 
