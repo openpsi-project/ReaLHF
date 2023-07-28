@@ -26,10 +26,16 @@ def labeled2code_and_result(labeled_data):
             except AssertionError:
                 invalid_cnt += 1
                 continue
+        existing_codes = [x[0] for x in prompt2infresult[key]]
+        if any(d['code'].strip() in c.strip() or c.strip() in d['code'] for c in existing_codes):
+            continue
         prompt2infresult[key].append(
             (d['code'], bool(d['exec_result_name'] == 'RunSuccess'), bool(get_label_fn(d) == 0)))
     print(f"The number of unique prompts (head+task):", len(prompt2infresult))
     print(f"number of invalid data: {invalid_cnt}")
+    prompt2infresult = dict(prompt2infresult)
+    atleast_one_pos_cnt = sum([any(v[-1] for v in vv) for vv in prompt2infresult.values()])
+    print(f"Number of prompts with at least one positive code: {atleast_one_pos_cnt}")
     return dict(prompt2infresult)
 
 
@@ -112,8 +118,8 @@ if __name__ == "__main__":
 
     prompt2infresult = labeled2code_and_result(data)
     data = make_data(prompt2infresult, criterion='label', max_n_labels=10)
-    data = cross_task_code_augmentation(data)
-    data = rubbish_compilable_code_augmentation(list(prompt2infresult.keys()), data)
+    # data = cross_task_code_augmentation(data)
+    # data = rubbish_compilable_code_augmentation(list(prompt2infresult.keys()), data)
 
     fn = "tmp.json"
     with open(fn, "w") as f:
@@ -125,7 +131,7 @@ if __name__ == "__main__":
 
     os.system("rm tmp.json tmp_.json")
 
-    output_root_dir = "/data/aigc/llm/fw/datasets/rw-unpaired/"
+    output_root_dir = "/home/aigc/llm/datasets/rw-unpaired/"
     os.makedirs(output_root_dir, exist_ok=True)
 
     np.random.shuffle(data)
