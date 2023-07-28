@@ -9,7 +9,7 @@ import tqdm
 import transformers
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def get_prompt_embedding(prompts, model_name_or_path: str):
     import api.utils
     print("Loading model...")
