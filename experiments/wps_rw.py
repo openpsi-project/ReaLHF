@@ -2,8 +2,8 @@ import functools
 import getpass
 import itertools
 import json
-import os
 import math
+import os
 import random
 
 from api.config import *

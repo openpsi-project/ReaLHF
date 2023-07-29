@@ -1,6 +1,7 @@
 from typing import List, Optional, Union
 import logging
 import math
+import os
 
 from torch import nn
 import deepspeed
@@ -8,7 +9,6 @@ import deepspeed.compression.helper
 import torch
 import torch.nn.functional as F
 import transformers
-import os
 
 import api.config
 import api.model

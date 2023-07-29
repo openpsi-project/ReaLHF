@@ -9,13 +9,13 @@ import re
 
 import deepspeed
 import torch
-import torch.utils.data
 import torch.nn as nn
+import torch.utils.data
 import tqdm
 import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_aggregate, recursive_apply
-from impl.model.utils import masked_normalization, save_hf_model, get_eos_indices
+from impl.model.utils import get_eos_indices, masked_normalization, save_hf_model
 import api.model
 import api.utils
 

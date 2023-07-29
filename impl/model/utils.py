@@ -4,10 +4,10 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import transformers
 
 import api.model
 import api.utils
-import transformers
 
 logger = logging.getLogger("Model Utils")
 
