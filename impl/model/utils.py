@@ -7,6 +7,7 @@ import torch.nn as nn
 
 import api.model
 import api.utils
+import transformers
 
 logger = logging.getLogger("Model Utils")
 
@@ -249,3 +250,22 @@ def save_hf_model(model: api.model.Model, output_dir):
                              output_dir,
                              sub_folder=f"epoch{model.version.epoch}step{model.version.epoch_step}")
     unfuse_lora_after_saving(module)
+
+
+def get_eos_indices(
+    input_ids: torch.LongTensor,
+    tokenizer: transformers.PreTrainedTokenizerFast,
+) -> torch.LongTensor:
+    if torch.any(input_ids[:, 0] == tokenizer.eos_token_id):
+        indices = (input_ids[:, 0] == tokenizer.eos_token_id).nonzero().flatten()
+        bad_input_ids = input_ids[indices]
+        bad_strs = tokenizer.batch_decode(bad_input_ids,
+                                          skip_special_tokens=True,
+                                          clean_up_tokenization_spaces=True)
+        raise RuntimeError(f"Generated sequence terminates unexpectedly early: {bad_strs}")
+    seq_len = input_ids.shape[1]
+    eos_mask = (input_ids == tokenizer.eos_token_id).float()
+    seq_no_eos_mask = (eos_mask.sum(1) == 0).float()
+    eos_indices = eos_mask.argmax(1)
+    eos_indices = (eos_indices * (1 - seq_no_eos_mask) + seq_no_eos_mask * (seq_len - 1)).long()
+    return eos_indices

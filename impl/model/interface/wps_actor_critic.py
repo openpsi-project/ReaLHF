@@ -9,12 +9,13 @@ import re
 
 import deepspeed
 import torch
+import torch.utils.data
 import torch.nn as nn
 import tqdm
 import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_aggregate, recursive_apply
-from impl.model.utils import masked_normalization, save_hf_model
+from impl.model.utils import masked_normalization, save_hf_model, get_eos_indices
 import api.model
 import api.utils
 
@@ -39,31 +40,12 @@ def remove_code_comments(code: str) -> str:
     return code
 
 
-def get_eos_indices(
-    input_ids: torch.LongTensor,
-    tokenizer: transformers.PreTrainedTokenizerFast,
-) -> torch.LongTensor:
-    if torch.any(input_ids[:, 0] == tokenizer.eos_token_id):
-        indices = (input_ids[:, 0] == tokenizer.eos_token_id).nonzero().flatten()
-        bad_input_ids = input_ids[indices]
-        bad_strs = tokenizer.batch_decode(bad_input_ids,
-                                          skip_special_tokens=True,
-                                          clean_up_tokenization_spaces=True)
-        raise RuntimeError(f"Generated sequence terminates unexpectedly early: {bad_strs}")
-    seq_len = input_ids.shape[1]
-    eos_mask = (input_ids == tokenizer.eos_token_id).float()
-    seq_no_eos_mask = (eos_mask.sum(1) == 0).float()
-    eos_indices = eos_mask.argmax(1)
-    eos_indices = (eos_indices * (1 - seq_no_eos_mask) + seq_no_eos_mask * (seq_len - 1)).long()
-    return eos_indices
-
-
 @dataclasses.dataclass
 class WPSRewardUnpairedInterface(api.model.ModelInterface):
     remove_code_comments: bool = False
     pos_weight: float = 1.0
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
@@ -135,7 +117,7 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
     def save(self, model: api.model.Model, output_dir):
         save_hf_model(model, output_dir)
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
         device = model_.device
         model = model_.module
@@ -219,7 +201,7 @@ def critic_loss_fn(value: torch.FloatTensor, old_value: torch.FloatTensor, targe
     return 0.5 * (value_loss * loss_mask).sum() / loss_mask.sum()
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def compute_rewards(kl_ctl: float, clip_reward_value: float, log_probs: torch.FloatTensor,
                     ref_log_probs: torch.FloatTensor, reward_score: torch.FloatTensor,
                     seq_eos_indices: torch.LongTensor):
@@ -236,7 +218,7 @@ def compute_rewards(kl_ctl: float, clip_reward_value: float, log_probs: torch.Fl
     return kl_rewards, kl_rewards + score_rewards
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def get_advantages_and_returns(gamma: float, lam: float, values: torch.FloatTensor,
                                rewards: torch.FloatTensor):
     # Adopted from https://github.com/CarperAI/trlx/blob/main/trlx/models/modeling_ppo.py#L134
@@ -264,7 +246,7 @@ class WPSActorInterface(api.model.ModelInterface):
     value_eps_clip: float = 0.2
     max_reward_clip: float = 5.0
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         tokenizer = model.tokenizer
@@ -306,7 +288,7 @@ class WPSActorInterface(api.model.ModelInterface):
             ),)
         return recursive_apply(res, lambda x: x.cpu())
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
@@ -428,7 +410,7 @@ class WPSCriticInterface(api.model.ModelInterface):
     value_eps_clip: float = 0.2
     max_reward_clip: float = 5.0
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.train()
@@ -508,3 +490,116 @@ class WPSCriticInterface(api.model.ModelInterface):
 
 
 api.model.register_interface('wps_critic', WPSCriticInterface)
+
+
+@dataclasses.dataclass
+class WPSContrastiveRewardInterface(api.model.ModelInterface):
+
+    @torch.inference_mode()
+    def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+        module = model.module
+        module.eval()
+        data = recursive_apply(data, lambda x: x.to(model.device))
+
+        bs, prompt_len = data['prompts'].size()
+        eos_indices = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer)
+
+        chosen_end_scores = module(
+            prompts=data['input_ids'][:, :prompt_len],
+            prompt_attention_mask=data['attention_mask'][:, :prompt_len],
+            responses=data['input_ids'][:, prompt_len:],
+            response_attention_mask=data['attention_mask'][:, prompt_len:],
+            eos_indices=eos_indices,
+        )
+
+        ###################### logging ######################
+        seq_strs = model.tokenizer.batch_decode(data['input_ids'],
+                                                clean_up_tokenization_spaces=False,
+                                                skip_special_tokens=True)
+        for seq_str, score in zip(seq_strs, chosen_end_scores):
+            logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
+        #####################################################
+
+        return from_dict(dict(scores=chosen_end_scores.cpu()))
+
+    def train_step(self, model: api.model.Model, batch: NamedArray) -> NamedArray:
+        device = model.device
+        rm_model = model.module
+        rm_model.train()
+
+        batch = recursive_apply(batch, lambda x: x.to(device))
+        labels = batch['labels']
+
+        bs, c_dim = batch['responses'].shape[:2]
+        eos_indices = get_eos_indices(batch['responses'].flatten(end_dim=1), model.tokenizer)
+        eos_indices = eos_indices.view(bs, c_dim, *eos_indices.shape[1:])
+
+        scores = rm_model(
+            prompts=batch['prompts'],
+            prompt_attention_mask=batch['prompt_attention_mask'],
+            responses=batch['responses'],
+            response_attention_mask=batch['response_attention_mask'],
+            eos_indices=eos_indices,
+        )
+        scores = torch.cat([torch.zeros((bs, 1), dtype=scores.dtype, device=scores.device), scores], dim=1)
+        loss = torch.nn.functional.cross_entropy(scores, labels, reduction='mean')
+
+        rm_model.backward(loss)
+        rm_model.step()
+
+        cur_epoch = model.version.epoch
+        model.inc_version()
+        if model.version.epoch > cur_epoch:
+            rm_model.tput_timer.update_epoch_count()
+
+        return dict(loss=loss.detach().item(), acc=(scores.max(-1).values == labels).mean().detach().item())
+
+    def save(self, model: api.model.Model, output_dir):
+        module = model.module
+        tokenizer = model.tokenizer
+        logger.info(f'saving the model for epoch {model.version.epoch} step {model.version.epoch_step}...')
+        model_to_save = module.module if hasattr(module, 'module') else module
+        output_dir = os.path.join(output_dir, f"epoch{model.version.epoch}step{model.version.epoch_step}")
+        os.makedirs(output_dir, exist_ok=True)
+        output_model_file = os.path.join(output_dir, "pytorch_model.bin")
+        output_config_file = os.path.join(output_dir, "config.json")
+        save_dict = model_to_save.state_dict()
+        torch.save(save_dict, output_model_file)
+        model_to_save.config.to_json_file(output_config_file)
+        tokenizer.save_vocabulary(output_dir)
+
+    @torch.inference_mode()
+    def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
+        device = model_.device
+        model = model_.module
+        tokenizer = model_.tokenizer
+
+        model.eval()
+        correct_predictions = 0
+        total_predictions = 0
+        loss = 0
+
+        for step, batch in enumerate(tqdm.tqdm(eval_dataloader)):
+            batch = recursive_apply(from_dict(batch), lambda x: x.to(device))
+            labels = batch['labels']
+            bs, c_dim = batch['responses'].shape[:2]
+            eos_indices = get_eos_indices(batch['responses'].flatten(end_dim=1), tokenizer)
+            eos_indices = eos_indices.view(bs, c_dim, *eos_indices.shape[1:])
+
+            scores: torch.FloatTensor = model(
+                prompts=batch['prompts'],
+                prompt_attention_mask=batch['prompt_attention_mask'],
+                responses=batch['responses'],
+                response_attention_mask=batch['response_attention_mask'],
+                eos_indices=eos_indices,
+            )
+            scores = torch.cat([torch.zeros((bs, 1), dtype=scores.dtype, device=scores.device), scores],
+                               dim=1)
+            loss += torch.nn.functional.cross_entropy(scores, labels, reduction='sum')
+            correct_predictions += (scores.max(-1).values == labels).sum()
+            total_predictions += bs
+
+        return dict(acc=float(correct_predictions / total_predictions), loss=float(loss / total_predictions))
+
+
+api.model.register_interface("wps_contrastive_reward", WPSContrastiveRewardInterface)
