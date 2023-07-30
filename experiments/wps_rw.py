@@ -33,12 +33,27 @@ def sample_log_uniform(low, high):
 
 class WpsRewardModelingExperiment(Experiment):
 
-    def __init__(self, n_models=16, seed=1, weight_decay=0.0, lora_dim=32, lora_scaling=None, lr=None):
+    def __init__(
+        self,
+        n_models=16,
+        seed=1,
+        weight_decay=0.0,
+        lora_dim=32,
+        lora_scaling=20.0,
+        lr=2.5e-4,  # or scaling=8.0 lr=5e-4
+        adam_betas=None,
+        lr_scheduler_type=None,
+        min_lr_ratio=None,
+        warmup_steps_proportion=None,
+        total_train_epochs=None,
+    ):
         self.n_models = self.n_data_workers = n_models
         self.seed = seed
 
-        self.enable_sweep = (weight_decay is None) or (lora_dim is None) or (lora_scaling
-                                                                             is None) or (lr is None)
+        self.enable_sweep = ((weight_decay is None) or (lora_dim is None) or (lora_scaling is None)
+                             or (lr is None) or adam_betas is None or lr_scheduler_type is None
+                             or min_lr_ratio is None or warmup_steps_proportion is None
+                             or total_train_epochs is None)
 
         if weight_decay is None:
             wd_low = math.log(1e-6)
@@ -59,6 +74,32 @@ class WpsRewardModelingExperiment(Experiment):
         else:
             self.lora_lr = lr
             self.lora_scaling = lora_scaling
+
+        if adam_betas is None:
+            self.adam_betas = random.choice([(0.9, 0.999), (0.9, 0.99), (0.9, 0.95)])
+        else:
+            self.adam_betas = adam_betas
+        assert isinstance(self.adam_betas, tuple) and len(self.adam_betas) == 2
+
+        if lr_scheduler_type is None:
+            self.lr_scheduler_type = random.choice(['constant', 'cosine', 'linear'])
+        else:
+            self.lr_scheduler_type = lr_scheduler_type
+
+        if warmup_steps_proportion is None:
+            self.warmup_steps_proportion = random.random() * 0.1
+        else:
+            self.warmup_steps_proportion = warmup_steps_proportion
+
+        if min_lr_ratio is None:
+            self.min_lr_ratio = random.choice([0.0, 0.1])
+        else:
+            self.min_lr_ratio = min_lr_ratio
+
+        if total_train_epochs is None:
+            self.total_train_epochs = random.choice(list(range(1, 5)))
+        else:
+            self.total_train_epochs = total_train_epochs
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -128,16 +169,22 @@ class WpsRewardModelingExperiment(Experiment):
         eval_dataset.args['dataset_path'] = f"{root_dir}/aigc/llm/datasets/rw-unpaired/valid.jsonl"
         eval_dataloader = DataLoader("default_eval", args=dict(batch_size=eval_batch_size_per_device))
 
-        backend = ModelBackend('ds_train',
-                               args=dict(
-                                   optimizer_name='adam',
-                                   optimizer_config=dict(lr=1e-5,
-                                                         weight_decay=self.weight_decay,
-                                                         betas=(0.9, 0.95)),
-                                   warmup_steps_proportion=0.0,
-                                   min_lr_ratio=0.0,
-                                   zero_stage=2,
-                               ))
+        backend = ModelBackend(
+            'ds_train',
+            args=dict(
+                optimizer_name='adam',
+                optimizer_config=dict(
+                    lr=self.lora_lr,
+                    weight_decay=self.weight_decay,
+                    eps=1e-5,
+                    betas=self.adam_betas,
+                ),
+                lr_scheduler_type=self.lr_scheduler_type,
+                warmup_steps_proportion=self.warmup_steps_proportion,
+                min_lr_ratio=self.min_lr_ratio,
+                zero_stage=2,
+            ),
+        )
 
         rw_model = Model(
             "wps_reward_lora",
@@ -151,7 +198,6 @@ class WpsRewardModelingExperiment(Experiment):
                 lora_scaling=self.lora_scaling,
             ),
         )
-        backend.args['optimizer_config']['lr'] = self.lora_lr
 
         interface = ModelInterface('wps_reward_unpaired', args=dict(pos_weight=pos_weight))
 
@@ -173,7 +219,7 @@ class WpsRewardModelingExperiment(Experiment):
         ecs = MasterWorkerECS(model_worker).add_systems([train_rw])
 
         cfg = ExperimentConfig(
-            total_train_epochs=1,
+            total_train_epochs=self.total_train_epochs,
             save_frequency_steps=None,
             save_frequency_epochs=None,
             save_frequency_seconds=None,
@@ -222,9 +268,16 @@ class WpsContrastiveRewardExperiment(WpsRewardModelingExperiment):
 
     def initial_setup(self) -> ExperimentConfig:
         self.weight_decay = 0.0
-        self.lora_lr = 1e-3
+        self.lora_lr = 5e-4
         self.lora_scaling = 8.0
         self.lora_dim = 32.0
+        self.adam_betas = (0.9, 0.95)
+        self.lr_scheduler_type = 'cosine'
+        self.warmup_steps_proportion = 0.0
+        self.min_lr_ratio = 0.0
+        self.total_train_epochs = 4
+
+        self.enable_sweep = False
 
         root_dir = "/home"
         model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
@@ -264,16 +317,22 @@ class WpsContrastiveRewardExperiment(WpsRewardModelingExperiment):
         eval_dataset.args['dataset_path'] = f"{root_dir}/aigc/llm/datasets/rw-contrastive/valid.jsonl"
         eval_dataloader = DataLoader("default_eval", args=dict(batch_size=eval_batch_size_per_device))
 
-        backend = ModelBackend('ds_train',
-                               args=dict(
-                                   optimizer_name='adam',
-                                   optimizer_config=dict(lr=1e-5,
-                                                         weight_decay=self.weight_decay,
-                                                         betas=(0.9, 0.95)),
-                                   warmup_steps_proportion=0.0,
-                                   min_lr_ratio=0.0,
-                                   zero_stage=2,
-                               ))
+        backend = ModelBackend(
+            'ds_train',
+            args=dict(
+                optimizer_name='adam',
+                optimizer_config=dict(
+                    lr=self.lora_lr,
+                    weight_decay=self.weight_decay,
+                    eps=1e-5,
+                    betas=self.adam_betas,
+                ),
+                lr_scheduler_type=self.lr_scheduler_type,
+                warmup_steps_proportion=self.warmup_steps_proportion,
+                min_lr_ratio=self.min_lr_ratio,
+                zero_stage=2,
+            ),
+        )
 
         rw_model = Model(
             "lora_contrastive_reward",
@@ -309,7 +368,7 @@ class WpsContrastiveRewardExperiment(WpsRewardModelingExperiment):
         ecs = MasterWorkerECS(model_worker).add_systems([train_rw_contrastive])
 
         cfg = ExperimentConfig(
-            total_train_epochs=1,
+            total_train_epochs=self.total_train_epochs,
             save_frequency_steps=None,
             save_frequency_epochs=None,
             save_frequency_seconds=None,

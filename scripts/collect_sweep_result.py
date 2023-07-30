@@ -5,7 +5,7 @@ import subprocess
 exp_name = "wps-rw-s1"
 cfgs = []
 for trial in range(1, 55):
-    log_root = f"/home/aigc/llm/fw/logs/{exp_name}_lora-sweep-20230728-{trial}/"
+    log_root = f"/home/aigc/llm/fw/logs/{exp_name}_lora-sweep-20230729-{trial}/"
     s = subprocess.check_output(f"cat {os.path.join(log_root, 'model_worker')} | grep 'Configuring with'",
                                 shell=True).decode('ascii').strip().split('\n')[-1].strip()
 
@@ -28,6 +28,7 @@ for trial in range(1, 55):
     cfg['acc'] = float(match_f.group(1))
     cfg['lr_scaling_product'] = float(cfg['lr']) * float(cfg['lora_scaling'])
 
+    cfg = {kk: f"{float(vv):.6f}" for kk, vv in cfg.items()}
     cfgs.append(cfg)
 
 cfgs = [{k: float(v) for k, v in x.items()} for x in cfgs]
@@ -50,5 +51,5 @@ def pretty_print(data):
 
 
 # lora dim=8, lora_scaling
-pretty_print(sorted([cfg for cfg in cfgs if cfg['lora_dim'] == 128], key=lambda x: x['acc']))
+pretty_print(sorted([cfg for cfg in cfgs], key=lambda x: x['acc']))
 # pretty_print(sorted([cfg for cfg in cfgs if cfg['lr'] <= 1e-3], key=lambda x: x['acc']))
