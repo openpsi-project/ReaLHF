@@ -606,6 +606,10 @@ api.model.register_interface("wps_contrastive_reward", WPSContrastiveRewardInter
 
 
 class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
+    # TODO: accumulated acc
+    def __post_init__(self):
+        self.train_total_correct_predictions = 0
+        self.train_total_predictions = 0
 
     @torch.inference_mode()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
@@ -659,8 +663,13 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
         model.inc_version()
         if model.version.epoch > cur_epoch:
             rm_model.tput_timer.update_epoch_count()
+            self.train_total_predictions = self.train_total_correct_predictions = 0
 
-        return dict(loss=loss.detach().item(), acc=(scores.max(-1).values == labels).mean().detach().item())
+        correct_predictions = (scores.max(-1).values == labels).float().sum().detach.item()
+        self.train_total_correct_predictions += correct_predictions
+        self.train_total_predictions += bs
+
+        return dict(loss=loss.detach().item(), acc=self.train_total_correct_predictions / self.train_total_predictions)
 
     def save(self, model: api.model.Model, output_dir):
         save_hf_model(model, output_dir)

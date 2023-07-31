@@ -413,23 +413,22 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
 
     def initial_setup(self) -> ExperimentConfig:
         self.weight_decay = 0.0
-        self.lora_lr = 5e-4
-        self.lora_scaling = 8.0
-        self.lora_dim = 32.0
+        self.lora_lr = 2.5e-4
+        self.lora_scaling = 32.0
+        self.lora_dim = 32
         self.adam_betas = (0.9, 0.95)
-        self.lr_scheduler_type = 'cosine'
-        self.warmup_steps_proportion = 0.0
+        self.lr_scheduler_type = 'linear'
+        self.warmup_steps_proportion = 0.075
         self.min_lr_ratio = 0.0
         self.total_train_epochs = 4
 
-        self.enable_sweep = False
 
         root_dir = "/home"
         model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
-        train_batch_size_per_device = 2
+        train_batch_size_per_device = 4
         eval_batch_size_per_device = 12
         max_seq_len = 512
-        contrastive_dim = 5
+        contrastive_dim = 6
 
         dataset = Dataset(
             'wps_reward_plackett_luce',
@@ -490,7 +489,6 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
                 lora_scaling=self.lora_scaling,
             ),
         )
-        backend.args['optimizer_config']['lr'] = self.lora_lr
 
         interface = ModelInterface('wps_plackett_luce_reward')
 
@@ -521,8 +519,6 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
             data_worker=data_worker,
             model_worker=model_worker,
         )
-        if not self.enable_sweep:
-            cfg.save_frequency_epochs = 1
         return cfg
 
 
