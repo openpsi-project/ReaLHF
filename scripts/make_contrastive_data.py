@@ -99,8 +99,10 @@ if __name__ == "__main__":
     labeled_codes_len = [len(x['labeled_codes']) for x in train_data + valid_data]
     print(f"Average number of labeld codes: {np.mean(labeled_codes_len)}, "
           f"min {np.min(labeled_codes_len)}, max {np.max(labeled_codes_len)}")
-    n_pos_only = sum([all(y['correctness_label'] for y in x['labeled_codes']) for x in train_data + valid_data])
-    n_neg_only = sum([all((not y['correctness_label']) for y in x['labeled_codes']) for x in train_data + valid_data])
+    n_pos_only = sum(
+        [all(y['correctness_label'] for y in x['labeled_codes']) for x in train_data + valid_data])
+    n_neg_only = sum(
+        [all((not y['correctness_label']) for y in x['labeled_codes']) for x in train_data + valid_data])
     print(f"Number of positive only data: {n_pos_only}, "
           f"number of negative only data: {n_neg_only}, "
           f"others: {len(labeled_codes_len) - n_pos_only - n_neg_only}")
@@ -112,7 +114,7 @@ if __name__ == "__main__":
     with open('tmp_.json', "r") as fin:
         train_data = json.load(fin)
     os.system("rm tmp.json tmp_.json")
-    
+
     fn = "tmp.json"
     with open(fn, "w") as f:
         json.dump(valid_data, f)

@@ -392,3 +392,145 @@ for s in range(1, 6):
             seed=s,
         ),
     )
+
+
+def train_plackett_luce_rw(
+    commands: Commands,
+    model: ModelQuery['default'],
+    input_ids: RawDataQuery['input_ids'],
+    attention_mask: RawDataQuery['attention_mask'],
+    labels: RawDataQuery['labels'],
+):
+    inputs = commands.build_model_inputs(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        labels=labels,
+    )
+    commands.log(model.train_step(inputs))
+
+
+class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
+
+    def initial_setup(self) -> ExperimentConfig:
+        self.weight_decay = 0.0
+        self.lora_lr = 5e-4
+        self.lora_scaling = 8.0
+        self.lora_dim = 32.0
+        self.adam_betas = (0.9, 0.95)
+        self.lr_scheduler_type = 'cosine'
+        self.warmup_steps_proportion = 0.0
+        self.min_lr_ratio = 0.0
+        self.total_train_epochs = 4
+
+        self.enable_sweep = False
+
+        root_dir = "/home"
+        model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
+        train_batch_size_per_device = 2
+        eval_batch_size_per_device = 12
+        max_seq_len = 512
+        contrastive_dim = 5
+
+        dataset = Dataset(
+            'wps_reward_plackett_luce',
+            args=dict(
+                dataset_path=f"{root_dir}/aigc/llm/datasets/rw-contrastive/train.jsonl",
+                tokenizer_name_or_path=model_path,
+                max_seq_len=max_seq_len,
+                contrastive_dim=contrastive_dim,
+            ),
+        )
+        dataloader = DataLoader(
+            'default',
+            args=dict(
+                shuffle=True,
+                drop_last=False,
+                batch_size=train_batch_size_per_device * self.n_models // self.n_data_workers,
+            ),
+        )
+        data_worker = [
+            DataWorker(
+                datasets=[dataset],
+                stream=RequestReplyStream(f"data{i}"),
+                dataloader=dataloader,
+                seed=self.seed,
+            ) for i in range(self.n_data_workers)
+        ]
+
+        eval_dataset = copy.deepcopy(dataset)
+        eval_dataset.args['dataset_path'] = f"{root_dir}/aigc/llm/datasets/rw-contrastive/valid.jsonl"
+        eval_dataloader = DataLoader("default_eval", args=dict(batch_size=eval_batch_size_per_device))
+
+        backend = ModelBackend(
+            'ds_train',
+            args=dict(
+                optimizer_name='adam',
+                optimizer_config=dict(
+                    lr=self.lora_lr,
+                    weight_decay=self.weight_decay,
+                    eps=1e-5,
+                    betas=self.adam_betas,
+                ),
+                lr_scheduler_type=self.lr_scheduler_type,
+                warmup_steps_proportion=self.warmup_steps_proportion,
+                min_lr_ratio=self.min_lr_ratio,
+                zero_stage=2,
+            ),
+        )
+
+        rw_model = Model(
+            "wps_reward_lora",
+            args=dict(
+                model_name_or_path=model_path,
+                disable_dropout=True,
+                load_state_dict=False,
+                lora_dim=self.lora_dim,
+                lora_module_name='attn',
+                additional_module_names_to_opt=["v_head"],
+                lora_scaling=self.lora_scaling,
+            ),
+        )
+        backend.args['optimizer_config']['lr'] = self.lora_lr
+
+        interface = ModelInterface('wps_plackett_luce_reward')
+
+        streams = [RequestReplyStream(f"model{i}") for i in range(self.n_models)]
+
+        model_worker = [
+            ModelWorker(
+                seed=self.seed,
+                model=rw_model,
+                backend=backend,
+                interface=interface,
+                model_name='default',
+                stream=streams[i],
+                eval_datasets=[dataset],
+                eval_dataloader=eval_dataloader,
+            ) for i in range(self.n_models)
+        ]
+
+        ecs = MasterWorkerECS(model_worker).add_systems([train_plackett_luce_rw])
+
+        cfg = ExperimentConfig(
+            total_train_epochs=self.total_train_epochs,
+            save_frequency_steps=None,
+            save_frequency_epochs=None,
+            save_frequency_seconds=None,
+            eval_frequency_epochs=1,
+            master_ecs=ecs,
+            data_worker=data_worker,
+            model_worker=model_worker,
+        )
+        if not self.enable_sweep:
+            cfg.save_frequency_epochs = 1
+        return cfg
+
+
+for s in range(1, 6):
+    register_experiment(
+        f"wps-rw-pl-s{s}",
+        functools.partial(
+            WpsPlackettLuceRewardExperiment,
+            seed=s,
+        ),
+    )

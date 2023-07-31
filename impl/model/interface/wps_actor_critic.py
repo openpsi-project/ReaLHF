@@ -603,3 +603,100 @@ class WPSContrastiveRewardInterface(api.model.ModelInterface):
 
 
 api.model.register_interface("wps_contrastive_reward", WPSContrastiveRewardInterface)
+
+
+class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
+
+    @torch.inference_mode()
+    def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+        module = model.module
+        module.eval()
+        data = recursive_apply(data, lambda x: x.to(model.device))
+        scores: torch.FloatTensor = module(input_ids=data['input_ids'],
+                                           attention_mask=data['attention_mask']).float()
+        prompt_len = data['prompts'].size()[-1]
+        eos_indices = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
+        chosen_end_scores = scores.gather(-1, eos_indices.unsqueeze(-1)).squeeze(-1)
+
+        ###################### logging ######################
+        seq_strs = model.tokenizer.batch_decode(data['input_ids'],
+                                                clean_up_tokenization_spaces=False,
+                                                skip_special_tokens=True)
+        for seq_str, score in zip(seq_strs, chosen_end_scores):
+            logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
+        #####################################################
+
+        return from_dict(dict(scores=chosen_end_scores.cpu()))
+
+    def train_step(self, model: api.model.Model, batch: NamedArray) -> NamedArray:
+        device = model.device
+        rm_model = model.module
+        rm_model.train()
+
+        batch = recursive_apply(batch, lambda x: x.to(device))
+        labels = batch['labels']
+
+        bs, c_dim = batch['input_ids'].shape[:2]
+        eos_indices = get_eos_indices(batch['input_ids'].flatten(end_dim=1), model.tokenizer)
+        eos_indices = eos_indices.view(bs, c_dim)
+
+        scores: torch.FloatTensor = rm_model(
+            input_ids=batch['input_ids'].flatten(end_dim=1),
+            attention_mask=batch['attention_mask'].flatten(end_dim=1),
+            use_cache=False,
+        ).float()  # [bs * c_dim, seq_len]
+
+        scores = scores.view(bs, c_dim, -1)
+        scores = scores.gather(-1, eos_indices.unsqueeze(-1)).squeeze(-1)  # [bs, c_dim]
+
+        scores = torch.cat([torch.zeros((bs, 1), dtype=scores.dtype, device=scores.device), scores], dim=1)
+        loss = torch.nn.functional.cross_entropy(scores, labels, reduction='mean')
+
+        rm_model.backward(loss)
+        rm_model.step()
+
+        cur_epoch = model.version.epoch
+        model.inc_version()
+        if model.version.epoch > cur_epoch:
+            rm_model.tput_timer.update_epoch_count()
+
+        return dict(loss=loss.detach().item(), acc=(scores.max(-1).values == labels).mean().detach().item())
+
+    def save(self, model: api.model.Model, output_dir):
+        save_hf_model(model, output_dir)
+
+    @torch.inference_mode()
+    def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
+        device = model_.device
+        model = model_.module
+        tokenizer = model_.tokenizer
+
+        model.eval()
+        correct_predictions = 0
+        total_predictions = 0
+        loss = 0
+
+        for step, batch in enumerate(tqdm.tqdm(eval_dataloader)):
+            batch = recursive_apply(from_dict(batch), lambda x: x.to(device))
+            labels = batch['labels']
+            bs, c_dim = batch['input_ids'].shape[:2]
+
+            eos_indices = get_eos_indices(batch['input_ids'].flatten(end_dim=1), tokenizer)
+            eos_indices = eos_indices.view(bs, c_dim)
+
+            scores: torch.FloatTensor = model(
+                input_ids=batch['input_ids'].flatten(end_dim=1),
+                attention_mask=batch['attention_mask'].flatten(end_dim=1),
+                use_cache=False,
+            ).float().view(bs, c_dim, -1)
+            scores = scores.gather(-1, eos_indices.unsqueeze(-1)).squeeze(-1)
+            scores = torch.cat([torch.zeros((bs, 1), dtype=scores.dtype, device=scores.device), scores],
+                               dim=1)
+            loss += torch.nn.functional.cross_entropy(scores, labels, reduction='sum')
+            correct_predictions += (scores.max(-1).values == labels).sum()
+            total_predictions += bs
+
+        return dict(acc=float(correct_predictions / total_predictions), loss=float(loss / total_predictions))
+
+
+api.model.register_interface("wps_plackett_luce_reward", WPSPlackettLuceRewardInterface)
