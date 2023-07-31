@@ -73,44 +73,56 @@ if __name__ == "__main__":
 
     raw_file_name = "/home/aigc/llm/raw/starcoder_compile_5000_flatten_labels0625.json"
     with open(raw_file_name, "r") as f:
-        data = json.load(f)
-    print(f"Raw dataset size: {len(data)}")
+        raw_data = json.load(f)
+    print(f"Raw dataset size: {len(raw_data)}")
 
-    prompt2infresult = labeled2code_and_result(data)
+    prompt2infresult = labeled2code_and_result(raw_data)
+    prompts = list(prompt2infresult.keys())
+    np.random.shuffle(prompts)
+    n_train = int(len(prompts) * train_proportion)
+    train_prompts = prompts[:n_train]
+    valid_prompts = prompts[n_train:]
 
-    data = []
-    for (head, task), v in prompt2infresult.items():
+    train_data = []
+    for head, task in train_prompts:
         labeled_codes = []
-        for (code, compilable, correct) in v:
+        for (code, compilable, correct) in prompt2infresult[(head, task)]:
             labeled_codes.append(dict(code=code, correctness_label=correct))
-        data.append(dict(head=head, task=task, labeled_codes=labeled_codes))
+        train_data.append(dict(head=head, task=task, labeled_codes=labeled_codes))
+    valid_data = []
+    for head, task in valid_prompts:
+        labeled_codes = []
+        for (code, compilable, correct) in prompt2infresult[(head, task)]:
+            labeled_codes.append(dict(code=code, correctness_label=correct))
+        valid_data.append(dict(head=head, task=task, labeled_codes=labeled_codes))
 
-    labeled_codes_len = [len(x['labeled_codes']) for x in data]
+    labeled_codes_len = [len(x['labeled_codes']) for x in train_data + valid_data]
     print(f"Average number of labeld codes: {np.mean(labeled_codes_len)}, "
           f"min {np.min(labeled_codes_len)}, max {np.max(labeled_codes_len)}")
-    n_pos_only = sum([all(y['correctness_label'] for y in x['labeled_codes']) for x in data])
-    n_neg_only = sum([all((not y['correctness_label']) for y in x['labeled_codes']) for x in data])
+    n_pos_only = sum([all(y['correctness_label'] for y in x['labeled_codes']) for x in train_data + valid_data])
+    n_neg_only = sum([all((not y['correctness_label']) for y in x['labeled_codes']) for x in train_data + valid_data])
     print(f"Number of positive only data: {n_pos_only}, "
           f"number of negative only data: {n_neg_only}, "
           f"others: {len(labeled_codes_len) - n_pos_only - n_neg_only}")
 
     fn = "tmp.json"
     with open(fn, "w") as f:
-        json.dump(data, f)
+        json.dump(train_data, f)
     subprocess.check_output(["python3", "-m", "scripts.wash_head", "--input", fn, '--output', 'tmp_.json'])
-
     with open('tmp_.json', "r") as fin:
-        data = json.load(fin)
-
+        train_data = json.load(fin)
+    os.system("rm tmp.json tmp_.json")
+    
+    fn = "tmp.json"
+    with open(fn, "w") as f:
+        json.dump(valid_data, f)
+    subprocess.check_output(["python3", "-m", "scripts.wash_head", "--input", fn, '--output', 'tmp_.json'])
+    with open('tmp_.json', "r") as fin:
+        valid_data = json.load(fin)
     os.system("rm tmp.json tmp_.json")
 
     output_root_dir = "/home/aigc/llm/datasets/rw-contrastive/"
     os.makedirs(output_root_dir, exist_ok=True)
-
-    np.random.shuffle(data)
-    n_train = int(len(data) * train_proportion)
-    train_data = data[:n_train]
-    valid_data = data[n_train:]
 
     with open(os.path.join(output_root_dir, 'train.jsonl'), "w") as fout:
         for d in train_data:

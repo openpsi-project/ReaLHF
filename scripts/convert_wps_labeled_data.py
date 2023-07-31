@@ -113,31 +113,46 @@ if __name__ == "__main__":
 
     raw_file_name = "/home/aigc/llm/raw/starcoder_compile_5000_flatten_labels0625.json"
     with open(raw_file_name, "r") as f:
-        data = json.load(f)
-    print(f"Raw dataset size: {len(data)}")
+        raw_data = json.load(f)
+    print(f"Raw dataset size: {len(raw_data)}")
 
-    prompt2infresult = labeled2code_and_result(data)
-    data = make_data(prompt2infresult, criterion='label', max_n_labels=10)
+    prompt2infresult = labeled2code_and_result(raw_data)
+    prompts = list(prompt2infresult.keys())
+    np.random.shuffle(prompts)
+    n_train = int(len(prompts) * train_proportion)
+    train_prompts = prompts[:n_train]
+    valid_prompts = prompts[n_train:]
+
+    train_data = make_data({k: prompt2infresult[k]
+                            for k in train_prompts},
+                           criterion='label',
+                           max_n_labels=10)
+    valid_data = make_data({k: prompt2infresult[k]
+                            for k in valid_prompts},
+                           criterion='label',
+                           max_n_labels=10)
+
     # data = cross_task_code_augmentation(data)
     # data = rubbish_compilable_code_augmentation(list(prompt2infresult.keys()), data)
 
     fn = "tmp.json"
     with open(fn, "w") as f:
-        json.dump(data, f)
+        json.dump(train_data, f)
     subprocess.check_output(["python3", "-m", "scripts.wash_head", "--input", fn, '--output', 'tmp_.json'])
-
     with open('tmp_.json', "r") as fin:
-        data = json.load(fin)
+        train_data = json.load(fin)
+    os.system("rm tmp.json tmp_.json")
 
+    fn = "tmp.json"
+    with open(fn, "w") as f:
+        json.dump(valid_data, f)
+    subprocess.check_output(["python3", "-m", "scripts.wash_head", "--input", fn, '--output', 'tmp_.json'])
+    with open('tmp_.json', "r") as fin:
+        valid_data = json.load(fin)
     os.system("rm tmp.json tmp_.json")
 
     output_root_dir = "/home/aigc/llm/datasets/rw-unpaired/"
     os.makedirs(output_root_dir, exist_ok=True)
-
-    np.random.shuffle(data)
-    n_train = int(len(data) * train_proportion)
-    train_data = data[:n_train]
-    valid_data = data[n_train:]
 
     with open(os.path.join(output_root_dir, 'train.jsonl'), "w") as fout:
         for d in train_data:

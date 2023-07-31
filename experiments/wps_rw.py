@@ -38,9 +38,9 @@ class WpsRewardModelingExperiment(Experiment):
         n_models=16,
         seed=1,
         weight_decay=0.0,
+        lr=2.5e-4,
         lora_dim=32,
-        lora_scaling=20.0,
-        lr=2.5e-4,  # or scaling=8.0 lr=5e-4
+        lora_scaling=32,
         adam_betas=None,
         lr_scheduler_type=None,
         min_lr_ratio=None,
@@ -63,16 +63,18 @@ class WpsRewardModelingExperiment(Experiment):
             self.weight_decay = weight_decay
 
         if lora_dim is None:
-            self.lora_dim = random.choice([8, 32, 128])
+            self.lora_dim = random.choice([8, 16, 32])
         else:
             self.lora_dim = lora_dim
 
-        if lr is None or lora_scaling is None:
-            prod = sample_log_uniform(1e-3, 1e-1)
-            self.lora_lr = sample_log_uniform(1e-4, 2e-3)
-            self.lora_scaling = prod / self.lora_lr
+        if lr is None:
+            self.lora_lr = sample_log_uniform(7e-5, 7e-4)
         else:
             self.lora_lr = lr
+
+        if lora_scaling is None:
+            self.lora_scaling = sample_log_uniform(0.8, self.lora_dim * 8)
+        else:
             self.lora_scaling = lora_scaling
 
         if adam_betas is None:
@@ -138,7 +140,7 @@ class WpsRewardModelingExperiment(Experiment):
         #     n_neg = len(data) - n_pos
         #     pos_weight = n_neg / n_pos
         # print(pos_weight)
-        pos_weight = 2.0351339481774264
+        pos_weight = 2.044542447629548
 
         dataset = Dataset(
             'excel_reward_modeling_unpaired',
