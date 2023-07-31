@@ -45,7 +45,7 @@ class WpsRewardModelingExperiment(Experiment):
         lr_scheduler_type=None,
         min_lr_ratio=None,
         warmup_steps_proportion=None,
-        total_train_epochs=None,
+        total_train_epochs=4,
     ):
         self.n_models = self.n_data_workers = n_models
         self.seed = seed
