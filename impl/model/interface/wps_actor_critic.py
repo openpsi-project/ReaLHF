@@ -605,8 +605,9 @@ class WPSContrastiveRewardInterface(api.model.ModelInterface):
 api.model.register_interface("wps_contrastive_reward", WPSContrastiveRewardInterface)
 
 
+@dataclasses.dataclass
 class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
-    # TODO: accumulated acc
+
     def __post_init__(self):
         self.train_total_correct_predictions = 0
         self.train_total_predictions = 0
@@ -659,17 +660,18 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
         rm_model.backward(loss)
         rm_model.step()
 
+        acc = self.train_total_correct_predictions / self.train_total_predictions
         cur_epoch = model.version.epoch
         model.inc_version()
         if model.version.epoch > cur_epoch:
             rm_model.tput_timer.update_epoch_count()
             self.train_total_predictions = self.train_total_correct_predictions = 0
 
-        correct_predictions = (scores.max(-1).values == labels).float().sum().detach.item()
+        correct_predictions = (scores.max(-1).values == labels).float().sum().detach().item()
         self.train_total_correct_predictions += correct_predictions
         self.train_total_predictions += bs
 
-        return dict(loss=loss.detach().item(), acc=self.train_total_correct_predictions / self.train_total_predictions)
+        return dict(loss=loss.detach().item(), acc=acc)
 
     def save(self, model: api.model.Model, output_dir):
         save_hf_model(model, output_dir)
