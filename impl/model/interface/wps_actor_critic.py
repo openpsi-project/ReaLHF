@@ -552,7 +552,7 @@ class WPSContrastiveRewardInterface(api.model.ModelInterface):
         if model.version.epoch > cur_epoch:
             rm_model.tput_timer.update_epoch_count()
 
-        return dict(loss=loss.detach().item(), acc=(scores.max(-1).values == labels).mean().detach().item())
+        return dict(loss=loss.detach().item(), acc=(scores.argmax(-1) == labels).mean().detach().item())
 
     def save(self, model: api.model.Model, output_dir):
         module = model.module
@@ -596,7 +596,7 @@ class WPSContrastiveRewardInterface(api.model.ModelInterface):
             scores = torch.cat([torch.zeros((bs, 1), dtype=scores.dtype, device=scores.device), scores],
                                dim=1)
             loss += torch.nn.functional.cross_entropy(scores, labels, reduction='sum')
-            correct_predictions += (scores.max(-1).values == labels).sum()
+            correct_predictions += (scores.argmax(-1) == labels).sum()
             total_predictions += bs
 
         return dict(acc=float(correct_predictions / total_predictions), loss=float(loss / total_predictions))
@@ -656,20 +656,21 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
 
         scores = torch.cat([torch.zeros((bs, 1), dtype=scores.dtype, device=scores.device), scores], dim=1)
         loss = torch.nn.functional.cross_entropy(scores, labels, reduction='mean')
+        logger.info(f"scores: {scores}, loss: {loss}.")
 
         rm_model.backward(loss)
         rm_model.step()
 
+        correct_predictions = (scores.argmax(-1) == labels).float().sum().detach().item()
+        self.train_total_correct_predictions += correct_predictions
+        self.train_total_predictions += bs
         acc = self.train_total_correct_predictions / self.train_total_predictions
+
         cur_epoch = model.version.epoch
         model.inc_version()
         if model.version.epoch > cur_epoch:
             rm_model.tput_timer.update_epoch_count()
             self.train_total_predictions = self.train_total_correct_predictions = 0
-
-        correct_predictions = (scores.max(-1).values == labels).float().sum().detach().item()
-        self.train_total_correct_predictions += correct_predictions
-        self.train_total_predictions += bs
 
         return dict(loss=loss.detach().item(), acc=acc)
 
@@ -704,7 +705,7 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
             scores = torch.cat([torch.zeros((bs, 1), dtype=scores.dtype, device=scores.device), scores],
                                dim=1)
             loss += torch.nn.functional.cross_entropy(scores, labels, reduction='sum')
-            correct_predictions += (scores.max(-1).values == labels).sum()
+            correct_predictions += (scores.argmax(-1) == labels).sum()
             total_predictions += bs
 
         return dict(acc=float(correct_predictions / total_predictions), loss=float(loss / total_predictions))

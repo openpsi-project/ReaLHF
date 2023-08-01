@@ -413,7 +413,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
 
     def initial_setup(self) -> ExperimentConfig:
         self.weight_decay = 0.0
-        self.lora_lr = 1e-5
+        self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
         self.lora_dim = 32
         self.adam_betas = (0.9, 0.95)
@@ -421,7 +421,6 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
         self.warmup_steps_proportion = 0.075
         self.min_lr_ratio = 0.0
         self.total_train_epochs = 4
-
 
         root_dir = "/home"
         model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"

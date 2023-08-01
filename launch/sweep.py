@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-exp_name = "wps-rw-s1"
+exp_name = "wps-rw-pl-s1"
 trial_name_prefix = "lora-sweep-20230731"
 log_dir_path = "/home/aigc/llm/fw/logs/"
 
@@ -12,5 +12,5 @@ for root, dirs, files in os.walk(log_dir_path):
             count += 1
 
 for trial in range(max(1, count), 5001):
-    os.system(f"python3 -m apps.main start -e {exp_name} -f lora-sweep-20230731-{trial} "
+    os.system(f"python3 -m apps.main start -e {exp_name} -f {trial_name_prefix}-{trial} "
               f"--wandb_mode disabled --mode slurm --debug")

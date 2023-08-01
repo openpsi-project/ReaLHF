@@ -131,6 +131,11 @@ if __name__ == "__main__":
             json.dump(d, fout, ensure_ascii=False)
             fout.write("\n")
 
+    with open(os.path.join(output_root_dir, 'train-small.jsonl'), "w") as fout:
+        for d in train_data[:32]:
+            json.dump(d, fout, ensure_ascii=False)
+            fout.write("\n")
+
     with open(os.path.join(output_root_dir, 'valid.jsonl'), "w") as fout:
         for d in valid_data:
             json.dump(d, fout, ensure_ascii=False)
