@@ -420,7 +420,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
         self.lr_scheduler_type = 'linear'
         self.warmup_steps_proportion = 0.075
         self.min_lr_ratio = 0.0
-        self.total_train_epochs = 4
+        self.total_train_epochs = 8
 
         root_dir = "/home"
         model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
@@ -511,7 +511,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=None,
-            save_frequency_epochs=None,
+            save_frequency_epochs=1,
             save_frequency_seconds=None,
             eval_frequency_epochs=1,
             master_ecs=ecs,

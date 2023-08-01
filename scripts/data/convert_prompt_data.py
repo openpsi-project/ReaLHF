@@ -2,11 +2,13 @@ import json
 import os
 import pickle
 import subprocess
+import tqdm
 
 import numpy as np
 import torch
 import tqdm
 import transformers
+from scripts.data.utils import IMPOSSIBLE_TASKS, longest_common_substring
 
 
 @torch.inference_mode()
@@ -30,17 +32,59 @@ def get_prompt_embedding(prompts, model_name_or_path: str):
     return all_embeds
 
 
+def filter_prompts(data):
+    import api.utils
+    tokenizer = api.utils.load_hf_tokenizer("/home/aigc/llm/checkpoints/starcoder-wps-best/")
+
+    prompts = [d['starcoder']['prompt'] for d in data]
+    tasks = [d['task_cn'] for d in data]
+    heads = [d['head_cn'] for d in data]
+    all_codes = [[x['code'] for x in d['starcoder']['inference_result']] for d in data]
+
+    filtered_data = set()
+    duplicate_tasks = set()
+    for prompt, head, task, codes in tqdm.tqdm(list(zip(prompts, heads, tasks, all_codes))):
+        # if the reference code is too long, throw it away
+        tokens = tokenizer([code + tokenizer.eos_token for code in codes])
+        lengths = [len(x) for x in tokens['input_ids']]
+        if sum(lengths) / len(lengths) > 256:
+            continue
+
+        key = (head, task)
+
+        # filter out impossible tasks like sending emails
+        if any(t in task for t in IMPOSSIBLE_TASKS):
+            continue
+
+        # if the longest common substring of task is larger than 12, skip
+        if key not in filtered_data and key[1] not in duplicate_tasks:
+            flag = False
+            for other_key in filtered_data:
+                sub_s = longest_common_substring(key[1], other_key[1])
+                if len(sub_s) >= 12:
+                    print(f"Task {key[1]} and {other_key[1]} are considered duplicate. "
+                          f"The longest common sub-string (length {len(sub_s)}): {sub_s}.")
+                    duplicate_tasks.add(key[1])
+                    flag = True
+                    break
+            if flag:
+                continue
+
+        filtered_data.add(key)
+    return [dict(task=key[1], head=key[0]) for key in filtered_data]
+
+
 if __name__ == "__main__":
     with open("/home/aigc/llm/raw/starcoder-inference-300k-4.json", 'r') as f:
-        data = json.load(f)
-    prompts = [d['starcoder']['prompt'] for d in data]
+        raw_data = json.load(f)[:50000]
+    # prompts = [d['starcoder']['prompt'] for d in data]
     # TODO: filter prompts with clustering
     # embeds = get_prompt_embedding(prompts, "/data/marl/checkpoints/fw/starcoder-wps-best/")
     # with open("/data/aigc/public/wps-excel/starcoder-inference-300k-4-prompt-embeds.pkl", 'wb') as f:
     #     pickle.dump(embeds, f)
     # with open("/data/aigc/public/wps-excel/starcoder-inference-300k-4-prompt-embeds.pkl", 'rb') as f:
     #     embeds = pickle.load(f)
-    data = [dict(task=d['task_cn'], head=d['head_cn']) for d in data]
+    data = filter_prompts(raw_data)
 
     fn = "tmp.json"
     with open(fn, "w") as f:
@@ -64,13 +108,9 @@ if __name__ == "__main__":
             json.dump(d, fout, ensure_ascii=False)
             fout.write("\n")
 
-    with open(os.path.join(output_root_dir, 'train50000.jsonl'), "w") as fout:
-        for d in train_data[:50000]:
-            json.dump(d, fout, ensure_ascii=False)
-            fout.write("\n")
-
     with open(os.path.join(output_root_dir, 'valid.jsonl'), "w") as fout:
         for d in valid_data:
             json.dump(d, fout, ensure_ascii=False)
             fout.write("\n")
+    print(f"Raw data size: {len(raw_data)}")
     print(f"Number of train data: {len(train_data)}, number of validation data: {len(valid_data)}.")
