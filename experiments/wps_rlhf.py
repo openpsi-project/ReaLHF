@@ -168,7 +168,6 @@ class WpsRLHFExperiment(Experiment):
         dataset = Dataset('excel_prompt',
                           args=dict(
                               dataset_path="/home/aigc/llm/datasets/prompts/train50000.jsonl",
-                              tokenizer_name_or_path=actor_path,
                               max_seq_len=max_prompt_len,
                           ))
         dataloader = DataLoader('excel_rlhf',
@@ -180,6 +179,7 @@ class WpsRLHFExperiment(Experiment):
                                 ))
         data_worker = [
             DataWorker(
+                tokenizer_name_or_path=actor_path,
                 datasets=[dataset],
                 stream=RequestReplyStream(f"data{i}"),
                 dataloader=dataloader,

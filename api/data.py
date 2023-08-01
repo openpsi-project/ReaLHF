@@ -4,6 +4,7 @@ import functools
 import logging
 import os
 import time
+import inspect
 
 import numpy as np
 import torch.utils.data
@@ -35,82 +36,12 @@ def get_shuffle_indices(seed: int, size: int):
     return shuffle_idx
 
 
-class Dataset(torch.utils.data.Dataset):
-
-    def __init__(
-        self,
-        seed: int,
-        ddp_rank: int,
-        world_size: int,
-        tokenizer: transformers.PreTrainedTokenizerFast,
-    ):
-        """Initialize the subset of dataset belonging to the current worker.
-        
-        Dataset split is done by the __init__ function such that different workers
-        can only load different subsets instead of the whole dataset, which is usually
-        faster (e.g. parallel tokenization) and more memory efficient.
-
-        Args:
-            seed (int): Random seed used to create split indices.
-            ddp_rank (int): ...
-            world_size (int): ...
-            tokenizer (transformers.PreTrainedTokenizerFast): ...
-        """
-        super().__init__()
-        self.__seed = seed
-        self.__ddp_rank = ddp_rank
-        self.__world_size = world_size
-        self.__tokenizer = tokenizer
-
-    @property
-    def seed(self) -> int:
-        return self.__seed
-
-    @property
-    def ddp_rank(self) -> int:
-        return self.__ddp_rank
-
-    @property
-    def world_size(self) -> int:
-        return self.__world_size
-
-    @property
-    def tokenizer(self) -> transformers.PreTrainedTokenizerFast:
-        return self.__tokenizer
-
-    def __len__(self) -> int:
-        raise NotImplementedError()
-
-    def __getitem__(self, index: int) -> Dict:
-        raise NotImplementedError()
-
-
-class ConcatDataset(torch.utils.data.ConcatDataset):
-
-    def __init__(self, datasets: Iterable[Dataset]) -> None:
-        super().__init__(datasets)
-        for key in ['seed', 'ddp_rank', 'world_size']:
-            if len(set([getattr(d, key) for d in datasets])) != 1:
-                raise ValueError(
-                    f"All datasets must have the same {key}. Given: {[getattr(d, key) for d in datasets]}")
-        if len(set([d.tokenizer.__class__.__name__ for d in datasets])) != 1:
-            raise ValueError("All datasets must have the same tokenizer.")
-
-    @property
-    def seed(self) -> int:
-        return self.datasets[0].seed
-
-    @property
-    def ddp_rank(self) -> int:
-        return self.datasets[0].ddp_rank
-
-    @property
-    def world_size(self) -> int:
-        return self.datasets[0].world_size
-
-    @property
-    def tokenizer(self) -> transformers.PreTrainedTokenizerFast:
-        return self.datasets[0].tokenizer
+@dataclasses.dataclass
+class DatasetUtility:
+    seed: int
+    ddp_rank: int
+    world_size: int
+    tokenizer: transformers.PreTrainedTokenizerFast
 
 
 ALL_DATASET_CLASSES = {}
@@ -119,6 +50,10 @@ ALL_DATASET_CLASSES = {}
 def register_dataset(name, dataset_cls):
     assert name not in ALL_DATASET_CLASSES
     assert '/' not in name
+    call_arg_names = list(inspect.signature(dataset_cls).parameters.keys())
+    if 'util' not in call_arg_names:
+        raise KeyError(f"'util' must be one of the arguments in __init__, which is an instance of DatasetUtility. "
+                       f"Existing arguments: {call_arg_names}.")
     ALL_DATASET_CLASSES[name] = dataset_cls
 
 
@@ -127,17 +62,24 @@ def make_dataset(
     seed: int,
     ddp_rank: int,
     world_size: int,
+    tokenizer_name_or_path: str,
     experiment_name: str,
     trial_name: str,
     cache_root: Optional[str] = None,
-    is_eval: bool = False,
-) -> Dataset:
+) -> torch.utils.data.Dataset:
     if isinstance(cfg, str):
         cfg = api.config.Dataset(type_=cfg)
 
+    util = DatasetUtility(
+        seed,
+        ddp_rank,
+        world_size,
+        api.utils.load_hf_tokenizer(tokenizer_name_or_path),
+    )
+
     if cache_root is None:
         dataset_cls = ALL_DATASET_CLASSES[cfg.type_]
-        return dataset_cls(seed, ddp_rank, world_size, **cfg.args)
+        return dataset_cls(util=util, **cfg.args)
 
     # Create and check cache path.
     if (not cache_root.startswith("/data") and not cache_root.startswith("/hddlustre")
@@ -149,10 +91,6 @@ def make_dataset(
 
     output_path = os.path.join(cache_root, experiment_name, trial_name, cfg.type_, f"seed{seed}",
                                f"world_size{world_size}", f"rank{ddp_rank}")
-    if is_eval:
-        output_path = os.path.join(output_path, "eval")
-    else:
-        output_path = os.path.join(output_path, "train")
     os.makedirs(output_path, exist_ok=True)
 
     fname = "dataset.pt"
@@ -179,27 +117,13 @@ def register_dataloader(name, dataloader_cls):
     ALL_DATALOADER_CLASSES[name] = dataloader_cls
 
 
-def make_dataloader(cfg: Union[str, api.config.DataLoader], dataset: Dataset) -> torch.utils.data.DataLoader:
+def make_dataloader(cfg: Union[str, api.config.DataLoader],
+                    dataset: torch.utils.data.Dataset) -> torch.utils.data.DataLoader:
     if isinstance(cfg, str):
         cfg = api.config.DataLoader(type_=cfg)
     dataloader_cls = ALL_DATALOADER_CLASSES[cfg.type_]
     return dataloader_cls(dataset, **cfg.args)
 
-
-class TrivialDataset(Dataset):
-
-    def __init__(self, seed, ddp_rank, world_size, tokenizer_name_or_path):
-        tokenizer = api.utils.load_hf_tokenizer(tokenizer_name_or_path)
-        super().__init__(seed, ddp_rank, world_size, tokenizer)
-
-    def __len__(self):
-        return 1024
-
-    def __getitem__(self, index):
-        return dict(x=torch.rand(1), y=torch.full((1,), index))
-
-
-register_dataset('trivial', TrivialDataset)
 
 register_dataloader(
     'default',

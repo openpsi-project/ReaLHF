@@ -76,7 +76,7 @@ def filter_prompts(data):
 
 if __name__ == "__main__":
     with open("/home/aigc/llm/raw/starcoder-inference-300k-4.json", 'r') as f:
-        raw_data = json.load(f)[:50000]
+        raw_data = json.load(f)[:10000]
     # prompts = [d['starcoder']['prompt'] for d in data]
     # TODO: filter prompts with clustering
     # embeds = get_prompt_embedding(prompts, "/data/marl/checkpoints/fw/starcoder-wps-best/")
@@ -89,7 +89,7 @@ if __name__ == "__main__":
     fn = "tmp.json"
     with open(fn, "w") as f:
         json.dump(data, f)
-    subprocess.check_output(["python3", "-m", "scripts.wash_head", "--input", fn, '--output', 'tmp_.json'])
+    subprocess.check_output(["python3", "-m", "scripts.data.wash_head", "--input", fn, '--output', 'tmp_.json'])
     with open('tmp_.json', "r") as fin:
         data = json.load(fin)
     os.system("rm tmp.json tmp_.json")

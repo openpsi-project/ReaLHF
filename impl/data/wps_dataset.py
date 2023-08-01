@@ -22,12 +22,14 @@ def get_prompt_and_chosen(head, task, code):
     return get_prompt(head, task) + code
 
 
-class ExcelPromptDataset(api.data.Dataset):
+class ExcelPromptDataset(torch.utils.data.Dataset):
 
-    def __init__(self, seed, ddp_rank, world_size, dataset_path, tokenizer_name_or_path, max_seq_len):
-        tokenizer = api.utils.load_hf_tokenizer(tokenizer_name_or_path)
-
-        super().__init__(seed, ddp_rank, world_size, tokenizer)
+    def __init__(self, util: api.data.DatasetUtility, dataset_path, max_seq_len):
+        self.util = util
+        seed = self.util.seed
+        world_size = self.util.world_size
+        tokenizer = self.util.tokenizer
+        ddp_rank = self.util.ddp_rank
 
         if not dataset_path.endswith(".jsonl"):
             raise NotImplementedError("Only support .jsonal dataset format.")
@@ -62,7 +64,7 @@ class ExcelPromptDataset(api.data.Dataset):
 
     def __getitem__(self, idx):
         return (self.prompt_dataset[idx]["input_ids"], self.prompt_dataset[idx]["attention_mask"],
-                self.tokenizer.pad_token_id, self.tokenizer.eos_token_id)
+                self.util.tokenizer.pad_token_id, self.util.tokenizer.eos_token_id)
 
 
 class DataCollatorRLHF:
@@ -111,12 +113,14 @@ api.data.register_dataloader("excel_rlhf", RLHFDataLoader)
 api.data.register_dataset("excel_prompt", ExcelPromptDataset)
 
 
-class ExcelRewardModelingPairDataset(api.data.Dataset):
+class ExcelRewardModelingPairDataset(torch.utils.data.Dataset):
 
-    def __init__(self, seed, ddp_rank, world_size, dataset_path, tokenizer_name_or_path, max_seq_len):
-        tokenizer = api.utils.load_hf_tokenizer(tokenizer_name_or_path)
-
-        super().__init__(seed, ddp_rank, world_size, tokenizer)
+    def __init__(self, util: api.data.DatasetUtility, dataset_path, max_seq_len):
+        self.util = util
+        seed = self.util.seed
+        world_size = self.util.world_size
+        tokenizer = self.util.tokenizer
+        ddp_rank = self.util.ddp_rank
 
         if not dataset_path.endswith(".jsonl"):
             raise NotImplementedError("Only support .jsonal dataset format.")
@@ -251,12 +255,14 @@ api.data.register_dataloader("excel_reward_pair", RewardModelingDataLoader)
 api.data.register_dataset("excel_reward_pair", ExcelRewardModelingPairDataset)
 
 
-class ExcelRewardModelingUnpairedDataset(api.data.Dataset):
+class ExcelRewardModelingUnpairedDataset(torch.utils.data.Dataset):
 
-    def __init__(self, seed, ddp_rank, world_size, dataset_path, tokenizer_name_or_path, max_seq_len):
-        tokenizer = api.utils.load_hf_tokenizer(tokenizer_name_or_path)
-
-        super().__init__(seed, ddp_rank, world_size, tokenizer)
+    def __init__(self, util: api.data.DatasetUtility, dataset_path, max_seq_len):
+        self.util = util
+        seed = self.util.seed
+        world_size = self.util.world_size
+        tokenizer = self.util.tokenizer
+        ddp_rank = self.util.ddp_rank
 
         if not dataset_path.endswith(".jsonl"):
             raise NotImplementedError("Only support .jsonal dataset format.")
@@ -285,7 +291,7 @@ class ExcelRewardModelingUnpairedDataset(api.data.Dataset):
                                                                dtype=torch.long)
 
         input_ids = self.chosen_token['input_ids']
-        eos_mask = (input_ids == self.tokenizer.eos_token_id).float()
+        eos_mask = (input_ids == tokenizer.eos_token_id).float()
         seq_no_eos_mask = (eos_mask.sum(1) == 0).float()
         eos_indices = eos_mask.argmax(1)
         eos_indices = (eos_indices * (1 - seq_no_eos_mask) + seq_no_eos_mask * (max_seq_len - 1)).long()
@@ -305,22 +311,18 @@ class ExcelRewardModelingUnpairedDataset(api.data.Dataset):
 
 api.data.register_dataset("excel_reward_modeling_unpaired", ExcelRewardModelingUnpairedDataset)
 
-# TODO: use GPT to generate more rubbish codes
-RUBBISH_CODE_COLLECTIONS = [
-    "const sheet = Application.ActiveSheet;\nconst usedRange = sheet.UsedRange;\nconst rowCount = usedRange.Rows.Count;",
-    "const sheet = Application.ActiveSheet\nconst usedRange = sheet.UsedRange\nconst rowCount = usedRange.Rows.Count",
-    "const sheet = Application.ActiveSheet\nconst usedRange = sheet.UsedRange\nconst rowCount = usedRange.Rows.Count\nfor(let i = usedRange.Row + 1; i <= rowCount; i++) {\n}",
-]
+from scripts.data.utils import RUBBISH_CODE_COLLECTIONS
 
 
-class ExcelContrastiveRewardDataset(api.data.Dataset):
+class ExcelContrastiveRewardDataset(torch.utils.data.Dataset):
 
-    def __init__(self, seed, ddp_rank, world_size, dataset_path, tokenizer_name_or_path, max_prompt_len,
-                 max_code_len, contrastive_dim):
-        tokenizer = api.utils.load_hf_tokenizer(tokenizer_name_or_path)
-
-        # TODO: refactor this sh*t
-        super().__init__(seed, ddp_rank, world_size, tokenizer)
+    def __init__(self, util: api.data.DatasetUtility, dataset_path, max_prompt_len, max_code_len,
+                 contrastive_dim):
+        self.util = util
+        seed = self.util.seed
+        world_size = self.util.world_size
+        tokenizer = self.util.tokenizer
+        ddp_rank = self.util.ddp_rank
 
         if not dataset_path.endswith(".jsonl"):
             raise NotImplementedError("Only support .jsonal dataset format.")
@@ -391,14 +393,14 @@ class ExcelContrastiveRewardDataset(api.data.Dataset):
             codes = existing_neg_codes
         assert len(codes) == self.contrastive_dim, len(codes)
 
-        codes = [code + self.tokenizer.eos_token for code in codes]
+        codes = [code + self.util.tokenizer.eos_token for code in codes]
 
-        assert self.tokenizer.padding_side == 'right'
-        code_tokens = self.tokenizer(codes,
-                                     max_length=self.max_code_len,
-                                     padding="max_length",
-                                     truncation=True,
-                                     return_tensors="pt")
+        assert self.util.tokenizer.padding_side == 'right'
+        code_tokens = self.util.tokenizer(codes,
+                                          max_length=self.max_code_len,
+                                          padding="max_length",
+                                          truncation=True,
+                                          return_tensors="pt")
 
         return {
             "prompts": self.prompt_token["input_ids"][idx],
@@ -412,13 +414,14 @@ class ExcelContrastiveRewardDataset(api.data.Dataset):
 api.data.register_dataset("wps_reward_contrastive", ExcelContrastiveRewardDataset)
 
 
-class ExcelPlackettLuceRewardDataset(api.data.Dataset):
+class ExcelPlackettLuceRewardDataset(torch.utils.data.Dataset):
 
-    def __init__(self, seed, ddp_rank, world_size, dataset_path, tokenizer_name_or_path, max_seq_len,
-                 contrastive_dim):
-        tokenizer = api.utils.load_hf_tokenizer(tokenizer_name_or_path)
-
-        super().__init__(seed, ddp_rank, world_size, tokenizer)
+    def __init__(self, util: api.data.DatasetUtility, dataset_path, max_seq_len, contrastive_dim):
+        self.util = util
+        seed = self.util.seed
+        world_size = self.util.world_size
+        tokenizer = self.util.tokenizer
+        ddp_rank = self.util.ddp_rank
 
         if not dataset_path.endswith(".jsonl"):
             raise NotImplementedError("Only support .jsonal dataset format.")
@@ -484,13 +487,15 @@ class ExcelPlackettLuceRewardDataset(api.data.Dataset):
             codes = existing_neg_codes
         assert len(codes) == self.contrastive_dim, len(codes)
 
-        chosen_codes = [get_prompt_and_chosen(head, task, code) + self.tokenizer.eos_token for code in codes]
+        chosen_codes = [
+            get_prompt_and_chosen(head, task, code) + self.util.tokenizer.eos_token for code in codes
+        ]
 
-        chosen_tokens = self.tokenizer(chosen_codes,
-                                       max_length=self.max_seq_len,
-                                       padding="max_length",
-                                       truncation=True,
-                                       return_tensors="pt")
+        chosen_tokens = self.util.tokenizer(chosen_codes,
+                                            max_length=self.max_seq_len,
+                                            padding="max_length",
+                                            truncation=True,
+                                            return_tensors="pt")
 
         return {
             "input_ids": chosen_tokens['input_ids'],

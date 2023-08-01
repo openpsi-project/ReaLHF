@@ -146,7 +146,6 @@ class WpsRewardModelingExperiment(Experiment):
             'excel_reward_modeling_unpaired',
             args=dict(
                 dataset_path=f"{root_dir}/aigc/llm/datasets/rw-unpaired/train.jsonl",
-                tokenizer_name_or_path=model_path,
                 max_seq_len=max_seq_len,
             ),
         )
@@ -160,6 +159,7 @@ class WpsRewardModelingExperiment(Experiment):
         )
         data_worker = [
             DataWorker(
+                tokenizer_name_or_path=model_path,
                 datasets=[dataset],
                 stream=RequestReplyStream(f"data{i}"),
                 dataloader=dataloader,
@@ -292,7 +292,6 @@ class WpsContrastiveRewardExperiment(WpsRewardModelingExperiment):
             'wps_reward_contrastive',
             args=dict(
                 dataset_path=f"{root_dir}/aigc/llm/datasets/rw-contrastive/train.jsonl",
-                tokenizer_name_or_path=model_path,
                 max_prompt_len=max_prompt_len,
                 max_code_len=max_code_len,
                 contrastive_dim=contrastive_dim,
@@ -308,6 +307,7 @@ class WpsContrastiveRewardExperiment(WpsRewardModelingExperiment):
         )
         data_worker = [
             DataWorker(
+                tokenizer_name_or_path=model_path,
                 datasets=[dataset],
                 stream=RequestReplyStream(f"data{i}"),
                 dataloader=dataloader,
@@ -433,7 +433,6 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
             'wps_reward_plackett_luce',
             args=dict(
                 dataset_path=f"{root_dir}/aigc/llm/datasets/rw-contrastive/train.jsonl",
-                tokenizer_name_or_path=model_path,
                 max_seq_len=max_seq_len,
                 contrastive_dim=contrastive_dim,
             ),
@@ -449,6 +448,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
         data_worker = [
             DataWorker(
                 datasets=[dataset],
+                tokenizer_name_or_path=model_path,
                 stream=RequestReplyStream(f"data{i}"),
                 dataloader=dataloader,
                 seed=self.seed,

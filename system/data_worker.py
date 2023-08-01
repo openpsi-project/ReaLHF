@@ -1,4 +1,5 @@
 import logging
+import torch.utils.data
 
 import api.config as config_pkg
 import api.data as data_api
@@ -35,12 +36,13 @@ class DataWorker(worker_base.Worker):
 
     def __setup_datasets(self):
         # initialize data sets
-        self.__dataset = data_api.ConcatDataset([
+        self.__dataset = torch.utils.data.ConcatDataset([
             data_api.make_dataset(
                 d,
                 self.config.seed,
                 self.__worker_index,
                 self.__worker_count,
+                self.config.tokenizer_name_or_path,
                 self.config.worker_info.experiment_name,
                 self.config.worker_info.trial_name,
                 cache_root=(None if not self.config.use_dataset_cache else self.config.dataset_cahce_root),

@@ -171,6 +171,7 @@ class ModelWorker:
 
 @dataclasses.dataclass
 class DataWorker:
+    tokenizer_name_or_path: str
     datasets: List[Union[str, Dataset]]
     stream: Union[str, RequestReplyStream]
     # dataset cache
