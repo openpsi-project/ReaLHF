@@ -1,10 +1,10 @@
 from typing import Dict, Iterable, Optional, Union
 import dataclasses
 import functools
+import inspect
 import logging
 import os
 import time
-import inspect
 
 import numpy as np
 import torch.utils.data
@@ -52,8 +52,9 @@ def register_dataset(name, dataset_cls):
     assert '/' not in name
     call_arg_names = list(inspect.signature(dataset_cls).parameters.keys())
     if 'util' not in call_arg_names:
-        raise KeyError(f"'util' must be one of the arguments in __init__, which is an instance of DatasetUtility. "
-                       f"Existing arguments: {call_arg_names}.")
+        raise KeyError(
+            f"'util' must be one of the arguments in __init__, which is an instance of DatasetUtility. "
+            f"Existing arguments: {call_arg_names}.")
     ALL_DATASET_CLASSES[name] = dataset_cls
 
 

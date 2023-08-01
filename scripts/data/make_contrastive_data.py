@@ -7,6 +7,7 @@ import subprocess
 
 import numpy as np
 import tqdm
+
 from scripts.data.utils import IMPOSSIBLE_TASKS, longest_common_substring
 
 

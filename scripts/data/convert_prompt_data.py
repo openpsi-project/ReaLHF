@@ -2,12 +2,12 @@ import json
 import os
 import pickle
 import subprocess
-import tqdm
 
 import numpy as np
 import torch
 import tqdm
 import transformers
+
 from scripts.data.utils import IMPOSSIBLE_TASKS, longest_common_substring
 
 
@@ -89,7 +89,8 @@ if __name__ == "__main__":
     fn = "tmp.json"
     with open(fn, "w") as f:
         json.dump(data, f)
-    subprocess.check_output(["python3", "-m", "scripts.data.wash_head", "--input", fn, '--output', 'tmp_.json'])
+    subprocess.check_output(
+        ["python3", "-m", "scripts.data.wash_head", "--input", fn, '--output', 'tmp_.json'])
     with open('tmp_.json', "r") as fin:
         data = json.load(fin)
     os.system("rm tmp.json tmp_.json")

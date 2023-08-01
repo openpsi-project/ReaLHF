@@ -1,13 +1,15 @@
-import api.utils
-import transformers
-import torch
-import json
-import collections
-import random
 import argparse
-import zmq
+import collections
+import json
 import pickle
+import random
 import time
+
+import torch
+import transformers
+import zmq
+
+import api.utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", "-p", type=int, default=7777)

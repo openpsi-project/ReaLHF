@@ -3,13 +3,15 @@ IMPOSSIBLE_TASKS = [
     "导出",
     "短信",
     "邮件",
-    "加载","保存",
+    "加载",
+    "保存",
 ]
 RUBBISH_CODE_COLLECTIONS = [
     "const sheet = Application.ActiveSheet;\nconst usedRange = sheet.UsedRange;\nconst rowCount = usedRange.Rows.Count;",
     "const sheet = Application.ActiveSheet\nconst usedRange = sheet.UsedRange\nconst rowCount = usedRange.Rows.Count",
     "const sheet = Application.ActiveSheet\nconst usedRange = sheet.UsedRange\nconst rowCount = usedRange.Rows.Count\nfor(let i = usedRange.Row + 1; i <= rowCount; i++) {\n}",
 ]
+
 
 def longest_common_substring(s1, s2):
     m = len(s1)

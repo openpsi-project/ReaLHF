@@ -1,8 +1,9 @@
-import json
 import collections
-import random
-import zmq
+import json
 import pickle
+import random
+
+import zmq
 
 
 def labeled2code_and_result(labeled_data):
