@@ -183,22 +183,26 @@ def generate_logits_ignoring_mask(logits: torch.FloatTensor,
 
 def actor_loss_fn(logprobs: torch.FloatTensor, old_logprobs: torch.FloatTensor, advantages: torch.FloatTensor,
                   loss_mask: torch.FloatTensor, eps_clip: float):
-    ## policy gradient loss
     ratio = torch.exp((logprobs - old_logprobs) * loss_mask)
+    clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
     pg_loss1 = -advantages * ratio
-    pg_loss2 = -advantages * torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
+    pg_loss2 = -advantages * clipped_ratio
     pg_loss = (torch.max(pg_loss1, pg_loss2) * loss_mask).sum() / loss_mask.sum()
-    clip_ratio = ((pg_loss2 > pg_loss1).float().detach() * loss_mask).sum() / loss_mask.sum()
-    return pg_loss, clip_ratio.detach(), (ratio.detach() * loss_mask).sum() / loss_mask.sum()
+    proportion_clipped = (ratio.detach() > 1.0 + eps_clip).logical_or(ratio.detach() < 1.0 - eps_clip)
+    proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
+    return pg_loss, proportion_clipped, (ratio.detach() * loss_mask).sum() / loss_mask.sum()
 
 
 def critic_loss_fn(value: torch.FloatTensor, old_value: torch.FloatTensor, target_value: torch.FloatTensor,
                    loss_mask: torch.FloatTensor, value_eps_clip: float) -> torch.FloatTensor:
     value_loss_original = (value - target_value).pow(2)
     value_clipped = old_value + (value - old_value).clamp(-value_eps_clip, value_eps_clip)
+    proportion_clipped = (value.detach() > old_value + value_eps_clip).logical_or(value.detach() < old_value -
+                                                                                  value_eps_clip)
+    proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
     value_loss_clipped = (value_clipped - target_value).pow(2)
     value_loss = torch.max(value_loss_original, value_loss_clipped)
-    return 0.5 * (value_loss * loss_mask).sum() / loss_mask.sum()
+    return 0.5 * (value_loss * loss_mask).sum() / loss_mask.sum(), proportion_clipped
 
 
 @torch.inference_mode()
@@ -323,9 +327,9 @@ class WPSActorInterface(api.model.ModelInterface):
 
         kl_rewards, rewards = compute_rewards(self.kl_ctl, self.max_reward_clip, old_logp, ref_logp,
                                               sample['rewards'], eos_indices)
-        advantages, _ = get_advantages_and_returns(self.discount, self.gae_lambda,
-                                                   sample['values'][:, shifted_start:],
-                                                   rewards[:, shifted_start:])
+        advantages, returns = get_advantages_and_returns(self.discount, self.gae_lambda,
+                                                         sample['values'][:, shifted_start:],
+                                                         rewards[:, shifted_start:])
         # adv_norm = masked_normalization(advantages)
         adv_norm = advantages
         adv_norm = torch.cat([torch.zeros_like(sample['values'][:, :shifted_start]), adv_norm], dim=1)
@@ -347,12 +351,12 @@ class WPSActorInterface(api.model.ModelInterface):
 
         return dict(
             task_reward=sample['rewards'].mean().detach(),
+            advantage=advantages.mean().detach(),
             reward=rewards.mean().detach(),
             kl_reward=kl_rewards.mean().detach(),
-            advantage=advantages.mean().detach(),
-            clip_ratio=clip_ratio.detach(),
-            importance_weight=importance_weight.detach(),
             actor_loss=loss.detach(),
+            actor_clip_ratio=clip_ratio.detach(),
+            importance_weight=importance_weight.detach(),
             prompt_non_pad_ratio=prompt_non_pad_ratio,
             prompt_truncate_ratio=prompt_truncate_ratio,
             generated_non_pad_ratio=generated_non_pad_ratio,
@@ -448,12 +452,18 @@ class WPSCriticInterface(api.model.ModelInterface):
                                                                                              shifted_start:])
         returns = torch.cat([torch.zeros_like(sample['values'][:, :shifted_start]), returns], dim=1)
 
-        loss = critic_loss_fn(new_values, sample['values'], returns, loss_mask, self.value_eps_clip)
+        loss, clip_ratio = critic_loss_fn(new_values, sample['values'], returns, loss_mask,
+                                          self.value_eps_clip)
 
         module.backward(loss)
         module.step()
 
-        return dict(loss=loss.detach())
+        return dict(
+            value_loss=loss.detach(),
+            value_clip_ratio=clip_ratio.detach(),
+            values=new_values.mean().detach(),
+            returns=returns.mean().detach(),
+        )
 
     def train_step(self, model_: api.model.Model, sample: NamedArray) -> Dict:
         model = model_.module

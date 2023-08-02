@@ -8,7 +8,7 @@ import subprocess
 import numpy as np
 import tqdm
 
-from scripts.data.utils import IMPOSSIBLE_TASKS, longest_common_substring
+from scripts.data.utils import IMPOSSIBLE_TASKS, longest_common_substring, jaro_Winkler
 
 
 def labeled2code_and_result(labeled_data):

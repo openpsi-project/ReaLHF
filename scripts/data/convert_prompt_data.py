@@ -8,7 +8,7 @@ import torch
 import tqdm
 import transformers
 
-from scripts.data.utils import IMPOSSIBLE_TASKS, longest_common_substring
+from scripts.data.utils import IMPOSSIBLE_TASKS, longest_common_substring, jaro_Winkler
 
 
 @torch.inference_mode()
@@ -60,12 +60,17 @@ def filter_prompts(data):
         if key not in filtered_data and key[1] not in duplicate_tasks:
             flag = False
             for other_key in filtered_data:
-                sub_s = longest_common_substring(key[1], other_key[1])
-                if len(sub_s) >= 12:
-                    print(f"Task {key[1]} and {other_key[1]} are considered duplicate. "
-                          f"The longest common sub-string (length {len(sub_s)}): {sub_s}.")
-                    duplicate_tasks.add(key[1])
+                jw_score = jaro_Winkler(key[1], other_key[1])
+                if jw_score > 0.8:
                     flag = True
+                sub_s = longest_common_substring(key[1], other_key[1])
+                if len(sub_s) >= 15:
+                    flag = True
+
+                if flag:
+                    print(f"Task {key[1]} and {other_key[1]} are considered duplicate. "
+                          f"The longest common sub-string (length {len(sub_s)}, score {jw_score}): {sub_s}.")
+                    duplicate_tasks.add(key[1])
                     break
             if flag:
                 continue
@@ -76,7 +81,8 @@ def filter_prompts(data):
 
 if __name__ == "__main__":
     with open("/home/aigc/llm/raw/starcoder-inference-300k-4.json", 'r') as f:
-        raw_data = json.load(f)[:10000]
+        raw_data = json.load(f)[:20000]
+    np.random.shuffle(raw_data)
     # prompts = [d['starcoder']['prompt'] for d in data]
     # TODO: filter prompts with clustering
     # embeds = get_prompt_embedding(prompts, "/data/marl/checkpoints/fw/starcoder-wps-best/")

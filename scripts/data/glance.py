@@ -38,7 +38,7 @@ if __name__ == "__main__":
                         "-f",
                         type=str,
                         required=False,
-                        default="/home/aigc/llm/datasets/rw-contrastive/train.jsonl")
+                        default="/home/aigc/llm/datasets/prompts/train.jsonl")
     args = parser.parse_args()
     if args.file.endswith(".json"):
         iter_json_data(args=args)
