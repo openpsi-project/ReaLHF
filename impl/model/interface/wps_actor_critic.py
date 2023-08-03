@@ -53,15 +53,17 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
         scores: torch.FloatTensor = module(input_ids=data['input_ids'],
                                            attention_mask=data['attention_mask']).float()
         prompt_len = data['prompts'].size()[-1]
-        eos_indices = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
-        chosen_end_scores = scores.gather(-1, eos_indices.unsqueeze(-1)).squeeze(-1)
+        eos_indices, _ = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
+        chosen_end_scores = scores.gather(-1,
+                                          eos_indices.unsqueeze(-1)).squeeze(-1) / 10  # FIXME: for debug only
 
+        # FIXME: for debug only
         ###################### logging ######################
-        seq_strs = model.tokenizer.batch_decode(data['input_ids'],
-                                                clean_up_tokenization_spaces=False,
-                                                skip_special_tokens=True)
-        for seq_str, score in zip(seq_strs, chosen_end_scores):
-            logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
+        # seq_strs = model.tokenizer.batch_decode(data['input_ids'],
+        #                                         clean_up_tokenization_spaces=False,
+        #                                         skip_special_tokens=True)
+        # for seq_str, score in zip(seq_strs, chosen_end_scores):
+        #     logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
         #####################################################
 
         return from_dict(dict(scores=chosen_end_scores.cpu()))
@@ -90,7 +92,7 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
 
         batch = recursive_apply(batch, lambda x: x.to(device))
         labels = batch['correctness_labels']
-        eos_indices = get_eos_indices(batch['input_ids'], model.tokenizer)
+        eos_indices, _ = get_eos_indices(batch['input_ids'], model.tokenizer)
 
         scores = rm_model(input_ids=batch['input_ids'],
                           attention_mask=batch['attention_mask'],
@@ -129,7 +131,7 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
         for step, batch in enumerate(tqdm.tqdm(eval_dataloader)):
             batch = recursive_apply(from_dict(batch), lambda x: x.to(device))
             labels = batch['correctness_labels']
-            eos_indices = get_eos_indices(batch['input_ids'], model_.tokenizer)
+            eos_indices, _ = get_eos_indices(batch['input_ids'], model_.tokenizer)
             scores = model(
                 input_ids=batch['input_ids'],
                 attention_mask=batch['attention_mask'],
@@ -146,7 +148,7 @@ api.model.register_interface("wps_reward_unpaired", WPSRewardUnpairedInterface)
 
 
 def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.FloatTensor:
-    logits = logits[:, :-1, :]
+    logits = logits[:, :-1]
     labels = labels[:, 1:]
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
     log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1))
@@ -188,37 +190,41 @@ def actor_loss_fn(logprobs: torch.FloatTensor, old_logprobs: torch.FloatTensor, 
     pg_loss1 = -advantages * ratio
     pg_loss2 = -advantages * clipped_ratio
     pg_loss = (torch.max(pg_loss1, pg_loss2) * loss_mask).sum() / loss_mask.sum()
-    proportion_clipped = (ratio.detach() > 1.0 + eps_clip).logical_or(ratio.detach() < 1.0 - eps_clip)
+    proportion_clipped = (pg_loss1 < pg_loss2)
     proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
     return pg_loss, proportion_clipped, (ratio.detach() * loss_mask).sum() / loss_mask.sum()
 
 
 def critic_loss_fn(value: torch.FloatTensor, old_value: torch.FloatTensor, target_value: torch.FloatTensor,
                    loss_mask: torch.FloatTensor, value_eps_clip: float) -> torch.FloatTensor:
-    value_loss_original = (value - target_value).pow(2)
+    # TODO: support both huber and mse
+    value_loss_original = torch.nn.functional.huber_loss(value, target_value, reduction='none', delta=10.0)
+    # value_loss_original = (value - target_value).pow(2)
     value_clipped = old_value + (value - old_value).clamp(-value_eps_clip, value_eps_clip)
-    proportion_clipped = (value.detach() > old_value + value_eps_clip).logical_or(value.detach() < old_value -
-                                                                                  value_eps_clip)
+    # value_loss_clipped = (value_clipped - target_value).pow(2)
+    value_loss_clipped = torch.nn.functional.huber_loss(value_clipped,
+                                                        target_value,
+                                                        reduction='none',
+                                                        delta=10.0)
+    # value_loss = torch.max(value_loss_original, value_loss_clipped)
+    value_loss = value_loss_original
+    proportion_clipped = (value_loss_clipped > value_loss_original)
     proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
-    value_loss_clipped = (value_clipped - target_value).pow(2)
-    value_loss = torch.max(value_loss_original, value_loss_clipped)
     return 0.5 * (value_loss * loss_mask).sum() / loss_mask.sum(), proportion_clipped
 
 
 @torch.inference_mode()
 def compute_rewards(kl_ctl: float, clip_reward_value: float, log_probs: torch.FloatTensor,
                     ref_log_probs: torch.FloatTensor, reward_score: torch.FloatTensor,
-                    seq_eos_indices: torch.LongTensor):
-    eos_indices = seq_eos_indices - 1  # -1 because log_probs is one token shorter than input_ids
+                    eos_indices: torch.LongTensor, seq_no_eos_mask: torch.FloatTensor):
     kl_rewards = -kl_ctl * (log_probs - ref_log_probs)
     for i in range(kl_rewards.shape[0]):
-        # We also mask the loss at the EOS token because the probability outputed
-        # at this position does not matter for the generated sequence.
         kl_rewards[i, eos_indices[i]:] = 0.0
     score_rewards = torch.zeros_like(kl_rewards)
     reward_clip = torch.clamp(reward_score, -clip_reward_value, clip_reward_value)
     # This is assigned to the token before EOS, which rewards the output of the EOS token.
     score_rewards.scatter_(-1, (eos_indices - 1).unsqueeze(-1), reward_clip.unsqueeze(-1))
+    score_rewards = score_rewards * (1 - seq_no_eos_mask.unsqueeze(1))  # only compute final rewards with EOS
     return kl_rewards, kl_rewards + score_rewards
 
 
@@ -226,11 +232,12 @@ def compute_rewards(kl_ctl: float, clip_reward_value: float, log_probs: torch.Fl
 def get_advantages_and_returns(gamma: float, lam: float, values: torch.FloatTensor,
                                rewards: torch.FloatTensor):
     # Adopted from https://github.com/CarperAI/trlx/blob/main/trlx/models/modeling_ppo.py#L134
+    assert values.shape[1] == rewards.shape[1] + 1
     lastgaelam = 0
     advantages_reversed = []
     length = rewards.size()[-1]
     for t in reversed(range(length)):
-        nextvalues = values[:, t + 1] if t < length - 1 else 0.0
+        nextvalues = values[:, t + 1]
         delta = rewards[:, t] + gamma * nextvalues - values[:, t]
         lastgaelam = delta + gamma * lam * lastgaelam
         advantages_reversed.append(lastgaelam)
@@ -319,14 +326,13 @@ class WPSActorInterface(api.model.ModelInterface):
         prompt_len = sample['prompts'].size()[-1]
         shifted_start = prompt_len - 1
         loss_mask = sample['attention_mask'][:, 1:].clone()
-        # Mask the probability of prompts. All tokens after EOS (including EOS) are masked, too.
         loss_mask[:, :shifted_start] = 0
 
-        eos_indices = get_eos_indices(sample['input_ids'][:, prompt_len:], tokenizer)
+        eos_indices, seq_no_eos_mask = get_eos_indices(sample['input_ids'][:, prompt_len:], tokenizer)
         eos_indices = eos_indices + prompt_len
 
         kl_rewards, rewards = compute_rewards(self.kl_ctl, self.max_reward_clip, old_logp, ref_logp,
-                                              sample['rewards'], eos_indices)
+                                              sample['rewards'], eos_indices, seq_no_eos_mask)
         advantages, returns = get_advantages_and_returns(self.discount, self.gae_lambda,
                                                          sample['values'][:, shifted_start:],
                                                          rewards[:, shifted_start:])
@@ -419,19 +425,29 @@ class WPSCriticInterface(api.model.ModelInterface):
         module = model.module
         module.train()
         data = recursive_apply(data, lambda x: x.to(model.device))
-        scores = module(input_ids=data['input_ids'], attention_mask=data['attention_mask']).float()
+        scores = module(input_ids=data['input_ids'],
+                        attention_mask=data['attention_mask']).float() / 10  # FIXME: for debug only
+
+        # FIXME: for debug only
+        debug_id = torch.zeros(data['input_ids'].shape[0], dtype=torch.long, device=model.device)
+        if torch.distributed.get_rank() == 0:
+            debug_id[0] = 1
+            logger.info(f"inference seq: {data['input_ids'][0]}, attn mask: {data['attention_mask'][0]}")
+
         prompt_len = data['prompts'].shape[1]
-        eos_indices = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
+        eos_indices, seq_no_eos_mask = get_eos_indices(data['input_ids'][:, prompt_len:],
+                                                       model.tokenizer) + prompt_len
         for i in range(scores.shape[0]):
-            scores[i, eos_indices[i]:] = 0
-        return from_dict(dict(scores=scores[:, :-1]))
+            if not seq_no_eos_mask[i]:
+                scores[i, eos_indices[i]:] = 0
+        return from_dict(dict(scores=scores, debug_id=debug_id))
 
     def _ppo_critic_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                          tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
         module.train()
         new_values = module(input_ids=sample['input_ids'],
                             attention_mask=sample['attention_mask'],
-                            use_cache=False).float()[:, :-1]
+                            use_cache=False).float() / 10  # FIXME: for debug only
 
         old_logp: torch.Tensor = sample['logp']
         ref_logp: torch.Tensor = sample['ref_logp']
@@ -439,24 +455,32 @@ class WPSCriticInterface(api.model.ModelInterface):
         prompt_len = sample['prompts'].size()[-1]
         shifted_start = prompt_len - 1
         loss_mask = sample['attention_mask'][:, 1:].clone()
-        # Mask the probability of prompts. All tokens after EOS (including EOS) are masked, too.
         loss_mask[:, :shifted_start] = 0
 
-        eos_indices = get_eos_indices(sample['input_ids'][:, prompt_len:], tokenizer)
+        eos_indices, seq_no_eos_mask = get_eos_indices(sample['input_ids'][:, prompt_len:], tokenizer)
         eos_indices = eos_indices + prompt_len
 
         _, rewards = compute_rewards(self.kl_ctl, self.max_reward_clip, old_logp, ref_logp, sample['rewards'],
-                                     eos_indices)
+                                     eos_indices, seq_no_eos_mask)
         _, returns = get_advantages_and_returns(self.discount, self.gae_lambda,
                                                 sample['values'][:, shifted_start:], rewards[:,
                                                                                              shifted_start:])
         returns = torch.cat([torch.zeros_like(sample['values'][:, :shifted_start]), returns], dim=1)
 
-        loss, clip_ratio = critic_loss_fn(new_values, sample['values'], returns, loss_mask,
+        loss, clip_ratio = critic_loss_fn(new_values[:, :-1], sample['values'][:, :-1], returns, loss_mask,
                                           self.value_eps_clip)
 
-        module.backward(loss)
-        module.step()
+        # FIXME: for debug only
+        if torch.any(sample['debug_id'] == 1):
+            idx = sample['debug_id'].argmax()
+            logger.info(f"output values: {new_values[idx, :-1] * loss_mask[idx]}, "
+                        f"old values: {sample['values'][idx, :-1] * loss_mask[idx]}, "
+                        f"returns: {returns[idx] * loss_mask[idx]}, loss_mask: {loss_mask[idx]}")
+            logger.info(f"seq: {sample['input_ids'][idx]}, attention_mask: {sample['attention_mask'][idx]}")
+
+        # FIXME: for debug only
+        # module.backward(loss)
+        # module.step()
 
         return dict(
             value_loss=loss.detach(),
@@ -512,7 +536,7 @@ class WPSContrastiveRewardInterface(api.model.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         bs, prompt_len = data['prompts'].size()
-        eos_indices = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer)
+        eos_indices, _ = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer)
 
         chosen_end_scores = module(
             prompts=data['input_ids'][:, :prompt_len],
@@ -541,7 +565,7 @@ class WPSContrastiveRewardInterface(api.model.ModelInterface):
         labels = batch['labels']
 
         bs, c_dim = batch['responses'].shape[:2]
-        eos_indices = get_eos_indices(batch['responses'].flatten(end_dim=1), model.tokenizer)
+        eos_indices, _ = get_eos_indices(batch['responses'].flatten(end_dim=1), model.tokenizer)
         eos_indices = eos_indices.view(bs, c_dim, *eos_indices.shape[1:])
 
         scores = rm_model(
@@ -593,7 +617,7 @@ class WPSContrastiveRewardInterface(api.model.ModelInterface):
             batch = recursive_apply(from_dict(batch), lambda x: x.to(device))
             labels = batch['labels']
             bs, c_dim = batch['responses'].shape[:2]
-            eos_indices = get_eos_indices(batch['responses'].flatten(end_dim=1), tokenizer)
+            eos_indices, _ = get_eos_indices(batch['responses'].flatten(end_dim=1), tokenizer)
             eos_indices = eos_indices.view(bs, c_dim, *eos_indices.shape[1:])
 
             scores: torch.FloatTensor = model(
@@ -630,7 +654,7 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
         scores: torch.FloatTensor = module(input_ids=data['input_ids'],
                                            attention_mask=data['attention_mask']).float()
         prompt_len = data['prompts'].size()[-1]
-        eos_indices = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
+        eos_indices, _ = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
         chosen_end_scores = scores.gather(-1, eos_indices.unsqueeze(-1)).squeeze(-1)
 
         ###################### logging ######################
@@ -652,7 +676,7 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
         labels = batch['labels']
 
         bs, c_dim = batch['input_ids'].shape[:2]
-        eos_indices = get_eos_indices(batch['input_ids'].flatten(end_dim=1), model.tokenizer)
+        eos_indices, _ = get_eos_indices(batch['input_ids'].flatten(end_dim=1), model.tokenizer)
         eos_indices = eos_indices.view(bs, c_dim)
 
         scores: torch.FloatTensor = rm_model(
@@ -703,7 +727,7 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
             labels = batch['labels']
             bs, c_dim = batch['input_ids'].shape[:2]
 
-            eos_indices = get_eos_indices(batch['input_ids'].flatten(end_dim=1), tokenizer)
+            eos_indices, _ = get_eos_indices(batch['input_ids'].flatten(end_dim=1), tokenizer)
             eos_indices = eos_indices.view(bs, c_dim)
 
             scores: torch.FloatTensor = model(
