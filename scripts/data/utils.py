@@ -7,6 +7,8 @@ IMPOSSIBLE_TASKS = [
     "保存",
     "合并",
     "字典",
+    "为表格加上保护措施",
+    "上传",
 ]
 RUBBISH_CODE_COLLECTIONS = [
     "const sheet = Application.ActiveSheet;\nconst usedRange = sheet.UsedRange;\nconst rowCount = usedRange.Rows.Count;",

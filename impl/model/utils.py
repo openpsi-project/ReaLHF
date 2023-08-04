@@ -1,3 +1,4 @@
+from typing import Tuple
 import logging
 
 import numpy as np
@@ -255,7 +256,7 @@ def save_hf_model(model: api.model.Model, output_dir):
 def get_eos_indices(
     input_ids: torch.LongTensor,
     tokenizer: transformers.PreTrainedTokenizerFast,
-) -> torch.LongTensor:
+) -> Tuple[torch.LongTensor, torch.FloatTensor]:
     if torch.any(input_ids[:, 0] == tokenizer.eos_token_id):
         indices = (input_ids[:, 0] == tokenizer.eos_token_id).nonzero().flatten()
         bad_input_ids = input_ids[indices]
@@ -268,4 +269,4 @@ def get_eos_indices(
     seq_no_eos_mask = (eos_mask.sum(1) == 0).float()
     eos_indices = eos_mask.argmax(1)
     eos_indices = (eos_indices * (1 - seq_no_eos_mask) + seq_no_eos_mask * (seq_len - 1)).long()
-    return eos_indices
+    return eos_indices, seq_no_eos_mask

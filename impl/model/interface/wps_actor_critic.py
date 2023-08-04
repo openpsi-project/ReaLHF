@@ -53,17 +53,16 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
         scores: torch.FloatTensor = module(input_ids=data['input_ids'],
                                            attention_mask=data['attention_mask']).float()
         prompt_len = data['prompts'].size()[-1]
-        eos_indices, _ = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
-        chosen_end_scores = scores.gather(-1,
-                                          eos_indices.unsqueeze(-1)).squeeze(-1) / 10  # FIXME: for debug only
+        eos_indices, _ = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer)
+        eos_indices = eos_indices + prompt_len
+        chosen_end_scores = scores.gather(-1, eos_indices.unsqueeze(-1)).squeeze(-1)
 
-        # FIXME: for debug only
         ###################### logging ######################
-        # seq_strs = model.tokenizer.batch_decode(data['input_ids'],
-        #                                         clean_up_tokenization_spaces=False,
-        #                                         skip_special_tokens=True)
-        # for seq_str, score in zip(seq_strs, chosen_end_scores):
-        #     logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
+        seq_strs = model.tokenizer.batch_decode(data['input_ids'],
+                                                clean_up_tokenization_spaces=False,
+                                                skip_special_tokens=True)
+        for seq_str, score in zip(seq_strs, chosen_end_scores):
+            logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
         #####################################################
 
         return from_dict(dict(scores=chosen_end_scores.cpu()))
@@ -242,7 +241,7 @@ def get_advantages_and_returns(gamma: float, lam: float, values: torch.FloatTens
         lastgaelam = delta + gamma * lam * lastgaelam
         advantages_reversed.append(lastgaelam)
     advantages = torch.stack(advantages_reversed[::-1], dim=1)
-    returns = advantages + values
+    returns = advantages + values[:, :-1]
     return advantages.detach(), returns
 
 
@@ -283,7 +282,7 @@ class WPSActorInterface(api.model.ModelInterface):
             seq = torch.nn.functional.pad(seq, pad=(0, pad_length), mode='constant', value=pad_token_id)
         attention_mask = torch.logical_and(seq.not_equal(pad_token_id), (seq.not_equal(eos_token_id))).long()
 
-        module.train()
+        module.eval()
         logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits.float()
         logits_ignoring_mask = generate_logits_ignoring_mask(logits, module.generation_config.top_p,
                                                              module.generation_config.top_k)
@@ -312,7 +311,7 @@ class WPSActorInterface(api.model.ModelInterface):
 
     def _ppo_actor_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                         tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
-        module.train()
+        module.eval()
         logits_ignoring_mask = sample['logits_ignoring_mask']
         new_logits: torch.FloatTensor = module(input_ids=sample['input_ids'],
                                                attention_mask=sample['attention_mask'],
@@ -330,6 +329,9 @@ class WPSActorInterface(api.model.ModelInterface):
 
         eos_indices, seq_no_eos_mask = get_eos_indices(sample['input_ids'][:, prompt_len:], tokenizer)
         eos_indices = eos_indices + prompt_len
+        for i in range(eos_indices.shape[0]):
+            if not seq_no_eos_mask[i]:
+                loss_mask[i, eos_indices[i] - 1] = 1
 
         kl_rewards, rewards = compute_rewards(self.kl_ctl, self.max_reward_clip, old_logp, ref_logp,
                                               sample['rewards'], eos_indices, seq_no_eos_mask)
@@ -375,7 +377,7 @@ class WPSActorInterface(api.model.ModelInterface):
         # TODO: add EMA
         model = model_.module
         tokenizer = model_.tokenizer
-        model.train()
+        model.eval()
         assert sample['input_ids'].shape[0] % self.mini_batch_size == 0
         n_minibatch = sample['input_ids'].shape[0] // self.mini_batch_size
 
@@ -423,31 +425,25 @@ class WPSCriticInterface(api.model.ModelInterface):
     @torch.inference_mode()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
-        module.train()
+        module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
-        scores = module(input_ids=data['input_ids'],
-                        attention_mask=data['attention_mask']).float() / 10  # FIXME: for debug only
-
-        # FIXME: for debug only
-        debug_id = torch.zeros(data['input_ids'].shape[0], dtype=torch.long, device=model.device)
-        if torch.distributed.get_rank() == 0:
-            debug_id[0] = 1
-            logger.info(f"inference seq: {data['input_ids'][0]}, attn mask: {data['attention_mask'][0]}")
+        scores = module(input_ids=data['input_ids'], attention_mask=data['attention_mask']).float()
 
         prompt_len = data['prompts'].shape[1]
-        eos_indices, seq_no_eos_mask = get_eos_indices(data['input_ids'][:, prompt_len:],
-                                                       model.tokenizer) + prompt_len
+        eos_indices, seq_no_eos_mask = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer)
+        eos_indices = eos_indices + prompt_len
         for i in range(scores.shape[0]):
             if not seq_no_eos_mask[i]:
                 scores[i, eos_indices[i]:] = 0
-        return from_dict(dict(scores=scores, debug_id=debug_id))
+
+        return from_dict(dict(scores=scores))
 
     def _ppo_critic_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                          tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
-        module.train()
+        module.eval()
         new_values = module(input_ids=sample['input_ids'],
                             attention_mask=sample['attention_mask'],
-                            use_cache=False).float() / 10  # FIXME: for debug only
+                            use_cache=False).float()
 
         old_logp: torch.Tensor = sample['logp']
         ref_logp: torch.Tensor = sample['ref_logp']
@@ -459,6 +455,9 @@ class WPSCriticInterface(api.model.ModelInterface):
 
         eos_indices, seq_no_eos_mask = get_eos_indices(sample['input_ids'][:, prompt_len:], tokenizer)
         eos_indices = eos_indices + prompt_len
+        for i in range(eos_indices.shape[0]):
+            if not seq_no_eos_mask[i]:
+                loss_mask[i, eos_indices[i] - 1] = 1
 
         _, rewards = compute_rewards(self.kl_ctl, self.max_reward_clip, old_logp, ref_logp, sample['rewards'],
                                      eos_indices, seq_no_eos_mask)
@@ -470,17 +469,8 @@ class WPSCriticInterface(api.model.ModelInterface):
         loss, clip_ratio = critic_loss_fn(new_values[:, :-1], sample['values'][:, :-1], returns, loss_mask,
                                           self.value_eps_clip)
 
-        # FIXME: for debug only
-        if torch.any(sample['debug_id'] == 1):
-            idx = sample['debug_id'].argmax()
-            logger.info(f"output values: {new_values[idx, :-1] * loss_mask[idx]}, "
-                        f"old values: {sample['values'][idx, :-1] * loss_mask[idx]}, "
-                        f"returns: {returns[idx] * loss_mask[idx]}, loss_mask: {loss_mask[idx]}")
-            logger.info(f"seq: {sample['input_ids'][idx]}, attention_mask: {sample['attention_mask'][idx]}")
-
-        # FIXME: for debug only
-        # module.backward(loss)
-        # module.step()
+        module.backward(loss)
+        module.step()
 
         return dict(
             value_loss=loss.detach(),
@@ -492,7 +482,6 @@ class WPSCriticInterface(api.model.ModelInterface):
     def train_step(self, model_: api.model.Model, sample: NamedArray) -> Dict:
         model = model_.module
         tokenizer = model_.tokenizer
-        model.train()
         assert sample['input_ids'].shape[0] % self.mini_batch_size == 0
         n_minibatch = sample['input_ids'].shape[0] // self.mini_batch_size
 
@@ -654,7 +643,8 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
         scores: torch.FloatTensor = module(input_ids=data['input_ids'],
                                            attention_mask=data['attention_mask']).float()
         prompt_len = data['prompts'].size()[-1]
-        eos_indices, _ = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer) + prompt_len
+        eos_indices, _ = get_eos_indices(data['input_ids'][:, prompt_len:], model.tokenizer)
+        eos_indices = eos_indices + prompt_len
         chosen_end_scores = scores.gather(-1, eos_indices.unsqueeze(-1)).squeeze(-1)
 
         ###################### logging ######################

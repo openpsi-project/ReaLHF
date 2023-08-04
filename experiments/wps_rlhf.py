@@ -269,7 +269,7 @@ class WpsRLHFExperiment(Experiment):
             gae_lambda=0.95,
             eps_clip=0.2,
             value_eps_clip=0.2,
-            max_reward_clip=1.0,
+            max_reward_clip=20.0,
         )
         actor_interface = ref_interface = ModelInterface(
             'wps_actor',
@@ -279,6 +279,8 @@ class WpsRLHFExperiment(Experiment):
             'wps_critic',
             args=ppo_kwargs,
         )
+        critic_interface.args['ppo_epochs'] = 5
+        critic_interface.args['mini_batch_size'] = mini_batch_size_per_device * self.n_actors // self.n_critics
         rw_interface = ModelInterface('wps_reward_unpaired')
 
         actor_streams = [RequestReplyStream(f"actor{i}") for i in range(self.n_actors)]
