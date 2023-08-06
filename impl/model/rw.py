@@ -15,15 +15,17 @@ class RewardModel(nn.Module):
         self,
         base_model_name_or_path: str,
         load_state_dict: bool,
-        disable_dropout: bool,
+        output_scaling: float = 1.0,
+        output_bias: float = 0.0,
     ):
         super().__init__()
         base_model = api.utils.create_hf_nn(
             transformers.AutoModel,
             model_name_or_path=base_model_name_or_path,
-            disable_dropout=disable_dropout,
             init_from_scratch=load_state_dict,
         )
+        self.output_scaling = output_scaling
+        self.output_bias = output_bias
         self.config = base_model.config
         # `gpt-neo(x)` models use `hidden_size` attribute names instead of `n_embd``
         self.config.n_embd = self.config.hidden_size if hasattr(self.config,
@@ -62,7 +64,7 @@ class RewardModel(nn.Module):
                                                   use_cache=use_cache)
         hidden_states = transformer_outputs[0]
         scores = self.v_head(hidden_states).squeeze(-1)
-        return scores
+        return (scores - self.output_bias) * self.output_scaling
 
 
 class ZippedRewardModel(nn.Module):
@@ -91,14 +93,17 @@ def create_wps_reward_model(
     name: str,
     model_name_or_path: str,
     load_state_dict: bool,
-    disable_dropout: bool,
+    dtype: torch.dtype,
     device: Union[str, torch.device],
+    output_scaling:float=1.0,
+    output_bias:float=0.0,
 ):
     module = RewardModel(
         base_model_name_or_path=model_name_or_path,
         load_state_dict=load_state_dict,
-        disable_dropout=disable_dropout,
-    )
+        output_bias=output_bias,
+        output_scaling=output_scaling,
+    ).to(dtype)
     tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
     return api.model.Model(name, module, tokenizer, device)
 
@@ -106,16 +111,15 @@ def create_wps_reward_model(
 def create_zipped_wps_reward_model(
     name: str,
     model_name_or_paths: List[str],
-    disable_dropout: bool,
+    dtype: torch.dtype,
     device: Union[str, torch.device],
 ):
     module = ZippedRewardModel([
         RewardModel(
             base_model_name_or_path=model_name_or_path,
             load_state_dict=True,
-            disable_dropout=disable_dropout,
         ) for model_name_or_path in model_name_or_paths
-    ])
+    ]).to(dtype)
     tokenizers = [api.utils.load_hf_tokenizer(p) for p in model_name_or_paths]
     if not all(tokenizers[0].__class__.__name__ == t.__class__.__name__ for t in tokenizers):
         raise RuntimeError("Tokenizers must be the same!")
