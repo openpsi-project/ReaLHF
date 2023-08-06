@@ -32,7 +32,6 @@ if __name__ == "__main__":
     model = api.utils.create_hf_nn(
         transformers.AutoModelForCausalLM,
         model_name_or_path=model_path,
-        disable_dropout=True,
         generation_kwargs=generation_kwargs,
     ).to(device)
 

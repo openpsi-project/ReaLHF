@@ -17,8 +17,7 @@ def get_prompt_embedding(prompts, model_name_or_path: str):
     print("Loading model...")
     tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
     model = api.utils.create_hf_nn(transformers.AutoModelForCausalLM,
-                                   model_name_or_path,
-                                   disable_dropout=True)
+                                   model_name_or_path)
     device = torch.device("cuda:0")
     model = model.to(device)
     model.eval()
