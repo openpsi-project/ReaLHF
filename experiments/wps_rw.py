@@ -192,7 +192,6 @@ class WpsRewardModelingExperiment(Experiment):
             "wps_reward_lora",
             args=dict(
                 model_name_or_path=model_path,
-                disable_dropout=True,
                 load_state_dict=False,
                 lora_dim=self.lora_dim,
                 lora_module_name='attn',
@@ -340,7 +339,6 @@ class WpsContrastiveRewardExperiment(WpsRewardModelingExperiment):
             "lora_contrastive_reward",
             args=dict(
                 model_name_or_path=model_path,
-                disable_dropout=True,
                 embed_dim=1024,
                 load_state_dict=False,
                 lora_dim=self.lora_dim,
@@ -480,7 +478,6 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
             "wps_reward_lora",
             args=dict(
                 model_name_or_path=model_path,
-                disable_dropout=True,
                 load_state_dict=False,
                 lora_dim=self.lora_dim,
                 lora_module_name='attn',
