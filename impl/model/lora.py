@@ -267,7 +267,7 @@ class LoRAContrastiveRewardModel(nn.Module):
         self,
         base_model_name_or_path: str,
         load_state_dict: bool,
-        disable_dropout: bool,
+        dtype: torch.dtype,
         lora_dim: int,
         embed_dim: int,
         lora_module_name: str,
@@ -277,8 +277,8 @@ class LoRAContrastiveRewardModel(nn.Module):
         super().__init__()
         base_model = api.utils.create_hf_nn(
             transformers.AutoModel,
+            dtype=dtype,
             model_name_or_path=base_model_name_or_path,
-            disable_dropout=disable_dropout,
             init_from_scratch=load_state_dict,
         )
         self.config = base_model.config
@@ -384,10 +384,10 @@ def create_contrastive_reward_model(
     name: str,
     model_name_or_path: str,
     load_state_dict: bool,
-    disable_dropout: bool,
     lora_dim: int,
     embed_dim: int,
     lora_module_name: str,
+    dtype: torch.dtype,
     device: Union[str, torch.device],
     lora_scaling: float = 1.0,
     lora_dropout: float = 0.0,
@@ -395,7 +395,7 @@ def create_contrastive_reward_model(
     module = LoRAContrastiveRewardModel(
         base_model_name_or_path=model_name_or_path,
         load_state_dict=load_state_dict,
-        disable_dropout=disable_dropout,
+        dtype=dtype,
         lora_dim=lora_dim,
         embed_dim=embed_dim,
         lora_scaling=lora_scaling,

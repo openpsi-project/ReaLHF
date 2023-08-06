@@ -30,15 +30,12 @@ def load_hf_tokenizer(model_name_or_path: str, fast_tokenizer=True) -> transform
 def create_hf_nn(
     model_class: Type,
     model_name_or_path: str,
-    disable_dropout: bool = False,
     init_from_scratch: bool = False,
     dtype: torch.dtype = torch.float16,
     generation_kwargs: Optional[Dict[str, Any]] = None,
 ) -> transformers.PreTrainedModel:
     tokenizer = load_hf_tokenizer(model_name_or_path)
     model_config = transformers.AutoConfig.from_pretrained(model_name_or_path)
-    if disable_dropout:
-        model_config.dropout = 0.0
     # FIXME: there may be an error when using ZeRO-3
     # https://huggingface.co/docs/transformers/main_classes/deepspeed#nontrainer-deepspeed-integration
 
@@ -72,7 +69,7 @@ def create_hf_nn(
             **generation_kwargs
         })
     logger.debug("Hugginface model generation config: ", model.generation_config)
-    return model
+    return model.to(dtype=dtype)
 
 
 def save_hf_format(model, tokenizer, output_dir, sub_folder=""):

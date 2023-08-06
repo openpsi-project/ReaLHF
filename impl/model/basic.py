@@ -12,14 +12,14 @@ def hf_model_factory(model_cls):
     def create_huggingface_model(
         name: str,
         model_name_or_path: str,
-        disable_dropout: bool,
         generation_kwargs: dict,
+        dtype: torch.dtype,
         device: Union[str, torch.device],
     ):
         module = api.utils.create_hf_nn(model_cls,
                                         model_name_or_path,
-                                        disable_dropout=disable_dropout,
                                         init_from_scratch=False,
+                                        dtype=dtype,
                                         generation_kwargs=generation_kwargs)
         tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
         return api.model.Model(name, module, tokenizer, device)
