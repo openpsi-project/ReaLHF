@@ -194,22 +194,27 @@ def actor_loss_fn(logprobs: torch.FloatTensor, old_logprobs: torch.FloatTensor, 
     return pg_loss, proportion_clipped, (ratio.detach() * loss_mask).sum() / loss_mask.sum()
 
 
-def critic_loss_fn(value: torch.FloatTensor, old_value: torch.FloatTensor, target_value: torch.FloatTensor,
-                   loss_mask: torch.FloatTensor, value_eps_clip: float) -> torch.FloatTensor:
-    # TODO: support both huber and mse
-    value_loss_original = torch.nn.functional.huber_loss(value, target_value, reduction='none', delta=10.0)
-    # value_loss_original = (value - target_value).pow(2)
+def critic_loss_fn(value: torch.FloatTensor,
+                   old_value: torch.FloatTensor,
+                   target_value: torch.FloatTensor,
+                   loss_mask: torch.FloatTensor,
+                   value_eps_clip: float,
+                   loss_fn_type: str = 'huber') -> torch.FloatTensor:
+
+    if loss_fn_type == 'huber':
+        loss_fn = functools.partial(torch.nn.functional.huber_loss, reduction='none', delta=10.0)
+    elif loss_fn_type == 'mse':
+        loss_fn = functools.partial(torch.nn.functional.mse, reduction='none')
+    else:
+        raise NotImplementedError(f"Unknown loss fn type: {loss_fn_type}")
+
+    value_loss_original = loss_fn(value, target_value)
     value_clipped = old_value + (value - old_value).clamp(-value_eps_clip, value_eps_clip)
-    # value_loss_clipped = (value_clipped - target_value).pow(2)
-    value_loss_clipped = torch.nn.functional.huber_loss(value_clipped,
-                                                        target_value,
-                                                        reduction='none',
-                                                        delta=10.0)
-    # value_loss = torch.max(value_loss_original, value_loss_clipped)
-    value_loss = value_loss_original
+    value_loss_clipped = loss_fn(value_clipped, target_value)
+    value_loss = torch.max(value_loss_original, value_loss_clipped)
     proportion_clipped = (value_loss_clipped > value_loss_original)
     proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
-    return 0.5 * (value_loss * loss_mask).sum() / loss_mask.sum(), proportion_clipped
+    return (value_loss * loss_mask).sum() / loss_mask.sum(), proportion_clipped
 
 
 @torch.inference_mode()
@@ -310,7 +315,8 @@ class WPSActorInterface(api.model.ModelInterface):
         return from_dict(dict(logp=logp.cpu()))
 
     def _ppo_actor_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
-                        tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
+                        tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray,
+                        version_steps: int) -> Dict:
         module.eval()
         logits_ignoring_mask = sample['logits_ignoring_mask']
         new_logits: torch.FloatTensor = module(input_ids=sample['input_ids'],
@@ -346,7 +352,7 @@ class WPSActorInterface(api.model.ModelInterface):
                                                             self.eps_clip)
 
         module.backward(loss)
-        module.step()
+        module.step(lr_kwargs={'epoch': version_steps})
 
         prompts: torch.LongTensor = sample['prompts']
         ans: torch.LongTensor = sample['input_ids'][:, prompt_len:]
@@ -388,7 +394,8 @@ class WPSActorInterface(api.model.ModelInterface):
             shuffle_indices = torch.randperm(sample['input_ids'].shape[0])
             for mini_bs_i in range(0, sample['input_ids'].shape[0], self.mini_batch_size):
                 indices = shuffle_indices[mini_bs_i:mini_bs_i + self.mini_batch_size]
-                stats = self._ppo_actor_step(ppo_i, model, tokenizer, sample[indices])
+                stats = self._ppo_actor_step(ppo_i, model, tokenizer, sample[indices],
+                                             model_.version.global_step)
                 for k, v in stats.items():
                     train_stats[k] += v
 
@@ -439,7 +446,8 @@ class WPSCriticInterface(api.model.ModelInterface):
         return from_dict(dict(scores=scores))
 
     def _ppo_critic_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
-                         tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray) -> Dict:
+                         tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray,
+                         version_steps: int) -> Dict:
         module.eval()
         new_values = module(input_ids=sample['input_ids'],
                             attention_mask=sample['attention_mask'],
@@ -470,7 +478,7 @@ class WPSCriticInterface(api.model.ModelInterface):
                                           self.value_eps_clip)
 
         module.backward(loss)
-        module.step()
+        module.step(lr_kwargs={'epoch': version_steps})
 
         return dict(
             value_loss=loss.detach(),
@@ -492,7 +500,8 @@ class WPSCriticInterface(api.model.ModelInterface):
             shuffle_indices = torch.randperm(sample['input_ids'].shape[0])
             for mini_bs_i in range(0, sample['input_ids'].shape[0], self.mini_batch_size):
                 indices = shuffle_indices[mini_bs_i:mini_bs_i + self.mini_batch_size]
-                stats = self._ppo_critic_step(ppo_i, model, tokenizer, sample[indices])
+                stats = self._ppo_critic_step(ppo_i, model, tokenizer, sample[indices],
+                                              model_.version.global_step)
                 for k, v in stats.items():
                     train_stats[k] += v
 
