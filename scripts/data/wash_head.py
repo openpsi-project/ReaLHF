@@ -7,6 +7,9 @@ def filter_excel_data(data):
     for i in range(len(data)):
         d = data[i]
 
+        if len(d['task']) <= 3:
+            continue
+
         # split heads
         parts = list(map(lambda x: x.strip(), data[i]['head'].split('|')))
 
@@ -108,7 +111,7 @@ def filter_excel_data(data):
             # print(new_head)
             filtered_data.append(
                 dict(head=new_head,
-                     task=data[i]['task'],
+                     task=data[i]['task'].strip("。"),
                      **{
                          k: v
                          for k, v in data[i].items() if k != 'task' and k != 'head'

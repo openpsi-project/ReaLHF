@@ -116,7 +116,7 @@ def train_critic(
 
 class WpsRLHFExperiment(Experiment):
 
-    def __init__(self, n_actors=8, n_critics=4, n_rewards=2, n_refs=2, seed=1):
+    def __init__(self, n_actors=8, n_critics=2, n_rewards=2, n_refs=4, seed=1):
         self.n_actors = n_actors
         self.n_rewards = n_rewards
         self.n_refs = n_refs
@@ -158,7 +158,7 @@ class WpsRLHFExperiment(Experiment):
     def initial_setup(self) -> ExperimentConfig:
         actor_path = "/home/aigc/llm/checkpoints/starcoder-wps-best/"
         rw_paths = [
-            '/home/aigc/llm/root/checkpoints/wps-rw-pl-s1/20230801-2/default/epoch5step0/',
+            '/home/aigc/llm/root/checkpoints/wps-rw-pl-s1/20230801-2/default/epoch4step0/',
         ]
         critic_path = rw_paths[0]
         rw_output_scaling = 0.1
@@ -234,8 +234,8 @@ class WpsRLHFExperiment(Experiment):
         critic_model = Model(
             "wps_reward_lora",
             args=dict(
-                model_name_or_path=actor_path,
-                load_state_dict=False,
+                model_name_or_path=critic_path,
+                load_state_dict=True,
                 dtype=torch.float16,
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
@@ -246,6 +246,7 @@ class WpsRLHFExperiment(Experiment):
             ),
         )
 
+        # TODO: regularization to prevent degeneration
         actor_backend = ModelBackend(
             'ds_train',
             args=dict(

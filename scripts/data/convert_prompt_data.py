@@ -80,7 +80,7 @@ def filter_prompts(data):
 
 if __name__ == "__main__":
     with open("/home/aigc/llm/raw/starcoder-inference-300k-4.json", 'r') as f:
-        raw_data = json.load(f)[:20000]
+        raw_data = json.load(f)[:30000]
     np.random.shuffle(raw_data)
     # prompts = [d['starcoder']['prompt'] for d in data]
     # TODO: filter prompts with clustering

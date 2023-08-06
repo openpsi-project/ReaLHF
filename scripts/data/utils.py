@@ -1,20 +1,38 @@
 IMPOSSIBLE_TASKS = [
+    #
     "图",
+    "透视",
+    "透视表",
+    "键",
+    #
+    "导入",
     "导出",
+    "上传",
+    "下载",
     "短信",
     "邮件",
     "加载",
     "保存",
+    "链接",
+    "数据库",
+    #
     "合并",
     "字典",
-    "为表格加上保护措施",
-    "上传",
+    "保护",
     "任务",
+    "新的表格",
+    "新表格",
+    "底纹",
+    "唯一标识符列",
+    "去重",
+    "下拉",
 ]
 RUBBISH_CODE_COLLECTIONS = [
     "const sheet = Application.ActiveSheet;\nconst usedRange = sheet.UsedRange;\nconst rowCount = usedRange.Rows.Count;",
     "const sheet = Application.ActiveSheet\nconst usedRange = sheet.UsedRange\nconst rowCount = usedRange.Rows.Count",
     "const sheet = Application.ActiveSheet\nconst usedRange = sheet.UsedRange\nconst rowCount = usedRange.Rows.Count\nfor(let i = usedRange.Row + 1; i <= rowCount; i++) {\n}",
+    "//\n//\n",
+    "\"\n\"\n",
 ]
 
 

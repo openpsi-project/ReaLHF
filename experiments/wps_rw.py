@@ -457,6 +457,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
         eval_dataset.args['dataset_path'] = f"{root_dir}/aigc/llm/datasets/rw-contrastive/valid.jsonl"
         eval_dataloader = DataLoader("default_eval", args=dict(batch_size=eval_batch_size_per_device))
 
+        # TODO: regularization to prevent degeneration
         backend = ModelBackend(
             'ds_train',
             args=dict(

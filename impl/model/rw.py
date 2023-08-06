@@ -7,6 +7,9 @@ import transformers
 
 import api.model
 import api.utils
+import logging
+
+logger = logging.getLogger("Reward Model")
 
 
 class RewardModel(nn.Module):
@@ -39,6 +42,8 @@ class RewardModel(nn.Module):
             assert os.path.exists(model_ckpt_path), f"Cannot find model checkpoint at {model_ckpt_path}"
             model_ckpt = torch.load(model_ckpt_path, map_location='cpu')
             self.load_state_dict(model_ckpt)
+            logger.info(f"Reward model loaded state dict from {model_ckpt_path}. "
+                        "This is expected during RLHF, but not expected for training the reward model.")
 
     def gradient_checkpointing_enable(self):
         self.rwtranrsformer.gradient_checkpointing_enable()
@@ -95,8 +100,8 @@ def create_wps_reward_model(
     load_state_dict: bool,
     dtype: torch.dtype,
     device: Union[str, torch.device],
-    output_scaling:float=1.0,
-    output_bias:float=0.0,
+    output_scaling: float = 1.0,
+    output_bias: float = 0.0,
 ):
     module = RewardModel(
         base_model_name_or_path=model_name_or_path,
