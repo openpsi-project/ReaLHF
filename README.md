@@ -1,4 +1,4 @@
-# a distributed system for llm rlhf
+# A Distributed System for LLM RLHF
 
 ## Step 1: Train A Reward Model
 
@@ -27,5 +27,7 @@ Remember to replace the default actor model and reward model to yours.
 Check the logs hinted by stdout for detailed training information.
 
 There are some scripts to wash data based on heuristics in `scripts/data`.
+
+## Reward vs Training Steps
 
 ![Reward vs Training Steps](assets/reward.png)
