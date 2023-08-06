@@ -8,7 +8,7 @@ import torch
 import tqdm
 import transformers
 
-from scripts.data.utils import IMPOSSIBLE_TASKS, longest_common_substring, jaro_Winkler
+from scripts.data.utils import IMPOSSIBLE_TASKS, jaro_Winkler, longest_common_substring
 
 
 @torch.inference_mode()
@@ -16,8 +16,7 @@ def get_prompt_embedding(prompts, model_name_or_path: str):
     import api.utils
     print("Loading model...")
     tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
-    model = api.utils.create_hf_nn(transformers.AutoModelForCausalLM,
-                                   model_name_or_path)
+    model = api.utils.create_hf_nn(transformers.AutoModelForCausalLM, model_name_or_path)
     device = torch.device("cuda:0")
     model = model.to(device)
     model.eval()

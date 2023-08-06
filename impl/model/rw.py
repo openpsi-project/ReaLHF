@@ -1,4 +1,5 @@
 from typing import List, Union
+import logging
 import os
 
 import torch
@@ -7,7 +8,6 @@ import transformers
 
 import api.model
 import api.utils
-import logging
 
 logger = logging.getLogger("Reward Model")
 

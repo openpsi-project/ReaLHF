@@ -1,6 +1,6 @@
+import argparse
 import os
 import time
-import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--gpu", action='store_true')
