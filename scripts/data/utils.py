@@ -9,6 +9,7 @@ IMPOSSIBLE_TASKS = [
     "字典",
     "为表格加上保护措施",
     "上传",
+    "任务",
 ]
 RUBBISH_CODE_COLLECTIONS = [
     "const sheet = Application.ActiveSheet;\nconst usedRange = sheet.UsedRange;\nconst rowCount = usedRange.Rows.Count;",

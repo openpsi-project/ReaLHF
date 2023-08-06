@@ -91,6 +91,7 @@ if __name__ == "__main__":
     raw_file_name = "/home/aigc/llm/raw/starcoder_compile_5000_flatten_labels0625.json"
     with open(raw_file_name, "r") as f:
         raw_data = json.load(f)
+        np.random.shuffle(raw_data)
     print(f"Raw dataset size: {len(raw_data)}")
 
     prompt2infresult = labeled2code_and_result(raw_data)
