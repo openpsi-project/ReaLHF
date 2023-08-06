@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Dict
 import dataclasses
 import functools
 import logging
@@ -18,24 +18,22 @@ import torch
 DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU = 32  # A place-holder for inference.
 
 
-def get_train_ds_config(offload=False,
-                        stage=2,
-                        enable_hybrid_engine=False,
-                        inference_tp_size=1,
-                        release_inference_cache=False,
-                        pin_parameters=True,
-                        tp_gather_partition_size=8,
-                        max_out_tokens=512):
-
-    # TODO: more versatile config
-    device = "cpu" if offload else "none"
+def get_train_ds_config(offload_param: bool = False,
+                        offload_optimizer_state: bool = False,
+                        enable_fp16: bool = True,
+                        stage: int = 2,
+                        **kwargs):
     zero_opt_dict = {
         "stage": stage,
+        "overlap_comm": True,
+        "round_robin_gradients": True,
         "offload_param": {
-            "device": device
+            "device": "cpu" if offload_param else "none",
+            "pin_memory": True,
         },
         "offload_optimizer": {
-            "device": device
+            "device": "cpu" if offload_optimizer_state else "none",
+            "pin_memory": True,
         },
         "stage3_param_persistence_threshold": 1e4,
         "stage3_max_live_parameters": 3e7,
@@ -46,30 +44,26 @@ def get_train_ds_config(offload=False,
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
         "fp16": {
-            "enabled": True,
-            "loss_scale_window": 100
+            "enabled": enable_fp16,
+            "loss_scale_window": 100,
+            "initial_scale_power": 12,
         },
         "gradient_clipping": 1.0,
         "prescale_gradients": False,
+        "gradient_predevide_factor": 1.0,
         "wall_clock_breakdown": False,
-        "hybrid_engine": {
-            "enabled": enable_hybrid_engine,
-            "max_out_tokens": max_out_tokens,
-            "inference_tp_size": inference_tp_size,
-            "release_inference_cache": release_inference_cache,
-            "pin_parameters": pin_parameters,
-            "tp_gather_partition_size": tp_gather_partition_size,
-        }
+        **kwargs,
     }
 
 
-def get_eval_ds_config(offload=False, stage=0):
+def get_eval_ds_config(offload=False, stage=0, enable_fp16: bool = True, **kwargs):
     device = "cpu" if offload else "none"
     zero_opt_dict = {
         "stage": stage,
         "stage3_param_persistence_threshold": 1e4,
         "offload_param": {
-            "device": device
+            "device": device,
+            "pin_memory": True,
         },
         "memory_efficient_linear": False
     }
@@ -79,11 +73,12 @@ def get_eval_ds_config(offload=False, stage=0):
         "train_micro_batch_size_per_gpu": DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU,
         "train_batch_size": torch.distributed.get_world_size() * DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU,
         "fp16": {
-            "enabled": True
+            "enabled": enable_fp16,
         },
         "gradient_clipping": 1.0,
         "prescale_gradients": False,
-        "wall_clock_breakdown": False
+        "wall_clock_breakdown": False,
+        **kwargs
     }
 
 
@@ -121,39 +116,35 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     min_lr_ratio: float = 0.0  # will be used for linear and cosine schedule
     gradient_accumulation_steps: int = 1
     gradient_checkpointing: bool = False
-    offload: bool = False
+    offload_param: bool = False
+    offload_optimizer_state: bool = False
+    enable_fp16: bool = True
     zero_stage: int = 2
-    enable_hybrid_engine: bool = False
-    inference_tp_size: int = 1
-    release_inference_cache: bool = False
-    pin_parameters: bool = True
-    tp_gather_partition_size: int = 8
-    max_out_tokens: int = 512
+    additional_ds_config: Dict = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
         assert self.zero_stage == 2
-        if self.inference_tp_size > 1 and self.zero_stage != 3:
-            raise ValueError(f"Zero stage 3 must be used to do Tensor sharding in the hybrid engine.")
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
         module = model.module
         weight_decay = self.optimizer_config.get('weight_decay', 0.0)
         if self.optimizer_name == 'adam':
-            optimizer = deepspeed.ops.adam.FusedAdam(get_optimizer_grouped_parameters(module, weight_decay),
-                                                     **self.optimizer_config)
+            if not self.offload_param and not self.offload_optimizer_state:
+                optim_cls = deepspeed.ops.adam.FusedAdam
+            else:
+                optim_cls = deepspeed.ops.adam.DeepSpeedCPUAdam
+            optimizer = optim_cls(get_optimizer_grouped_parameters(module, weight_decay),
+                                  **self.optimizer_config)
         else:
             raise NotImplementedError(f"Unsupported optimizer: {self.optimizer_name}.")
 
         ds_config = get_train_ds_config(
-            offload=self.offload,
+            offload_param=self.offload_param,
+            offload_optimizer_state=self.offload_optimizer_state,
             stage=self.zero_stage,
-            enable_hybrid_engine=self.enable_hybrid_engine,
-            inference_tp_size=self.inference_tp_size,
-            release_inference_cache=self.release_inference_cache,
-            pin_parameters=self.pin_parameters,
-            tp_gather_partition_size=self.tp_gather_partition_size,
-            max_out_tokens=self.max_out_tokens,
+            enable_fp16=self.enable_fp16,
+            **self.additional_ds_config,
         )
 
         ds_config['train_micro_batch_size_per_gpu'] = spec.batch_size_per_device
@@ -213,14 +204,16 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
 class DeepspeedInferenceBackend(api.model.ModelBackend):
     offload: bool = False
     zero_stage: int = 0
+    enable_fp16: bool = True
+    additional_ds_config: Dict = dataclasses.field(default_factory=dict)
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
         module = model.module
-        ds_config = get_eval_ds_config(
-            offload=self.offload,
-            stage=self.zero_stage,
-        )
+        ds_config = get_eval_ds_config(offload=self.offload,
+                                       stage=self.zero_stage,
+                                       enable_fp16=self.enable_fp16,
+                                       **self.additional_ds_config)
         module, *_ = deepspeed.initialize(model=module, config=ds_config)
         model.module = module
         return model
