@@ -346,10 +346,10 @@ class WPSActorInterface(api.model.ModelInterface):
                                                          rewards[:, shifted_start:])
         # adv_norm = masked_normalization(advantages)
         adv_norm = advantages
-        adv_norm = torch.cat([torch.zeros_like(sample['values'][:, :shifted_start]), adv_norm], dim=1)
 
-        loss, clip_ratio, importance_weight = actor_loss_fn(new_logp, old_logp, adv_norm, loss_mask,
-                                                            self.eps_clip)
+        loss, clip_ratio, importance_weight = actor_loss_fn(new_logp[:, shifted_start:],
+                                                            old_logp[:, shifted_start:], adv_norm,
+                                                            loss_mask[:, shifted_start:], self.eps_clip)
 
         module.backward(loss)
         module.step(lr_kwargs={'epoch': version_steps})
@@ -365,9 +365,8 @@ class WPSActorInterface(api.model.ModelInterface):
 
         return dict(
             task_reward=sample['rewards'].mean().detach(),
+            kl_reward=(kl_rewards.detach() * loss_mask).sum(1).mean(),
             advantage=advantages.mean().detach(),
-            reward=rewards.mean().detach(),
-            kl_reward=kl_rewards.mean().detach(),
             actor_loss=loss.detach(),
             actor_clip_ratio=clip_ratio.detach(),
             importance_weight=importance_weight.detach(),
@@ -467,15 +466,14 @@ class WPSCriticInterface(api.model.ModelInterface):
             if not seq_no_eos_mask[i]:
                 loss_mask[i, eos_indices[i] - 1] = 1
 
+        old_values = sample['values']
         _, rewards = compute_rewards(self.kl_ctl, self.max_reward_clip, old_logp, ref_logp, sample['rewards'],
                                      eos_indices, seq_no_eos_mask)
-        _, returns = get_advantages_and_returns(self.discount, self.gae_lambda,
-                                                sample['values'][:, shifted_start:], rewards[:,
-                                                                                             shifted_start:])
-        returns = torch.cat([torch.zeros_like(sample['values'][:, :shifted_start]), returns], dim=1)
+        _, returns = get_advantages_and_returns(self.discount, self.gae_lambda, old_values[:, shifted_start:],
+                                                rewards[:, shifted_start:])
 
-        loss, clip_ratio = critic_loss_fn(new_values[:, :-1], sample['values'][:, :-1], returns, loss_mask,
-                                          self.value_eps_clip)
+        loss, clip_ratio = critic_loss_fn(new_values[:, shifted_start:-1], old_values[:, shifted_start:-1],
+                                          returns, loss_mask[:, shifted_start:], self.value_eps_clip)
 
         module.backward(loss)
         module.step(lr_kwargs={'epoch': version_steps})
