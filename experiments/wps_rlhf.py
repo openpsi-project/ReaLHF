@@ -1,3 +1,4 @@
+import torch
 from api.config import *
 from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
 
@@ -115,7 +116,7 @@ def train_critic(
 
 class WpsRLHFExperiment(Experiment):
 
-    def __init__(self, n_actors=8, n_critics=2, n_rewards=2, n_refs=4, n_data_workers=8, seed=1):
+    def __init__(self, n_actors=8, n_critics=4, n_rewards=2, n_refs=2, seed=1):
         self.n_actors = n_actors
         self.n_rewards = n_rewards
         self.n_refs = n_refs
@@ -123,7 +124,7 @@ class WpsRLHFExperiment(Experiment):
 
         self.n_total = n_actors + n_rewards + n_refs + n_critics
 
-        self.n_data_workers = n_data_workers
+        self.n_data_workers = n_actors
 
         self.seed = seed
 
@@ -160,6 +161,8 @@ class WpsRLHFExperiment(Experiment):
             '/home/aigc/llm/root/checkpoints/wps-rw-pl-s1/20230801-2/default/epoch5step0/',
         ]
         critic_path = rw_paths[0]
+        rw_output_scaling = 0.1
+        rw_output_bias = 0.0
 
         mini_batch_size_per_device = 4
         batch_size_per_device = 32
@@ -171,13 +174,15 @@ class WpsRLHFExperiment(Experiment):
                               dataset_path="/home/aigc/llm/datasets/prompts/train.jsonl",
                               max_seq_len=max_prompt_len,
                           ))
-        dataloader = DataLoader('excel_rlhf',
-                                args=dict(
-                                    max_token_len=max_prompt_len,
-                                    shuffle=True,
-                                    drop_last=False,
-                                    batch_size=batch_size_per_device * self.n_actors // self.n_data_workers,
-                                ))
+        dataloader = DataLoader(
+            'excel_rlhf',
+            args=dict(
+                max_token_len=max_prompt_len,
+                shuffle=True,
+                drop_last=True,
+                batch_size=batch_size_per_device * self.n_actors // self.n_data_workers,
+            ),
+        )
         data_worker = [
             DataWorker(
                 tokenizer_name_or_path=actor_path,
@@ -201,8 +206,8 @@ class WpsRLHFExperiment(Experiment):
             "causal_lm_lora",
             args=dict(
                 model_name_or_path=actor_path,
-                disable_dropout=True,
                 generation_kwargs=generation_kwargs,
+                dtype=torch.float16,
                 lora_dim=32,
                 lora_scaling=32.0,
                 lora_module_name="attn",
@@ -212,8 +217,8 @@ class WpsRLHFExperiment(Experiment):
             'causal_lm',
             args=dict(
                 model_name_or_path=actor_path,
-                disable_dropout=True,
                 generation_kwargs=generation_kwargs,
+                dtype=torch.float16,
             ),
         )
         rw_model = Model(
@@ -221,15 +226,19 @@ class WpsRLHFExperiment(Experiment):
             args=dict(
                 model_name_or_path=rw_paths[0],
                 load_state_dict=True,
-                disable_dropout=True,
+                dtype=torch.float16,
+                output_bias=rw_output_bias,
+                output_scaling=rw_output_scaling,
             ),
         )
         critic_model = Model(
             "wps_reward_lora",
             args=dict(
-                model_name_or_path=critic_path,
-                load_state_dict=True,
-                disable_dropout=True,
+                model_name_or_path=actor_path,
+                load_state_dict=False,
+                dtype=torch.float16,
+                output_bias=rw_output_bias,
+                output_scaling=rw_output_scaling,
                 lora_dim=32,
                 lora_scaling=32.0,
                 lora_module_name='attn',
@@ -241,7 +250,7 @@ class WpsRLHFExperiment(Experiment):
             'ds_train',
             args=dict(
                 optimizer_name='adam',
-                optimizer_config=dict(lr=1e-4, weight_decay=0.0, eps=1e-5, betas=(0.9, 0.95)),
+                optimizer_config=dict(lr=2.5e-4, weight_decay=0.0, eps=1e-5, betas=(0.9, 0.95)),
                 lr_scheduler_type='linear',
                 warmup_steps_proportion=0.075,
                 min_lr_ratio=0.0,
@@ -252,11 +261,14 @@ class WpsRLHFExperiment(Experiment):
             'ds_train',
             args=dict(
                 optimizer_name='adam',
-                optimizer_config=dict(lr=1e-4, weight_decay=0.0, eps=1e-5, betas=(0.9, 0.95)),
+                optimizer_config=dict(lr=2.5e-4, weight_decay=0.0, eps=1e-5, betas=(0.9, 0.95)),
                 lr_scheduler_type='linear',
                 warmup_steps_proportion=0.075,
                 min_lr_ratio=0.0,
                 zero_stage=2,
+                offload_param=False,
+                offload_optimizer_state=False,
+                enable_fp16=True,
             ),
         )
         ref_backend = rw_backend = ModelBackend('ds_inference')
@@ -265,22 +277,21 @@ class WpsRLHFExperiment(Experiment):
             ppo_epochs=1,
             mini_batch_size=mini_batch_size_per_device,
             kl_ctl=0.1,
-            discount=0.99,
-            gae_lambda=0.95,
+            discount=1.0,
+            gae_lambda=1.0,
             eps_clip=0.2,
             value_eps_clip=0.2,
             max_reward_clip=20.0,
         )
         actor_interface = ref_interface = ModelInterface(
             'wps_actor',
-            args=ppo_kwargs,
+            args=copy.deepcopy(ppo_kwargs),
         )
         critic_interface = ModelInterface(
             'wps_critic',
-            args=ppo_kwargs,
+            args=copy.deepcopy(ppo_kwargs),
         )
-        critic_interface.args['ppo_epochs'] = 5
-        critic_interface.args['mini_batch_size'] = mini_batch_size_per_device * self.n_actors // self.n_critics
+        # critic_interface.args['mini_batch_size'] = mini_batch_size_per_device * self.n_actors // self.n_critics
         rw_interface = ModelInterface('wps_reward_unpaired')
 
         actor_streams = [RequestReplyStream(f"actor{i}") for i in range(self.n_actors)]
@@ -330,7 +341,7 @@ class WpsRLHFExperiment(Experiment):
         return ExperimentConfig(
             total_train_epochs=8,
             save_frequency_epochs=None,
-            save_frequency_seconds=3600,
+            save_frequency_seconds=None,
             master_ecs=ecs,
             data_worker=data_worker,
             model_worker=model_worker,
