@@ -163,9 +163,10 @@ class ModelWorker:
     eval_dataloader: Optional[DataLoader] = None
     use_dataset_cache: bool = False
     dataset_cahce_root: str = DATASET_CACHE_PATH
-    # cudnn config
+    # cuda & cudnn config
     cudnn_benchmark: bool = False
     cudnn_deterministic: bool = False
+    cuda_cache_cleanliness: bool = True  # i.e., clear cuda cache after each RPC call
     worker_info: Optional[WorkerInformation] = None
 
 

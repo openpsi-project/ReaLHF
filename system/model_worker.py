@@ -6,6 +6,7 @@ import queue
 import socket
 import threading
 import time
+import gc
 
 import numpy as np
 import torch
@@ -138,6 +139,12 @@ class ModelWorker(worker_base.Worker):
         reply = request_reply_stream.Reply(data=res)
 
         self.__stream.post_reply(reply)
+        
+        if self.config.cuda_cache_cleanliness:
+            # following huggingface trl
+            gc.collect()
+            torch.cuda.empty_cache()
+            gc.collect()
 
         sample_count = request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 0
         return worker_base.PollResult(sample_count=sample_count, batch_count=1)
