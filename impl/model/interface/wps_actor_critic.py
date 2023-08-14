@@ -250,6 +250,34 @@ def get_advantages_and_returns(gamma: float, lam: float, values: torch.FloatTens
     return advantages.detach(), returns
 
 
+class AdaptiveKLController:
+    """
+    Adaptive KL controller described in the paper:
+    https://arxiv.org/pdf/1909.08593.pdf
+    """
+
+    def __init__(self, init_kl_coef, target, horizon):
+        self.value = init_kl_coef
+        self.target = target
+        self.horizon = horizon
+
+    def update(self, current, n_steps):
+        target = self.target
+        proportional_error = torch.clip(current / target - 1, -0.2, 0.2)
+        mult = 1 + proportional_error * n_steps / self.horizon
+        self.value = self.value * mult
+
+
+class FixedKLController:
+    """Fixed KL controller."""
+
+    def __init__(self, kl_coef):
+        self.value = kl_coef
+
+    def update(self, current, n_steps):
+        pass
+
+
 @dataclasses.dataclass
 class WPSActorInterface(api.model.ModelInterface):
     mini_batch_size: int = 8
@@ -260,6 +288,21 @@ class WPSActorInterface(api.model.ModelInterface):
     eps_clip: float = 0.2
     value_eps_clip: float = 0.2
     max_reward_clip: float = 5.0
+    early_stop_kl: Optional[float] = None  # by default, 0.1
+    early_step_imp_ratio: Optional[float] = None  # by default, 10.0
+    adaptive_kl_ctl: bool = False
+    adaptive_kl_target: Optional[float] = 6
+    adaptive_kl_horizon: Optional[float] = 10000
+
+    def __post_init__(self):
+        if self.adaptive_kl_ctl:
+            assert self.adaptive_kl_target is not None
+            assert self.adaptive_kl_horizon is not None
+            self.kl_adapter = AdaptiveKLController(self.kl_ctl, self.adaptive_kl_target,
+                                                   self.adaptive_kl_horizon)
+        else:
+            self.kl_adapter = FixedKLController(self.kl_ctl)
+        self.kl_ctl = None
 
     @torch.inference_mode()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
@@ -317,6 +360,8 @@ class WPSActorInterface(api.model.ModelInterface):
     def _ppo_actor_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                         tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray,
                         version_steps: int) -> Dict:
+        mini_bs = sample.length(0)
+
         module.eval()
         logits_ignoring_mask = sample['logits_ignoring_mask']
         new_logits: torch.FloatTensor = module(input_ids=sample['input_ids'],
@@ -339,11 +384,15 @@ class WPSActorInterface(api.model.ModelInterface):
             if not seq_no_eos_mask[i]:
                 loss_mask[i, eos_indices[i] - 1] = 1
 
-        kl_rewards, rewards = compute_rewards(self.kl_ctl, self.max_reward_clip, old_logp, ref_logp,
+        kl_rewards, rewards = compute_rewards(self.kl_adapter.value, self.max_reward_clip, old_logp, ref_logp,
                                               sample['rewards'], eos_indices, seq_no_eos_mask)
         advantages, returns = get_advantages_and_returns(self.discount, self.gae_lambda,
                                                          sample['values'][:, shifted_start:],
                                                          rewards[:, shifted_start:])
+
+        mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
+        self.kl_adapter.update(mean_ref_kl, n_steps=torch.distributed.get_world_size() * mini_bs)
+
         # adv_norm = masked_normalization(advantages)
         adv_norm = advantages
 
@@ -351,8 +400,10 @@ class WPSActorInterface(api.model.ModelInterface):
                                                             old_logp[:, shifted_start:], adv_norm,
                                                             loss_mask[:, shifted_start:], self.eps_clip)
 
-        module.backward(loss)
-        module.step(lr_kwargs={'epoch': version_steps})
+        if self.early_step_imp_ratio is not None and importance_weight > self.early_step_imp_ratio:
+            logger.warning(f"Current importance ratio {importance_weight.item():.4f} is larger "
+                           f"than early stop threshold {self.early_step_imp_ratio}. Abandon this minibatch.")
+            loss = loss * 0.0
 
         prompts: torch.LongTensor = sample['prompts']
         ans: torch.LongTensor = sample['input_ids'][:, prompt_len:]
@@ -363,9 +414,14 @@ class WPSActorInterface(api.model.ModelInterface):
 
         ignoring_logits_ratio = logits_ignoring_mask.float().mean()
 
-        return dict(
+        approx_kl = ((old_logp[:, shifted_start:] - new_logp[:, shifted_start:].detach()) *
+                     loss_mask[:, shifted_start:]).sum() / loss_mask[:, shifted_start:].sum()
+
+        stats = dict(
             task_reward=sample['rewards'].mean().detach(),
             kl_reward=(kl_rewards.detach() * loss_mask).sum(1).mean(),
+            ppo_approx_kl=approx_kl,
+            cur_kl_ctl=self.kl_adapter.value,
             advantage=advantages.mean().detach(),
             actor_loss=loss.detach(),
             actor_clip_ratio=clip_ratio.detach(),
@@ -376,6 +432,15 @@ class WPSActorInterface(api.model.ModelInterface):
             generated_truncate_ratio=generated_truncate_ratio,
             ignoring_logits_ratio=ignoring_logits_ratio,
         )
+
+        if self.early_stop_kl is not None and api.utils.get_all_reduce_mean(approx_kl) > self.early_stop_kl:
+            logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
+                           f"than early stop threshold {self.early_stop_kl}. Abort actor update.")
+            return stats
+
+        module.backward(loss)
+        module.step(lr_kwargs={'epoch': version_steps})
+        return stats
 
     def train_step(self, model_: api.model.Model, sample: NamedArray) -> Dict:
         # TODO: add imitation learning auxilary loss
@@ -427,6 +492,19 @@ class WPSCriticInterface(api.model.ModelInterface):
     eps_clip: float = 0.2
     value_eps_clip: float = 0.2
     max_reward_clip: float = 5.0
+    adaptive_kl_ctl: bool = False
+    adaptive_kl_target: Optional[float] = 6
+    adaptive_kl_horizon: Optional[float] = 10000
+
+    def __post_init__(self):
+        if self.adaptive_kl_ctl:
+            assert self.adaptive_kl_target is not None
+            assert self.adaptive_kl_horizon is not None
+            self.kl_adapter = AdaptiveKLController(self.kl_ctl, self.adaptive_kl_target,
+                                                   self.adaptive_kl_horizon)
+        else:
+            self.kl_adapter = FixedKLController(self.kl_ctl)
+        self.kl_ctl = None
 
     @torch.inference_mode()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
@@ -447,6 +525,8 @@ class WPSCriticInterface(api.model.ModelInterface):
     def _ppo_critic_step(self, ppo_epoch: int, module: api.model.NeuralNetwork,
                          tokenizer: transformers.PreTrainedTokenizerFast, sample: NamedArray,
                          version_steps: int) -> Dict:
+        mini_bs = sample.length(0)
+
         module.eval()
         new_values = module(input_ids=sample['input_ids'],
                             attention_mask=sample['attention_mask'],
@@ -467,10 +547,13 @@ class WPSCriticInterface(api.model.ModelInterface):
                 loss_mask[i, eos_indices[i] - 1] = 1
 
         old_values = sample['values']
-        _, rewards = compute_rewards(self.kl_ctl, self.max_reward_clip, old_logp, ref_logp, sample['rewards'],
-                                     eos_indices, seq_no_eos_mask)
+        kl_rewards, rewards = compute_rewards(self.kl_adapter.value, self.max_reward_clip, old_logp, ref_logp,
+                                              sample['rewards'], eos_indices, seq_no_eos_mask)
         _, returns = get_advantages_and_returns(self.discount, self.gae_lambda, old_values[:, shifted_start:],
                                                 rewards[:, shifted_start:])
+
+        mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
+        self.kl_adapter.update(mean_ref_kl, n_steps=torch.distributed.get_world_size() * mini_bs)
 
         loss, clip_ratio = critic_loss_fn(new_values[:, shifted_start:-1], old_values[:, shifted_start:-1],
                                           returns, loss_mask[:, shifted_start:], self.value_eps_clip)
