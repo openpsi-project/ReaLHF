@@ -56,7 +56,7 @@ class SlurmSchedulerClient(SchedulerClient):
                      mem=1024,
                      env_vars=None,
                      container_image="root/llm-cpu",
-                     container_mounts="/home:/home",
+                     container_mounts="/data:/data",
                      nodelist=None,
                      exclude=None,
                      hostfile=False):

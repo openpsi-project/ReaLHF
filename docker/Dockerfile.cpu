@@ -22,4 +22,4 @@ RUN pip3 install -U transformers huggingface_hub
 
 WORKDIR /
 
-RUN pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple -U deepspeed
+RUN pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple -U deepspeed datasets accelerate

@@ -17,10 +17,11 @@ RUN pip3 install -U cmake prometheus_client wandb redis scipy \
 RUN pip3 install -U transformers huggingface_hub
 RUN pip3 install -U deepspeed
 RUN pip3 install -U triton
-RUN pip3 install -U flash-attn --no-build-isolation
+RUN pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple -U "flash-attn<2" --no-build-isolation
 # RUN pip3 install -U vllm
-RUN pip3 install -U ray
+RUN pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple -U ray datasets accelerate
 
 WORKDIR /
 
+#RUN pip3 install datasets accelerate
 #RUN pip3 install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117

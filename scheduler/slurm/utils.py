@@ -7,7 +7,7 @@ import base.names
 
 
 def log_path(job_name, task_name):
-    root_dir = "/home"
+    root_dir = "/data"
     if task_name is None:
         return f"{root_dir}/aigc/llm/{base.names.USER_NAMESPACE}/logs/{job_name}"
     else:

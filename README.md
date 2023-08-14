@@ -13,7 +13,7 @@ See `ExcelPlackettLuceRewardDataset` in `impl/data/wps_dataset.py` for the used 
 
 See `WPSPlackettLuceRewardInterface` in `impl/model/interface/wps_actor_critic.py` for the algorithm implementation.
 
-The trained model will be saved in the subfolders of `/home/aigc/llm/root/checkpoints/wps-rw-pl-s1/${your_trial_name}/default/epoch4step0/`.
+The trained model will be saved in the subfolders of `/data/aigc/llm/root/checkpoints/wps-rw-pl-s1/${your_trial_name}/default/epoch4step0/`.
 
 ## Step 2: RLHF
 

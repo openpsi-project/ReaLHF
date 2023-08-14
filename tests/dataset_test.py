@@ -4,7 +4,7 @@ import impl.data
 import impl.model
 
 if __name__ == "__main__":
-    root_dir = "/home"
+    root_dir = "/data"
     model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
     max_prompt_len = max_answer_len = 256
     max_seq_len = 512
@@ -13,7 +13,7 @@ if __name__ == "__main__":
     dataset_cfg = api.config.Dataset(
         'excel_prompt',
         args=dict(
-            dataset_path="/home/aigc/llm/datasets/prompts/train50000.jsonl",
+            dataset_path="/data/aigc/llm/datasets/prompts/train50000.jsonl",
             max_seq_len=max_prompt_len,
         ),
     )

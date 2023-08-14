@@ -234,7 +234,7 @@ class NfsNameRecordRepository(NameRecordRepository):
     #     RECORD_ROOT = "/data/aigc/llm/name_resolve"
     # else:
     #     RECORD_ROOT = "/tmp/marl_name_resolve"
-    RECORD_ROOT = "/home/aigc/llm/name_resolve"
+    RECORD_ROOT = "/data/aigc/llm/name_resolve"
 
     def __init__(self, **kwargs):
         self.__to_delete = set()

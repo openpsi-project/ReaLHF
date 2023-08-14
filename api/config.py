@@ -12,10 +12,10 @@ import yaml
 
 import api.ecs
 
-PYTORCH_KERNEL_CACHE_PATH = f"/home/aigc/llm/{getpass.getuser()}/.cache/torch/kernels"
-TRITON_CACHE_PATH = f"/home/aigc/llm/{getpass.getuser()}/.cache/triton"
-DATASET_CACHE_PATH = f'/home/aigc/llm/{getpass.getuser()}/.cache/datasets'
-TORCH_EXTENSIONS_DIR = f"/home/aigc/llm/{getpass.getuser()}/.cache/torch/extensions"
+PYTORCH_KERNEL_CACHE_PATH = f"/data/aigc/llm/{getpass.getuser()}/.cache/torch/kernels"
+TRITON_CACHE_PATH = f"/data/aigc/llm/{getpass.getuser()}/.cache/triton"
+DATASET_CACHE_PATH = f'/data/aigc/llm/{getpass.getuser()}/.cache/datasets'
+TORCH_EXTENSIONS_DIR = f"/data/aigc/llm/{getpass.getuser()}/.cache/torch/extensions"
 # PYTORCH_KERNEL_CACHE_PATH = f"/data/aigc/llm/{getpass.getuser()}/.cache/torch/kernels"
 # DATASET_CACHE_PATH = f'/data/aigc/llm/{getpass.getuser()}/.datacache/'
 

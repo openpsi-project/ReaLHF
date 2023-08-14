@@ -1,3 +1,5 @@
+docker/zeromq-4.3.4.tar.gz
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

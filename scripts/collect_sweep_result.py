@@ -4,7 +4,7 @@ import subprocess
 
 exp_name = "wps-rw-s1"
 trial_name_prefix = "lora-sweep-20230731"
-log_dir_path = "/home/aigc/llm/fw/logs/"
+log_dir_path = "/data/aigc/llm/fw/logs/"
 
 count = 0
 for root, dirs, files in os.walk(log_dir_path):

@@ -88,7 +88,7 @@ def make_data(
 if __name__ == "__main__":
     train_proportion = 0.9
 
-    raw_file_name = "/home/aigc/llm/raw/starcoder_compile_5000_flatten_labels0625.json"
+    raw_file_name = "/data/aigc/llm/raw/starcoder_compile_5000_flatten_labels0625.json"
     with open(raw_file_name, "r") as f:
         raw_data = json.load(f)
         np.random.shuffle(raw_data)
@@ -143,7 +143,7 @@ if __name__ == "__main__":
         valid_data = json.load(fin)
     os.system("rm tmp.json tmp_.json")
 
-    output_root_dir = "/home/aigc/llm/datasets/rw-contrastive/"
+    output_root_dir = "/data/aigc/llm/datasets/rw-contrastive/"
     os.makedirs(output_root_dir, exist_ok=True)
 
     with open(os.path.join(output_root_dir, 'train.jsonl'), "w") as fout:

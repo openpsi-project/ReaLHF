@@ -128,7 +128,7 @@ class WpsRewardModelingExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        root_dir = "/home"
+        root_dir = "/data"
         model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
         train_batch_size_per_device = 2
         eval_batch_size_per_device = 12
@@ -280,7 +280,7 @@ class WpsContrastiveRewardExperiment(WpsRewardModelingExperiment):
 
         self.enable_sweep = False
 
-        root_dir = "/home"
+        root_dir = "/data"
         model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
         train_batch_size_per_device = 2
         eval_batch_size_per_device = 12
@@ -420,7 +420,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
         self.min_lr_ratio = 0.0
         self.total_train_epochs = 8
 
-        root_dir = "/home"
+        root_dir = "/data"
         model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
         train_batch_size_per_device = 1
         eval_batch_size_per_device = 12

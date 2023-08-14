@@ -157,9 +157,9 @@ class WpsRLHFExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        actor_path = "/home/aigc/llm/checkpoints/starcoder-wps-best/"
+        actor_path = "/data/aigc/llm/checkpoints/starcoder-wps-best/"
         rw_paths = [
-            '/home/aigc/llm/root/checkpoints/wps-rw-pl-s1/20230801-2/default/epoch4step0/',
+            '/data/aigc/llm/root/checkpoints/wps-rw-pl-s1/20230801-2/default/epoch4step0/',
         ]
         critic_path = rw_paths[0]
         rw_output_scaling = 0.1
@@ -172,7 +172,7 @@ class WpsRLHFExperiment(Experiment):
 
         dataset = Dataset('excel_prompt',
                           args=dict(
-                              dataset_path="/home/aigc/llm/datasets/prompts/train.jsonl",
+                              dataset_path="/data/aigc/llm/datasets/prompts/train.jsonl",
                               max_seq_len=max_prompt_len,
                           ))
         dataloader = DataLoader(

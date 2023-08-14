@@ -32,7 +32,7 @@ def get_prompt_embedding(prompts, model_name_or_path: str):
 
 def filter_prompts(data):
     import api.utils
-    tokenizer = api.utils.load_hf_tokenizer("/home/aigc/llm/checkpoints/starcoder-wps-best/")
+    tokenizer = api.utils.load_hf_tokenizer("/data/aigc/llm/checkpoints/starcoder-wps-best/")
 
     prompts = [d['starcoder']['prompt'] for d in data]
     tasks = [d['task_cn'] for d in data]
@@ -78,7 +78,7 @@ def filter_prompts(data):
 
 
 if __name__ == "__main__":
-    with open("/home/aigc/llm/raw/starcoder-inference-300k-4.json", 'r') as f:
+    with open("/data/aigc/llm/raw/starcoder-inference-300k-4.json", 'r') as f:
         raw_data = json.load(f)[:30000]
     np.random.shuffle(raw_data)
     # prompts = [d['starcoder']['prompt'] for d in data]
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     os.system("rm tmp.json tmp_.json")
 
     train_proportion = 0.9
-    output_root_dir = "/home/aigc/llm/datasets/prompts/"
+    output_root_dir = "/data/aigc/llm/datasets/prompts/"
     os.makedirs(output_root_dir, exist_ok=True)
     np.random.shuffle(data)
 

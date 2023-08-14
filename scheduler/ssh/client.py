@@ -17,9 +17,9 @@ logger = logging.getLogger("SSH scheduler")
 
 def log_path(job_name, task_name):
     if task_name is None:
-        return f"/home/{base.names.USER_NAMESPACE}/llm/logs/{job_name}"
+        return f"/data/{base.names.USER_NAMESPACE}/llm/logs/{job_name}"
     else:
-        return f"/home/{base.names.USER_NAMESPACE}/llm/logs/{job_name}/{task_name}"
+        return f"/data/{base.names.USER_NAMESPACE}/llm/logs/{job_name}/{task_name}"
 
 
 @dataclasses.dataclass
