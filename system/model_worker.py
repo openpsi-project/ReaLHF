@@ -1,12 +1,12 @@
 from typing import Any, Optional, Tuple
 import datetime
+import gc
 import logging
 import os
 import queue
 import socket
 import threading
 import time
-import gc
 
 import numpy as np
 import torch
@@ -139,7 +139,7 @@ class ModelWorker(worker_base.Worker):
         reply = request_reply_stream.Reply(data=res)
 
         self.__stream.post_reply(reply)
-        
+
         if self.config.cuda_cache_cleanliness:
             # following huggingface trl
             gc.collect()
