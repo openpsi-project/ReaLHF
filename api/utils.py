@@ -27,33 +27,80 @@ def load_hf_tokenizer(model_name_or_path: str, fast_tokenizer=True) -> transform
     return tokenizer
 
 
+def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
+    r"""
+    Taken from peft: https://github.com/huggingface/peft/blob/main/src/peft/utils/other.py#L81
+
+    This method wraps the entire protocol for preparing a model before running a training. This includes:
+        1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
+        head to fp32
+
+    Args:
+        model, (`transformers.PreTrainedModel`):
+            The loaded model from `transformers`
+    """
+    loaded_in_kbit = getattr(model, "is_loaded_bnb_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
+
+    for name, param in model.named_parameters():
+        # freeze base model's layers
+        param.requires_grad = False
+
+    # cast all non INT8 parameters to fp32
+    for param in model.parameters():
+        if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
+            param.data = param.data.to(torch.float32)
+
+    if loaded_in_kbit and use_gradient_checkpointing:
+        # For backward compatibility
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        else:
+
+            def make_inputs_require_grad(module, input, output):
+                output.requires_grad_(True)
+
+            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+
+        # enable gradient checkpointing for memory efficiency
+        model.gradient_checkpointing_enable()
+
+    return model
+
+
 def create_hf_nn(
     model_class: Type,
     model_name_or_path: str,
     init_from_scratch: bool = False,
-    dtype: torch.dtype = torch.float16,
+    from_pretrained_kwargs: Optional[Dict[str, Any]] = None,
     generation_kwargs: Optional[Dict[str, Any]] = None,
+    quantization_kwargs: Optional[Dict[str, Any]] = None,
 ) -> transformers.PreTrainedModel:
-    tokenizer = load_hf_tokenizer(model_name_or_path)
+
+    # load model
     model_config = transformers.AutoConfig.from_pretrained(model_name_or_path)
-    # FIXME: there may be an error when using ZeRO-3
-    # https://huggingface.co/docs/transformers/main_classes/deepspeed#nontrainer-deepspeed-integration
-
-    logger.info(f"Loading from {model_name_or_path}, dtype {dtype}")
+    logger.info(f"Loading from {model_name_or_path}...")
     st = time.monotonic()
-    model = None
     if init_from_scratch:
-        try:
-            model = model_class.from_config(model_config)
-        except:
-            pass
-    if model is None:
-        model = model_class.from_pretrained(model_name_or_path,
-                                            from_tf=False,
-                                            config=model_config,
-                                            torch_dtype=dtype)  # torch_dtype = torch.float16
-    logger.info(f"Loaded from {model_name_or_path}, dtype {dtype}, time cost {time.monotonic() - st}")
+        model: transformers.PreTrainedModel = model_class.from_config(model_config)
+        if quantization_kwargs is not None:
+            from accelerate.utils import BnbQuantizationConfig, load_and_quantize_model
+            qconfig = BnbQuantizationConfig(**quantization_kwargs)
+            model = load_and_quantize_model(model, qconfig)
+    else:
+        if quantization_kwargs is not None:
+            qconfig = transformers.BitsAndBytesConfig(**quantization_kwargs)
+            from_pretrained_kwargs['quantization_config'] = qconfig
+        model: transformers.PreTrainedModel = model_class.from_pretrained(
+            model_name_or_path,
+            **from_pretrained_kwargs,
+        )
+    if quantization_kwargs is not None:
+        # TODO: fix gradient checkpointing here
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
+    logger.info(f"Loaded from {model_name_or_path}, time cost {time.monotonic() - st}")
 
+    # overwrite and fix generation config
+    tokenizer = load_hf_tokenizer(model_name_or_path)
     if "pad_token_id" not in model.config.to_dict():
         model.config.pad_token_id = tokenizer.pad_token_id
     raw_generation_config = transformers.GenerationConfig.from_model_config(model.config)
@@ -69,7 +116,8 @@ def create_hf_nn(
             **generation_kwargs
         })
     logger.debug("Hugginface model generation config: ", model.generation_config)
-    return model.to(dtype=dtype)
+
+    return model
 
 
 def save_hf_format(model, tokenizer, output_dir, sub_folder=""):
