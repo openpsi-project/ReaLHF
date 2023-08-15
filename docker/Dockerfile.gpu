@@ -2,28 +2,28 @@ FROM nvcr.io/nvidia/pytorch:23.06-py3
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt update
-RUN apt install -y libpgm-dev net-tools
+RUN apt install -y ca-certificates
+RUN sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
+RUN sed -i "s@http://.*security.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
+RUN apt update
+RUN apt install -y libpgm-dev net-tools python3-opencv ffmpeg libsm6 libxext6 python3-pip pkg-config
 
-WORKDIR /
 COPY ./zeromq-4.3.4.tar.gz /
-RUN tar zxvf /zeromq-4.3.4.tar.gz
+RUN tar zxvf zeromq-4.3.4.tar.gz
 WORKDIR /zeromq-4.3.4
 RUN ./configure --with-pgm && make && make install
 
 RUN pip3 install -U pip
+RUN pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
 RUN pip3 install -I --no-binary=:all: pyzmq
-RUN pip3 install -U cmake prometheus_client wandb redis scipy \
+
+RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy \
 	Deprecated einops kornia pybind11 icetk h5py ninja packaging
-RUN pip3 install -U transformers huggingface_hub
+RUN pip3 install -U transformers huggingface_hub datasets accelerate bitsandbytes
 RUN pip3 install -U deepspeed
 RUN pip3 install -U triton
-RUN pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple -U "flash-attn<2" --no-build-isolation
-# RUN pip3 install -U vllm
-RUN pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple -U ray datasets accelerate
-
+RUN pip3 install -U "flash-attn<2" --no-build-isolation
+RUN pip3 install -U ray
 WORKDIR /
-
-RUN pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple -U bitsandbytes
-
-#RUN pip3 install datasets accelerate
-#RUN pip3 install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117
+# RUN pip3 install -U vllm
