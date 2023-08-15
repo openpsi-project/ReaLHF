@@ -127,7 +127,7 @@ def control_cmd(expr_name, trial_name, debug, ignore_worker_error):
 
 def make(mode, job_name, **kwargs) -> SchedulerClient:
     if mode == "slurm":
-        from scheduler.slurm import SlurmSchedulerClient
+        from scheduler.slurm.client import SlurmSchedulerClient
         return SlurmSchedulerClient(job_name)
     else:
         raise NotImplementedError(f"Scheduler {mode} not found")
