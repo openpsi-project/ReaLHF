@@ -34,7 +34,6 @@ class LinearLoRA(nn.Module):
         lora_dim: int = 0,
         lora_scaling: float = 1,
         lora_dropout: float = 0,
-        dtype: Optional[torch.dtype] = None,
         bnb_8bit_kwargs: Optional[Dict[str, Any]] = None,
     ):
         super(LinearLoRA, self).__init__()
@@ -42,8 +41,6 @@ class LinearLoRA(nn.Module):
         bnb_8bit_config = LoRA8bitConfig(**bnb_8bit_kwargs) if bnb_8bit_kwargs is not None else None
 
         # sanity checks
-        if bnb_8bit_config is not None and dtype is not None:
-            raise RuntimeError("Cannot specify dtype when bnb_8bit is True.")
         if lora_dim <= 0:
             raise ValueError("You are training to use LoRA, whose reduced dim should be larger than 1")
 
@@ -131,8 +128,12 @@ class LinearLoRA(nn.Module):
         return y + self.lora_right(self.lora_left(self.lora_dropout(x))) * self.lora_scaling
 
 
-def convert_linear_layer_to_lora(model: nn.Module, lora_key_to_replace: str, lora_kwargs: dict,
-                                 lora_exclude_module_names: List):
+def is_lora_model(model: nn.Module) -> bool:
+    return len([name for name, module in model.named_modules() if isinstance(module, LinearLoRA)]) > 0
+
+
+def convert_linear_layer_to_lora(model: nn.Module, lora_key_to_replace: str, lora_module_kwargs: dict,
+                                 lora_exclude_module_names: List) -> nn.Module:
     replace_name = []
     for name, module in model.named_modules():
         if lora_key_to_replace not in name:
@@ -148,12 +149,12 @@ def convert_linear_layer_to_lora(model: nn.Module, lora_key_to_replace: str, lor
 
     for name in replace_name:
         module: nn.Linear = deepspeed.compression.helper.recursive_getattr(model, name)
-        tmp = LinearLoRA(module, **lora_kwargs)
+        tmp = LinearLoRA(module, **lora_module_kwargs)
         deepspeed.compression.helper.recursive_setattr(model, name, tmp)
     return model
 
 
-def squash_all_lora_layers(model: nn.Module):
+def squash_all_lora_layers(model: nn.Module) -> nn.Module:
     for name in [name for name, module in model.named_modules() if isinstance(module, LinearLoRA)]:
         module: LinearLoRA = deepspeed.compression.helper.recursive_getattr(model, name)
         module.squash_lora()
@@ -163,21 +164,21 @@ def squash_all_lora_layers(model: nn.Module):
     return model
 
 
-def fuse_all_lora_layers(model: nn.Module):
+def fuse_all_lora_layers(model: nn.Module) -> nn.Module:
     for name in [name for name, module in model.named_modules() if isinstance(module, LinearLoRA)]:
         module: LinearLoRA = deepspeed.compression.helper.recursive_getattr(model, name)
         module.fuse_lora_weight()
     return model
 
 
-def unfuse_all_lora_layers(model: nn.Module):
+def unfuse_all_lora_layers(model: nn.Module) -> nn.Module:
     for name in [name for name, module in model.named_modules() if isinstance(module, LinearLoRA)]:
         module: LinearLoRA = deepspeed.compression.helper.recursive_getattr(model, name)
         module.unfuse_lora_weight()
     return model
 
 
-def only_optimize_lora_parameters(model: nn.Module, additional_module_names_to_opt: List[str]):
+def only_optimize_lora_parameters(model: nn.Module, additional_module_names_to_opt: List[str]) -> nn.Module:
     for name, param in model.named_parameters():
         requires_grad = "lora_right" in name or "lora_left" in name
         for x in additional_module_names_to_opt:
@@ -188,20 +189,20 @@ def only_optimize_lora_parameters(model: nn.Module, additional_module_names_to_o
     return model
 
 
-def get_lora_state_dict(model: nn.Module):
+def get_lora_state_dict(model: nn.Module) -> Dict[str, torch.Tensor]:
     lora_names = [name for name, module in model.named_modules() if isinstance(module, LinearLoRA)]
     return {k: v for k, v in model.state_dict() if k in lora_names}
 
 
 def lora_wrap_fn(cls_):
 
-    def wrapped_cls(lora_kwargs: dict,
+    def wrapped_cls(lora_module_kwargs: dict,
                     lora_key_to_replace: str,
                     lora_exclude_module_names: Optional[List[str]] = None,
                     additional_module_names_to_opt: Optional[List[str]] = None,
                     load_lora_path: Optional[str] = None,
                     lora_op_after_creation: Optional[Literal['squash', 'fuse']] = None,
-                    **kwargs):
+                    **kwargs) -> api.model.Model:
         model: api.model.Model = cls_(**kwargs)
 
         if additional_module_names_to_opt is None:
@@ -212,7 +213,7 @@ def lora_wrap_fn(cls_):
         model.module = convert_linear_layer_to_lora(
             model.module,
             lora_key_to_replace,
-            lora_kwargs=lora_kwargs,
+            lora_module_kwargs=lora_module_kwargs,
             lora_exclude_module_names=lora_exclude_module_names,
         )
 

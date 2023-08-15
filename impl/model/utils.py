@@ -1,5 +1,6 @@
 from typing import Tuple
 import logging
+import os
 
 import numpy as np
 import torch
@@ -240,17 +241,28 @@ class MovingAverageRunningMeanStd(nn.Module):
         return (x * std + mean).float()
 
 
-def save_hf_model(model: api.model.Model, output_dir):
-    from impl.model.lora import convert_lora_to_linear_layer, unfuse_lora_after_saving
+def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
+    from impl.model.lora import is_lora_model, get_lora_state_dict
     module = model.module
     tokenizer = model.tokenizer
     logger.info(f'saving the model for epoch {model.version.epoch} step {model.version.epoch_step}...')
-    convert_lora_to_linear_layer(module)
-    api.utils.save_hf_format(module,
-                             tokenizer,
-                             output_dir,
-                             sub_folder=f"epoch{model.version.epoch}step{model.version.epoch_step}")
-    unfuse_lora_after_saving(module)
+    if not is_lora_model(module):
+        api.utils.save_hf_format(
+            module,
+            tokenizer,
+            output_dir,
+            sub_folder=f"epoch{model.version.epoch}step{model.version.epoch_step}",
+        )
+        return
+    lora_sd = get_lora_state_dict(module)
+    torch.save(
+        lora_sd,
+        os.path.join(
+            output_dir,
+            f"epoch{model.version.epoch}step{model.version.epoch_step}.pt",
+            "lora.bin",
+        ),
+    )
 
 
 def get_eos_indices(

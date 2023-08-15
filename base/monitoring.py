@@ -61,7 +61,6 @@ class _TargetGroupHolder:
 
 class TargetRepository:
     TARGET_FILE_DIR = "/data/aigc/llm/monitoring/targets"
-    # TARGET_FILE_DIR = "/data/aigc/llm/monitoring/targets"
     os.makedirs(TARGET_FILE_DIR, exist_ok=True)
 
     def __init__(self):

@@ -35,7 +35,7 @@ class WpsRewardModelingExperiment(Experiment):
 
     def __init__(
         self,
-        n_models=16,
+        n_models=4,
         seed=1,
         weight_decay=0.0,
         lr=2.5e-4,
@@ -264,7 +264,7 @@ def train_plackett_luce_rw(
 class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
 
     def initial_setup(self) -> ExperimentConfig:
-        self.weight_decay = 0.0
+        self.weight_decay = 0.1
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
         self.lora_dim = 32
@@ -311,7 +311,6 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
         eval_dataset.args['dataset_path'] = f"{root_dir}/aigc/llm/datasets/rw-contrastive/valid.jsonl"
         eval_dataloader = DataLoader("default_eval", args=dict(batch_size=eval_batch_size_per_device))
 
-        # TODO: regularization to prevent degeneration
         backend = ModelBackend(
             'ds_train',
             args=dict(
@@ -329,15 +328,24 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
             ),
         )
 
+        import torch
         rw_model = Model(
             "wps_reward_lora",
             args=dict(
                 model_name_or_path=model_path,
-                load_state_dict=False,
-                lora_dim=self.lora_dim,
-                lora_module_name='attn',
+                from_pretrained_kwargs=dict(dtype=torch.float16, use_cache=False),
+                quantization_kwargs=dict(load_in_bit=True),
+                lora_module_kwargs=dict(
+                    lora_dim=self.lora_dim,
+                    lora_scaling=self.lora_scaling,
+                    bnb_8bit_kwargs=dict(
+                        trainable=True,
+                        threshold=6.0,
+                        memory_efficient_backward=True,
+                    ),
+                ),
+                lora_key_to_replace='attn',
                 additional_module_names_to_opt=["v_head"],
-                lora_scaling=self.lora_scaling,
             ),
         )
 

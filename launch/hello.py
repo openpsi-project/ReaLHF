@@ -17,7 +17,7 @@ srun_flags = [
     f"--cpus-per-task=1",
     f"--gpus-per-task=1",
     f"--mem-per-cpu=50000M",
-    f"--container-image=root/llm-gpu",
+    f"--container-image=llm/llm-gpu",
     f"--container-mounts=/home:/home",
     "--container-workdir=/home/fw/distributed_llm-wei-dev",
 ]

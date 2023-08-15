@@ -15,7 +15,7 @@ import tqdm
 import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_aggregate, recursive_apply
-from impl.model.utils import get_eos_indices, masked_normalization, save_hf_model
+from impl.model.utils import get_eos_indices, masked_normalization, save_hf_or_lora_model
 import api.model
 import api.utils
 
@@ -116,7 +116,17 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
         return dict(loss=loss.detach().item())
 
     def save(self, model: api.model.Model, output_dir):
-        save_hf_model(model, output_dir)
+        from impl.model.lora import is_lora_model
+        save_hf_or_lora_model(model, output_dir)
+        if is_lora_model(model.module):
+            torch.save(
+                model.module.v_head.state_dict(),
+                os.path.join(
+                    output_dir,
+                    f"epoch{model.version.epoch}step{model.version.epoch_step}.pt",
+                    "rw_v_head.bin",
+                ),
+            )
 
     @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
@@ -476,7 +486,7 @@ class WPSActorInterface(api.model.ModelInterface):
         return train_stats
 
     def save(self, model: api.model.Model, output_dir):
-        save_hf_model(model, output_dir)
+        save_hf_or_lora_model(model, output_dir)
 
 
 api.model.register_interface("wps_actor", WPSActorInterface)
@@ -599,7 +609,7 @@ class WPSCriticInterface(api.model.ModelInterface):
         return train_stats
 
     def save(self, model: api.model.Model, output_dir):
-        save_hf_model(model, output_dir)
+        save_hf_or_lora_model(model, output_dir)
 
 
 api.model.register_interface('wps_critic', WPSCriticInterface)
@@ -676,7 +686,17 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
         return dict(loss=loss.detach().item(), acc=acc)
 
     def save(self, model: api.model.Model, output_dir):
-        save_hf_model(model, output_dir)
+        from impl.model.lora import is_lora_model
+        save_hf_or_lora_model(model, output_dir)
+        if is_lora_model(model.module):
+            torch.save(
+                model.module.v_head.state_dict(),
+                os.path.join(
+                    output_dir,
+                    f"epoch{model.version.epoch}step{model.version.epoch_step}.pt",
+                    "rw_v_head.bin",
+                ),
+            )
 
     @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:

@@ -15,7 +15,7 @@ def hf_model_factory(model_cls):
         generation_kwargs: dict,
         dtype: torch.dtype,
         device: Union[str, torch.device],
-    ):
+    ) -> api.model.Model:
         module = api.utils.create_hf_nn(model_cls,
                                         model_name_or_path,
                                         init_from_scratch=False,

@@ -59,7 +59,7 @@ class RewardModel(nn.Module):
         head_mask=None,
         inputs_embeds=None,
         use_cache=False,
-    ):
+    ) -> torch.Tensor:
         transformer_outputs = self.rwtranrsformer(
             input_ids,
             past_key_values=past_key_values,
@@ -82,7 +82,7 @@ def create_wps_reward_model(
     output_scaling: float = 1.0,
     output_bias: float = 0.0,
     load_v_head_path: Optional[str] = None,
-):
+) -> api.model.Model:
     module = RewardModel(
         base_model_name_or_path=model_name_or_path,
         from_pretrained_kwargs=from_pretrained_kwargs,

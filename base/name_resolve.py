@@ -10,6 +10,7 @@ import socket
 import threading
 import time
 import uuid
+import getpass
 
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
@@ -230,11 +231,7 @@ class MemoryNameRecordRepository(NameRecordRepository):
 
 
 class NfsNameRecordRepository(NameRecordRepository):
-    # if socket.gethostname().startswith("frl") or socket.gethostname().startswith("dev"):
-    #     RECORD_ROOT = "/data/aigc/llm/name_resolve"
-    # else:
-    #     RECORD_ROOT = "/tmp/marl_name_resolve"
-    RECORD_ROOT = "/data/aigc/llm/name_resolve"
+    RECORD_ROOT = f"/data/aigc/llm/name_resolve/"
 
     def __init__(self, **kwargs):
         self.__to_delete = set()

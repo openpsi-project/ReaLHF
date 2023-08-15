@@ -2,12 +2,10 @@ import getpass
 import os
 
 print(os.environ['CUDA_VISIBLE_DEVICES'])
-PYTORCH_KERNEL_CACHE_PATH = f"/data/aigc/llm/{getpass.getuser()}/.cache/torch/kernels"
-TRITON_CACHE_PATH = f"/data/aigc/llm/{getpass.getuser()}/.cache/triton"
-DATASET_CACHE_PATH = f'/data/aigc/llm/{getpass.getuser()}/.cache/datasets'
-TORCH_EXTENSIONS_DIR = f"/data/aigc/llm/{getpass.getuser()}/.cache/torch/extensions"
-# PYTORCH_KERNEL_CACHE_PATH = f"/data/aigc/llm/{getpass.getuser()}/.cache/torch/kernels"
-# DATASET_CACHE_PATH = f'/data/aigc/llm/{getpass.getuser()}/.datacache/'
+PYTORCH_KERNEL_CACHE_PATH = f"/data/aigc/llm/.cache/{getpass.getuser()}/torch/kernels"
+TRITON_CACHE_PATH = f"/data/aigc/llm/.cache/{getpass.getuser()}/triton"
+DATASET_CACHE_PATH = f'/data/aigc/llm/.cache/{getpass.getuser()}/datasets'
+TORCH_EXTENSIONS_DIR = f"/data/aigc/llm/.cache/{getpass.getuser()}/torch/extensions"
 _LLM_ENVVARS = {
     "NCCL_P2P_DISABLE": "1",
     "NCCL_IB_DISABLE": "1",
