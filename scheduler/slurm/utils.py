@@ -1,17 +1,15 @@
 import dataclasses
 import enum
-import os
 import subprocess
 
 import base.names
 
 
 def log_path(job_name, task_name):
-    root_dir = "/data"
     if task_name is None:
-        return f"{root_dir}/aigc/llm/{base.names.USER_NAMESPACE}/logs/{job_name}"
+        return f"/data/aigc/llm/logs/{base.names.USER_NAMESPACE}/{job_name}"
     else:
-        return f"{root_dir}/aigc/llm/{base.names.USER_NAMESPACE}/logs/{job_name}/{task_name}"
+        return f"/data/aigc/llm/logs/{base.names.USER_NAMESPACE}/{job_name}/{task_name}"
 
 
 @dataclasses.dataclass
@@ -129,39 +127,37 @@ def parse_output_tres_line(tres):
 def get_slurm_node_resources():
     # execute `scontrol show node` to get node resources
     # return a list of SlurmResource
-    # o = subprocess.check_output(["scontrol", "show", "node"]).decode("utf-8")
-    # nodes = o.split("\n\n")
-    # all_rres = {}
-    # for node in nodes:
-    #     if len(node) <= 1:
-    #         continue
-    #     ls = node.split("\n")
-    #     node_name = ls[0].split(" ")[0].split("=")[1]
-    #     ctres = SlurmResource()
-    #     atres = SlurmResource()
-    #     for l in ls:
-    #         l = l.strip("\n").strip()
-    #         if l.startswith("State"):
-    #             status = parse_output_status_line(l)
-    #             if "DOWN" in status or "DRAIN" in status or "NOT_RESPONDING" in status:
-    #                 break
-    #         if l.startswith("CfgTRES"):
-    #             ctres = parse_output_tres_line(l)
-    #         if l.startswith("AllocTRES"):
-    #             atres = parse_output_tres_line(l)
-    #     if "8a" in node_name or "4a" in node_name or "slurm" in node_name:
-    #         ctres.gpu_type = atres.gpu_type = "tesla"
-    #     else:
-    #         ctres.gpu_type = atres.gpu_type = "geforce"
-    #     rres = ctres - atres
-    #     if rres.valid():
-    #         all_rres[node_name] = rres
-    #     else:
-    #         all_rres[node_name] = SlurmResource()
+    o = subprocess.check_output(["scontrol", "show", "node"]).decode("utf-8")
+    nodes = o.split("\n\n")
+    all_rres = {}
+    for node in nodes:
+        if len(node) <= 1:
+            continue
+        ls = node.split("\n")
+        node_name = ls[0].split(" ")[0].split("=")[1]
+        ctres = SlurmResource()
+        atres = SlurmResource()
+        for l in ls:
+            l = l.strip("\n").strip()
+            if l.startswith("State"):
+                status = parse_output_status_line(l)
+                if "DOWN" in status or "DRAIN" in status or "NOT_RESPONDING" in status:
+                    break
+            if l.startswith("CfgTRES"):
+                ctres = parse_output_tres_line(l)
+            if l.startswith("AllocTRES"):
+                atres = parse_output_tres_line(l)
+        if "8a" in node_name or "4a" in node_name or "YL-com" in node_name:
+            ctres.gpu_type = atres.gpu_type = "tesla"
+        else:
+            ctres.gpu_type = atres.gpu_type = "geforce"
+        rres = ctres - atres
+        if rres.valid():
+            all_rres[node_name] = rres
+        else:
+            all_rres[node_name] = SlurmResource()
 
-    # return all_rres
-    return dict(slurm01=SlurmResource(mem=1000000, cpu=112, gpu_type='tesla', gpu=8),
-                slurm02=SlurmResource(mem=1000000, cpu=112, gpu_type='tesla', gpu=8))
+    return all_rres
 
 
 def write_hostfile(res, num_tasks, hostfile_dir):
