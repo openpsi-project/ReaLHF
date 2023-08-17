@@ -1,4 +1,6 @@
-FROM nvcr.io/nvidia/pytorch:23.06-py3
+ARG base_image=nvcr.io/nvidia/pytorch:23.06-py3
+
+FROM ${base_image}
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt update
