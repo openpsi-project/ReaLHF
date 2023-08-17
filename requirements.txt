@@ -1,0 +1,27 @@
+# NOTE: this is the dependencies of the development environment, not the run environment
+# NOTE: dependencies of the run environment are specified in Dockerfile
+# backend
+torch
+deepspeed
+scipy
+scikit-learn
+# huggingface related
+transformers
+accelerate
+datasets
+bitsandbytes
+# flash-attn<2.0.0
+# logging & monitoring
+prometheus_client
+redis
+wandb
+matplotlib
+seaborn
+# data transfer
+blosc
+zmq
+cmake
+# for formatting
+yapf
+isort
+toml
