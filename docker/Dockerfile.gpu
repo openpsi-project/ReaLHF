@@ -16,7 +16,7 @@ RUN ./configure --with-pgm && make && make install
 WORKDIR /
 
 RUN pip3 install -U pip
-RUN pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip3 config set global.index-url https://mirrors.aliyun.com/pypi/simple/
 RUN pip3 install -I --no-binary=:all: pyzmq
 
 RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy \
