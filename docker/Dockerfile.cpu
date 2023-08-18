@@ -6,7 +6,7 @@ RUN apt install -y ca-certificates
 RUN sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
 RUN sed -i "s@http://.*security.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
 RUN apt update
-RUN apt install -y libpgm-dev net-tools python3-opencv ffmpeg libsm6 libxext6 python3-pip pkg-config
+RUN apt install -y libpgm-dev net-tools python3-opencv ffmpeg libsm6 libxext6 python3-pip pkg-config libopenblas-base libopenmpi-dev
 
 COPY ./zeromq-4.3.4.tar.gz /
 WORKDIR /
@@ -19,7 +19,7 @@ RUN pip3 install -U pip
 RUN pip3 config set global.index-url https://mirrors.aliyun.com/pypi/simple/
 RUN pip3 install -I --no-binary=:all: pyzmq
 
-RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+RUN pip3 install -U torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy \
 	Deprecated einops kornia pybind11 icetk h5py ninja packaging
