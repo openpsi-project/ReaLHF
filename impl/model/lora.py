@@ -21,7 +21,6 @@ logger = logging.getLogger("LoRA")
 class LoRA8bitConfig:
     trainable: bool
     threshold: float
-    memory_efficient_backward: bool
 
 
 class LinearLoRA(nn.Module):
@@ -58,7 +57,6 @@ class LinearLoRA(nn.Module):
                 has_fp16_weights=bnb_8bit_config.trainable,
                 threshold=bnb_8bit_config.threshold,
                 device=self.weight.device,
-                memory_efficient_backward=bnb_8bit_config.memory_efficient_backward,
             )
             self.lora_left = bnb.nn.Linear8bitLt(
                 rows,
@@ -67,7 +65,6 @@ class LinearLoRA(nn.Module):
                 has_fp16_weights=bnb_8bit_config.trainable,
                 threshold=bnb_8bit_config.threshold,
                 device=self.weight.device,
-                memory_efficient_backward=bnb_8bit_config.memory_efficient_backward,
             )
         else:
             if dtype is None:
@@ -120,11 +117,13 @@ class LinearLoRA(nn.Module):
         self.fuse_lora = False
 
     def forward(self, x):
-        y = F.linear(x, self.weight, self.bias)
+        y = F.linear(x.to(self.weight.dtype), self.weight, self.bias)
         if self.squashed or self.fuse_lora:
             return y
         if self.use_bnb_8bit:
             x = x.to(torch.float16)
+        else:
+            x = x.to(self.lora_left.weight.dtype)
         return y + self.lora_right(self.lora_left(self.lora_dropout(x))) * self.lora_scaling
 
 
@@ -140,7 +139,7 @@ def convert_linear_layer_to_lora(model: nn.Module, lora_key_to_replace: str, lor
             continue
         if any(x in name for x in lora_exclude_module_names):
             continue
-        if isinstance(module, [bnb.nn.Linear8bitLt, nn.Linear]):
+        if isinstance(module, (bnb.nn.Linear8bitLt, nn.Linear)):
             replace_name.append(name)
         elif 'linear' in module.__class__.__name__.lower():
             logger.warning(

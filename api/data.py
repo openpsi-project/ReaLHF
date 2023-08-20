@@ -50,11 +50,11 @@ ALL_DATASET_CLASSES = {}
 def register_dataset(name, dataset_cls):
     assert name not in ALL_DATASET_CLASSES
     assert '/' not in name
-    call_arg_names = list(inspect.signature(dataset_cls).parameters.keys())
-    if 'util' not in call_arg_names:
-        raise KeyError(
-            f"'util' must be one of the arguments in __init__, which is an instance of DatasetUtility. "
-            f"Existing arguments: {call_arg_names}.")
+    # call_arg_names = list(inspect.signature(dataset_cls).parameters.keys())
+    # if 'util' not in call_arg_names:
+    #     raise KeyError(
+    #         f"'util' must be one of the arguments in __init__, which is an instance of DatasetUtility. "
+    #         f"Existing arguments: {call_arg_names}.")
     ALL_DATASET_CLASSES[name] = dataset_cls
 
 
@@ -63,7 +63,7 @@ def make_dataset(
     seed: int,
     ddp_rank: int,
     world_size: int,
-    tokenizer_name_or_path: str,
+    tokenizer_or_tokenizer_name: Union[transformers.PreTrainedTokenizerFast, str],
     experiment_name: str,
     trial_name: str,
     cache_root: Optional[str] = None,
@@ -71,11 +71,15 @@ def make_dataset(
     if isinstance(cfg, str):
         cfg = api.config.Dataset(type_=cfg)
 
+    if isinstance(tokenizer_or_tokenizer_name, str):
+        tokenizer = api.utils.load_hf_tokenizer(tokenizer_or_tokenizer_name)
+    else:
+        tokenizer = tokenizer_or_tokenizer_name
     util = DatasetUtility(
         seed,
         ddp_rank,
         world_size,
-        api.utils.load_hf_tokenizer(tokenizer_name_or_path),
+        tokenizer,
     )
 
     if cache_root is None:

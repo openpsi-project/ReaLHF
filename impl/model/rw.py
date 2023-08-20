@@ -42,8 +42,7 @@ class RewardModel(nn.Module):
         # its forward function outputs the last hidden state instead of logits
         self.rwtranrsformer = base_model
 
-        base_dtype = next(mod for mod in base_model.modules() if isinstance(mod, nn.Linear)).weight.dtype
-        self.v_head = nn.Linear(self.config.n_embd, 1, bias=False, dtype=base_dtype).to(base_model.device)
+        self.v_head = nn.Linear(self.config.n_embd, 1, bias=False).to(base_model.device)
 
     def gradient_checkpointing_enable(self):
         self.rwtranrsformer.gradient_checkpointing_enable()

@@ -333,15 +333,14 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
             "wps_reward_lora",
             args=dict(
                 model_name_or_path=model_path,
-                from_pretrained_kwargs=dict(dtype=torch.float16, use_cache=False),
-                quantization_kwargs=dict(load_in_bit=True),
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=False),
+                quantization_kwargs=dict(load_in_8bit=True),
                 lora_module_kwargs=dict(
                     lora_dim=self.lora_dim,
                     lora_scaling=self.lora_scaling,
                     bnb_8bit_kwargs=dict(
                         trainable=True,
                         threshold=6.0,
-                        memory_efficient_backward=True,
                     ),
                 ),
                 lora_key_to_replace='attn',

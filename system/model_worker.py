@@ -75,13 +75,23 @@ class ModelWorker(worker_base.Worker):
             f"SetUp Information - Model worker index {self.__worker_index}"
             f" type \"{self.config.model_name}\" located at {socket.gethostname()} GPU {local_gpu_id}.")
 
+        self.__device = torch.device('cuda:0')
+        self.__model = api.model.make_model(
+            self.config.model,
+            name=self.model_name,
+            device=self.__device,
+        )
+        self.__interface = api.model.make_interface(self.config.interface)
+        self.__backend = api.model.make_backend(self.config.backend)
+
         if self.config.eval_datasets is not None and self.config.eval_dataloader is not None:
-            eval_dataset = api.data.ConcatDataset([
+            eval_dataset = torch.utils.data.ConcatDataset([
                 api.data.make_dataset(
                     d,
                     self.config.seed,
                     self.__worker_index,
                     self.__world_size,
+                    self.__model.tokenizer,
                     self.config.worker_info.experiment_name,
                     self.config.worker_info.trial_name,
                     cache_root=(None
@@ -92,15 +102,6 @@ class ModelWorker(worker_base.Worker):
         else:
             eval_dataloader = None
         self.__eval_dataloader = eval_dataloader
-
-        self.__device = torch.device('cuda:0')
-        self.__model = api.model.make_model(
-            self.config.model,
-            name=self.model_name,
-            device=self.__device,
-        )
-        self.__interface = api.model.make_interface(self.config.interface)
-        self.__backend = api.model.make_backend(self.config.backend)
 
     def _poll(self):
         if not self.__ddp_env_resolved:
