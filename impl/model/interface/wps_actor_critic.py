@@ -119,14 +119,13 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
         from impl.model.lora import is_lora_model
         save_hf_or_lora_model(model, output_dir)
         if is_lora_model(model.module):
-            torch.save(
-                model.module.v_head.state_dict(),
+            save_path = os.path.abspath(
                 os.path.join(
                     output_dir,
-                    f"epoch{model.version.epoch}step{model.version.epoch_step}.pt",
-                    "rw_v_head.bin",
-                ),
-            )
+                    f"epoch{model.version.epoch}step{model.version.epoch_step}",
+                ))
+            os.makedirs(save_path, exist_ok=True)
+            torch.save(model.module.v_head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
 
     @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
@@ -689,14 +688,13 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
         from impl.model.lora import is_lora_model
         save_hf_or_lora_model(model, output_dir)
         if is_lora_model(model.module):
-            torch.save(
-                model.module.v_head.state_dict(),
+            save_path = os.path.abspath(
                 os.path.join(
                     output_dir,
-                    f"epoch{model.version.epoch}step{model.version.epoch_step}.pt",
-                    "rw_v_head.bin",
-                ),
-            )
+                    f"epoch{model.version.epoch}step{model.version.epoch_step}",
+                ))
+            os.makedirs(save_path, exist_ok=True)
+            torch.save(model.module.v_head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
 
     @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:

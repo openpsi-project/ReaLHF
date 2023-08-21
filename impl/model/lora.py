@@ -29,7 +29,7 @@ class LinearLoRA(nn.Module):
 
     def __init__(
         self,
-        linear_: Union[nn.Linear, bnb.nn.Linear8bitLt],
+        linear: Union[nn.Linear, bnb.nn.Linear8bitLt],
         lora_dim: int = 0,
         lora_scaling: float = 1,
         lora_dropout: float = 0,
@@ -43,35 +43,34 @@ class LinearLoRA(nn.Module):
         if lora_dim <= 0:
             raise ValueError("You are training to use LoRA, whose reduced dim should be larger than 1")
 
-        self.weight = linear_.weight
-        self.bias = linear_.bias
+        self.linear = linear
 
-        rows, columns = self.weight.shape
+        rows, columns = self.linear.weight.shape
+        dtype = torch.float16
 
         self.use_bnb_8bit = (bnb_8bit_config is not None)
         if bnb_8bit_config is not None:
             self.lora_right = bnb.nn.Linear8bitLt(
                 lora_dim,
-                columns,
+                rows,
                 bias=False,
                 has_fp16_weights=bnb_8bit_config.trainable,
                 threshold=bnb_8bit_config.threshold,
-                device=self.weight.device,
-            )
+                device=self.linear.weight.device,
+            ).to(dtype=dtype)
             self.lora_left = bnb.nn.Linear8bitLt(
-                rows,
+                columns,
                 lora_dim,
                 bias=False,
                 has_fp16_weights=bnb_8bit_config.trainable,
                 threshold=bnb_8bit_config.threshold,
-                device=self.weight.device,
-            )
+                device=self.linear.weight.device,
+            ).to(dtype=dtype)
         else:
-            if dtype is None:
-                dtype = self.weight.dtype
-            self.lora_right = nn.Linear(lora_dim, columns, bias=False).to(dtype=dtype,
-                                                                          device=self.weight.device)
-            self.lora_left = nn.Linear(rows, lora_dim, bias=False).to(dtype=dtype, device=self.weight.device)
+            self.lora_right = nn.Linear(lora_dim, rows, bias=False).to(dtype=dtype,
+                                                                       device=self.linear.weight.device)
+            self.lora_left = nn.Linear(columns, lora_dim, bias=False).to(dtype=dtype,
+                                                                         device=self.linear.weight.device)
 
         self.lora_scaling = lora_scaling / lora_dim
 
@@ -81,7 +80,7 @@ class LinearLoRA(nn.Module):
             self.lora_dropout = nn.Identity()
 
         # disable the original weight gradient
-        self.weight.requires_grad = False
+        self.linear.weight.requires_grad = False
         # fuse LoRA to the original weight
         self.fuse_lora = False
 
@@ -95,35 +94,22 @@ class LinearLoRA(nn.Module):
         if not self.squashed:
             self.lora_dropout.train(mode)
 
-    def squash_lora(self):
-        if self.squashed:
-            raise RuntimeError("LoRA is already squashed.")
-        self.fuse_lora_weight()
-        del self.lora_left
-        del self.lora_right
-        del self.lora_dropout
-        self.squashed = True
-
     def fuse_lora_weight(self):
         if not self.squashed and not self.fuse_lora:
-            self.weight.data += self.lora_scaling * torch.matmul(self.lora_left.weight.t(),
-                                                                 self.lora_right.weight.t())
+            self.linear.weight.data += self.lora_scaling * torch.matmul(self.lora_left.weight.t(),
+                                                                        self.lora_right.weight.t())
         self.fuse_lora = True
 
     def unfuse_lora_weight(self):
         if not self.squashed and self.fuse_lora:
-            self.weight.data -= self.lora_scaling * torch.matmul(self.lora_left.weight.t(),
-                                                                 self.lora_right.weight.t())
+            self.linear.weight.data -= self.lora_scaling * torch.matmul(self.lora_left.weight.t(),
+                                                                        self.lora_right.weight.t())
         self.fuse_lora = False
 
     def forward(self, x):
-        y = F.linear(x.to(self.weight.dtype), self.weight, self.bias)
+        y = self.linear(x)
         if self.squashed or self.fuse_lora:
             return y
-        if self.use_bnb_8bit:
-            x = x.to(torch.float16)
-        else:
-            x = x.to(self.lora_left.weight.dtype)
         return y + self.lora_right(self.lora_left(self.lora_dropout(x))) * self.lora_scaling
 
 
@@ -156,7 +142,7 @@ def convert_linear_layer_to_lora(model: nn.Module, lora_key_to_replace: str, lor
 def squash_all_lora_layers(model: nn.Module) -> nn.Module:
     for name in [name for name, module in model.named_modules() if isinstance(module, LinearLoRA)]:
         module: LinearLoRA = deepspeed.compression.helper.recursive_getattr(model, name)
-        module.squash_lora()
+        deepspeed.compression.helper.recursive_setattr(model, name, module.linear)
     gc.collect()
     torch.cuda.empty_cache()
     gc.collect()
@@ -190,7 +176,7 @@ def only_optimize_lora_parameters(model: nn.Module, additional_module_names_to_o
 
 def get_lora_state_dict(model: nn.Module) -> Dict[str, torch.Tensor]:
     lora_names = [name for name, module in model.named_modules() if isinstance(module, LinearLoRA)]
-    return {k: v for k, v in model.state_dict() if k in lora_names}
+    return {k: v for k, v in model.state_dict().items() if k in lora_names}
 
 
 def lora_wrap_fn(cls_):
