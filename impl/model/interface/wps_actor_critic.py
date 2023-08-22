@@ -15,7 +15,8 @@ import tqdm
 import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_aggregate, recursive_apply
-from impl.model.utils import get_eos_indices, masked_normalization, save_hf_or_lora_model
+from impl.model.utils.data import get_eos_indices, masked_normalization
+from impl.model.utils.save import save_hf_or_lora_model
 import api.model
 import api.utils
 
@@ -116,7 +117,7 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
         return dict(loss=loss.detach().item())
 
     def save(self, model: api.model.Model, output_dir):
-        from impl.model.lora import is_lora_model
+        from impl.model.nn.lora import is_lora_model
         save_hf_or_lora_model(model, output_dir)
         if is_lora_model(model.module):
             save_path = os.path.abspath(
@@ -685,7 +686,7 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
         return dict(loss=loss.detach().item(), acc=acc)
 
     def save(self, model: api.model.Model, output_dir):
-        from impl.model.lora import is_lora_model
+        from impl.model.nn.lora import is_lora_model
         save_hf_or_lora_model(model, output_dir)
         if is_lora_model(model.module):
             save_path = os.path.abspath(

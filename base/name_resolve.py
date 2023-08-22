@@ -1,6 +1,7 @@
 # Implements a simple name resolving service, which can be considered as a distributed key-value dict.
 from typing import Callable, List, Optional
 import dataclasses
+import getpass
 import logging
 import os
 import queue
@@ -10,7 +11,6 @@ import socket
 import threading
 import time
 import uuid
-import getpass
 
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry

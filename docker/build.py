@@ -1,7 +1,7 @@
 import argparse
 import os
-import time
 import socket
+import time
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--gpu", action='store_true')
