@@ -128,6 +128,7 @@ class WpsRewardModelingExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
+        assert False
         root_dir = "/data"
         model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
         train_batch_size_per_device = 2
