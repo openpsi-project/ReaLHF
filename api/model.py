@@ -42,7 +42,11 @@ class Model:
     ft_spec: FinetuneSpec = None  # will be initialized by the backend
 
     def __post_init__(self):
-        self.module = self.module.to(self.device)
+        try:
+            self.module = self.module.to(self.device)
+        except ValueError as e:
+            # 4-bit and 8-bit model may fail here
+            logger.error(f"Failed to move model to device {self.device} because {e}")
 
     def inc_version(self):
         self.version.global_step += 1

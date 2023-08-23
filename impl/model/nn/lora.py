@@ -174,9 +174,12 @@ def only_optimize_lora_parameters(model: nn.Module, additional_module_names_to_o
     return model
 
 
-def get_lora_state_dict(model: nn.Module) -> Dict[str, torch.Tensor]:
-    lora_names = [name for name, module in model.named_modules() if isinstance(module, LinearLoRA)]
-    return {k: v for k, v in model.state_dict().items() if k in lora_names}
+def get_lora_state_dict(model: nn.Module) -> List[Dict[str, torch.Tensor]]:
+    lora_sds = []
+    for name in [name for name, module in model.named_modules() if isinstance(module, LinearLoRA)]:
+        module: LinearLoRA = deepspeed.compression.helper.recursive_getattr(model, name)
+        lora_sds.append(module.state_dict())
+    return lora_sds
 
 
 def lora_wrap_fn(cls_):
@@ -204,12 +207,13 @@ def lora_wrap_fn(cls_):
 
         if load_lora_path is not None:
             logger.info(f"Loading LoRA from {load_lora_path}")
-            lora_state_dict = torch.load(load_lora_path, map_location="cpu")
-            names = sorted([name for name, module in model.named_modules() if isinstance(module, LinearLoRA)])
-            sd_names = sorted(lora_state_dict.keys())
-            if names != sd_names:
-                raise RuntimeError(f"LoRA names do not match: {names} != {sd_names}")
-            model.module.load_state_dict(lora_state_dict, strict=False)
+            lora_sds = torch.load(load_lora_path, map_location=model.device)
+            lora_names = [name for name, module in model.module.named_modules() if isinstance(module, LinearLoRA)]
+            assert len(lora_names) == len(lora_sds), (len(lora_sds), len(lora_names))
+            for name, sd in zip(lora_names, lora_sds):
+                m: LinearLoRA = deepspeed.compression.helper.recursive_getattr(model.module, name)
+                m.to(model.device)
+                m.load_state_dict(sd)
 
         if lora_op_after_creation is None:
             pass

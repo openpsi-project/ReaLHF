@@ -50,6 +50,15 @@ class RewardModel(nn.Module):
     def gradient_checkpointing_disable(self):
         self.rwtranrsformer.gradient_checkpointing_disable()
 
+    def to(self, *args, **kwargs):
+        # Checks if the model has been loaded in 8-bit
+        if getattr(self.rwtranrsformer, "is_quantized", False):
+            raise ValueError(
+                "`.to` is not supported for `4-bit` or `8-bit` models. Please use the model as it is, since the"
+                " model has already been set to the correct devices and casted to the correct `dtype`.")
+        else:
+            return super().to(*args, **kwargs)
+
     def forward(
         self,
         input_ids=None,
@@ -92,8 +101,7 @@ def create_wps_reward_model(
 
     if load_v_head_path is not None:
         v_head_sd: Dict = torch.load(load_v_head_path, map_location='cpu')
-        assert len(v_head_sd) == 1 and "v_head.weight" in v_head_sd, list(v_head_sd.keys())
-        module.load_state_dict(v_head_sd, strict=False)
+        module.v_head.load_state_dict(v_head_sd)
 
     tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
     return api.model.Model(name, module, tokenizer, device)

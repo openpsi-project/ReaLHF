@@ -117,7 +117,7 @@ def train_critic(
 
 class WpsRLHFExperiment(Experiment):
 
-    def __init__(self, n_actors=8, n_critics=2, n_rewards=2, n_refs=4, seed=1):
+    def __init__(self, n_actors=1, n_critics=1, n_rewards=1, n_refs=1, seed=1):
         self.n_actors = n_actors
         self.n_rewards = n_rewards
         self.n_refs = n_refs
@@ -157,11 +157,12 @@ class WpsRLHFExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        actor_path = "/data/aigc/llm/checkpoints/starcoder-wps-best/"
-        rw_paths = [
-            '/data/aigc/llm/root/checkpoints/wps-rw-pl-s1/20230801-2/default/epoch4step0/',
-        ]
-        critic_path = rw_paths[0]
+        actor_path = "/data/aigc/llm/checkpoints/4l-starcoder/"
+        rw_lora_head_path = "/data/aigc/llm/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
+
+        self.lora_dim = 32
+        self.lora_scaling = 32.0
+
         rw_output_scaling = 0.1
         rw_output_bias = 0.0
 
@@ -170,11 +171,13 @@ class WpsRLHFExperiment(Experiment):
         max_prompt_len = 128
         max_answer_len = 512 - max_prompt_len
 
-        dataset = Dataset('excel_prompt',
-                          args=dict(
-                              dataset_path="/data/aigc/llm/datasets/prompts/train.jsonl",
-                              max_seq_len=max_prompt_len,
-                          ))
+        dataset = Dataset(
+            'excel_prompt',
+            args=dict(
+                dataset_path="/data/aigc/llm/datasets/wps-prompts/train-small.jsonl",
+                max_seq_len=max_prompt_len,
+            ),
+        )
         dataloader = DataLoader(
             'excel_rlhf',
             args=dict(
@@ -194,83 +197,105 @@ class WpsRLHFExperiment(Experiment):
             ) for i in range(self.n_data_workers)
         ]
 
-        generation_kwargs = dict(max_new_tokens=max_answer_len,
-                                 min_new_tokens=10,
-                                 do_sample=True,
-                                 top_p=1.0,
-                                 top_k=1000,
-                                 temperature=1.0,
-                                 num_beams=1,
-                                 num_beam_groups=1,
-                                 num_return_sequences=1)
+        generation_kwargs = dict(
+            max_new_tokens=max_answer_len,
+            min_new_tokens=10,
+            do_sample=True,
+            top_p=1.0,
+            top_k=1000,
+            temperature=1.0,
+            num_beams=1,
+            num_beam_groups=1,
+            num_return_sequences=1,
+        )
         actor_model = Model(
             "causal_lm_lora",
             args=dict(
                 model_name_or_path=actor_path,
+                init_from_scratch=False,
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=False),
                 generation_kwargs=generation_kwargs,
-                dtype=torch.float16,
-                lora_dim=32,
-                lora_scaling=32.0,
-                lora_module_name="attn",
+                quantization_kwargs=dict(load_in_8bit=True),
+                lora_module_kwargs=dict(
+                    lora_dim=self.lora_dim,
+                    lora_scaling=self.lora_scaling,
+                    bnb_8bit_kwargs=dict(
+                        trainable=True,
+                        threshold=6.0,
+                    ),
+                ),
+                lora_key_to_replace='attn',
             ),
         )
         ref_model = Model(
             'causal_lm',
             args=dict(
                 model_name_or_path=actor_path,
+                init_from_scratch=False,
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=False),
                 generation_kwargs=generation_kwargs,
-                dtype=torch.float16,
+                quantization_kwargs=dict(load_in_8bit=True),
             ),
         )
         rw_model = Model(
-            "wps_reward",
-            args=dict(
-                model_name_or_path=rw_paths[0],
-                load_state_dict=True,
-                dtype=torch.float16,
-                output_bias=rw_output_bias,
-                output_scaling=rw_output_scaling,
-            ),
-        )
-        critic_model = Model(
             "wps_reward_lora",
             args=dict(
-                model_name_or_path=critic_path,
-                load_state_dict=True,
-                dtype=torch.float16,
+                model_name_or_path=actor_path,
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=False),
+                quantization_kwargs=dict(load_in_8bit=True),
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
-                lora_dim=32,
-                lora_scaling=32.0,
-                lora_module_name='attn',
-                additional_module_names_to_opt=['v_head'],
+                load_v_head_path=os.path.join(rw_lora_head_path, "rw_v_head.bin"),
+                lora_module_kwargs=dict(
+                    lora_dim=self.lora_dim,
+                    lora_scaling=self.lora_scaling,
+                    bnb_8bit_kwargs=dict(
+                        trainable=True,
+                        threshold=6.0,
+                    ),
+                ),
+                lora_key_to_replace='attn',
+                load_lora_path=os.path.join(rw_lora_head_path, "lora.bin"),
+                lora_op_after_creation='squash',
             ),
         )
+        critic_model = copy.deepcopy(rw_model)
+        critic_model.args['lora_op_after_creation'] = None
 
-        # TODO: regularization to prevent degeneration
         actor_backend = ModelBackend(
             'ds_train',
             args=dict(
                 optimizer_name='adam',
-                optimizer_config=dict(lr=2.5e-4, weight_decay=0.0, eps=1e-5, betas=(0.9, 0.95)),
+                optimizer_config=dict(
+                    lr=2.5e-4,
+                    weight_decay=0.0,
+                    eps=1e-5,
+                    betas=(0.9, 0.95),
+                ),
                 lr_scheduler_type='linear',
                 warmup_steps_proportion=0.075,
                 min_lr_ratio=0.0,
                 zero_stage=2,
+                enable_fp16=False,
             ),
         )
         critic_backend = ModelBackend(
             'ds_train',
             args=dict(
                 optimizer_name='adam',
-                optimizer_config=dict(lr=2.5e-4, weight_decay=0.0, eps=1e-5, betas=(0.9, 0.95)),
+                optimizer_config=dict(
+                    lr=2.5e-4,
+                    weight_decay=0.0,
+                    eps=1e-5,
+                    betas=(0.9, 0.95),
+                ),
                 lr_scheduler_type='linear',
                 warmup_steps_proportion=0.075,
                 min_lr_ratio=0.0,
                 zero_stage=2,
                 offload_param=False,
                 offload_optimizer_state=False,
-                enable_fp16=True,
+                enable_fp16=False,
             ),
         )
         ref_backend = rw_backend = ModelBackend('ds_inference')

@@ -35,7 +35,7 @@ class WpsRewardModelingExperiment(Experiment):
 
     def __init__(
         self,
-        n_models=16,
+        n_models=4,
         seed=1,
         weight_decay=0.0,
         lr=2.5e-4,
@@ -276,7 +276,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
         self.total_train_epochs = 8
 
         root_dir = "/data"
-        model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
+        model_path = f"{root_dir}/aigc/llm/checkpoints/4l-starcoder/"
         train_batch_size_per_device = 1
         eval_batch_size_per_device = 12
         max_seq_len = 512
