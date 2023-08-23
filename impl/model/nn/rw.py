@@ -77,7 +77,7 @@ class RewardModel(nn.Module):
             use_cache=use_cache,
         )
         hidden_states = transformer_outputs[0]
-        scores = self.v_head(hidden_states).squeeze(-1)
+        scores = self.v_head(hidden_states.to(self.v_head.weight.dtype)).squeeze(-1)
         return (scores - self.output_bias) * self.output_scaling
 
 

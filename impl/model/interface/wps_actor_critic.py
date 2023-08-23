@@ -194,6 +194,10 @@ def generate_logits_ignoring_mask(logits: torch.FloatTensor,
 
 def actor_loss_fn(logprobs: torch.FloatTensor, old_logprobs: torch.FloatTensor, advantages: torch.FloatTensor,
                   loss_mask: torch.FloatTensor, eps_clip: float):
+    # clone inference tensors
+    old_logprobs = old_logprobs.clone()
+    advantages = advantages.clone()
+
     ratio = torch.exp((logprobs - old_logprobs) * loss_mask)
     clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
     pg_loss1 = -advantages * ratio
@@ -218,6 +222,7 @@ def critic_loss_fn(value: torch.FloatTensor,
     else:
         raise NotImplementedError(f"Unknown loss fn type: {loss_fn_type}")
 
+    target_value = target_value.clone()  # clone a inference tensor
     value_loss_original = loss_fn(value, target_value)
     value_clipped = old_value + (value - old_value).clamp(-value_eps_clip, value_eps_clip)
     value_loss_clipped = loss_fn(value_clipped, target_value)
@@ -431,7 +436,7 @@ class WPSActorInterface(api.model.ModelInterface):
             task_reward=sample['rewards'].mean().detach(),
             kl_reward=(kl_rewards.detach() * loss_mask).sum(1).mean(),
             ppo_approx_kl=approx_kl,
-            cur_kl_ctl=self.kl_adapter.value,
+            cur_kl_ctl=torch.tensor(self.kl_adapter.value).to(approx_kl),
             advantage=advantages.mean().detach(),
             actor_loss=loss.detach(),
             actor_clip_ratio=clip_ratio.detach(),

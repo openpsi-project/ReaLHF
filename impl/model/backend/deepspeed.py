@@ -1,8 +1,14 @@
-from typing import Callable, Dict
+from typing import Callable, Dict, List, Optional, Union, Tuple, Any
 import dataclasses
 import functools
 import logging
 import math
+import torch
+
+from deepspeed.runtime import zero
+from deepspeed.accelerator import get_accelerator
+from deepspeed.runtime.engine import DeepSpeedEngine, DeepSpeedOptimizerCallable, DeepSpeedSchedulerCallable
+from deepspeed.runtime.config import DeepSpeedConfig
 
 import deepspeed
 import torch
@@ -106,6 +112,43 @@ def get_optimizer_grouped_parameters(
     return optimizer_grouped_parameters
 
 
+def deepspeed_initialize(
+    model: torch.nn.Module,
+    config: Dict,
+    optimizer: Optional[Union[torch.optim.Optimizer, DeepSpeedOptimizerCallable]] = None,
+    model_parameters: Optional[torch.nn.Module] = None,
+    lr_scheduler: Optional[Union[torch.optim.lr_scheduler._LRScheduler, DeepSpeedSchedulerCallable]] = None,
+    mpu=None,
+) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
+    """A simple wrapper around deepspeed.initialize."""
+
+    # Disable zero.Init context if it's currently enabled
+    zero.partition_parameters.shutdown_init_context()
+
+    from deepspeed import comm as dist
+    deepspeed.dist = dist
+
+    config_class = DeepSpeedConfig(config, mpu)
+    engine = DeepSpeedEngine(
+        args=None,
+        model=model,
+        optimizer=optimizer,
+        model_parameters=model_parameters,
+        lr_scheduler=lr_scheduler,
+        mpu=mpu,
+        dist_init_required=False,
+        config=config,
+        config_class=config_class,
+        dont_change_device=True,
+    )
+
+    # Restore zero.Init context if necessary
+    zero.partition_parameters.restore_init_context()
+
+    return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
+    return tuple(return_items)
+
+
 @dataclasses.dataclass
 class DeepspeedTrainBackend(api.model.ModelBackend):
     optimizer_name: str = 'adam'
@@ -187,11 +230,12 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
                                       min_lr_ratio=self.min_lr_ratio)
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-        module, *_ = deepspeed.initialize(model=module,
-                                          optimizer=optimizer,
-                                          config=ds_config,
-                                          lr_scheduler=lr_scheduler,
-                                          dist_init_required=False)
+        module, *_ = deepspeed_initialize(
+            model=module,
+            optimizer=optimizer,
+            config=ds_config,
+            lr_scheduler=lr_scheduler,
+        )
 
         if self.gradient_checkpointing:
             module.gradient_checkpointing_enable()
@@ -214,7 +258,7 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
                                        stage=self.zero_stage,
                                        enable_fp16=self.enable_fp16,
                                        **self.additional_ds_config)
-        module, *_ = deepspeed.initialize(model=module, config=ds_config)
+        module, *_ = deepspeed_initialize(model=module, config=ds_config)
         model.module = module
         return model
 

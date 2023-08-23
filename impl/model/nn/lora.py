@@ -106,11 +106,13 @@ class LinearLoRA(nn.Module):
                                                                         self.lora_right.weight.t())
         self.fuse_lora = False
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         y = self.linear(x)
         if self.squashed or self.fuse_lora:
             return y
-        return y + self.lora_right(self.lora_left(self.lora_dropout(x))) * self.lora_scaling
+        x = self.lora_dropout(x).to(dtype=self.lora_left.weight.dtype)
+        x = self.lora_right(self.lora_left(x)) * self.lora_scaling
+        return y + x.to(y)
 
 
 def is_lora_model(model: nn.Module) -> bool:
@@ -208,8 +210,10 @@ def lora_wrap_fn(cls_):
         if load_lora_path is not None:
             logger.info(f"Loading LoRA from {load_lora_path}")
             lora_sds = torch.load(load_lora_path, map_location=model.device)
-            lora_names = [name for name, module in model.module.named_modules() if isinstance(module, LinearLoRA)]
-            assert len(lora_names) == len(lora_sds), (len(lora_sds), len(lora_names))
+            lora_names = [
+                name for name, module in model.module.named_modules() if isinstance(module, LinearLoRA)
+            ]
+            assert len(lora_names) == len(lora_sds) > 0, (len(lora_sds), len(lora_names))
             for name, sd in zip(lora_names, lora_sds):
                 m: LinearLoRA = deepspeed.compression.helper.recursive_getattr(model.module, name)
                 m.to(model.device)

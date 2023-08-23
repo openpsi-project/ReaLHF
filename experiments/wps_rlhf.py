@@ -117,7 +117,7 @@ def train_critic(
 
 class WpsRLHFExperiment(Experiment):
 
-    def __init__(self, n_actors=1, n_critics=1, n_rewards=1, n_refs=1, seed=1):
+    def __init__(self, n_actors=2, n_critics=2, n_rewards=1, n_refs=1, seed=1):
         self.n_actors = n_actors
         self.n_rewards = n_rewards
         self.n_refs = n_refs
@@ -150,8 +150,9 @@ class WpsRLHFExperiment(Experiment):
                 scheduling=Scheduling.model_worker_default(
                     cpu=4,
                     gpu=1,
-                    gpu_type='tesla',
+                    gpu_type='geforce',
                     mem=60000,
+                    nodelist='frl8g134',
                 ),
             ),
         )
@@ -166,8 +167,8 @@ class WpsRLHFExperiment(Experiment):
         rw_output_scaling = 0.1
         rw_output_bias = 0.0
 
-        mini_batch_size_per_device = 4
-        batch_size_per_device = 32
+        mini_batch_size_per_device = 1
+        batch_size_per_device = 2
         max_prompt_len = 128
         max_answer_len = 512 - max_prompt_len
 
@@ -298,7 +299,7 @@ class WpsRLHFExperiment(Experiment):
                 enable_fp16=False,
             ),
         )
-        ref_backend = rw_backend = ModelBackend('ds_inference')
+        ref_backend = rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=False))
 
         ppo_kwargs = dict(
             ppo_epochs=1,
