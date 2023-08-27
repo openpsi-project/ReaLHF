@@ -28,6 +28,7 @@ def main_start(args):
                 "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
                 "WANDB_MODE": args.wandb_mode,
                 "LOGLEVEL": args.LOGLEVEL,
+                "DLLM_MODE": args.mode.upper(),
                 **sch_cfg.scheduling.env_vars,
             }
             cmd = scheduler.client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
@@ -65,7 +66,6 @@ def main_start(args):
         "setup",
         scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
         env_vars=simple_env_vars,
-        #  exclude='frl2g[084-086],frl2g008,frl2g093,frl2g094,frl8g[136-137]',
     )
 
     sched.wait(timeout=120, update=True)
@@ -99,8 +99,6 @@ def main_start(args):
 
 
 def main_stop(args):
-    mode = args.mode or "slurm"
-    assert mode == "slurm", "Only slurm experiment is supported."
     sched = scheduler.client.make(mode=args.mode, job_name=f"{args.experiment_name}_{args.trial_name}")
     sched.find_all()
     sched.stop_all()
@@ -119,7 +117,7 @@ def main_find_config(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="rlhf")
+    parser = argparse.ArgumentParser(prog="distributed_llm")
     subparsers = parser.add_subparsers(dest="cmd", help="sub-command help")
     subparsers.required = True
 
@@ -130,7 +128,7 @@ def main():
                            type=str,
                            default=None,
                            help="trial name; by default uses '<USER>-test'")
-    subparser.add_argument("--mode", default="slurm", choices=["slurm"])
+    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm"])
     subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
     subparser.add_argument("--wandb_mode",
                            type=str,

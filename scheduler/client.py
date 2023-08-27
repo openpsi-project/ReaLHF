@@ -1,12 +1,7 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional
 import dataclasses
 import enum
 import logging
-import os
-import re
-import shutil
-import subprocess
-import time
 
 logger = logging.getLogger("scheduler")
 
@@ -129,5 +124,8 @@ def make(mode, job_name, **kwargs) -> SchedulerClient:
     if mode == "slurm":
         from scheduler.slurm.client import SlurmSchedulerClient
         return SlurmSchedulerClient(job_name)
+    elif mode == 'local':
+        from scheduler.local.client import LocalSchedulerClient
+        return LocalSchedulerClient(job_name)
     else:
         raise NotImplementedError(f"Scheduler {mode} not found")

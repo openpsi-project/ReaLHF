@@ -5,7 +5,8 @@ import multiprocessing
 import os
 
 # HACK: we must let each slurm job have its own CUDA_VISIBLE_DEVICES
-os.environ['CUDA_VISIBLE_DEVICES'] = str(int(os.environ["SLURM_PROCID"]) % 8)
+if os.environ.get('DLLM_MODE') == 'SLURM':
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(int(os.environ["SLURM_PROCID"]) % 8)
 multiprocessing.set_start_method("spawn", force=True)
 
 import api.config
