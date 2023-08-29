@@ -108,7 +108,7 @@ class SchedulerClient:
 
 def remote_worker_cmd(expr_name, trial_name, debug, worker_type):
     return f"python3 {'' if debug else '-O'} -m apps.remote worker -w {worker_type} " \
-           f"-e {expr_name} -f {trial_name} -i {{index}}"
+           f"-e {expr_name} -f {trial_name} -i {{index}} -g {{count}}"
 
 
 def setup_cmd(expr_name, trial_name, debug):

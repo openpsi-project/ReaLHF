@@ -99,7 +99,7 @@ class SlurmSchedulerClient(SchedulerClient):
 
         with open(multi_prog_file, "w") as f:
             if "index" in cmd:
-                cmd = cmd.format(index='%t')
+                cmd = cmd.format(index='%t', count=str(spec.ntasks))
             f.write(f"0-{ntasks-1} {cmd}\n")
 
         if spec.hostfile:
