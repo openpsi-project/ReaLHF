@@ -7,6 +7,7 @@ import os
 multiprocessing.set_start_method("spawn", force=True)
 
 import base.gpu_utils
+import base.name_resolve
 
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
@@ -14,7 +15,6 @@ logger = logging.getLogger("Main-Workers")
 
 
 def main_reset_name_resolve(args):
-    import base.name_resolve
     base.name_resolve.clear_subtree(
         base.names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name))
 
