@@ -4,25 +4,9 @@ import logging
 import multiprocessing
 import os
 
-# HACK: we must let each slurm job have its own CUDA_VISIBLE_DEVICES
-if os.environ.get('DLLM_MODE') == 'SLURM':
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(int(os.environ["SLURM_PROCID"]) % 8)
 multiprocessing.set_start_method("spawn", force=True)
 
-import api.config
-import base.name_resolve
-import base.names
-import experiments
-import system
-
-try:
-    import impl.data
-except ModuleNotFoundError:
-    pass
-try:
-    import impl.model
-except ModuleNotFoundError:
-    pass
+import base.gpu_utils
 
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
@@ -30,12 +14,19 @@ logger = logging.getLogger("Main-Workers")
 
 
 def main_reset_name_resolve(args):
+    import base.name_resolve
     base.name_resolve.clear_subtree(
         base.names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name))
 
 
 def main_worker(args):
-    # now only support group_size = 1
+    base.gpu_utils.isolate_cuda_device(args.worker_type, args.group_id, args.group_size, args.experiment_name,
+                                       args.trial_name)
+    import experiments
+    import impl.data
+    import impl.model
+    import system
+
     logger.info(f"Run {args.worker_type} worker with args: %s", args)
     assert not args.experiment_name.startswith(
         "/"), f"Invalid experiment_name \"{args.experiment_name}\" starts with \"/\""
@@ -54,6 +45,9 @@ def main_controller(args):
             config_index: the index of experiment configuration (experiment may return multiple configurations)
             ignore_worker_error: bool, if False, stop the experiment when any worker(s) fail.
     """
+    import api.config
+    import experiments
+    import system
     logger.info("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
     controller = system.make_controller(experiment_name=args.experiment_name, trial_name=args.trial_name)
@@ -93,6 +87,7 @@ def main():
     subparser.set_defaults(func=main_reset_name_resolve)
 
     args = parser.parse_args()
+
     args.func(args)
 
 

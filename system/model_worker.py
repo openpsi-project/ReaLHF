@@ -21,8 +21,6 @@ import base.seeding as seeding
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
-# some modif
-
 
 class ModelWorker(worker_base.Worker):
 
@@ -46,9 +44,8 @@ class ModelWorker(worker_base.Worker):
 
         self.__experiment_name = self.config.worker_info.experiment_name
         self.__trial_name = self.config.worker_info.trial_name
+        # NOTE: here worker_index is different from peer/ddp rank
         self.__worker_index = cfg.worker_info.worker_index
-        assert int(self.__worker_index) == int(os.environ['SLURM_PROCID']), (self.__worker_index,
-                                                                             os.environ['SLURM_PROCID'])
 
         torch.backends.cudnn.benchmark = cfg.cudnn_benchmark
         torch.backends.cudnn.deterministic = cfg.cudnn_deterministic
@@ -89,7 +86,7 @@ class ModelWorker(worker_base.Worker):
                 api.data.make_dataset(
                     d,
                     self.config.seed,
-                    self.__worker_index,
+                    self.__ddp_rank,
                     self.__world_size,
                     self.__model.tokenizer,
                     self.config.worker_info.experiment_name,
@@ -113,7 +110,7 @@ class ModelWorker(worker_base.Worker):
             return worker_base.PollResult(0, 0)
 
         tik = time.perf_counter()
-        if self.__worker_index == 0:
+        if self.is_master:
             self.logger.info(f"Model worker {self.model_name} received request {request.handle_name}.")
         try:
             if request.handle_name == 'initialize':
@@ -134,7 +131,7 @@ class ModelWorker(worker_base.Worker):
         except RuntimeError as e:
             self.print_monitor_info()
             raise e
-        if self.__worker_index == 0:
+        if self.is_master:
             self.logger.info(f"Model worker {self.model_name} handle request {request.handle_name}"
                              f" in {time.perf_counter() - tik:.4f}s")
         reply = request_reply_stream.Reply(data=res)
