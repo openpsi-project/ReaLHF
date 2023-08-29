@@ -5,13 +5,11 @@ import logging
 import os
 import re
 
+from base.constants import LOG_FORMAT, DATE_FORMAT
 import api.config as config_package
 import experiments
 import scheduler.client
 import system
-
-LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
-DATE_FORMAT = "%Y%m%d-%H:%M:%S"
 
 logger = logging.getLogger("main")
 
