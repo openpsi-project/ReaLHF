@@ -68,9 +68,9 @@ class RayTaskQueue(worker_base.WorkerServerTaskQueue):
         self.__send_queue.put(response)
 
 
-class ZmqWorkerControl(worker_base.WorkerControlPanel):
+class ZmqRequester(worker_base.WorkerControlPanelRequester):
 
-    class ZmqFuture(worker_base.WorkerControlPanel.Future):
+    class ZmqFuture(worker_base.WorkerControlPanelRequester.Future):
         # Every ZmqFuture connect one socket, close after returning results.
         def __init__(self, payload, context: zmq.Context, address, worker_name, wait_response=True):
             self.__worker_name = worker_name
@@ -96,87 +96,21 @@ class ZmqWorkerControl(worker_base.WorkerControlPanel):
             self.__socket.close()
             return r
 
-    def __init__(self, experiment_name, trial_name):
-        super().__init__()
-        self.__experiment_name = experiment_name
-        self.__trial_name = trial_name
+    def __init__(self):
         self.__context = zmq.Context()
         self.__context.set(zmq.MAX_SOCKETS, 20480)
-        self.__worker_addresses = {}
 
-    def close(self):
-        logger.info("Closing ZMQ worker control panel.")
-
-    @property
-    def worker_names(self):
-        return list(self.__worker_addresses.keys())
-
-    def connect(self,
-                worker_names,
-                timeout=None,
-                raises_timeout_error=False,
-                reconnect=False,
-                progress=False):
-        rs = []
-        deadline = time.monotonic() + (timeout or 0)
-        if progress:
-            try:
-                import tqdm
-                worker_names = tqdm.tqdm(worker_names, leave=False)
-            except ModuleNotFoundError:
-                pass
-        for name in worker_names:
-            if name in self.__worker_addresses:
-                if reconnect:
-                    del self.__worker_addresses[name]
-                else:
-                    continue
-            try:
-                if timeout is not None:
-                    timeout = max(0, deadline - time.monotonic())
-                server_address = base.name_resolve.wait(names.worker(self.__experiment_name,
-                                                                     self.__trial_name, name),
-                                                        timeout=timeout)
-            except TimeoutError as e:
-                if raises_timeout_error:
-                    raise e
-                continue
-            # self.__worker_addresses[name] stores address
-            self.__worker_addresses[name] = server_address
-            rs.append(name)
-        return rs
-
-    def auto_connect(self):
-        name_root = names.worker_root(self.__experiment_name, self.__trial_name)
-        worker_names = [r[len(name_root):] for r in base.name_resolve.find_subtree(name_root)]
-        return self.connect(worker_names, timeout=0, raises_timeout_error=True)
-
-    def async_request(self, worker_name, command, wait_response=True, **kwargs):
-        if worker_name not in self.__worker_addresses:
-            raise KeyError(f"No such connected worker: {worker_name}")
+    def async_request(self, worker_name, address, command, wait_response=True, **kwargs):
         return self.ZmqFuture(pickle.dumps((command, kwargs)),
                               self.__context,
-                              self.__worker_addresses[worker_name],
+                              address,
                               worker_name,
                               wait_response=wait_response)
 
-    def get_worker_status(self, worker_name) -> worker_base.WorkerServerStatus:
-        try:
-            status_str = base.name_resolve.wait(
-                names.worker_status(experiment_name=self.__experiment_name,
-                                    trial_name=self.__trial_name,
-                                    worker_name=worker_name),
-                timeout=1,
-            )
-            status = worker_base.WorkerServerStatus(status_str)
-        except base.name_resolve.NameEntryNotFoundError:
-            status = worker_base.WorkerServerStatus.LOST
-        return status
 
+class RayRequester(worker_base.WorkerControlPanelRequester):
 
-class RayControlPanel(worker_base.WorkerControlPanel):
-
-    class RayQueueFuture(worker_base.WorkerControlPanel.Future):
+    class RayQueueFuture(worker_base.WorkerControlPanelRequester.Future):
 
         def __init__(self, worker_name: str, queue: rq.Queue):
             self.__queue = queue
@@ -190,48 +124,15 @@ class RayControlPanel(worker_base.WorkerControlPanel):
             except Exception as e:
                 raise RuntimeError(f"Error waiting for Ray queue future {self.__worker_name}.") from e
 
-    def __init__(self, experiment_name, trial_name):
-        super().__init__()
-        self.__experiment_name = experiment_name
-        self.__trial_name = trial_name
+    def __init__(self, request_comms: Dict[str, rq.Queue], reply_comms: Dict[str, rq.Queue]):
+        self.__request_comms: Dict[str, rq.Queue] = request_comms
+        self.__reply_comms: Dict[str, rq.Queue] = reply_comms
 
-        self.__worker_names = set()
-        self.__request_comms: Dict[str, rq.Queue] = dict()
-        self.__reply_comms: Dict[str, rq.Queue] = dict()
-
-    def close(self):
-        logger.info("Closing Ray worker control panel.")
-
-    @property
-    def worker_names(self):
-        return self.__worker_names
-
-    def connect(self, worker_names, *args, **kwargs):
-        self.__worker_names = self.__worker_names.union(set(worker_names))
-
-    def auto_connect(self) -> List[str]:
-        raise NotImplementedError("auto_connect not supported for RayControlPanel")
-
-    def async_request(self, worker_name, command, **kwargs):
-        if worker_name not in self.__worker_names:
-            raise KeyError(f"No such connected worker: {worker_name}")
+    def async_request(self, worker_name, _, command, __, **kwargs):
         request_queue = self.__request_comms[worker_name]
         request_queue.put((command, kwargs))
         reply_queue = self.__reply_comms[worker_name]
         return self.RayQueueFuture(reply_queue)
-
-    def get_worker_status(self, worker_name) -> WorkerServerStatus:
-        try:
-            status_str = base.name_resolve.wait(
-                names.worker_status(experiment_name=self.__experiment_name,
-                                    trial_name=self.__trial_name,
-                                    worker_name=worker_name),
-                timeout=1,
-            )
-            status = worker_base.WorkerServerStatus(status_str)
-        except base.name_resolve.NameEntryNotFoundError:
-            status = worker_base.WorkerServerStatus.LOST
-        return status
 
 
 def make_server(type_, worker_name, experiment_name, trial_name, **kwargs):
@@ -244,9 +145,11 @@ def make_server(type_, worker_name, experiment_name, trial_name, **kwargs):
     return worker_base.WorkerServer(worker_name, experiment_name, trial_name, q)
 
 
-def make_control(type_, **kwargs):
+def make_control(type_, experiment_name, trial_name, **kwargs):
     if type_ == "zmq":
-        return ZmqWorkerControl(**kwargs)
-    if type_ == 'ray':
-        return RayControlPanel(**kwargs)
-    raise NotImplementedError(type_)
+        requester = ZmqRequester(**kwargs)
+    elif type_ == 'ray':
+        requester = RayRequester(**kwargs)
+    else:
+        raise NotImplementedError(type_)
+    raise worker_base.WorkerControlPanel(experiment_name, trial_name, requester)

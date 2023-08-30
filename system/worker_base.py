@@ -167,23 +167,40 @@ class WorkerServer:
             delete_on_exit=False)
 
 
-class WorkerControlPanel:
-    """The abstract class that defines the management utilities to all the workers of an experiment trial.
-    """
+class WorkerControlPanelRequester:
 
     class Future:
 
         def result(self, timeout=None):
             raise NotImplementedError()
 
+    def async_request(self,
+                      worker_name: str,
+                      address: str,
+                      command: str,
+                      wait_for_response: bool = True,
+                      **kwargs) -> Future:
+        raise NotImplementedError()
+
+
+class WorkerControlPanel:
+    """A class that defines the management utilities to all the workers of an experiment trial.
+    """
+
     @dataclasses.dataclass
     class Response:
         worker_name: str
-        result: Any
+        result: WorkerControlPanelRequester.Future
         timed_out: bool = False
 
-    def __init__(self):
+    def __init__(self, experiment_name, trial_name, requester: WorkerControlPanelRequester):
         self.__closed = False
+
+        self.__experiment_name = experiment_name
+        self.__trial_name = trial_name
+        self.__worker_addresses = {}
+
+        self.__requester = requester
 
     def __del__(self):
         if not self.__closed:
@@ -199,6 +216,7 @@ class WorkerControlPanel:
             self.__closed = True
 
     def close(self):
+        logger.info("Closing worker control panel.")
         raise NotImplementedError()
 
     @staticmethod
@@ -215,7 +233,7 @@ class WorkerControlPanel:
         """Returns current connected workers. A WorkerControlPanel initializes with no connected workers.
         Workers are connected via either self.connect(names), or self.auto_connect().
         """
-        raise NotImplementedError()
+        return list(self.__worker_addresses.keys())
 
     def connect(self,
                 worker_names: List[str],
@@ -238,7 +256,34 @@ class WorkerControlPanel:
             A list of successfully connected or reconnected workers. If a specified worker is missing, it can
             either be that it is already connected and `reconnect` is False, or that the connection timed out.
         """
-        raise NotImplementedError()
+        rs = []
+        deadline = time.monotonic() + (timeout or 0)
+        if progress:
+            try:
+                import tqdm
+                worker_names = tqdm.tqdm(worker_names, leave=False)
+            except ModuleNotFoundError:
+                pass
+        for name in worker_names:
+            if name in self.__worker_addresses:
+                if reconnect:
+                    del self.__worker_addresses[name]
+                else:
+                    continue
+            try:
+                if timeout is not None:
+                    timeout = max(0, deadline - time.monotonic())
+                server_address = base.name_resolve.wait(base.names.worker(self.__experiment_name,
+                                                                          self.__trial_name, name),
+                                                        timeout=timeout)
+            except TimeoutError as e:
+                if raises_timeout_error:
+                    raise e
+                continue
+            # self.__worker_addresses[name] stores address
+            self.__worker_addresses[name] = server_address
+            rs.append(name)
+        return rs
 
     def auto_connect(self) -> List[str]:
         """Auto-detects available workers belonging to the experiment trial, and connects to them.
@@ -246,17 +291,15 @@ class WorkerControlPanel:
         Returns:
             Names of successfully connected workers.
         """
-        raise NotImplementedError()
+        name_root = base.names.worker_root(self.__experiment_name, self.__trial_name)
+        worker_names = [r[len(name_root):] for r in base.name_resolve.find_subtree(name_root)]
+        return self.connect(worker_names, timeout=0, raises_timeout_error=True)
 
     def request(self, worker_name: str, command, **kwargs) -> Any:
         """Sends an request to the specified worker.
         """
-        return self.async_request(worker_name, command, **kwargs).result()
-
-    def async_request(self, worker_name: str, command, **kwargs) -> Future:
-        """Posts an request to the specified worker.
-        """
-        raise NotImplementedError()
+        address = self.__worker_addresses[worker_name]
+        return self.__requester.async_request(worker_name, address, command, **kwargs).result()
 
     def group_request(self,
                       command,
@@ -299,13 +342,13 @@ class WorkerControlPanel:
         rs = []
         deadline = time.monotonic() + (timeout or 0)
         for j in range(0, len(selected), _MAX_SOCKET_CONCURRENCY):
-            sub_rs = []
+            sub_rs: List[WorkerControlPanel.Response] = []
             sub_selected = selected[j:j + _MAX_SOCKET_CONCURRENCY]
             sub_worker_kwargs = worker_kwargs[j:j + _MAX_SOCKET_CONCURRENCY]
             for name, kwargs in zip(sub_selected, sub_worker_kwargs):
-                sub_rs.append(
-                    self.Response(worker_name=name,
-                                  result=self.async_request(name, command, wait_response, **kwargs)))
+                address = self.__worker_addresses[name]
+                result_fut = self.__requester.async_request(name, address, command, wait_response, **kwargs)
+                sub_rs.append(WorkerControlPanel.Response(worker_name=name, result=result_fut))
 
             if not wait_response:
                 continue
@@ -332,7 +375,17 @@ class WorkerControlPanel:
         Raises:
             ValueError if worker is not connected.
         """
-        raise NotImplementedError()
+        try:
+            status_str = base.name_resolve.wait(
+                base.names.worker_status(experiment_name=self.__experiment_name,
+                                         trial_name=self.__trial_name,
+                                         worker_name=worker_name),
+                timeout=1,
+            )
+            status = WorkerServerStatus(status_str)
+        except base.name_resolve.NameEntryNotFoundError:
+            status = WorkerServerStatus.LOST
+        return status
 
     def pulse(self):
         return {name: self.get_worker_status(name) for name in self.worker_names}
