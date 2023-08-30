@@ -59,8 +59,8 @@ def main_controller(args):
 
 def main_sray_head(args):
     cmd = (f"ray start --head --num-cpus=0 --num-gpus=0 "
-           f"--port={args.port} --memory={int(args.mem * 1024**2)} "
-           f"--object-store-memory={int(args.obj_store_mem * 1024**2)} ")
+           f"--port={args.port} --memory={int(args.mem)} "
+           f"--object-store-memory={int(args.obj_store_mem)} ")
     output = subprocess.check_output(cmd, shell=True).decode('ascii')
     pattern = r"ray start --address='(\d+\.\d+\.\d+\.\d+:\d+)'"
     match = re.search(pattern, output)
@@ -112,8 +112,8 @@ def main():
     subparser.add_argument("--experiment_name", "-e", type=str, required=True)
     subparser.add_argument("--trial_name", "-f", type=str, required=True)
     subparser.add_argument("--port", type=int, default=8777)
-    subparser.add_argument("--mem", type=int, default=int(20e3), help='in MBytes')
-    subparser.add_argument("--obj_store_mem", type=int, default=int(20e3), help='in MBytes')
+    subparser.add_argument("--mem", type=int, default=int(20e9), help='in bytes')
+    subparser.add_argument("--obj_store_mem", type=int, default=int(20e9), help='in bytes')
     subparser.set_defaults(func=main_sray_head)
 
     args = parser.parse_args()
