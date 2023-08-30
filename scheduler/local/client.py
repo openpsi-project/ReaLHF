@@ -1,9 +1,10 @@
 from typing import Dict, List, Optional
-import subprocess
-import os
-from scheduler.client import SchedulerClient, SchedulerError, TaskInfo, TaskState
 import logging
+import os
 import re
+import subprocess
+
+from scheduler.client import SchedulerClient, SchedulerError, TaskInfo, TaskState
 
 logger = logging.getLogger("Local Scheduler")
 
