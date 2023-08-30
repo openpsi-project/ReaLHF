@@ -1,15 +1,15 @@
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
+import copy
 import dataclasses
 import enum
 import logging
 import time
-import copy
 
 import ray
 import ray.util.queue as rq
 
-from system import WORKER_TYPES, Controller, run_worker, load_worker
+from system import Controller, load_worker, run_worker, WORKER_TYPES
 from system.worker_base import WorkerServerStatus as Wss
 from system.worker_control import RayServer
 import api.config

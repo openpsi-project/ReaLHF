@@ -4,7 +4,7 @@ import logging
 import os
 import traceback
 
-from base.constants import LOG_FORMAT, DATE_FORMAT
+from base.constants import DATE_FORMAT, LOG_FORMAT
 import api.config
 
 logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level=os.environ.get("LOGLEVEL", "INFO"))

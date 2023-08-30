@@ -1,17 +1,17 @@
-from typing import Tuple, List, Dict, Any, Optional, Union
-import re
+from typing import Any, Dict, List, Optional, Tuple, Union
 import logging
 import pickle
+import re
 import socket
 import time
 
-import zmq
 import ray.util.queue as rq
+import zmq
 
+from system.worker_base import WorkerServerStatus
 import base.name_resolve
 import base.names as names
 import system.worker_base as worker_base
-from system.worker_base import WorkerServerStatus
 
 logger = logging.getLogger("worker-control")
 WORKER_WAIT_FOR_CONTROLLER_SECONDS = 3600

@@ -1,11 +1,11 @@
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 import argparse
 import getpass
 import logging
 import os
 import re
 
-from base.constants import LOG_FORMAT, DATE_FORMAT
+from base.constants import DATE_FORMAT, LOG_FORMAT
 import api.config as config_package
 import experiments
 import scheduler.client

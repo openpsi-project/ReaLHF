@@ -1,15 +1,13 @@
-from typing import Callable, Dict, List, Optional, Union, Tuple, Any
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import dataclasses
 import functools
 import logging
 import math
-import torch
 
-from deepspeed.runtime import zero
 from deepspeed.accelerator import get_accelerator
-from deepspeed.runtime.engine import DeepSpeedEngine, DeepSpeedOptimizerCallable, DeepSpeedSchedulerCallable
+from deepspeed.runtime import zero
 from deepspeed.runtime.config import DeepSpeedConfig
-
+from deepspeed.runtime.engine import DeepSpeedEngine, DeepSpeedOptimizerCallable, DeepSpeedSchedulerCallable
 import deepspeed
 import torch
 
