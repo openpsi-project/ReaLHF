@@ -121,15 +121,13 @@ def control_cmd(expr_name, trial_name, debug, ignore_worker_error, controller_ty
             f"--type {controller_type}")
 
 
-def ray_cluster_cmd(expr_name,
-                    trial_name,
-                    mem,
-                    obj_store_mem,
-                    is_head: bool,
-                    worker_type=None,
-                    port=None,
-                    cpu=None,
-                    gpu=None):
+def ray_cluster_cmd(
+    expr_name,
+    trial_name,
+    is_head: bool,
+    worker_type=None,
+    port=None,
+):
     if is_head:
         worker_type = 'head'
         assert port is not None
@@ -137,10 +135,6 @@ def ray_cluster_cmd(expr_name,
         f"-e {expr_name}",
         f"-f {trial_name}",
         f"-w {worker_type}",
-        f"--mem {mem}",
-        f"--obj_store_mem {obj_store_mem}",
-        f"--cpu {0 if is_head else cpu}",
-        f"--gpu {0 if is_head else gpu}",
     ]
     if is_head:
         flags += [

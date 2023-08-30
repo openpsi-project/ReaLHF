@@ -31,19 +31,15 @@ def _submit_workers(
     scheduled_jobs = []
     for sch_cfg in scheduling_configs:
 
+        job_environs = {**environs, **sch_cfg.scheduling.env_vars}
         if use_ray_cluster:
             cmd = scheduler.client.ray_cluster_cmd(
                 expr_name,
                 trial_name,
-                mem=int(sch_cfg.scheduling.mem * 1024**2),
-                obj_store_mem=int(60e3 * 1024**2),
                 is_head=False,
                 worker_type=worker_type,
-                cpu=sch_cfg.scheduling.cpu,
-                gpu=sch_cfg.scheduling.gpu,
             )
         else:
-            job_environs = {**environs, **sch_cfg.scheduling.env_vars}
             cmd = scheduler.client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
         logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
 
@@ -73,6 +69,10 @@ def _submit_workers(
 
 
 def main_start(args):
+    if args.mode == 'ray' and args.image_name is None:
+        raise ValueError("image_name must be specified when using ray cluster. "
+                         "This is becuase ray cluster requires all workers to have "
+                         "the same version of Python and ray.")
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
     experiment = config_package.make_experiment(args.experiment_name)
@@ -106,18 +106,16 @@ def main_start(args):
             expr_name,
             trial_name,
             port=8777,
-            mem=int(20e9),  # in bytes
-            obj_store_mem=int(20e9),  # in bytes
             is_head=True,
         )
         sched.submit(
             "ray_head",
             ray_head_cmd,
-            count=1,
             cpu=1,
             gpu=0,
-            mem=40e3,  # in MBytes
-            commit=True,
+            mem=int(10e3),  # in MBytes
+            env_vars=base_environs,
+            container_image=args.image_name,
         )
 
     # Schedule controller
@@ -133,6 +131,7 @@ def main_start(args):
         gpu=0,
         mem=1024,
         env_vars=base_environs,
+        container_image=args.image_name or setup.controller_image,
     )
 
     workers_configs = ((k, getattr(setup, k)) for k in system.WORKER_TYPES)

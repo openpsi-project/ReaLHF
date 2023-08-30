@@ -245,6 +245,7 @@ class RayController(Controller):
         self.__workers_ref = None
 
     def start(self, *args, **kwargs):
+        # FIXME: for debug only
         time.sleep(10000000)
         try:
             self._start(*args, **kwargs)
@@ -252,6 +253,7 @@ class RayController(Controller):
             self.shutdown()
 
     def _start(self, experiment: api.config.Experiment, ignore_worker_error=False):
+        # TODO: wait for ray cluster worker nodes ready
         if ignore_worker_error:
             check_worker_status = ()
             remove_worker_status = (Wss.COMPLETED, Wss.ERROR, Wss.LOST, Wss.UNKNOWN)

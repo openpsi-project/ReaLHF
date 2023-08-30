@@ -63,38 +63,38 @@ def main_controller(args):
 
 
 def main_ray(args):
-    ray_flags = [
-        f"--num-cpus={0 if args.head else args.cpu}",
-        f"--num-gpus={0 if args.head else args.gpu}",
-        f"--memory={int(args.mem)}",
-        f"--object-store-memory={int(args.obj_store_mem)}",
-    ]
+    ray_flags = []
     ray_addr_name = base.names.ray_cluster(args.experiment_name, args.trial_name, "address")
     if args.head:
         ray_flags += [
+            f"--num-cpus=0",
+            f"--num-gpus=0",
             f"--port={args.port}",
             "--head",
         ]
     else:
         try:
-            address = base.name_resolve.wait(ray_addr_name, timeout=60)
+            address = base.name_resolve.wait(ray_addr_name, timeout=300)
         except TimeoutError:
             raise TimeoutError("Timeout waiting for ray cluster head address.")
         ray_flags += [f"--address={address}"]
 
     cmd = f"ray start {' '.join(ray_flags)}"
     output = subprocess.check_output(cmd, shell=True).decode('ascii')
+    if args.head:
+        logger.info("Successfully launched ray cluster head.")
+    else:
+        logger.info(f"Successfully launched nodes for {args.worker_type} in Ray cluster.")
 
     if args.head:
         pattern = r"ray start --address='(\d+\.\d+\.\d+\.\d+:\d+)'"
         match = re.search(pattern, output)
         if match:
             addr = match.group(1)
-            logger.debug("Found ray address: '%s'", addr)
+            logger.info("Found ray address: '%s'", addr)
         else:
             raise RuntimeError(f"Address not found in ray start output: {output}.")
-        base.name_resolve.add(ray_addr_name, addr, delete_on_exit=True, keepalive_ttl=60)
-
+        base.name_resolve.add(ray_addr_name, addr, delete_on_exit=True, keepalive_ttl=300)
     else:
         _name = base.names.ray_cluster(args.experiment_name, args.trial_name, args.worker_type)
         base.name_resolve.add_subentry(_name, args.group_id, delete_on_exit=True, keepalive_ttl=60)
@@ -149,11 +149,7 @@ def main():
     subparser.add_argument("--group_id", "-i", type=int, required=True)
     subparser.add_argument("--group_size", "-g", type=int, required=True)
     subparser.add_argument("--port", type=int, default=8777)
-    subparser.add_argument("--mem", type=int, default=int(20e9), help='in bytes')
-    subparser.add_argument("--obj_store_mem", type=int, default=int(20e9), help='in bytes')
     subparser.add_argument("--head", action='store_true')
-    subparser.add_argument("--cpu", type=int, default=0, help='only used on non-head nodes')
-    subparser.add_argument("--gpu", type=int, default=0, help='only used on non-head nodes')
     subparser.set_defaults(func=main_ray)
 
     args = parser.parse_args()

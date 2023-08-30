@@ -46,21 +46,22 @@ class SlurmSchedulerClient(SchedulerClient):
     def submit(self, task_name, cmd, **kwargs):
         self.submit_array(task_name, cmd, count=1, **kwargs)
 
-    def submit_array(self,
-                     task_name,
-                     cmd,
-                     count,
-                     cpu=1,
-                     gpu_type: str = "geforce",
-                     gpu=0,
-                     mem=1024,
-                     env_vars=None,
-                     container_image="llm/llm-cpu",
-                     container_mounts="/data:/data",
-                     nodelist=None,
-                     exclude=None,
-                     hostfile=False,
-                     commit=False):
+    def submit_array(
+        self,
+        task_name,
+        cmd,
+        count,
+        cpu=1,
+        gpu_type: str = "geforce",
+        gpu=0,
+        mem=1024,
+        env_vars=None,
+        container_image="llm/llm-cpu",
+        container_mounts="/data:/data",
+        nodelist=None,
+        exclude=None,
+        hostfile=False,
+    ):
         # record information of the task, do not submit to slurn until `wait()` is called
         resource_requirement = SlurmResource(mem=mem, cpu=cpu, gpu=gpu, gpu_type=gpu_type)
         # TODO: temporary fix
@@ -77,12 +78,8 @@ class SlurmSchedulerClient(SchedulerClient):
                                            nodelist=nodelist,
                                            exclude=exclude,
                                            hostfile=hostfile)
-        if commit:
-            self.__commit_one(task_spec)
-            logger.info("Committed Slurm task: %s (count=%s)", task_name, count)
-        else:
-            self.__pending_task_specs.append(task_spec)
-            logger.info("Registered Slurm task: %s (count=%s)", task_name, count)
+        self.__pending_task_specs.append(task_spec)
+        logger.info("Registered Slurm task: %s (count=%s)", task_name, count)
 
     def __commit_one(self, spec: SlurmTaskSpecification):
         """Commit one spec to slurm."""
