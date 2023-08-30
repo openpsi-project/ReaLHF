@@ -1,16 +1,15 @@
 import argparse
-import json
 import logging
-import multiprocessing
 import os
+import re
+import subprocess
+import time
 
-multiprocessing.set_start_method("spawn", force=True)
-
+from base.constants import DATE_FORMAT, LOG_FORMAT
 import base.gpu_utils
 import base.name_resolve
+import base.names
 
-LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
-DATE_FORMAT = "%Y%m%d-%H:%M:%S"
 logger = logging.getLogger("Main-Workers")
 
 
@@ -58,6 +57,28 @@ def main_controller(args):
     )
 
 
+def main_sray_head(args):
+    cmd = (f"ray start --head --num-cpus=0 --num-gpus=0 "
+           f"--port={args.port} --memory={int(args.mem * 1024**2)} "
+           f"--object-store-memory={int(args.obj_store_mem * 1024**2)} ")
+    output = subprocess.check_output(cmd, shell=True).decode('ascii')
+    pattern = r"ray start --address='(\d+\.\d+\.\d+\.\d+:\d+)'"
+    match = re.search(pattern, output)
+    if match:
+        addr = match.group(1)
+        logger.debug("Found ray address: '%s'", addr)
+    else:
+        raise RuntimeError(f"Address not found in ray start output: {output}.")
+    ray_addr_name = base.names.ray_cluster(args.experiment_name, args.trial_name, "address")
+    base.name_resolve.add(ray_addr_name, addr, delete_on_exit=True, keepalive_ttl=60)
+    while True:
+        try:
+            time.sleep(10)
+        except KeyboardInterrupt:
+            break
+    subprocess.check_output(f"ray stop", shell=True)
+
+
 def main():
     logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level=os.environ.get("LOGLEVEL", "INFO"))
 
@@ -85,6 +106,15 @@ def main():
     subparser.add_argument("--experiment_name", "-e", type=str, required=True)
     subparser.add_argument("--trial_name", "-f", type=str, required=True)
     subparser.set_defaults(func=main_reset_name_resolve)
+
+    subparser = subparsers.add_parser(
+        "sray_head", help='launch ray cluster via slurm and write ray address to name_resolve')
+    subparser.add_argument("--experiment_name", "-e", type=str, required=True)
+    subparser.add_argument("--trial_name", "-f", type=str, required=True)
+    subparser.add_argument("--port", type=int, default=8777)
+    subparser.add_argument("--mem", type=int, default=int(20e3), help='in MBytes')
+    subparser.add_argument("--obj_store_mem", type=int, default=int(20e3), help='in MBytes')
+    subparser.set_defaults(func=main_sray_head)
 
     args = parser.parse_args()
 
