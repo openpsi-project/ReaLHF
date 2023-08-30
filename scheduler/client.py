@@ -115,9 +115,39 @@ def setup_cmd(expr_name, trial_name, debug):
     return f"python3 {'' if debug else '-O'} -m apps.remote reset_name_resolve -e {expr_name} -f {trial_name}"
 
 
-def control_cmd(expr_name, trial_name, debug, ignore_worker_error):
+def control_cmd(expr_name, trial_name, debug, ignore_worker_error, controller_type):
     return (f"python3 {'' if debug else '-O'} -m apps.remote controller -e {expr_name} -f {trial_name} "
-            f"--{'ignore_worker_error' if ignore_worker_error else 'raise_worker_error'}")
+            f"--{'ignore_worker_error' if ignore_worker_error else 'raise_worker_error'} "
+            f"--type {controller_type}")
+
+
+def ray_cluster_cmd(expr_name,
+                    trial_name,
+                    mem,
+                    obj_store_mem,
+                    is_head: bool,
+                    worker_type=None,
+                    port=None,
+                    cpu=None,
+                    gpu=None):
+    if is_head:
+        worker_type = 'head'
+        assert port is not None
+    flags = [
+        f"-e {expr_name}",
+        f"-f {trial_name}",
+        f"-w {worker_type}",
+        f"--mem {mem}",
+        f"--obj_store_mem {obj_store_mem}",
+        f"--cpu {0 if is_head else cpu}",
+        f"--gpu {0 if is_head else gpu}",
+    ]
+    if is_head:
+        flags += [
+            f"--port {port}",
+            "--head",
+        ]
+    return (f"python3 -m apps.remote ray  -i {{index}} -g {{count}} {' '.join(flags)}")
 
 
 def make(mode, job_name, **kwargs) -> SchedulerClient:

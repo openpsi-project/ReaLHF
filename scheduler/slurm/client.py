@@ -59,7 +59,8 @@ class SlurmSchedulerClient(SchedulerClient):
                      container_mounts="/data:/data",
                      nodelist=None,
                      exclude=None,
-                     hostfile=False):
+                     hostfile=False,
+                     commit=False):
         # record information of the task, do not submit to slurn until `wait()` is called
         resource_requirement = SlurmResource(mem=mem, cpu=cpu, gpu=gpu, gpu_type=gpu_type)
         # TODO: temporary fix
@@ -76,8 +77,12 @@ class SlurmSchedulerClient(SchedulerClient):
                                            nodelist=nodelist,
                                            exclude=exclude,
                                            hostfile=hostfile)
-        self.__pending_task_specs.append(task_spec)
-        logger.info("Registered Slurm task: %s (count=%s)", task_name, count)
+        if commit:
+            self.__commit_one(task_spec)
+            logger.info("Committed Slurm task: %s (count=%s)", task_name, count)
+        else:
+            self.__pending_task_specs.append(task_spec)
+            logger.info("Registered Slurm task: %s (count=%s)", task_name, count)
 
     def __commit_one(self, spec: SlurmTaskSpecification):
         """Commit one spec to slurm."""
