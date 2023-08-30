@@ -253,7 +253,7 @@ class RayController(Controller):
             self.shutdown()
 
     def _start(self, experiment: api.config.Experiment, ignore_worker_error=False):
-        # TODO: wait for ray cluster worker nodes ready
+        # TODO: wait for ray cluster worker nodes ready, use name_resolve connect
         if ignore_worker_error:
             check_worker_status = ()
             remove_worker_status = (Wss.COMPLETED, Wss.ERROR, Wss.LOST, Wss.UNKNOWN)

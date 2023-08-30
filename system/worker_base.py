@@ -1,5 +1,5 @@
 from hashlib import new
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import dataclasses
 import enum
 import logging
@@ -22,8 +22,9 @@ import base.network
 
 logger = logging.getLogger("worker")
 
-_WANDB_LOG_FREQUENCY_SECONDS = 10
 _MAX_SOCKET_CONCURRENCY = 1000
+WORKER_WAIT_FOR_CONTROLLER_SECONDS = 3600
+WORKER_JOB_STATUS_LINGER_SECONDS = 60
 
 
 class WorkerException(Exception):
@@ -50,28 +51,120 @@ class WorkerServerStatus(str, enum.Enum):
     LOST = "LOST"  # CANNOT be set
 
 
+class NoRequstForWorker(Exception):
+    pass
+
+
+class WorkerServerTaskQueue:
+
+    def try_get_request(self) -> Tuple[str, Dict[str, Any]]:
+        raise NotImplementedError()
+
+    def respond(self, response):
+        raise NotImplementedError()
+
+
 class WorkerServer:
-    """The abstract class that defines how a worker exposes RPC stubs to the controller.
+    """A light-weight implementation of an RPC server.
+
+    Note that this server only allows a single client connection for now, as that is sufficient for
+    workers which respond to the controller only.
+
+    Example:
+        # Server side.
+        server = RpcServer(port)
+        server.register_handler('foo', foo)
+        while True:
+            server.handle_requests()
+
+        # Client side.
+        client = RpcClient(host, port)
+        client.request('foo', x=42, y='str') # foo(x=42, y='str') will be called on the server side.
     """
 
-    def __init__(self, worker_name):
+    def __init__(self, worker_name, experiment_name, trial_name, task_queue: WorkerServerTaskQueue):
         """Specifies the name of the worker that WorkerControlPanel can used to find and manage.
         Args:
             worker_name: Typically "<worker_type>/<worker_index>".
         """
-        self.worker_name = worker_name
+        self.__worker_name = worker_name
+        self.__experiment_name = experiment_name
+        self.__trial_name = trial_name
+
+        self.__task_queue = task_queue
+
+        self.__handlers = {}
+        host_ip = socket.gethostbyname(socket.gethostname())
+
+        try:
+            controller_status = base.name_resolve.wait(base.names.worker_status(
+                experiment_name, trial_name, "ctl"),
+                                                       timeout=WORKER_WAIT_FOR_CONTROLLER_SECONDS)
+        except TimeoutError:
+            raise TimeoutError(
+                f"Worker ({experiment_name, trial_name, worker_name}) connect to controller timeout from host {socket.gethostname()}."
+            )
+
+        if controller_status != "READY":
+            raise RuntimeError(f"Abnormal controller state on experiment launch {controller_status}.")
+
+        if experiment_name is not None and trial_name is not None:
+            key = base.names.worker(experiment_name, trial_name, worker_name)
+            address = f"{host_ip}:{self.__port}"
+            base.name_resolve.add(key, address, keepalive_ttl=10, delete_on_exit=True)
+            logger.info("Added name_resolve entry %s for worker server at %s", key, address)
 
     def register_handler(self, command, fn):
         """Registers an RPC command. The handler `fn` shall be called when `self.handle_requests()` sees an
         incoming command of the registered type.
         """
-        raise NotImplementedError()
+        if command in self.__handlers:
+            raise KeyError(f"Command '{command}' exists")
+        self.__handlers[command] = fn
 
     def handle_requests(self, max_count=None):
-        raise NotImplementedError()
+        """Handles queued requests in order, optionally limited by `max_count`.
+
+        Returns:
+            The count of requests handled.
+        """
+        count = 0
+        while max_count is None or count < max_count:
+            try:
+                command, kwargs = self.__task_queue.try_get_request()
+            except NoRequstForWorker:
+                # Currently no request in the queue.
+                break
+            logger.debug("Handle request %s with kwargs %s", command, kwargs)
+            if command in self.__handlers:
+                try:
+                    response = self.__handlers[command](**kwargs)
+                    logger.debug("Handle request: %s, ok", command)
+                except WorkerException:
+                    raise
+                except Exception as e:
+                    logger.error("Handle request: %s, error", command)
+                    logger.error(e, exc_info=True)
+                    response = e
+            else:
+                logger.error("Handle request: %s, no such command", command)
+                response = KeyError(f'No such command: {command}')
+            self.__task_queue.respond(response)
+            logger.debug("Handle request: %s, sent reply", command)
+            count += 1
+        return count
 
     def set_status(self, status: WorkerServerStatus):
-        raise NotImplementedError()
+        """On graceful exit, worker status is cleared.
+        """
+        base.name_resolve.add(
+            base.names.worker_status(experiment_name=self.__experiment_name,
+                                     trial_name=self.__trial_name,
+                                     worker_name=self.worker_name),
+            value=status.value,
+            keepalive_ttl=WORKER_JOB_STATUS_LINGER_SECONDS,  # Job Status lives one minutes after worker exit.
+            replace=True,
+            delete_on_exit=False)
 
 
 class WorkerControlPanel:

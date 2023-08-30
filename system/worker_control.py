@@ -18,41 +18,9 @@ WORKER_WAIT_FOR_CONTROLLER_SECONDS = 3600
 WORKER_JOB_STATUS_LINGER_SECONDS = 60
 
 
-class ZmqServer(worker_base.WorkerServer):
-    """A light-weight implementation of an RPC server.
+class ZmqTaskQueue(worker_base.WorkerServerTaskQueue):
 
-    Note that this server only allows a single client connection for now, as that is sufficient for
-    workers which respond to the controller only.
-
-    Example:
-        # Server side.
-        server = RpcServer(port)
-        server.register_handler('foo', foo)
-        while True:
-            server.handle_requests()
-
-        # Client side.
-        client = RpcClient(host, port)
-        client.request('foo', x=42, y='str') # foo(x=42, y='str') will be called on the server side.
-    """
-
-    def set_status(self, status: worker_base.WorkerServerStatus):
-        """On graceful exit, worker status is cleared.
-        """
-        base.name_resolve.add(
-            names.worker_status(experiment_name=self.__experiment_name,
-                                trial_name=self.__trial_name,
-                                worker_name=self.worker_name),
-            value=status.value,
-            keepalive_ttl=WORKER_JOB_STATUS_LINGER_SECONDS,  # Job Status lives one minutes after worker exit.
-            replace=True,
-            delete_on_exit=False)
-
-    def __init__(self, port=0, experiment_name=None, trial_name=None, worker_name=None):
-        super().__init__(worker_name)
-        self.__experiment_name = experiment_name
-        self.__trial_name = trial_name
-        self.__handlers = {}
+    def __init__(self, port=0):
         self.__context = zmq.Context()
         self.__socket = self.__context.socket(zmq.REP)
         host_ip = socket.gethostbyname(socket.gethostname())
@@ -62,24 +30,6 @@ class ZmqServer(worker_base.WorkerServer):
             self.__socket.bind(f"tcp://{host_ip}:{port}")
             self.__port = port
 
-        try:
-            controller_status = base.name_resolve.wait(names.worker_status(experiment_name, trial_name,
-                                                                           "ctl"),
-                                                       timeout=WORKER_WAIT_FOR_CONTROLLER_SECONDS)
-        except TimeoutError:
-            raise TimeoutError(
-                f"Worker ({experiment_name, trial_name, worker_name}) connect to controller timeout from host {socket.gethostname()}."
-            )
-
-        if controller_status != "READY":
-            raise RuntimeError(f"Abnormal controller state on experiment launch {controller_status}.")
-
-        if experiment_name is not None and trial_name is not None:
-            key = names.worker(experiment_name, trial_name, worker_name)
-            address = f"{host_ip}:{self.__port}"
-            base.name_resolve.add(key, address, keepalive_ttl=10, delete_on_exit=True)
-            logger.info("Added name_resolve entry %s for worker server at %s", key, address)
-
     def __del__(self):
         self.__socket.close()
 
@@ -87,100 +37,35 @@ class ZmqServer(worker_base.WorkerServer):
     def port(self):
         return self.__port
 
-    def register_handler(self, command, fn):
-        if command in self.__handlers:
-            raise KeyError(f"Command '{command}' exists")
-        self.__handlers[command] = fn
+    def try_get_request(self) -> Tuple[str, Dict[str, Any]]:
+        try:
+            data = self.__socket.recv(zmq.NOBLOCK)
+        except zmq.ZMQError:
+            # Currently no request in the queue.
+            raise worker_base.NoRequstForWorker()
+        return pickle.loads(data)
 
-    def handle_requests(self, max_count=None):
-        """Handles queued requests in order, optionally limited by `max_count`.
-
-        Returns:
-            The count of requests handled.
-        """
-        count = 0
-        while max_count is None or count < max_count:
-            try:
-                data = self.__socket.recv(zmq.NOBLOCK)
-            except zmq.ZMQError:
-                # Currently no request in the queue.
-                break
-            command, kwargs = pickle.loads(data)
-            logger.debug("Handle request: %s, len(data)=%d", command, len(data))
-            if command in self.__handlers:
-                try:
-                    response = self.__handlers[command](**kwargs)
-                    logger.debug("Handle request: %s, ok", command)
-                except worker_base.WorkerException:
-                    raise
-                except Exception as e:
-                    logger.error("Handle request: %s, error", command)
-                    logger.error(e, exc_info=True)
-                    response = e
-            else:
-                logger.error("Handle request: %s, no such command", command)
-                response = KeyError(f'No such command: {command}')
-            self.__socket.send(pickle.dumps(response))
-            logger.debug("Handle request: %s, sent reply", command)
-            count += 1
-        return count
+    def respond(self, response):
+        self.__socket.send(pickle.dumps(response))
 
 
-class RayServer(worker_base.WorkerServer):
+class RayTaskQueue(worker_base.WorkerServerTaskQueue):
 
-    def set_status(self, status: worker_base.WorkerServerStatus):
-        """On graceful exit, worker status is cleared.
-        """
-        base.name_resolve.add(
-            names.worker_status(experiment_name=self.__experiment_name,
-                                trial_name=self.__trial_name,
-                                worker_name=self.worker_name),
-            value=status.value,
-            keepalive_ttl=WORKER_JOB_STATUS_LINGER_SECONDS,  # Job Status lives one minutes after worker exit.
-            replace=True,
-            delete_on_exit=False)
-
-    def __init__(self, comm: Tuple[rq.Queue, rq.Queue], worker_name: str, experiment_name: str,
-                 trial_name: str):
-        super().__init__(worker_name)
-        self.__handlers = {}
-
-        self.__experiment_name = experiment_name
-        self.__trial_name = trial_name
-
+    def __init__(self, comm: Tuple[rq.Queue, rq.Queue]):
         recv_queue, send_queue = comm
         self.__recv_queue = recv_queue
         self.__send_queue = send_queue
 
-    def register_handler(self, command, fn):
-        if command in self.__handlers:
-            raise KeyError(f"Command '{command}' exists")
-        self.__handlers[command] = fn
+    def try_get_request(self) -> Tuple[str, Dict[str, Any]]:
+        try:
+            command, kwargs = self.__recv_queue.get_nowait()
+        except rq.Empty:
+            # Currently no request in the queue.
+            raise worker_base.NoRequstForWorker()
+        return command, kwargs
 
-    def handle_requests(self, max_count=None):
-        count = 0
-        while max_count is None or count < max_count:
-            try:
-                command, kwargs = self.__recv_queue.get_nowait()
-            except rq.Empty:
-                break
-            logger.debug("Handle request: %s with kwargs %s", command, kwargs)
-            if command in self.__handlers:
-                try:
-                    response = self.__handlers[command](**kwargs)
-                    logger.debug("Handle request: %s, ok", command)
-                except worker_base.WorkerException:
-                    raise
-                except Exception as e:
-                    logger.error("Handle request: %s, error", command)
-                    logger.error(e, exc_info=True)
-            else:
-                logger.error("Handle request: %s, no such command", command)
-                response = KeyError(f'No such command: {command}')
-            self.__send_queue.put(response)
-            logger.debug("Handle request: %s, sent reply", command)
-            count += 1
-        return count
+    def respond(self, response):
+        self.__send_queue.put(response)
 
 
 class ZmqWorkerControl(worker_base.WorkerControlPanel):
@@ -349,12 +234,14 @@ class RayControlPanel(worker_base.WorkerControlPanel):
         return status
 
 
-def make_server(type_, **kwargs):
+def make_server(type_, worker_name, experiment_name, trial_name, **kwargs):
     if type_ == "zmq":
-        return ZmqServer(**kwargs)
-    if type_ == 'ray':
-        return RayServer(**kwargs)
-    raise NotImplementedError(type_)
+        q = ZmqTaskQueue(**kwargs)
+    elif type_ == 'ray':
+        q = RayTaskQueue(**kwargs)
+    else:
+        raise NotImplementedError(type_)
+    return worker_base.WorkerServer(worker_name, experiment_name, trial_name, q)
 
 
 def make_control(type_, **kwargs):
