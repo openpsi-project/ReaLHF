@@ -76,7 +76,8 @@ def main_start(args):
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
     experiment = config_package.make_experiment(args.experiment_name)
-    sched = scheduler.client.make(mode=args.mode, job_name=f"{args.experiment_name}_{trial_name}")
+    scheduler_mode = args.mode if args.mode != 'ray' else 'slurm'
+    sched = scheduler.client.make(mode=scheduler_mode, job_name=f"{args.experiment_name}_{trial_name}")
 
     setup = experiment.scheduling_setup()
 
@@ -157,7 +158,8 @@ def main_start(args):
 
 
 def main_stop(args):
-    sched = scheduler.client.make(mode=args.mode, job_name=f"{args.experiment_name}_{args.trial_name}")
+    scheduler_mode = args.mode if args.mode != 'ray' else 'slurm'
+    sched = scheduler.client.make(mode=scheduler_mode, job_name=f"{args.experiment_name}_{args.trial_name}")
     sched.find_all()
     sched.stop_all()
 
@@ -186,7 +188,7 @@ def main():
                            type=str,
                            default=None,
                            help="trial name; by default uses '<USER>-test'")
-    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm"])
+    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray"])
     subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
     subparser.add_argument("--wandb_mode",
                            type=str,
@@ -208,7 +210,7 @@ def main():
     subparser = subparsers.add_parser("stop", help="stops an experiment. only slurm experiment is supported.")
     subparser.add_argument("--experiment_name", "-e", type=str, required=True, help="name of the experiment")
     subparser.add_argument("--trial_name", "-f", type=str, required=True, help="name of the trial")
-    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm"])
+    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray"])
     subparser.set_defaults(func=main_stop)
 
     subparser = subparsers.add_parser("find_config",

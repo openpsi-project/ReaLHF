@@ -245,6 +245,7 @@ class RayController(Controller):
         self.__workers_ref = None
 
     def start(self, *args, **kwargs):
+        time.sleep(10000000)
         try:
             self._start(*args, **kwargs)
         except Exception as e:
