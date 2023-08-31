@@ -339,8 +339,6 @@ class RayController:
         ray.init(address=ray_head_addr)
 
         logger.info("Ray initialized! Ready to run workers.")
-        # TODO: for debug only
-        time.sleep(100000)
 
         try:
             self._launch_workers(workers_configs)
