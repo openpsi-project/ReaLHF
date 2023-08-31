@@ -121,27 +121,9 @@ def control_cmd(expr_name, trial_name, debug, ignore_worker_error, controller_ty
             f"--type {controller_type}")
 
 
-def ray_cluster_cmd(
-    expr_name,
-    trial_name,
-    is_head: bool,
-    worker_type=None,
-    port=None,
-):
-    if is_head:
-        worker_type = 'head'
-        assert port is not None
-    flags = [
-        f"-e {expr_name}",
-        f"-f {trial_name}",
-        f"-w {worker_type}",
-    ]
-    if is_head:
-        flags += [
-            f"--port {port}",
-            "--head",
-        ]
-    return (f"python3 -m apps.remote ray  -i {{index}} -g {{count}} {' '.join(flags)}")
+def ray_cluster_cmd(expr_name, trial_name, worker_type):
+    flags = [f"-e {expr_name}", f"-f {trial_name}", f"-w {worker_type}"]
+    return (f"python3 -m apps.remote ray -i {{index}} -g {{count}} {' '.join(flags)}")
 
 
 def make(mode, job_name, **kwargs) -> SchedulerClient:

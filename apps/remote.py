@@ -52,6 +52,28 @@ def main_controller(args):
     import system
     logger.info("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
+    if args.type == 'ray':
+        # launch ray cluster head
+        ray_flags = [
+            f"--num-cpus=0",
+            f"--num-gpus=0",
+            f"--port={args.ray_port}",
+            "--head",
+        ]
+        cmd = f"ray start {' '.join(ray_flags)}"
+        output = subprocess.check_output(cmd, shell=True).decode('ascii')
+        logger.info("Successfully launched ray cluster head.")
+
+        pattern = r"ray start --address='(\d+\.\d+\.\d+\.\d+:\d+)'"
+        match = re.search(pattern, output)
+        if match:
+            addr = match.group(1)
+            logger.info("Found ray address: '%s'", addr)
+        else:
+            raise RuntimeError(f"Address not found in ray start output: {output}.")
+        ray_addr_name = base.names.ray_cluster(args.experiment_name, args.trial_name, "address")
+        base.name_resolve.add(ray_addr_name, addr, delete_on_exit=True, keepalive_ttl=300)
+
     controller = system.make_controller(type_=args.type,
                                         experiment_name=args.experiment_name,
                                         trial_name=args.trial_name)
@@ -61,47 +83,28 @@ def main_controller(args):
         ignore_worker_error=args.ignore_worker_error,
     )
 
+    if args.type == 'ray':
+        subprocess.check_output(f"ray stop", shell=True)
+
 
 def main_ray(args):
-    ray_flags = []
     ray_addr_name = base.names.ray_cluster(args.experiment_name, args.trial_name, "address")
-    if args.head:
-        ray_flags += [
-            f"--num-cpus=0",
-            f"--num-gpus=0",
-            f"--port={args.port}",
-            "--head",
-        ]
-    else:
-        try:
-            address = base.name_resolve.wait(ray_addr_name, timeout=300)
-        except TimeoutError:
-            raise TimeoutError("Timeout waiting for ray cluster head address.")
-        ray_flags += [f"--address={address}"]
+    try:
+        address = base.name_resolve.wait(ray_addr_name, timeout=300)
+    except TimeoutError:
+        raise TimeoutError("Timeout waiting for ray cluster head address.")
+    ray_flags = [f"--address={address}"]
 
     cmd = f"ray start {' '.join(ray_flags)}"
-    output = subprocess.check_output(cmd, shell=True).decode('ascii')
-    if args.head:
-        logger.info("Successfully launched ray cluster head.")
-    else:
-        logger.info(f"Successfully launched nodes for {args.worker_type} in Ray cluster.")
+    _ = subprocess.check_output(cmd, shell=True).decode('ascii')
+    logger.info(f"Successfully launched nodes for {args.worker_type} in Ray cluster.")
 
-    if args.head:
-        pattern = r"ray start --address='(\d+\.\d+\.\d+\.\d+:\d+)'"
-        match = re.search(pattern, output)
-        if match:
-            addr = match.group(1)
-            logger.info("Found ray address: '%s'", addr)
-        else:
-            raise RuntimeError(f"Address not found in ray start output: {output}.")
-        base.name_resolve.add(ray_addr_name, addr, delete_on_exit=True, keepalive_ttl=300)
-    else:
-        host_ip = socket.gethostbyname(socket.gethostname())
-        base.name_resolve.add(base.names.ray_cluster(args.experiment_name, args.trial_name,
-                                                     f"{args.worker_type}/{args.group_id}"),
-                              host_ip,
-                              delete_on_exit=True,
-                              keepalive_ttl=300)
+    host_ip = socket.gethostbyname(socket.gethostname())
+    base.name_resolve.add(base.names.ray_cluster(args.experiment_name, args.trial_name,
+                                                 f"{args.worker_type}/{args.group_id}"),
+                          host_ip,
+                          delete_on_exit=True,
+                          keepalive_ttl=300)
 
     while True:
         try:
@@ -130,6 +133,7 @@ def main():
     subparser.add_argument("--ignore_worker_error", action="store_true")
     subparser.add_argument('--raise_worker_error', dest='ignore_worker_error', action='store_false')
     subparser.add_argument('--type', type=str, default='zmq')
+    subparser.add_argument("--ray_port", type=int, default=8777)
     subparser.set_defaults(feature=False)
     subparser.set_defaults(func=main_controller)
 
@@ -152,8 +156,6 @@ def main():
     subparser.add_argument("--worker_type", '-w', type=str, required=True)
     subparser.add_argument("--group_id", "-i", type=int, required=True)
     subparser.add_argument("--group_size", "-g", type=int, required=True)
-    subparser.add_argument("--port", type=int, default=8777)
-    subparser.add_argument("--head", action='store_true')
     subparser.set_defaults(func=main_ray)
 
     args = parser.parse_args()

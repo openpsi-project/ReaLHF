@@ -328,9 +328,20 @@ class RayController:
                                            timeout=300)
                 except TimeoutError:
                     raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
-        logger.info("Ray cluster started. Ready to run.")
+        logger.info("Ray cluster started.")
 
-        ray.init('auto')
+        try:
+            ray_head_addr = base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
+                                                                     self.__trial_name, "address"),
+                                                   timeout=300)
+        except TimeoutError:
+            raise RuntimeError("Timeout waiting for ray cluster head address.")
+        ray.init(address=ray_head_addr)
+
+        logger.info("Ray initialized! Ready to run workers.")
+        # TODO: for debug only
+        time.sleep(100000)
+
         try:
             self._launch_workers(workers_configs)
             self.__base_controller.start(experiment, ignore_worker_error)

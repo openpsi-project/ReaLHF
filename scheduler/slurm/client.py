@@ -137,12 +137,12 @@ class SlurmSchedulerClient(SchedulerClient):
             f"--cpus-per-task={cpu}",
             f"--gpus-per-task={gpu_type}:1" if gpu == 1 else "",
             f"--mem-per-cpu={mem // max(1, cpu)}",
-            f"--container-image={spec.container_image}",
-            f"--container-mounts={spec.container_mounts}",
-            f"--container-mount-home",
             f"--export={','.join(str(k)+'='+str(v) for k, v in spec.env_vars.items())}"
             if spec.env_vars is not None else "",
             f"--multi-prog",
+            f"--container-image={spec.container_image}",
+            f"--container-mounts={spec.container_mounts}",
+            f"--container-mount-home",
         ]
 
         srun_cmd = f'srun -l {" ".join(srun_flags)} {multi_prog_file}'
@@ -282,7 +282,7 @@ class SlurmSchedulerClient(SchedulerClient):
         output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("ascii").strip()
         rs = []
         for line in output.split("\n")[1:]:
-            job_id, state, start_time, slurm_name, node_list, *_ = line.split(delimiter)
+            job_id, state, start_time, slurm_name, nodelist, *_ = line.split(delimiter)
             if slurm_ids is not None:
                 assert slurm_name.startswith(f"{self.job_name}:")
             elif not slurm_name.startswith(f"{self.job_name}:"):
@@ -293,7 +293,7 @@ class SlurmSchedulerClient(SchedulerClient):
                 rs.append(
                     TaskInfo(name=task_name,
                              state=SlurmSchedulerClient.STATUS_MAPPING[state],
-                             host=node_list,
+                             host=nodelist,
                              start_time=start_time,
                              slurm_id=ji.strip()))
         return rs

@@ -36,7 +36,6 @@ def _submit_workers(
             cmd = scheduler.client.ray_cluster_cmd(
                 expr_name,
                 trial_name,
-                is_head=False,
                 worker_type=worker_type,
             )
         else:
@@ -100,32 +99,16 @@ def main_start(args):
 
     logger.info(f"Running configuration: {experiment.__class__.__name__}")
 
-    # launch ray cluster head within slurm
-    if args.mode == 'ray':
-        ray_head_cmd = scheduler.client.ray_cluster_cmd(
-            expr_name,
-            trial_name,
-            port=8777,
-            is_head=True,
-        )
-        sched.submit(
-            "ray_head",
-            ray_head_cmd,
-            cpu=1,
-            gpu=0,
-            mem=int(10e3),  # in MBytes
-            env_vars=base_environs,
-            container_image=args.image_name,
-        )
-
     # Schedule controller
     sched.submit_array(
         task_name="ctl",
-        cmd=scheduler.client.control_cmd(expr_name,
-                                         trial_name,
-                                         args.debug,
-                                         args.ignore_worker_error,
-                                         controller_type="ray" if args.mode == 'ray' else "zmq"),
+        cmd=scheduler.client.control_cmd(
+            expr_name,
+            trial_name,
+            args.debug,
+            args.ignore_worker_error,
+            controller_type="ray" if args.mode == 'ray' else "zmq",
+        ),
         count=1,
         cpu=1,
         gpu=0,
