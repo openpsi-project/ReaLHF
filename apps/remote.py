@@ -95,9 +95,6 @@ def main_ray(args):
         else:
             raise RuntimeError(f"Address not found in ray start output: {output}.")
         base.name_resolve.add(ray_addr_name, addr, delete_on_exit=True, keepalive_ttl=300)
-    else:
-        _name = base.names.ray_cluster(args.experiment_name, args.trial_name, args.worker_type)
-        base.name_resolve.add_subentry(_name, args.group_id, delete_on_exit=True, keepalive_ttl=60)
 
     while True:
         try:

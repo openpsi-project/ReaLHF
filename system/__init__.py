@@ -15,26 +15,6 @@ logger = logging.getLogger("system base")
 WORKER_TYPES = ["data_worker", "model_worker", "master_worker"]
 
 
-class Controller:
-
-    def __init__(self, experiment_name, trial_name):
-        assert "_" not in experiment_name, f"_ not allowed in experiment_name (args: -e) " \
-                                           f"{experiment_name}, use '-' instead."
-        assert "_" not in trial_name, f"_ not allowed in trial_name (args: -f) {trial_name}, use '-' instead."
-        self.experiment_name = experiment_name
-        self.trial_name = trial_name
-
-        logger.info("Experiment: %s %s", self.experiment_name, self.trial_name)
-
-    def start(self, experiment: api.config.Experiment, ignore_worker_error=False):
-        """Start an experiment.
-        Args:
-            experiment: An experiment class, with `initial_setup` method returning workers configurations.
-            ignore_worker_error: If True, do not stop experiment when part of worker(s) fail.
-        """
-        raise NotImplementedError()
-
-
 def load_worker(worker_type: str) -> Type:
     assert worker_type in WORKER_TYPES, f"Invalid worker type {worker_type}"
     module = importlib.import_module(worker_type_to_module(worker_type))
@@ -74,11 +54,13 @@ def run_worker(worker_type, experiment_name, trial_name, worker_name, worker_ser
         raise e
 
 
-def make_controller(type_, *args, **kwargs) -> Controller:
+def make_controller(type_, experiment_name, trial_name):
     module = importlib.import_module("system.controller")
     if type_ == 'zmq':
-        return getattr(module, "ZmqController")(*args, **kwargs)
+        control_module = importlib.import_module("system.worker_control")
+        panel = getattr(control_module, 'make_control')('zmq', experiment_name, trial_name)
+        return getattr(module, "Controller")(experiment_name, trial_name, panel)
     elif type_ == 'ray':
-        return getattr(module, "RayController")(*args, **kwargs)
+        return getattr(module, "RayController")(experiment_name, trial_name)
     else:
         raise NotImplementedError(f"Unknown controller type {type_}.")
