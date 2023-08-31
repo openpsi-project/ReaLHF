@@ -4,7 +4,7 @@ from transformers.activations import GELUActivation
 import torch
 import torch.nn as nn
 
-from impl.model.utils.generate import generate
+from impl.model.utils.generate import generate, old_generate
 from impl.model.utils.spec import TransformerConfig, TransformerData
 import api.model
 import api.utils
@@ -48,6 +48,9 @@ class MQATransformerForCausalLM(nn.Module):
     def generate(self, *args, **kwargs):
         # TODO: support huggingface generate
         return generate(self, *args, **kwargs)
+
+    def old_generate(self, *args, **kwargs):
+        return old_generate(self, *args, **kwargs)
 
     def to_layers(self):
         return [self.preprocess] + self.transformer.to_layers() + [self.postprocess]

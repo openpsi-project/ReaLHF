@@ -14,6 +14,8 @@ import torch
 
 mp.set_start_method('spawn', force=True)
 
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
 from base.namedarray import NamedArray
 from impl.model.utils.generate import generate
 import api.config as config_package
@@ -23,7 +25,7 @@ import base.name_resolve as name_resolve
 import base.names as names
 import impl.model.utils.spec as spec
 
-model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder/"
+MODEL_PATH = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder/"
 IF_LOG = True
 
 
@@ -46,6 +48,13 @@ def get_model(model_path, device):
                                             config=config,
                                         ))
     model = api.model.make_model(model_config, name="generate", device=device)
+    return model
+
+
+def get_huggingface_model(model_path, device):
+    model = AutoModelForCausalLM.from_pretrained(model_path)
+    model.to(device)
+    model.eval()
     return model
 
 
@@ -95,7 +104,7 @@ def log(s):
 def main():
     device = setup_gpu()
     # worker_index, device = setup_gpu_deepspeed_cli()
-    model = get_model(model_path, device)
+    model = get_model(MODEL_PATH, device)
     interface = get_interface()
     backend = get_backend()
 
@@ -117,5 +126,28 @@ def main():
     log(f"generate outputs: {outputs}")
 
 
+def huggingface_generate():
+    device = setup_gpu()
+    model = get_huggingface_model(MODEL_PATH, device)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, padding_side="left", fast_tokenizer=True)
+    tokenizer.pad_token = tokenizer.eos_token
+    log(f"model initialized")
+    input_ids, attention_mask = get_batch(tokenizer, device, 4)
+    log(f"generate inputs: ")
+    log(f"prompts: {input_ids}")
+    log(f"prompt_att_mask: {attention_mask}")
+
+    log("begin generate")
+    outputs = model.generate(input_ids,
+                             attention_mask=attention_mask,
+                             eos_token_id=tokenizer.eos_token_id,
+                             pad_token_id=tokenizer.pad_token_id,
+                             min_new_tokens=10,
+                             max_new_tokens=50)
+    log("end generate")
+    log(f"generate outputs: {outputs}")
+
+
 if __name__ == "__main__":
     main()
+    # huggingface_generate()

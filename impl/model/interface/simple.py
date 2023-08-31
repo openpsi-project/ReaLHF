@@ -35,7 +35,11 @@ class SimpleInterface(api.model.ModelInterface):
         # namedarray -> tensor -> namedarray
         seq = module.generate(data.prompts,
                               attention_mask=data.prompt_att_mask,
+                              min_new_tokens=50,
                               max_new_tokens=50,
+                              greedy=False,
+                              temperature=0.9,
+                              top_k=50,
                               pad_token_id=pad_token_id,
                               eos_token_id=eos_token_id)
 
