@@ -70,7 +70,7 @@ def _submit_workers(
 
 def main_start(args):
     if args.mode == 'ray' and args.image_name is None:
-        raise ValueError("image_name must be specified when using ray cluster. "
+        raise ValueError("--image_name must be specified when using ray cluster. "
                          "This is becuase ray cluster requires all workers to have "
                          "the same version of Python and ray.")
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
