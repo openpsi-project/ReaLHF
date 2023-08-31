@@ -3,7 +3,7 @@ import logging
 import os
 import re
 import subprocess
-import time
+import socket
 
 from base.constants import DATE_FORMAT, LOG_FORMAT
 import base.gpu_utils
@@ -95,6 +95,13 @@ def main_ray(args):
         else:
             raise RuntimeError(f"Address not found in ray start output: {output}.")
         base.name_resolve.add(ray_addr_name, addr, delete_on_exit=True, keepalive_ttl=300)
+    else:
+        host_ip = socket.gethostbyname(socket.gethostname())
+        base.name_resolve.add(base.names.ray_cluster(args.experiment_name, args.trial_name,
+                                                     f"{args.worker_type}/{args.group_id}"),
+                              host_ip,
+                              delete_on_exit=True,
+                              keepalive_ttl=300)
 
     while True:
         try:

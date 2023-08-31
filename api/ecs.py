@@ -278,6 +278,7 @@ class MasterWorkerECS:
         levels = self.resolve_order()
         try:
             # TODO: if all data queries provide shapes, replace DataQuery with shaped torch.Tensor instead of Mock()
+            # TODO: do not log in mock run
             self._mock_run(levels)
         except Exception as e:
             raise RuntimeError("Mock run failed because of the reason above.") from e
