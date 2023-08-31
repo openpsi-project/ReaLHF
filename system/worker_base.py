@@ -206,6 +206,8 @@ class WorkerControlPanel:
 
         self.__requester = requester
 
+        self.__logger = logging.getLogger("worker control panel")
+
     def __del__(self):
         if not self.__closed:
             self.close()
@@ -220,8 +222,7 @@ class WorkerControlPanel:
             self.__closed = True
 
     def close(self):
-        logger.info("Closing worker control panel.")
-        raise NotImplementedError()
+        self.__logger.info("Closing worker control panel.")
 
     @staticmethod
     def name(worker_type, worker_index):
