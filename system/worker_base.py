@@ -63,6 +63,10 @@ class WorkerServerTaskQueue:
     def respond(self, response):
         raise NotImplementedError()
 
+    @property
+    def port(self) -> int:
+        return -1
+
 
 class WorkerServer:
     """A light-weight implementation of an RPC server.
@@ -110,7 +114,7 @@ class WorkerServer:
 
         if experiment_name is not None and trial_name is not None:
             key = base.names.worker(experiment_name, trial_name, worker_name)
-            address = f"{host_ip}:{self.__port}"
+            address = f"{host_ip}:{self.__task_queue.port}"
             base.name_resolve.add(key, address, keepalive_ttl=10, delete_on_exit=True)
             logger.info("Added name_resolve entry %s for worker server at %s", key, address)
 
@@ -160,7 +164,7 @@ class WorkerServer:
         base.name_resolve.add(
             base.names.worker_status(experiment_name=self.__experiment_name,
                                      trial_name=self.__trial_name,
-                                     worker_name=self.worker_name),
+                                     worker_name=self.__worker_name),
             value=status.value,
             keepalive_ttl=WORKER_JOB_STATUS_LINGER_SECONDS,  # Job Status lives one minutes after worker exit.
             replace=True,

@@ -152,4 +152,4 @@ def make_control(type_, experiment_name, trial_name, **kwargs):
         requester = RayRequester(**kwargs)
     else:
         raise NotImplementedError(type_)
-    raise worker_base.WorkerControlPanel(experiment_name, trial_name, requester)
+    return worker_base.WorkerControlPanel(experiment_name, trial_name, requester)

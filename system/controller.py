@@ -9,9 +9,8 @@ import time
 import ray
 import ray.util.queue as rq
 
-from system import Controller, load_worker, run_worker, WORKER_TYPES
+from system import Controller, load_worker, WORKER_TYPES
 from system.worker_base import WorkerServerStatus as Wss
-from system.worker_control import RayServer
 import api.config
 import base.monitoring
 import base.name_resolve

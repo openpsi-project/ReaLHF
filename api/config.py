@@ -32,7 +32,7 @@ for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
 
 _LLM_GPU_IMAGE = "llm/llm-gpu"
-_LLM_CPU_IMAGE = "llm/llm-gpu"
+_LLM_CPU_IMAGE = "llm/llm-cpu"
 
 
 @dataclasses.dataclass
