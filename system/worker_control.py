@@ -132,7 +132,7 @@ class RayRequester(worker_base.WorkerControlPanelRequester):
         request_queue = self.__request_comms[worker_name]
         request_queue.put((command, kwargs))
         reply_queue = self.__reply_comms[worker_name]
-        return self.RayQueueFuture(reply_queue)
+        return self.RayQueueFuture(worker_name, reply_queue)
 
 
 def make_server(type_, worker_name, experiment_name, trial_name, **kwargs):
