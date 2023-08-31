@@ -329,8 +329,7 @@ class RayController:
                 except TimeoutError:
                     raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
         logger.info("Ray cluster started. Ready to run.")
-        # FIXME: for debug only
-        time.sleep(10000000)
+
         ray.init('auto')
         try:
             self._launch_workers(workers_configs)
@@ -339,7 +338,7 @@ class RayController:
             self.shutdown()
 
     def shutdown(self):
-        ray_exiting_name = names.ray_cluster(self.experiment_name, self.trial_name, "exiting")
+        ray_exiting_name = names.ray_cluster(self.__experiment_name, self.__trial_name, "exiting")
         base.name_resolve.add(ray_exiting_name, value="1", delete_on_exit=True)
         del self.__workers_reply_comm
         del self.__workers_request_comm
