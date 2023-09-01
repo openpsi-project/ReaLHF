@@ -101,7 +101,7 @@ def main_start(args):
         env_vars=base_environs,
     )
 
-    sched.wait(timeout=120, update=True)
+    sched.wait(timeout=300, update=True)
     logger.info(f"Resetting name resolving repo... Done.")
 
     logger.info(f"Running configuration: {experiment.__class__.__name__}")

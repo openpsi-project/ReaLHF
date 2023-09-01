@@ -10,6 +10,7 @@ import base.gpu_utils
 import base.name_resolve
 import base.names
 
+RAY_HEAD_WAIT_TIME = 500
 logger = logging.getLogger("Main-Workers")
 
 
@@ -72,7 +73,7 @@ def main_controller(args):
         else:
             raise RuntimeError(f"Address not found in ray start output: {output}.")
         ray_addr_name = base.names.ray_cluster(args.experiment_name, args.trial_name, "address")
-        base.name_resolve.add(ray_addr_name, addr, delete_on_exit=True, keepalive_ttl=300)
+        base.name_resolve.add(ray_addr_name, addr, delete_on_exit=True, keepalive_ttl=RAY_HEAD_WAIT_TIME)
 
     controller = system.make_controller(type_=args.type,
                                         experiment_name=args.experiment_name,
@@ -90,7 +91,7 @@ def main_controller(args):
 def main_ray(args):
     ray_addr_name = base.names.ray_cluster(args.experiment_name, args.trial_name, "address")
     try:
-        address = base.name_resolve.wait(ray_addr_name, timeout=300)
+        address = base.name_resolve.wait(ray_addr_name, timeout=RAY_HEAD_WAIT_TIME)
     except TimeoutError:
         raise TimeoutError("Timeout waiting for ray cluster head address.")
     ray_flags = [f"--address={address}"]
