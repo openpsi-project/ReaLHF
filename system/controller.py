@@ -5,6 +5,7 @@ import dataclasses
 import enum
 import logging
 import time
+import traceback
 
 import ray
 import ray.util.queue as rq
@@ -64,7 +65,7 @@ class Controller:
         """
         self.__control.auto_connect()
 
-    def start(self, experiment: api.config.Experiment, ignore_worker_error=False):
+    def start(self, experiment: api.config.Experiment, ignore_worker_error=False, reset_nameresolve=True):
         if ignore_worker_error:
             check_worker_status = ()
             remove_worker_status = (Wss.COMPLETED, Wss.ERROR, Wss.LOST, Wss.UNKNOWN)
@@ -88,9 +89,11 @@ class Controller:
                 raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
             logger.info(f"Configuration has {len(config)} {name}.")
 
-        # State clean-up.
-        logger.info("Cleaning up previous states")
-        base.name_resolve.clear_subtree(names.trial_root(self.experiment_name, self.trial_name))
+        if reset_nameresolve:
+            # State clean-up. Required for local mode.
+            logger.info("Cleaning up previous states")
+            base.name_resolve.clear_subtree(names.trial_root(self.experiment_name, self.trial_name))
+
         base.name_resolve.add(names.trial_registry(self.experiment_name, self.trial_name),
                               value=datetime.now().strftime("%Y%m%d"),
                               delete_on_exit=False,
@@ -134,7 +137,8 @@ class Controller:
                     worker_kwargs=[dict(config=cfg) for cfg in cfgs],
                     progress=True)
         except Exception as e:
-            logger.error("Configuring Failed. Exiting Workers.")
+            logger.error(f"Configuring Failed: {e}. Exiting Workers.")
+            logger.error(traceback.format_exc())
             self.interrupt(wait_timeout=120)
             raise e
 
@@ -229,6 +233,24 @@ class Controller:
             raise RuntimeError(f"Fail to interrupt workers, timeout={wait_timeout}.")
 
 
+def run_ray_worker(worker_type, idx, experiment_name, trial_name, comm: Tuple[rq.Queue, rq.Queue]):
+    worker_name = f"{worker_type}/{idx}"
+    server = system.worker_control.make_server(
+        'ray',
+        worker_name=worker_name,
+        experiment_name=experiment_name,
+        trial_name=trial_name,
+        comm=comm,
+    )
+    worker = load_worker(worker_type)(server=server)
+    try:
+        worker.run()
+    except Exception as e:
+        logging.error("Worker %s failed with exception: %s", worker_name, e)
+        logging.error(traceback.format_exc())
+        raise e
+
+
 class RayController:
     """A controller that uses Ray to manage workers.
     
@@ -245,7 +267,6 @@ class RayController:
 
         self.__workers_reply_comm = None
         self.__workers_request_comm = None
-        self.__workers_run_refs = None
         self.__workers_ref = None
 
     def _launch_workers(self, workers_configs: List[Tuple[str, List, api.config.TasksGroup]]):
@@ -254,7 +275,6 @@ class RayController:
         self.__workers_ref: Dict[str, ray.ObjectRef] = {}
         self.__workers_request_comm: Dict[str, rq.Queue] = dict()
         self.__workers_reply_comm: Dict[str, rq.Queue] = dict()
-        self.__workers_run_refs: Dict[str, ray.ObjectRef] = {}
         for worker_type, config, schedule in workers_configs:
             count = len(config)
             all_schedules: List[api.config.TasksGroup] = []
@@ -271,33 +291,20 @@ class RayController:
                     all_schedules.append(s_)
             assert len(all_schedules) == len(config)
             comms = [(rq.Queue(maxsize=8), rq.Queue(maxsize=8)) for _ in all_schedules]
-            worker_servers = [
-                system.worker_control.make_server(
-                    'ray',
-                    worker_name=f"{worker_type}/{idx}",
-                    experiment_name=self.__experiment_name,
-                    trial_name=self.__trial_name,
-                    comm=comm,
-                ) for idx, comm in enumerate(comms)
-            ]
-            worker_cls = load_worker(worker_type)
-            refs = [
+            jobs = [
                 ray.remote(
                     num_cpus=sch.scheduling.cpu,
                     num_gpus=sch.scheduling.gpu,
                     memory=sch.scheduling.mem,
                     name=f"{worker_type}/{idx}",
-                )(worker_cls).remote(server=server)
-                for idx, (server, sch) in enumerate(zip(worker_servers, all_schedules))
+                )(run_ray_worker).remote(worker_type, idx, self.__experiment_name, self.__trial_name, comm)
+                for idx, (comm, sch) in enumerate(zip(comms, all_schedules))
             ]
-            _run_refs = [ref.run.remote() for ref in refs]
-
-            for idx, (ref, c, run_ref) in enumerate(zip(refs, comms, _run_refs)):
+            for idx, (job, c) in enumerate(zip(jobs, comms)):
                 name = f"{worker_type}/{idx}"
-                self.__workers_ref[name] = ref
+                self.__workers_ref[name] = job
                 self.__workers_request_comm[name] = c[0]
                 self.__workers_reply_comm[name] = c[1]
-                self.__workers_run_refs[name] = run_ref
             logger.info(f"Launched {count} {worker_type}.")
 
         panel = system.worker_control.make_control(
@@ -308,6 +315,7 @@ class RayController:
             reply_comms=self.__workers_reply_comm,
         )
         self.__base_controller = Controller(self.__experiment_name, self.__trial_name, panel)
+        logger.info("All Ray workers are lauched.")
 
     def start(self, experiment: api.config.Experiment, ignore_worker_error=False):
         scheduling: api.config.ExperimentScheduling = experiment.scheduling_setup()
@@ -316,33 +324,37 @@ class RayController:
         workers_configs = [(k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES]
         workers_configs: List[Tuple[str, List, api.config.TasksGroup]]
 
-        for name, config, schedule in workers_configs:
-            count = sum([s.count for s in schedule]) if isinstance(schedule, list) else schedule.count
-            if len(config) != count:
-                logger.error("Scheduling and config mismatch, interrupting all workers.")
-                raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
-            for idx in range(count):
-                try:
-                    base.name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
-                                                             f"{name}/{idx}"),
-                                           timeout=300)
-                except TimeoutError:
-                    raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
-        logger.info("Ray cluster started.")
+        ####################################################################
+        # for name, config, schedule in workers_configs:
+        #     count = sum([s.count for s in schedule]) if isinstance(schedule, list) else schedule.count
+        #     if len(config) != count:
+        #         logger.error("Scheduling and config mismatch, interrupting all workers.")
+        #         raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
+        #     for idx in range(count):
+        #         try:
+        #             base.name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
+        #                                                      f"{name}/{idx}"),
+        #                                    timeout=300)
+        #         except TimeoutError:
+        #             raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
+        # logger.info("Ray cluster started.")
 
-        try:
-            ray_head_addr = base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
-                                                                     self.__trial_name, "address"),
-                                                   timeout=300)
-        except TimeoutError:
-            raise RuntimeError("Timeout waiting for ray cluster head address.")
-        ray.init(address=ray_head_addr)
+        # try:
+        #     ray_head_addr = base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
+        #                                                              self.__trial_name, "address"),
+        #                                            timeout=300)
+        # except TimeoutError:
+        #     raise RuntimeError("Timeout waiting for ray cluster head address.")
+        # ray_head_addr = 'localhost:8777'
+        ####################################################################
+        # ray.init(address=ray_head_addr)
+        ray.init()
 
         logger.info("Ray initialized! Ready to run workers.")
 
         try:
             self._launch_workers(workers_configs)
-            self.__base_controller.start(experiment, ignore_worker_error)
+            self.__base_controller.start(experiment, ignore_worker_error, reset_nameresolve=False)
         except Exception as e:
             self.shutdown()
 
@@ -351,6 +363,5 @@ class RayController:
         base.name_resolve.add(ray_exiting_name, value="1", delete_on_exit=True)
         del self.__workers_reply_comm
         del self.__workers_request_comm
-        del self.__workers_run_refs
         del self.__workers_ref
         ray.shutdown()

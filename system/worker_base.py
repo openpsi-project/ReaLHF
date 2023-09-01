@@ -1,4 +1,3 @@
-from hashlib import new
 from typing import Any, Dict, List, Optional, Tuple
 import dataclasses
 import enum
@@ -9,7 +8,6 @@ import socket
 import threading
 import time
 
-import prometheus_client
 import wandb
 
 from api import config as config_pkg
@@ -468,10 +466,6 @@ class Worker:
         if self._server is not None:
             self.logger.debug(f"Setting worker server status to {status}")
             self._server.set_status(status)
-
-    def __del__(self):
-        if self.__wandb_run is not None:
-            self.__wandb_run.finish()
 
     @property
     def is_configured(self):

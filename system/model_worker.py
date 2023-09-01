@@ -1,14 +1,7 @@
-from typing import Any, Optional, Tuple
-import datetime
 import gc
-import logging
-import os
-import queue
 import socket
-import threading
 import time
 
-import numpy as np
 import torch
 import torch.utils.data
 
@@ -20,6 +13,10 @@ import base.namedarray as namedarray
 import base.seeding as seeding
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
+
+# Register all implemented datasets and models.
+import impl.model  # isort:skip
+import impl.data  # isort:skip
 
 
 class ModelWorker(worker_base.Worker):

@@ -170,6 +170,7 @@ def main():
                            type=str,
                            default=None,
                            help="trial name; by default uses '<USER>-test'")
+    # TODO: implement a ray_local mode for debug
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray"])
     subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
     subparser.add_argument("--wandb_mode",
