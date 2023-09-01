@@ -46,7 +46,7 @@ class Model:
             self.module = self.module.to(self.device)
         except ValueError as e:
             # 4-bit and 8-bit model may fail here
-            logger.error(f"Failed to move model to device {self.device} because {e}")
+            logger.warning(f"Failed to move model to device {self.device} because {e}. Abort to device.")
 
     def inc_version(self):
         self.version.global_step += 1

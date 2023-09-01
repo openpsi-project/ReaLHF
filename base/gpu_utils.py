@@ -63,8 +63,8 @@ def setup_ddp(expr_name, trial_name, model_name, worker_index):
     ddp_rank = global_peers.index(str(worker_index))
 
     global GPU_DEVICES_ISOLATED
-    if not GPU_DEVICES_ISOLATED and os.environ['DLLM_MODE'] != 'RAY':
-        raise RuntimeError("GPU devices not isolated. This should not happen.")
+    if not GPU_DEVICES_ISOLATED and 'RAY' not in os.environ['DLLM_MODE']:
+        raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
     assert len(os.environ['CUDA_VISIBLE_DEVICES'].split(',')) == 1, os.environ['CUDA_VISIBLE_DEVICES']
     local_gpu_id = int(os.environ['CUDA_VISIBLE_DEVICES'])
 

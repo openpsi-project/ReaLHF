@@ -65,7 +65,7 @@ class Controller:
         """
         self.__control.auto_connect()
 
-    def start(self, experiment: api.config.Experiment, ignore_worker_error=False, reset_nameresolve=True):
+    def start(self, experiment: api.config.Experiment, ignore_worker_error=False):
         if ignore_worker_error:
             check_worker_status = ()
             remove_worker_status = (Wss.COMPLETED, Wss.ERROR, Wss.LOST, Wss.UNKNOWN)
@@ -88,11 +88,6 @@ class Controller:
                 self.interrupt()
                 raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
             logger.info(f"Configuration has {len(config)} {name}.")
-
-        if reset_nameresolve:
-            # State clean-up. Required for local mode.
-            logger.info("Cleaning up previous states")
-            base.name_resolve.clear_subtree(names.trial_root(self.experiment_name, self.trial_name))
 
         base.name_resolve.add(names.trial_registry(self.experiment_name, self.trial_name),
                               value=datetime.now().strftime("%Y%m%d"),
@@ -142,41 +137,41 @@ class Controller:
             self.interrupt(wait_timeout=120)
             raise e
 
-        # # Configure monitoring.
-        logger.info("Configuring monitoring")
-        mon_addresses = []
-        mon_repo = base.monitoring.TargetRepository()
-        workers = None
-        for _ in range(10):
-            rs = self.__control.group_request("start_monitoring", worker_names=workers, timeout=3)
-            workers = []
-            for r in rs:
-                if r.timed_out:
-                    workers.append(r.worker_name)
-                else:
-                    mon_addresses.append(f"{r.result.host}:{r.result.prometheus_port}")
-            if len(workers) == 0:
-                break
-            logger.warning("Failed start monitoring for %d workers, reconnecting and trying again",
-                           len(workers))
-            self.__control.connect(workers, reconnect=True)
-        else:
-            raise RuntimeError("Failed to start monitoring.")
+        # Configure monitoring.
+        # logger.info("Configuring monitoring")
+        # mon_addresses = []
+        # mon_repo = base.monitoring.TargetRepository()
+        # workers = None
+        # for _ in range(10):
+        #     rs = self.__control.group_request("start_monitoring", worker_names=workers, timeout=3)
+        #     workers = []
+        #     for r in rs:
+        #         if r.timed_out:
+        #             workers.append(r.worker_name)
+        #         else:
+        #             mon_addresses.append(f"{r.result.host}:{r.result.prometheus_port}")
+        #     if len(workers) == 0:
+        #         break
+        #     logger.warning("Failed start monitoring for %d workers, reconnecting and trying again",
+        #                    len(workers))
+        #     self.__control.connect(workers, reconnect=True)
+        # else:
+        #     raise RuntimeError("Failed to start monitoring.")
 
-        with mon_repo.add_target_group(f"{self.experiment_name}.{self.trial_name}",
-                                       mon_addresses,
-                                       delete_on_exit=True):
-            logger.info("Start workers...")
-            self.__control.group_request("start")
-            logger.info("Started.")
-            try:
-                self.wait(timeout=None, check_status=check_worker_status, remove_status=remove_worker_status)
-            except system.worker_base.WorkerException as e:
-                logger.error(e)
-                self.interrupt(wait_timeout=30)
-            except KeyboardInterrupt:
-                logger.info("Interrupted.")
-                self.interrupt(wait_timeout=30)
+        # with mon_repo.add_target_group(f"{self.experiment_name}.{self.trial_name}",
+        #                                mon_addresses,
+        #                                delete_on_exit=True):
+        logger.info("Start workers...")
+        self.__control.group_request("start")
+        logger.info("Started.")
+        try:
+            self.wait(timeout=None, check_status=check_worker_status, remove_status=remove_worker_status)
+        except system.worker_base.WorkerException as e:
+            logger.error(e)
+            self.interrupt(wait_timeout=30)
+        except KeyboardInterrupt:
+            logger.info("Interrupted.")
+            self.interrupt(wait_timeout=30)
 
     def wait(self, timeout: Optional[int], check_status: Tuple[Wss, ...], remove_status: Tuple[Wss, ...]):
         deadline = None if timeout is None else time.time() + timeout
@@ -259,7 +254,7 @@ class RayController:
     instead of submitting them to the scheduelr.
     """
 
-    def __init__(self, experiment_name, trial_name):
+    def __init__(self, experiment_name, trial_name, local_mode: bool):
         # base controller will be lazier initialized when launching workers.
         self.__experiment_name = experiment_name
         self.__trial_name = trial_name
@@ -268,6 +263,8 @@ class RayController:
         self.__workers_reply_comm = None
         self.__workers_request_comm = None
         self.__workers_ref = None
+
+        self.__local_mode = local_mode
 
     def _launch_workers(self, workers_configs: List[Tuple[str, List, api.config.TasksGroup]]):
         # Launch remote workers.
@@ -324,37 +321,36 @@ class RayController:
         workers_configs = [(k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES]
         workers_configs: List[Tuple[str, List, api.config.TasksGroup]]
 
-        ####################################################################
-        # for name, config, schedule in workers_configs:
-        #     count = sum([s.count for s in schedule]) if isinstance(schedule, list) else schedule.count
-        #     if len(config) != count:
-        #         logger.error("Scheduling and config mismatch, interrupting all workers.")
-        #         raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
-        #     for idx in range(count):
-        #         try:
-        #             base.name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
-        #                                                      f"{name}/{idx}"),
-        #                                    timeout=300)
-        #         except TimeoutError:
-        #             raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
-        # logger.info("Ray cluster started.")
+        if self.__local_mode:
+            ray.init()
+        else:
+            for name, config, schedule in workers_configs:
+                count = sum([s.count for s in schedule]) if isinstance(schedule, list) else schedule.count
+                if len(config) != count:
+                    logger.error("Scheduling and config mismatch, interrupting all workers.")
+                    raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
+                for idx in range(count):
+                    try:
+                        base.name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
+                                                                 f"{name}/{idx}"),
+                                               timeout=300)
+                    except TimeoutError:
+                        raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
+            logger.info("Ray cluster started.")
 
-        # try:
-        #     ray_head_addr = base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
-        #                                                              self.__trial_name, "address"),
-        #                                            timeout=300)
-        # except TimeoutError:
-        #     raise RuntimeError("Timeout waiting for ray cluster head address.")
-        # ray_head_addr = 'localhost:8777'
-        ####################################################################
-        # ray.init(address=ray_head_addr)
-        ray.init()
+            try:
+                ray_head_addr = base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
+                                                                         self.__trial_name, "address"),
+                                                       timeout=300)
+            except TimeoutError:
+                raise RuntimeError("Timeout waiting for ray cluster head address.")
+            ray.init(address=ray_head_addr)
 
         logger.info("Ray initialized! Ready to run workers.")
 
         try:
             self._launch_workers(workers_configs)
-            self.__base_controller.start(experiment, ignore_worker_error, reset_nameresolve=False)
+            self.__base_controller.start(experiment, ignore_worker_error)
         except Exception as e:
             self.shutdown()
 

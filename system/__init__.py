@@ -61,6 +61,8 @@ def make_controller(type_, experiment_name, trial_name):
         panel = getattr(control_module, 'make_control')('zmq', experiment_name, trial_name)
         return getattr(module, "Controller")(experiment_name, trial_name, panel)
     elif type_ == 'ray':
-        return getattr(module, "RayController")(experiment_name, trial_name)
+        return getattr(module, "RayController")(experiment_name, trial_name, local_mode=False)
+    elif type_ == 'local_ray':
+        return getattr(module, "RayController")(experiment_name, trial_name, local_mode=True)
     else:
         raise NotImplementedError(f"Unknown controller type {type_}.")

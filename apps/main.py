@@ -14,6 +14,13 @@ import system
 logger = logging.getLogger("main")
 
 
+def scheduler_mode(mode: str) -> str:
+    if mode == 'ray' or mode == 'slurm':
+        return 'slurm'
+    elif 'local' in mode:
+        return 'local'
+
+
 def _submit_workers(
     sched: scheduler.client.SchedulerClient,
     expr_name: str,
@@ -75,8 +82,8 @@ def main_start(args):
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
     experiment = config_package.make_experiment(args.experiment_name)
-    scheduler_mode = args.mode if args.mode != 'ray' else 'slurm'
-    sched = scheduler.client.make(mode=scheduler_mode, job_name=f"{args.experiment_name}_{trial_name}")
+    sched = scheduler.client.make(mode=scheduler_mode(args.mode),
+                                  job_name=f"{args.experiment_name}_{trial_name}")
 
     setup = experiment.scheduling_setup()
 
@@ -100,6 +107,12 @@ def main_start(args):
     logger.info(f"Running configuration: {experiment.__class__.__name__}")
 
     # Schedule controller
+    if args.mode == 'ray':
+        controller_type = 'ray'
+    elif args.mode == 'local_ray':
+        controller_type = 'local_ray'
+    else:
+        controller_type = 'zmq'
     sched.submit_array(
         task_name="ctl",
         cmd=scheduler.client.control_cmd(
@@ -107,7 +120,7 @@ def main_start(args):
             trial_name,
             args.debug,
             args.ignore_worker_error,
-            controller_type="ray" if args.mode == 'ray' else "zmq",
+            controller_type,
         ),
         count=1,
         cpu=1,
@@ -117,20 +130,23 @@ def main_start(args):
         container_image=args.image_name or setup.controller_image,
     )
 
-    workers_configs = ((k, getattr(setup, k)) for k in system.WORKER_TYPES)
+    if args.mode != 'local_ray':
+        workers_configs = ((k, getattr(setup, k)) for k in system.WORKER_TYPES)
 
-    for name, scheduling_setup in workers_configs:
-        if not isinstance(scheduling_setup, list):
-            scheduling_setup = [scheduling_setup]
-        _submit_workers(sched,
-                        expr_name,
-                        trial_name,
-                        args.debug,
-                        name,
-                        scheduling_setup,
-                        base_environs,
-                        args.image_name,
-                        use_ray_cluster=(args.mode == 'ray'))
+        for name, scheduling_setup in workers_configs:
+            if not isinstance(scheduling_setup, list):
+                scheduling_setup = [scheduling_setup]
+            # For local or slurm mode, launch all workers.
+            # For ray mode, launch the ray cluster for all workers via slurm.
+            _submit_workers(sched,
+                            expr_name,
+                            trial_name,
+                            args.debug,
+                            name,
+                            scheduling_setup,
+                            base_environs,
+                            args.image_name,
+                            use_ray_cluster=(args.mode == 'ray'))
 
     try:
         sched.wait()
@@ -140,8 +156,8 @@ def main_start(args):
 
 
 def main_stop(args):
-    scheduler_mode = args.mode if args.mode != 'ray' else 'slurm'
-    sched = scheduler.client.make(mode=scheduler_mode, job_name=f"{args.experiment_name}_{args.trial_name}")
+    sched = scheduler.client.make(mode=scheduler_mode(args.mode),
+                                  job_name=f"{args.experiment_name}_{args.trial_name}")
     sched.find_all()
     sched.stop_all()
 
@@ -170,8 +186,7 @@ def main():
                            type=str,
                            default=None,
                            help="trial name; by default uses '<USER>-test'")
-    # TODO: implement a ray_local mode for debug
-    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray"])
+    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
     subparser.add_argument("--wandb_mode",
                            type=str,
@@ -193,7 +208,7 @@ def main():
     subparser = subparsers.add_parser("stop", help="stops an experiment. only slurm experiment is supported.")
     subparser.add_argument("--experiment_name", "-e", type=str, required=True, help="name of the experiment")
     subparser.add_argument("--trial_name", "-f", type=str, required=True, help="name of the trial")
-    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray"])
+    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.set_defaults(func=main_stop)
 
     subparser = subparsers.add_parser("find_config",
