@@ -58,8 +58,8 @@ def _submit_workers(
 
         scheduled_jobs.append(
             sched.submit_array(
-                job_name,
-                cmd,
+                task_name=job_name,
+                cmd=cmd,
                 count=sch_cfg.count,
                 cpu=sch_cfg.scheduling.cpu,
                 gpu=sch_cfg.scheduling.gpu,
@@ -147,7 +147,6 @@ def main_start(args):
                             base_environs,
                             args.image_name,
                             use_ray_cluster=(args.mode == 'ray'))
-
     try:
         sched.wait()
     except (KeyboardInterrupt, scheduler.client.TaskException):

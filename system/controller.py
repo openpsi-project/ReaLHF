@@ -138,25 +138,25 @@ class Controller:
             raise e
 
         # Configure monitoring.
-        # logger.info("Configuring monitoring")
-        # mon_addresses = []
-        # mon_repo = base.monitoring.TargetRepository()
-        # workers = None
-        # for _ in range(10):
-        #     rs = self.__control.group_request("start_monitoring", worker_names=workers, timeout=3)
-        #     workers = []
-        #     for r in rs:
-        #         if r.timed_out:
-        #             workers.append(r.worker_name)
-        #         else:
-        #             mon_addresses.append(f"{r.result.host}:{r.result.prometheus_port}")
-        #     if len(workers) == 0:
-        #         break
-        #     logger.warning("Failed start monitoring for %d workers, reconnecting and trying again",
-        #                    len(workers))
-        #     self.__control.connect(workers, reconnect=True)
-        # else:
-        #     raise RuntimeError("Failed to start monitoring.")
+        logger.info("Configuring monitoring")
+        mon_addresses = []
+        mon_repo = base.monitoring.TargetRepository()
+        workers = None
+        for _ in range(10):
+            rs = self.__control.group_request("start_monitoring", worker_names=workers, timeout=3)
+            workers = []
+            for r in rs:
+                if r.timed_out:
+                    workers.append(r.worker_name)
+                else:
+                    mon_addresses.append(f"{r.result.host}:{r.result.prometheus_port}")
+            if len(workers) == 0:
+                break
+            logger.warning("Failed start monitoring for %d workers, reconnecting and trying again",
+                           len(workers))
+            self.__control.connect(workers, reconnect=True)
+        else:
+            raise RuntimeError("Failed to start monitoring.")
 
         # with mon_repo.add_target_group(f"{self.experiment_name}.{self.trial_name}",
         #                                mon_addresses,

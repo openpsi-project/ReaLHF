@@ -57,7 +57,7 @@ class SlurmSchedulerClient(SchedulerClient):
         mem=1024,
         env_vars=None,
         container_image="llm/llm-cpu",
-        container_mounts="/data:/data",
+        container_mounts="/data:/data,/lustre:/lustre",
         nodelist=None,
         exclude=None,
         hostfile=False,
@@ -105,7 +105,12 @@ class SlurmSchedulerClient(SchedulerClient):
             f.write(f"0-{ntasks-1} {cmd}\n")
 
         if spec.hostfile:
-            write_hostfile(spec.resource_requirement, ntasks, hostfile)
+            write_hostfile(spec.resource_requirement,
+                           ntasks,
+                           hostfile,
+                           node_type=None,
+                           nodelist=spec.nodelist,
+                           exclude=spec.exclude)
 
         logger.info(
             f"Allocating {ntasks} task(s) \"{task_name}\" with {cpu} cpu, {gpu} gpu and {mem} MB memory.")

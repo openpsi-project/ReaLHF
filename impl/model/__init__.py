@@ -1,5 +1,6 @@
 import impl.model.backend.deepspeed
 import impl.model.interface.wps_actor_critic
+import impl.model.interface.chat
 import impl.model.nn.basic
 import impl.model.nn.rw
 

@@ -28,6 +28,7 @@ _LLM_ENVVARS = {
     "CUDA_LAUNCH_BLOCKING": "1",
     "TORCH_USE_CUDA_DSA": "1",
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
+    "PYTHONUSERBASE": "/local/meizy"
 }
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
