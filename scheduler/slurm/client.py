@@ -1,5 +1,7 @@
+from collections import defaultdict
 from typing import List, Optional, Tuple
 import logging
+import math
 import os
 import re
 import shutil
@@ -38,10 +40,14 @@ class SlurmSchedulerClient(SchedulerClient):
         "OUT_OF_MEMORY": TaskState.FAILED,
     }
 
-    def __init__(self, job_name):
-        super().__init__(job_name)
+    def __init__(self, expr_name, trial_name):
+        super().__init__(expr_name, trial_name)
         self._tasks = {}
         self.__pending_task_specs = []
+        self.__taskname_to_ntasks = defaultdict(int)  # record ntasks for each type of task
+        self.__allocated_ntasks = defaultdict(int)
+        self.__taskname_to_nspecs = defaultdict(int)  # record commited #specs for each type of task
+        self.__allocated_workers = defaultdict(int)  # dict for worker indices
 
     def submit(self, task_name, cmd, **kwargs):
         self.submit_array(task_name, cmd, count=1, **kwargs)
@@ -49,7 +55,7 @@ class SlurmSchedulerClient(SchedulerClient):
     def submit_array(
         self,
         task_name,
-        cmd,
+        cmd,  # XXX: should be None for workers
         count,
         cpu=1,
         gpu_type: str = "geforce",
@@ -62,7 +68,7 @@ class SlurmSchedulerClient(SchedulerClient):
         exclude=None,
         hostfile=False,
     ):
-        # record information of the task, do not submit to slurn until `wait()` is called
+        # record information of the task, do not submit to slurm until `wait()` is called
         resource_requirement = SlurmResource(mem=mem, cpu=cpu, gpu=gpu, gpu_type=gpu_type)
         # TODO: temporary fix
         if gpu == 0:
@@ -79,38 +85,91 @@ class SlurmSchedulerClient(SchedulerClient):
                                            exclude=exclude,
                                            hostfile=hostfile)
         self.__pending_task_specs.append(task_spec)
-        logger.info("Registered Slurm task: %s (count=%s)", task_name, count)
+        if gpu > 0:
+            task_size = math.ceil(1 / gpu)
+            real_count = math.ceil(count / task_size)
+        else:
+            real_count = count
+        self.__taskname_to_ntasks[task_name] += real_count
+        logger.info("Registered Slurm task: %s (count=%s, real_count=%s)", task_name, count, real_count)
 
     def __commit_one(self, spec: SlurmTaskSpecification):
         """Commit one spec to slurm."""
-        task_name = spec.task_name
-        slurm_name = f"{self.job_name}:{task_name}"
+        # logging, all tasks with the same name shares the same log file
+        # spec will not be changed throughout the function
+        # sepearte task name with index
+        task_name = f"{spec.task_name}-{self.__taskname_to_nspecs[spec.task_name]}"
+        self.__taskname_to_nspecs[spec.task_name] += 1
+
         output = log_path(self.job_name, task_name)
+        slurm_name = f"{self.job_name}:{task_name}"
         os.makedirs(os.path.dirname(output), exist_ok=True, mode=0o775)
 
         ntasks = spec.ntasks
         mem = spec.resource_requirement.mem
         cpu = spec.resource_requirement.cpu
         gpu = spec.resource_requirement.gpu
-        assert gpu == 1 or gpu == 0, "GPU count must be 0 or 1 for one slurm task."
-        gpu_type = spec.resource_requirement.gpu_type
         cmd = spec.cmd
+
+        # assert gpu == 1 or gpu == 0, "GPU count must be 0 or 1 for one slurm task."
+        # support fractional GPU count
+        assert gpu <= 1 and gpu >= 0, "GPU count must be between 0 and 1."
+        gpu_type = spec.resource_requirement.gpu_type
 
         multi_prog_file = log_path(self.job_name, task_name) + ".multiprog"
         hostfile = log_path(self.job_name, task_name) + ".hostfile"
 
+        task_size = 1
+        # extra_task_size = 0
+        if gpu < 1 and gpu > 0:
+            # merge multiple tasks that has fraction GPU count into
+            # one task s.t. GPU count = 1
+            task_size = math.ceil(1 / gpu)
+            gpu = 1
+            cpu = cpu * task_size
+            mem = mem * task_size
+            # XXX: resource in task size is not scaled properly because i dont want to introduce
+            #      different resource requirements in one submit
+
+            ntasks = math.ceil(ntasks / task_size)
+            # extra_task_size = ntasks % task_size
+            # if extra_task_size > 0:
+            #     ntasks += 1
+
+        new_rr = SlurmResource(mem=mem, cpu=cpu, gpu=gpu, gpu_type=gpu_type)
+        start_group_id = self.__allocated_ntasks[spec.task_name]
+        total_ntasks = self.__taskname_to_ntasks[spec.task_name]
+        commit_index_start = self.__allocated_workers[spec.task_name]
+        self.__allocated_ntasks[spec.task_name] += ntasks
+        self.__allocated_workers[spec.task_name] += spec.ntasks
+
         with open(multi_prog_file, "w") as f:
             if "index" in cmd:
-                cmd = cmd.format(index='%t', count=str(spec.ntasks))
+                cmd = cmd.format(index=str(start_group_id), offset='%t', count=str(total_ntasks))
             f.write(f"0-{ntasks-1} {cmd}\n")
 
+        logger.info(f"{task_name} cpu: {cpu}, gpu: {gpu}, mem: {mem}, ntasks: {ntasks},"
+                    f"task_size: {task_size}, start_group_id: {start_group_id},"
+                    f"total_ntasks: {total_ntasks}, commit_index_start: {commit_index_start}")
+
         if spec.hostfile:
-            write_hostfile(spec.resource_requirement,
+            write_hostfile(new_rr,
                            ntasks,
                            hostfile,
                            node_type=None,
                            nodelist=spec.nodelist,
                            exclude=spec.exclude)
+
+        # reconstruct worker index in remote.py by adding env var
+        # start : start_index + args.group_offset * args.task_size
+        # end : start_index + min((args.group_offset + 1) * args.task_size, spec.ntasks))
+        env_vars = spec.env_vars.copy() if spec.env_vars is not None else {}
+        env_vars.update({
+            "COMMIT_INDEX_START": str(commit_index_start),
+            "TASK_SIZE": str(task_size),
+            "COMMIT_N_WORKERS": str(spec.ntasks)
+        })
+        logger.info("Setting env var")
 
         logger.info(
             f"Allocating {ntasks} task(s) \"{task_name}\" with {cpu} cpu, {gpu} gpu and {mem} MB memory.")
@@ -129,8 +188,8 @@ class SlurmSchedulerClient(SchedulerClient):
             f'#SBATCH --mem-per-cpu={mem // max(1, cpu)}M',
             # '#SBATCH --partition=cpu' if gpu == 0 else "",
             "#SBATCH --distribution=arbitrary" if spec.hostfile else "",
-            f'#SBATCH --nodelist={spec.nodelist}' if spec.nodelist is not None else "",
-            f'#SBATCH --exclude={spec.exclude}' if spec.exclude is not None else "",
+            # f'#SBATCH --nodelist={spec.nodelist}' if spec.nodelist is not None else "",
+            # f'#SBATCH --exclude={spec.exclude}' if spec.exclude is not None else "",
         ]
 
         srun_env = os.environ.copy()
@@ -142,8 +201,8 @@ class SlurmSchedulerClient(SchedulerClient):
             f"--cpus-per-task={cpu}",
             f"--gpus-per-task={gpu_type}:1" if gpu == 1 else "",
             f"--mem-per-cpu={mem // max(1, cpu)}",
-            f"--export={','.join(str(k)+'='+str(v) for k, v in spec.env_vars.items())}"
-            if spec.env_vars is not None else "",
+            f"--export={','.join(str(k)+'='+str(v) for k, v in env_vars.items())}"
+            if env_vars is not None else "",
             f"--multi-prog",
             f"--container-image={spec.container_image}",
             f"--container-mounts={spec.container_mounts}",
@@ -153,6 +212,7 @@ class SlurmSchedulerClient(SchedulerClient):
         srun_cmd = f'srun -l {" ".join(srun_flags)} {multi_prog_file}'
 
         lines += [
+            'echo "*************************************"',
             'echo "[Runner] StartTime: $(date -u)"',
             'echo "[Runner] Host: $(hostname)"',
             "echo '[Runner] Command: {}'".format(srun_cmd),
@@ -174,6 +234,7 @@ class SlurmSchedulerClient(SchedulerClient):
 
     def __commit_all(self):
         for task_spec in self.__pending_task_specs:
+            time.sleep(2)  # TODO: temo fix for multiple commits
             self.__commit_one(task_spec)
         self.__pending_task_specs = []
 
@@ -216,6 +277,7 @@ class SlurmSchedulerClient(SchedulerClient):
         return rs
 
     def __show_log(self, task_name):
+        # task_name = task_name.split("-")[0]
         try:
             terminal_columns = os.get_terminal_size().columns
         except OSError:

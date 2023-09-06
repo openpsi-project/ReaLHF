@@ -145,20 +145,32 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                     mem=10000,
                 ),
             ),
-            model_worker=TasksGroup(
-                count=self.n_total,
-                scheduling=Scheduling.model_worker_default(
-                    cpu=4,
-                    gpu=1,
-                    gpu_type='tesla',
-                    mem=60000,
-                    nodelist='frl8a140',
+            model_worker=[
+                TasksGroup(
+                    count=self.n_actors,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=1,
+                        gpu_type='geforce',
+                        mem=20000,
+                        nodelist='frl8g134,frl8g[136-137]',
+                    ),
                 ),
-            ),
+                TasksGroup(
+                    count=self.n_critics + self.n_rewards + self.n_refs,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=1,
+                        gpu=0.25,
+                        gpu_type='geforce',
+                        mem=5000,
+                        nodelist='frl8g134,frl8g[136-137]',
+                    ),
+                )
+            ],
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        actor_path = "/lustre/meizy/base_models/opt-6.7b"
+        actor_path = "/lustre/meizy/base_models/opt-125m"
         critic_path = "/lustre/meizy/base_models/opt-125m"
         # rw_lora_head_path = \
         # "/data/aigc/llm/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
@@ -171,7 +183,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
 
         mini_batch_size_per_device = 1
         batch_size_per_device = 2
-        max_prompt_len = 128
+        max_prompt_len = 256
         max_answer_len = 512 - max_prompt_len
 
         dataset = Dataset(

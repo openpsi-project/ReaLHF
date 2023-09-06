@@ -109,9 +109,9 @@ def parse_output_tres_line(tres):
     for t in tres:
         if t.startswith("mem"):
             if t.endswith("M"):
-                res.mem = int(t.split("=")[1].strip("M"))
+                res.mem = float(t.split("=")[1].strip("M"))
             elif t.endswith("G"):
-                res.mem = int(t.split("=")[1].strip("G")) * 1024
+                res.mem = float(t.split("=")[1].strip("G")) * 1024
             else:
                 raise ValueError("Unknown memory unit.")
         elif t.startswith("cpu"):

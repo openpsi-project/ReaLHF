@@ -78,7 +78,7 @@ class Controller:
         setup.set_worker_information(experiment_name=self.experiment_name, trial_name=self.trial_name)
 
         # Scheduling and connecting to workers.
-        workers_configs = []
+        # TODO for heterogeneous workers of the same type k, list scheduling[k] and setup[k] should match.
         workers_configs = [(k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES]
 
         for name, config, schedule in workers_configs:

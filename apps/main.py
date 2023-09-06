@@ -47,6 +47,7 @@ def _submit_workers(
             )
         else:
             cmd = scheduler.client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
+
         logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
 
         nodelist = sch_cfg.scheduling.nodelist
@@ -82,8 +83,7 @@ def main_start(args):
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
     experiment = config_package.make_experiment(args.experiment_name)
-    sched = scheduler.client.make(mode=scheduler_mode(args.mode),
-                                  job_name=f"{args.experiment_name}_{trial_name}")
+    sched = scheduler.client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
 
     setup = experiment.scheduling_setup()
 
@@ -147,6 +147,7 @@ def main_start(args):
                             base_environs,
                             args.image_name,
                             use_ray_cluster=(args.mode == 'ray'))
+
     try:
         sched.wait()
     except (KeyboardInterrupt, scheduler.client.TaskException):
