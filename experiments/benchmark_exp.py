@@ -117,7 +117,7 @@ def train_critic(
 
 class ChatRLHFBenchmarkExperiment(Experiment):
 
-    def __init__(self, n_actors=4, n_critics=1, n_rewards=1, n_refs=1, seed=1):
+    def __init__(self, n_actors=1, n_critics=1, n_rewards=1, n_refs=1, seed=1):
         self.n_actors = n_actors
         self.n_rewards = n_rewards
         self.n_refs = n_refs
@@ -145,6 +145,18 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                     mem=10000,
                 ),
             ),
+            # model_worker=[
+            #     TasksGroup(
+            #         count=self.n_total,
+            #         scheduling=Scheduling.model_worker_default(
+            #             cpu=4,
+            #             gpu=1,
+            #             gpu_type='geforce',
+            #             mem=20000,
+            #             nodelist='frl8g134,frl8g[136-137]',
+            #         ),
+            #     ),
+            # ]
             model_worker=[
                 TasksGroup(
                     count=self.n_actors,
@@ -157,7 +169,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                     ),
                 ),
                 TasksGroup(
-                    count=self.n_critics + self.n_rewards + self.n_refs,
+                    count=self.n_rewards + self.n_refs + self.n_critics,
                     scheduling=Scheduling.model_worker_default(
                         cpu=1,
                         gpu=0.25,
@@ -181,10 +193,10 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         rw_output_scaling = 0.1
         rw_output_bias = 0.0
 
-        mini_batch_size_per_device = 1
+        mini_batch_size_per_device = 2
         batch_size_per_device = 2
         max_prompt_len = 256
-        max_answer_len = 512 - max_prompt_len
+        max_answer_len = 256
 
         dataset = Dataset(
             'chat_prompt',
@@ -214,21 +226,21 @@ class ChatRLHFBenchmarkExperiment(Experiment):
 
         generation_kwargs = dict(
             max_new_tokens=max_answer_len,
-            min_new_tokens=10,
-            do_sample=True,
-            top_p=1.0,
-            top_k=1000,
-            temperature=1.0,
-            num_beams=1,
-            num_beam_groups=1,
-            num_return_sequences=1,
+            min_new_tokens=max_answer_len,
+            # do_sample=False,
+            # top_p=1.0,
+            # top_k=1,
+            # temperature=1.0,
+            # num_beams=1,
+            # num_beam_groups=1,
+            # num_return_sequences=1,
         )
         actor_model = Model(
             "causal_lm",
             args=dict(
                 model_name_or_path=actor_path,
                 init_from_scratch=False,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=False),
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=True),
                 generation_kwargs=generation_kwargs,
                 # quantization_kwargs=dict(load_in_8bit=True),
             ),
@@ -254,7 +266,17 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 load_v_head_path=None,
             ),
         )
-        critic_model = copy.deepcopy(rw_model)
+        critic_model = rw_model = Model(
+            "wps_reward",
+            args=dict(
+                model_name_or_path=critic_path,
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=True),
+                # quantization_kwargs=dict(load_in_8bit=True),
+                output_bias=rw_output_bias,
+                output_scaling=rw_output_scaling,
+                load_v_head_path=None,
+            ),
+        )
         # critic_model.args['lora_op_after_creation'] = None
 
         actor_backend = ModelBackend(
@@ -268,10 +290,11 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                     betas=(0.9, 0.95),
                 ),
                 lr_scheduler_type='linear',
-                warmup_steps_proportion=0.075,
+                warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
                 zero_stage=2,
-                enable_fp16=False,
+                enable_fp16=True,
+                enable_hybrid_engine=False,
             ),
         )
         critic_backend = ModelBackend(
@@ -285,12 +308,13 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                     betas=(0.9, 0.95),
                 ),
                 lr_scheduler_type='linear',
-                warmup_steps_proportion=0.075,
+                warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
                 zero_stage=2,
                 offload_param=False,
                 offload_optimizer_state=False,
-                enable_fp16=False,
+                enable_fp16=True,
+                enable_hybrid_engine=False,
             ),
         )
         ref_backend = rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=False))
@@ -330,6 +354,13 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                         stream=actor_streams[i]) for i in range(self.n_actors)
         ] + [
             ModelWorker(seed=self.seed,
+                        model=critic_model,
+                        backend=critic_backend,
+                        interface=critic_interface,
+                        model_name='critic',
+                        stream=critic_streams[i]) for i in range(self.n_critics)
+        ] + [
+            ModelWorker(seed=self.seed,
                         model=rw_model,
                         backend=rw_backend,
                         interface=rw_interface,
@@ -342,13 +373,6 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                         interface=ref_interface,
                         model_name='ref',
                         stream=ref_model_streams[i]) for i in range(self.n_refs)
-        ] + [
-            ModelWorker(seed=self.seed,
-                        model=critic_model,
-                        backend=critic_backend,
-                        interface=critic_interface,
-                        model_name='critic',
-                        stream=critic_streams[i]) for i in range(self.n_critics)
         ]
 
         ecs = MasterWorkerECS(model_worker).add_systems([

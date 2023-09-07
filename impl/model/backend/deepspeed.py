@@ -26,18 +26,19 @@ def get_train_ds_config(offload_param: bool = False,
                         offload_optimizer_state: bool = False,
                         enable_fp16: bool = True,
                         stage: int = 2,
+                        hybrid_engine_args: Dict = dict(enabled=False),
                         **kwargs):
     zero_opt_dict = {
         "stage": stage,
-        "overlap_comm": True,
-        "round_robin_gradients": True,
+        # "overlap_comm": True,
+        # "round_robin_gradients": True,
         "offload_param": {
             "device": "cpu" if offload_param else "none",
-            "pin_memory": True,
+            # "pin_memory": True,
         },
         "offload_optimizer": {
             "device": "cpu" if offload_optimizer_state else "none",
-            "pin_memory": True,
+            # "pin_memory": True,
         },
         "stage3_param_persistence_threshold": 1e4,
         "stage3_max_live_parameters": 3e7,
@@ -50,8 +51,9 @@ def get_train_ds_config(offload_param: bool = False,
         "fp16": {
             "enabled": enable_fp16,
             "loss_scale_window": 100,
-            "initial_scale_power": 12,
+            # "initial_scale_power": 12,
         },
+        "hybrid_engine": hybrid_engine_args,
         "gradient_clipping": 1.0,
         "prescale_gradients": False,
         "gradient_predevide_factor": 1.0,
@@ -161,6 +163,14 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     offload_optimizer_state: bool = False
     enable_fp16: bool = True
     zero_stage: int = 2
+    # hybrid engine args
+    enable_hybrid_engine: bool = False
+    max_out_tokens: int = 512
+    inference_tp_size: int = 1
+    release_inference_cache: bool = False
+    pin_parameters: bool = True
+    tp_gather_partition_size: int = 8
+    # addtional deepspeed args
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
@@ -180,11 +190,21 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
         else:
             raise NotImplementedError(f"Unsupported optimizer: {self.optimizer_name}.")
 
+        hybrid_engine_args = dict(
+            enabled=self.enable_hybrid_engine,
+            max_out_tokens=self.max_out_tokens,
+            inference_tp_size=self.inference_tp_size,
+            release_inference_cache=self.release_inference_cache,
+            pin_parameters=self.pin_parameters,
+            tp_gather_partition_size=self.tp_gather_partition_size,
+        )
+
         ds_config = get_train_ds_config(
             offload_param=self.offload_param,
             offload_optimizer_state=self.offload_optimizer_state,
             stage=self.zero_stage,
             enable_fp16=self.enable_fp16,
+            hybrid_engine_args=hybrid_engine_args,
             **self.additional_ds_config,
         )
 
