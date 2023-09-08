@@ -65,7 +65,7 @@ class SchedulerClient:
             count: Number of tasks. The indices of the tasks shall be 0..count-1.
         """
         for index in range(count):
-            self.submit(task_name + "_" + str(index), cmd.format(index=index), **kwargs)
+            self.submit(task_name + "_" + str(index), cmd.format(index=index, count=count), **kwargs)
 
     def stop(self, task_name):
         """Stops a running task. Raises exception if there is no such task, but passes if the task has stopped
