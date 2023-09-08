@@ -126,7 +126,7 @@ class ModelWorker(worker_base.Worker):
             else:
                 raise NotImplementedError(f"Unknown request type: {request.handle_name}.")
         except RuntimeError as e:
-            self.print_monitor_info()
+            # We may print some info here.
             raise e
         if self.is_master:
             self.logger.info(f"Model worker {self.model_name} handle request {request.handle_name}"

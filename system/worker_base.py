@@ -13,7 +13,6 @@ import wandb
 from api import config as config_pkg
 from base.gpu_utils import set_cuda_device
 import base.cluster
-import base.monitoring
 import base.name_resolve
 import base.names
 import base.network
@@ -395,12 +394,6 @@ class WorkerControlPanel:
 
 
 @dataclasses.dataclass
-class MonitoringInformation:
-    host: str
-    prometheus_port: int
-
-
-@dataclasses.dataclass
 class PollResult:
     # Number of total samples and batches processed by the worker. Specifically:
     # - For an actor worker, sample_count = batch_count = number of env.step()-s being executed.
@@ -437,13 +430,11 @@ class Worker:
         self.__exiting = False
         self.config = None
         self.__is_configured = False
-        self._monitoring_info = None
 
         self._server = server
         if server is not None:
             server.register_handler('configure', self.configure)
             server.register_handler('reconfigure', self.reconfigure)
-            server.register_handler('start_monitoring', self.start_monitoring)
             server.register_handler('start', self.start)
             server.register_handler('pause', self.pause)
             server.register_handler('exit', self.exit)
@@ -456,9 +447,7 @@ class Worker:
         self.__last_successful_poll_time = None
         self.__worker_info = None
 
-        # Monitoring related.
         self._start_time_ns = None
-        self.__wandb_run = None
 
         self.__set_status(WorkerServerStatus.READY)
 
@@ -491,10 +480,6 @@ class Worker:
         assert not self.__running
         self.logger.info("Configuring with: %s", config)
 
-        # For passing tests
-        self.monitor = base.monitoring.DummyMonitor(None)
-        self.monitor_thread = base.monitoring.DummyMonitorThread()
-
         r = self._configure(config)
         self.__worker_info = r
         self.__worker_type = r.worker_type
@@ -522,66 +507,6 @@ class Worker:
         self._reconfigure(**kwargs)
         self.__is_configured = True
         self.logger.info("Reconfigured successfully")
-
-    def print_monitor_info(self):
-        # for debugging in workers
-        self.monitor_thread.print()
-
-    def start_monitoring(self):
-        """ Start monitoring and define monitoring metrics for prometheus.
-        Subclasses should add metrics in this method if different monitoring metrics is needed.
-        """
-        prometheus_port = base.monitoring.start_prometheus_server()
-        r = self._monitoring_info = MonitoringInformation(host=socket.gethostname(),
-                                                          prometheus_port=prometheus_port)
-        self.logger.info("Started prometheus server on %s:%s", r.host, r.prometheus_port)
-
-        if not self.__worker_info:
-            raise Exception("Initializing monitoring before configuration.")
-
-        model_name = "" if not self.__worker_info.model_name else self.__worker_info.model_name
-        prometheus_labels = dict(host=base.network.gethostname(),
-                                 experiment=self.__worker_info.experiment_name,
-                                 trial=self.__worker_info.trial_name,
-                                 worker=self.__worker_info.worker_type,
-                                 worker_id=self.__worker_info.worker_index,
-                                 policy=model_name)
-        wandb_args = dict(
-            entity=self.__worker_info.wandb_entity,
-            project=self.__worker_info.wandb_project or f"{self.__worker_info.experiment_name}",
-            group=self.__worker_info.wandb_group or self.__worker_info.trial_name,
-            job_type=self.__worker_info.wandb_job_type or f"{self.__worker_info.worker_type}",
-            name=self.__worker_info.wandb_name
-            or f"{self.__worker_info.model_name or self.__worker_info.worker_index}",
-            id=
-            f"{self.__worker_info.experiment_name}_{self.__worker_info.trial_name}_{self.__worker_info.model_name or 'unnamed'}"
-            f"_{self.__worker_info.worker_type}_{self.__worker_info.worker_index}",
-            settings=wandb.Settings(start_method="fork"),
-        )
-
-        if_log_wandb = (self.__worker_index == 0 and self.__worker_type == 'trainer') \
-                       if self.__worker_info.log_wandb is None else self.__worker_info.log_wandb
-
-        prometheus_metrics = dict(marl_worker_sample_count="Counter",
-                                  marl_worker_batch_count="Counter",
-                                  marl_worker_wait_seconds="Histogram",
-                                  marl_worker_cpu_percent="Summary",
-                                  marl_worker_memory_rss_mb="Summary",
-                                  marl_worker_memory_vms_mb="Summary",
-                                  marl_worker_memory_shared_mb="Summary",
-                                  marl_worker_gpu_percent="Summary",
-                                  marl_worker_gpu_mem_util_percent="Summary",
-                                  marl_worker_gpu_memory_mb="Summary")
-        monitor_info = base.monitoring.MonitorInfo(
-            prometheus_labels=prometheus_labels,
-            prometheus_metrics=prometheus_metrics,
-            if_log_wandb=if_log_wandb,
-            wandb_args=wandb_args,
-        )
-        self.monitor = base.monitoring.Monitor(monitor_info)
-        self.monitor_thread = base.monitoring.MonitorThread(self.monitor)
-        self.monitor_thread.start()
-        return r
 
     def start(self):
         self.logger.info("Starting worker")
@@ -611,48 +536,29 @@ class Worker:
         self.logger.info("Running worker now")
         try:
             while not self.__exiting:
-                if self.__running:
-                    if not self.__is_configured:
-                        raise RuntimeError("Worker is not configured")
-                    start_time = time.monotonic_ns()
-                    r = self._poll()
-                    poll_time = (time.monotonic_ns() - start_time) / 1e9
-                    wait_seconds = 0.0
-                    if self.__last_successful_poll_time is not None:
-                        # Account the waiting time since the last successful step.
-                        wait_seconds = (start_time - self.__last_successful_poll_time) / 1e9
-                    self.__last_successful_poll_time = time.monotonic_ns()
-
-                    if r.sample_count == r.batch_count == 0:
-                        if self.__worker_type != "actor":
-                            time.sleep(0.002)
-                    else:
-                        self.monitor.metric("marl_worker_sample_count").inc(r.sample_count)
-                        self.monitor.metric("marl_worker_batch_count").inc(r.batch_count)
-                        self.monitor.metric("marl_worker_wait_seconds").observe(wait_seconds)
-
-                        now = time.monotonic_ns()
-                        if self.__last_update_ns is not None:  # Update new stats with 10 seconds frequency.
-                            if (now - self.__last_update_ns) / 1e9 >= 10:
-                                duration = (time.monotonic_ns() - self._start_time_ns) / 1e9
-                                new_stats = dict(
-                                    samples=self.monitor.metric("marl_worker_sample_count")._value.get() /
-                                    duration,
-                                    batches=self.monitor.metric("marl_worker_batch_count")._value.get() /
-                                    duration,
-                                    idleTime=self.monitor.metric("marl_worker_wait_seconds")._sum.get() /
-                                    duration,
-                                    **self._stats())
-                                self.monitor_thread.update_stats(new_stats)
-                                t1, t2, perc = self.monitor_thread.thread_profiles()
-                                self.logger.debug(
-                                    f"Monitoring thread time: {t1}, total CPU time: {t2}, monitor thread time percentage: {perc}"
-                                )
-                                self.__last_update_ns = now
-                        else:
-                            self.__last_update_ns = now
-                else:
+                if not self.__running:
                     time.sleep(0.05)
+                if not self.__is_configured:
+                    raise RuntimeError("Worker is not configured")
+                start_time = time.monotonic_ns()
+                r = self._poll()
+                poll_time = (time.monotonic_ns() - start_time) / 1e9
+                wait_seconds = 0.0
+                if self.__last_successful_poll_time is not None:
+                    # Account the waiting time since the last successful step.
+                    wait_seconds = (start_time - self.__last_successful_poll_time) / 1e9
+                self.__last_successful_poll_time = time.monotonic_ns()
+
+                if r.sample_count == r.batch_count == 0:
+                    time.sleep(0.002)
+                else:
+                    now = time.monotonic_ns()
+                    if self.__last_update_ns is not None:  # Update new stats with 10 seconds frequency.
+                        if (now - self.__last_update_ns) / 1e9 >= 10:
+                            duration = (time.monotonic_ns() - self._start_time_ns) / 1e9
+                            self.__last_update_ns = now
+                    else:
+                        self.__last_update_ns = now
                 self._server.handle_requests()
         except KeyboardInterrupt:
             self.exit()
