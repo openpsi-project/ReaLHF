@@ -536,8 +536,10 @@ class Worker:
         self.logger.info("Running worker now")
         try:
             while not self.__exiting:
+                self._server.handle_requests()
                 if not self.__running:
                     time.sleep(0.05)
+                    continue
                 if not self.__is_configured:
                     raise RuntimeError("Worker is not configured")
                 start_time = time.monotonic_ns()
@@ -559,7 +561,6 @@ class Worker:
                             self.__last_update_ns = now
                     else:
                         self.__last_update_ns = now
-                self._server.handle_requests()
         except KeyboardInterrupt:
             self.exit()
         except Exception as e:
