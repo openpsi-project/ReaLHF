@@ -205,11 +205,14 @@ class ChatActorInterface(api.model.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
         t1 = time.perf_counter()
         logger.info("generate(): recursive apply time: %.4f", t1 - t0)
+        logger.info(f"generate(): prompts shape {data.prompts.shape}")
         seq = module.generate(data.prompts,
                               attention_mask=data.prompt_att_mask,
                               generation_config=module.generation_config)
         t2 = time.perf_counter()
         logger.info("generate(): generate time: %.4f", t2 - t1)
+        # logger.info(f"generate(): generation config: {module.generation_config}")
+        logger.info(f"generate(): seq shape: {seq.shape}")
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
@@ -218,7 +221,7 @@ class ChatActorInterface(api.model.ModelInterface):
             seq = torch.nn.functional.pad(seq, pad=(0, pad_length), mode='constant', value=pad_token_id)
         attention_mask = torch.logical_and(seq.not_equal(pad_token_id), (seq.not_equal(eos_token_id))).long()
 
-        module.eval()
+        # module.eval()
         # TODO: optimize this
         t3 = time.perf_counter()
         logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits.float()
@@ -525,8 +528,8 @@ class ChatRewardInterface(api.model.ModelInterface):
         seq_strs = model.tokenizer.batch_decode(data['input_ids'],
                                                 clean_up_tokenization_spaces=False,
                                                 skip_special_tokens=True)
-        for seq_str, score in zip(seq_strs, chosen_end_scores):
-            logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
+        # for seq_str, score in zip(seq_strs, chosen_end_scores):
+        #     logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
         #####################################################
 
         return from_dict(dict(scores=chosen_end_scores.cpu()))

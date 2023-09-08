@@ -1,9 +1,12 @@
+import logging
 import os
 import random
 import time
 
+import deepspeed
 import torch
 
+from base.constants import DATE_FORMAT, LOG_FORMAT
 from base.namedarray import NamedArray, recursive_apply
 import api.config
 import api.data
@@ -23,7 +26,7 @@ def get_input(tokenizer, device, s):
     return input_ids, attention_mask
 
 
-def random_sentence(min_len=1, max_len=20):
+def random_sentence(min_len=1, max_len=200):
     words = ["the", "quick", "brown", "fox", "jumped", "over", "the", "lazy", "dog"]
     sentence_length = random.randint(min_len, max_len)
     return " ".join(random.choices(words, k=sentence_length))
@@ -34,6 +37,8 @@ def main():
     os.environ["LOCAL_RANK"] = "0"
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12345"
+
+    logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
 
     ppo_kwargs = dict(
         ppo_epochs=1,
@@ -58,12 +63,12 @@ def main():
                 eps=1e-5,
                 betas=(0.9, 0.95),
             ),
-            lr_scheduler_type='linear',
+            lr_scheduler_type='cosine',
             warmup_steps_proportion=0.0,
             min_lr_ratio=0.0,
             zero_stage=2,
             enable_fp16=True,
-            enable_hybrid_engine=False,
+            enable_hybrid_engine=True,
         ),
     )
     backend = api.model.make_backend(backend_config)
@@ -85,7 +90,9 @@ def main():
         args=dict(
             model_name_or_path=actor_path,
             init_from_scratch=False,
-            from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=True),
+            from_pretrained_kwargs=dict(  # torch_dtype=torch.float16, 
+                #use_cache=True,
+            ),
             generation_kwargs=generation_kwargs,
             # quantization_kwargs=dict(load_in_8bit=True),
         ),
@@ -97,18 +104,24 @@ def main():
                                      steps_per_epoch=1,
                                      batch_size_per_device=2)
     model = backend.initialize(model, ft_spec)
-    tokenizer = api.utils.load_hf_tokenizer(actor_path)
-    for _ in range(10):
-        # sentences = ["A fast, affordable, scalable and open system framework for enabling end-to-end Reinforcement "\
-        #             "Learning Human Feedback (RLHF) training experience to generate high-quality ChatGPT-style models at all scales.",
-        #             "another short input",
-        #             "another longer short input that is longer than the previous one",
-        # ]
-        sentences = [random_sentence() for _ in range(5)]
-        prompts = tokenizer(sentences, return_tensors="pt", padding=True)
-        input_ids, attention_mask = prompts["input_ids"], prompts["attention_mask"]
+    # model = deepspeed.init_inference(
+    #     model=model.module,
+    #     config={
+    #         "replace_with_kernel_inject": True
+    #     }
+    # )
+    # print(model.module.device)
+    tokenizer = api.utils.load_hf_tokenizer(actor_path, padding_side="left")
+    import pickle
 
-        print(input_ids.shape, attention_mask.shape)
+    for i in range(10):
+        sentences = [random_sentence() for _ in range(2)]
+        prompts = tokenizer(sentences, return_tensors="pt", padding='max_length', max_length=256)
+        input_ids, attention_mask = prompts["input_ids"], prompts["attention_mask"]
+        # with open(f"/datafiles/prompts_{i}.pkl", "rb") as f:
+        #     input_ids = pickle.load(f)
+        # with open(f"/datafiles/mask_{i}.pkl", "rb") as f:
+        #     attention_mask = pickle.load(f)
 
         data = NamedArray(
             prompts=input_ids,
@@ -117,9 +130,9 @@ def main():
 
         st = time.perf_counter()
         res = interface.generate(model, data)
+        # res = model.generate(input_ids, attention_mask=attention_mask, **generation_kwargs)
         et = time.perf_counter()
-        print(f"generate {input_ids.shape} time cost {et-st}")
-    # print(res)
+        print(f"generate res seq {res.seq.shape} time cost {et-st}")
 
 
 if __name__ == "__main__":

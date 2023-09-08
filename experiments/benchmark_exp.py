@@ -145,9 +145,21 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                     mem=10000,
                 ),
             ),
+            model_worker=[
+                TasksGroup(
+                    count=self.n_total,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=0.25,
+                        gpu_type='tesla',
+                        mem=10000,
+                        nodelist='frl8a141',
+                    ),
+                ),
+            ],
             # model_worker=[
             #     TasksGroup(
-            #         count=self.n_total,
+            #         count=self.n_actors,
             #         scheduling=Scheduling.model_worker_default(
             #             cpu=4,
             #             gpu=1,
@@ -156,29 +168,17 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             #             nodelist='frl8g134,frl8g[136-137]',
             #         ),
             #     ),
-            # ]
-            model_worker=[
-                TasksGroup(
-                    count=self.n_actors,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type='geforce',
-                        mem=20000,
-                        nodelist='frl8g134,frl8g[136-137]',
-                    ),
-                ),
-                TasksGroup(
-                    count=self.n_rewards + self.n_refs + self.n_critics,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=1,
-                        gpu=0.25,
-                        gpu_type='geforce',
-                        mem=5000,
-                        nodelist='frl8g134,frl8g[136-137]',
-                    ),
-                )
-            ],
+            #     TasksGroup(
+            #         count=self.n_rewards + self.n_refs + self.n_critics,
+            #         scheduling=Scheduling.model_worker_default(
+            #             cpu=1,
+            #             gpu=0.25,
+            #             gpu_type='geforce',
+            #             mem=5000,
+            #             nodelist='frl8g134,frl8g[136-137]',
+            #         ),
+            #     )
+            # ],
         )
 
     def initial_setup(self) -> ExperimentConfig:
@@ -240,7 +240,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             args=dict(
                 model_name_or_path=actor_path,
                 init_from_scratch=False,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=True),
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 generation_kwargs=generation_kwargs,
                 # quantization_kwargs=dict(load_in_8bit=True),
             ),
@@ -250,7 +250,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             args=dict(
                 model_name_or_path=critic_path,
                 init_from_scratch=False,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=False),
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 generation_kwargs=generation_kwargs,
                 # quantization_kwargs=dict(load_in_8bit=True),
             ),
@@ -259,24 +259,14 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             "wps_reward",
             args=dict(
                 model_name_or_path=critic_path,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=False),
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 # quantization_kwargs=dict(load_in_8bit=True),
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
                 load_v_head_path=None,
             ),
         )
-        critic_model = rw_model = Model(
-            "wps_reward",
-            args=dict(
-                model_name_or_path=critic_path,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=True),
-                # quantization_kwargs=dict(load_in_8bit=True),
-                output_bias=rw_output_bias,
-                output_scaling=rw_output_scaling,
-                load_v_head_path=None,
-            ),
-        )
+        critic_model = copy.deepcopy(rw_model)
         # critic_model.args['lora_op_after_creation'] = None
 
         actor_backend = ModelBackend(
@@ -294,7 +284,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 min_lr_ratio=0.0,
                 zero_stage=2,
                 enable_fp16=True,
-                enable_hybrid_engine=False,
+                enable_hybrid_engine=True,
             ),
         )
         critic_backend = ModelBackend(

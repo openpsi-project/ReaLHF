@@ -46,7 +46,7 @@ def get_train_ds_config(offload_param: bool = False,
         "memory_efficient_linear": False
     }
     return {
-        "steps_per_print": 100,
+        "steps_per_print": 10,
         "zero_optimization": zero_opt_dict,
         "fp16": {
             "enabled": enable_fp16,
@@ -56,7 +56,6 @@ def get_train_ds_config(offload_param: bool = False,
         "hybrid_engine": hybrid_engine_args,
         "gradient_clipping": 1.0,
         "prescale_gradients": False,
-        "gradient_predevide_factor": 1.0,
         "wall_clock_breakdown": False,
         **kwargs,
     }
@@ -174,7 +173,8 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
-        assert self.zero_stage == 2
+        pass
+        # assert self.zero_stage == 2
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -212,6 +212,8 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
         ds_config['train_batch_size'] = spec.batch_size_per_device * torch.distributed.get_world_size(
         ) * self.gradient_accumulation_steps
 
+        # print(ds_config)
+
         def warmup_then_cosine_anneal(step, warmup_steps_proportion, total_steps, min_lr_ratio):
             warmup_steps = max(5, int(total_steps * warmup_steps_proportion))
             cosine_steps = total_steps - warmup_steps
@@ -248,7 +250,14 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
                                       min_lr_ratio=self.min_lr_ratio)
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-        module, *_ = deepspeed_initialize(
+        # module, *_ = deepspeed_initialize(
+        #     model=module,
+        #     optimizer=optimizer,
+        #     config=ds_config,
+        #     lr_scheduler=lr_scheduler,
+        # )
+
+        module, *_ = deepspeed.initialize(
             model=module,
             optimizer=optimizer,
             config=ds_config,
