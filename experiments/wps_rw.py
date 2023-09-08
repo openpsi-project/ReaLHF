@@ -334,7 +334,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
             "wps_reward_lora",
             args=dict(
                 model_name_or_path=model_path,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=False),
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 quantization_kwargs=dict(load_in_8bit=True),
                 lora_module_kwargs=dict(
                     lora_dim=self.lora_dim,
@@ -363,6 +363,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
                 stream=streams[i],
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
+                cuda_cache_cleanliness=False,
             ) for i in range(self.n_models)
         ]
 
