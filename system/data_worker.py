@@ -69,6 +69,8 @@ class DataWorker(worker_base.Worker):
                 self.__epoch_step, self.__dict_sample = next(self.__data_generator)
 
         request: request_reply_stream.Request = self.__stream.poll_request()
+        if request is None:
+            return worker_base.PollResult(0, 0)
 
         if request.handle_name == 'fetch':
             res = data_api.DataBatch(data=self.__dict_sample,
