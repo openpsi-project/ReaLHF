@@ -112,8 +112,10 @@ def filter_excel_data(data):
             filtered_data.append(
                 dict(head=new_head,
                      task=data[i]['task'].strip("。"),
-                     **{k: v
-                        for k, v in data[i].items() if k != 'task' and k != 'head'}))
+                     **{
+                         k: v
+                         for k, v in data[i].items() if k != 'task' and k != 'head'
+                     }))
 
     print(f"The original number of data entries: {len(data)}, number after filtering: {len(filtered_data)}")
     return filtered_data
