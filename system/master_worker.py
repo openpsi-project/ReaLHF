@@ -42,8 +42,10 @@ def model_rpc_call(data: namedarray.NamedArray, request_type, streams):
     datas = namedarray.split(data, len(streams))
     for x in datas:
         x.register_metadata(**data.metadata)
+    start = time.perf_counter()
     request_all(streams, request_type, datas)
     replies = gather_all_replies(streams)
+    logger.debug(f"RPC call \"{request_type}\" time consumption: {time.perf_counter() - start:.3f}s.")
     if isinstance(replies[0], Dict):
         return {k: np.mean([r[k] for r in replies]) for k in replies[0].keys()}
     elif isinstance(replies[0], namedarray.NamedArray):
@@ -158,6 +160,7 @@ class MasterWorker(worker_base.Worker):
         logger.info(f"Task levels resolved by ECS: {self.__levels}.")
 
         max_concurrency = max(len(tasks) for tasks in exec_funcs)
+        logger.info(f"Thread pool max concurrency: {max_concurrency}")
         self.__thread_pool_executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrency)
         self.__exec_funcs = exec_funcs
 
