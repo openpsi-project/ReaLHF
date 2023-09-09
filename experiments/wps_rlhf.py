@@ -203,7 +203,7 @@ class WpsRLHFExperiment(Experiment):
             min_new_tokens=10,
             do_sample=True,
             top_p=1.0,
-            top_k=1000,
+            top_k=int(1e9),
             temperature=1.0,
             num_beams=1,
             num_beam_groups=1,
