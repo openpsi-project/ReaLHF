@@ -128,12 +128,10 @@ class ModelWorker(worker_base.Worker):
         except RuntimeError as e:
             # We may print some info here.
             raise e
+        self.__stream.post_reply(request_reply_stream.Reply(data=res))
         if self.is_master:
             self.logger.info(f"Model worker {self.model_name} handle request {request.handle_name}"
                              f" in {time.perf_counter() - tik:.4f}s")
-        reply = request_reply_stream.Reply(data=res)
-
-        self.__stream.post_reply(reply)
 
         if self.config.cuda_cache_cleanliness:
             # following huggingface trl
