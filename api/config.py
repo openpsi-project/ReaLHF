@@ -25,7 +25,7 @@ _LLM_ENVVARS = {
     "TRITON_CACHE_DIR": TRITON_CACHE_PATH,
     "TOKENIZERS_PARALLELISM": "true",
     "TORCH_EXTENSIONS_DIR": TORCH_EXTENSIONS_DIR,
-    "CUDA_LAUNCH_BLOCKING": "1",
+    # "CUDA_LAUNCH_BLOCKING": "1",
     "TORCH_USE_CUDA_DSA": "1",
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
 }
@@ -165,7 +165,7 @@ class ModelWorker:
     # cuda & cudnn config
     cudnn_benchmark: bool = False
     cudnn_deterministic: bool = False
-    cuda_cache_cleanliness: bool = True  # i.e., clear cuda cache after each RPC call
+    cuda_cache_cleanliness: bool = False  # i.e., clear cuda cache after each RPC call
     worker_info: Optional[WorkerInformation] = None
 
 
