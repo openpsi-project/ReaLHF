@@ -175,7 +175,7 @@ def generate_logits_ignoring_mask(logits: torch.FloatTensor,
     if top_k < 0 or top_k > logits.size(-1):
         top_k = logits.size(-1)
     if top_p == 1.0 and top_k == logits.size(-1):
-        return torch.zeros_like(logits, dtype=torch.bool)
+        return None
 
     sorted_logits, sorted_indices = torch.sort(logits, descending=False, dim=-1)
     sorted_logits: torch.FloatTensor
@@ -334,9 +334,12 @@ class WPSActorInterface(api.model.ModelInterface):
             max_token_len = module.generation_config.max_length
 
         data = recursive_apply(data, lambda x: x.to(model.device))
-        seq = module.generate(data.prompts,
-                              attention_mask=data.prompt_att_mask,
-                              generation_config=module.generation_config)
+        seq = module.generate(
+            data.prompts,
+            attention_mask=data.prompt_att_mask,
+            generation_config=module.generation_config,
+            use_cache=True,
+        )
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
@@ -349,7 +352,8 @@ class WPSActorInterface(api.model.ModelInterface):
         logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits.float()
         logits_ignoring_mask = generate_logits_ignoring_mask(logits, module.generation_config.top_p,
                                                              module.generation_config.top_k)
-        logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(logits.dtype).min)
+        if logits_ignoring_mask is not None:
+            logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(logits.dtype).min)
         logp = gather_shifted_log_probs(logits, seq)
 
         res = from_dict(
@@ -368,7 +372,8 @@ class WPSActorInterface(api.model.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
         logits: torch.FloatTensor = module(input_ids=data['input_ids'],
                                            attention_mask=data['attention_mask']).logits.float()
-        logits.masked_fill_(data['logits_ignoring_mask'].bool(), torch.finfo(logits.dtype).min)
+        if data['logits_ignoring_mask'] is not None:
+            logits.masked_fill_(data['logits_ignoring_mask'].bool(), torch.finfo(logits.dtype).min)
         logp = gather_shifted_log_probs(logits, data['input_ids'])
         return from_dict(dict(logp=logp.cpu()))
 
@@ -382,7 +387,8 @@ class WPSActorInterface(api.model.ModelInterface):
         new_logits: torch.FloatTensor = module(input_ids=sample['input_ids'],
                                                attention_mask=sample['attention_mask'],
                                                use_cache=False).logits.float()
-        new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
+        if logits_ignoring_mask is not None:
+            new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
         new_logp = gather_shifted_log_probs(new_logits, sample['input_ids'])
 
         old_logp: torch.Tensor = sample['logp']
@@ -427,7 +433,7 @@ class WPSActorInterface(api.model.ModelInterface):
         generated_non_pad_ratio = (ans != tokenizer.pad_token_id).float().mean()
         generated_truncate_ratio = (ans[:, -1] != tokenizer.pad_token_id).float().mean()
 
-        ignoring_logits_ratio = logits_ignoring_mask.float().mean()
+        # ignoring_logits_ratio = logits_ignoring_mask.float().mean()
 
         approx_kl = ((old_logp[:, shifted_start:] - new_logp[:, shifted_start:].detach()) *
                      loss_mask[:, shifted_start:]).sum() / loss_mask[:, shifted_start:].sum()
@@ -445,8 +451,11 @@ class WPSActorInterface(api.model.ModelInterface):
             prompt_truncate_ratio=prompt_truncate_ratio,
             generated_non_pad_ratio=generated_non_pad_ratio,
             generated_truncate_ratio=generated_truncate_ratio,
-            ignoring_logits_ratio=ignoring_logits_ratio,
         )
+
+        if logits_ignoring_mask is not None:
+            ignoring_logits_ratio = logits_ignoring_mask.float().mean()
+            stats['ignoring_logits_ratio'] = ignoring_logits_ratio
 
         if self.early_stop_kl is not None and api.utils.get_all_reduce_mean(approx_kl) > self.early_stop_kl:
             logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
