@@ -24,7 +24,10 @@ logger = logging.getLogger("master worker")
 
 
 def request_all(streams, handle_type, datas):
+    tik = time.perf_counter()
+    logger.info(f"master worker #request_all# *start* time **{time.time_ns()}**")
     requests = [request_reply_stream.Request(handle_type, data) for data in datas]
+    logger.info(f"master worker #request_all# *end* time **{time.time_ns()}**")
     tik = time.perf_counter()
     for s, r in zip(streams, requests):
         s.post_request(r)
@@ -34,7 +37,10 @@ def request_all(streams, handle_type, datas):
 
 
 def gather_all_replies(streams):
+    tik = time.perf_counter()
+    logger.info(f"master worker #gather_all_replies# *start* time **{time.time_ns()}**")
     responses = [s.poll_reply().data for s in streams]
+    logger.info(f"master worker #gather_all_replies# *end* time **{time.time_ns()}**")
     return responses
 
 
@@ -174,6 +180,9 @@ class MasterWorker(worker_base.Worker):
         self.MODEL_SAVE_ROOT = os.path.join(self.MODEL_SAVE_ROOT, config.worker_info.experiment_name,
                                             config.worker_info.trial_name)
 
+        # Used only for benchmark
+        self.__benchmark_steps = config.benchmark_steps
+
         return config.worker_info
 
     def _poll(self):
@@ -279,12 +288,15 @@ class MasterWorker(worker_base.Worker):
             f"Epoch {epoch + 1}/{self._ft_spec.total_train_epochs} "
             f"step {epoch_step + 1}/{self._ft_spec.steps_per_epoch} "
             f"(global step {global_step + 1}/{self._ft_spec.total_train_steps}) finishes. "
-            f"Execution time consumption: {time.perf_counter() - execution_start:.3f}s. "
+            f"#End to end# execution time: **{time.perf_counter() - execution_start:.3f}**s. "
             f"Total time consumption: {total_time_consumption:.3f}s. "
             f"Estimated remaining time: {time_per_step * (self._ft_spec.total_train_steps - global_step - 1):.3f}s."
         )
 
         bs = sample[list(sample.keys())[0]].shape[0]
+        if self.__benchmark_steps is not None and global_step >= self.__benchmark_steps:
+            raise RuntimeError(f"Benchmark completes! Yeah!!!")
+
         return worker_base.PollResult(sample_count=bs, batch_count=1)
 
     def exit(self):

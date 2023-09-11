@@ -185,6 +185,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
                 optim_cls = deepspeed.ops.adam.FusedAdam
             else:
                 optim_cls = deepspeed.ops.adam.DeepSpeedCPUAdam
+            logger.info(f"Optimizer class {optim_cls}")
             optimizer = optim_cls(get_optimizer_grouped_parameters(module, weight_decay),
                                   **self.optimizer_config)
         else:
@@ -264,8 +265,8 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             lr_scheduler=lr_scheduler,
         )
 
-        if self.gradient_checkpointing:
-            module.gradient_checkpointing_enable()
+        # if self.gradient_checkpointing:
+        #     module.gradient_checkpointing_enable()
 
         model.module = module
         return model
@@ -285,7 +286,7 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
                                        stage=self.zero_stage,
                                        enable_fp16=self.enable_fp16,
                                        **self.additional_ds_config)
-        module, *_ = deepspeed_initialize(model=module, config=ds_config)
+        module, *_ = deepspeed.initialize(model=module, config=ds_config)
         model.module = module
         return model
 

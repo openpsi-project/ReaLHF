@@ -1,0 +1,30 @@
+import json
+import os
+import shutil
+
+example_config_dir = "/lustre/meizy/base_models/cfgonly/opt-cfgonly"
+
+with open(os.path.join(example_config_dir, "config.json"), "r") as f:
+    example_config = json.load(f)
+
+hidden_size = 768
+ffn_dim = hidden_size * 4
+num_attention_heads = 12
+num_hidden_layers = 12
+word_embed_proj_dim = hidden_size
+max_position_embeddings = 2048
+
+example_config["hidden_size"] = hidden_size
+example_config["ffn_dim"] = ffn_dim
+example_config["num_attention_heads"] = num_attention_heads
+example_config["num_hidden_layers"] = num_hidden_layers
+example_config["word_embed_proj_dim"] = word_embed_proj_dim
+example_config["max_position_embeddings"] = max_position_embeddings
+
+new_config_dir = f"/lustre/meizy/base_models/cfgonly/opt-{hidden_size}-{num_hidden_layers}"
+# os.makedirs(new_config_dir, exist_ok=True)
+shutil.copytree(example_config_dir, new_config_dir, dirs_exist_ok=True)
+
+new_config_file = os.path.join(new_config_dir, "config.json")
+with open(new_config_file, "w") as f:
+    json.dump(example_config, f, indent=4)

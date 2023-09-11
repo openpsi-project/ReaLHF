@@ -111,7 +111,7 @@ class SchedulerClient:
 def remote_worker_cmd(expr_name, trial_name, debug, worker_type):
     # requires information in scheduler package
     return f"python3 {'' if debug else '-O'} -m apps.remote worker -w {worker_type} " \
-           f"-e {expr_name} -f {trial_name} -i {{index}} -o {{offset}} -g {{count}}"
+           f"-e {expr_name} -f {trial_name} -i {{index}} -o {{offset}} -g {{count}} -r {{group_index}}"
 
 
 def setup_cmd(expr_name, trial_name, debug):

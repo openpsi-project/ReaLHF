@@ -11,6 +11,7 @@ import api.model
 import base.gpu_utils as gpu_utils
 import base.namedarray as namedarray
 import base.seeding as seeding
+import base.timeutil as timeutil
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
@@ -30,6 +31,7 @@ class ModelWorker(worker_base.Worker):
         self.__ddp_rank = None
 
         self.__stream = None
+        self.__clear_cache_frequency = timeutil.FrequencyControl(frequency_steps=10)
 
     @property
     def is_master(self):
@@ -129,17 +131,25 @@ class ModelWorker(worker_base.Worker):
             self.print_monitor_info()
             raise e
         if self.is_master:
-            self.logger.info(f"Model worker {self.model_name} handle request {request.handle_name}"
-                             f" in {time.perf_counter() - tik:.4f}s")
+            self.logger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
+                             f" in **{time.perf_counter() - tik:.4f}**s")
         reply = request_reply_stream.Reply(data=res)
 
         self.__stream.post_reply(reply)
 
         if self.config.cuda_cache_cleanliness:
-            # following huggingface trl
-            gc.collect()
-            torch.cuda.empty_cache()
-            gc.collect()
+            if self.__clear_cache_frequency.check():
+                # following huggingface trl # ALWAYS COST 0.3+ SEC
+                st = time.monotonic()
+                gc.collect()
+                torch.cuda.empty_cache()
+                gc.collect()
+                et = time.monotonic()
+                if self.is_master:
+                    self.logger.info(f"Model worker {self.model_name} CLEAN CACHE in {et-st:.4f}s")
+
+        # logging gpu/cpu stats
+        # self.print_monitor_info()
 
         sample_count = request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 0
         return worker_base.PollResult(sample_count=sample_count, batch_count=1)

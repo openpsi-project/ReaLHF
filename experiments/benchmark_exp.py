@@ -18,7 +18,7 @@ def rollout(
     commands.set_data('seq', res['seq'])
     commands.set_data('logp', res['logp'])
     commands.set_data('attention_mask', res['attention_mask'])
-    commands.set_data('logits_ignoring_mask', res['logits_ignoring_mask'])
+    # commands.set_data('logits_ignoring_mask', res['logits_ignoring_mask'])
 
 
 def inference_reward(
@@ -42,11 +42,13 @@ def inference_ref_logits(
     model: ModelQuery['ref'],
     seq: DataQuery['seq'],
     attention_mask: DataQuery['attention_mask'],
-    logits_ignoring_mask: DataQuery['logits_ignoring_mask'],
+    # logits_ignoring_mask: DataQuery['logits_ignoring_mask'],
 ):
-    inputs = commands.build_model_inputs(input_ids=seq,
-                                         attention_mask=attention_mask,
-                                         logits_ignoring_mask=logits_ignoring_mask)
+    inputs = commands.build_model_inputs(
+        input_ids=seq,
+        attention_mask=attention_mask,
+        # logits_ignoring_mask=logits_ignoring_mask
+    )
     res = model(inputs)
     commands.set_data('ref_logp', res['logp'])
 
@@ -77,7 +79,7 @@ def train_actor(
     ref_logp: DataQuery['ref_logp'],
     prompts: DataQuery['prompts'],
     attention_mask: DataQuery['attention_mask'],
-    logits_ignoring_mask: DataQuery['logits_ignoring_mask'],
+    # logits_ignoring_mask: DataQuery['logits_ignoring_mask'],
 ):
     data = commands.build_model_inputs(
         input_ids=seq,
@@ -87,7 +89,7 @@ def train_actor(
         ref_logp=ref_logp,
         prompts=prompts,
         attention_mask=attention_mask,
-        logits_ignoring_mask=logits_ignoring_mask,
+        # logits_ignoring_mask=logits_ignoring_mask,
     )
     commands.log(model.train_step(data))
 
@@ -117,7 +119,14 @@ def train_critic(
 
 class ChatRLHFBenchmarkExperiment(Experiment):
 
-    def __init__(self, n_actors=1, n_critics=1, n_rewards=1, n_refs=1, seed=1):
+    def __init__(self,
+                 n_actors=7,
+                 n_critics=1,
+                 n_rewards=1,
+                 n_refs=1,
+                 seed=1,
+                 actor_model_name=None,
+                 critic_model_name=None):
         self.n_actors = n_actors
         self.n_rewards = n_rewards
         self.n_refs = n_refs
@@ -128,6 +137,9 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         self.n_data_workers = n_actors
 
         self.seed = seed
+
+        self.actor_model_name = actor_model_name
+        self.critic_model_name = critic_model_name
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -145,45 +157,62 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                     mem=10000,
                 ),
             ),
-            model_worker=[
-                TasksGroup(
-                    count=self.n_total,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=0.25,
-                        gpu_type='tesla',
-                        mem=10000,
-                        nodelist='frl8a141',
-                    ),
-                ),
-            ],
             # model_worker=[
             #     TasksGroup(
-            #         count=self.n_actors,
+            #         count=self.n_total,
             #         scheduling=Scheduling.model_worker_default(
             #             cpu=4,
-            #             gpu=1,
-            #             gpu_type='geforce',
-            #             mem=20000,
-            #             nodelist='frl8g134,frl8g[136-137]',
+            #             gpu=0.25,
+            #             gpu_type='tesla',
+            #             mem=10000,
+            #             nodelist='frl8a141',
             #         ),
             #     ),
-            #     TasksGroup(
-            #         count=self.n_rewards + self.n_refs + self.n_critics,
-            #         scheduling=Scheduling.model_worker_default(
-            #             cpu=1,
-            #             gpu=0.25,
-            #             gpu_type='geforce',
-            #             mem=5000,
-            #             nodelist='frl8g134,frl8g[136-137]',
-            #         ),
-            #     )
             # ],
+            model_worker=[
+                TasksGroup(
+                    count=self.n_actors,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=8,
+                        gpu=1,
+                        gpu_type='tesla',
+                        mem=60000,
+                        nodelist='frl8a140',
+                    ),
+                ),
+                # TasksGroup(
+                #     count=self.n_critics,
+                #     scheduling=Scheduling.model_worker_default(
+                #         cpu=8,
+                #         gpu=1,
+                #         gpu_type='tesla',
+                #         mem=60000,
+                #         nodelist='frl8a140',
+                #     ),
+                # ),
+                TasksGroup(
+                    count=self.n_critics + self.n_rewards + self.n_refs,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=2,
+                        gpu=0.25,
+                        gpu_type='tesla',
+                        mem=15000,
+                        nodelist='frl8a140',
+                    ),
+                )
+            ],
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        actor_path = "/lustre/meizy/base_models/opt-125m"
-        critic_path = "/lustre/meizy/base_models/opt-125m"
+        if self.actor_model_name is None:
+            actor_path = "/lustre/meizy/base_models/cfgonly/opt-5120-40"
+        else:
+            actor_path = os.path.join("/lustre/meizy/base_models/cfgonly/", self.actor_model_name)
+
+        if self.critic_model_name is None:
+            critic_path = "/lustre/meizy/base_models/cfgonly/opt-768-12"
+        else:
+            critic_path = os.path.join("/lustre/meizy/base_models/cfgonly/", self.critic_model_name)
         # rw_lora_head_path = \
         # "/data/aigc/llm/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
 
@@ -193,8 +222,8 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         rw_output_scaling = 0.1
         rw_output_bias = 0.0
 
-        mini_batch_size_per_device = 2
-        batch_size_per_device = 2
+        mini_batch_size_per_device = 3
+        batch_size_per_device = 3
         max_prompt_len = 256
         max_answer_len = 256
 
@@ -239,7 +268,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             "causal_lm",
             args=dict(
                 model_name_or_path=actor_path,
-                init_from_scratch=False,
+                init_from_scratch=True,
                 from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 generation_kwargs=generation_kwargs,
                 # quantization_kwargs=dict(load_in_8bit=True),
@@ -248,8 +277,8 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         ref_model = Model(
             'causal_lm',
             args=dict(
-                model_name_or_path=critic_path,
-                init_from_scratch=False,
+                model_name_or_path=actor_path,
+                init_from_scratch=True,
                 from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 generation_kwargs=generation_kwargs,
                 # quantization_kwargs=dict(load_in_8bit=True),
@@ -264,6 +293,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
                 load_v_head_path=None,
+                init_from_scratch=True,
             ),
         )
         critic_model = copy.deepcopy(rw_model)
@@ -272,17 +302,11 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         actor_backend = ModelBackend(
             'ds_train',
             args=dict(
-                optimizer_name='adam',
-                optimizer_config=dict(
-                    lr=2.5e-4,
-                    weight_decay=0.0,
-                    eps=1e-5,
-                    betas=(0.9, 0.95),
-                ),
-                lr_scheduler_type='linear',
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
                 zero_stage=2,
+                offload_param=False,
+                offload_optimizer_state=False,
                 enable_fp16=True,
                 enable_hybrid_engine=True,
             ),
@@ -290,14 +314,6 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         critic_backend = ModelBackend(
             'ds_train',
             args=dict(
-                optimizer_name='adam',
-                optimizer_config=dict(
-                    lr=2.5e-4,
-                    weight_decay=0.0,
-                    eps=1e-5,
-                    betas=(0.9, 0.95),
-                ),
-                lr_scheduler_type='linear',
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
                 zero_stage=2,
@@ -381,7 +397,36 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             master_ecs=ecs,
             data_worker=data_worker,
             model_worker=model_worker,
+            benchmark_steps=100,
         )
 
 
 register_experiment("chat-rlhf-benchmark", ChatRLHFBenchmarkExperiment)
+
+import functools
+import itertools
+
+# OPT exps
+
+actor_model_specs = [(5120, 40), (1024, 24)]  # tuple (hidden_size, layer)
+critic_model_specs = [(1024, 24)]
+
+spec_to_n_params = {
+    (1024, 24): "350m",
+    (5120, 40): "13b",
+}
+
+for actor_spec, critic_spec in itertools.product(actor_model_specs, critic_model_specs):
+    actor_name = f"opt-{actor_spec[0]}-{actor_spec[1]}"
+    critic_name = f"opt-{critic_spec[0]}-{critic_spec[1]}"
+    actor_n_params = spec_to_n_params[actor_spec]
+    critic_n_params = spec_to_n_params[critic_spec]
+    exp_name = f"opt-{actor_n_params}+{critic_n_params}-chat-rlhf-benchmark"
+    register_class = functools.partial(
+        ChatRLHFBenchmarkExperiment,
+        actor_model_name=actor_name,
+        critic_model_name=critic_name,
+    )
+    register_experiment(exp_name, register_class)
+
+# Starcoder

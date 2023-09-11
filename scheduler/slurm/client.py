@@ -99,6 +99,7 @@ class SlurmSchedulerClient(SchedulerClient):
         # spec will not be changed throughout the function
         # sepearte task name with index
         task_name = f"{spec.task_name}-{self.__taskname_to_nspecs[spec.task_name]}"
+        group_index = self.__taskname_to_nspecs[spec.task_name]
         self.__taskname_to_nspecs[spec.task_name] += 1
 
         output = log_path(self.job_name, task_name)
@@ -145,7 +146,10 @@ class SlurmSchedulerClient(SchedulerClient):
 
         with open(multi_prog_file, "w") as f:
             if "index" in cmd:
-                cmd = cmd.format(index=str(start_group_id), offset='%t', count=str(total_ntasks))
+                cmd = cmd.format(index=str(start_group_id),
+                                 offset='%t',
+                                 count=ntasks,
+                                 group_index=str(group_index))
             f.write(f"0-{ntasks-1} {cmd}\n")
 
         logger.info(f"{task_name} cpu: {cpu}, gpu: {gpu}, mem: {mem}, ntasks: {ntasks},"

@@ -38,11 +38,16 @@ def main_worker(args):
     worker_index_end = min(worker_index_start + task_size, commit_index_start + commit_n_workers)
 
     group_id = args.group_id + args.group_offset
+    group_index = args.group_index
+    group_name = f"{args.worker_type}-{group_index}"
     logger.info(f"{args.worker_type} group id {group_id}, "
                 f"worker index {worker_index_start}:{worker_index_end}")
 
-    base.gpu_utils.isolate_cuda_device(args.worker_type, group_id, args.group_size, args.experiment_name,
+    # base.gpu_utils.isolate_cuda_device(args.worker_type, group_id, args.group_size, args.experiment_name,
+    #                                    args.trial_name)
+    base.gpu_utils.isolate_cuda_device(group_name, group_id, args.group_size, args.experiment_name,
                                        args.trial_name)
+
     import experiments
     import impl.data
     import impl.model
@@ -196,6 +201,7 @@ def main():
     subparser.add_argument("--group_id", "-i", type=int, required=True)
     subparser.add_argument("--group_offset", "-o", type=int, required=True)
     subparser.add_argument("--group_size", "-g", type=int, required=True)
+    subparser.add_argument("--group_index", "-r", type=int, required=True)
     subparser.set_defaults(func=main_worker)
 
     subparser = subparsers.add_parser("reset_name_resolve", help="reset name resolve repo for a trial")

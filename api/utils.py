@@ -130,6 +130,13 @@ def create_hf_nn(
 
     model.resize_token_embeddings(int(8 * math.ceil(len(tokenizer) / 8.0)))
 
+    try:
+        model._num_params = sum(
+            [p.ds_numel if hasattr(p, "ds_tensor") else p.numel() for p in model.parameters()])
+        logger.info(f"Created model {type(model)}, num params {model._num_params/(1e9):.4f} B")
+    except Exception as e:
+        logger.info(f"Calculate num params failed, exception: {e}")
+
     logger.debug("Hugginface model generation config: ", model.generation_config)
 
     return model

@@ -66,11 +66,15 @@ class IpRequestClient(RequestClient):
         else:
             payload.data = [pickle.dumps(payload.data)]
             encoding = b'00'
-        logger.debug(f"Request encoding time: {time.perf_counter() - tik:.4f}s")
+        # logger.debug(f"Request encoding time: {time.perf_counter() - tik:.4f}s")
+        # logger.info(f"post request start time {int(time.time_ns()/10e6)}")
         self.__socket.send_multipart([payload.handle_name.encode('ascii'), encoding] + payload.data)
+        # logger.info(f"post request end time {int(time.time_ns()/10e6)}")
 
     def poll_reply(self):
+        # logger.info(f"poll reply start time {int(time.time_ns()/10e6)}")
         encoding, *data = self.__socket.recv_multipart()
+        # logger.info(f"poll reply end time {int(time.time_ns()/10e6)}")
         tik = time.perf_counter()
         if encoding == b'01':
             data = namedarray.loads(data)
@@ -79,7 +83,7 @@ class IpRequestClient(RequestClient):
             data = pickle.loads(data[0])
         else:
             raise NotImplementedError()
-        logger.debug(f"Reply decoding time: {time.perf_counter() - tik:.4f}s")
+        # logger.debug(f"Reply decoding time: {time.perf_counter() - tik:.4f}s")
         return Reply(data)
 
 
@@ -95,7 +99,9 @@ class IpReplyServer(ReplyServer):
         self.__serialization_method = serialization_method
 
     def poll_request(self):
+        # logger.info(f"poll request start time {int(time.time_ns()/10e6)}")
         handle_name, encoding, *data = self.__socket.recv_multipart()
+        # logger.info(f"poll request end time {int(time.time_ns()/10e6)}")
         handle_name = handle_name.decode('ascii')
         tik = time.perf_counter()
         if encoding == b'01':
@@ -105,7 +111,7 @@ class IpReplyServer(ReplyServer):
             data = pickle.loads(data[0])
         else:
             raise NotImplementedError()
-        logger.debug(f"Request decoding time: {time.perf_counter() - tik:.4f}s")
+        # logger.debug(f"Request decoding time: {time.perf_counter() - tik:.4f}s")
         return Request(handle_name, data)
 
     def post_reply(self, payload: Reply):
@@ -118,8 +124,11 @@ class IpReplyServer(ReplyServer):
         else:
             payload.data = [pickle.dumps(payload.data)]
             encoding = b'00'
-        logger.debug(f"Reply encoding time: {time.perf_counter() - tik:.4f}s")
+        # logger.debug(f"Reply encoding time: {time.perf_counter() - tik:.4f}s")
+
+        # logger.info(f"post reply start time {int(time.time_ns()/10e6)}")
         self.__socket.send_multipart([encoding] + payload.data)
+        # logger.info(f"post reply end time {int(time.time_ns()/10e6)}")
 
 
 class NameResolvingRequestClient(IpRequestClient):

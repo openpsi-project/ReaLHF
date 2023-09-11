@@ -100,7 +100,7 @@ def critic_loss_fn(value: torch.FloatTensor,
     return (value_loss * loss_mask).sum() / loss_mask.sum(), proportion_clipped
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def compute_rewards(kl_ctl: float, clip_reward_value: float, log_probs: torch.FloatTensor,
                     ref_log_probs: torch.FloatTensor, reward_score: torch.FloatTensor,
                     eos_indices: torch.LongTensor, seq_no_eos_mask: torch.FloatTensor):
@@ -115,7 +115,7 @@ def compute_rewards(kl_ctl: float, clip_reward_value: float, log_probs: torch.Fl
     return kl_rewards, kl_rewards + score_rewards
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def get_advantages_and_returns(gamma: float, lam: float, values: torch.FloatTensor,
                                rewards: torch.FloatTensor):
     # Adopted from https://github.com/CarperAI/trlx/blob/main/trlx/models/modeling_ppo.py#L134
@@ -187,7 +187,7 @@ class ChatActorInterface(api.model.ModelInterface):
             self.kl_adapter = FixedKLController(self.kl_ctl)
         self.kl_ctl = None
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         tokenizer = model.tokenizer
@@ -204,15 +204,16 @@ class ChatActorInterface(api.model.ModelInterface):
         t0 = time.perf_counter()
         data = recursive_apply(data, lambda x: x.to(model.device))
         t1 = time.perf_counter()
-        logger.info("generate(): recursive apply time: %.4f", t1 - t0)
-        logger.info(f"generate(): prompts shape {data.prompts.shape}")
+        # logger.info("generate(): recursive apply time: %.4f", t1 - t0)
+        # logger.info(f"generate(): prompts shape {data.prompts.shape}")
         seq = module.generate(data.prompts,
                               attention_mask=data.prompt_att_mask,
-                              generation_config=module.generation_config)
+                              generation_config=module.generation_config,
+                              synced_gpus=False)
         t2 = time.perf_counter()
-        logger.info("generate(): generate time: %.4f", t2 - t1)
+        # logger.info("generate(): generate time: %.4f", t2 - t1)
         # logger.info(f"generate(): generation config: {module.generation_config}")
-        logger.info(f"generate(): seq shape: {seq.shape}")
+        # logger.info(f"generate(): seq shape: {seq.shape}")
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
@@ -226,10 +227,10 @@ class ChatActorInterface(api.model.ModelInterface):
         t3 = time.perf_counter()
         logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits.float()
         t4 = time.perf_counter()
-        logger.info("generate(): forward logits time: %.4f", t4 - t3)
-        logits_ignoring_mask = generate_logits_ignoring_mask(logits, module.generation_config.top_p,
-                                                             module.generation_config.top_k)
-        logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(logits.dtype).min)
+        #logger.info("generate(): forward logits time: %.4f", t4 - t3)
+        # logits_ignoring_mask = generate_logits_ignoring_mask(logits, module.generation_config.top_p,
+        #                                                      module.generation_config.top_k)
+        # logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(logits.dtype).min)
         logp = gather_shifted_log_probs(logits, seq)
 
         res = from_dict(
@@ -237,19 +238,19 @@ class ChatActorInterface(api.model.ModelInterface):
                 seq=seq,
                 attention_mask=attention_mask,
                 logp=logp,
-                logits_ignoring_mask=logits_ignoring_mask,
+                # logits_ignoring_mask=logits_ignoring_mask,
             ),)
         res = recursive_apply(res, lambda x: x.cpu())
         return res
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
         logits: torch.FloatTensor = module(input_ids=data['input_ids'],
                                            attention_mask=data['attention_mask']).logits.float()
-        logits.masked_fill_(data['logits_ignoring_mask'].bool(), torch.finfo(logits.dtype).min)
+        # logits.masked_fill_(data['logits_ignoring_mask'].bool(), torch.finfo(logits.dtype).min)
         logp = gather_shifted_log_probs(logits, data['input_ids'])
         return from_dict(dict(logp=logp.cpu()))
 
@@ -258,12 +259,16 @@ class ChatActorInterface(api.model.ModelInterface):
                         version_steps: int) -> Dict:
         mini_bs = sample.length(0)
 
-        module.eval()
-        logits_ignoring_mask = sample['logits_ignoring_mask']
+        # st = time.perf_counter()
+        # module.train()
+        # module.eval()
+        t0 = time.perf_counter()
+        # logits_ignoring_mask = sample['logits_ignoring_mask']
         new_logits: torch.FloatTensor = module(input_ids=sample['input_ids'],
                                                attention_mask=sample['attention_mask'],
-                                               use_cache=False).logits.float()
-        new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
+                                               use_cache=False).logits  # .float()
+        t1 = time.perf_counter()
+        # new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
         new_logp = gather_shifted_log_probs(new_logits, sample['input_ids'])
 
         old_logp: torch.Tensor = sample['logp']
@@ -296,47 +301,56 @@ class ChatActorInterface(api.model.ModelInterface):
                                                             old_logp[:, shifted_start:], adv_norm,
                                                             loss_mask[:, shifted_start:], self.eps_clip)
 
-        if self.early_step_imp_ratio is not None and importance_weight > self.early_step_imp_ratio:
-            logger.warning(f"Current importance ratio {importance_weight.item():.4f} is larger "
-                           f"than early stop threshold {self.early_step_imp_ratio}. Abandon this minibatch.")
-            loss = loss * 0.0
+        # if self.early_step_imp_ratio is not None and importance_weight > self.early_step_imp_ratio:
+        #     logger.warning(f"Current importance ratio {importance_weight.item():.4f} is larger "
+        #                    f"than early stop threshold {self.early_step_imp_ratio}. Abandon this minibatch.")
+        #     loss = loss * 0.0
 
-        prompts: torch.LongTensor = sample['prompts']
-        ans: torch.LongTensor = sample['input_ids'][:, prompt_len:]
-        prompt_non_pad_ratio = (prompts != tokenizer.pad_token_id).float().mean()
-        prompt_truncate_ratio = (prompts[:, 0] != tokenizer.pad_token_id).float().mean()
-        generated_non_pad_ratio = (ans != tokenizer.pad_token_id).float().mean()
-        generated_truncate_ratio = (ans[:, -1] != tokenizer.pad_token_id).float().mean()
+        # prompts: torch.LongTensor = sample['prompts']
+        # ans: torch.LongTensor = sample['input_ids'][:, prompt_len:]
+        # prompt_non_pad_ratio = (prompts != tokenizer.pad_token_id).float().mean()
+        # prompt_truncate_ratio = (prompts[:, 0] != tokenizer.pad_token_id).float().mean()
+        # generated_non_pad_ratio = (ans != tokenizer.pad_token_id).float().mean()
+        # generated_truncate_ratio = (ans[:, -1] != tokenizer.pad_token_id).float().mean()
 
-        ignoring_logits_ratio = logits_ignoring_mask.float().mean()
+        # ignoring_logits_ratio = logits_ignoring_mask.float().mean()
 
-        approx_kl = ((old_logp[:, shifted_start:] - new_logp[:, shifted_start:].detach()) *
-                     loss_mask[:, shifted_start:]).sum() / loss_mask[:, shifted_start:].sum()
+        # approx_kl = ((old_logp[:, shifted_start:] - new_logp[:, shifted_start:].detach()) *
+        #              loss_mask[:, shifted_start:]).sum() / loss_mask[:, shifted_start:].sum()
 
-        stats = dict(
-            task_reward=sample['rewards'].mean().detach(),
-            kl_reward=(kl_rewards.detach() * loss_mask).sum(1).mean(),
-            ppo_approx_kl=approx_kl,
-            cur_kl_ctl=torch.tensor(self.kl_adapter.value).to(approx_kl),
-            advantage=advantages.mean().detach(),
-            actor_loss=loss.detach(),
-            actor_clip_ratio=clip_ratio.detach(),
-            importance_weight=importance_weight.detach(),
-            prompt_non_pad_ratio=prompt_non_pad_ratio,
-            prompt_truncate_ratio=prompt_truncate_ratio,
-            generated_non_pad_ratio=generated_non_pad_ratio,
-            generated_truncate_ratio=generated_truncate_ratio,
-            ignoring_logits_ratio=ignoring_logits_ratio,
-        )
+        # stats = dict(
+        #     task_reward=sample['rewards'].mean().detach(),
+        #     kl_reward=(kl_rewards.detach() * loss_mask).sum(1).mean(),
+        #     ppo_approx_kl=approx_kl,
+        #     cur_kl_ctl=torch.tensor(self.kl_adapter.value).to(approx_kl),
+        #     advantage=advantages.mean().detach(),
+        #     actor_loss=loss.detach(),
+        #     actor_clip_ratio=clip_ratio.detach(),
+        #     importance_weight=importance_weight.detach(),
+        #     prompt_non_pad_ratio=prompt_non_pad_ratio,
+        #     prompt_truncate_ratio=prompt_truncate_ratio,
+        #     generated_non_pad_ratio=generated_non_pad_ratio,
+        #     generated_truncate_ratio=generated_truncate_ratio,
+        #     # ignoring_logits_ratio=ignoring_logits_ratio,
+        # )
 
-        if self.early_stop_kl is not None and api.utils.get_all_reduce_mean(approx_kl) > self.early_stop_kl:
-            logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
-                           f"than early stop threshold {self.early_stop_kl}. Abort actor update.")
-            return stats
+        # if self.early_stop_kl is not None and api.utils.get_all_reduce_mean(approx_kl) > self.early_stop_kl:
+        #     logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
+        #                    f"than early stop threshold {self.early_stop_kl}. Abort actor update.")
+        #     return {}
 
+        torch.cuda.synchronize()
+        t2 = time.perf_counter()
         module.backward(loss)
+        torch.cuda.synchronize()
+        t3 = time.perf_counter()
         module.step(lr_kwargs={'epoch': version_steps})
-        return stats
+        torch.cuda.synchronize()
+        t4 = time.perf_counter()
+        logger.info(
+            f"_ppo_actor_step {t4 - t0:.3f}, forward {t1 - t0:.3f}, loss {t2 - t1:.3f}, backward {t3 - t2:.3f}, opt step {t4 - t3:.3f}"
+        )
+        return {}
 
     def train_step(self, model_: api.model.Model, sample: NamedArray) -> Dict:
         # TODO: add imitation learning auxilary loss
@@ -347,8 +361,9 @@ class ChatActorInterface(api.model.ModelInterface):
         assert sample['input_ids'].shape[0] % self.mini_batch_size == 0
         n_minibatch = sample['input_ids'].shape[0] // self.mini_batch_size
 
+        t0 = time.perf_counter()
         sample = recursive_apply(sample, lambda x: x.to(model_.device))
-
+        t1 = time.perf_counter()
         train_stats = collections.defaultdict(lambda: 0)
         for ppo_i in range(self.ppo_epochs):
             shuffle_indices = torch.randperm(sample['input_ids'].shape[0])
@@ -356,20 +371,22 @@ class ChatActorInterface(api.model.ModelInterface):
                 indices = shuffle_indices[mini_bs_i:mini_bs_i + self.mini_batch_size]
                 stats = self._ppo_actor_step(ppo_i, model, tokenizer, sample[indices],
                                              model_.version.global_step)
-                for k, v in stats.items():
-                    train_stats[k] += v
-
+                # for k, v in stats.items():
+                #     train_stats[k] += v
+        t2 = time.perf_counter()
         cur_epoch = model_.version.epoch
         model_.inc_version()
         if model_.version.epoch > cur_epoch:
             model.tput_timer.update_epoch_count()
 
-        train_stats = dict(train_stats)
-        for k, v in train_stats.items():
-            v = v.detach() / self.ppo_epochs / n_minibatch
-            train_stats[k] = api.utils.get_all_reduce_mean(v).item()
-
-        return train_stats
+        # train_stats = dict(train_stats)
+        # for k, v in train_stats.items():
+        #     v = v.detach() / self.ppo_epochs / n_minibatch
+        # train_stats[k] = api.utils.get_all_reduce_mean(v).item()
+        # train_stats[k] = v.item()
+        t3 = time.perf_counter()
+        # logger.info(f"actor train_step {t3 - t0:.3f}, recursive_apply {t1 - t0:.3f}, ppo_actor_step {t2 - t1:.3f}, other {t3 - t2:.3f}")
+        return {}
 
     def save(self, model: api.model.Model, output_dir):
         # TODO: for benchmark experiment, do not save models
@@ -404,7 +421,7 @@ class ChatCriticInterface(api.model.ModelInterface):
             self.kl_adapter = FixedKLController(self.kl_ctl)
         self.kl_ctl = None
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
@@ -512,7 +529,7 @@ class ChatRewardInterface(api.model.ModelInterface):
         self.train_total_correct_predictions = 0
         self.train_total_predictions = 0
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
@@ -540,7 +557,7 @@ class ChatRewardInterface(api.model.ModelInterface):
     def save(self, model: api.model.Model, output_dir):
         pass
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
         pass
 

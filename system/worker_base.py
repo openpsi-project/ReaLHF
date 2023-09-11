@@ -621,6 +621,7 @@ class Worker:
                     if self.__last_successful_poll_time is not None:
                         # Account the waiting time since the last successful step.
                         wait_seconds = (start_time - self.__last_successful_poll_time) / 1e9
+                        self.logger.debug(f"Waited {wait_seconds} seconds since last successful poll.")
                     self.__last_successful_poll_time = time.monotonic_ns()
 
                     if r.sample_count == r.batch_count == 0:
