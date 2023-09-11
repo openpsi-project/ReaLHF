@@ -206,6 +206,7 @@ def lora_wrap_fn(cls_):
             lora_module_kwargs=lora_module_kwargs,
             lora_exclude_module_names=lora_exclude_module_names,
         )
+        model.module = only_optimize_lora_parameters(model.module, additional_module_names_to_opt)
 
         if load_lora_path is not None:
             logger.info(f"Loading LoRA from {load_lora_path}")
