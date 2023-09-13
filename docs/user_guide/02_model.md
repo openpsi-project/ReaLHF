@@ -62,7 +62,7 @@ class ModelInterface(abc.ABC):
 
 Note that the input/output of "inference" and "generation" are `NamedArray` objects, which contain PyTorch CPU tensors.
 
-Do anything you want to implement this following this signature! 
+Do anything you want to implement it following the signature! 
 
 See `impl/model/interface/wps_actor_critic.py` for examples.
 
