@@ -18,7 +18,7 @@ To implement a new model, users should write a function with signature
 
 ```python
 def foo(name: str, device: Union[str, torch.device], **model_kwargs) -> api.model.Model:
-    pass
+    ...
 ```
 
 i.e., `name` and `device` must be the arguments of this function. It's the user's freedom how to construct the neural network and how to load the tokenizer.
