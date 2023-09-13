@@ -21,7 +21,7 @@ def foo(name: str, device: Union[str, torch.device], **model_kwargs) -> api.mode
     ...
 ```
 
-i.e., `name` and `device` must be the arguments of this function. It's the user's freedom how to construct the neural network and how to load the tokenizer.
+i.e., `name` and `device` must be arguments of this function. It's the user's freedom how to construct the neural network and how to load the tokenizer.
 
 Don't forget the register this model via
 
