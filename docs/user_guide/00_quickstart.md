@@ -70,7 +70,7 @@ It also contains several useful attributes like `device` and `version`. A `Model
 
 Each method takes a `Model` and a `NamedArray` object as the input and produces corresponding model output, such as reference logits or training statistics. See signatures in `api/model.py` for details.
 
-Users can only implement parts of these interfaces in a specific algorithm.
+Users can just implement some of these interfaces in a specific algorithm.
 
 ## `ModelBackend`
 
