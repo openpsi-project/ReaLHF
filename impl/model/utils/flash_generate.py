@@ -1,16 +1,17 @@
 # a terrible greedy generate
-import api.model
-from typing import Callable, List, Optional, Union, Tuple
-import transformers
+from typing import Callable, List, Optional, Tuple, Union
 import dataclasses
 import itertools
 
 import torch
 import torch.nn.functional as F
+import transformers
 
 from .spec import TransformerData
-from impl.model.nn.flash_mqat import PipeCacheData, PipeTransferData, FlashMQATConfig
-from impl.model.utils.logits_warper import chained_logits_wraper, TopKLogitsWarper, TopPLogitsWarper, unioned_logits_wraper
+from impl.model.nn.flash_mqat import FlashMQATConfig, PipeCacheData, PipeTransferData
+from impl.model.utils.logits_warper import (chained_logits_wraper, TopKLogitsWarper, TopPLogitsWarper,
+                                            unioned_logits_wraper)
+import api.model
 
 
 @dataclasses.dataclass

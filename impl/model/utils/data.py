@@ -1,6 +1,7 @@
-from typing import Tuple, Union, Type
-import logging
+from typing import Tuple, Type, Union
 import dataclasses
+import logging
+
 import numpy as np
 import torch
 import torch.distributed as dist

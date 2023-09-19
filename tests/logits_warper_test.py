@@ -1,9 +1,12 @@
 from typing import Optional
-import unittest
-import torch
 import random
-from impl.model.utils.logits_warper import chained_logits_wraper, TopKLogitsWarper, TopPLogitsWarper, unioned_logits_wraper
+import unittest
+
 from transformers.generation.utils import top_k_top_p_filtering
+import torch
+
+from impl.model.utils.logits_warper import (chained_logits_wraper, TopKLogitsWarper, TopPLogitsWarper,
+                                            unioned_logits_wraper)
 
 vocab_size = 5000
 

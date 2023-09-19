@@ -1,6 +1,7 @@
-import torch
+from typing import List, Optional, Tuple
 import dataclasses
-from typing import Optional, Tuple, List
+
+import torch
 
 
 class LogitsWarper:

@@ -1,9 +1,11 @@
 import unittest
+
 import torch
 import transformers
 
 from impl.model.nn.flash_mqat import FlashMQATForCausalLM, PipeCacheData, PipeTransferData
-from impl.model.utils.flash_generate import generate, GenerationConfig, vanilla_packed_generate, vanilla_cpu_generate, build_packed_inputs, unpack_tensor
+from impl.model.utils.flash_generate import (build_packed_inputs, generate, GenerationConfig, unpack_tensor,
+                                             vanilla_cpu_generate, vanilla_packed_generate)
 
 
 class FlashMQATStarCoderTest(unittest.TestCase):
