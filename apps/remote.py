@@ -144,37 +144,37 @@ def main_controller(args):
         subprocess.check_output(f"ray stop", shell=True)
 
 
-def main_ray(args):
-    ray_addr_name = base.names.ray_cluster(args.experiment_name, args.trial_name, "address")
-    try:
-        address = base.name_resolve.wait(ray_addr_name, timeout=RAY_HEAD_WAIT_TIME)
-    except TimeoutError:
-        raise TimeoutError("Timeout waiting for ray cluster head address.")
-    ray_flags = [f"--address={address}"]
+# def main_ray(args):
+#     ray_addr_name = base.names.ray_cluster(args.experiment_name, args.trial_name, "address")
+#     try:
+#         address = base.name_resolve.wait(ray_addr_name, timeout=RAY_HEAD_WAIT_TIME)
+#     except TimeoutError:
+#         raise TimeoutError("Timeout waiting for ray cluster head address.")
+#     ray_flags = [f"--address={address}"]
 
-    cmd = f"ray start {' '.join(ray_flags)}"
-    _ = subprocess.check_output(cmd, shell=True).decode('ascii')
-    logger.info(f"Successfully launched nodes for {args.worker_type} in Ray cluster.")
+#     cmd = f"ray start {' '.join(ray_flags)}"
+#     _ = subprocess.check_output(cmd, shell=True).decode('ascii')
+#     logger.info(f"Successfully launched nodes for {args.worker_type} in Ray cluster.")
 
-    host_ip = socket.gethostbyname(socket.gethostname())
-    base.name_resolve.add(base.names.ray_cluster(args.experiment_name, args.trial_name,
-                                                 f"{args.worker_type}/{args.group_id}"),
-                          host_ip,
-                          delete_on_exit=True,
-                          keepalive_ttl=300)
+#     host_ip = socket.gethostbyname(socket.gethostname())
+#     base.name_resolve.add(base.names.ray_cluster(args.experiment_name, args.trial_name,
+#                                                  f"{args.worker_type}/{args.group_id}"),
+#                           host_ip,
+#                           delete_on_exit=True,
+#                           keepalive_ttl=300)
 
-    while True:
-        try:
-            ray_exiting_name = base.names.ray_cluster(args.experiment_name, args.trial_name, "exiting")
-            try:
-                base.name_resolve.wait(ray_exiting_name, timeout=10)
-                break
-            except TimeoutError:
-                pass
-        except KeyboardInterrupt:
-            break
+#     while True:
+#         try:
+#             ray_exiting_name = base.names.ray_cluster(args.experiment_name, args.trial_name, "exiting")
+#             try:
+#                 base.name_resolve.wait(ray_exiting_name, timeout=10)
+#                 break
+#             except TimeoutError:
+#                 pass
+#         except KeyboardInterrupt:
+#             break
 
-    subprocess.check_output(f"ray stop", shell=True)
+#     subprocess.check_output(f"ray stop", shell=True)
 
 
 def main():
@@ -209,13 +209,13 @@ def main():
     subparser.add_argument("--trial_name", "-f", type=str, required=True)
     subparser.set_defaults(func=main_reset_name_resolve)
 
-    subparser = subparsers.add_parser("ray", help='launch ray cluster write ray address to name_resolve')
-    subparser.add_argument("--experiment_name", "-e", type=str, required=True)
-    subparser.add_argument("--trial_name", "-f", type=str, required=True)
-    subparser.add_argument("--worker_type", '-w', type=str, required=True)
-    subparser.add_argument("--group_id", "-i", type=int, required=True)
-    subparser.add_argument("--group_size", "-g", type=int, required=True)
-    subparser.set_defaults(func=main_ray)
+    # subparser = subparsers.add_parser("ray", help='launch ray cluster write ray address to name_resolve')
+    # subparser.add_argument("--experiment_name", "-e", type=str, required=True)
+    # subparser.add_argument("--trial_name", "-f", type=str, required=True)
+    # subparser.add_argument("--worker_type", '-w', type=str, required=True)
+    # subparser.add_argument("--group_id", "-i", type=int, required=True)
+    # subparser.add_argument("--group_size", "-g", type=int, required=True)
+    # subparser.set_defaults(func=main_ray)
 
     args = parser.parse_args()
 

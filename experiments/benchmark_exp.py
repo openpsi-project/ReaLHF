@@ -3,6 +3,8 @@ import torch
 from api.config import *
 from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
 
+import os 
+
 
 def rollout(
     commands: Commands,
@@ -120,7 +122,7 @@ def train_critic(
 class ChatRLHFBenchmarkExperiment(Experiment):
 
     def __init__(self,
-                 n_actors=8,
+                 n_actors=4,
                  n_critics=1,
                  n_rewards=1,
                  n_refs=1,
@@ -157,72 +159,32 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                     mem=10000,
                 ),
             ),
-            # model_worker=[
-            #     TasksGroup(
-            #         count=self.n_total,
-            #         scheduling=Scheduling.model_worker_default(
-            #             cpu=4,
-            #             gpu=0.25,
-            #             gpu_type='tesla',
-            #             mem=10000,
-            #             nodelist='frl8a141',
-            #         ),
-            #     ),
-            # ],
             model_worker=[
                 TasksGroup(
-                    count=self.n_actors,
+                    count=self.n_total,
                     scheduling=Scheduling.model_worker_default(
                         cpu=8,
                         gpu=1,
                         gpu_type='tesla',
                         mem=60000,
-                        nodelist='frl8a140',
+                        nodelist='YL-com02',
                     ),
                 ),
-                TasksGroup(
-                    count=self.n_critics,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=8,
-                        gpu=1,
-                        gpu_type='tesla',
-                        mem=60000,
-                        nodelist='frl8a139',
-                    ),
-                ),
-                TasksGroup(
-                    count=self.n_rewards,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=8,
-                        gpu=1,
-                        gpu_type='tesla',
-                        mem=60000,
-                        nodelist='frl8a139',
-                    ),
-                ),
-                TasksGroup(
-                    count=self.n_rewards,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=8,
-                        gpu=1,
-                        gpu_type='tesla',
-                        mem=60000,
-                        nodelist='frl8a139',
-                    ),
-                )
             ],
         )
 
     def initial_setup(self) -> ExperimentConfig:
+        model_dir = "/data/meizy/models/cfgonly"
+        data_path = "/data/meizy/datasets/Dahoas/rm-static/data.jsonl"
         if self.actor_model_name is None:
-            actor_path = "/lustre/meizy/base_models/cfgonly/opt-5120-40"
+            actor_path = os.path.join(model_dir, "opt-1024-24")
         else:
-            actor_path = os.path.join("/lustre/meizy/base_models/cfgonly/", self.actor_model_name)
+            actor_path = os.path.join(model_dir, self.actor_model_name)
 
         if self.critic_model_name is None:
-            critic_path = "/lustre/meizy/base_models/cfgonly/opt-2048-24"
+            critic_path = os.path.join(model_dir, "opt-1024-24")
         else:
-            critic_path = os.path.join("/lustre/meizy/base_models/cfgonly/", self.critic_model_name)
+            critic_path = os.path.join(model_dir, self.critic_model_name)
         # rw_lora_head_path = \
         # "/data/aigc/llm/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
 
@@ -240,7 +202,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         dataset = Dataset(
             'chat_prompt',
             args=dict(
-                dataset_path="/lustre/meizy/datasets/Dahoas/rm-static/data/data.jsonl",
+                dataset_path=data_path,
                 max_seq_len=max_prompt_len,
             ),
         )

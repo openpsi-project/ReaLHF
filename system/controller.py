@@ -7,8 +7,8 @@ import logging
 import time
 import traceback
 
-import ray
-import ray.util.queue as rq
+# import ray
+# import ray.util.queue as rq
 
 from system import load_worker, WORKER_TYPES
 from system.worker_base import WorkerServerStatus as Wss
@@ -228,136 +228,136 @@ class Controller:
             raise RuntimeError(f"Fail to interrupt workers, timeout={wait_timeout}.")
 
 
-def run_ray_worker(worker_type, idx, experiment_name, trial_name, comm: Tuple[rq.Queue, rq.Queue]):
-    worker_name = f"{worker_type}/{idx}"
-    server = system.worker_control.make_server(
-        'ray',
-        worker_name=worker_name,
-        experiment_name=experiment_name,
-        trial_name=trial_name,
-        comm=comm,
-    )
-    worker = load_worker(worker_type)(server=server)
-    try:
-        worker.run()
-    except Exception as e:
-        logging.error("Worker %s failed with exception: %s", worker_name, e)
-        logging.error(traceback.format_exc())
-        raise e
+# def run_ray_worker(worker_type, idx, experiment_name, trial_name, comm: Tuple[rq.Queue, rq.Queue]):
+#     worker_name = f"{worker_type}/{idx}"
+#     server = system.worker_control.make_server(
+#         'ray',
+#         worker_name=worker_name,
+#         experiment_name=experiment_name,
+#         trial_name=trial_name,
+#         comm=comm,
+#     )
+#     worker = load_worker(worker_type)(server=server)
+#     try:
+#         worker.run()
+#     except Exception as e:
+#         logging.error("Worker %s failed with exception: %s", worker_name, e)
+#         logging.error(traceback.format_exc())
+#         raise e
 
 
-class RayController:
-    """A controller that uses Ray to manage workers.
+# class RayController:
+#     """A controller that uses Ray to manage workers.
     
-    It uses the basic Controller to configure workers.
-    Besides, it launchs all remote workers using Ray,
-    instead of submitting them to the scheduelr.
-    """
+#     It uses the basic Controller to configure workers.
+#     Besides, it launchs all remote workers using Ray,
+#     instead of submitting them to the scheduelr.
+#     """
 
-    def __init__(self, experiment_name, trial_name, local_mode: bool):
-        # base controller will be lazier initialized when launching workers.
-        self.__experiment_name = experiment_name
-        self.__trial_name = trial_name
-        self.__base_controller = None
+#     def __init__(self, experiment_name, trial_name, local_mode: bool):
+#         # base controller will be lazier initialized when launching workers.
+#         self.__experiment_name = experiment_name
+#         self.__trial_name = trial_name
+#         self.__base_controller = None
 
-        self.__workers_reply_comm = None
-        self.__workers_request_comm = None
-        self.__workers_ref = None
+#         self.__workers_reply_comm = None
+#         self.__workers_request_comm = None
+#         self.__workers_ref = None
 
-        self.__local_mode = local_mode
+#         self.__local_mode = local_mode
 
-    def _launch_workers(self, workers_configs: List[Tuple[str, List, api.config.TasksGroup]]):
-        # Launch remote workers.
-        logger.info("Launching remote workers using Ray...")
-        self.__workers_ref: Dict[str, ray.ObjectRef] = {}
-        self.__workers_request_comm: Dict[str, rq.Queue] = dict()
-        self.__workers_reply_comm: Dict[str, rq.Queue] = dict()
-        for worker_type, config, schedule in workers_configs:
-            count = len(config)
-            all_schedules: List[api.config.TasksGroup] = []
-            if isinstance(schedule, List):
-                for s in schedule:
-                    for _ in range(s.count):
-                        s_ = copy.deepcopy(s)
-                        s_.count = 1
-                        all_schedules.append(s_)
-            else:
-                for _ in range(schedule.count):
-                    s_ = copy.deepcopy(schedule)
-                    s_.count = 1
-                    all_schedules.append(s_)
-            assert len(all_schedules) == len(config)
-            comms = [(rq.Queue(maxsize=8), rq.Queue(maxsize=8)) for _ in all_schedules]
-            jobs = [
-                ray.remote(
-                    num_cpus=sch.scheduling.cpu,
-                    num_gpus=sch.scheduling.gpu,
-                    memory=sch.scheduling.mem,
-                    name=f"{worker_type}/{idx}",
-                )(run_ray_worker).remote(worker_type, idx, self.__experiment_name, self.__trial_name, comm)
-                for idx, (comm, sch) in enumerate(zip(comms, all_schedules))
-            ]
-            for idx, (job, c) in enumerate(zip(jobs, comms)):
-                name = f"{worker_type}/{idx}"
-                self.__workers_ref[name] = job
-                self.__workers_request_comm[name] = c[0]
-                self.__workers_reply_comm[name] = c[1]
-            logger.info(f"Launched {count} {worker_type}.")
+#     def _launch_workers(self, workers_configs: List[Tuple[str, List, api.config.TasksGroup]]):
+#         # Launch remote workers.
+#         logger.info("Launching remote workers using Ray...")
+#         self.__workers_ref: Dict[str, ray.ObjectRef] = {}
+#         self.__workers_request_comm: Dict[str, rq.Queue] = dict()
+#         self.__workers_reply_comm: Dict[str, rq.Queue] = dict()
+#         for worker_type, config, schedule in workers_configs:
+#             count = len(config)
+#             all_schedules: List[api.config.TasksGroup] = []
+#             if isinstance(schedule, List):
+#                 for s in schedule:
+#                     for _ in range(s.count):
+#                         s_ = copy.deepcopy(s)
+#                         s_.count = 1
+#                         all_schedules.append(s_)
+#             else:
+#                 for _ in range(schedule.count):
+#                     s_ = copy.deepcopy(schedule)
+#                     s_.count = 1
+#                     all_schedules.append(s_)
+#             assert len(all_schedules) == len(config)
+#             comms = [(rq.Queue(maxsize=8), rq.Queue(maxsize=8)) for _ in all_schedules]
+#             jobs = [
+#                 ray.remote(
+#                     num_cpus=sch.scheduling.cpu,
+#                     num_gpus=sch.scheduling.gpu,
+#                     memory=sch.scheduling.mem,
+#                     name=f"{worker_type}/{idx}",
+#                 )(run_ray_worker).remote(worker_type, idx, self.__experiment_name, self.__trial_name, comm)
+#                 for idx, (comm, sch) in enumerate(zip(comms, all_schedules))
+#             ]
+#             for idx, (job, c) in enumerate(zip(jobs, comms)):
+#                 name = f"{worker_type}/{idx}"
+#                 self.__workers_ref[name] = job
+#                 self.__workers_request_comm[name] = c[0]
+#                 self.__workers_reply_comm[name] = c[1]
+#             logger.info(f"Launched {count} {worker_type}.")
 
-        panel = system.worker_control.make_control(
-            "ray",
-            self.__experiment_name,
-            self.__trial_name,
-            request_comms=self.__workers_request_comm,
-            reply_comms=self.__workers_reply_comm,
-        )
-        self.__base_controller = Controller(self.__experiment_name, self.__trial_name, panel)
-        logger.info("All Ray workers are lauched.")
+#         panel = system.worker_control.make_control(
+#             "ray",
+#             self.__experiment_name,
+#             self.__trial_name,
+#             request_comms=self.__workers_request_comm,
+#             reply_comms=self.__workers_reply_comm,
+#         )
+#         self.__base_controller = Controller(self.__experiment_name, self.__trial_name, panel)
+#         logger.info("All Ray workers are lauched.")
 
-    def start(self, experiment: api.config.Experiment, ignore_worker_error=False):
-        scheduling: api.config.ExperimentScheduling = experiment.scheduling_setup()
-        setup = experiment.initial_setup()
-        setup.set_worker_information(experiment_name=self.__experiment_name, trial_name=self.__trial_name)
-        workers_configs = [(k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES]
-        workers_configs: List[Tuple[str, List, api.config.TasksGroup]]
+#     def start(self, experiment: api.config.Experiment, ignore_worker_error=False):
+#         scheduling: api.config.ExperimentScheduling = experiment.scheduling_setup()
+#         setup = experiment.initial_setup()
+#         setup.set_worker_information(experiment_name=self.__experiment_name, trial_name=self.__trial_name)
+#         workers_configs = [(k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES]
+#         workers_configs: List[Tuple[str, List, api.config.TasksGroup]]
 
-        if self.__local_mode:
-            ray.init()
-        else:
-            for name, config, schedule in workers_configs:
-                count = sum([s.count for s in schedule]) if isinstance(schedule, list) else schedule.count
-                if len(config) != count:
-                    logger.error("Scheduling and config mismatch, interrupting all workers.")
-                    raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
-                for idx in range(count):
-                    try:
-                        base.name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
-                                                                 f"{name}/{idx}"),
-                                               timeout=300)
-                    except TimeoutError:
-                        raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
-            logger.info("Ray cluster started.")
+#         if self.__local_mode:
+#             ray.init()
+#         else:
+#             for name, config, schedule in workers_configs:
+#                 count = sum([s.count for s in schedule]) if isinstance(schedule, list) else schedule.count
+#                 if len(config) != count:
+#                     logger.error("Scheduling and config mismatch, interrupting all workers.")
+#                     raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
+#                 for idx in range(count):
+#                     try:
+#                         base.name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
+#                                                                  f"{name}/{idx}"),
+#                                                timeout=300)
+#                     except TimeoutError:
+#                         raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
+#             logger.info("Ray cluster started.")
 
-            try:
-                ray_head_addr = base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
-                                                                         self.__trial_name, "address"),
-                                                       timeout=300)
-            except TimeoutError:
-                raise RuntimeError("Timeout waiting for ray cluster head address.")
-            ray.init(address=ray_head_addr)
+#             try:
+#                 ray_head_addr = base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
+#                                                                          self.__trial_name, "address"),
+#                                                        timeout=300)
+#             except TimeoutError:
+#                 raise RuntimeError("Timeout waiting for ray cluster head address.")
+#             ray.init(address=ray_head_addr)
 
-        logger.info("Ray initialized! Ready to run workers.")
+#         logger.info("Ray initialized! Ready to run workers.")
 
-        try:
-            self._launch_workers(workers_configs)
-            self.__base_controller.start(experiment, ignore_worker_error)
-        except Exception as e:
-            self.shutdown()
+#         try:
+#             self._launch_workers(workers_configs)
+#             self.__base_controller.start(experiment, ignore_worker_error)
+#         except Exception as e:
+#             self.shutdown()
 
-    def shutdown(self):
-        ray_exiting_name = names.ray_cluster(self.__experiment_name, self.__trial_name, "exiting")
-        base.name_resolve.add(ray_exiting_name, value="1", delete_on_exit=True)
-        del self.__workers_reply_comm
-        del self.__workers_request_comm
-        del self.__workers_ref
-        ray.shutdown()
+#     def shutdown(self):
+#         ray_exiting_name = names.ray_cluster(self.__experiment_name, self.__trial_name, "exiting")
+#         base.name_resolve.add(ray_exiting_name, value="1", delete_on_exit=True)
+#         del self.__workers_reply_comm
+#         del self.__workers_request_comm
+#         del self.__workers_ref
+#         ray.shutdown()

@@ -5,7 +5,7 @@ import re
 import socket
 import time
 
-import ray.util.queue as rq
+# import ray.util.queue as rq
 import zmq
 
 from system.worker_base import WorkerServerStatus
@@ -49,23 +49,23 @@ class ZmqTaskQueue(worker_base.WorkerServerTaskQueue):
         self.__socket.send(pickle.dumps(response))
 
 
-class RayTaskQueue(worker_base.WorkerServerTaskQueue):
+# class RayTaskQueue(worker_base.WorkerServerTaskQueue):
 
-    def __init__(self, comm: Tuple[rq.Queue, rq.Queue]):
-        recv_queue, send_queue = comm
-        self.__recv_queue = recv_queue
-        self.__send_queue = send_queue
+#     def __init__(self, comm: Tuple[rq.Queue, rq.Queue]):
+#         recv_queue, send_queue = comm
+#         self.__recv_queue = recv_queue
+#         self.__send_queue = send_queue
 
-    def try_get_request(self) -> Tuple[str, Dict[str, Any]]:
-        try:
-            command, kwargs = self.__recv_queue.get_nowait()
-        except rq.Empty:
-            # Currently no request in the queue.
-            raise worker_base.NoRequstForWorker()
-        return command, kwargs
+#     def try_get_request(self) -> Tuple[str, Dict[str, Any]]:
+#         try:
+#             command, kwargs = self.__recv_queue.get_nowait()
+#         except rq.Empty:
+#             # Currently no request in the queue.
+#             raise worker_base.NoRequstForWorker()
+#         return command, kwargs
 
-    def respond(self, response):
-        self.__send_queue.put(response)
+#     def respond(self, response):
+#         self.__send_queue.put(response)
 
 
 class ZmqRequester(worker_base.WorkerControlPanelRequester):
@@ -108,31 +108,31 @@ class ZmqRequester(worker_base.WorkerControlPanelRequester):
                               wait_response=wait_response)
 
 
-class RayRequester(worker_base.WorkerControlPanelRequester):
+# class RayRequester(worker_base.WorkerControlPanelRequester):
 
-    class RayQueueFuture(worker_base.WorkerControlPanelRequester.Future):
+#     class RayQueueFuture(worker_base.WorkerControlPanelRequester.Future):
 
-        def __init__(self, worker_name: str, queue: rq.Queue):
-            self.__queue = queue
-            self.__worker_name = worker_name
+#         def __init__(self, worker_name: str, queue: rq.Queue):
+#             self.__queue = queue
+#             self.__worker_name = worker_name
 
-        def result(self, timeout=None):
-            try:
-                return self.__queue.get(timeout=timeout)
-            except rq.Empty:
-                raise TimeoutError(f"Waiting for Ray worker {self.__worker_name} response timeout.")
-            except Exception as e:
-                raise RuntimeError(f"Error waiting for Ray queue future {self.__worker_name}.") from e
+#         def result(self, timeout=None):
+#             try:
+#                 return self.__queue.get(timeout=timeout)
+#             except rq.Empty:
+#                 raise TimeoutError(f"Waiting for Ray worker {self.__worker_name} response timeout.")
+#             except Exception as e:
+#                 raise RuntimeError(f"Error waiting for Ray queue future {self.__worker_name}.") from e
 
-    def __init__(self, request_comms: Dict[str, rq.Queue], reply_comms: Dict[str, rq.Queue]):
-        self.__request_comms: Dict[str, rq.Queue] = request_comms
-        self.__reply_comms: Dict[str, rq.Queue] = reply_comms
+#     def __init__(self, request_comms: Dict[str, rq.Queue], reply_comms: Dict[str, rq.Queue]):
+#         self.__request_comms: Dict[str, rq.Queue] = request_comms
+#         self.__reply_comms: Dict[str, rq.Queue] = reply_comms
 
-    def async_request(self, worker_name, _, command, __, **kwargs):
-        request_queue = self.__request_comms[worker_name]
-        request_queue.put((command, kwargs))
-        reply_queue = self.__reply_comms[worker_name]
-        return self.RayQueueFuture(worker_name, reply_queue)
+#     def async_request(self, worker_name, _, command, __, **kwargs):
+#         request_queue = self.__request_comms[worker_name]
+#         request_queue.put((command, kwargs))
+#         reply_queue = self.__reply_comms[worker_name]
+#         return self.RayQueueFuture(worker_name, reply_queue)
 
 
 def make_server(type_, worker_name, experiment_name, trial_name, **kwargs):

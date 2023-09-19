@@ -2,12 +2,15 @@ import json
 import os
 import shutil
 
-example_config_dir = "/lustre/meizy/base_models/cfgonly/opt-cfgonly"
+example_config_dir = "cfg_templates/opt/"
+new_config_base_dir = "/data/meizy/models/cfgonly"
 
 with open(os.path.join(example_config_dir, "config.json"), "r") as f:
     example_config = json.load(f)
 
 configs = [
+    (768, 12, 12), # 125m
+    (1024, 16, 24), # 350m
     (2048, 32, 24),  # 1.3b
     (3072, 32, 24),
     (4096, 32, 24),
@@ -34,7 +37,7 @@ for hs, nhead, nlayers in configs:
     example_config["word_embed_proj_dim"] = word_embed_proj_dim
     example_config["max_position_embeddings"] = max_position_embeddings
 
-    new_config_dir = f"/lustre/meizy/base_models/cfgonly/opt-{hidden_size}-{num_hidden_layers}"
+    new_config_dir = os.path.join(new_config_base_dir, f"opt-{hidden_size}-{num_hidden_layers}")
     # os.makedirs(new_config_dir, exist_ok=True)
     shutil.copytree(example_config_dir, new_config_dir, dirs_exist_ok=True)
 
