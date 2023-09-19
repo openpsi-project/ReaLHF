@@ -383,7 +383,7 @@ class WorkerControlPanel:
                 base.names.worker_status(experiment_name=self.__experiment_name,
                                          trial_name=self.__trial_name,
                                          worker_name=worker_name),
-                timeout=1,
+                timeout=15,
             )
             status = WorkerServerStatus(status_str)
         except base.name_resolve.NameEntryNotFoundError:
@@ -464,7 +464,7 @@ class Worker:
 
     def __set_status(self, status: WorkerServerStatus):
         if self._server is not None:
-            self.logger.debug(f"Setting worker server status to {status}")
+            self.logger.info(f"Setting worker server status to {status}")
             self._server.set_status(status)
 
     @property
@@ -562,16 +562,17 @@ class Worker:
         if_log_wandb = (self.__worker_index == 0 and self.__worker_type == 'trainer') \
                        if self.__worker_info.log_wandb is None else self.__worker_info.log_wandb
 
-        prometheus_metrics = dict(marl_worker_sample_count="Counter",
-                                  marl_worker_batch_count="Counter",
-                                  marl_worker_wait_seconds="Histogram",
-                                  marl_worker_cpu_percent="Summary",
-                                  marl_worker_memory_rss_mb="Summary",
-                                  marl_worker_memory_vms_mb="Summary",
-                                  marl_worker_memory_shared_mb="Summary",
-                                  marl_worker_gpu_percent="Summary",
-                                  marl_worker_gpu_mem_util_percent="Summary",
-                                  marl_worker_gpu_memory_mb="Summary")
+        # prometheus_metrics = dict(marl_worker_sample_count="Counter",
+        #                           marl_worker_batch_count="Counter",
+        #                           marl_worker_wait_seconds="Histogram",
+        #                           marl_worker_cpu_percent="Summary",
+        #                           marl_worker_memory_rss_mb="Summary",
+        #                           marl_worker_memory_vms_mb="Summary",
+        #                           marl_worker_memory_shared_mb="Summary",
+        #                           marl_worker_gpu_percent="Summary",
+        #                           marl_worker_gpu_mem_util_percent="Summary",
+        #                           marl_worker_gpu_memory_mb="Summary")
+        prometheus_metrics = {}
         monitor_info = base.monitoring.MonitorInfo(
             prometheus_labels=prometheus_labels,
             prometheus_metrics=prometheus_metrics,
@@ -628,21 +629,21 @@ class Worker:
                         if self.__worker_type != "actor":
                             time.sleep(0.002)
                     else:
-                        self.monitor.metric("marl_worker_sample_count").inc(r.sample_count)
-                        self.monitor.metric("marl_worker_batch_count").inc(r.batch_count)
-                        self.monitor.metric("marl_worker_wait_seconds").observe(wait_seconds)
+                        # self.monitor.metric("marl_worker_sample_count").inc(r.sample_count)
+                        # self.monitor.metric("marl_worker_batch_count").inc(r.batch_count)
+                        # self.monitor.metric("marl_worker_wait_seconds").observe(wait_seconds)
 
                         now = time.monotonic_ns()
                         if self.__last_update_ns is not None:  # Update new stats with 10 seconds frequency.
                             if (now - self.__last_update_ns) / 1e9 >= 10:
                                 duration = (time.monotonic_ns() - self._start_time_ns) / 1e9
                                 new_stats = dict(
-                                    samples=self.monitor.metric("marl_worker_sample_count")._value.get() /
-                                    duration,
-                                    batches=self.monitor.metric("marl_worker_batch_count")._value.get() /
-                                    duration,
-                                    idleTime=self.monitor.metric("marl_worker_wait_seconds")._sum.get() /
-                                    duration,
+                                    # samples=self.monitor.metric("marl_worker_sample_count")._value.get() /
+                                    # duration,
+                                    # batches=self.monitor.metric("marl_worker_batch_count")._value.get() /
+                                    # duration,
+                                    # idleTime=self.monitor.metric("marl_worker_wait_seconds")._sum.get() /
+                                    # duration,
                                     **self._stats())
                                 self.monitor_thread.update_stats(new_stats)
                                 t1, t2, perc = self.monitor_thread.thread_profiles()

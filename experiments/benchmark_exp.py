@@ -120,7 +120,7 @@ def train_critic(
 class ChatRLHFBenchmarkExperiment(Experiment):
 
     def __init__(self,
-                 n_actors=7,
+                 n_actors=8,
                  n_critics=1,
                  n_rewards=1,
                  n_refs=1,
@@ -180,24 +180,34 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                         nodelist='frl8a140',
                     ),
                 ),
-                # TasksGroup(
-                #     count=self.n_critics,
-                #     scheduling=Scheduling.model_worker_default(
-                #         cpu=8,
-                #         gpu=1,
-                #         gpu_type='tesla',
-                #         mem=60000,
-                #         nodelist='frl8a140',
-                #     ),
-                # ),
                 TasksGroup(
-                    count=self.n_critics + self.n_rewards + self.n_refs,
+                    count=self.n_critics,
                     scheduling=Scheduling.model_worker_default(
-                        cpu=2,
-                        gpu=0.25,
+                        cpu=8,
+                        gpu=1,
                         gpu_type='tesla',
-                        mem=15000,
-                        nodelist='frl8a140',
+                        mem=60000,
+                        nodelist='frl8a139',
+                    ),
+                ),
+                TasksGroup(
+                    count=self.n_rewards,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=8,
+                        gpu=1,
+                        gpu_type='tesla',
+                        mem=60000,
+                        nodelist='frl8a139',
+                    ),
+                ),
+                TasksGroup(
+                    count=self.n_rewards,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=8,
+                        gpu=1,
+                        gpu_type='tesla',
+                        mem=60000,
+                        nodelist='frl8a139',
                     ),
                 )
             ],
@@ -210,7 +220,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             actor_path = os.path.join("/lustre/meizy/base_models/cfgonly/", self.actor_model_name)
 
         if self.critic_model_name is None:
-            critic_path = "/lustre/meizy/base_models/cfgonly/opt-768-12"
+            critic_path = "/lustre/meizy/base_models/cfgonly/opt-2048-24"
         else:
             critic_path = os.path.join("/lustre/meizy/base_models/cfgonly/", self.critic_model_name)
         # rw_lora_head_path = \
@@ -222,8 +232,8 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         rw_output_scaling = 0.1
         rw_output_bias = 0.0
 
-        mini_batch_size_per_device = 3
-        batch_size_per_device = 3
+        mini_batch_size_per_device = 2
+        batch_size_per_device = 2
         max_prompt_len = 256
         max_answer_len = 256
 

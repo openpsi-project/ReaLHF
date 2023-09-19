@@ -73,7 +73,7 @@ def get_eval_ds_config(offload=False, stage=0, enable_fp16: bool = True, **kwarg
         "memory_efficient_linear": False
     }
     return {
-        "steps_per_print": 10,
+        "steps_per_print": 5,
         "zero_optimization": zero_opt_dict,
         "train_micro_batch_size_per_gpu": DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU,
         "train_batch_size": torch.distributed.get_world_size() * DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU,

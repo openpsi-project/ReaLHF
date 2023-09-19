@@ -2,6 +2,7 @@ import gc
 import socket
 import time
 
+from deepspeed.accelerator import get_accelerator
 import torch
 import torch.utils.data
 
@@ -18,6 +19,7 @@ import system.worker_base as worker_base
 # Register all implemented datasets and models.
 import impl.model  # isort:skip
 import impl.data  # isort:skip
+
 
 
 class ModelWorker(worker_base.Worker):
@@ -72,6 +74,7 @@ class ModelWorker(worker_base.Worker):
             f" type \"{self.config.model_name}\" located at {socket.gethostname()} GPU {local_gpu_id}.")
 
         self.__device = torch.device('cuda:0')
+
         self.__model = api.model.make_model(
             self.config.model,
             name=self.model_name,
@@ -150,6 +153,12 @@ class ModelWorker(worker_base.Worker):
 
         # logging gpu/cpu stats
         # self.print_monitor_info()
+        tik = time.perf_counter()
+        self.logger.info(("MemAllocated={}GB, MaxMemAllocated={}GB".format(
+            round(get_accelerator().memory_allocated() / 1024**3, 2),
+            round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+        )))
+        self.logger.info(f"monitoring overhead {time.perf_counter()-tik}s")
 
         sample_count = request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 0
         return worker_base.PollResult(sample_count=sample_count, batch_count=1)
