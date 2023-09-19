@@ -21,7 +21,6 @@ import impl.model  # isort:skip
 import impl.data  # isort:skip
 
 
-
 class ModelWorker(worker_base.Worker):
 
     def __init__(self, server=None):
