@@ -254,14 +254,6 @@ class CausalSelfAttentionLayer(nn.Module):
             v = v.view(*v.shape[:2], self.nkv, self.d)
             k = k.view(*k.shape[:2], self.nkv, self.d)
             # k_cache and v_cache will be modified in-place.
-            ####################################################
-            bs = k_cache.shape[0]
-            for j in range(bs):
-                assert (k_cache[j, :cache_seqlens[j]] != 0).all()
-                assert (v_cache[j, :cache_seqlens[j]] != 0).all()
-                assert (k_cache[j, cache_seqlens[j]:] == 0).all()
-                assert (v_cache[j, cache_seqlens[j]:] == 0).all()
-            ####################################################
             hidden_states = flash_attn_with_kvcache(q,
                                                     k_cache,
                                                     v_cache,
@@ -270,14 +262,6 @@ class CausalSelfAttentionLayer(nn.Module):
                                                     cache_seqlens,
                                                     scale_factor,
                                                     causal=False)
-            ####################################################
-            bs = k_cache.shape[0]
-            for j in range(bs):
-                assert (k_cache[j, :cache_seqlens[j] + 1] != 0).all()
-                assert (v_cache[j, :cache_seqlens[j] + 1] != 0).all()
-                assert (k_cache[j, cache_seqlens[j] + 1:] == 0).all()
-                assert (v_cache[j, cache_seqlens[j] + 1:] == 0).all()
-            ####################################################
         elif cu_seqlens is not None:
             assert max_seqlen is not None
             assert len(qkv.shape) == 2
@@ -361,15 +345,6 @@ class FlashMQATBlock(nn.Module):
         if self.output_layernorm:
             h = self.ln_f(h)
         x.pp_output = h
-        ####################################################
-        if y.k_cache is not None:
-            bs = y.k_cache.shape[0]
-            for j in range(bs):
-                assert (y.k_cache[j, :y.cache_seqlens[j] + 1] != 0).all()
-                assert (y.v_cache[j, :y.cache_seqlens[j] + 1] != 0).all()
-                assert (y.k_cache[j, y.cache_seqlens[j] + 1:] == 0).all()
-                assert (y.v_cache[j, y.cache_seqlens[j] + 1:] == 0).all()
-        ####################################################
         if y.k_cache is None:
             y.k_cache = k.detach()
         if y.v_cache is None:

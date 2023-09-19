@@ -1,6 +1,6 @@
-from typing import Tuple
+from typing import Tuple, Union, Type
 import logging
-
+import dataclasses
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -86,3 +86,56 @@ def get_eos_indices(
     eos_indices = eos_mask.argmax(1)
     eos_indices = (eos_indices * (1 - seq_no_eos_mask) + seq_no_eos_mask * (seq_len - 1)).long()
     return eos_indices, seq_no_eos_mask
+
+
+# TODO: temp solution, all data going through pp models must be non-boolean tensors
+# before input to pipe model, convert all data to tensors (# input of pipe model should be tensors)-> convert back to original type
+# after output from pipe -> convert all data to tensors
+def to_tensor(x: Union[int, bool, torch.Tensor, None]):
+    device = torch.cuda.current_device()
+    if isinstance(x, int) or isinstance(x, bool):
+        assert x >= 0
+        return torch.tensor(x, dtype=torch.long, device=device)
+    elif x is None:
+        return torch.tensor(-1, dtype=torch.long, device=device)
+    elif torch.is_tensor(x):
+        # if x.dtype != torch.bool:
+        #     return x.to(device=device)
+        # else:
+        #     # convert bool tensor to long tensor
+        #     return x.to(dtype=torch.long, device=device)
+        return x.to(device=device)
+    else:
+        raise NotImplementedError(f"Cannot convert {x} to tensor")
+
+
+def from_tensor(x: torch.Tensor, _type: Type):
+    try:
+        if int(x) < 0:
+            return None
+    except:
+        pass
+    if _type == int:
+        return int(x)
+    elif _type == bool:
+        return bool(x)
+    elif _type == torch.Tensor:
+        return x
+    else:
+        raise NotImplementedError(f"Cannot convert tensor to {_type}")
+
+
+class TensorDataclassToTupleInterface:
+
+    def to_tuple(self):
+        t = []
+        for v in dataclasses.asdict(self).values():
+            t.append(to_tensor(v))
+        return tuple(t)
+
+    @classmethod
+    def from_tuple(cls, t):
+        x = cls()
+        for i, f in enumerate(dataclasses.fields(x)):
+            setattr(x, f.name, from_tensor(t[i], f.type))
+        return x

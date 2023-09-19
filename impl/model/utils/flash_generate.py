@@ -128,7 +128,6 @@ def generate(
         input_lens = torch.tensor(input_lens, dtype=torch.int, device=device)
         packed_input_ids = torch.cat(packed_input_ids, dim=0)
         cu_seqlens = torch.cat([torch.tensor([0], device=device), input_lens.cumsum(-1)]).int()
-        print("<<", packed_input_ids, cu_seqlens)
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seq_len)
         # one embedding layer, n_layers transformer block, one output layer
@@ -136,7 +135,6 @@ def generate(
               ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
         # Model forward will set k/v cache in PipeCacheData.
         logits = model(x, ys).pp_output
-        print(logits[..., 0], logits[cu_seqlens[1:] - 1][..., 0])
         logits = logits[cu_seqlens[1:] - 1]
         for y in ys[1:-1]:
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
@@ -182,16 +180,6 @@ def generate(
         logits = model(x, ys).pp_output.squeeze()
         for yidx, y in enumerate(ys[:-1]):
             y.cache_seqlens += 1
-            ###################################################
-            if yidx == 0:
-                continue
-            for i in range(bs):
-                assert (y.k_cache[i, :y.cache_seqlens[i]]
-                        != 0).all(), (y.k_cache[i, ..., 0], y.cache_seqlens[i], yidx)
-                assert (y.v_cache[i, :y.cache_seqlens[i]] != 0).all()
-                assert (y.k_cache[i, y.cache_seqlens[i]:] == 0).all()
-                assert (y.v_cache[i, y.cache_seqlens[i]:] == 0).all()
-            ###################################################
 
         next_tokens, selected_logits, logits_mask, terminate, unfinished_sequences = genstep(
             logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
@@ -200,7 +188,7 @@ def generate(
         gen_logits_mask_ph.append(logits_mask)
         generated_idx += 1
 
-    return torch.stack(gen_token_ph, -1), torch.stack(gen_logits_ph, -2), torch.stack(gen_logits_mask_ph, -2)
+    return torch.stack(gen_token_ph, -1), torch.stack(gen_logits_ph, -1), torch.stack(gen_logits_mask_ph, -2)
 
 
 def build_packed_inputs(input_ids: torch.LongTensor, attention_mask: torch.BoolTensor,
@@ -222,6 +210,22 @@ def build_packed_inputs(input_ids: torch.LongTensor, attention_mask: torch.BoolT
     packed_input_ids = torch.cat(packed_input_ids, dim=0)
     cu_seqlens = torch.cat([torch.tensor([0], device=device), input_lens.cumsum(-1)]).int()
     return packed_input_ids, cu_seqlens, max_seq_len
+
+
+def unpack_tensor(packed_x: torch.Tensor, cu_seqlens: torch.IntTensor, device: torch.device,
+                  padding_side: str):
+    seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
+    bs = cu_seqlens.shape[0] - 1
+    max_seqlen = int(max(seqlens))
+    unpacked_x = torch.zeros((bs, max_seqlen, *packed_x.shape[1:]), dtype=packed_x.dtype, device=device)
+    for i in range(bs):
+        if padding_side == 'right':
+            unpacked_x[i, :seqlens[i]] = packed_x[cu_seqlens[i]:cu_seqlens[i + 1]]
+        elif padding_side == 'left':
+            unpacked_x[i, max_seqlen - seqlens[i]:] = packed_x[cu_seqlens[i]:cu_seqlens[i + 1]]
+        else:
+            raise NotImplementedError()
+    return unpacked_x
 
 
 @torch.no_grad()

@@ -3,46 +3,37 @@ import torch
 import transformers
 
 from impl.model.nn.flash_mqat import FlashMQATForCausalLM, PipeCacheData, PipeTransferData
-from impl.model.utils.flash_generate import generate, GenerationConfig, vanilla_packed_generate, vanilla_cpu_generate
+from impl.model.utils.flash_generate import generate, GenerationConfig, vanilla_packed_generate, vanilla_cpu_generate, build_packed_inputs, unpack_tensor
 
 
 class FlashMQATStarCoderTest(unittest.TestCase):
 
-    # @classmethod
-    # def setUpClass(cls):
-    #     cls.bs = bs = 4
-    #     cls.device = device = 'cuda'
+    @classmethod
+    def setUpClass(cls):
+        cls.bs = bs = 4
+        cls.device = device = 'cuda'
 
-    #     sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
-    #     sc_cfg.n_layer = 1
-    #     sc_cfg.n_embd = 1024
-    #     sc_cfg.n_head = 8
-    #     sc_cfg.n_inner = 4096
-    #     sc_cfg.vocab_size = 5000
-    #     sc_cfg.n_positions = 512
+        sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
+        sc_cfg.n_layer = 1
+        sc_cfg.n_embd = 1024
+        sc_cfg.n_head = 8
+        sc_cfg.n_inner = 4096
+        sc_cfg.n_positions = 512
 
-    #     cls.tokenizer = transformers.AutoTokenizer.from_pretrained(
-    #         "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
-    #     cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
+        cls.tokenizer = transformers.AutoTokenizer.from_pretrained(
+            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
+        cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
-    #     cls.starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(
-    #         sc_cfg).to(dtype=torch.float16, device=device)
-    #     cls.starcoder.eval()
+        cls.starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(
+            sc_cfg).to(dtype=torch.float16, device=device)
+        cls.starcoder.eval()
 
-    #     # cls.starcoder = transformers.AutoModelForCausalLM.from_pretrained(
-    #     #     "/data/aigc/llm/checkpoints/4l-starcoder/", torch_dtype=torch.float16, use_cache=True).cuda()
-    #     # cls.starcoder.eval()
+        cls.model = FlashMQATForCausalLM.from_starcoder(from_model=cls.starcoder,
+                                                        dtype=torch.float16,
+                                                        device=device)
+        cls.model.eval()
+        cls.config = cls.model.config
 
-    #     # cls.model = FlashMQATForCausalLM.from_starcoder(model_path="/data/aigc/llm/checkpoints/4l-starcoder/",
-    #     #                                                 dtype=torch.float16,
-    #     #                                                 device=device)
-    #     cls.model = FlashMQATForCausalLM.from_starcoder(from_model=cls.starcoder,
-    #                                                     dtype=torch.float16,
-    #                                                     device=device)
-    #     cls.model.eval()
-    #     cls.config = cls.model.config
-
-    @unittest.skip('')
     def testStandardForward(self):
         config = self.config
         bs = self.bs
@@ -60,9 +51,8 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         with torch.no_grad():
             logits = model(x, ys).pp_output
             sc_logits = starcoder(input_ids=input_ids).logits
-        assert torch.allclose(logits, sc_logits), ((logits - sc_logits)).abs().max()
+        assert torch.allclose(logits, sc_logits, atol=5e-3), ((logits - sc_logits)).abs().max()
 
-    @unittest.skip('')
     def testPackedForward(self):
         config = self.config
         bs = self.bs
@@ -99,7 +89,6 @@ class FlashMQATStarCoderTest(unittest.TestCase):
             logits = model(x, ys).pp_output
         assert torch.allclose(logits, sc_logits, atol=5e-3), ((logits - sc_logits)).abs().max()
 
-    @unittest.skip('')
     def testGenerate(self):
         seqs = [
             "# This is a print function\ndef", "import time\n",
@@ -108,6 +97,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         self.tokenizer.padding_side = "left"
         encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
         input_ids = encoding['input_ids'].to(self.device)
+        prompt_len = input_ids.shape[1]
         attention_mask = encoding['attention_mask'].to(self.device)
         gconfig = GenerationConfig(min_new_tokens=10,
                                    max_new_tokens=100,
@@ -116,16 +106,11 @@ class FlashMQATStarCoderTest(unittest.TestCase):
                                    top_k=50,
                                    top_p=1.0,
                                    num_samples=1)
-        # generated, glogits, glmask = generate(model=self.model,
-        #                                       tokenizer=self.tokenizer,
-        #                                       input_ids=input_ids,
-        #                                       attention_mask=attention_mask,
-        #                                       gconfig=gconfig)
-        vg, vglogits, vglmask = vanilla_packed_generate(model=self.model,
-                                                        tokenizer=self.tokenizer,
-                                                        input_ids=input_ids,
-                                                        attention_mask=attention_mask,
-                                                        gconfig=gconfig)
+        generated, glogits, glmask = generate(model=self.model,
+                                              tokenizer=self.tokenizer,
+                                              input_ids=input_ids,
+                                              attention_mask=attention_mask,
+                                              gconfig=gconfig)
         tgconfig = transformers.GenerationConfig(
             min_new_tokens=10,
             max_new_tokens=100,
@@ -143,26 +128,16 @@ class FlashMQATStarCoderTest(unittest.TestCase):
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 generation_config=tgconfig,
-            )
-            tam = torch.logical_and(tseq.not_equal(self.tokenizer.pad_token_id),
-                                    (tseq.not_equal(self.tokenizer.eos_token_id))).long()
-            tlogits = self.starcoder(input_ids=tseq, attention_mask=tam).logits
-            tlogits = tlogits.gather(-1, tseq[..., None]).squeeze(-1)
-            tseq = tseq[:, input_ids.shape[1]:]
-            tlogits = tlogits[:, input_ids.shape[1]:]
-        print(vg, tseq)
-        print(vglogits, tlogits)
-        assert torch.allclose(vglogits, tlogits), (vglogits - tlogits).abs().max()
-        # assert torch.allclose(generated, vg)
-        # assert torch.allclose(glogits, vglogits), (glogits, vglogits, (glogits - vglogits).abs().max())
-        # assert torch.allclose(glmask, vglmask)
-        # print(">>>>>>>>>>>>>>>>>>>>")
-        # print(input_ids)
-        # print(generated)
-        # print(self.tokenizer.batch_decode(torch.cat([input_ids, generated], -1)))
-        # print("<<<<<<<<<<<<<<<<<<<")
-        # print(vg)
-        # print(self.tokenizer.batch_decode(torch.cat([input_ids, vg], -1)))
+            )[:, prompt_len:]
+        assert torch.allclose(tseq, generated), (tseq, generated)
+
+        inf_input_ids = torch.cat([input_ids, generated], -1)
+        tam = torch.logical_and(inf_input_ids.not_equal(self.tokenizer.pad_token_id),
+                                (inf_input_ids.not_equal(self.tokenizer.eos_token_id))).long()
+        tlogits = self.starcoder(input_ids=inf_input_ids, attention_mask=tam).logits[:, :-1]
+        tlogits = tlogits.gather(-1, inf_input_ids[:, 1:].unsqueeze(-1)).squeeze(-1)
+        tlogits = tlogits[:, prompt_len - 1:]
+        assert torch.allclose(glogits, tlogits, atol=5e-3), (glogits - tlogits).abs().max()
 
 
 class FlashMQATStarCoderCPUTest(unittest.TestCase):
@@ -192,7 +167,6 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         cls.model.eval()
         cls.config = cls.model.config
 
-    @unittest.skip('')
     @torch.no_grad()
     def testStandardForward(self):
         config = self.config
@@ -261,7 +235,8 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         ys = [PipeCacheData(input_ids=vg_input_ids)
               ] + [PipeCacheData() for _ in range(self.model.config.n_layers + 1)]
         vglogits = self.model(x, ys).pp_output[:, :-1]
-        vglogits = vglogits.gather(-1, vg_input_ids[:, 1:].unsqueeze(-1)).squeeze(-1)[:, input_ids.shape[1] - 1:]
+        vglogits = vglogits.gather(-1, vg_input_ids[:, 1:].unsqueeze(-1)).squeeze(-1)[:,
+                                                                                      input_ids.shape[1] - 1:]
         assert torch.allclose(vglogits_, vglogits)
 
         tgconfig = transformers.GenerationConfig(
@@ -289,6 +264,149 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         tlogits = tlogits[:, input_ids.shape[1] - 1:]
         assert torch.allclose(tseq, vg)
         assert torch.allclose(vglogits, tlogits), (vglogits - tlogits).abs().max()
+
+
+class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bs = bs = 7
+        cls.device = device = 'cpu'
+        cls.dtype = dtype = torch.float32
+
+        sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
+        sc_cfg.n_layer = 1
+        sc_cfg.n_embd = 1024
+        sc_cfg.n_head = 8
+        sc_cfg.n_inner = 4096
+        sc_cfg.n_positions = 512
+
+        cls.tokenizer = transformers.AutoTokenizer.from_pretrained(
+            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
+        cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
+
+        starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
+            dtype=dtype, device=device)
+        starcoder.eval()
+
+        cls.model = FlashMQATForCausalLM.from_starcoder(from_model=starcoder, dtype=dtype, device=device)
+        cls.model.eval()
+        cls.config = cls.model.config
+
+    @torch.no_grad()
+    def testGenerate(self):
+        seqs = [
+            "# This is a print function\ndef", "import time\n",
+            "assert torch.allclose(logits, sc_logits, atol=5e-3"
+        ]
+        self.tokenizer.padding_side = "left"
+        encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
+        prompt: torch.Tensor = encoding['input_ids'].to(self.device)
+        prompt_att_mask: torch.Tensor = encoding['attention_mask'].to(self.device)
+        gconfig = GenerationConfig(min_new_tokens=10,
+                                   max_new_tokens=100,
+                                   temperature=1.0,
+                                   greedy=True,
+                                   top_k=50,
+                                   top_p=1.0,
+                                   num_samples=1)
+        vcg, vclogits, vcmask = vanilla_cpu_generate(model=self.model,
+                                                     tokenizer=self.tokenizer,
+                                                     input_ids=prompt,
+                                                     attention_mask=prompt_att_mask,
+                                                     gconfig=gconfig)
+
+        self.model = self.model.cuda().to(torch.float16)
+        vg, vglogits, vgmask = vanilla_packed_generate(model=self.model.cuda(),
+                                                       tokenizer=self.tokenizer,
+                                                       input_ids=prompt.cuda(),
+                                                       attention_mask=prompt_att_mask.cuda(),
+                                                       gconfig=gconfig)
+        vglogits = vglogits.float().cpu()
+        vgmask = vgmask.float().cpu()
+
+        seq = torch.cat([prompt, vcg], -1)
+        seq_attn_mask = torch.logical_and(seq.ne(self.tokenizer.pad_token_id),
+                                          seq.ne(self.tokenizer.eos_token_id))
+        packed_input_ids, cu_seqlens, max_seq_len = build_packed_inputs(seq, seq_attn_mask, 'cuda')
+        x = PipeTransferData(cu_seqlens=cu_seqlens.cuda(), max_seqlen=max_seq_len)
+        ys = [PipeCacheData(input_ids=packed_input_ids.cuda())
+              ] + [PipeCacheData() for _ in range(self.model.config.n_layers + 1)]
+        inf_logits = self.model(x, ys).pp_output[:, :-1].float().cpu()
+        inf_logits = unpack_tensor(inf_logits, cu_seqlens, 'cpu', padding_side='left')
+        inf_logits = inf_logits.gather(-1, seq[:, 1:].unsqueeze(-1)).squeeze(-1)[:, prompt.shape[1] - 1:]
+        assert torch.allclose(vcg, vg.cpu()), (vcg, vg)
+        assert torch.allclose(inf_logits, vclogits,
+                              atol=5e-3), (inf_logits, vclogits, (inf_logits - vclogits).abs().max())
+        assert torch.allclose(vglogits, vclogits,
+                              atol=5e-3), (vglogits, vclogits, (vglogits - vclogits).abs().max())
+        assert torch.allclose(vgmask.cpu(), vcmask), (vgmask, vcmask)
+
+
+class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bs = bs = 7
+        cls.device = device = 'cuda'
+        cls.dtype = dtype = torch.float16
+
+        sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
+        sc_cfg.n_layer = 16
+        sc_cfg.n_embd = 1024
+        sc_cfg.n_head = 8
+        sc_cfg.n_inner = 4096
+        sc_cfg.n_positions = 512
+
+        cls.tokenizer = transformers.AutoTokenizer.from_pretrained(
+            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
+        cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
+
+        starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
+            dtype=dtype, device=device)
+        starcoder.eval()
+
+        cls.model = FlashMQATForCausalLM.from_starcoder(from_model=starcoder, dtype=dtype, device=device)
+        cls.model.eval()
+        cls.config = cls.model.config
+
+    @torch.no_grad()
+    def testGenerate(self):
+        seqs = [
+            "# This is a print function\ndef",
+            "import time\n",
+            "assert torch.allclose(logits, sc_logits, atol=5e-3",
+            "import torch\n",
+        ]
+        self.tokenizer.padding_side = "left"
+        encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
+        prompt: torch.Tensor = encoding['input_ids'].to(self.device)
+        prompt_att_mask: torch.Tensor = encoding['attention_mask'].to(self.device)
+        gconfig = GenerationConfig(min_new_tokens=10,
+                                   max_new_tokens=100,
+                                   temperature=1.0,
+                                   greedy=True,
+                                   top_k=50,
+                                   top_p=1.0,
+                                   num_samples=1)
+
+        vg, vglogits, vgmask = vanilla_packed_generate(model=self.model,
+                                                       tokenizer=self.tokenizer,
+                                                       input_ids=prompt,
+                                                       attention_mask=prompt_att_mask,
+                                                       gconfig=gconfig)
+
+        g, logits, mask = generate(model=self.model,
+                                   tokenizer=self.tokenizer,
+                                   input_ids=prompt,
+                                   attention_mask=prompt_att_mask,
+                                   gconfig=gconfig)
+
+        # print(self.tokenizer.batch_decode(torch.cat([prompt, g], -1)))
+        assert torch.allclose(g, vg), (g, vg)
+        assert torch.allclose(logits, vglogits,
+                              atol=5e-3), (logits, vglogits, (logits - vglogits).abs().max())
+        assert torch.allclose(vgmask, mask), (vgmask, mask)
 
 
 if __name__ == "__main__":
