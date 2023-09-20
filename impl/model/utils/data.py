@@ -140,3 +140,82 @@ class TensorDataclassToTupleInterface:
         for i, f in enumerate(dataclasses.fields(x)):
             setattr(x, f.name, from_tensor(t[i], f.type))
         return x
+
+
+@torch.jit.script
+def upcast_masked_softmax(x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor, scale: float,
+                          softmax_dtype: torch.dtype):
+    input_dtype = x.dtype
+    x = x.to(softmax_dtype) * scale
+    x = torch.where(mask, x, mask_value)
+    x = torch.nn.functional.softmax(x, dim=-1).to(input_dtype)
+    return x
+
+
+@torch.jit.script
+def upcast_softmax(x: torch.Tensor, scale: float, softmax_dtype: torch.dtype):
+    input_dtype = x.dtype
+    x = x.to(softmax_dtype) * scale
+    x = torch.nn.functional.softmax(x, dim=-1).to(input_dtype)
+    return x
+
+
+@torch.jit.script
+def masked_softmax(x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor):
+    x = torch.where(mask, x, mask_value)
+    x = torch.nn.functional.softmax(x, dim=-1)
+    return x
+
+
+def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
+    bs, slen, n_kv_heads, head_dim = x.shape
+    if n_rep == 1:
+        return x
+    return (x[:, :, :, None, :].expand(bs, slen, n_kv_heads, n_rep,
+                                       head_dim).reshape(bs, slen, n_kv_heads * n_rep, head_dim))
+
+
+def mask_eos_token(logits, eos_token_id=None):
+    # for min_new_tokens
+    if eos_token_id is not None:
+        logits[..., eos_token_id] = -float("inf")
+    return logits
+
+
+def build_packed_inputs(input_ids: torch.LongTensor,
+                        attention_mask: torch.BoolTensor) -> Tuple[torch.LongTensor, torch.IntTensor, int]:
+    bs, prompt_padded_len = input_ids.shape[:2]
+    device = input_ids.device
+    assert attention_mask.shape == input_ids.shape
+    packed_input_ids = []
+    input_lens = []
+    for i in range(bs):
+        if attention_mask is not None:
+            start_idx = attention_mask[i].nonzero()[0][0]
+            end_idx = prompt_padded_len - attention_mask[i].flip(0).nonzero()[0][0]
+        else:
+            start_idx, end_idx = 0, prompt_padded_len
+        input_lens.append(end_idx - start_idx)
+        packed_input_ids.append(input_ids[i, start_idx:end_idx])
+    max_seq_len = int(max(input_lens))
+    input_lens = torch.tensor(input_lens, dtype=torch.int, device=device)
+    packed_input_ids = torch.cat(packed_input_ids, dim=0)
+    cu_seqlens = torch.cat([torch.tensor([0], device=device), input_lens.cumsum(-1)]).int()
+    return packed_input_ids, cu_seqlens, max_seq_len
+
+
+def unpack_tensor(packed_x: torch.Tensor, cu_seqlens: torch.IntTensor, device: torch.device,
+                  padding_side: str):
+    seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
+    bs = cu_seqlens.shape[0] - 1
+    max_seqlen = int(max(seqlens))
+    unpacked_x = torch.zeros((bs, max_seqlen, *packed_x.shape[1:]), dtype=packed_x.dtype, device=device)
+    for i in range(bs):
+        if padding_side == 'right':
+            unpacked_x[i, :seqlens[i]] = packed_x[cu_seqlens[i]:cu_seqlens[i + 1]]
+        elif padding_side == 'left':
+            unpacked_x[i, max_seqlen - seqlens[i]:] = packed_x[cu_seqlens[i]:cu_seqlens[i + 1]]
+        else:
+            raise NotImplementedError()
+    return unpacked_x

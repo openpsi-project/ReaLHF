@@ -231,3 +231,28 @@ def unioned_logits_wraper(xs: List[LogitsWarper], filter_value: float = -float("
                                     change_logits_inplace, change_mask_inplace, filter_value)
 
     return foo
+
+
+def top_k_top_p_logits(
+    logits: torch.Tensor,
+    top_k=0,
+    top_p=1.0,
+    filter_value=-float('Inf'),
+    inplace: bool = False,
+    ordered: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    warper_fn = unioned_logits_wraper if not ordered else chained_logits_wraper
+    p = warper_fn([
+        TopKLogitsWarper(top_k=top_k, filter_value=filter_value),
+        TopPLogitsWarper(top_p=top_p, filter_value=filter_value)
+    ],
+                  filter_value=filter_value)
+    return p(
+        None,
+        logits,
+        change_logits=True,
+        change_logits_inplace=inplace,
+        change_mask=True,
+        change_mask_inplace=True,
+        mask=torch.ones_like(logits),
+    )

@@ -3,9 +3,9 @@ import unittest
 import torch
 import transformers
 
-from impl.model.nn.flash_mqat import FlashMQATForCausalLM, PipeCacheData, PipeTransferData
-from impl.model.utils.flash_generate import (build_packed_inputs, generate, GenerationConfig, unpack_tensor,
-                                             vanilla_cpu_generate, vanilla_packed_generate)
+from impl.model.nn.flash_mqat import (FlashMQATForCausalLM, generate, GenerationConfig, PipeCacheData,
+                                      PipeTransferData, vanilla_cpu_generate, vanilla_packed_generate)
+from impl.model.utils.data import build_packed_inputs, unpack_tensor
 
 
 class FlashMQATStarCoderTest(unittest.TestCase):
@@ -330,7 +330,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         seq = torch.cat([prompt, vcg], -1)
         seq_attn_mask = torch.logical_and(seq.ne(self.tokenizer.pad_token_id),
                                           seq.ne(self.tokenizer.eos_token_id))
-        packed_input_ids, cu_seqlens, max_seq_len = build_packed_inputs(seq, seq_attn_mask, 'cuda')
+        packed_input_ids, cu_seqlens, max_seq_len = build_packed_inputs(seq, seq_attn_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens.cuda(), max_seqlen=max_seq_len)
         ys = [PipeCacheData(input_ids=packed_input_ids.cuda())
               ] + [PipeCacheData() for _ in range(self.model.config.n_layers + 1)]

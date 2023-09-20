@@ -17,13 +17,12 @@ mp.set_start_method('spawn', force=True)
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from base.namedarray import NamedArray
-from impl.model.utils.generate import generate
 import api.config as config_package
 import api.model
 import base.gpu_utils
 import base.name_resolve as name_resolve
 import base.names as names
-import impl.model.utils.spec as spec
+from impl.model.nn.mqa_transformer import TransformerConfig, generate
 
 MODEL_PATH = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder/"
 IF_LOG = True
@@ -41,7 +40,7 @@ def setup_gpu():
 def get_model(model_path, device):
     config_file = os.path.join(model_path, "config.json")
     # model_file_path = os.path.join(model_path, "pytorch_model.bin")
-    config = spec.TransformerConfig.from_huggingface_config(config_file)
+    config = TransformerConfig.from_huggingface_config(config_file)
     model_config = config_package.Model(type_="mqa_transformer",
                                         args=dict(
                                             model_name_or_path=model_path,
