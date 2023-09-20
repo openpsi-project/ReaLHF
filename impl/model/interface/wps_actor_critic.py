@@ -17,6 +17,7 @@ import transformers
 from base.namedarray import from_dict, NamedArray, recursive_aggregate, recursive_apply
 from impl.model.utils.data import gather_shifted_log_probs, get_eos_indices, masked_normalization
 from impl.model.utils.save import save_hf_or_lora_model
+from impl.model.utils.logits_warper import top_k_top_p_logits
 import api.model
 import api.utils
 
@@ -154,34 +155,6 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
 
 
 api.model.register_interface("wps_reward_unpaired", WPSRewardUnpairedInterface)
-
-
-def generate_logits_ignoring_mask(logits: torch.FloatTensor,
-                                  top_p: Optional[float] = 1.0,
-                                  top_k: Optional[int] = -1) -> torch.BoolTensor:
-    if top_p is None:
-        top_p = 1.0
-    if top_k is None:
-        top_k = -1
-    assert 0 < top_p <= 1.0
-    if top_k < 0 or top_k > logits.size(-1):
-        top_k = logits.size(-1)
-    if top_p == 1.0 and top_k == logits.size(-1):
-        return None
-
-    sorted_logits, sorted_indices = torch.sort(logits, descending=False, dim=-1)
-    sorted_logits: torch.FloatTensor
-    sorted_indices: torch.LongTensor
-    cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
-    # Remove tokens with cumulative top_p above the threshold (token with 0 are kept)
-    sorted_indices_to_remove = cumulative_probs <= (1 - top_p)
-    # scatter sorted tensors to original indexing
-    top_p_indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
-
-    # Remove all tokens with a probability less than the last token of the top-k
-    top_k_indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
-
-    return top_p_indices_to_remove.logical_or(top_k_indices_to_remove).bool()
 
 
 def actor_loss_fn(logprobs: torch.FloatTensor, old_logprobs: torch.FloatTensor, advantages: torch.FloatTensor,
@@ -342,10 +315,12 @@ class WPSActorInterface(api.model.ModelInterface):
 
         module.eval()
         logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits.float()
-        logits_ignoring_mask = generate_logits_ignoring_mask(logits, module.generation_config.top_p,
-                                                             module.generation_config.top_k)
-        if logits_ignoring_mask is not None:
-            logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(logits.dtype).min)
+        top_k_top_p_logits(logits,
+                           top_k=module.generation_config.top_k,
+                           top_p=module.generation_config.top_p,
+                           inplace=True,
+                           ordered=False)
+        logits_ignoring_mask = logits == torch.finfo(logits.dtype).min
         logp = gather_shifted_log_probs(logits, seq)
 
         res = from_dict(
