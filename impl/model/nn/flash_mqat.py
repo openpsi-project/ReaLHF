@@ -13,7 +13,6 @@ from impl.model.utils.data import (build_packed_inputs, mask_eos_token, repeat_k
                                    TensorDataclassToTupleInterface, upcast_masked_softmax, upcast_softmax)
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP
-import api.model
 
 try:
     from flash_attn import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache
@@ -41,6 +40,9 @@ class FlashMQATConfig:
 class PipeTransferData(TensorDataclassToTupleInterface):
     """Data structure for transferring data between stages.
 
+    Each pipeline stage has exactly one PipeTransferData as the input and the output,
+    no matter how many layers are in this stage.
+
     Attributes:
         pp_input: The input to the current stage. Usually hidden states
             with shape [bs, seq_len, hidden_dim].
@@ -48,10 +50,15 @@ class PipeTransferData(TensorDataclassToTupleInterface):
             Usually hidden states with shape [bs, seq_len, hidden_dim].
         cu_seqlens: The cumulative sequence lengths of packed input_ids.
             Used by flash_attn_varlen_func. Will not be used during generation.
-            Shape [bs + 1].
+            It's configuration-like data that must be transfered from the first stage
+            to the last. Shape [bs + 1].
         max_seqlen: The maximum sequence length of packed input_ids.
             Used by flash_attn_varlen_func. Will not be used during generation.
-        head_mask: The head mask for attention. Use case not clear.
+            It's configuration-like data that must be transfered from the first stage
+            to the last.
+        attention_mask: The attention mask of the input, the same as huggingface transformers.
+            Used by torch_attn_func to examine the outputs of PyTorch attention and flash
+            attention are the same. Only for debugging. Shape [bs, seq_len].
     """
     pp_input: Optional[torch.Tensor] = None
     pp_output: Optional[torch.Tensor] = None
@@ -59,7 +66,6 @@ class PipeTransferData(TensorDataclassToTupleInterface):
     # The followings are "configuration"-like data that should be passed across all stages.
     cu_seqlens: Optional[torch.Tensor] = None
     max_seqlen: Optional[int] = None
-    head_mask: Optional[torch.Tensor] = None
 
     # Only used for debugging
     attention_mask: Optional[torch.Tensor] = None
@@ -68,12 +74,17 @@ class PipeTransferData(TensorDataclassToTupleInterface):
 @dataclasses.dataclass
 class PipeCacheData(TensorDataclassToTupleInterface):
     """Data structure for caching data locally that will not be trasferred.
+    
+    Each layer has exactly one PipeCacheData as the input.
+    If a pipeline stage has multiple layers, a list of PipeCacheData should be passed
+    as the input. The cached tensors will be changed in-place.
 
     Attributes:
         input_ids: The input token ids. Used only at the first stage.
             Can be packed with shape [total_seq_len] or unpacked with shape [bs, seq].
         position_ids: Input position IDs. Can be resolved automatically in most cases.
             Used only at the first stage. The same shape as input_ids.
+            If None, will be resolved automatically.
         k_cache: Key cache used for generation, shape [bs, max_seq, n_kv_heads, head_dim].
             Note that this is the cache for a specific layer, not for all layers.
         v_cache: Value cache used for generation, shape [bs, max_seq, n_kv_heads, head_dim].
@@ -98,8 +109,29 @@ def torch_attn_func(
     softmax_scale: float,
     upcast_unscale: float = 1.0,
     attention_mask: Optional[torch.Tensor] = None,
-):
-    """We don't use pytorch efficient kernels here for debugging."""
+) -> torch.Tensor:
+    """PyTorch implementation of the attention function with a flash-attn-like API.
+
+    We use this function to compare the output of our model and huggingface models.
+    Flash-attn/float16/CUDAkernels will all more or less suffer from float point errors.
+    We call this function with float32 and CPU to get the "ground truth" output.
+
+    Args:
+        q (torch.Tensor): Shape [bs, seqlen, #q, head_dim].
+        k (torch.Tensor): Shape [bs, seqlen, #kv, head_dim].
+        v (torch.Tensor): Shape [bs, seqlen, #kv, head_dim].
+        causal (bool): .
+        dropout_p (float): .
+        softmax_scale (float): .
+        upcast_unscale (float, optional): Scale factor when upcastin attention scores.
+            Defaults to 1.0.
+        attention_mask (Optional[torch.Tensor], optional): Huggingface-like attention mask.
+            Shape [*, seqlen, seqlen]. Will override the `causal` argument.
+            Only used for debugging. Defaults to None.
+
+    Returns:
+        torch.Tensor: Attention score. Shape [bs, seqlen, #q, head_dim].
+    """
     n_rep = q.shape[-2] // k.shape[-2]
     bsz, seqlen = q.shape[:2]
     # repeat k/v heads if n_kv_heads < n_heads
@@ -111,6 +143,7 @@ def torch_attn_func(
     v = v.transpose(1, 2)
     scores = torch.matmul(q, k.transpose(2, 3)) * softmax_scale
     if attention_mask is not None:
+        assert str(attention_mask.device) == 'cpu'
         mask_softmax = True
         mask = attention_mask
     elif causal:
@@ -317,6 +350,8 @@ class FlashMQATBlock(nn.Module):
         if self.output_layernorm:
             h = self.ln_f(h)
         x.pp_output = h
+        # Set kv cache during the first forward pass of generation.
+        # Do we need an option to disable this?
         if y.k_cache is None:
             y.k_cache = k.detach()
         if y.v_cache is None:
@@ -401,6 +436,7 @@ class FlashMQATBase(nn.Module):
         self.embedding_layer = VocabPositionEmbedding(config.vocab_size,
                                                       config.n_positions,
                                                       config.hidden_dim,
+                                                      config.embd_pdrop,
                                                       dtype=dtype,
                                                       device=device)
         self.h = nn.ModuleList([
@@ -421,7 +457,7 @@ class FlashMQATBase(nn.Module):
         for layer, y in zip(layers, ys):
             x = layer(x, y)  # This will set pp_output.
             x.pp_input = x.pp_output
-        # Finally, pp_input is the input of this pipeline stage (maybe across several layers),
+        # Finally, pp_input is the input of this pipeline stage,
         # pp_output is the output of this pipeline stage.
         # In the first stage, pp_input is None.
         x.pp_input = raw_pp_input
@@ -565,6 +601,14 @@ def genstep(
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor, torch.Tensor, bool, torch.Tensor]: 
+        A tuple of
+            next_tokens: Shape [bs].
+            logprob: The log probability of selected tokens. May be re-normalized
+                according to the mask machanism. Shape [bs].
+            logits_mask: The mask of logits. Shape [bs, vocab_size].
+            terminate: Whether the generation should be terminated.
+            unfinished_sequences: Bool tensor indicator of whether a sequence is finished.
+                Shape [bs].
     """
 
     next_token_logits = next_token_logits.float()
@@ -603,7 +647,7 @@ def genstep(
 
 @torch.no_grad()
 def generate(
-    model: api.model.NeuralNetwork,
+    model: FlashMQATForCausalLM,
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
@@ -611,7 +655,40 @@ def generate(
     v_caches: Optional[List[torch.Tensor]] = None,
     cache_seqlens: Optional[torch.Tensor] = None,
     gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Generete a sequence with a FlashMQAT.
+
+    Args:
+        model (FlashMQATForCausalLM): .
+        tokenizer (transformers.PreTrainedTokenizerFast): .
+        input_ids (torch.Tensor): Prompts, may be padded. Shape [bs, seqlen].
+        attention_mask (Optional[torch.Tensor], optional): The same as huggingface.
+            Shape [bs, seqlen]. If None, generate attention mask according to
+            pad_token_id and eos_token_id. Defaults to None.
+        k_caches (Optional[List[torch.Tensor]], optional): List of k_caches.
+            Length equals to the number of transformer layers.
+            Each tensor in the list has shape [bs, max_seqlen, #kv, head_dim].
+            Used for resuming a previous generation state.
+            If None, generate from scratch. Defaults to None.
+        v_caches (Optional[List[torch.Tensor]], optional): List of v_caches.
+            Length equals to the number of transformer layers.
+            Each tensor in the list has shape [bs, max_seqlen, #kv, head_dim].
+            Used for resuming a previous generation state.
+            If None, generate from scratch. Defaults to None.
+        cache_seqlens (Optional[torch.Tensor], optional): Shape [bs].
+            Used for resuming a previous generation state. Defaults to None.
+        gconfig (GenerationConfig, optional): .
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        The tuple of
+            gen_tokens: Generated tokens. Shape [bs, #new_tokens].
+            log_probs: Log probabilities of generated tokens. Shape [bs, #new_tokens].
+            mask: The mask of logits. None if no mask otherwise a tensor of shape [bs, vocab_size].
+    """
+    if attention_mask is None:
+        attention_mask = torch.logical_and(input_ids != tokenizer.pad_token_id, input_ids
+                                           != tokenizer.eos_token_id)
     if (k_caches is None) != (v_caches is None) or (k_caches is None) != (cache_seqlens is None):
         raise ValueError("k_cache, v_cache, cache_seqlens must be all None or all not None")
     device = input_ids.device
@@ -679,7 +756,7 @@ def generate(
     # The main loop.
     while not terminate:
         # the next round of inference
-        ys[0].input_ids = next_tokens.unsqueeze(-1)  # [bs, 1]
+        ys[0].input_ids = next_tokens.unsqueeze(-1)  # [bs, 1], seqlen=1
         ys[0].position_ids = None
         # K/v cache will be changed in-place with flash attention.
         logits = model(x, ys).pp_output.squeeze()
@@ -707,12 +784,13 @@ def generate(
 
 @torch.no_grad()
 def vanilla_packed_generate(
-    model: api.model.NeuralNetwork,
+    model: FlashMQATForCausalLM,
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
     gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Only used for debugging."""
     mconfig: FlashMQATConfig = model.config
 
     terminate = False
@@ -762,12 +840,13 @@ def vanilla_packed_generate(
 
 @torch.no_grad()
 def vanilla_cpu_generate(
-    model: api.model.NeuralNetwork,
+    model: FlashMQATForCausalLM,
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
     gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Only used for debugging."""
     mconfig: FlashMQATConfig = model.config
     assert str(input_ids.device) == 'cpu'
 
