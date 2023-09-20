@@ -1,6 +1,6 @@
 from typing import List, Optional, Tuple
 import dataclasses
-
+import functools
 import torch
 
 
@@ -8,44 +8,17 @@ class LogitsWarper:
     """Abstract base class for all logit processors that can be applied during generation.
     
     Cloned from huggingface transformers/src/transformers/generation/logits_process.py,
-    except that we can optionally change the logits or a logits mask inplace.
+    except that we can optionally change the logits inplace.
     """
 
     def __call__(
         self,
         input_ids: torch.LongTensor,
         logits: torch.FloatTensor,
-        mask: Optional[torch.FloatTensor] = None,
-        change_logits: bool = True,
-        change_mask: bool = True,
-        change_logits_inplace: bool = False,
-        change_mask_inplace: bool = False,
-    ) -> Tuple[torch.FloatTensor, Optional[torch.FloatTensor]]:
+        inplace: bool = False,
+    ) -> torch.FloatTensor:
         raise NotImplementedError(
             f"{self.__class__} is an abstract class. Only classes inheriting this class can be called.")
-
-
-def _process_logits_mask(
-    logits: torch.FloatTensor,
-    mask: torch.BoolTensor,
-    indices_to_remove: torch.LongTensor,
-    change_logits: bool,
-    change_mask: bool,
-    change_logits_inplace: bool,
-    change_mask_inplace: bool,
-    filter_value: float,
-) -> Tuple[torch.FloatTensor, Optional[torch.FloatTensor]]:
-    if change_logits:
-        if change_logits_inplace:
-            logits.masked_fill_(indices_to_remove, filter_value)
-        else:
-            logits = logits.masked_fill(indices_to_remove, filter_value)
-    if mask is not None and change_mask:
-        if change_mask_inplace:
-            mask.masked_fill_(indices_to_remove, 0.0)
-        else:
-            mask = mask.masked_fill(indices_to_remove, 0.0)
-    return logits, mask
 
 
 @dataclasses.dataclass
@@ -60,19 +33,13 @@ class TemperatureLogitsWarper(LogitsWarper):
         self,
         _,
         logits: torch.FloatTensor,
-        mask: Optional[torch.FloatTensor],
-        change_logits: bool = True,
-        change_mask: bool = True,
-        change_logits_inplace: bool = False,
-        change_mask_inplace: bool = True,
+        inplace: bool = False,
     ) -> Tuple[torch.FloatTensor, Optional[torch.FloatTensor]]:
-        if not change_logits:
-            raise ValueError("Temperature logits processor can only be called for changing logits.")
-        if change_logits_inplace:
+        if inplace:
             logits.div_(self.temperature)
         else:
             logits = logits / self.temperature
-        return logits / self.temperature, mask
+        return logits / self.temperature
 
 
 @dataclasses.dataclass
@@ -93,11 +60,7 @@ class TopPLogitsWarper(LogitsWarper):
         self,
         _,
         logits: torch.FloatTensor,
-        mask: Optional[torch.FloatTensor],
-        change_logits: bool = True,
-        change_mask: bool = True,
-        change_logits_inplace: bool = False,
-        change_mask_inplace: bool = False,
+        inplace: bool = False,
     ) -> Tuple[torch.FloatTensor, Optional[torch.FloatTensor]]:
         sorted_logits, sorted_indices = torch.sort(logits, descending=False)
         cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
@@ -109,8 +72,12 @@ class TopPLogitsWarper(LogitsWarper):
 
         # scatter sorted tensors to original indexing
         indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
-        return _process_logits_mask(logits, mask, indices_to_remove, change_logits, change_mask,
-                                    change_logits_inplace, change_mask_inplace, self.filter_value)
+        self.filter_value = torch.finfo(logits.dtype).min
+        if inplace:
+            logits.masked_fill_(indices_to_remove, self.filter_value)
+        else:
+            logits = logits.masked_fill(indices_to_remove, self.filter_value)
+        return logits
 
 
 @dataclasses.dataclass
@@ -130,21 +97,21 @@ class TopKLogitsWarper(LogitsWarper):
         self,
         _,
         logits: torch.FloatTensor,
-        mask: Optional[torch.FloatTensor],
-        change_logits: bool = True,
-        change_mask: bool = True,
-        change_logits_inplace: bool = False,
-        change_mask_inplace: bool = False,
+        inplace: bool = False,
     ) -> Tuple[torch.FloatTensor, Optional[torch.FloatTensor]]:
         top_k = min(self.top_k, logits.size(-1))  # Safety check
         # Remove all tokens with a probability less than the last token of the top-k
         indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
-        return _process_logits_mask(logits, mask, indices_to_remove, change_logits, change_mask,
-                                    change_logits_inplace, change_mask_inplace, self.filter_value)
+        self.filter_value = torch.finfo(logits.dtype).min
+        if inplace:
+            logits.masked_fill_(indices_to_remove, self.filter_value)
+        else:
+            logits = logits.masked_fill(indices_to_remove, self.filter_value)
+        return logits
 
 
 @dataclasses.dataclass
-class EtaLogitsWarper(LogitsWarper):
+class EpsilonLogitsWarper(LogitsWarper):
     epsilon: float
     filter_value: float = -float("Inf")
     min_tokens_to_keep: int = 1
@@ -164,11 +131,7 @@ class EtaLogitsWarper(LogitsWarper):
         self,
         _,
         logits: torch.FloatTensor,
-        mask: Optional[torch.FloatTensor],
-        change_logits: bool = True,
-        change_mask: bool = True,
-        change_logits_inplace: bool = False,
-        change_mask_inplace: bool = False,
+        inplace: bool = False,
     ) -> Tuple[torch.FloatTensor, Optional[torch.FloatTensor]]:
         # Calculate the adaptive cutoff
         probabilities = logits.softmax(dim=-1)
@@ -180,55 +143,41 @@ class EtaLogitsWarper(LogitsWarper):
         top_k = min(self.min_tokens_to_keep, logits.size(-1))  # Safety check
         indices_to_remove = indices_to_remove & (logits < torch.topk(logits, top_k)[0][..., -1, None])
 
-        return _process_logits_mask(logits, mask, indices_to_remove, change_logits, change_mask,
-                                    change_logits_inplace, change_mask_inplace, self.filter_value)
+        self.filter_value = torch.finfo(logits.dtype).min
+        if inplace:
+            logits.masked_fill_(indices_to_remove, self.filter_value)
+        else:
+            logits = logits.masked_fill(indices_to_remove, self.filter_value)
+        return logits
 
 
-def chained_logits_wraper(xs: List[LogitsWarper]):
+def chained_logits_wraper(xs: List[LogitsWarper], inplace: bool = False):
 
     def foo(
         input_ids: torch.LongTensor,
         logits: torch.FloatTensor,
-        mask: Optional[torch.FloatTensor] = None,
-        change_logits: bool = True,
-        change_mask: bool = True,
-        change_logits_inplace: bool = False,
-        change_mask_inplace: bool = False,
     ):
         for x in xs:
-            logits, mask = x(input_ids, logits, mask, change_logits, change_mask, change_logits_inplace,
-                             change_mask_inplace)
-        return logits, mask
+            logits = x(input_ids, logits, inplace)
+        return logits
 
     return foo
 
 
-def unioned_logits_wraper(xs: List[LogitsWarper], filter_value: float = -float("Inf")):
+def unioned_logits_wraper(xs: List[LogitsWarper], inplace: bool = False):
 
     def foo(
         input_ids: torch.LongTensor,
         logits: torch.FloatTensor,
-        mask: Optional[torch.FloatTensor] = None,
-        change_logits: bool = True,
-        change_mask: bool = True,
-        change_logits_inplace: bool = False,
-        change_mask_inplace: bool = False,
     ):
-        if mask is None:
-            mask = torch.ones_like(logits, dtype=torch.bool)
-        all_masks = []
-        for x in xs:
-            _, m = x(input_ids,
-                     logits,
-                     mask,
-                     change_logits=False,
-                     change_mask=True,
-                     change_logits_inplace=False,
-                     change_mask_inplace=False)
-            all_masks.append(m)
-        mask = torch.stack(all_masks, dim=0).all(dim=0)
-        return _process_logits_mask(logits, mask, mask.logical_not(), change_logits, change_mask,
-                                    change_logits_inplace, change_mask_inplace, filter_value)
+        processed_logits = [x(input_ids, logits, inplace=False) for x in xs]
+        masks = [logits != pl for pl in processed_logits]
+        mask = functools.reduce(torch.logical_and, masks)
+        if inplace:
+            logits.masked_fill_(mask.logical_not(), torch.finfo(logits.dtype).min)
+        else:
+            logits = logits + (1 - mask) * torch.finfo(logits.dtype).min
+        return logits
 
     return foo
 
@@ -237,22 +186,9 @@ def top_k_top_p_logits(
     logits: torch.Tensor,
     top_k=0,
     top_p=1.0,
-    filter_value=-float('Inf'),
     inplace: bool = False,
     ordered: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     warper_fn = unioned_logits_wraper if not ordered else chained_logits_wraper
-    p = warper_fn([
-        TopKLogitsWarper(top_k=top_k, filter_value=filter_value),
-        TopPLogitsWarper(top_p=top_p, filter_value=filter_value)
-    ],
-                  filter_value=filter_value)
-    return p(
-        None,
-        logits,
-        change_logits=True,
-        change_logits_inplace=inplace,
-        change_mask=True,
-        change_mask_inplace=True,
-        mask=torch.ones_like(logits),
-    )
+    p = warper_fn([TopKLogitsWarper(top_k=top_k), TopPLogitsWarper(top_p=top_p)], inplace=inplace)
+    return p(None, logits)

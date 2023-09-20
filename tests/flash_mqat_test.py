@@ -5,7 +5,7 @@ import transformers
 
 from impl.model.nn.flash_mqat import (FlashMQATForCausalLM, generate, GenerationConfig, PipeCacheData,
                                       PipeTransferData, vanilla_cpu_generate, vanilla_packed_generate)
-from impl.model.utils.data import build_packed_inputs, unpack_tensor
+from impl.model.utils.data import build_packed_inputs, unpack_tensor, gather_shifted_log_probs
 
 
 class FlashMQATStarCoderTest(unittest.TestCase):
@@ -101,20 +101,21 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         input_ids = encoding['input_ids'].to(self.device)
         prompt_len = input_ids.shape[1]
         attention_mask = encoding['attention_mask'].to(self.device)
-        gconfig = GenerationConfig(min_new_tokens=10,
+        gconfig = GenerationConfig(min_new_tokens=0,
                                    max_new_tokens=100,
                                    temperature=1.0,
                                    greedy=True,
                                    top_k=50,
                                    top_p=1.0,
                                    num_samples=1)
-        generated, glogits, glmask = generate(model=self.model,
-                                              tokenizer=self.tokenizer,
-                                              input_ids=input_ids,
-                                              attention_mask=attention_mask,
-                                              gconfig=gconfig)
+        generated, glogprobs, glmask = generate(model=self.model,
+                                                tokenizer=self.tokenizer,
+                                                input_ids=input_ids,
+                                                attention_mask=attention_mask,
+                                                gconfig=gconfig)
+        self.assertIsNone(glmask)
         tgconfig = transformers.GenerationConfig(
-            min_new_tokens=10,
+            min_new_tokens=0,
             max_new_tokens=100,
             temperature=1.0,
             do_sample=False,
@@ -136,10 +137,10 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         inf_input_ids = torch.cat([input_ids, generated], -1)
         tam = torch.logical_and(inf_input_ids.not_equal(self.tokenizer.pad_token_id),
                                 (inf_input_ids.not_equal(self.tokenizer.eos_token_id))).long()
-        tlogits = self.starcoder(input_ids=inf_input_ids, attention_mask=tam).logits[:, :-1]
-        tlogits = tlogits.gather(-1, inf_input_ids[:, 1:].unsqueeze(-1)).squeeze(-1)
-        tlogits = tlogits[:, prompt_len - 1:]
-        assert torch.allclose(glogits, tlogits, atol=5e-3), (glogits - tlogits).abs().max()
+        tlogits = self.starcoder(input_ids=inf_input_ids, attention_mask=tam).logits.float()
+        tlogprobs = gather_shifted_log_probs(tlogits, inf_input_ids)
+        tlogprobs = tlogprobs[:, prompt_len - 1:]
+        assert torch.allclose(glogprobs, tlogprobs, atol=5e-3), (glogprobs - tlogprobs).abs().max()
 
 
 class FlashMQATStarCoderCPUTest(unittest.TestCase):
@@ -218,31 +219,34 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
         input_ids = encoding['input_ids'].to(self.device)
         attention_mask = encoding['attention_mask'].to(self.device)
-        gconfig = GenerationConfig(min_new_tokens=10,
+        gconfig = GenerationConfig(min_new_tokens=0,
                                    max_new_tokens=100,
                                    temperature=1.0,
                                    greedy=True,
                                    top_k=50,
                                    top_p=1.0,
                                    num_samples=1)
-        vg, vglogits_, vglmask = vanilla_cpu_generate(model=self.model,
-                                                      tokenizer=self.tokenizer,
-                                                      input_ids=input_ids,
-                                                      attention_mask=attention_mask,
-                                                      gconfig=gconfig)
+        vg, vglogprob_, vglmask = vanilla_cpu_generate(model=self.model,
+                                                       tokenizer=self.tokenizer,
+                                                       input_ids=input_ids,
+                                                       attention_mask=attention_mask,
+                                                       gconfig=gconfig)
+        self.assertIsNone(vglmask)
+
         vg_input_ids = torch.cat([input_ids, vg], -1)
         vam = torch.logical_and(vg_input_ids.not_equal(self.tokenizer.pad_token_id),
                                 (vg_input_ids.not_equal(self.tokenizer.eos_token_id))).long()
+
         x = PipeTransferData(attention_mask=vam)
         ys = [PipeCacheData(input_ids=vg_input_ids)
               ] + [PipeCacheData() for _ in range(self.model.config.n_layers + 1)]
-        vglogits = self.model(x, ys).pp_output[:, :-1]
-        vglogits = vglogits.gather(-1, vg_input_ids[:, 1:].unsqueeze(-1)).squeeze(-1)[:,
-                                                                                      input_ids.shape[1] - 1:]
-        assert torch.allclose(vglogits_, vglogits)
+        vglogits = self.model(x, ys).pp_output
+        vglogprob = gather_shifted_log_probs(vglogits, vg_input_ids)
+        vglogprob = vglogprob[:, input_ids.shape[1] - 1:]
+        assert torch.allclose(vglogprob_, vglogprob)
 
         tgconfig = transformers.GenerationConfig(
-            min_new_tokens=10,
+            min_new_tokens=0,
             max_new_tokens=100,
             temperature=1.0,
             do_sample=False,
@@ -260,12 +264,12 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         )
         tam = torch.logical_and(tseq.not_equal(self.tokenizer.pad_token_id),
                                 (tseq.not_equal(self.tokenizer.eos_token_id))).long()
-        tlogits = self.starcoder(input_ids=tseq, attention_mask=tam).logits[:, :-1]
-        tlogits = tlogits.gather(-1, tseq[:, 1:][..., None]).squeeze(-1)
+        tlogits = self.starcoder(input_ids=tseq, attention_mask=tam).logits.float()
+        tlogprob = gather_shifted_log_probs(tlogits, tseq)
         tseq = tseq[:, input_ids.shape[1]:]
-        tlogits = tlogits[:, input_ids.shape[1] - 1:]
+        tlogprob = tlogprob[:, input_ids.shape[1] - 1:]
         assert torch.allclose(tseq, vg)
-        assert torch.allclose(vglogits, tlogits), (vglogits - tlogits).abs().max()
+        assert torch.allclose(vglogprob, tlogprob), (vglogprob - tlogprob).abs().max()
 
 
 class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
@@ -312,20 +316,18 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
                                    top_k=50,
                                    top_p=1.0,
                                    num_samples=1)
-        vcg, vclogits, vcmask = vanilla_cpu_generate(model=self.model,
-                                                     tokenizer=self.tokenizer,
-                                                     input_ids=prompt,
-                                                     attention_mask=prompt_att_mask,
-                                                     gconfig=gconfig)
-
+        vcg, vclogprob, vcmask = vanilla_cpu_generate(model=self.model,
+                                                      tokenizer=self.tokenizer,
+                                                      input_ids=prompt,
+                                                      attention_mask=prompt_att_mask,
+                                                      gconfig=gconfig)
         self.model = self.model.cuda().to(torch.float16)
-        vg, vglogits, vgmask = vanilla_packed_generate(model=self.model.cuda(),
-                                                       tokenizer=self.tokenizer,
-                                                       input_ids=prompt.cuda(),
-                                                       attention_mask=prompt_att_mask.cuda(),
-                                                       gconfig=gconfig)
-        vglogits = vglogits.float().cpu()
-        vgmask = vgmask.float().cpu()
+        vg, vglogprob, vgmask = vanilla_packed_generate(model=self.model.cuda(),
+                                                        tokenizer=self.tokenizer,
+                                                        input_ids=prompt.cuda(),
+                                                        attention_mask=prompt_att_mask.cuda(),
+                                                        gconfig=gconfig)
+        vglogprob = vglogprob.float().cpu()
 
         seq = torch.cat([prompt, vcg], -1)
         seq_attn_mask = torch.logical_and(seq.ne(self.tokenizer.pad_token_id),
@@ -334,15 +336,15 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         x = PipeTransferData(cu_seqlens=cu_seqlens.cuda(), max_seqlen=max_seq_len)
         ys = [PipeCacheData(input_ids=packed_input_ids.cuda())
               ] + [PipeCacheData() for _ in range(self.model.config.n_layers + 1)]
-        inf_logits = self.model(x, ys).pp_output[:, :-1].float().cpu()
-        inf_logits = unpack_tensor(inf_logits, cu_seqlens, 'cpu', padding_side='left')
-        inf_logits = inf_logits.gather(-1, seq[:, 1:].unsqueeze(-1)).squeeze(-1)[:, prompt.shape[1] - 1:]
+        inf_logits = self.model(x, ys).pp_output.float().cpu()
+        inf_logits = unpack_tensor(inf_logits, cu_seqlens, padding_side='left')
+        inf_logprob = gather_shifted_log_probs(inf_logits, seq)[:, prompt.shape[1] - 1:]
         assert torch.allclose(vcg, vg.cpu()), (vcg, vg)
-        assert torch.allclose(inf_logits, vclogits,
-                              atol=5e-3), (inf_logits, vclogits, (inf_logits - vclogits).abs().max())
-        assert torch.allclose(vglogits, vclogits,
-                              atol=5e-3), (vglogits, vclogits, (vglogits - vclogits).abs().max())
-        assert torch.allclose(vgmask.cpu(), vcmask), (vgmask, vcmask)
+        assert torch.allclose(inf_logprob, vclogprob,
+                              atol=5e-3), (inf_logprob, vclogprob, (inf_logprob - vclogprob).abs().max())
+        assert torch.allclose(vglogprob, vclogprob,
+                              atol=5e-3), (vglogprob, vclogprob, (vglogprob - vclogprob).abs().max())
+        assert torch.allclose(vgmask.cpu(), vcmask)
 
 
 class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
@@ -392,23 +394,23 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
                                    top_p=1.0,
                                    num_samples=1)
 
-        vg, vglogits, vgmask = vanilla_packed_generate(model=self.model,
-                                                       tokenizer=self.tokenizer,
-                                                       input_ids=prompt,
-                                                       attention_mask=prompt_att_mask,
-                                                       gconfig=gconfig)
+        vg, vglogprob, vgmask = vanilla_packed_generate(model=self.model,
+                                                        tokenizer=self.tokenizer,
+                                                        input_ids=prompt,
+                                                        attention_mask=prompt_att_mask,
+                                                        gconfig=gconfig)
 
-        g, logits, mask = generate(model=self.model,
-                                   tokenizer=self.tokenizer,
-                                   input_ids=prompt,
-                                   attention_mask=prompt_att_mask,
-                                   gconfig=gconfig)
+        g, logprob, mask = generate(model=self.model,
+                                    tokenizer=self.tokenizer,
+                                    input_ids=prompt,
+                                    attention_mask=prompt_att_mask,
+                                    gconfig=gconfig)
 
         # print(self.tokenizer.batch_decode(torch.cat([prompt, g], -1)))
         assert torch.allclose(g, vg), (g, vg)
-        assert torch.allclose(logits, vglogits,
-                              atol=5e-3), (logits, vglogits, (logits - vglogits).abs().max())
-        assert torch.allclose(vgmask, mask), (vgmask, mask)
+        assert torch.allclose(logprob, vglogprob,
+                              atol=5e-3), (logprob, vglogprob, (logprob - vglogprob).abs().max())
+        assert torch.allclose(mask, vgmask)
 
 
 if __name__ == "__main__":

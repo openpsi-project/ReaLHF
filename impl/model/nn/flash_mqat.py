@@ -550,27 +550,38 @@ def genstep(
     unfinished_sequences: torch.Tensor,
     generated_idx: int,
     gconfig: GenerationConfig,
-):
+) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], bool, torch.Tensor]:
+    """Advance generation by one step given logits.
+
+    Args:
+        next_token_logits (torch.Tensor): Shape [bs, vocab_size].
+        tokenizer (transformers.PreTrainedTokenizerFast): .
+        unfinished_sequences (torch.Tensor): Bool tensor indicator of whether a sequence is finished.
+            Shape [bs].
+        generated_idx (int): The token index to be generated.
+        gconfig (GenerationConfig): .
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, bool, torch.Tensor]: 
+    """
+
+    next_token_logits = next_token_logits.float()
     if generated_idx < gconfig.min_new_tokens:
         next_token_logits = mask_eos_token(next_token_logits, eos_token_id=tokenizer.eos_token_id)
 
-    if gconfig.greedy:
-        max_iv = next_token_logits.max(-1)
-        next_tokens = max_iv.indices
-        selected_logits = max_iv.values
-        logits_mask = torch.ones_like(next_token_logits)
-    else:
-        next_token_logits = next_token_logits.float()
+    if not gconfig.greedy:
         next_token_logits /= gconfig.temperature
-        next_token_logits, logits_mask = top_k_top_p_logits(
+        next_token_logits = top_k_top_p_logits(
             next_token_logits,
             top_k=gconfig.top_k,
             top_p=gconfig.top_p,
             inplace=True,
             ordered=False,
         )
-        next_tokens = torch.distributions.Categorical(logits=next_token_logits).sample()
-        selected_logits = torch.gather(next_token_logits, -1, next_tokens.unsqueeze(-1)).squeeze(-1)
+
+    distrb = torch.distributions.Categorical(logits=next_token_logits)
+    next_tokens = distrb.mode if gconfig.greedy else distrb.sample()
+    logprob = distrb.log_prob(next_tokens)
 
     if tokenizer.eos_token_id is not None:
         if tokenizer.pad_token_id is None:
@@ -581,7 +592,11 @@ def genstep(
     # terminate check
     terminate = (generated_idx >= gconfig.max_new_tokens - 1) or (unfinished_sequences.max() == 0)
 
-    return next_tokens, selected_logits, logits_mask, terminate, unfinished_sequences
+    logits_mask = next_token_logits != torch.finfo(next_token_logits.dtype).min
+    if logits_mask.all():
+        logits_mask = None
+
+    return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
 
 
 @torch.no_grad()
@@ -606,7 +621,7 @@ def generate(
     unfinished_sequences = torch.ones(bs, dtype=torch.long, device=device)
 
     gen_token_ph = []
-    gen_logits_ph = []
+    gen_logprob_ph = []
     gen_logits_mask_ph = []
 
     # Prepare inputs for generation iterations
@@ -642,10 +657,10 @@ def generate(
         ys[0].cache_seqlens = input_lens.clone()
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
-        next_tokens, selected_logits, logits_mask, terminate, unfinished_sequences = genstep(
+        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
             logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
-        gen_logits_ph.append(selected_logits)
         gen_token_ph.append(next_tokens)
+        gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
         generated_idx += 1
     else:
@@ -669,14 +684,23 @@ def generate(
         for yidx, y in enumerate(ys[:-1]):
             y.cache_seqlens += 1
 
-        next_tokens, selected_logits, logits_mask, terminate, unfinished_sequences = genstep(
+        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
             logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
-        gen_logits_ph.append(selected_logits)
         gen_token_ph.append(next_tokens)
+        gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
         generated_idx += 1
 
-    return torch.stack(gen_token_ph, -1), torch.stack(gen_logits_ph, -1), torch.stack(gen_logits_mask_ph, -2)
+    gen_tokens = torch.stack(gen_token_ph, -1)
+    log_probs = torch.stack(gen_logprob_ph, -1)
+    if all([m is None for m in gen_logits_mask_ph]):
+        logits_mask = None
+    else:
+        mm = next(m for m in gen_logits_mask_ph if m is not None)
+        gen_logits_mask_ph = [torch.zeros_like(mm) if m is None else m for m in gen_logits_mask_ph]
+        logits_mask = torch.stack(gen_logits_mask_ph, -2)
+
+    return gen_tokens, log_probs, logits_mask
 
 
 @torch.no_grad()
@@ -694,7 +718,7 @@ def vanilla_packed_generate(
     unfinished_sequences = torch.ones(input_ids.shape[0], dtype=torch.long, device=input_ids.device)
 
     gen_token_ph = []
-    gen_logits_ph = []
+    gen_logprob_ph = []
     gen_logits_mask_ph = []
 
     # The main loop.
@@ -709,10 +733,10 @@ def vanilla_packed_generate(
         logits = logits[cu_seqlens[1:] - 1]
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
-        next_tokens, selected_logits, logits_mask, terminate, unfinished_sequences = genstep(
+        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
             logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
-        gen_logits_ph.append(selected_logits)
         gen_token_ph.append(next_tokens)
+        gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
         generated_idx += 1
 
@@ -722,7 +746,16 @@ def vanilla_packed_generate(
             next_tokens.unsqueeze(-1).not_equal(tokenizer.pad_token_id))
         attention_mask = torch.cat([attention_mask, am], 1)
 
-    return torch.stack(gen_token_ph, -1), torch.stack(gen_logits_ph, -1), torch.stack(gen_logits_mask_ph, -2)
+    gen_tokens = torch.stack(gen_token_ph, -1)
+    log_probs = torch.stack(gen_logprob_ph, -1)
+    if all([m is None for m in gen_logits_mask_ph]):
+        logits_mask = None
+    else:
+        mm = next(m for m in gen_logits_mask_ph if m is not None)
+        gen_logits_mask_ph = [torch.zeros_like(mm) if m is None else m for m in gen_logits_mask_ph]
+        logits_mask = torch.stack(gen_logits_mask_ph, -2)
+
+    return gen_tokens, log_probs, logits_mask
 
 
 @torch.no_grad()
@@ -741,7 +774,7 @@ def vanilla_cpu_generate(
     unfinished_sequences = torch.ones(input_ids.shape[0], dtype=torch.long, device=input_ids.device)
 
     gen_token_ph = []
-    gen_logits_ph = []
+    gen_logprob_ph = []
     gen_logits_mask_ph = []
 
     # The main loop.
@@ -753,10 +786,10 @@ def vanilla_cpu_generate(
         logits = model(x, ys).pp_output[:, -1, :]
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
-        next_tokens, selected_logits, logits_mask, terminate, unfinished_sequences = genstep(
+        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
             logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
-        gen_logits_ph.append(selected_logits)
         gen_token_ph.append(next_tokens)
+        gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
         generated_idx += 1
 
@@ -766,4 +799,13 @@ def vanilla_cpu_generate(
             next_tokens.unsqueeze(-1).not_equal(tokenizer.pad_token_id))
         attention_mask = torch.cat([attention_mask, am], 1)
 
-    return torch.stack(gen_token_ph, -1), torch.stack(gen_logits_ph, -1), torch.stack(gen_logits_mask_ph, -2)
+    gen_tokens = torch.stack(gen_token_ph, -1)
+    log_probs = torch.stack(gen_logprob_ph, -1)
+    if all([m is None for m in gen_logits_mask_ph]):
+        logits_mask = None
+    else:
+        mm = next(m for m in gen_logits_mask_ph if m is not None)
+        gen_logits_mask_ph = [torch.zeros_like(mm) if m is None else m for m in gen_logits_mask_ph]
+        logits_mask = torch.stack(gen_logits_mask_ph, -2)
+
+    return gen_tokens, log_probs, logits_mask

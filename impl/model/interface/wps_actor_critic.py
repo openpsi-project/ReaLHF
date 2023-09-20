@@ -15,7 +15,7 @@ import tqdm
 import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_aggregate, recursive_apply
-from impl.model.utils.data import get_eos_indices, masked_normalization
+from impl.model.utils.data import get_eos_indices, masked_normalization, gather_shifted_log_probs
 from impl.model.utils.save import save_hf_or_lora_model
 import api.model
 import api.utils
@@ -156,12 +156,7 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
 api.model.register_interface("wps_reward_unpaired", WPSRewardUnpairedInterface)
 
 
-def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.FloatTensor:
-    logits = logits[:, :-1]
-    labels = labels[:, 1:]
-    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-    log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1))
-    return log_probs_labels.squeeze(-1)
+
 
 
 def generate_logits_ignoring_mask(logits: torch.FloatTensor,

@@ -1,4 +1,4 @@
-from typing import Tuple, Type, Union
+from typing import Tuple, Type, Union, Optional
 import dataclasses
 import logging
 
@@ -176,10 +176,13 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
                                        head_dim).reshape(bs, slen, n_kv_heads * n_rep, head_dim))
 
 
-def mask_eos_token(logits, eos_token_id=None):
+def mask_eos_token(
+    logits: torch.Tensor,
+    eos_token_id: Optional[int] = None,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
     # for min_new_tokens
     if eos_token_id is not None:
-        logits[..., eos_token_id] = -float("inf")
+        logits[..., eos_token_id] = torch.finfo(logits.dtype).min
     return logits
 
 
@@ -205,12 +208,13 @@ def build_packed_inputs(input_ids: torch.LongTensor,
     return packed_input_ids, cu_seqlens, max_seq_len
 
 
-def unpack_tensor(packed_x: torch.Tensor, cu_seqlens: torch.IntTensor, device: torch.device,
-                  padding_side: str):
+def unpack_tensor(packed_x: torch.Tensor, cu_seqlens: torch.IntTensor, padding_side: str):
     seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
     bs = cu_seqlens.shape[0] - 1
     max_seqlen = int(max(seqlens))
-    unpacked_x = torch.zeros((bs, max_seqlen, *packed_x.shape[1:]), dtype=packed_x.dtype, device=device)
+    unpacked_x = torch.zeros((bs, max_seqlen, *packed_x.shape[1:]),
+                             dtype=packed_x.dtype,
+                             device=packed_x.device)
     for i in range(bs):
         if padding_side == 'right':
             unpacked_x[i, :seqlens[i]] = packed_x[cu_seqlens[i]:cu_seqlens[i + 1]]
@@ -219,3 +223,11 @@ def unpack_tensor(packed_x: torch.Tensor, cu_seqlens: torch.IntTensor, device: t
         else:
             raise NotImplementedError()
     return unpacked_x
+
+
+def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.FloatTensor:
+    logits = logits[:, :-1]
+    labels = labels[:, 1:]
+    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+    log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1))
+    return log_probs_labels.squeeze(-1)
