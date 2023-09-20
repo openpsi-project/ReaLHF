@@ -17,12 +17,12 @@ mp.set_start_method('spawn', force=True)
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from base.namedarray import NamedArray
+from impl.model.nn.mqa_transformer import generate, TransformerConfig
 import api.config as config_package
 import api.model
 import base.gpu_utils
 import base.name_resolve as name_resolve
 import base.names as names
-from impl.model.nn.mqa_transformer import TransformerConfig, generate
 
 MODEL_PATH = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder/"
 IF_LOG = True

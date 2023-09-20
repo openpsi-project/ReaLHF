@@ -4,6 +4,7 @@ import impl.data
 import impl.model
 
 if __name__ == "__main__":
+    assert False, "This test is currently corrupted."
     root_dir = "/data"
     model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
     max_prompt_len = max_answer_len = 256
@@ -13,7 +14,7 @@ if __name__ == "__main__":
     dataset_cfg = api.config.Dataset(
         'excel_prompt',
         args=dict(
-            dataset_path="/data/aigc/llm/datasets/prompts/train50000.jsonl",
+            dataset_path="/data/aigc/llm/datasets/wps-prompts/train-small.json",
             max_seq_len=max_prompt_len,
         ),
     )
@@ -30,7 +31,7 @@ if __name__ == "__main__":
                                     seed=1,
                                     ddp_rank=0,
                                     world_size=1,
-                                    tokenizer_name_or_path=model_path,
+                                    tokenizer_or_tokenizer_name=model_path,
                                     experiment_name="dataset_test",
                                     trial_name='test')
     dataloder = api.data.make_dataloader(dataloader_cfg, dataset)

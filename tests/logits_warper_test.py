@@ -5,29 +5,9 @@ import unittest
 from transformers.generation.utils import top_k_top_p_filtering
 import torch
 
-from impl.model.utils.logits_warper import (chained_logits_wraper, TopKLogitsWarper, TopPLogitsWarper,
-                                            unioned_logits_wraper)
+from impl.model.utils.logits_warper import top_k_top_p_logits
 
-vocab_size = 5000
-
-
-def chained_top_k_top_p(logits, top_k=0, top_p=1.0, filter_value=-float('Inf')):
-    return chained_logits_wraper([
-        TopKLogitsWarper(top_k=top_k, filter_value=filter_value),
-        TopPLogitsWarper(top_p=top_p, filter_value=filter_value)
-    ],)(None, logits, change_mask=True, change_mask_inplace=True, mask=torch.ones_like(logits))
-
-
-def unioned_top_k_top_p(logits, top_k=0, top_p=1.0, filter_value=-float('Inf')):
-    return unioned_logits_wraper([
-        TopKLogitsWarper(top_k=top_k, filter_value=filter_value),
-        TopPLogitsWarper(top_p=top_p, filter_value=filter_value)
-    ],
-                                 filter_value=filter_value)(None,
-                                                            logits,
-                                                            change_mask=True,
-                                                            change_mask_inplace=True,
-                                                            mask=torch.ones_like(logits))
+vocab_size = 100
 
 
 def generate_logits_ignoring_mask(logits: torch.FloatTensor,
@@ -65,21 +45,21 @@ class LogitsWarperTest(unittest.TestCase):
         k = random.randint(100, vocab_size)
         logits = torch.randn(2, 100, vocab_size)
 
-        x2, m = chained_top_k_top_p(logits, top_k=k, top_p=p, filter_value=-100)
+        filter_value = torch.finfo(logits.dtype).min
+        x2 = top_k_top_p_logits(logits, top_k=k, top_p=p, inplace=False, ordered=True)
         x3 = top_k_top_p_filtering(logits.flatten(end_dim=-2), top_k=k, top_p=p,
-                                   filter_value=-100).view(2, 100, vocab_size)
+                                   filter_value=filter_value).view(2, 100, vocab_size)
         assert torch.allclose(x3, x2), (x3 - x2).abs().max()
-        x4 = logits.masked_fill((1 - m).bool(), -100)
-        assert torch.allclose(x2, x4), (x2 - x4).abs().max()
 
     def testUnioned(self):
         p = random.random()
-        k = random.randint(100, vocab_size)
-        logits = torch.randn(2, 100, vocab_size)
+        k = random.randint(10, vocab_size)
+        logits = torch.randn(2, 10, vocab_size)
 
         m1 = generate_logits_ignoring_mask(logits, top_k=k, top_p=p)
-        _, m2 = unioned_top_k_top_p(logits, top_k=k, top_p=p, filter_value=-100)
-        assert torch.allclose(m1, m2.logical_not())
+        top_k_top_p_logits(logits, top_k=k, top_p=p, inplace=True, ordered=False)
+        assert torch.allclose(m1, logits == torch.finfo(logits.dtype).min), (m1, logits == torch.finfo(
+            logits.dtype).min)
 
 
 if __name__ == "__main__":

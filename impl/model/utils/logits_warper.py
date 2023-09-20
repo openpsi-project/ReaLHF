@@ -1,6 +1,7 @@
 from typing import List, Optional, Tuple
 import dataclasses
 import functools
+
 import torch
 
 
@@ -156,7 +157,7 @@ def chained_logits_wraper(xs: List[LogitsWarper], inplace: bool = False):
     def foo(
         input_ids: torch.LongTensor,
         logits: torch.FloatTensor,
-    ):
+    ) -> torch.FloatTensor:
         for x in xs:
             logits = x(input_ids, logits, inplace)
         return logits
@@ -169,14 +170,14 @@ def unioned_logits_wraper(xs: List[LogitsWarper], inplace: bool = False):
     def foo(
         input_ids: torch.LongTensor,
         logits: torch.FloatTensor,
-    ):
+    ) -> torch.FloatTensor:
         processed_logits = [x(input_ids, logits, inplace=False) for x in xs]
         masks = [logits != pl for pl in processed_logits]
-        mask = functools.reduce(torch.logical_and, masks)
+        mask = functools.reduce(torch.logical_or, masks)
         if inplace:
-            logits.masked_fill_(mask.logical_not(), torch.finfo(logits.dtype).min)
+            logits.masked_fill_(mask, torch.finfo(logits.dtype).min)
         else:
-            logits = logits + (1 - mask) * torch.finfo(logits.dtype).min
+            logits = logits.masked_fill(mask, torch.finfo(logits.dtype).min)
         return logits
 
     return foo
@@ -188,7 +189,7 @@ def top_k_top_p_logits(
     top_p=1.0,
     inplace: bool = False,
     ordered: bool = False,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> torch.FloatTensor:
     warper_fn = unioned_logits_wraper if not ordered else chained_logits_wraper
     p = warper_fn([TopKLogitsWarper(top_k=top_k), TopPLogitsWarper(top_p=top_p)], inplace=inplace)
     return p(None, logits)

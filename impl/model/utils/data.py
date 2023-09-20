@@ -1,4 +1,4 @@
-from typing import Tuple, Type, Union, Optional
+from typing import Optional, Tuple, Type, Union
 import dataclasses
 import logging
 

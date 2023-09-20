@@ -5,7 +5,7 @@ import transformers
 
 from impl.model.nn.flash_mqat import (FlashMQATForCausalLM, generate, GenerationConfig, PipeCacheData,
                                       PipeTransferData, vanilla_cpu_generate, vanilla_packed_generate)
-from impl.model.utils.data import build_packed_inputs, unpack_tensor, gather_shifted_log_probs
+from impl.model.utils.data import build_packed_inputs, gather_shifted_log_probs, unpack_tensor
 
 
 class FlashMQATStarCoderTest(unittest.TestCase):
