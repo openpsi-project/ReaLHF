@@ -332,11 +332,13 @@ class VocabPositionEmbedding(nn.Module):
                  vocab_size: int,
                  n_positions: int,
                  hidden_dim: int,
+                 embed_pdrop: float,
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[Union[str, torch.device]] = None):
         super().__init__()
         self.wte = nn.Embedding(vocab_size, hidden_dim, dtype=dtype, device=device)
         self.wpe = nn.Embedding(n_positions, hidden_dim, dtype=dtype, device=device)
+        self.embed_drop = nn.Dropout(embed_pdrop)
 
         self.self_attention_mask = torch.tril(
             torch.ones((n_positions, n_positions), dtype=torch.bool, device=device))
@@ -382,7 +384,7 @@ class VocabPositionEmbedding(nn.Module):
 
         inputs_embeds = self.wte(y.input_ids)
         position_embeds = self.wpe(y.position_ids)
-        x.pp_output = inputs_embeds + position_embeds
+        x.pp_output = self.embed_drop(inputs_embeds + position_embeds)
         return x
 
 
