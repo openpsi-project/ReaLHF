@@ -655,7 +655,7 @@ def generate(
     v_caches: Optional[List[torch.Tensor]] = None,
     cache_seqlens: Optional[torch.Tensor] = None,
     gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
     """Generete a sequence with a FlashMQAT.
 
     Args:
@@ -680,11 +680,13 @@ def generate(
         gconfig (GenerationConfig, optional): .
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
         The tuple of
             gen_tokens: Generated tokens. Shape [bs, #new_tokens].
             log_probs: Log probabilities of generated tokens. Shape [bs, #new_tokens].
             mask: The mask of logits. None if no mask otherwise a tensor of shape [bs, vocab_size].
+            ys: List of PipeCacheData. Length equals to the number of transformer layers.
+                Can be saved for continuing generation.
     """
     if attention_mask is None:
         attention_mask = torch.logical_and(input_ids != tokenizer.pad_token_id, input_ids
@@ -705,6 +707,7 @@ def generate(
 
     # Prepare inputs for generation iterations
     if k_caches is None:
+        from_scratch = True
         # Generate from scratch.
         # Input_ids may have different lengths, we should first pack them into a large batch
         # to use varlen flash attention, then record kv caches for the following inferences.
@@ -743,11 +746,19 @@ def generate(
         gen_logits_mask_ph.append(logits_mask)
         generated_idx += 1
     else:
+        from_scratch = False
         # Resume from a previous generation state.
         if prompt_padded_len != 1:
             raise ValueError("prompt_padded_len must be 1 when resuming from a previous generation state.")
+        max_seq_len = gconfig.max_new_tokens + int(max(cache_seqlens)) + 1
+        for i in range(len(k_caches)):
+            pad = (0, 0, 0, 0, 0, max_seq_len - k_caches[i].shape[1])
+            if k_caches[i].shape[1] < max_seq_len:
+                k_caches[i] = nn.functional.pad(k_caches[i], pad)
+            if v_caches[i].shape[1] < max_seq_len:
+                v_caches[i] = nn.functional.pad(v_caches[i], pad)
         x = PipeTransferData()
-        ys = [PipeCacheData(input_ids=input_ids, cache_seqlens=cache_seqlens.clone())] + [
+        ys = [PipeCacheData(cache_seqlens=cache_seqlens.clone())] + [
             PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens.clone())
             for k, v in zip(k_caches, v_caches)
         ] + [PipeCacheData()]
@@ -776,10 +787,10 @@ def generate(
         logits_mask = None
     else:
         mm = next(m for m in gen_logits_mask_ph if m is not None)
-        gen_logits_mask_ph = [torch.zeros_like(mm) if m is None else m for m in gen_logits_mask_ph]
+        gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
         logits_mask = torch.stack(gen_logits_mask_ph, -2)
 
-    return gen_tokens, log_probs, logits_mask
+    return gen_tokens, log_probs, logits_mask, ys[1:-1]
 
 
 @torch.no_grad()
@@ -832,7 +843,7 @@ def vanilla_packed_generate(
         logits_mask = None
     else:
         mm = next(m for m in gen_logits_mask_ph if m is not None)
-        gen_logits_mask_ph = [torch.zeros_like(mm) if m is None else m for m in gen_logits_mask_ph]
+        gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
         logits_mask = torch.stack(gen_logits_mask_ph, -2)
 
     return gen_tokens, log_probs, logits_mask
@@ -886,7 +897,7 @@ def vanilla_cpu_generate(
         logits_mask = None
     else:
         mm = next(m for m in gen_logits_mask_ph if m is not None)
-        gen_logits_mask_ph = [torch.zeros_like(mm) if m is None else m for m in gen_logits_mask_ph]
+        gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
         logits_mask = torch.stack(gen_logits_mask_ph, -2)
 
     return gen_tokens, log_probs, logits_mask
