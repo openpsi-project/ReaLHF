@@ -3,6 +3,10 @@ import torch
 from api.config import *
 from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
 
+EXPR_BEGIN_TIME = None
+EXPR_DEADLINE = "now+12hours"
+EXPR_TIME_LIMIT = "3"
+
 
 def rollout(
     commands: Commands,
@@ -120,7 +124,7 @@ def train_critic(
 class ChatRLHFBenchmarkExperiment(Experiment):
 
     def __init__(self,
-                 n_actors=8,
+                 n_actors=2,
                  n_critics=1,
                  n_rewards=1,
                  n_refs=1,
@@ -148,6 +152,10 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 scheduling=Scheduling.data_worker_default(
                     cpu=2,
                     mem=10000,
+                    node_type="g1",
+                    begin=EXPR_BEGIN_TIME,
+                    deadline=EXPR_DEADLINE,
+                    time_limit=EXPR_TIME_LIMIT,
                 ),
             ),
             master_worker=TasksGroup(
@@ -155,20 +163,12 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 scheduling=Scheduling.master_worker_default(
                     cpu=4,
                     mem=10000,
+                    node_type="g1",
+                    begin=EXPR_BEGIN_TIME,
+                    deadline=EXPR_DEADLINE,
+                    time_limit=EXPR_TIME_LIMIT,
                 ),
             ),
-            # model_worker=[
-            #     TasksGroup(
-            #         count=self.n_total,
-            #         scheduling=Scheduling.model_worker_default(
-            #             cpu=4,
-            #             gpu=0.25,
-            #             gpu_type='tesla',
-            #             mem=10000,
-            #             nodelist='frl8a141',
-            #         ),
-            #     ),
-            # ],
             model_worker=[
                 TasksGroup(
                     count=self.n_actors,
@@ -177,50 +177,38 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                         gpu=1,
                         gpu_type='tesla',
                         mem=60000,
-                        nodelist='frl8a140',
+                        # nodelist='frl8a140',
+                        node_type="a100",
+                        begin=EXPR_BEGIN_TIME,
+                        deadline=EXPR_DEADLINE,
+                        time_limit=EXPR_TIME_LIMIT,
                     ),
                 ),
                 TasksGroup(
-                    count=self.n_critics,
+                    count=self.n_critics + self.n_refs + self.n_rewards,
                     scheduling=Scheduling.model_worker_default(
-                        cpu=8,
-                        gpu=1,
+                        cpu=2,
+                        gpu=0.25,
                         gpu_type='tesla',
-                        mem=60000,
-                        nodelist='frl8a139',
+                        mem=15000,
+                        # nodelist='frl8a140',
+                        node_type="a100",
+                        begin=EXPR_BEGIN_TIME,
+                        deadline=EXPR_DEADLINE,
+                        time_limit=EXPR_TIME_LIMIT,
                     ),
                 ),
-                TasksGroup(
-                    count=self.n_rewards,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=8,
-                        gpu=1,
-                        gpu_type='tesla',
-                        mem=60000,
-                        nodelist='frl8a139',
-                    ),
-                ),
-                TasksGroup(
-                    count=self.n_rewards,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=8,
-                        gpu=1,
-                        gpu_type='tesla',
-                        mem=60000,
-                        nodelist='frl8a139',
-                    ),
-                )
             ],
         )
 
     def initial_setup(self) -> ExperimentConfig:
         if self.actor_model_name is None:
-            actor_path = "/lustre/meizy/base_models/cfgonly/opt-5120-40"
+            actor_path = "/lustre/meizy/base_models/cfgonly/opt-768-12"
         else:
             actor_path = os.path.join("/lustre/meizy/base_models/cfgonly/", self.actor_model_name)
 
         if self.critic_model_name is None:
-            critic_path = "/lustre/meizy/base_models/cfgonly/opt-2048-24"
+            critic_path = "/lustre/meizy/base_models/cfgonly/opt-768-12"
         else:
             critic_path = os.path.join("/lustre/meizy/base_models/cfgonly/", self.critic_model_name)
         # rw_lora_head_path = \
@@ -407,7 +395,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             master_ecs=ecs,
             data_worker=data_worker,
             model_worker=model_worker,
-            benchmark_steps=100,
+            benchmark_steps=10000,
         )
 
 

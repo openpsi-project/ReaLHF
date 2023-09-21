@@ -28,7 +28,7 @@ _LLM_ENVVARS = {
     # "CUDA_LAUNCH_BLOCKING": "1",
     # "TORCH_USE_CUDA_DSA": "1",
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
-    "PYTHONUSERBASE": "/local/meizy"
+    "PYTHONUSERBASE": "/nonsense"
 }
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
@@ -43,10 +43,15 @@ class Scheduling:
     gpu: int
     mem: int
     gpu_type: str = "tesla"
+    node_type: str = None
     nodelist: str = None
     exclude: str = None
     container_image: str = _LLM_CPU_IMAGE
     env_vars: Dict[str, str] = dataclasses.field(default_factory=lambda: _LLM_ENVVARS)
+    # time utils from "https://slurm.schedmd.com/sbatch.html"
+    time_limit: Optional[str] = None  # see  "--time" option for format
+    begin: Optional[str] = None  # see "--begin" option for format
+    deadline: Optional[str] = None  # see "--deadline" option for format
 
     @staticmethod
     def master_worker_default(**kwargs):
