@@ -6,6 +6,9 @@ import enum
 import logging
 import time
 import traceback
+import os
+from dataclasses import asdict
+import json
 
 # import ray
 # import ray.util.queue as rq
@@ -59,6 +62,7 @@ class Controller:
         logger.info("Experiment: %s %s", self.experiment_name, self.trial_name)
 
         self.__control = panel
+        self.json_config_file_path = f"/data/aigc/llm/logs/meizy/{self.experiment_name}-{self.trial_name}"
 
     def reconnect(self):
         """Automatically reconnect to workers. And list all jobs to scheduler.
@@ -76,6 +80,9 @@ class Controller:
         scheduling: api.config.ExperimentScheduling = experiment.scheduling_setup()
         setup = experiment.initial_setup()
         setup.set_worker_information(experiment_name=self.experiment_name, trial_name=self.trial_name)
+
+        with open(os.path.join(self.json_config_file_path, "config.json"), "w") as f:
+            json.dump(asdict(setup.config), f, indent=4)
 
         # Scheduling and connecting to workers.
         # TODO for heterogeneous workers of the same type k, list scheduling[k] and setup[k] should match.

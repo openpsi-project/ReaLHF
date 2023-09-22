@@ -122,7 +122,7 @@ class SlurmResource:
 
     def valid(self) -> bool:
         # check if it is a valid resource requirement
-        if self.gpu_type not in ["geforce", "tesla"]:
+        if self.gpu_type not in ["geforce", "tesla", None]:
             return False
         if self.mem < 0 or self.cpu < 0 or self.gpu < 0:
             return False
@@ -604,6 +604,10 @@ def allocate_resources(infos: List[SlurmTaskInfo],
                 allocated[hostname] = tmp - task_left
             all_resources[hostname] = resource
         if task_left > 0:
+            now_all_resources = get_all_node_resources()
+            for hn, res in now_all_resources.items():
+                logger.info("Node: {}, Resource: {}".format(hn, res))
+            logger.info("Task: {}, Resource: {}".format(info.slurm_name, info.resource_requirement))
             raise SlurmResourceNotEnoughException()
         hostlist = []
         for hostname, task_num in allocated.items():
