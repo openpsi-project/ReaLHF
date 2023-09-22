@@ -153,7 +153,8 @@ class ModelWorker(worker_base.Worker):
         # logging gpu/cpu stats
         # self.print_monitor_info()
         tik = time.perf_counter()
-        self.logger.info(("MemAllocated={}GB, MaxMemAllocated={}GB".format(
+        self.logger.info(("Model worker {}: MemAllocated={}GB, MaxMemAllocated={}GB".format(
+            self.model_name,
             round(get_accelerator().memory_allocated() / 1024**3, 2),
             round(get_accelerator().max_memory_allocated() / 1024**3, 2),
         )))

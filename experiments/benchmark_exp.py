@@ -4,6 +4,8 @@ from api.config import *
 from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
 
 import os 
+EXPR_DEADLINE = "now+8hours"
+EXPR_TIME_LIMIT = "30"
 
 
 def rollout(
@@ -122,7 +124,7 @@ def train_critic(
 class ChatRLHFBenchmarkExperiment(Experiment):
 
     def __init__(self,
-                 n_actors=7,
+                 n_actors=1,
                  n_critics=1,
                  n_rewards=1,
                  n_refs=1,
@@ -150,6 +152,9 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 scheduling=Scheduling.data_worker_default(
                     cpu=2,
                     mem=10000,
+                    begin=None,
+                    deadline=EXPR_DEADLINE,
+                    time_limit=EXPR_TIME_LIMIT,
                 ),
             ),
             master_worker=TasksGroup(
@@ -157,31 +162,39 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 scheduling=Scheduling.master_worker_default(
                     cpu=4,
                     mem=10000,
+                    begin=None,
+                    deadline=EXPR_DEADLINE,
+                    time_limit=EXPR_TIME_LIMIT,
                 ),
             ),
             model_worker=[
+                # TasksGroup(
+                #     count=self.n_actors,
+                #     scheduling=Scheduling.model_worker_default(
+                #         cpu=8,
+                #         gpu=1,
+                #         gpu_type='tesla',
+                #         mem=60000,
+                #         # nodelist='frl8a140',
+                #         node_type="a100",
+                #         begin=None,
+                #         deadline=EXPR_DEADLINE,
+                #         time_limit=EXPR_TIME_LIMIT,
+                #     ),
+                # ),
                 TasksGroup(
-                    count=self.n_actors,
+                    count=self.n_actors + self.n_critics + self.n_refs + self.n_rewards,
                     scheduling=Scheduling.model_worker_default(
-                        cpu=8,
-                        gpu=1,
-                        gpu_type='tesla',
-                        mem=60000,
-                        nodelist='YL-com02',
-                    ),
-                ),
-            ] + [
-                TasksGroup(
-                    count=self.n_critics+self.n_rewards+self.n_refs,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=2,
+                        cpu=4,
                         gpu=0.25,
                         gpu_type='tesla',
                         mem=30000,
                         nodelist='YL-com02',
+                        deadline=EXPR_DEADLINE,
+                        time_limit=EXPR_TIME_LIMIT,
                     ),
                 ),
-            ],
+            ]
         )
 
     def initial_setup(self) -> ExperimentConfig:
@@ -306,7 +319,8 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 enable_hybrid_engine=False,
             ),
         )
-        ref_backend = rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=False))
+        ref_backend = ModelBackend('ds_inference', args=dict(enable_fp16=True, offload=False))
+        rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=True, offload=False))
 
         ppo_kwargs = dict(
             ppo_epochs=1,
@@ -380,7 +394,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             master_ecs=ecs,
             data_worker=data_worker,
             model_worker=model_worker,
-            benchmark_steps=100,
+            benchmark_steps=1000,
         )
 
 
@@ -389,14 +403,17 @@ register_experiment("chat-rlhf-benchmark", ChatRLHFBenchmarkExperiment)
 import functools
 import itertools
 
-# OPT exps
+# OPT small scale exps: one card benchmark
 
-actor_model_specs = [(5120, 40), (1024, 24)]  # tuple (hidden_size, layer)
-critic_model_specs = [(1024, 24)]
+actor_model_specs = [(2048, 24), (1024, 24), (768, 12), (4096, 24),
+                     (4096, 36)]  # tuple (hidden_size, layer)
+critic_model_specs = [(1024, 24), (768, 12)]
 
 spec_to_n_params = {
+    (4096, 24): "5b",
+    (2048, 24): "1.3b",
     (1024, 24): "350m",
-    (5120, 40): "13b",
+    (768, 12): "125m",
 }
 
 for actor_spec, critic_spec in itertools.product(actor_model_specs, critic_model_specs):
@@ -405,11 +422,13 @@ for actor_spec, critic_spec in itertools.product(actor_model_specs, critic_model
     actor_n_params = spec_to_n_params[actor_spec]
     critic_n_params = spec_to_n_params[critic_spec]
     exp_name = f"opt-{actor_n_params}+{critic_n_params}-chat-rlhf-benchmark"
-    register_class = functools.partial(
-        ChatRLHFBenchmarkExperiment,
-        actor_model_name=actor_name,
-        critic_model_name=critic_name,
-    )
+    register_class = functools.partial(ChatRLHFBenchmarkExperiment,
+                                       actor_model_name=actor_name,
+                                       critic_model_name=critic_name,
+                                       n_actors=1,
+                                       n_critics=1,
+                                       n_rewards=1,
+                                       n_refs=1)
     register_experiment(exp_name, register_class)
 
 # Starcoder

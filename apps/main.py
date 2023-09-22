@@ -4,6 +4,7 @@ import getpass
 import logging
 import os
 import re
+import time
 
 from base.constants import DATE_FORMAT, LOG_FORMAT
 import api.config as config_package
@@ -52,6 +53,7 @@ def _submit_workers(
 
         nodelist = sch_cfg.scheduling.nodelist
         exclude = sch_cfg.scheduling.exclude
+        node_type = sch_cfg.scheduling.node_type
         container_image = image_name or sch_cfg.scheduling.container_image
         job_name = worker_type
         if use_ray_cluster:
@@ -67,10 +69,15 @@ def _submit_workers(
                 gpu_type=sch_cfg.scheduling.gpu_type,
                 mem=sch_cfg.scheduling.mem,
                 container_image=container_image,
+                node_type=node_type,
                 nodelist=nodelist,
                 exclude=exclude,
                 env_vars=job_environs,
                 hostfile=True,
+                multiprog=True,
+                begin=sch_cfg.scheduling.begin,
+                deadline=sch_cfg.scheduling.deadline,
+                time_limit=sch_cfg.scheduling.time_limit,
             ),)
     return scheduled_jobs
 
@@ -80,6 +87,7 @@ def main_start(args):
         raise ValueError("--image_name must be specified when using ray cluster. "
                          "This is becuase ray cluster requires all workers to have "
                          "the same version of Python and ray.")
+
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
     experiment = config_package.make_experiment(args.experiment_name)

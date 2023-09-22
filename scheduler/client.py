@@ -37,6 +37,7 @@ class TaskInfo:
     name: str
     state: TaskState
     host: str = None  # The host on which the task is/was running. None if the task had not run.
+    submit_time: str = None
     start_time: str = None
     slurm_id: str = None  # Slurm only. The Slurm id of the task.
 
@@ -111,7 +112,7 @@ class SchedulerClient:
 def remote_worker_cmd(expr_name, trial_name, debug, worker_type):
     # requires information in scheduler package
     return f"python3 {'' if debug else '-O'} -m apps.remote worker -w {worker_type} " \
-           f"-e {expr_name} -f {trial_name} -i {{index}} -o {{offset}} -g {{count}} -r {{group_index}}"
+           f"-e {expr_name} -f {trial_name} -i {{group_id}} -o {{group_offset}} -g {{group_size}} -r {{group_index}}"
 
 
 def setup_cmd(expr_name, trial_name, debug):

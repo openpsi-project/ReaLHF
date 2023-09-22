@@ -383,7 +383,7 @@ class WorkerControlPanel:
                 base.names.worker_status(experiment_name=self.__experiment_name,
                                          trial_name=self.__trial_name,
                                          worker_name=worker_name),
-                timeout=15,
+                timeout=60,
             )
             status = WorkerServerStatus(status_str)
         except base.name_resolve.NameEntryNotFoundError:
