@@ -122,7 +122,7 @@ def train_critic(
 class ChatRLHFBenchmarkExperiment(Experiment):
 
     def __init__(self,
-                 n_actors=4,
+                 n_actors=7,
                  n_critics=1,
                  n_rewards=1,
                  n_refs=1,
@@ -161,12 +161,23 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             ),
             model_worker=[
                 TasksGroup(
-                    count=self.n_total,
+                    count=self.n_actors,
                     scheduling=Scheduling.model_worker_default(
                         cpu=8,
                         gpu=1,
                         gpu_type='tesla',
                         mem=60000,
+                        nodelist='YL-com02',
+                    ),
+                ),
+            ] + [
+                TasksGroup(
+                    count=self.n_critics+self.n_rewards+self.n_refs,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=2,
+                        gpu=0.25,
+                        gpu_type='tesla',
+                        mem=30000,
                         nodelist='YL-com02',
                     ),
                 ),
@@ -177,12 +188,12 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         model_dir = "/data/meizy/models/cfgonly"
         data_path = "/data/meizy/datasets/Dahoas/rm-static/data.jsonl"
         if self.actor_model_name is None:
-            actor_path = os.path.join(model_dir, "opt-1024-24")
+            actor_path = os.path.join(model_dir, "opt-5120-40")
         else:
             actor_path = os.path.join(model_dir, self.actor_model_name)
 
         if self.critic_model_name is None:
-            critic_path = os.path.join(model_dir, "opt-1024-24")
+            critic_path = os.path.join(model_dir, "opt-768-12")
         else:
             critic_path = os.path.join(model_dir, self.critic_model_name)
         # rw_lora_head_path = \
