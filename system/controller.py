@@ -9,6 +9,7 @@ import traceback
 import os
 from dataclasses import asdict
 import json
+import getpass
 
 # import ray
 # import ray.util.queue as rq
@@ -62,7 +63,7 @@ class Controller:
         logger.info("Experiment: %s %s", self.experiment_name, self.trial_name)
 
         self.__control = panel
-        self.json_config_file_path = f"/data/aigc/llm/logs/meizy/{self.experiment_name}-{self.trial_name}"
+        self.json_config_file_path = f"/data/aigc/llm/logs/{getpass.getuser()}/{self.experiment_name}_{self.trial_name}"
 
     def reconnect(self):
         """Automatically reconnect to workers. And list all jobs to scheduler.
