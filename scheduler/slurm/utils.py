@@ -3,6 +3,7 @@ from __future__ import annotations  # python3.7+ feature to allow self-referenci
 from typing import Callable, Dict, List, Literal, Optional, Union
 import dataclasses
 import datetime
+import getpass
 import logging
 import math
 import os
@@ -38,7 +39,7 @@ STATUS_MAPPING = {
     "DEADLINE": TaskState.COMPLETED,
     "TIMEOUT": TaskState.COMPLETED
 }
-LOG_BASE_PATH = "/data/aigc/llm/logs/"
+LOG_BASE_PATH = f"/data/aigc/llm/logs/{getpass.getuser()}"
 
 
 class SlurmResourceNotEnoughException(Exception):

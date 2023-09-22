@@ -16,7 +16,7 @@ from scheduler.slurm.utils import (allocate_resources, SlurmResource, SlurmResou
 logger = logging.getLogger("Slurm scheduler")
 
 SCHEDULING_RETRY_INTERVAL_SECONDS = 30
-SCHEDULING_TIMEOUT_MAX_SECONDS = 60 * 10  # 3600 * 24
+SCHEDULING_TIMEOUT_MAX_SECONDS = 3600 * 24
 LOCK_FILE_NAME = "/data/aigc/llm/logs/slurm_scheduler.lock"
 
 
