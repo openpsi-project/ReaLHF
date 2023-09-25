@@ -125,7 +125,7 @@ def deepspeed_initialize(
         dist_init_required=False,
         config=config,
         config_class=config_class,
-        dont_change_device=True,
+        # dont_change_device=True,
     )
 
     # Restore zero.Init context if necessary

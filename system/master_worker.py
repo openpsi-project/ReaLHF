@@ -228,8 +228,10 @@ class MasterWorker(worker_base.Worker):
         for k in datas[0].keys():
             if isinstance(datas[0][k], torch.Tensor):
                 if len(datas[0][k].shape) < 2:
-                    raise RuntimeError(f"Data {k} is not batched. Expect the first dimension to be batch size."
-                                       f"For packed inputs, please unsqueeze the first dimension and pad the second dimension to be the same.")
+                    raise RuntimeError(
+                        f"Data {k} is not batched. Expect the first dimension to be batch size."
+                        f"For packed inputs, please unsqueeze the first dimension and pad the second dimension to be the same."
+                    )
                 sample[k] = torch.cat([x[k] for x in datas], dim=0)
             else:
                 # There may be other metadata, e.g. pad token id.

@@ -1,6 +1,7 @@
 from typing import Callable, List, Optional, Tuple, Union
 import copy
 import dataclasses
+import json
 import math
 import os
 
@@ -10,9 +11,11 @@ import torch.nn.functional as F
 import transformers
 
 from impl.model.utils.data import (build_packed_inputs, mask_eos_token, repeat_kv,
-                                   TensorDataclassToTupleInterface, upcast_masked_softmax, upcast_softmax)
+                                   TensorDataclassToTupleInterface, unpack_tensor, upcast_masked_softmax,
+                                   upcast_softmax)
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP
+import api.model
 
 try:
     from flash_attn import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache
@@ -34,6 +37,17 @@ class FlashMQATConfig:
     attn_pdrop: float = 0.1
     layer_norm_epsilon: float = 1e-5
     activation_function: str = "gelu"
+
+
+@dataclasses.dataclass
+class GenerationConfig:
+    min_new_tokens: int = 1
+    max_new_tokens: int = 10
+    temperature: float = 1.0
+    greedy: bool = True
+    top_p: float = 1.0
+    top_k: int = 0
+    num_samples: int = 1
 
 
 @dataclasses.dataclass
@@ -424,6 +438,7 @@ class VocabPositionEmbedding(nn.Module):
 
 
 class FlashMQATBase(nn.Module):
+    # TODO: enable gradient checkpointing
 
     def __init__(
         self,
@@ -433,6 +448,8 @@ class FlashMQATBase(nn.Module):
     ):
         super().__init__()
         self.config = config
+        self.dtype = dtype
+        self.device = device
         self.embedding_layer = VocabPositionEmbedding(config.vocab_size,
                                                       config.n_positions,
                                                       config.hidden_dim,
@@ -570,16 +587,197 @@ class FlashMQATForCausalLM(nn.Module):
         model.load_state_dict(new_state_dict)
         return model
 
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_path: str,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        with open(os.path.join(model_path, "config.json"), 'r') as f:
+            config = FlashMQATConfig(**json.load(f))
+        state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
+        model = cls(config, dtype, device)
+        model.load_state_dict(state_dict)
+        return model
+
 
 @dataclasses.dataclass
-class GenerationConfig:
-    min_new_tokens: int = 1
-    max_new_tokens: int = 10
-    temperature: float = 1.0
-    greedy: bool = True
-    top_p: float = 1.0
-    top_k: int = 0
-    num_samples: int = 1
+class DuckModelOutput:
+    logits: Optional[torch.Tensor] = None
+
+
+@dataclasses.dataclass
+class DuckGenerationOutput:
+    sequences: torch.Tensor
+    scores: Optional[torch.Tensor] = None
+    logits_mask: Optional[torch.Tensor] = None
+
+
+class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
+    """__call__ on this model will return a huggingface-like output."""
+
+    def __init__(self, net: FlashMQATForCausalLM):
+        super().__init__()
+        self.net = net
+
+    @property
+    def config(self):
+        return self.net.config
+
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        packed_input_ids: Optional[torch.Tensor] = None,
+        cu_seqlens: Optional[torch.Tensor] = None,
+        max_seqlen: Optional[int] = None,
+    ) -> DuckModelOutput:
+        assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)
+        build_packed = False
+        if packed_input_ids is None and attention_mask is not None:
+            build_packed = True
+            packed_input_ids, cu_seqlens, max_seqlen = build_packed_inputs(input_ids, attention_mask)
+        if packed_input_ids is not None:
+            x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+            ys = [PipeCacheData(input_ids=packed_input_ids)
+                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+        else:
+            x = PipeTransferData()
+            ys = [PipeCacheData(input_ids=input_ids)
+                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+        logits = self.net(x, ys).pp_output
+        if build_packed:
+            logits = unpack_tensor(logits, cu_seqlens, max_seqlen)
+        return DuckModelOutput(logits=logits)
+
+    def generate(
+        self,
+        tokenizer: transformers.PreTrainedTokenizerFast,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        k_caches: Optional[List[torch.Tensor]] = None,
+        v_caches: Optional[List[torch.Tensor]] = None,
+        cache_seqlens: Optional[torch.Tensor] = None,
+        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    ) -> DuckGenerationOutput:
+        seq, scores, mask = generate(self.net, tokenizer, input_ids, attention_mask, k_caches, v_caches,
+                                     cache_seqlens, gconfig)
+        return DuckGenerationOutput(seq, scores, mask)
+
+    @classmethod
+    def from_starcoder(
+        cls,
+        from_model: Optional[transformers.PreTrainedModel] = None,
+        model_path: Optional[str] = None,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        return cls(FlashMQATForCausalLM.from_starcoder(from_model, model_path, dtype, device))
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_path: str,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        return cls(FlashMQATForCausalLM.from_pretrained(model_path, dtype, device))
+
+
+def make_flash_mqat_clm_hf(
+    name: str,
+    device: torch.device,
+    model_path: str,
+    dtype: Optional[torch.dtype] = None,
+    from_type: str = 'starcoder',
+    tokenizer_path: Optional[str] = None,
+):
+    if from_type == 'starcoder':
+        module = HuggingfaceLikeFlashMQATForCausalLM.from_starcoder(model_path=model_path,
+                                                                    dtype=dtype,
+                                                                    device=device)
+        tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
+    elif from_type == 'self':
+        module = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(model_path=model_path,
+                                                                     dtype=dtype,
+                                                                     device=device)
+        tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_path)
+    else:
+        raise NotImplementedError()
+    return api.model.Model(name, module, tokenizer, device)
+
+
+api.model.register_model("flash_mqat_clm_hf", make_flash_mqat_clm_hf)
+
+
+class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
+
+    def __init__(self, net: FlashMQATBase):
+        super().__init__()
+        self.net = net
+        self.head = nn.Linear(net.config.hidden_dim,
+                              1,
+                              bias=False,
+                              dtype=self.net.dtype,
+                              device=self.net.device)
+
+    @property
+    def config(self):
+        return self.net.config
+
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        packed_input_ids: Optional[torch.Tensor] = None,
+        cu_seqlens: Optional[torch.Tensor] = None,
+        max_seqlen: Optional[int] = None,
+    ) -> DuckModelOutput:
+        assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)
+        build_packed = False
+        if packed_input_ids is None and attention_mask is not None:
+            build_packed = True
+            packed_input_ids, cu_seqlens, max_seqlen = build_packed_inputs(input_ids, attention_mask)
+        if packed_input_ids is not None:
+            x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+            ys = [PipeCacheData(input_ids=packed_input_ids)
+                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+        else:
+            x = PipeTransferData()
+            ys = [PipeCacheData(input_ids=input_ids)
+                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+        hidden_states = self.net(x, ys).pp_output
+        if build_packed:
+            hidden_states = unpack_tensor(hidden_states, cu_seqlens, max_seqlen)
+        return self.head(hidden_states).squeeze()
+
+    @classmethod
+    def from_sft_model(
+        cls,
+        from_model: Optional[HuggingfaceLikeFlashMQATForCausalLM] = None,
+        model_path: Optional[str] = None,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        if from_model is None:
+            from_model = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(model_path, dtype, device)
+        return cls(from_model.net)
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_path: str,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        model = DeepSpeedChatLikeFlashMQATCriticModel.from_sft_model(model_path=model_path,
+                                                                     dtype=dtype,
+                                                                     device=device)
+        if not os.path.exists(os.path.join(model_path, "rw_v_head.bin")):
+            raise ValueError("rw_v_head.bin not found in model_path.")
+        model.head.load_state_dict(torch.load(os.path.join(model_path, "rw_v_head.bin")))
+        return model
 
 
 def genstep(
@@ -707,7 +905,6 @@ def generate(
 
     # Prepare inputs for generation iterations
     if k_caches is None:
-        from_scratch = True
         # Generate from scratch.
         # Input_ids may have different lengths, we should first pack them into a large batch
         # to use varlen flash attention, then record kv caches for the following inferences.
@@ -746,7 +943,6 @@ def generate(
         gen_logits_mask_ph.append(logits_mask)
         generated_idx += 1
     else:
-        from_scratch = False
         # Resume from a previous generation state.
         if prompt_padded_len != 1:
             raise ValueError("prompt_padded_len must be 1 when resuming from a previous generation state.")

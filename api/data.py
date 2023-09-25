@@ -150,3 +150,10 @@ register_dataloader(
         collate_fn=transformers.default_data_collator,
     ),
 )
+register_dataloader(
+    'iterable_dataset_loader',
+    functools.partial(
+        torch.utils.data.DataLoader,
+        batch_size=None,
+    ),
+)

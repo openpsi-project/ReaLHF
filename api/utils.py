@@ -120,24 +120,6 @@ def create_hf_nn(
     return model
 
 
-def save_hf_format(model, tokenizer, output_dir, sub_folder=""):
-    # used to save huggingface format, so we can use it for hf.from_pretrained
-    model_to_save = model.module if hasattr(model, 'module') else model
-    CONFIG_NAME = "config.json"
-    WEIGHTS_NAME = "pytorch_model.bin"
-    output_dir = os.path.join(output_dir, sub_folder)
-    os.makedirs(output_dir, exist_ok=True)
-    output_model_file = os.path.join(output_dir, WEIGHTS_NAME)
-    output_config_file = os.path.join(output_dir, CONFIG_NAME)
-    save_dict = model_to_save.state_dict()
-    for key in list(save_dict.keys()):
-        if "lora" in key:
-            save_dict.pop(key)
-    torch.save(save_dict, output_model_file)
-    model_to_save.config.to_json_file(output_config_file)
-    tokenizer.save_vocabulary(output_dir)
-
-
 def get_all_reduce_mean(tensor):
     torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.SUM)
     tensor = tensor / torch.distributed.get_world_size()
