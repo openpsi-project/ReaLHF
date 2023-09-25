@@ -79,7 +79,7 @@ class ModelWorker(worker_base.Worker):
         self.__backend = api.model.make_backend(self.config.backend)
 
         if self.config.eval_datasets is not None and self.config.eval_dataloader is not None:
-            eval_dataset = torch.utils.data.ConcatDataset([
+            eval_datasets = [
                 api.data.make_dataset(
                     d,
                     self.config.seed,
@@ -91,7 +91,11 @@ class ModelWorker(worker_base.Worker):
                     cache_root=(None
                                 if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
                 ) for d in self.config.eval_datasets
-            ],)
+            ]
+            if len(eval_datasets) > 1:
+                eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
+            else:
+                eval_dataset = eval_datasets[0]
             eval_dataloader = api.data.make_dataloader(self.config.eval_dataloader, eval_dataset)
         else:
             eval_dataloader = None

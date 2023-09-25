@@ -38,7 +38,7 @@ class DataWorker(worker_base.Worker):
 
     def __setup_datasets(self):
         # initialize data sets
-        self.__dataset = torch.utils.data.ConcatDataset([
+        datasets = [
             data_api.make_dataset(
                 d,
                 self.config.seed,
@@ -49,7 +49,11 @@ class DataWorker(worker_base.Worker):
                 self.config.worker_info.trial_name,
                 cache_root=(None if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
             ) for d in self.config.datasets
-        ],)
+        ]
+        if len(self.config.datasets) == 1:
+            self.__dataset = datasets[0]
+        else:
+            self.__dataset = torch.utils.data.ConcatDataset(datasets)
         self.__dataloader = data_api.make_dataloader(self.config.dataloader, self.__dataset)
         self.__data_generator = enumerate([])
 
@@ -83,11 +87,16 @@ class DataWorker(worker_base.Worker):
             self.__global_step += 1
 
         elif request.handle_name == "spec":
+            if self.__dataloader.batch_size is not None:
+                batch_size = self.__dataloader.batch_size
+            else:
+                assert isinstance(self.__dataloader.dataset, torch.utils.data.IterableDataset)
+                batch_size = list(self.__dict_sample.values())[0].shape[0]
             res = model_api.FinetuneSpec(
                 total_train_epochs=-1,  # place-holder, to be filled by master worker
                 total_train_steps=-1,  # place-holder, to be filled by master worker
                 steps_per_epoch=len(self.__dataloader),
-                batch_size_per_device=self.__dataloader.batch_size,
+                batch_size_per_device=batch_size,
             )
             sample_count = batch_count = 0
         else:

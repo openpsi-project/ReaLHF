@@ -4,7 +4,6 @@ force_alphabetical_sort_within_sections = true
 lexicographical = true
 src_paths = ["."]
 line_length = 110
-# extra_standard_library = ["numpy", "torch", "deepspeed", "transformers", "prometheus_client", "wandb", "zmq"]
 known_local_folder = [
     'api',
     'apps',
@@ -15,7 +14,6 @@ known_local_folder = [
     'system',
     'tests',
 ]
-extend_skip = ['impl/model/__init__.py']
 
 [tool.yapf]
 based_on_style = "pep8"
