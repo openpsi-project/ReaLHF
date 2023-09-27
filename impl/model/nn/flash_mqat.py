@@ -37,6 +37,8 @@ class FlashMQATConfig:
     attn_pdrop: float = 0.1
     layer_norm_epsilon: float = 1e-5
     activation_function: str = "gelu"
+    ckpt_attn: bool = False
+    ckpt_mlp: bool = False
 
 
 @dataclasses.dataclass
@@ -233,14 +235,14 @@ class CausalSelfAttentionLayer(nn.Module):
         return self
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            cu_seqlens: Optional[torch.Tensor] = None,
-            max_seqlen: Optional[int] = None,
-            k_cache: Optional[torch.Tensor] = None,
-            v_cache: Optional[torch.Tensor] = None,
-            cache_seqlens: Optional[Union[int, torch.Tensor]] = None,
-            attention_mask: Optional[torch.BoolTensor] = None,  # only used for debugging
+        self,
+        hidden_states: torch.Tensor,
+        cu_seqlens: Optional[torch.Tensor] = None,
+        k_cache: Optional[torch.Tensor] = None,
+        v_cache: Optional[torch.Tensor] = None,
+        cache_seqlens: Optional[Union[int, torch.Tensor]] = None,
+        attention_mask: Optional[torch.BoolTensor] = None,  # only used for debugging
+        max_seqlen: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # input shape: [bs, seq, hidden_dim]
         # default upcast, scale
@@ -321,6 +323,8 @@ class FlashMQATBlock(nn.Module):
         config: FlashMQATConfig,
         layer_index: int,
         output_layernorm: bool = False,
+        ckpt_attn: bool = False,
+        ckpt_mlp: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -348,19 +352,41 @@ class FlashMQATBlock(nn.Module):
                                      dtype=dtype,
                                      device=device)
 
+        self.ckpt_attn = ckpt_attn
+        self.ckpt_mlp = ckpt_mlp
+
+    def gradient_checkpointing_enable(self, attn: bool = True, mlp: bool = True):
+        self.ckpt_attn = attn
+        self.ckpt_mlp = mlp
+
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         h = x.pp_input
-        attn_out, k, v = self.attn(
-            hidden_states=h,
-            cu_seqlens=x.cu_seqlens,
-            max_seqlen=x.max_seqlen,
-            k_cache=y.k_cache,
-            v_cache=y.v_cache,
-            cache_seqlens=y.cache_seqlens,
-            attention_mask=x.attention_mask,
-        )
+        if self.ckpt_attn:
+            attn_out, k, v = torch.utils.checkpoint.checkpoint(
+                self.attn,
+                h,
+                x.cu_seqlens,
+                y.k_cache,
+                y.v_cache,
+                y.cache_seqlens,
+                x.attention_mask,
+                x.max_seqlen,
+            )
+        else:
+            attn_out, k, v = self.attn(
+                hidden_states=h,
+                cu_seqlens=x.cu_seqlens,
+                max_seqlen=x.max_seqlen,
+                k_cache=y.k_cache,
+                v_cache=y.v_cache,
+                cache_seqlens=y.cache_seqlens,
+                attention_mask=x.attention_mask,
+            )
         h = h + attn_out
-        h = self.mlp(h) + h
+        if self.ckpt_mlp:
+            h = torch.utils.checkpoint.checkpoint(self.mlp, h) + h
+        else:
+            h = self.mlp(h) + h
         if self.output_layernorm:
             h = self.ln_f(h)
         x.pp_output = h
@@ -438,7 +464,6 @@ class VocabPositionEmbedding(nn.Module):
 
 
 class FlashMQATBase(nn.Module):
-    # TODO: enable gradient checkpointing
 
     def __init__(
         self,
@@ -460,6 +485,8 @@ class FlashMQATBase(nn.Module):
             FlashMQATBlock(config,
                            layer_index=i,
                            output_layernorm=(i == config.n_layers - 1),
+                           ckpt_attn=(i > 0 and config.ckpt_attn),
+                           ckpt_mlp=(i > 0 and config.ckpt_mlp),
                            dtype=dtype,
                            device=device) for i in range(config.n_layers)
         ])
@@ -625,6 +652,12 @@ class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
     def config(self):
         return self.net.config
 
+    def gradient_checkpointing_enable(self):
+        for l in self.net.transformer.h[1:]:
+            # skip the first layer to enable lora together with grad checkpointing
+            l: FlashMQATBlock
+            l.gradient_checkpointing_enable()
+
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
@@ -725,6 +758,11 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
     @property
     def config(self):
         return self.net.config
+
+    def gradient_checkpointing_enable(self):
+        for l in self.net.h[1:]:
+            l: FlashMQATBlock
+            l.gradient_checkpointing_enable()
 
     def forward(
         self,

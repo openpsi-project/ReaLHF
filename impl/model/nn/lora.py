@@ -119,20 +119,23 @@ def is_lora_model(model: nn.Module) -> bool:
     return len([name for name, module in model.named_modules() if isinstance(module, LinearLoRA)]) > 0
 
 
-def convert_linear_layer_to_lora(model: nn.Module, lora_key_to_replace: str, lora_module_kwargs: dict,
+def convert_linear_layer_to_lora(model: nn.Module, lora_keys_to_replace: List[str], lora_module_kwargs: dict,
                                  lora_exclude_module_names: List) -> nn.Module:
+    if not isinstance(lora_keys_to_replace, list):
+        lora_keys_to_replace = [lora_keys_to_replace]
     replace_name = []
-    for name, module in model.named_modules():
-        if lora_key_to_replace not in name:
-            continue
-        if any(x in name for x in lora_exclude_module_names):
-            continue
-        if isinstance(module, (bnb.nn.Linear8bitLt, nn.Linear)):
-            replace_name.append(name)
-        elif 'linear' in module.__class__.__name__.lower():
-            logger.warning(
-                f"Found a linear-like layer {name} that is not `nn.Linear` or `bnb.nn.Linear8bitLt`. "
-                f"Class {module.__class__.__name__}. This layer will not be converted to LoRA.")
+    for lora_key_to_replace in lora_keys_to_replace:
+        for name, module in model.named_modules():
+            if lora_key_to_replace not in name:
+                continue
+            if any(x in name for x in lora_exclude_module_names):
+                continue
+            if isinstance(module, (bnb.nn.Linear8bitLt, nn.Linear)):
+                replace_name.append(name)
+            elif 'linear' in module.__class__.__name__.lower():
+                logger.warning(
+                    f"Found a linear-like layer {name} that is not `nn.Linear` or `bnb.nn.Linear8bitLt`. "
+                    f"Class {module.__class__.__name__}. This layer will not be converted to LoRA.")
 
     for name in replace_name:
         module: nn.Linear = deepspeed.compression.helper.recursive_getattr(model, name)
@@ -188,7 +191,7 @@ def get_lora_state_dict(model: nn.Module) -> List[Dict[str, torch.Tensor]]:
 def lora_wrap_fn(cls_):
 
     def wrapped_cls(lora_module_kwargs: dict,
-                    lora_key_to_replace: str,
+                    lora_keys_to_replace: List[str],
                     lora_exclude_module_names: Optional[List[str]] = None,
                     additional_module_names_to_opt: Optional[List[str]] = None,
                     load_lora_path: Optional[str] = None,
@@ -203,7 +206,7 @@ def lora_wrap_fn(cls_):
 
         model.module = convert_linear_layer_to_lora(
             model.module,
-            lora_key_to_replace,
+            lora_keys_to_replace,
             lora_module_kwargs=lora_module_kwargs,
             lora_exclude_module_names=lora_exclude_module_names,
         )

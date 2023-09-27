@@ -8,6 +8,7 @@ import torch.utils.data
 import api.config as config
 import api.data
 import api.model
+import base.timeutil
 import base.gpu_utils as gpu_utils
 import base.namedarray as namedarray
 import base.seeding as seeding
@@ -78,6 +79,9 @@ class ModelWorker(worker_base.Worker):
         self.__interface = api.model.make_interface(self.config.interface)
         self.__backend = api.model.make_backend(self.config.backend)
 
+        self.__ccc_freq_ctl = base.timeutil.FrequencyControl(self.config.ccc_freq_secs,
+                                                             self.config.ccc_freq_steps)
+
         if self.config.eval_datasets is not None and self.config.eval_dataloader is not None:
             eval_datasets = [
                 api.data.make_dataset(
@@ -137,7 +141,7 @@ class ModelWorker(worker_base.Worker):
             self.logger.info(f"Model worker {self.model_name} handle request {request.handle_name}"
                              f" in {time.perf_counter() - tik:.4f}s")
 
-        if self.config.cuda_cache_cleanliness:
+        if self.__ccc_freq_ctl.check():
             # following huggingface trl
             gc.collect()
             torch.cuda.empty_cache()

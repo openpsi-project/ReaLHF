@@ -29,7 +29,7 @@ def sample_log_uniform(low, high):
 
 class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
-    def __init__(self, n_models=2, seed=1, total_train_epochs=4):
+    def __init__(self, n_models=4, seed=1, total_train_epochs=4):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -68,15 +68,17 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
-        train_batch_size_per_device = 1
+        model_path = "/data/aigc/public/starcoder-16bit"
+        train_batch_size_per_device = 4
         eval_batch_size_per_device = 4
-        max_seq_len = 768
+        max_seq_len = 4096
 
         dataset = Dataset(
             'wps_formula_packed',
             args=dict(
                 n_tokens_per_batch=max_seq_len * train_batch_size_per_device,
+                max_length=max_seq_len,
+                max_n_seqs_per_batch=500,
                 json_path="/data/aigc/llm/datasets/wps-formula-sft/dllm-train-0908-formula-psi.json",
             ),
         )
@@ -111,10 +113,19 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                 min_lr_ratio=0.0,
                 zero_stage=2,
                 enable_fp16=True,
+                gradient_checkpointing=True,
             ),
         )
 
-        model = Model("flash_mqat_clm_hf", args=dict(model_path=model_path))
+        model = Model("flash_mqat_clm_hf_lora",
+                      args=dict(
+                          model_path=model_path,
+                          lora_module_kwargs=dict(
+                              lora_dim=self.lora_dim,
+                              lora_scaling=self.lora_scaling,
+                          ),
+                          lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
+                      ))
 
         interface = ModelInterface('flash_sft')
 
@@ -130,6 +141,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                 stream=streams[i],
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
+                ccc_freq_secs=None,
             ) for i in range(self.n_models)
         ]
 
