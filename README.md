@@ -2,7 +2,14 @@
 
 ## Contributing
 
+Before reading the code, keep in mind that:
+1. Everything in [api/config.py](api/config.py) are configurations. They are used to configurate your experiment.
+2. Other classes in [api directory](api/) are abstract methods. They represent necessary components for the system to run.
+3. Classes in [api/config.py](api/config.py) and other scripts in [api directory](api/) may have same class names. 
+
 See `docs/user_guide`.
+
+To understand difference between `model`, `model backend` and `model interface`, read [this doc](docs/user_guide/02_model.md).
 
 ## Step 1: Train A Reward Model
 
