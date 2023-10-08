@@ -24,6 +24,7 @@ logger = logging.getLogger("master worker")
 
 
 def request_all(streams, handle_type, datas):
+    """Send request of `handle_type` to multiple streams. len(streams)==len(datas)"""
     requests = [request_reply_stream.Request(handle_type, data) for data in datas]
     tik = time.perf_counter()
     for s, r in zip(streams, requests):
@@ -34,11 +35,13 @@ def request_all(streams, handle_type, datas):
 
 
 def gather_all_replies(streams):
+    """Collect responses from multiple streams. Blocking method."""
     responses = [s.poll_reply().data for s in streams]
     return responses
 
 
 def model_rpc_call(data: namedarray.NamedArray, request_type, streams):
+    """Splits data and process with multiple streams."""
     datas = namedarray.split(data, len(streams))
     for x in datas:
         x.register_metadata(**data.metadata)
@@ -92,12 +95,20 @@ def wrap_func(
             fn = _build_find_data_fn(type_hint)
         elif isinstance(type_hint(), Commands):
             fn = _build_find_commands_fn()
+        else:
+            raise NotImplementedError(f"Unknown function type hint {type_hint().__class__.__name__}")
         operating_fns.append(fn)
 
     def wrapped_func(master_worker):
         arguments = []
         for type_hint, fn in zip(type_hints.values(), operating_fns):
+            # This part is to resolve arguments to actual their implementations.
+            # e.g. if an argument to this method is ModelQuery, it is now replace with a DuckModel, which
+            # execute generate/inference/train/evaluate remotely.
+            # Methods generate/inference/train/evaluate are hard coded here. 
+            # They correspond to method implemented by abstract class ModelInterface from api/model.py.
             if isinstance(type_hint(), ModelQuery):
+                # If the operation is ModelQuery, find the model stream first.
                 streams = fn(master_worker)
 
                 class DuckModel:
@@ -274,6 +285,7 @@ class MasterWorker(worker_base.Worker):
             logger.info(f"Executing tasks level {i + 1}, task names {task_names}...")
             tik = time.perf_counter()
             futures = [self.__thread_pool_executor.submit(task, self) for task in tasks]
+            # TODO: shall we handle exceptions from future explicitly?
             [future.result() for future in futures]
             logger.info(f"Execute tasks level {i + 1} in {time.perf_counter() - tik:.3f}s.")
         self.data_registry.clear()
