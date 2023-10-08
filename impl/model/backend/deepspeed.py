@@ -171,7 +171,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     tp_gather_partition_size: int = 8
     # addtional deepspeed args
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
-
+    
     def __post_init__(self):
         pass
         # assert self.zero_stage == 2
@@ -265,8 +265,8 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             lr_scheduler=lr_scheduler,
         )
 
-        # if self.gradient_checkpointing:
-        #     module.gradient_checkpointing_enable()
+        if self.gradient_checkpointing:
+            module.gradient_checkpointing_enable()
 
         model.module = module
         return model

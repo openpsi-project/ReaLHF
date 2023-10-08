@@ -1,11 +1,10 @@
 #!/bin/bash
 
-actor_n_params=("125m" "350m" "1.3b" "5b")
-critic_n_params=("125m" "350m")
+trap 'echo "Ignoring error"' ERR
 
-for actor_n_param in "${actor_n_params[@]}"; do
-    for critic_n_param in "${critic_n_params[@]}"; do
-        echo "Running actor_n_param: $actor_n_param, critic_n_param: $critic_n_param"
-        nohup python3 -m apps.main start -e opt-${actor_n_param}+${critic_n_param}-chat-rlhf-benchmark -f 20230922-00 >> /dev/null &
-    done
+for ((i=0; i<7; i++)); do
+    echo "Running opt-2x8-params-r3-$i"
+    python3 -m apps.main start -e opt-2x8-params-r3-$i -f 20231008-01
 done
+
+# python3 -m apps.main start -e starcoder-2x8-16b -f 20231006-01

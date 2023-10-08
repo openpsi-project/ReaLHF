@@ -14,6 +14,7 @@ def hf_model_factory(model_cls):
         device: Union[str, torch.device],
         model_name_or_path: str,
         init_from_scratch: bool = False,
+        low_cpu_mem_usage: bool = False,
         from_pretrained_kwargs: Optional[Dict[str, Any]] = None,
         generation_kwargs: Optional[Dict[str, Any]] = None,
         quantization_kwargs: Optional[Dict[str, Any]] = None,
@@ -21,10 +22,11 @@ def hf_model_factory(model_cls):
         module = api.utils.create_hf_nn(
             model_cls,
             model_name_or_path,
-            init_from_scratch,
-            from_pretrained_kwargs,
-            generation_kwargs,
-            quantization_kwargs,
+            init_from_scratch=init_from_scratch,
+            low_cpu_mem_usage=low_cpu_mem_usage,
+            from_pretrained_kwargs=from_pretrained_kwargs,
+            generation_kwargs=generation_kwargs,
+            quantization_kwargs=quantization_kwargs,
         )
         tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
         return api.model.Model(name, module, tokenizer, device)

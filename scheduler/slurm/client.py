@@ -135,6 +135,11 @@ class SlurmSchedulerClient(SchedulerClient):
                 task_info.commit()
                 self.__committed_tasks[slurm_name] = task_info
             self.__pending_tasks = dict()
+            states = [None for _ in self.__committed_tasks]
+            while TaskState.PENDING in states or None in states:
+                time.sleep(0.1)
+                states = self.__update_all()
+            # time.sleep(2)
             fcntl.flock(fp, fcntl.LOCK_UN)
             # self.__pending_task_array_counter = defaultdict(int)
             # self.__pending_task_counter = defaultdict(int)
@@ -155,6 +160,7 @@ class SlurmSchedulerClient(SchedulerClient):
             logger.info(f"Canceling task {task_info.slurm_name}")
             task_info.cancel()
         time.sleep(0.2)
+        # print("before stop wait", self.__pending_tasks)
         self.wait(check_status=(),
                   remove_status=(TaskState.CANCELLED, TaskState.NOT_FOUND, TaskState.FAILED,
                                  TaskState.COMPLETED))
@@ -223,7 +229,10 @@ class SlurmSchedulerClient(SchedulerClient):
             time.sleep(2)
 
     def __update_all(self):
+        states = []
         for task_info in self.__committed_tasks.values():
-            task_info.update()
+            state = task_info.update()
+            states.append(state)
+        return states
 
     # def __update_subset(self, slurm_names):

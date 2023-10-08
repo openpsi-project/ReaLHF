@@ -201,16 +201,17 @@ class ChatActorInterface(api.model.ModelInterface):
         else:
             max_token_len = module.generation_config.max_length
 
+        # logger.info(f"generate(): max_token_len: {max_token_len}, {module.generation_config.max_length}, { module.generation_config.max_new_tokens}")
+
+        # TODO: fix generation config
         t0 = time.perf_counter()
         data = recursive_apply(data, lambda x: x.to(model.device))
-        t1 = time.perf_counter()
         # logger.info("generate(): recursive apply time: %.4f", t1 - t0)
         # logger.info(f"generate(): prompts shape {data.prompts.shape}")
         seq = module.generate(data.prompts,
                               attention_mask=data.prompt_att_mask,
-                              generation_config=module.generation_config,
-                              synced_gpus=False)
-        t2 = time.perf_counter()
+                              generation_config=module.generation_config
+                            )
         # logger.info("generate(): generate time: %.4f", t2 - t1)
         # logger.info(f"generate(): generation config: {module.generation_config}")
         # logger.info(f"generate(): seq shape: {seq.shape}")
