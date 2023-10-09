@@ -108,13 +108,10 @@ def create_hf_nn(
     raw_generation_config.pad_token_id = tokenizer.pad_token_id
     assert tokenizer.eos_token_id is not None
     raw_generation_config.eos_token_id = tokenizer.eos_token_id
-    if generation_kwargs is None:
-        model.generation_config = raw_generation_config
-    else:
-        model.generation_config = transformers.GenerationConfig.from_dict({
-            **raw_generation_config.to_dict(),
-            **generation_kwargs
-        })
+    raw_generation_config_dict = raw_generation_config.to_dict()
+    if generation_kwargs is not None:
+        raw_generation_config_dict.update(generation_kwargs)
+    model.generation_config.update(**raw_generation_config_dict)
     logger.debug("Hugginface model generation config: ", model.generation_config)
 
     return model

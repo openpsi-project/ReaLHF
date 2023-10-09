@@ -18,15 +18,15 @@ DATASET_CACHE_PATH = f'/data/aigc/llm/.cache/{getpass.getuser()}/datasets'
 TORCH_EXTENSIONS_DIR = f"/data/aigc/llm/.cache/{getpass.getuser()}/torch/extensions"
 
 _LLM_ENVVARS = {
-    "NCCL_P2P_DISABLE": "1",
-    "NCCL_IB_DISABLE": "1",
+    # "NCCL_P2P_DISABLE": "1",
+    # "NCCL_IB_DISABLE": "1",
     "TRANSFORMERS_OFFLINE": "1",
     "PYTORCH_KERNEL_CACHE_PATH": PYTORCH_KERNEL_CACHE_PATH,
     "TRITON_CACHE_DIR": TRITON_CACHE_PATH,
     "TOKENIZERS_PARALLELISM": "true",
     "TORCH_EXTENSIONS_DIR": TORCH_EXTENSIONS_DIR,
-    "CUDA_LAUNCH_BLOCKING": "1",
-    "TORCH_USE_CUDA_DSA": "1",
+    # "CUDA_LAUNCH_BLOCKING": "1",
+    # "TORCH_USE_CUDA_DSA": "1",
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
 }
 for k, v in _LLM_ENVVARS.items():

@@ -96,14 +96,14 @@ class LinearLoRA(nn.Module):
 
     def fuse_lora_weight(self):
         if not self.squashed and not self.fuse_lora:
-            self.linear.weight.data += self.lora_scaling * torch.matmul(self.lora_right.weight.t(),
-                                                                        self.lora_left.weight.t())
+            self.linear.weight.data += self.lora_scaling * torch.matmul(self.lora_right.weight,
+                                                                        self.lora_left.weight)
         self.fuse_lora = True
 
     def unfuse_lora_weight(self):
         if not self.squashed and self.fuse_lora:
-            self.linear.weight.data -= self.lora_scaling * torch.matmul(self.lora_right.weight.t(),
-                                                                        self.lora_left.weight.t())
+            self.linear.weight.data -= self.lora_scaling * torch.matmul(self.lora_right.weight,
+                                                                        self.lora_left.weight)
         self.fuse_lora = False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -144,14 +144,10 @@ def convert_linear_layer_to_lora(model: nn.Module, lora_keys_to_replace: List[st
     return model
 
 
-def squash_all_lora_layers(model: nn.Module) -> nn.Module:
+def delete_all_lora_layers(model: nn.Module) -> nn.Module:
     for name in [name for name, module in model.named_modules() if isinstance(module, LinearLoRA)]:
         module: LinearLoRA = deepspeed.compression.helper.recursive_getattr(model, name)
-        module.fuse_lora_weight()
         deepspeed.compression.helper.recursive_setattr(model, name, module.linear)
-    gc.collect()
-    torch.cuda.empty_cache()
-    gc.collect()
     return model
 
 
@@ -227,9 +223,18 @@ def lora_wrap_fn(cls_):
         if lora_op_after_creation is None:
             pass
         elif lora_op_after_creation == 'squash':
-            model.module = squash_all_lora_layers(model.module)
+            model.module = delete_all_lora_layers(fuse_all_lora_layers(model.module))
         elif lora_op_after_creation == 'fuse':
             model.module = fuse_all_lora_layers(model.module)
+        elif lora_op_after_creation == "squash_init":
+            model.module = delete_all_lora_layers(fuse_all_lora_layers(model.module))
+            model.module = convert_linear_layer_to_lora(
+                model.module,
+                lora_keys_to_replace,
+                lora_module_kwargs=lora_module_kwargs,
+                lora_exclude_module_names=lora_exclude_module_names,
+            )
+            model.module = only_optimize_lora_parameters(model.module, additional_module_names_to_opt)
         else:
             raise NotImplementedError(f"Unknown lora_op_after_creation: {lora_op_after_creation}")
 
