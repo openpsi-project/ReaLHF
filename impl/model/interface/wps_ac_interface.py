@@ -19,7 +19,7 @@ from impl.model.utils.data import gather_shifted_log_probs, get_eos_indices, mas
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.save import save_hf_or_lora_model
 import api.model
-import api.utils
+import api.huggingface
 
 logger = logging.getLogger("WPS Actor Critic")
 
@@ -424,7 +424,7 @@ class WPSActorInterface(api.model.ModelInterface):
             ignoring_logits_ratio = logits_ignoring_mask.float().mean()
             stats['ignoring_logits_ratio'] = ignoring_logits_ratio
 
-        if self.early_stop_kl is not None and api.utils.get_all_reduce_mean(approx_kl) > self.early_stop_kl:
+        if self.early_stop_kl is not None and api.huggingface.get_all_reduce_mean(approx_kl) > self.early_stop_kl:
             logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
                            f"than early stop threshold {self.early_stop_kl}. Abort actor update.")
             return stats
@@ -462,7 +462,7 @@ class WPSActorInterface(api.model.ModelInterface):
         train_stats = dict(train_stats)
         for k, v in train_stats.items():
             v = v.detach() / self.ppo_epochs / n_minibatch
-            train_stats[k] = api.utils.get_all_reduce_mean(v).item()
+            train_stats[k] = api.huggingface.get_all_reduce_mean(v).item()
 
         return train_stats
 
@@ -585,7 +585,7 @@ class WPSCriticInterface(api.model.ModelInterface):
         train_stats = dict(train_stats)
         for k, v in train_stats.items():
             v = v.detach() / self.ppo_epochs / n_minibatch
-            train_stats[k] = api.utils.get_all_reduce_mean(v).item()
+            train_stats[k] = api.huggingface.get_all_reduce_mean(v).item()
 
         return train_stats
 

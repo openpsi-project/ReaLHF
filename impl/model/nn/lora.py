@@ -12,7 +12,7 @@ import torch.nn.functional as F
 
 import api.config
 import api.model
-import api.utils
+import api.huggingface
 
 logger = logging.getLogger("LoRA")
 

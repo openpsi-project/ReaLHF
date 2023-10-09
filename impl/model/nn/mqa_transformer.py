@@ -15,7 +15,7 @@ from impl.model.utils.data import (mask_eos_token, TensorDataclassToTupleInterfa
                                    upcast_softmax)
 from impl.model.utils.logits_warper import top_k_top_p_logits
 import api.model
-import api.utils
+import api.huggingface
 
 
 @dataclasses.dataclass

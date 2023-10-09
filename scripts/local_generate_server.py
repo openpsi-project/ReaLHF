@@ -9,7 +9,7 @@ import torch
 import transformers
 import zmq
 
-import api.utils
+import api.huggingface
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", "-p", type=int, default=7777)
@@ -27,9 +27,9 @@ if __name__ == "__main__":
                              num_beam_groups=1,
                              num_return_sequences=1)
     device = torch.device("cuda:0")
-    tokenizer = api.utils.load_hf_tokenizer(model_path)
+    tokenizer = api.huggingface.load_hf_tokenizer(model_path)
     print("Loading model...", flush=True)
-    model = api.utils.create_hf_nn(
+    model = api.huggingface.create_hf_nn(
         transformers.AutoModelForCausalLM,
         model_name_or_path=model_path,
         generation_kwargs=generation_kwargs,

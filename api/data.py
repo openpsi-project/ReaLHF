@@ -11,7 +11,7 @@ import torch.utils.data
 import transformers
 
 import api.config
-import api.utils
+import api.huggingface
 
 logger = logging.getLogger("api.data")
 
@@ -72,7 +72,7 @@ def make_dataset(
         cfg = api.config.Dataset(type_=cfg)
 
     if isinstance(tokenizer_or_tokenizer_name, str):
-        tokenizer = api.utils.load_hf_tokenizer(tokenizer_or_tokenizer_name)
+        tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_or_tokenizer_name)
     else:
         tokenizer = tokenizer_or_tokenizer_name
     util = DatasetUtility(
