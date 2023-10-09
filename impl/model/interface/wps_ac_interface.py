@@ -274,9 +274,13 @@ class WPSActorInterface(api.model.ModelInterface):
         kl_rewards, rewards = ppo_functional.compute_rewards(self.kl_adapter.value, self.max_reward_clip,
                                                              old_logp, ref_logp, sample['rewards'],
                                                              eos_indices, seq_no_eos_mask)
-        advantages, returns = ppo_functional.get_advantages_and_returns(self.discount, self.gae_lambda,
-                                                                        sample['values'][:, shifted_start:],
-                                                                        rewards[:, shifted_start:])
+        advantages, returns = ppo_functional.get_advantages_and_returns(
+            gamma=self.discount,
+            lam=self.gae_lambda,
+            values=sample['values'][:, shifted_start:],
+            rewards=rewards[:, shifted_start:],
+            seq_no_eos_mask=seq_no_eos_mask,
+        )
 
         mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
         self.kl_adapter.update(mean_ref_kl, n_steps=torch.distributed.get_world_size() * mini_bs)
@@ -284,9 +288,13 @@ class WPSActorInterface(api.model.ModelInterface):
         # adv_norm = masked_normalization(advantages)
         adv_norm = advantages
 
-        loss, loss_stat = ppo_functional.actor_loss_fn(new_logp[:, shifted_start:], old_logp[:,
-                                                                                             shifted_start:],
-                                                       adv_norm, loss_mask[:, shifted_start:], self.eps_clip)
+        loss, loss_stat = ppo_functional.actor_loss_fn(
+            logprobs=new_logp[:, shifted_start:],
+            old_logprobs=old_logp[:, shifted_start:],
+            advantages=adv_norm,
+            loss_mask=loss_mask[:, shifted_start:],
+            eps_clip=self.eps_clip,
+        )
 
         importance_weight = loss_stat['importance_weight']
         clip_ratio = loss_stat['clip_ratio']
@@ -444,16 +452,22 @@ class WPSCriticInterface(api.model.ModelInterface):
         kl_rewards, rewards = ppo_functional.compute_rewards(self.kl_adapter.value, self.max_reward_clip,
                                                              old_logp, ref_logp, sample['rewards'],
                                                              eos_indices, seq_no_eos_mask)
-        _, returns = ppo_functional.get_advantages_and_returns(self.discount, self.gae_lambda,
-                                                               old_values[:, shifted_start:],
-                                                               rewards[:, shifted_start:])
+        _, returns = ppo_functional.get_advantages_and_returns(gamma=self.discount,
+                                                               lam=self.gae_lambda,
+                                                               values=old_values[:, shifted_start:],
+                                                               rewards=rewards[:, shifted_start:],
+                                                               seq_no_eos_mask=seq_no_eos_mask)
 
         mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
         self.kl_adapter.update(mean_ref_kl, n_steps=torch.distributed.get_world_size() * mini_bs)
 
-        loss, loss_stat = ppo_functional.critic_loss_fn(new_values[:, shifted_start:-1],
-                                                        old_values[:, shifted_start:-1], returns,
-                                                        loss_mask[:, shifted_start:], self.value_eps_clip)
+        loss, loss_stat = ppo_functional.critic_loss_fn(
+            value=new_values[:, shifted_start:-1],
+            old_value=old_values[:, shifted_start:-1],
+            target_value=returns,
+            loss_mask=loss_mask[:, shifted_start:],
+            loss_mask=self.value_eps_clip,
+        )
         clip_ratio = loss_stat['clip_ratio']
 
         module.backward(loss)

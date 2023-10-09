@@ -1,3 +1,4 @@
+from typing import Optional
 from typing import Tuple, Dict
 import torch
 import functools
@@ -35,35 +36,50 @@ def actor_loss_fn(
     logprobs: torch.FloatTensor,
     old_logprobs: torch.FloatTensor,
     advantages: torch.FloatTensor,
-    loss_mask: torch.FloatTensor,
     eps_clip: float,
+    loss_mask: Optional[torch.FloatTensor] = None,
 ) -> Tuple[torch.Tensor, Dict]:
-    """Compute PPO actor loss function given padded batch inputs.
+    """Compute PPO actor loss function.
+    
+    There is no shape requirements for the inputs, but they must have the same shape.
+    Either [bs, max_seqlen] for batch padded inputs or [tot_seqlen] for padded inputs.
 
     Args:
-        logprobs (torch.FloatTensor): Log probabilities of actions. Shape [bs, max_seqlen - 1].
-        old_logprobs (torch.FloatTensor): Old log probabilities of actions. Shape [bs, max_seqlen - 1].
-        advantages (torch.FloatTensor): GAE (normalized) advantages. Shape [bs, max_seqlen - 1].
-        loss_mask (torch.FloatTensor): Mask for loss computation. Shape [bs, max_seqlen - 1].
-            1 if valid else 0.
+        logprobs (torch.FloatTensor): Log probabilities of actions.
+        old_logprobs (torch.FloatTensor): Old log probabilities of actions.
+        advantages (torch.FloatTensor): GAE (normalized) advantages.
         eps_clip (float): Clip ratio of PPO.
+        loss_mask (Optional[torch.FloatTensor], optional): Mask for loss computation.
+            1 if valid else 0. Defaults to None.
 
     Returns:
-        Tuple[torch.Tensor, Dict]: Loss scalar and statistics.
+        Tuple[torch.Tensor, Dict]: Scalar loss and statistics.
     """
     # clone inference tensors
     old_logprobs = old_logprobs.clone()
     advantages = advantages.clone()
 
-    ratio = torch.exp((logprobs - old_logprobs) * loss_mask)
+    if loss_mask is not None:
+        ratio = torch.exp((logprobs - old_logprobs) * loss_mask)
+    else:
+        ratio = torch.exp(logprobs - old_logprobs)
+
     clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
     pg_loss1 = -advantages * ratio
     pg_loss2 = -advantages * clipped_ratio
-    pg_loss = (torch.max(pg_loss1, pg_loss2) * loss_mask).sum() / loss_mask.sum()
+
+    if loss_mask is not None:
+        pg_loss = (torch.max(pg_loss1, pg_loss2) * loss_mask).sum() / loss_mask.sum()
+    else:
+        pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
     proportion_clipped = (pg_loss1 < pg_loss2)
-    proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
-    importance_weight = (ratio.detach() * loss_mask).sum() / loss_mask.sum()
+    if loss_mask is not None:
+        proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
+        importance_weight = (ratio.detach() * loss_mask).sum() / loss_mask.sum()
+    else:
+        proportion_clipped = proportion_clipped.float().mean()
+        importance_weight = ratio.detach().mean()
     # Remain torch.CudaTensor here for all-reduce after train step.
     stat = dict(clip_ratio=proportion_clipped.detach(), importance_weight=importance_weight.detach())
 
@@ -73,23 +89,26 @@ def actor_loss_fn(
 def critic_loss_fn(value: torch.FloatTensor,
                    old_value: torch.FloatTensor,
                    target_value: torch.FloatTensor,
-                   loss_mask: torch.FloatTensor,
                    value_eps_clip: float,
+                   loss_mask: Optional[torch.FloatTensor] = None,
                    loss_fn_type: str = 'huber') -> Tuple[torch.Tensor, Dict]:
     """Compute PPO critic loss function given padded batch inputs.
 
+    There is no shape requirements for the inputs, but they must have the same shape.
+    Either [bs, max_seqlen] for batch padded inputs or [tot_seqlen] for padded inputs.
+    
     Args:
-        value (torch.FloatTensor): Values of shape [bs, max_seqlen - 1].
-            The position of the final token is not included. (The whole generated sequence is not a state.)
-        old_value (torch.FloatTensor): Old values of shape [bs, max_seqlen - 1].
-        target_value (torch.FloatTensor): Target value computed by GAE of shape [bs, max_seqlen - 1].
-        loss_mask (torch.FloatTensor): Mask for loss computation. Shape [bs, max_seqlen - 1].
-            1 if valid else 0.
+        value (torch.FloatTensor): Values. The position of the final token is not included.
+            (The whole generated sequence is not a state.)
+        old_value (torch.FloatTensor): Old values.
+        target_value (torch.FloatTensor): Returns computed by GAE.
         value_eps_clip (float): Clip ratio.
+        loss_mask (Optional[torch.FloatTensor], optional): Mask for loss computation.
+            1 if valid else 0. Defaults to None.
         loss_fn_type (str, optional): Type of loss function. Defaults to 'huber'.
 
     Returns:
-        Tuple[torch.Tensor, Dict]: Loss scalar and statistics.
+        Tuple[torch.Tensor, Dict]: Scalar loss and statistics.
     """
 
     if loss_fn_type == 'huber':
@@ -108,10 +127,18 @@ def critic_loss_fn(value: torch.FloatTensor,
     value_loss = torch.max(value_loss_original, value_loss_clipped)
 
     proportion_clipped = (value_loss_clipped > value_loss_original)
-    proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
+    if loss_mask is not None:
+        proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
+    else:
+        proportion_clipped = proportion_clipped.float().mean()
     stat = dict(clip_ratio=proportion_clipped.detach())
 
-    return (value_loss * loss_mask).sum() / loss_mask.sum(), stat
+    if loss_mask is not None:
+        value_loss = (value_loss * loss_mask).sum() / loss_mask.sum()
+    else:
+        value_loss = value_loss.mean()
+
+    return value_loss, stat
 
 
 @torch.inference_mode()
@@ -162,6 +189,7 @@ def get_advantages_and_returns(
     lam: float,
     values: torch.FloatTensor,
     rewards: torch.FloatTensor,
+    seq_no_eos_mask: torch.FloatTensor,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
     """Compute GAE and returns given padded batch inputs.
 
@@ -172,6 +200,8 @@ def get_advantages_and_returns(
         lam (float): GAE discount factor.
         values (torch.FloatTensor): Values of shape [bs, max_seqlen] (with bootstrapped values).
         rewards (torch.FloatTensor): Rewards of shape [bs, max_seqlen - 1].
+        seq_no_eos_mask (torch.FloatTensor): Indicator of no EOS tokens in a sequence. Shape [bs].
+            1 if no EOS else 0. Used for masking out bootstrap values for terminated sequences.
 
     Returns:
         Tuple[torch.FloatTensor, torch.FloatTensor]: GAE and returns of shape [bs, max_seqlen - 1].
@@ -182,9 +212,65 @@ def get_advantages_and_returns(
     length = rewards.size()[-1]
     for t in reversed(range(length)):
         nextvalues = values[:, t + 1]
+        if t == length - 1:
+            nextvalues *= seq_no_eos_mask
         delta = rewards[:, t] + gamma * nextvalues - values[:, t]
         lastgaelam = delta + gamma * lam * lastgaelam
         advantages_reversed.append(lastgaelam)
     advantages = torch.stack(advantages_reversed[::-1], dim=1)
     returns = advantages + values[:, :-1]
-    return advantages.detach(), returns.detach()
+    return advantages, returns
+
+
+@torch.inference_mode()
+def get_packed_rewards(
+    kl_ctl: float,
+    clip_reward_value: float,
+    log_probs: torch.FloatTensor,
+    ref_log_probs: torch.FloatTensor,
+    reward_score: torch.FloatTensor,
+    short1cu_seqlens: torch.IntTensor,
+    seq_no_eos_mask: torch.FloatTensor,
+) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+    tot_rewards = -kl_ctl * (log_probs - ref_log_probs)
+    kl_rewards = tot_rewards.clone()
+    reward_score = reward_score.clip(-clip_reward_value, clip_reward_value)
+    tot_rewards[short1cu_seqlens[1:] - 1] += reward_score * (1 - seq_no_eos_mask)
+    return kl_rewards, tot_rewards
+
+
+@torch.inference_mode()
+def get_packed_advantages_and_returns(
+    gamma: float,
+    lam: float,
+    values: torch.FloatTensor,
+    rewards: torch.FloatTensor,
+    short1cu_seqlens: torch.IntTensor,
+    seq_no_eos_mask: torch.FloatTensor,
+) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+    # TODO: implement a CUDA kernel to speed up this function
+    # the current implementation has complexity O(#tokens_in_batch), while it can be O(max_seqlen)
+    cu_seqlens = short1cu_seqlens.clone()
+    cu_seqlens[1:] += torch.ones_like(short1cu_seqlens[1:]).cumsum(0)
+
+    bs = short1cu_seqlens.shape[0] - 1
+    assert values.shape[0] == rewards.shape[0] + bs
+    advantages_reversed = []
+    returns_reversed = []
+    for i in reversed(range(bs)):
+        v_offset = cu_seqlens[i]
+        r_offset, r_end = short1cu_seqlens[i], short1cu_seqlens[i + 1]
+        assert cu_seqlens[i + 1] - v_offset - 1 == r_end - r_offset
+        lastgaelam = 0
+        for t in reversed(range(r_end - r_offset)):
+            nextvalues = values[v_offset + t + 1]
+            if t == r_end - r_offset - 1:
+                nextvalues *= seq_no_eos_mask[i]
+            delta = rewards[r_offset + t] + gamma * nextvalues - values[v_offset + t]
+            lastgaelam = delta + gamma * lam * lastgaelam
+            advantages_reversed.append(lastgaelam)
+            advantages_reversed.append(lastgaelam + values[v_offset + t])
+
+    advantages = torch.stack(advantages_reversed[::-1])
+    returns = torch.stack(returns_reversed[::-1])
+    return advantages, returns
