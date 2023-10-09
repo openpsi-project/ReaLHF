@@ -9,9 +9,9 @@ if __name__ == "__main__":
         args=dict(
             contrastive_dim=6,
             enforce_one_or_less_pos=False,
-            n_tokens_per_batch=4096,
+            n_tokens_per_batch=5120,
             max_n_seqs_per_batch=100,
-            max_length=768,
+            max_length=1024,
             json_path="/data/aigc/llm/datasets/wps-formula-rw/dataset_val.jsonl",
         ))
     dataloader_cfg = api.config.DataLoader('iterable_dataset_loader')

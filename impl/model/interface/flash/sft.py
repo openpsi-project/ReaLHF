@@ -4,11 +4,10 @@ import deepspeed
 import torch
 import torch.utils.data
 import tqdm
-import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.utils.data import gather_packed_shifted_log_probs
-from impl.model.utils.save import save_hf_format
+from impl.model.utils.save import save_hf_or_lora_model
 import api.data
 import api.model
 
@@ -44,10 +43,15 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask.float())
         module.backward(loss)
         module.step()
-        return dict(loss=loss.item())
+        cur_epoch = model.version.epoch
+        model.inc_version()
+        if model.version.epoch > cur_epoch:
+            module.tput_timer.update_epoch_count()
+
+        return dict(loss=loss.detach().item())
 
     def save(self, model: api.model.Model, save_dir: str):
-        save_hf_format(model.module, model.tokenizer, save_dir)
+        save_hf_or_lora_model(model, save_dir)
 
     @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
@@ -70,10 +74,10 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
 
             logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
                             max_seqlen=max_seqlen).logits.float()
-            loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask)
+            loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask.float())
 
-            losses += (1 - prompt_mask).sum() * loss.float()
-            n_tokens += (1 - prompt_mask).sum()
+            losses += (1 - prompt_mask.float()).sum() * loss.float()
+            n_tokens += (1 - prompt_mask.float()).sum()
         losses = losses / n_tokens
         try:
             perplexity = torch.exp(losses).item()

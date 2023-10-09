@@ -8,10 +8,10 @@ import torch.utils.data
 import api.config as config
 import api.data
 import api.model
-import base.timeutil
 import base.gpu_utils as gpu_utils
 import base.namedarray as namedarray
 import base.seeding as seeding
+import base.timeutil
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 

@@ -3,33 +3,31 @@ import math
 import random
 
 from api.config import *
-from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
+from api.ecs import Commands, MasterWorkerECS, ModelQuery, RawDataQuery
 
 
-def sft(
+def rw(
     commands: Commands,
     model: ModelQuery['default'],
     packed_input_ids: RawDataQuery['packed_input_ids'],
     cu_seqlens: RawDataQuery['cu_seqlens'],
-    prompt_mask: RawDataQuery['prompt_mask'],
+    labels: RawDataQuery['labels'],
+    n_contrastive_batches: RawDataQuery['n_contrastive_batches'],
+    contrastive_dim: RawDataQuery['contrastive_dim'],
 ):
     inputs = commands.build_model_inputs(
         packed_input_ids=packed_input_ids,
         cu_seqlens=cu_seqlens,
-        prompt_mask=prompt_mask,
+        labels=labels,
+        contrastive_dim=contrastive_dim,
+        n_contrastive_batches=n_contrastive_batches,
     )
     commands.log(model.train_step(inputs))
 
 
-def sample_log_uniform(low, high):
-    low = math.log(low)
-    high = math.log(high)
-    return math.exp(low + (high - low) * random.random())
+class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
 
-
-class WpsFormulaSupervisedFinetuningExperiment(Experiment):
-
-    def __init__(self, n_models=4, seed=1, total_train_epochs=4):
+    def __init__(self, n_models=1, seed=1, total_train_epochs=4):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -69,18 +67,22 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = "/data/aigc/public/starcoder-16bit"
-        train_batch_size_per_device = 4
-        eval_batch_size_per_device = 4
+        # model_path = "/data/aigc/llm/checkpoints/4l-starcoder/"
+        model_path = "/data/aigc/public/starcoder-16bit/"
+        train_batch_size_per_device = 5
+        eval_batch_size_per_device = 2
         max_seq_len = 4096
+        contrastive_dim = 6
 
         dataset = Dataset(
-            'wpsf_sft_packed',
+            'wpsf_plrw_packed',
             args=dict(
                 n_tokens_per_batch=max_seq_len * train_batch_size_per_device,
                 max_length=max_seq_len,
                 max_n_seqs_per_batch=500,
-                json_path="/data/aigc/llm/datasets/wps-formula-sft/dllm-train-0908-formula-psi.json",
+                contrastive_dim=contrastive_dim,
+                enforce_one_or_less_pos=True,
+                json_path="/data/aigc/llm/datasets/wps-formula-rw/dataset_train.jsonl",
             ),
         )
         dataloader = eval_dataloader = DataLoader('iterable_dataset_loader')
@@ -96,7 +98,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
         eval_dataset = copy.deepcopy(dataset)
         eval_dataset.args[
-            'dataset_path'] = "/data/aigc/llm/datasets/wps-formula-sft/dllm-valid-0908-formula-psi.json"
+            'dataset_path'] = "/data/aigc/llm/datasets/wps-formula-rw/dataset_val.jsonl"
         eval_dataset.args['n_tokens_per_batch'] = max_seq_len * eval_batch_size_per_device
 
         backend = ModelBackend(
@@ -118,17 +120,22 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
             ),
         )
 
-        model = Model("flash_mqat_clm_hf_lora",
-                      args=dict(
-                          model_path=model_path,
-                          lora_module_kwargs=dict(
-                              lora_dim=self.lora_dim,
-                              lora_scaling=self.lora_scaling,
-                          ),
-                          lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
-                      ))
+        model = Model(
+            "flash_mqat_critic_lora",
+            args=dict(
+                model_path=model_path,
+                from_type='starcoder',
+                lora_module_kwargs=dict(
+                    lora_dim=self.lora_dim,
+                    lora_scaling=self.lora_scaling,
+                ),
+                lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
+                load_lora_path=
+                "/data/aigc/llm/checkpoints/fw/wpsf-sft-flash-s1/test20230927/default/epoch0step0/lora.bin",
+                lora_op_after_creation='squash_init',
+            ))
 
-        interface = ModelInterface('flash_sft')
+        interface = ModelInterface('flash_plrw')
 
         streams = [RequestReplyStream(f"model{i}") for i in range(self.n_models)]
 
@@ -146,14 +153,14 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
             ) for i in range(self.n_models)
         ]
 
-        ecs = MasterWorkerECS(model_worker).add_systems([sft])
+        ecs = MasterWorkerECS(model_worker).add_systems([rw])
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=None,
             save_frequency_epochs=1,
             save_frequency_seconds=None,
-            eval_frequency_epochs=1,
+            eval_frequency_epochs=None,
             master_ecs=ecs,
             data_worker=data_worker,
             model_worker=model_worker,
@@ -163,5 +170,5 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
 seeds = range(1, 6)
 for s in seeds:
-    exp_name = f"wpsf-sft-flash-s{s}"
-    register_experiment(exp_name, functools.partial(WpsFormulaSupervisedFinetuningExperiment, seed=s))
+    exp_name = f"wpsf-plrw-flash-s{s}"
+    register_experiment(exp_name, functools.partial(WpsFormulaPlackettLuceRewardModelingExperiment, seed=s))

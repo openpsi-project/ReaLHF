@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Tuple
+import itertools
 import json
 import logging
-import itertools
 import random
 
 import numpy as np
@@ -327,9 +327,11 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
             existing_neg_codes = existing_neg_codes[:n_required_neg_codes]
 
         if self.enforce_one_or_less_pos and n_pos > 1:
-            codes = [np.random.choice(pos_codes)] + existing_neg_codes
+            codes = [random.choice(pos_codes)] + existing_neg_codes
             label = [0] + [1] + [0] * len(existing_neg_codes)
         elif n_pos > 0:
+            pos_code_indices = np.random.choice(len(pos_codes), size=self.contrastive_dim - len(existing_neg_codes), replace=False)
+            pos_codes = [pos_codes[kk] for kk in pos_code_indices]
             codes = pos_codes + existing_neg_codes
             label = [0] + [1 / len(pos_codes)] * len(pos_codes) + [0] * len(existing_neg_codes)
         else:
@@ -376,8 +378,10 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
                                                  value=-1)
             n_c_batches = torch.tensor([labels.shape[0]], dtype=torch.long)
             contrastive_dim = torch.tensor([self.contrastive_dim], dtype=torch.long)
+            assert labels.shape[-1] == self.contrastive_dim + 1
             labels = labels.flatten()
-            assert labels.shape[0] <= self.max_n_seqs_per_batch
+            if labels.shape[0] > self.max_n_seqs_per_batch:
+                raise RuntimeError("Please set a larger max_n_seqs_per_batch.")
             labels = torch.nn.functional.pad(labels, (0, self.max_n_seqs_per_batch - labels.shape[0]),
                                              value=-1)
 
@@ -386,8 +390,8 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
                 packed_input_ids=packed_input_ids.unsqueeze(0),
                 cu_seqlens=cu_seqlens.unsqueeze(0),
                 labels=labels.unsqueeze(0),
-                n_contrastive_batches=n_c_batches,
-                contrastive_dim=contrastive_dim,
+                n_contrastive_batches=n_c_batches.unsqueeze(0),
+                contrastive_dim=contrastive_dim.unsqueeze(0),
             )
         self._build_shuffled_contrastive_tuples()
         assert all(length <= self.n_tokens_per_batch for length in self.lengths)

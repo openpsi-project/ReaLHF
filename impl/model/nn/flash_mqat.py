@@ -443,6 +443,7 @@ class VocabPositionEmbedding(nn.Module):
             lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             y.position_ids = torch.cat(
                 [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
+            assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
             assert y.position_ids.shape == y.input_ids.shape
 
         if x.attention_mask is not None:
@@ -726,6 +727,8 @@ def make_flash_mqat_clm_hf(
     from_type: str = 'starcoder',
     tokenizer_path: Optional[str] = None,
 ):
+    if tokenizer_path is None:
+        tokenizer_path = model_path
     if from_type == 'starcoder':
         module = HuggingfaceLikeFlashMQATForCausalLM.from_starcoder(model_path=model_path,
                                                                     dtype=dtype,
@@ -791,16 +794,36 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         return self.head(hidden_states).squeeze()
 
     @classmethod
+    def from_starcoder(
+        cls,
+        model_path: Optional[str] = None,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+        v_head_path: Optional[str] = None,
+    ):
+        from_model = HuggingfaceLikeFlashMQATForCausalLM.from_starcoder(model_path=model_path,
+                                                                        dtype=dtype,
+                                                                        device=device)
+        model = cls(from_model.net.transformer)
+        if v_head_path is not None:
+            model.head.load_state_dict(torch.load(v_head_path))
+        return model
+
+    @classmethod
     def from_sft_model(
         cls,
         from_model: Optional[HuggingfaceLikeFlashMQATForCausalLM] = None,
         model_path: Optional[str] = None,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
+        v_head_path: Optional[str] = None,
     ):
         if from_model is None:
             from_model = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(model_path, dtype, device)
-        return cls(from_model.net)
+        model = cls(from_model.net.transformer)
+        if v_head_path is not None:
+            model.head.load_state_dict(torch.load(v_head_path))
+        return model
 
     @classmethod
     def from_pretrained(
@@ -809,13 +832,44 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
-        model = DeepSpeedChatLikeFlashMQATCriticModel.from_sft_model(model_path=model_path,
-                                                                     dtype=dtype,
-                                                                     device=device)
-        if not os.path.exists(os.path.join(model_path, "rw_v_head.bin")):
-            raise ValueError("rw_v_head.bin not found in model_path.")
-        model.head.load_state_dict(torch.load(os.path.join(model_path, "rw_v_head.bin")))
+        with open(os.path.join(model_path, "config.json"), 'r') as f:
+            config = FlashMQATConfig(**json.load(f))
+        state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
+        net = FlashMQATBase(config, dtype, device)
+        model = cls(net)
+        model.load_state_dict(state_dict)
         return model
+
+
+def make_flash_mqat_critic(
+    name: str,
+    device: torch.device,
+    model_path: str,
+    dtype: Optional[torch.dtype] = None,
+    from_type: str = 'sft',
+    tokenizer_path: Optional[str] = None,
+):
+    if tokenizer_path is None:
+        tokenizer_path = model_path
+    if from_type == 'sft':
+        module = DeepSpeedChatLikeFlashMQATCriticModel.from_sft_model(model_path=model_path,
+                                                                      dtype=dtype,
+                                                                      device=device)
+    elif from_type == 'starcoder':
+        module = DeepSpeedChatLikeFlashMQATCriticModel.from_starcoder(model_path=model_path,
+                                                                      dtype=dtype,
+                                                                      device=device)
+    elif from_type == 'self':
+        module = DeepSpeedChatLikeFlashMQATCriticModel.from_pretrained(model_path=model_path,
+                                                                       dtype=dtype,
+                                                                       device=device)
+    else:
+        raise NotImplementedError()
+    tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_path)
+    return api.model.Model(name, module, tokenizer, device)
+
+
+api.model.register_model("flash_mqat_critic", make_flash_mqat_critic)
 
 
 def genstep(
