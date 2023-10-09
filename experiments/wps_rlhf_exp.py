@@ -117,7 +117,7 @@ def train_critic(
 
 class WpsRLHFExperiment(Experiment):
 
-    def __init__(self, n_actors=2, n_critics=2, n_rewards=1, n_refs=1, seed=1):
+    def __init__(self, n_actors=1, n_critics=1, n_rewards=1, n_refs=1, seed=1):
         self.n_actors = n_actors
         self.n_rewards = n_rewards
         self.n_refs = n_refs
@@ -203,7 +203,7 @@ class WpsRLHFExperiment(Experiment):
             min_new_tokens=10,
             do_sample=True,
             top_p=1.0,
-            top_k=1000,
+            top_k=int(1e9),
             temperature=1.0,
             num_beams=1,
             num_beam_groups=1,
@@ -214,7 +214,7 @@ class WpsRLHFExperiment(Experiment):
             args=dict(
                 model_name_or_path=actor_path,
                 init_from_scratch=False,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=False),
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 generation_kwargs=generation_kwargs,
                 quantization_kwargs=dict(load_in_8bit=True),
                 lora_module_kwargs=dict(
@@ -233,7 +233,7 @@ class WpsRLHFExperiment(Experiment):
             args=dict(
                 model_name_or_path=actor_path,
                 init_from_scratch=False,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=False),
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 generation_kwargs=generation_kwargs,
                 quantization_kwargs=dict(load_in_8bit=True),
             ),
@@ -242,7 +242,7 @@ class WpsRLHFExperiment(Experiment):
             "wps_reward_lora",
             args=dict(
                 model_name_or_path=actor_path,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16, use_cache=False),
+                from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 quantization_kwargs=dict(load_in_8bit=True),
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,

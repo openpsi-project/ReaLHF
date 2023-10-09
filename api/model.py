@@ -10,7 +10,7 @@ import transformers
 
 from base.namedarray import NamedArray, recursive_apply
 import api.config
-import api.utils
+import api.huggingface
 
 logger = logging.getLogger("model")
 

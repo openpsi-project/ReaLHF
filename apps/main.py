@@ -109,6 +109,7 @@ def main_start(args):
         "setup",
         scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
         env_vars=base_environs,
+        node_type="g1",
     )
 
     try:
@@ -140,6 +141,7 @@ def main_start(args):
         cpu=1,
         gpu=0,
         mem=1024,
+        node_type="g1",
         env_vars=base_environs,
         container_image=args.image_name or setup.controller_image,
         time_limit=CONTROLLER_TIME_LIMIT,

@@ -20,7 +20,6 @@ import torch
 
 from . import p2p, schedule
 from .module import PipelineError, PipelineModule
-from impl.model.utils.spec import TransformerData
 
 TARGET_ID = -2
 LOG_STAGE = -2
@@ -379,6 +378,7 @@ class PipelineEngine(DeepSpeedEngine):
         inputs = self.pipe_buffers['inputs'][buffer_id]
         # inputs = tuple(t.clone() for t in self.pipe_buffers['inputs'][buffer_id])
 
+        from impl.model.nn.mqa_transformer import TransformerData
         x = TransformerData.from_tuple(inputs)
 
         attention_mask = x.raw_attention_mask.clone()
@@ -405,6 +405,7 @@ class PipelineEngine(DeepSpeedEngine):
         outputs = self.pipe_buffers['outputs'][buffer_id]
         # outputs = tuple(t.clone() for t in self.pipe_buffers['outputs'][buffer_id])
 
+        from impl.model.nn.mqa_transformer import TransformerData
         x = TransformerData.from_tuple(outputs)
         logits = x.logits
         input_ids = x.raw_input_ids
@@ -473,6 +474,7 @@ class PipelineEngine(DeepSpeedEngine):
 
     def _split_data_into_micro_batches(self, data_dict, splits):
         # return a data iterator yield micro batches
+        from impl.model.nn.mqa_transformer import TransformerData
         batches = []
         new_data_dict = {}
         for key, data in data_dict.items():
@@ -1320,6 +1322,7 @@ class PipelineEngine(DeepSpeedEngine):
         self._normal_mode()
         # TODO: data parallel, other micro batches
 
+        from impl.model.nn.mqa_transformer import TransformerData
         if len(output) > 0:
             raw_input_ids = [TransformerData.from_tuple(o).raw_input_ids for o in output]
             return torch.cat(raw_input_ids, dim=0)
@@ -1349,6 +1352,7 @@ class PipelineEngine(DeepSpeedEngine):
 
         # Reset any buffers that may have been populated during the forward passes.
         # ds_checkpointing.reset()
+        from impl.model.nn.mqa_transformer import TransformerData
         if len(output) > 0:
             logits = [TransformerData.from_tuple(o).logits for o in output]
             # loss = torch.cat(raw_input_ids, dim=0)

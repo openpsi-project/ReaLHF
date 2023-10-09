@@ -15,6 +15,7 @@ import base.namedarray as namedarray
 import base.names as names
 
 logger = logging.getLogger("Request-Replay Stream")
+ZMQ_IO_THREADS = 8
 
 
 class RequestClient:
@@ -49,7 +50,7 @@ class Reply:
 class IpRequestClient(RequestClient):
 
     def __init__(self, address, serialization_method):
-        self.__context = zmq.Context()
+        self.__context = zmq.Context(io_threads=ZMQ_IO_THREADS)
         self.__socket = self.__context.socket(zmq.REQ)
         self.__socket.connect(f"tcp://{address}")
         self.__socket.setsockopt(zmq.LINGER, 0)
@@ -57,7 +58,7 @@ class IpRequestClient(RequestClient):
         self.__serialization_method = serialization_method
 
     def post_request(self, payload: Request):
-        tik = time.perf_counter()
+        tik = time.monotonic()
         if isinstance(payload.data, namedarray.NamedArray):
             assert isinstance(payload.data, namedarray.NamedArray), type(payload.data)
             payload.data = namedarray.recursive_apply(payload.data, lambda x: x.cpu().numpy())
@@ -66,16 +67,12 @@ class IpRequestClient(RequestClient):
         else:
             payload.data = [pickle.dumps(payload.data)]
             encoding = b'00'
-        # logger.debug(f"Request encoding time: {time.perf_counter() - tik:.4f}s")
-        # logger.info(f"post request start time {int(time.time_ns()/10e6)}")
-        self.__socket.send_multipart([payload.handle_name.encode('ascii'), encoding] + payload.data)
-        # logger.info(f"post request end time {int(time.time_ns()/10e6)}")
+        self.__socket.send_multipart(
+            [pickle.dumps(tik), payload.handle_name.encode('ascii'), encoding] + payload.data)
 
     def poll_reply(self):
-        # logger.info(f"poll reply start time {int(time.time_ns()/10e6)}")
-        encoding, *data = self.__socket.recv_multipart()
-        # logger.info(f"poll reply end time {int(time.time_ns()/10e6)}")
-        tik = time.perf_counter()
+        time_bytes, encoding, *data = self.__socket.recv_multipart()
+        send_time = pickle.loads(time_bytes)
         if encoding == b'01':
             data = namedarray.loads(data)
             data = namedarray.recursive_apply(data, lambda x: torch.from_numpy(x))
@@ -83,14 +80,14 @@ class IpRequestClient(RequestClient):
             data = pickle.loads(data[0])
         else:
             raise NotImplementedError()
-        # logger.debug(f"Reply decoding time: {time.perf_counter() - tik:.4f}s")
+        logger.debug(f"Reply transfer time: {time.monotonic() - send_time:.4f}s")
         return Reply(data)
 
 
 class IpReplyServer(ReplyServer):
 
     def __init__(self, serialization_method):  # auto find port
-        self.__context = zmq.Context()
+        self.__context = zmq.Context(io_threads=ZMQ_IO_THREADS)
         self.__socket = self.__context.socket(zmq.REP)
         host_ip = socket.gethostbyname(socket.gethostname())
         port = self.__socket.bind_to_random_port(f"tcp://{host_ip}")
@@ -99,11 +96,12 @@ class IpReplyServer(ReplyServer):
         self.__serialization_method = serialization_method
 
     def poll_request(self):
-        # logger.info(f"poll request start time {int(time.time_ns()/10e6)}")
-        handle_name, encoding, *data = self.__socket.recv_multipart()
-        # logger.info(f"poll request end time {int(time.time_ns()/10e6)}")
+        try:
+            time_bytes, handle_name, encoding, *data = self.__socket.recv_multipart(flags=zmq.NOBLOCK)
+        except zmq.ZMQError:
+            return None
+        send_time = pickle.loads(time_bytes)
         handle_name = handle_name.decode('ascii')
-        tik = time.perf_counter()
         if encoding == b'01':
             data = namedarray.loads(data)
             data = namedarray.recursive_apply(data, lambda x: torch.from_numpy(x))
@@ -111,11 +109,11 @@ class IpReplyServer(ReplyServer):
             data = pickle.loads(data[0])
         else:
             raise NotImplementedError()
-        # logger.debug(f"Request decoding time: {time.perf_counter() - tik:.4f}s")
+        logger.debug(f"Request transfer time: {time.monotonic() - send_time:.4f}s")
         return Request(handle_name, data)
 
     def post_reply(self, payload: Reply):
-        tik = time.perf_counter()
+        tik = time.monotonic()
         if isinstance(payload.data, namedarray.NamedArray):
             assert isinstance(payload.data, namedarray.NamedArray), type(payload.data)
             payload.data = namedarray.recursive_apply(payload.data, lambda x: x.cpu().numpy())
@@ -124,11 +122,7 @@ class IpReplyServer(ReplyServer):
         else:
             payload.data = [pickle.dumps(payload.data)]
             encoding = b'00'
-        # logger.debug(f"Reply encoding time: {time.perf_counter() - tik:.4f}s")
-
-        # logger.info(f"post reply start time {int(time.time_ns()/10e6)}")
-        self.__socket.send_multipart([encoding] + payload.data)
-        # logger.info(f"post reply end time {int(time.time_ns()/10e6)}")
+        self.__socket.send_multipart([pickle.dumps(tik), encoding] + payload.data)
 
 
 class NameResolvingRequestClient(IpRequestClient):

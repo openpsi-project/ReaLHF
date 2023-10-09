@@ -1,7 +1,7 @@
 import functools
 
 from api.config import register_experiment
-from experiments.chat_rlhf import ChatRLHFBenchmarkConfig, ChatRLHFBenchmarkExperiment
+from experiments.chat_rlhf_exp import ChatRLHFBenchmarkConfig, ChatRLHFBenchmarkExperiment
 
 resource_config = dict(
     n_actors=14,

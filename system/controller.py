@@ -17,7 +17,6 @@ import ray.util.queue as rq
 from system import load_worker, WORKER_TYPES
 from system.worker_base import WorkerServerStatus as Wss
 import api.config
-import base.monitoring
 import base.name_resolve
 import base.names as names
 import system.worker_base
@@ -145,30 +144,6 @@ class Controller:
             self.interrupt(wait_timeout=120)
             raise e
 
-        # Configure monitoring.
-        logger.info("Configuring monitoring")
-        mon_addresses = []
-        mon_repo = base.monitoring.TargetRepository()
-        workers = None
-        for _ in range(10):
-            rs = self.__control.group_request("start_monitoring", worker_names=workers, timeout=3)
-            workers = []
-            for r in rs:
-                if r.timed_out:
-                    workers.append(r.worker_name)
-                else:
-                    mon_addresses.append(f"{r.result.host}:{r.result.prometheus_port}")
-            if len(workers) == 0:
-                break
-            logger.warning("Failed start monitoring for %d workers, reconnecting and trying again",
-                           len(workers))
-            self.__control.connect(workers, reconnect=True)
-        else:
-            raise RuntimeError("Failed to start monitoring.")
-
-        # with mon_repo.add_target_group(f"{self.experiment_name}.{self.trial_name}",
-        #                                mon_addresses,
-        #                                delete_on_exit=True):
         logger.info("Start workers...")
         self.__control.group_request("start")
         logger.info("Started.")

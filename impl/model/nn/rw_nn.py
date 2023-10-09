@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 import transformers
 
+import api.huggingface
 import api.model
-import api.utils
 
 logger = logging.getLogger("Reward Model")
 
@@ -22,7 +22,7 @@ class RewardModel(nn.Module):
                  output_bias: float,
                  init_from_scratch: bool = False):
         super().__init__()
-        base_model = api.utils.create_hf_nn(
+        base_model = api.huggingface.create_hf_nn(
             transformers.AutoModel,
             model_name_or_path=base_model_name_or_path,
             init_from_scratch=init_from_scratch,
@@ -104,7 +104,7 @@ def create_wps_reward_model(
         v_head_sd: Dict = torch.load(load_v_head_path, map_location='cpu')
         module.v_head.load_state_dict(v_head_sd)
 
-    tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
+    tokenizer = api.huggingface.load_hf_tokenizer(model_name_or_path)
     return api.model.Model(name, module, tokenizer, device)
 
 

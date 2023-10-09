@@ -15,10 +15,11 @@ import tqdm
 import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_aggregate, recursive_apply
-from impl.model.utils.data import get_eos_indices, masked_normalization
+from impl.model.utils.data import gather_shifted_log_probs, get_eos_indices, masked_normalization
+from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.save import save_hf_or_lora_model
+import api.huggingface
 import api.model
-import api.utils
 
 logger = logging.getLogger("WPS Actor Critic")
 
@@ -154,42 +155,6 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
 
 
 api.model.register_interface("wps_reward_unpaired", WPSRewardUnpairedInterface)
-
-
-def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.FloatTensor:
-    logits = logits[:, :-1]
-    labels = labels[:, 1:]
-    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-    log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1))
-    return log_probs_labels.squeeze(-1)
-
-
-def generate_logits_ignoring_mask(logits: torch.FloatTensor,
-                                  top_p: Optional[float] = 1.0,
-                                  top_k: Optional[int] = -1) -> torch.BoolTensor:
-    if top_p is None:
-        top_p = 1.0
-    if top_k is None:
-        top_k = -1
-    assert 0 < top_p <= 1.0
-    if top_k < 0 or top_k > logits.size(-1):
-        top_k = logits.size(-1)
-    if top_p == 1.0 and top_k == logits.size(-1):
-        return torch.zeros_like(logits, dtype=torch.bool)
-
-    sorted_logits, sorted_indices = torch.sort(logits, descending=False, dim=-1)
-    sorted_logits: torch.FloatTensor
-    sorted_indices: torch.LongTensor
-    cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
-    # Remove tokens with cumulative top_p above the threshold (token with 0 are kept)
-    sorted_indices_to_remove = cumulative_probs <= (1 - top_p)
-    # scatter sorted tensors to original indexing
-    top_p_indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
-
-    # Remove all tokens with a probability less than the last token of the top-k
-    top_k_indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
-
-    return top_p_indices_to_remove.logical_or(top_k_indices_to_remove).bool()
 
 
 def actor_loss_fn(logprobs: torch.FloatTensor, old_logprobs: torch.FloatTensor, advantages: torch.FloatTensor,
@@ -334,9 +299,12 @@ class WPSActorInterface(api.model.ModelInterface):
             max_token_len = module.generation_config.max_length
 
         data = recursive_apply(data, lambda x: x.to(model.device))
-        seq = module.generate(data.prompts,
-                              attention_mask=data.prompt_att_mask,
-                              generation_config=module.generation_config)
+        seq = module.generate(
+            data.prompts,
+            attention_mask=data.prompt_att_mask,
+            generation_config=module.generation_config,
+            use_cache=True,
+        )
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
@@ -347,9 +315,12 @@ class WPSActorInterface(api.model.ModelInterface):
 
         module.eval()
         logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits.float()
-        logits_ignoring_mask = generate_logits_ignoring_mask(logits, module.generation_config.top_p,
-                                                             module.generation_config.top_k)
-        logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(logits.dtype).min)
+        top_k_top_p_logits(logits,
+                           top_k=module.generation_config.top_k,
+                           top_p=module.generation_config.top_p,
+                           inplace=True,
+                           ordered=False)
+        logits_ignoring_mask = logits == torch.finfo(logits.dtype).min
         logp = gather_shifted_log_probs(logits, seq)
 
         res = from_dict(
@@ -368,7 +339,8 @@ class WPSActorInterface(api.model.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
         logits: torch.FloatTensor = module(input_ids=data['input_ids'],
                                            attention_mask=data['attention_mask']).logits.float()
-        logits.masked_fill_(data['logits_ignoring_mask'].bool(), torch.finfo(logits.dtype).min)
+        if data['logits_ignoring_mask'] is not None:
+            logits.masked_fill_(data['logits_ignoring_mask'].bool(), torch.finfo(logits.dtype).min)
         logp = gather_shifted_log_probs(logits, data['input_ids'])
         return from_dict(dict(logp=logp.cpu()))
 
@@ -382,7 +354,8 @@ class WPSActorInterface(api.model.ModelInterface):
         new_logits: torch.FloatTensor = module(input_ids=sample['input_ids'],
                                                attention_mask=sample['attention_mask'],
                                                use_cache=False).logits.float()
-        new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
+        if logits_ignoring_mask is not None:
+            new_logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(new_logits.dtype).min)
         new_logp = gather_shifted_log_probs(new_logits, sample['input_ids'])
 
         old_logp: torch.Tensor = sample['logp']
@@ -427,7 +400,7 @@ class WPSActorInterface(api.model.ModelInterface):
         generated_non_pad_ratio = (ans != tokenizer.pad_token_id).float().mean()
         generated_truncate_ratio = (ans[:, -1] != tokenizer.pad_token_id).float().mean()
 
-        ignoring_logits_ratio = logits_ignoring_mask.float().mean()
+        # ignoring_logits_ratio = logits_ignoring_mask.float().mean()
 
         approx_kl = ((old_logp[:, shifted_start:] - new_logp[:, shifted_start:].detach()) *
                      loss_mask[:, shifted_start:]).sum() / loss_mask[:, shifted_start:].sum()
@@ -445,10 +418,14 @@ class WPSActorInterface(api.model.ModelInterface):
             prompt_truncate_ratio=prompt_truncate_ratio,
             generated_non_pad_ratio=generated_non_pad_ratio,
             generated_truncate_ratio=generated_truncate_ratio,
-            ignoring_logits_ratio=ignoring_logits_ratio,
         )
 
-        if self.early_stop_kl is not None and api.utils.get_all_reduce_mean(approx_kl) > self.early_stop_kl:
+        if logits_ignoring_mask is not None:
+            ignoring_logits_ratio = logits_ignoring_mask.float().mean()
+            stats['ignoring_logits_ratio'] = ignoring_logits_ratio
+
+        if self.early_stop_kl is not None and api.huggingface.get_all_reduce_mean(
+                approx_kl) > self.early_stop_kl:
             logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
                            f"than early stop threshold {self.early_stop_kl}. Abort actor update.")
             return stats
@@ -486,7 +463,7 @@ class WPSActorInterface(api.model.ModelInterface):
         train_stats = dict(train_stats)
         for k, v in train_stats.items():
             v = v.detach() / self.ppo_epochs / n_minibatch
-            train_stats[k] = api.utils.get_all_reduce_mean(v).item()
+            train_stats[k] = api.huggingface.get_all_reduce_mean(v).item()
 
         return train_stats
 
@@ -609,7 +586,7 @@ class WPSCriticInterface(api.model.ModelInterface):
         train_stats = dict(train_stats)
         for k, v in train_stats.items():
             v = v.detach() / self.ppo_epochs / n_minibatch
-            train_stats[k] = api.utils.get_all_reduce_mean(v).item()
+            train_stats[k] = api.huggingface.get_all_reduce_mean(v).item()
 
         return train_stats
 

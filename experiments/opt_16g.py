@@ -2,7 +2,7 @@ import functools
 import itertools
 
 from api.config import register_experiment
-from experiments.chat_rlhf import ChatRLHFBenchmarkConfig, ChatRLHFBenchmarkExperiment
+from experiments.chat_rlhf_exp import ChatRLHFBenchmarkConfig, ChatRLHFBenchmarkExperiment
 
 spec_to_n_params = {
     (5120, 60): "19b",

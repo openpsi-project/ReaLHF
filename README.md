@@ -1,5 +1,16 @@
 # A Distributed System for LLM RLHF
 
+## Contributing
+
+Before reading the code, keep in mind that:
+1. Everything in [api/config.py](api/config.py) are configurations. They are used to configurate your experiment.
+2. Other classes in [api directory](api/) are abstract methods. They represent necessary components for the system to run.
+3. Classes in [api/config.py](api/config.py) and other scripts in [api directory](api/) may have same class names. 
+
+See `docs/user_guide`.
+
+To understand difference between `model`, `model backend` and `model interface`, read [this doc](docs/user_guide/02_model.md).
+
 ## Step 1: Train A Reward Model
 
 Command
@@ -13,7 +24,7 @@ See `ExcelPlackettLuceRewardDataset` in `impl/data/wps_dataset.py` for the used 
 
 See `WPSPlackettLuceRewardInterface` in `impl/model/interface/wps_actor_critic.py` for the algorithm implementation.
 
-The trained model will be saved in the subfolders of `/data/aigc/llm/root/checkpoints/wps-rw-pl-s1/${your_trial_name}/default/epoch4step0/`.
+The trained model will be saved in the subfolders of `/data/aigc/llm/checkpoints/${USER}/wps-rw-pl-s1/${your_trial_name}/default/epoch4step0/`.
 
 ## Step 2: RLHF
 

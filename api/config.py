@@ -171,7 +171,8 @@ class ModelWorker:
     # cuda & cudnn config
     cudnn_benchmark: bool = False
     cudnn_deterministic: bool = False
-    cuda_cache_cleanliness: bool = True  # i.e., clear cuda cache after each RPC call
+    ccc_freq_secs: Optional[float] = None  # ccc=clean cuda cache
+    ccc_freq_steps: Optional[int] = None
     worker_info: Optional[WorkerInformation] = None
 
 

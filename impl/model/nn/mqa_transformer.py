@@ -1,13 +1,73 @@
-from torch.nn import CrossEntropyLoss
-# from generate import generate
+from typing import Callable, List, Optional, Union
+import dataclasses
+import itertools
+import json
+
 from transformers.activations import GELUActivation
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import transformers
 
-from impl.model.utils.generate import generate, old_generate
-from impl.model.utils.spec import TransformerConfig, TransformerData
+from impl.model.backend.pipe_engine import LayerSpec, PipelineModule
+from impl.model.backend.pipe_engine.topology import PipeDataParallelTopology
+from impl.model.utils.data import (mask_eos_token, TensorDataclassToTupleInterface, upcast_masked_softmax,
+                                   upcast_softmax)
+from impl.model.utils.logits_warper import top_k_top_p_logits
+import api.huggingface
 import api.model
-import api.utils
+
+
+@dataclasses.dataclass
+class TransformerConfig:
+    n_layers: int
+    n_heads: int
+    head_dim: int
+    hidden_dim: int
+    intermediate_dim: int  # for mlp, usually 4*h
+    vocab_size: int
+    n_positions: int
+    resid_pdrop: float = 0.1
+    attn_pdrop: float = 0.1
+    embd_pdrop: float = 0.1
+    layer_norm_epsilon: float = 1e-5
+    activation_function: str = "gelu"
+
+    @staticmethod
+    def from_huggingface_config(config_file):
+        config_json = json.load(open(config_file, "r"))
+        # for starcoder config
+        config = TransformerConfig(n_layers=config_json["n_layer"],
+                                   n_heads=config_json["n_head"],
+                                   head_dim=config_json["n_embd"] // config_json["n_head"],
+                                   hidden_dim=config_json["n_embd"],
+                                   intermediate_dim=config_json["n_inner"],
+                                   vocab_size=config_json["vocab_size"],
+                                   n_positions=config_json["n_positions"],
+                                   resid_pdrop=config_json["resid_pdrop"],
+                                   attn_pdrop=config_json["attn_pdrop"],
+                                   embd_pdrop=config_json["embd_pdrop"],
+                                   layer_norm_epsilon=config_json["layer_norm_epsilon"],
+                                   activation_function="gelu")
+        return config
+
+
+@dataclasses.dataclass
+class TransformerData(TensorDataclassToTupleInterface):
+    # input, and config
+    raw_input_ids: torch.Tensor = None
+    raw_attention_mask: torch.Tensor = None
+    input_ids: torch.Tensor = None
+    attention_mask: torch.Tensor = None
+    labels: torch.Tensor = None
+    position_ids: torch.Tensor = None
+    hidden_states: torch.Tensor = None
+    kv_cache: torch.Tensor = None
+    head_mask: torch.Tensor = None
+    generation_id: int = None  # for kv cache, should > 0
+    # outputs
+    loss: torch.Tensor = None
+    logits: torch.Tensor = None
 
 
 class MQATransformerForCausalLM(nn.Module):
@@ -48,9 +108,6 @@ class MQATransformerForCausalLM(nn.Module):
     def generate(self, *args, **kwargs):
         # TODO: support huggingface generate
         return generate(self, *args, **kwargs)
-
-    def old_generate(self, *args, **kwargs):
-        return old_generate(self, *args, **kwargs)
 
     def to_layers(self):
         return [self.preprocess] + self.transformer.to_layers() + [self.postprocess]
@@ -151,7 +208,7 @@ class Postprocess(nn.Module):
             shift_logits = lm_logits[..., :-1, :].contiguous()
             shift_labels = x.labels[..., 1:].contiguous().to(shift_logits.device)
             # Flatten the tokens
-            loss_fct = CrossEntropyLoss()
+            loss_fct = nn.CrossEntropyLoss()
             loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
         x.logits = lm_logits
@@ -353,37 +410,6 @@ class MLP(nn.Module):
         return x
 
 
-# fused kernels for upcast softmax
-@torch.jit.script
-def upcast_masked_softmax(x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor, scale: float,
-                          softmax_dtype: torch.dtype):
-    input_dtype = x.dtype
-    x = x.to(softmax_dtype) * scale
-    x = torch.where(mask, x, mask_value)
-    x = torch.nn.functional.softmax(x, dim=-1).to(input_dtype)
-    return x
-
-
-@torch.jit.script
-def upcast_softmax(x: torch.Tensor, scale: float, softmax_dtype: torch.dtype):
-    input_dtype = x.dtype
-    x = x.to(softmax_dtype) * scale
-    x = torch.nn.functional.softmax(x, dim=-1).to(input_dtype)
-    return x
-
-
-@torch.jit.script
-def masked_softmax(x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor):
-    x = torch.where(mask, x, mask_value)
-    x = torch.nn.functional.softmax(x, dim=-1)
-    return x
-
-
-# mqa transformer pipe wrappers
-from impl.model.backend.pipe_engine import LayerSpec, PipelineModule
-from impl.model.backend.pipe_engine.topology import PipeDataParallelTopology
-
-
 class MQATransformerPipe(PipelineModule):
 
     def __init__(self, config: TransformerConfig, topology: PipeDataParallelTopology):
@@ -507,13 +533,11 @@ class LastLayerNormPipe(LastLayerNorm):
         return out.to_tuple()
 
 
-# TODO: auto set tokenizer
-from transformers import AutoTokenizer
-
-
 def create_mqa_transformer(model_name_or_path, config, name, device):
     # tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, fast_tokenizer=True, padding_side="left")
+    tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path,
+                                                           fast_tokenizer=True,
+                                                           padding_side="left")
     tokenizer.pad_token_id = tokenizer.eos_token_id
     module = MQATransformerForCausalLM(config)
     module.load_from_path(model_name_or_path, device, torch.half)
@@ -522,7 +546,9 @@ def create_mqa_transformer(model_name_or_path, config, name, device):
 
 def create_mqa_transformer_pipe(model_name_or_path, config, topology, device, name):
     # tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, fast_tokenizer=True, padding_side="left")
+    tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path,
+                                                           fast_tokenizer=True,
+                                                           padding_side="left")
     tokenizer.pad_token_id = tokenizer.eos_token_id
     module = MQATransformerPipe(config, topology)
     module.load_from_path(model_name_or_path, device, torch.half)
@@ -531,3 +557,114 @@ def create_mqa_transformer_pipe(model_name_or_path, config, topology, device, na
 
 api.model.register_model("mqa_transformer", create_mqa_transformer)
 api.model.register_model("mqa_transformer_pipe", create_mqa_transformer_pipe)
+
+
+@dataclasses.dataclass
+class GenerationConfig:
+    # generation arguments other than tensors
+    min_new_tokens: int = 1
+    max_new_tokens: int = 10
+    min_tokens: int = None
+    max_tokens: int = None
+    temperature: float = 1.0
+    greedy: bool = True
+    top_p: float = 1.0
+    top_k: int = 0
+    num_samples: int = 1
+    pad_token_id: Optional[int] = None
+    eos_token_id: Optional[int] = None
+
+
+def preprocess_input(x: TransformerData, last_token_only):
+    # x = TransformerData()
+    position_ids = x.raw_attention_mask.long().cumsum(-1) - 1
+    position_ids.masked_fill_(x.raw_attention_mask == 0, 1)
+
+    if last_token_only:
+        x.input_ids = x.raw_input_ids[:, -1:]
+        x.position_ids = position_ids[:, -1].unsqueeze(-1)
+    else:
+        x.input_ids = x.raw_input_ids
+        x.position_ids = position_ids
+
+    x.attention_mask = x.raw_attention_mask
+    return x
+
+
+def postprocess_output(
+    x: TransformerData,
+    unfinished_sequences: torch.Tensor,
+    args: GenerationConfig,
+):
+    logits = x.logits
+    orig_input_ids = x.raw_input_ids
+    orig_attn_mask = x.raw_attention_mask
+    cur_seq_len = orig_input_ids.shape[-1]
+
+    # process logits
+    next_token_logits = logits[:, -1, :]
+    if cur_seq_len < args.min_tokens:
+        next_token_logits = mask_eos_token(next_token_logits, args.eos_token_id)
+
+    if args.greedy:
+        next_tokens = torch.argmax(next_token_logits, dim=-1)
+        print("greedy next tokens", next_tokens, next_tokens.shape)
+    else:
+        next_token_logits = next_token_logits.float()
+        next_token_logits /= args.temperature
+        next_token_logits = top_k_top_p_logits(next_token_logits,
+                                               top_k=args.top_k,
+                                               top_p=args.top_p,
+                                               inplace=True,
+                                               ordered=True)
+        log_probs = F.softmax(next_token_logits, dim=-1)
+        next_tokens = torch.multinomial(log_probs, num_samples=1)
+        next_tokens = next_tokens.reshape(-1)
+
+    if args.eos_token_id is not None:
+        if args.pad_token_id is None:
+            raise ValueError("If `eos_token_id` is defined, make sure that `pad_token_id` is defined.")
+        next_tokens = next_tokens * unfinished_sequences + args.pad_token_id * (1 - unfinished_sequences)
+    unfinished_sequences = next_tokens.ne(args.eos_token_id).long() * unfinished_sequences
+    x.raw_input_ids = torch.cat([orig_input_ids, next_tokens[:, None]], dim=-1)
+    x.raw_attention_mask = torch.cat(
+        [orig_attn_mask, orig_attn_mask.new_ones((orig_attn_mask.shape[0], 1))], dim=-1)
+
+    # terminate check
+    terminate = (cur_seq_len >= args.max_tokens) or (unfinished_sequences.max() == 0)
+
+    return terminate, unfinished_sequences, x
+
+
+@torch.no_grad()
+def generate(
+        model,  # could be a deepspeed pipeline engine 
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        position_ids: torch.Tensor = None,
+        **kwargs):
+    args = GenerationConfig(**kwargs)
+    device = input_ids.device
+    input_length = input_ids.shape[-1]
+    # print(args.min_new_tokens, input_length)
+    if args.min_tokens is None:
+        args.min_tokens = args.min_new_tokens + input_length
+        # print(args.min_tokens)
+    if args.max_tokens is None:
+        args.max_tokens = args.max_new_tokens + input_length
+
+    unfinished_sequences = torch.ones(input_ids.shape[0], dtype=torch.long, device=device)
+    first_round = True
+    x = TransformerData(raw_input_ids=input_ids, raw_attention_mask=attention_mask)
+
+    while True:
+        x = preprocess_input(x, last_token_only=not first_round)
+        first_round = False
+        x = model(x)
+        terminate, unfinished_sequences, x = \
+                postprocess_output(x, unfinished_sequences, args)
+
+        if terminate:
+            break
+
+    return x.raw_input_ids

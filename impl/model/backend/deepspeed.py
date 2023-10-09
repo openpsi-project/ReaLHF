@@ -12,10 +12,6 @@ import base.deepspeed_utils as deepspeed_utils
 
 logger = logging.getLogger("DeepSpeed Backend")
 
-from typing import List
-
-import torch
-
 
 @dataclasses.dataclass
 class DeepspeedTrainBackend(api.model.ModelBackend):

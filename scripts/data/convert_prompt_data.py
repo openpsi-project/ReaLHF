@@ -13,10 +13,10 @@ from scripts.data.utils import IMPOSSIBLE_TASKS, jaro_Winkler, longest_common_su
 
 @torch.inference_mode()
 def get_prompt_embedding(prompts, model_name_or_path: str):
-    import api.utils
+    import api.huggingface
     print("Loading model...")
-    tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
-    model = api.utils.create_hf_nn(transformers.AutoModelForCausalLM, model_name_or_path)
+    tokenizer = api.huggingface.load_hf_tokenizer(model_name_or_path)
+    model = api.huggingface.create_hf_nn(transformers.AutoModelForCausalLM, model_name_or_path)
     device = torch.device("cuda:0")
     model = model.to(device)
     model.eval()
@@ -31,8 +31,8 @@ def get_prompt_embedding(prompts, model_name_or_path: str):
 
 
 def filter_prompts(data):
-    import api.utils
-    tokenizer = api.utils.load_hf_tokenizer("/data/aigc/llm/checkpoints/starcoder-wps-best/")
+    import api.huggingface
+    tokenizer = api.huggingface.load_hf_tokenizer("/data/aigc/llm/checkpoints/starcoder-wps-best/")
 
     prompts = [d['starcoder']['prompt'] for d in data]
     tasks = [d['task_cn'] for d in data]

@@ -12,7 +12,7 @@ import api.model
 import base.gpu_utils as gpu_utils
 import base.namedarray as namedarray
 import base.seeding as seeding
-import base.timeutil as timeutil
+import base.timeutil
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
@@ -32,7 +32,7 @@ class ModelWorker(worker_base.Worker):
         self.__ddp_rank = None
 
         self.__stream = None
-        self.__clear_cache_frequency = timeutil.FrequencyControl(frequency_steps=10)
+        self.__clear_cache_frequency = base.timeutil.FrequencyControl(frequency_steps=10)
 
     @property
     def is_master(self):
@@ -83,7 +83,7 @@ class ModelWorker(worker_base.Worker):
         self.__backend = api.model.make_backend(self.config.backend)
 
         if self.config.eval_datasets is not None and self.config.eval_dataloader is not None:
-            eval_dataset = torch.utils.data.ConcatDataset([
+            eval_datasets = [
                 api.data.make_dataset(
                     d,
                     self.config.seed,
@@ -95,7 +95,11 @@ class ModelWorker(worker_base.Worker):
                     cache_root=(None
                                 if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
                 ) for d in self.config.eval_datasets
-            ],)
+            ]
+            if len(eval_datasets) > 1:
+                eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
+            else:
+                eval_dataset = eval_datasets[0]
             eval_dataloader = api.data.make_dataloader(self.config.eval_dataloader, eval_dataset)
         else:
             eval_dataloader = None
@@ -130,8 +134,9 @@ class ModelWorker(worker_base.Worker):
             else:
                 raise NotImplementedError(f"Unknown request type: {request.handle_name}.")
         except RuntimeError as e:
-            self.print_monitor_info()
+            # We may print some info here.
             raise e
+        self.__stream.post_reply(request_reply_stream.Reply(data=res))
         if self.is_master:
             self.logger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
                              f" in ${time.perf_counter() - tik:.4f}$s")
@@ -148,7 +153,7 @@ class ModelWorker(worker_base.Worker):
                 gc.collect()
                 et = time.monotonic()
                 if self.is_master:
-                    self.logger.info(f"Model worker {self.model_name} CLEAN CACHE in {et-st:.4f}s")
+                    self.logger.info(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
 
         # logging gpu/cpu stats
         # self.print_monitor_info()
