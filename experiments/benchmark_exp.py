@@ -1,10 +1,12 @@
+import os
+
 import torch
 
 from api.config import *
 from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
 
 EXPR_DEADLINE = "now+8hours"
-EXPR_TIME_LIMIT = "30"
+EXPR_TIME_LIMIT = "20"
 
 
 def rollout(
@@ -120,96 +122,134 @@ def train_critic(
     commands.log(model.train_step(data))
 
 
+@dataclasses.dataclass
+class ChatRLHFBenchmarkConfig:
+    # resource
+    n_actors: int = 1
+    n_critics: int = 1
+    n_rewards: int = 1
+    n_refs: int = 1
+    seed: int = 1
+    gpu_per_actor: float = 0.25
+    gpu_per_critic: float = 0.25
+    gpu_per_reward: float = 0.25
+    gpu_per_ref: float = 0.25
+    # optimization options
+    actor_model_name: str = "opt-125m"
+    critic_model_name: str = "opt-125m"
+    init_from_scratch: bool = False
+    actor_zero_stage: int = 2
+    critic_zero_stage: int = 2
+    hybrid_engine: bool = True
+    batch_size_per_device: int = 2
+    max_prompt_length: int = 256
+    max_answer_length: int = 256
+    offload_actor_param: bool = False
+    offload_actor_optimizer_state: bool = False
+    offload_critic_param: bool = False
+    offload_critic_optimizer_states: bool = False
+    offload_ref: bool = False
+    offload_reward: bool = False
+
+
 class ChatRLHFBenchmarkExperiment(Experiment):
 
-    def __init__(self,
-                 n_actors=1,
-                 n_critics=1,
-                 n_rewards=1,
-                 n_refs=1,
-                 seed=1,
-                 actor_model_name=None,
-                 critic_model_name=None):
-        self.n_actors = n_actors
-        self.n_rewards = n_rewards
-        self.n_refs = n_refs
-        self.n_critics = n_critics
-
-        self.n_total = n_actors + n_rewards + n_refs + n_critics
-
-        self.n_data_workers = n_actors
-
-        self.seed = seed
-
-        self.actor_model_name = actor_model_name
-        self.critic_model_name = critic_model_name
-
-    def scheduling_setup(self) -> ExperimentScheduling:
-        return ExperimentScheduling(
-            data_worker=TasksGroup(
-                count=self.n_data_workers,
-                scheduling=Scheduling.data_worker_default(
-                    cpu=2,
-                    mem=10000,
-                    node_type="g1",
-                    begin=None,
-                    deadline=EXPR_DEADLINE,
-                    time_limit=EXPR_TIME_LIMIT,
-                ),
-            ),
-            master_worker=TasksGroup(
-                count=1,
-                scheduling=Scheduling.master_worker_default(
-                    cpu=4,
-                    mem=10000,
-                    node_type="g1",
-                    begin=None,
-                    deadline=EXPR_DEADLINE,
-                    time_limit=EXPR_TIME_LIMIT,
-                ),
-            ),
-            model_worker=[
-                # TasksGroup(
-                #     count=self.n_actors,
-                #     scheduling=Scheduling.model_worker_default(
-                #         cpu=8,
-                #         gpu=1,
-                #         gpu_type='tesla',
-                #         mem=60000,
-                #         # nodelist='frl8a140',
-                #         node_type="a100",
-                #         begin=None,
-                #         deadline=EXPR_DEADLINE,
-                #         time_limit=EXPR_TIME_LIMIT,
-                #     ),
-                # ),
-                TasksGroup(
-                    count=self.n_actors + self.n_critics + self.n_refs + self.n_rewards,
+    def __init__(self, config: ChatRLHFBenchmarkConfig = ChatRLHFBenchmarkConfig()):
+        self.config = config
+        self.n_data_workers = config.n_actors
+        # setup scheduling config
+        # actor critic reward ref
+        task_groups = []
+        last_gpu_per_type = None
+        last_n_types = 0
+        for model_type in ["actor", "critic", "reward", "ref"]:
+            n_types = getattr(config, f"n_{model_type}s")
+            gpu_per_type = getattr(config, f"gpu_per_{model_type}")
+            # print("last_gpu_per_type", last_gpu_per_type)
+            # print("last_n_types", last_n_types)
+            if gpu_per_type < 1:
+                assert n_types == 1, "n_type must be 1 if gpu_per_type < 1"
+            if last_gpu_per_type is None:
+                last_gpu_per_type = gpu_per_type
+                last_n_types = n_types
+                continue
+            if last_gpu_per_type != gpu_per_type:
+                new_task_group = TasksGroup(
+                    count=last_n_types,
                     scheduling=Scheduling.model_worker_default(
                         cpu=4,
-                        gpu=0.25,
+                        gpu=last_gpu_per_type,
                         gpu_type='tesla',
-                        mem=30000,
-                        # nodelist='frl8a140',
+                        mem=int(60000 * last_gpu_per_type),
+                        # nodelist='YL-com02',
                         node_type="a100",
-                        begin=None,
                         deadline=EXPR_DEADLINE,
                         time_limit=EXPR_TIME_LIMIT,
                     ),
-                ),
-            ],
+                )
+                task_groups.append(new_task_group)
+                last_gpu_per_type = gpu_per_type
+                last_n_types = n_types
+            else:
+                last_n_types += n_types
+
+        new_task_group = TasksGroup(
+            count=last_n_types,
+            scheduling=Scheduling.model_worker_default(
+                cpu=4,
+                gpu=last_gpu_per_type,
+                gpu_type='tesla',
+                mem=int(100000 * last_gpu_per_type),
+                # nodelist='YL-com02',
+                node_type="a100",
+                deadline=EXPR_DEADLINE,
+                time_limit=EXPR_TIME_LIMIT,
+            ),
         )
+        task_groups.append(new_task_group)
+        # print(task_groups)
+        self.model_worker_task_groups = task_groups
+        self.actor_model_name = config.actor_model_name
+        self.critic_model_name = config.critic_model_name
+        self.seed = config.seed
+        self.n_actors = config.n_actors
+        self.n_critics = config.n_critics
+        self.n_rewards = config.n_rewards
+        self.n_refs = config.n_refs
+        self.init_from_scratch = config.init_from_scratch
+
+    def scheduling_setup(self) -> ExperimentScheduling:
+        return ExperimentScheduling(data_worker=TasksGroup(
+            count=self.n_data_workers,
+            scheduling=Scheduling.data_worker_default(
+                cpu=2,
+                mem=10000,
+                begin=None,
+                node_type="g1",
+                deadline=EXPR_DEADLINE,
+                time_limit=EXPR_TIME_LIMIT,
+            ),
+        ),
+                                    master_worker=TasksGroup(
+                                        count=1,
+                                        scheduling=Scheduling.master_worker_default(
+                                            cpu=4,
+                                            mem=10000,
+                                            begin=None,
+                                            node_type="g1",
+                                            deadline=EXPR_DEADLINE,
+                                            time_limit=EXPR_TIME_LIMIT,
+                                        ),
+                                    ),
+                                    model_worker=self.model_worker_task_groups)
 
     def initial_setup(self) -> ExperimentConfig:
-        if self.actor_model_name is None:
-            actor_path = "/lustre/meizy/base_models/cfgonly/opt-768-12"
-        else:
-            actor_path = os.path.join("/lustre/meizy/base_models/cfgonly/", self.actor_model_name)
+        # model_dir = "/lustre/meizy/base_models/cfgonly"
+        model_dir = "/lustre/meizy/base_models"
+        data_path = "/lustre/meizy/datasets/Dahoas/rm-static/data/data.jsonl"
 
-        if self.critic_model_name is None:
-            critic_path = "/lustre/meizy/base_models/cfgonly/opt-768-12"
-        else:
-            critic_path = os.path.join("/lustre/meizy/base_models/cfgonly/", self.critic_model_name)
+        actor_path = os.path.join(model_dir, self.actor_model_name)
+        critic_path = os.path.join(model_dir, self.critic_model_name)
         # rw_lora_head_path = \
         # "/data/aigc/llm/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
 
@@ -219,15 +259,15 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         rw_output_scaling = 0.1
         rw_output_bias = 0.0
 
-        mini_batch_size_per_device = 2
-        batch_size_per_device = 2
-        max_prompt_len = 256
-        max_answer_len = 256
+        mini_batch_size_per_device = self.config.batch_size_per_device
+        batch_size_per_device = self.config.batch_size_per_device
+        max_prompt_len = self.config.max_prompt_length
+        max_answer_len = self.config.max_answer_length
 
         dataset = Dataset(
             'chat_prompt',
             args=dict(
-                dataset_path="/lustre/meizy/datasets/Dahoas/rm-static/data/data.jsonl",
+                dataset_path=data_path,
                 max_seq_len=max_prompt_len,
             ),
         )
@@ -265,7 +305,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             "causal_lm",
             args=dict(
                 model_name_or_path=actor_path,
-                init_from_scratch=True,
+                init_from_scratch=self.init_from_scratch,
                 from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 generation_kwargs=generation_kwargs,
                 # quantization_kwargs=dict(load_in_8bit=True),
@@ -275,7 +315,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             'causal_lm',
             args=dict(
                 model_name_or_path=actor_path,
-                init_from_scratch=True,
+                init_from_scratch=self.init_from_scratch,
                 from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 generation_kwargs=generation_kwargs,
                 # quantization_kwargs=dict(load_in_8bit=True),
@@ -302,10 +342,10 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
                 zero_stage=2,
-                offload_param=False,
-                offload_optimizer_state=False,
+                offload_param=self.config.offload_actor_param,
+                offload_optimizer_state=self.config.offload_actor_optimizer_state,
                 enable_fp16=True,
-                enable_hybrid_engine=True,
+                enable_hybrid_engine=self.config.hybrid_engine,
             ),
         )
         critic_backend = ModelBackend(
@@ -314,14 +354,16 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
                 zero_stage=2,
-                offload_param=False,
-                offload_optimizer_state=False,
+                offload_param=self.config.offload_critic_param,
+                offload_optimizer_state=self.config.offload_critic_optimizer_states,
                 enable_fp16=True,
                 enable_hybrid_engine=False,
             ),
         )
-        ref_backend = ModelBackend('ds_inference', args=dict(enable_fp16=True, offload=False))
-        rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=True, offload=False))
+        ref_backend = ModelBackend('ds_inference',
+                                   args=dict(enable_fp16=True, offload=self.config.offload_ref))
+        rw_backend = ModelBackend('ds_inference',
+                                  args=dict(enable_fp16=True, offload=self.config.offload_reward))
 
         ppo_kwargs = dict(
             ppo_epochs=1,
@@ -388,15 +430,14 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             train_critic,
         ])
 
-        return ExperimentConfig(
-            total_train_epochs=8,
-            save_frequency_epochs=None,
-            save_frequency_seconds=None,
-            master_ecs=ecs,
-            data_worker=data_worker,
-            model_worker=model_worker,
-            benchmark_steps=1000,
-        )
+        return ExperimentConfig(total_train_epochs=8,
+                                save_frequency_epochs=None,
+                                save_frequency_seconds=None,
+                                master_ecs=ecs,
+                                data_worker=data_worker,
+                                model_worker=model_worker,
+                                benchmark_steps=30,
+                                config=self.config)
 
 
 register_experiment("chat-rlhf-benchmark", ChatRLHFBenchmarkExperiment)
@@ -404,17 +445,24 @@ register_experiment("chat-rlhf-benchmark", ChatRLHFBenchmarkExperiment)
 import functools
 import itertools
 
-# OPT small scale exps: one card benchmark
-
-actor_model_specs = [(2048, 24), (1024, 24), (768, 12), (4096, 24)]  # tuple (hidden_size, layer)
-critic_model_specs = [(1024, 24), (768, 12)]
-
 spec_to_n_params = {
+    (9216, 64): "66b",
+    (7168, 48): "30b",
+    (6144, 60): "27.5b",
+    (6144, 40): "18.4b",
+    (5120, 60): "19b",
+    (5120, 40): "13b",
+    (4096, 36): "7.5b",
     (4096, 24): "5b",
     (2048, 24): "1.3b",
     (1024, 24): "350m",
     (768, 12): "125m",
 }
+
+# OPT small scale exps: one card benchmark
+actor_model_specs = [(2048, 24), (1024, 24), (768, 12), (4096, 24), (4096, 36),
+                     (5120, 40)]  # tuple (hidden_size, layer)
+critic_model_specs = [(1024, 24), (768, 12), (2048, 24)]
 
 for actor_spec, critic_spec in itertools.product(actor_model_specs, critic_model_specs):
     actor_name = f"opt-{actor_spec[0]}-{actor_spec[1]}"
@@ -422,13 +470,15 @@ for actor_spec, critic_spec in itertools.product(actor_model_specs, critic_model
     actor_n_params = spec_to_n_params[actor_spec]
     critic_n_params = spec_to_n_params[critic_spec]
     exp_name = f"opt-{actor_n_params}+{critic_n_params}-chat-rlhf-benchmark"
-    register_class = functools.partial(ChatRLHFBenchmarkExperiment,
-                                       actor_model_name=actor_name,
-                                       critic_model_name=critic_name,
-                                       n_actors=1,
-                                       n_critics=1,
-                                       n_rewards=1,
-                                       n_refs=1)
+    config = ChatRLHFBenchmarkConfig(
+        actor_model_name=actor_name,
+        critic_model_name=critic_name,
+        n_actors=1,
+        n_critics=1,
+        n_rewards=1,
+        n_refs=1,
+    )
+    register_class = functools.partial(ChatRLHFBenchmarkExperiment, config=config)
     register_experiment(exp_name, register_class)
 
 # Starcoder

@@ -237,6 +237,7 @@ class ExperimentConfig:
     eval_frequency_steps: Optional[int] = None
     eval_frequency_seconds: Optional[int] = None
     benchmark_steps: Optional[int] = None  # only used for benchmark
+    config: Optional[Any] = None
 
     def __post_init__(self):
         model_streams = collections.defaultdict(list)

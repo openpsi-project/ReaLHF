@@ -204,6 +204,7 @@ class ChatActorInterface(api.model.ModelInterface):
         t0 = time.perf_counter()
         data = recursive_apply(data, lambda x: x.to(model.device))
         t1 = time.perf_counter()
+        # logger.info(f"generation config = {module.generation_config}")
         # logger.info("generate(): recursive apply time: %.4f", t1 - t0)
         # logger.info(f"generate(): prompts shape {data.prompts.shape}")
         seq = module.generate(data.prompts,

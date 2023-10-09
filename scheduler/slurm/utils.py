@@ -122,7 +122,7 @@ class SlurmResource:
 
     def valid(self) -> bool:
         # check if it is a valid resource requirement
-        if self.gpu_type not in ["geforce", "tesla"]:
+        if self.gpu_type not in ["geforce", "tesla", None]:
             return False
         if self.mem < 0 or self.cpu < 0 or self.gpu < 0:
             return False
@@ -211,6 +211,10 @@ class SlurmTaskInfo:
         self.task_info = task_infos[0] if len(task_infos) > 0 else None
         # logger.info(f"All task infos: {task_infos}")
         # logger.info(f"Updated task info for {self.slurm_name}: {self.task_info}")
+        if self.task_info:
+            return self.task_info.state
+        else:
+            return None
 
     def cancel(self):
         cancel_tasks(slurm_names=[self.slurm_name])
@@ -332,7 +336,7 @@ class SlurmTaskInfo:
             'exit $RETCODE',
         ]
 
-        script_strs = '\n'.join(lines)
+        script_strs = '\n'.join(lines) + '\n'
         script = script_strs.encode('ascii')
 
         with open(self.log_path, "w") as f:
