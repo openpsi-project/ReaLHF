@@ -2,8 +2,8 @@ import argparse
 import logging
 import os
 import re
-import subprocess
 import socket
+import subprocess
 
 from base.constants import DATE_FORMAT, LOG_FORMAT
 import base.gpu_utils

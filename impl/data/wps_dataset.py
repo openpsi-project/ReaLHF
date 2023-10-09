@@ -7,7 +7,7 @@ import torch
 import torch.utils.data
 
 import api.data
-import api.utils
+import api.huggingface
 import base.namedarray
 
 logger = logging.getLogger("WPS Excel Dataset")

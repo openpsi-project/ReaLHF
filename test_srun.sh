@@ -1,5 +1,6 @@
 #!/bin/bash
 
-srun --gpus=tesla:1 --cpus-per-gpu=32 --mem=100G \
-     --container-image=meizy/deepspeed:0.9.2 --container-mounts=$PWD:/workspace,/data:/data,/hddlustre:/hddlustre \
+srun --gpus=tesla:1 --cpus-per-gpu=15 --mem-per-gpu=60G --nodelist=frl8a138 \
+     --container-image=llm/llm-gpu \
+     --container-mounts=/data:/data,/hddlustre:/hddlustre,/lustre:/lustre --container-mount-home \
      --pty bash

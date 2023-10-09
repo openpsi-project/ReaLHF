@@ -39,8 +39,8 @@ os.environ['LOCAL_RANK'] = "0"
 torch.distributed.init_process_group(**torch_dist_kwargs, group_name=model_name)
 # deepspeed.init_distributed(auto_mpi_discovery=False)
 
+from api.huggingface import create_hf_nn, load_hf_tokenizer
 from api.model import FinetuneSpec, Model, ModelVersion
-from api.utils import create_hf_nn, load_hf_tokenizer
 
 device = torch.device("cuda:0")
 model_path = f"/data/aigc/llm/checkpoints/codegen2b-wps/"

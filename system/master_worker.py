@@ -105,7 +105,7 @@ def wrap_func(
             # This part is to resolve arguments to actual their implementations.
             # e.g. if an argument to this method is ModelQuery, it is now replace with a DuckModel, which
             # execute generate/inference/train/evaluate remotely.
-            # Methods generate/inference/train/evaluate are hard coded here. 
+            # Methods generate/inference/train/evaluate are hard coded here.
             # They correspond to method implemented by abstract class ModelInterface from api/model.py.
             if isinstance(type_hint(), ModelQuery):
                 # If the operation is ModelQuery, find the model stream first.
@@ -238,6 +238,11 @@ class MasterWorker(worker_base.Worker):
         sample = {}
         for k in datas[0].keys():
             if isinstance(datas[0][k], torch.Tensor):
+                if len(datas[0][k].shape) < 2:
+                    raise RuntimeError(
+                        f"Data {k} is not batched. Expect the first dimension to be batch size."
+                        f"For packed inputs, please unsqueeze the first dimension and pad the second dimension to be the same."
+                    )
                 sample[k] = torch.cat([x[k] for x in datas], dim=0)
             else:
                 # There may be other metadata, e.g. pad token id.

@@ -3,7 +3,7 @@ import os
 import socket
 import time
 
-LATEST_TV = "23.06"
+LATEST_TV = "23.08"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--gpu", action='store_true')

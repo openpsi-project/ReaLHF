@@ -1,20 +1,19 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Dict
 import dataclasses
 import functools
-import logging
 import math
 
+from deepspeed.runtime.config import DeepSpeedConfig
 import deepspeed
 import torch
 
+from impl.model.backend.pipe_engine import PipelineEngine
 import api.model
 import base.deepspeed_utils as deepspeed_utils
 
-logger = logging.getLogger("DeepSpeed Backend")
-
 
 @dataclasses.dataclass
-class DeepspeedTrainBackend(api.model.ModelBackend):
+class PipelineTrainBackend(api.model.ModelBackend):
     optimizer_name: str = 'adam'
     optimizer_config: dict = dataclasses.field(
         default_factory=lambda: dict(lr=1e-5, weight_decay=0.1, betas=(0.9, 0.95), eps=1e-5))
@@ -26,11 +25,11 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     offload_param: bool = False
     offload_optimizer_state: bool = False
     enable_fp16: bool = True
-    zero_stage: int = 2
+    zero_stage: int = 0
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
-        assert self.zero_stage == 2
+        assert self.zero_stage < 2
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -94,12 +93,16 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
                                       min_lr_ratio=self.min_lr_ratio)
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-        module, *_ = deepspeed_utils.deepspeed_initialize(
-            model=module,
-            optimizer=optimizer,
-            config=ds_config,
-            lr_scheduler=lr_scheduler,
-        )
+        mpu = model.mpu()
+        config_class = DeepSpeedConfig(ds_config, mpu)
+        module = PipelineEngine(model=model,
+                                args=None,
+                                config=ds_config,
+                                config_class=config_class,
+                                mpu=mpu,
+                                optimizer=optimizer,
+                                lr_scheduler=lr_scheduler,
+                                dist_init_required=False)
 
         if self.gradient_checkpointing:
             module.gradient_checkpointing_enable()
@@ -108,24 +111,4 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
         return model
 
 
-@dataclasses.dataclass
-class DeepspeedInferenceBackend(api.model.ModelBackend):
-    offload: bool = False
-    zero_stage: int = 0
-    enable_fp16: bool = True
-    additional_ds_config: Dict = dataclasses.field(default_factory=dict)
-
-    def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
-        deepspeed.init_distributed(auto_mpi_discovery=False)
-        module = model.module
-        ds_config = deepspeed_utils.get_eval_ds_config(offload=self.offload,
-                                                       stage=self.zero_stage,
-                                                       enable_fp16=self.enable_fp16,
-                                                       **self.additional_ds_config)
-        module, *_ = deepspeed_utils.deepspeed_initialize(model=module, config=ds_config)
-        model.module = module
-        return model
-
-
-api.model.register_backend("ds_train", DeepspeedTrainBackend)
-api.model.register_backend("ds_inference", DeepspeedInferenceBackend)
+api.model.register_backend("pipeline_train", PipelineTrainBackend)
