@@ -135,8 +135,9 @@ class ChatRLHFBenchmarkConfig:
     gpu_per_reward: float = 0.25
     gpu_per_ref: float = 0.25
     # optimization options
-    actor_model_name: str = "opt-768-12"
-    critic_model_name: str = "opt-768-12"
+    init_from_scratch: bool = False
+    actor_model_name: str = "opt-125m"
+    critic_model_name: str = "opt-125m"
     actor_zero_stage: int = 2
     critic_zero_stage: int = 2
     hybrid_engine: bool = True
@@ -150,36 +151,6 @@ class ChatRLHFBenchmarkConfig:
     offload_ref: bool = False
     offload_reward: bool = False
     gradient_checkpointing: bool = False
-
-
-@dataclasses.dataclass
-class ChatRLHFBenchmarkConfig:
-    # resource
-    n_actors: int = 1
-    n_critics: int = 1
-    n_rewards: int = 1
-    n_refs: int = 1
-    seed: int = 1
-    gpu_per_actor: float = 0.25
-    gpu_per_critic: float = 0.25
-    gpu_per_reward: float = 0.25
-    gpu_per_ref: float = 0.25
-    # optimization options
-    actor_model_name: str = "opt-125m"
-    critic_model_name: str = "opt-125m"
-    init_from_scratch: bool = False
-    actor_zero_stage: int = 2
-    critic_zero_stage: int = 2
-    hybrid_engine: bool = True
-    batch_size_per_device: int = 2
-    max_prompt_length: int = 256
-    max_answer_length: int = 256
-    offload_actor_param: bool = False
-    offload_actor_optimizer_state: bool = False
-    offload_critic_param: bool = False
-    offload_critic_optimizer_states: bool = False
-    offload_ref: bool = False
-    offload_reward: bool = False
 
 
 class ChatRLHFBenchmarkExperiment(Experiment):

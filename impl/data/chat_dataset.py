@@ -7,7 +7,7 @@ import torch
 import torch.utils.data
 
 import api.data
-import api.utils
+import api.huggingface
 import base.namedarray
 
 logger = logging.getLogger("Chat Dataset")
@@ -108,7 +108,7 @@ api.data.register_dataloader("chat_rlhf", RLHFDataLoader)
 api.data.register_dataset("chat_prompt", ChatPromptDataset)
 
 if __name__ == "__main__":
-    tokenizer = api.utils.load_hf_tokenizer("/data/meizy/models/cfgonly/opt-1024-24")
+    tokenizer = api.huggingface.load_hf_tokenizer("/data/meizy/models/cfgonly/opt-1024-24")
     utils = [
         api.data.DatasetUtility(seed=1, ddp_rank=rank, world_size=4, tokenizer=tokenizer) for rank in range(4)
     ]

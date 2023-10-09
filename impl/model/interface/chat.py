@@ -18,8 +18,8 @@ import transformers
 from base.namedarray import from_dict, NamedArray, recursive_aggregate, recursive_apply
 from impl.model.utils.data import get_eos_indices, masked_normalization
 from impl.model.utils.save import save_hf_or_lora_model
+import api.huggingface
 import api.model
-import api.utils
 
 logger = logging.getLogger("Chat Interface")
 
@@ -323,7 +323,7 @@ class ChatActorInterface(api.model.ModelInterface):
         #     # ignoring_logits_ratio=ignoring_logits_ratio,
         # )
 
-        # if self.early_stop_kl is not None and api.utils.get_all_reduce_mean(approx_kl) > self.early_stop_kl:
+        # if self.early_stop_kl is not None and api.huggingface.get_all_reduce_mean(approx_kl) > self.early_stop_kl:
         #     logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
         #                    f"than early stop threshold {self.early_stop_kl}. Abort actor update.")
         #     return {}
@@ -371,7 +371,7 @@ class ChatActorInterface(api.model.ModelInterface):
         # train_stats = dict(train_stats)
         # for k, v in train_stats.items():
         #     v = v.detach() / self.ppo_epochs / n_minibatch
-        # train_stats[k] = api.utils.get_all_reduce_mean(v).item()
+        # train_stats[k] = api.huggingface.get_all_reduce_mean(v).item()
         # train_stats[k] = v.item()
         t3 = time.perf_counter()
         # logger.info(f"actor train_step {t3 - t0:.3f}, recursive_apply {t1 - t0:.3f}, ppo_actor_step {t2 - t1:.3f}, other {t3 - t2:.3f}")
@@ -498,7 +498,7 @@ class ChatCriticInterface(api.model.ModelInterface):
         train_stats = dict(train_stats)
         for k, v in train_stats.items():
             v = v.detach() / self.ppo_epochs / n_minibatch
-            train_stats[k] = api.utils.get_all_reduce_mean(v).item()
+            train_stats[k] = api.huggingface.get_all_reduce_mean(v).item()
 
         return train_stats
 

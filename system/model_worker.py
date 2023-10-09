@@ -32,7 +32,6 @@ class ModelWorker(worker_base.Worker):
         self.__ddp_rank = None
 
         self.__stream = None
-        self.__clear_cache_frequency = base.timeutil.FrequencyControl(frequency_steps=10)
 
     @property
     def is_master(self):
@@ -58,6 +57,9 @@ class ModelWorker(worker_base.Worker):
         gpu_utils.reveal_ddp_identity(self.__experiment_name, self.__trial_name, self.model_name,
                                       self.__worker_index)
         self.__ddp_env_resolved = False
+
+        self.__clear_cache_frequency = base.timeutil.FrequencyControl(
+            frequency_steps=self.config.cuda_cache_clear_freq)
 
         r = self.config.worker_info
         r.model_name = cfg.model_name
@@ -136,12 +138,12 @@ class ModelWorker(worker_base.Worker):
         except RuntimeError as e:
             # We may print some info here.
             raise e
-        self.__stream.post_reply(request_reply_stream.Reply(data=res))
+
         if self.is_master:
             self.logger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
                              f" in ${time.perf_counter() - tik:.4f}$s")
-        reply = request_reply_stream.Reply(data=res)
 
+        reply = request_reply_stream.Reply(data=res)
         self.__stream.post_reply(reply)
 
         if self.config.cuda_cache_cleanliness:

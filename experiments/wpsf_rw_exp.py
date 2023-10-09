@@ -61,14 +61,15 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
+                    node_type="a100",
                     mem=60000,
                 ),
             ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        # model_path = "/data/aigc/llm/checkpoints/4l-starcoder/"
-        model_path = "/data/aigc/public/starcoder-16bit/"
+        model_path = "/data/aigc/llm/checkpoints/4l-starcoder/"
+        # model_path = "/data/aigc/public/starcoder-16bit/"
         train_batch_size_per_device = 5
         eval_batch_size_per_device = 2
         max_seq_len = 4096
@@ -148,7 +149,6 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
                 stream=streams[i],
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
-                ccc_freq_secs=None,
             ) for i in range(self.n_models)
         ]
 

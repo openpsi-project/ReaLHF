@@ -10,8 +10,8 @@ from base.constants import DATE_FORMAT, LOG_FORMAT
 from base.namedarray import NamedArray, recursive_apply
 import api.config
 import api.data
+import api.huggingface
 import api.model
-import api.utils
 import impl.data
 import impl.data.chat_dataset
 import impl.model
@@ -111,7 +111,7 @@ def main():
     #     }
     # )
     # print(model.module.device)
-    tokenizer = api.utils.load_hf_tokenizer(actor_path, padding_side="left")
+    tokenizer = api.huggingface.load_hf_tokenizer(actor_path, padding_side="left")
     import pickle
 
     for i in range(10):

@@ -81,8 +81,9 @@ class Controller:
         setup = experiment.initial_setup()
         setup.set_worker_information(experiment_name=self.experiment_name, trial_name=self.trial_name)
 
-        with open(os.path.join(self.json_config_file_path, "config.json"), "w") as f:
-            json.dump(asdict(setup.config), f, indent=4)
+        if setup.config is not None:
+            with open(os.path.join(self.json_config_file_path, "config.json"), "w") as f:
+                json.dump(asdict(setup.config), f, indent=4)
 
         # Scheduling and connecting to workers.
         # TODO for heterogeneous workers of the same type k, list scheduling[k] and setup[k] should match.

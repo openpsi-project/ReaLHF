@@ -34,7 +34,7 @@ for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
 
 _LLM_GPU_IMAGE = "llm/llm-gpu"
-_LLM_CPU_IMAGE = "llm/llm-cpu"
+_LLM_CPU_IMAGE = "llm/llm-cpu:numba"
 
 
 @dataclasses.dataclass
@@ -171,8 +171,10 @@ class ModelWorker:
     # cuda & cudnn config
     cudnn_benchmark: bool = False
     cudnn_deterministic: bool = False
-    ccc_freq_secs: Optional[float] = None  # ccc=clean cuda cache
-    ccc_freq_steps: Optional[int] = None
+    cuda_cache_cleanliness: bool = True
+    cuda_cache_clear_freq: int = 10
+    # ccc_freq_secs: Optional[float] = None  # ccc=clean cuda cache
+    # ccc_freq_steps: Optional[int] = None
     worker_info: Optional[WorkerInformation] = None
 
 

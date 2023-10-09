@@ -109,6 +109,7 @@ def main_start(args):
         "setup",
         scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
         env_vars=base_environs,
+        container_image="llm/llm-cpu",
         node_type="g1",
     )
 
