@@ -4,6 +4,7 @@ import getpass
 import logging
 import os
 import re
+import time
 
 from base.constants import DATE_FORMAT, LOG_FORMAT
 import api.config as config_package
@@ -12,6 +13,8 @@ import scheduler.client
 import system
 
 logger = logging.getLogger("main")
+
+CONTROLLER_TIME_LIMIT = None
 
 
 def scheduler_mode(mode: str) -> str:
@@ -47,10 +50,12 @@ def _submit_workers(
             )
         else:
             cmd = scheduler.client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
+
         logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
 
         nodelist = sch_cfg.scheduling.nodelist
         exclude = sch_cfg.scheduling.exclude
+        node_type = sch_cfg.scheduling.node_type
         container_image = image_name or sch_cfg.scheduling.container_image
         job_name = worker_type
         if use_ray_cluster:
@@ -58,18 +63,23 @@ def _submit_workers(
 
         scheduled_jobs.append(
             sched.submit_array(
-                job_name,
-                cmd,
+                task_name=job_name,
+                cmd=cmd,
                 count=sch_cfg.count,
                 cpu=sch_cfg.scheduling.cpu,
                 gpu=sch_cfg.scheduling.gpu,
                 gpu_type=sch_cfg.scheduling.gpu_type,
                 mem=sch_cfg.scheduling.mem,
                 container_image=container_image,
+                node_type=node_type,
                 nodelist=nodelist,
                 exclude=exclude,
                 env_vars=job_environs,
                 hostfile=True,
+                multiprog=True,
+                begin=sch_cfg.scheduling.begin,
+                deadline=sch_cfg.scheduling.deadline,
+                time_limit=sch_cfg.scheduling.time_limit,
             ),)
     return scheduled_jobs
 
@@ -79,11 +89,11 @@ def main_start(args):
         raise ValueError("--image_name must be specified when using ray cluster. "
                          "This is becuase ray cluster requires all workers to have "
                          "the same version of Python and ray.")
+
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
     experiment = config_package.make_experiment(args.experiment_name)
-    sched = scheduler.client.make(mode=scheduler_mode(args.mode),
-                                  job_name=f"{args.experiment_name}_{trial_name}")
+    sched = scheduler.client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
 
     setup = experiment.scheduling_setup()
 
@@ -99,9 +109,15 @@ def main_start(args):
         "setup",
         scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
         env_vars=base_environs,
+        container_image="llm/llm-cpu",
+        node_type="g1",
     )
 
-    sched.wait(timeout=300, update=True)
+    try:
+        sched.wait(timeout=3600, update=True)
+    except:
+        # temp bypassing
+        logger.warning(f"Resetting name resolving repo failed.")
     logger.info(f"Resetting name resolving repo... Done.")
 
     logger.info(f"Running configuration: {experiment.__class__.__name__}")
@@ -126,8 +142,10 @@ def main_start(args):
         cpu=1,
         gpu=0,
         mem=1024,
+        node_type="g1",
         env_vars=base_environs,
         container_image=args.image_name or setup.controller_image,
+        time_limit=CONTROLLER_TIME_LIMIT,
     )
 
     if args.mode != 'local_ray':

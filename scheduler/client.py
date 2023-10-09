@@ -37,14 +37,17 @@ class TaskInfo:
     name: str
     state: TaskState
     host: str = None  # The host on which the task is/was running. None if the task had not run.
+    submit_time: str = None
     start_time: str = None
     slurm_id: str = None  # Slurm only. The Slurm id of the task.
 
 
 class SchedulerClient:
 
-    def __init__(self, job_name):
-        self.job_name = job_name
+    def __init__(self, expr_name, trial_name):
+        self.expr_name = expr_name
+        self.trial_name = trial_name
+        self.job_name = f"{expr_name}_{trial_name}"
 
     def submit(self, task_name, cmd, **kwargs):
         """Submits a task to the scheduler. Raises exception if the task is already running.
@@ -107,8 +110,9 @@ class SchedulerClient:
 
 
 def remote_worker_cmd(expr_name, trial_name, debug, worker_type):
+    # requires information in scheduler package
     return f"python3 {'' if debug else '-O'} -m apps.remote worker -w {worker_type} " \
-           f"-e {expr_name} -f {trial_name} -i {{index}} -g {{count}}"
+           f"-e {expr_name} -f {trial_name} -i {{group_id}} -o {{group_offset}} -g {{group_size}} -r {{group_index}}"
 
 
 def setup_cmd(expr_name, trial_name, debug):
@@ -126,12 +130,12 @@ def ray_cluster_cmd(expr_name, trial_name, worker_type):
     return (f"python3 -m apps.remote ray -i {{index}} -g {{count}} {' '.join(flags)}")
 
 
-def make(mode, job_name, **kwargs) -> SchedulerClient:
+def make(mode, expr_name, trial_name, **kwargs) -> SchedulerClient:
     if mode == "slurm":
         from scheduler.slurm.client import SlurmSchedulerClient
-        return SlurmSchedulerClient(job_name)
+        return SlurmSchedulerClient(expr_name, trial_name)
     elif mode == 'local':
         from scheduler.local.client import LocalSchedulerClient
-        return LocalSchedulerClient(job_name)
+        return LocalSchedulerClient(expr_name, trial_name)
     else:
         raise NotImplementedError(f"Scheduler {mode} not found")

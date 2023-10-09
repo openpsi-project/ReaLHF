@@ -1,9 +1,12 @@
 import argparse
 import logging
+import multiprocessing
 import os
 import re
 import socket
 import subprocess
+
+multiprocessing.set_start_method("spawn", force=True)
 
 from base.constants import DATE_FORMAT, LOG_FORMAT
 import base.gpu_utils
@@ -20,8 +23,31 @@ def main_reset_name_resolve(args):
 
 
 def main_worker(args):
-    base.gpu_utils.isolate_cuda_device(args.worker_type, args.group_id, args.group_size, args.experiment_name,
+    # resolve env vars to reconstruct wroker indices
+    # "WORKER_START_INDEX": str(current_worker_index),
+    #             "TASK_SIZE": str(task_size),
+    #             "NWOKRERS": str(spec.ntasks)
+    try:
+        commit_index_start = int(os.environ["COMMIT_INDEX_START"])
+        task_size = int(os.environ["TASK_SIZE"])
+        commit_n_workers = int(os.environ["COMMIT_N_WORKERS"])
+    except KeyError:
+        raise KeyError("Environment variables not set for remote.py to obtain worker index.")
+
+    worker_index_start = args.group_offset * task_size + commit_index_start
+    worker_index_end = min(worker_index_start + task_size, commit_index_start + commit_n_workers)
+
+    group_id = args.group_id + args.group_offset
+    group_index = args.group_index
+    group_name = f"{args.worker_type}-{group_index}"
+    logger.info(f"{args.worker_type} group id {group_id}, "
+                f"worker index {worker_index_start}:{worker_index_end}")
+
+    # base.gpu_utils.isolate_cuda_device(args.worker_type, group_id, args.group_size, args.experiment_name,
+    #                                    args.trial_name)
+    base.gpu_utils.isolate_cuda_device(group_name, group_id, args.group_size, args.experiment_name,
                                        args.trial_name)
+
     import experiments
     import impl.data
     import impl.model
@@ -30,13 +56,43 @@ def main_worker(args):
     logger.info(f"Run {args.worker_type} worker with args: %s", args)
     assert not args.experiment_name.startswith(
         "/"), f"Invalid experiment_name \"{args.experiment_name}\" starts with \"/\""
-    system.run_worker(
-        worker_type=args.worker_type,
-        experiment_name=args.experiment_name,
-        trial_name=args.trial_name,
-        worker_name=f"{args.worker_type}/{args.group_id}",
-        worker_server_type='zmq',
-    )
+    if task_size == 1:
+        system.run_worker(
+            worker_type=args.worker_type,
+            experiment_name=args.experiment_name,
+            trial_name=args.trial_name,
+            worker_name=f"{args.worker_type}/{worker_index_start}",
+            worker_server_type='zmq',
+        )
+    else:
+        workers = []
+        for task_id in range(worker_index_start, worker_index_end):
+            worker_args = dict(worker_type=args.worker_type,
+                               experiment_name=args.experiment_name,
+                               trial_name=args.trial_name,
+                               worker_name=f"{args.worker_type}/{task_id}",
+                               worker_server_type='zmq')
+            p = multiprocessing.Process(target=system.run_worker, kwargs=worker_args)
+            p.name = f"{args.worker_type}/{task_id}"
+            p.start()
+            workers.append(p)
+
+        logger.info(f"Waiting for {task_size} {args.worker_type} workers of group id {group_id}.")
+        worker_exit_code = 0
+        while not worker_exit_code:
+            for p in workers:
+                if p.exitcode is None:
+                    p.join(timeout=5)
+                elif p.exitcode == 0:
+                    pass
+                else:
+                    logger.error(f"{p.name} exitcode: {p.exitcode}")
+                    worker_exit_code = p.exitcode
+                    break
+        for p in workers:
+            if p.is_alive():
+                p.kill()
+        exit(worker_exit_code)
 
 
 def main_controller(args):
@@ -143,7 +199,9 @@ def main():
     subparser.add_argument("--experiment_name", "-e", type=str, required=True)
     subparser.add_argument("--trial_name", "-f", type=str, required=True)
     subparser.add_argument("--group_id", "-i", type=int, required=True)
+    subparser.add_argument("--group_offset", "-o", type=int, required=True)
     subparser.add_argument("--group_size", "-g", type=int, required=True)
+    subparser.add_argument("--group_index", "-r", type=int, required=True)
     subparser.set_defaults(func=main_worker)
 
     subparser = subparsers.add_parser("reset_name_resolve", help="reset name resolve repo for a trial")

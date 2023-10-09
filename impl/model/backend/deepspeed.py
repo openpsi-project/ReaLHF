@@ -27,10 +27,18 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     offload_optimizer_state: bool = False
     enable_fp16: bool = True
     zero_stage: int = 2
+    # hybrid engine args
+    enable_hybrid_engine: bool = False
+    max_out_tokens: int = 512
+    inference_tp_size: int = 1
+    release_inference_cache: bool = False
+    pin_parameters: bool = True
+    tp_gather_partition_size: int = 8
+    # addtional deepspeed args
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
-        assert self.zero_stage == 2
+        pass
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -46,11 +54,21 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
         else:
             raise NotImplementedError(f"Unsupported optimizer: {self.optimizer_name}.")
 
+        hybrid_engine_args = dict(
+            enabled=self.enable_hybrid_engine,
+            max_out_tokens=self.max_out_tokens,
+            inference_tp_size=self.inference_tp_size,
+            release_inference_cache=self.release_inference_cache,
+            pin_parameters=self.pin_parameters,
+            tp_gather_partition_size=self.tp_gather_partition_size,
+        )
+
         ds_config = deepspeed_utils.get_train_ds_config(
             offload_param=self.offload_param,
             offload_optimizer_state=self.offload_optimizer_state,
             stage=self.zero_stage,
             enable_fp16=self.enable_fp16,
+            hybrid_engine_args=hybrid_engine_args,
             **self.additional_ds_config,
         )
 

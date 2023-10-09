@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Any, Callable, Dict, get_type_hints, List
 import concurrent.futures
 import copy
@@ -26,6 +27,7 @@ logger = logging.getLogger("master worker")
 def request_all(streams, handle_type, datas):
     """Send request of `handle_type` to multiple streams. len(streams)==len(datas)"""
     requests = [request_reply_stream.Request(handle_type, data) for data in datas]
+    logger.info(f"master worker #request_all# *end* time ${time.time_ns()}$")
     tik = time.perf_counter()
     for s, r in zip(streams, requests):
         s.post_request(r)
@@ -37,6 +39,7 @@ def request_all(streams, handle_type, datas):
 def gather_all_replies(streams):
     """Collect responses from multiple streams. Blocking method."""
     responses = [s.poll_reply().data for s in streams]
+    logger.info(f"master worker #gather_all_replies# *end* time ${time.time_ns()}$")
     return responses
 
 
@@ -142,6 +145,10 @@ class MasterWorker(worker_base.Worker):
         self._ft_spec = None
         self._train_start_time = None
 
+        # for benchmark
+        self.e2e_time_history = []
+        self.level_time_history = defaultdict(list)
+
     @property
     def commands(self):
         return self.__commands
@@ -157,9 +164,8 @@ class MasterWorker(worker_base.Worker):
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
         self.__model_streams: Dict[str, List[request_reply_stream.NameResolvingRequestClient]] = {
-            model_name: [
-                request_reply_stream.make_request_client(config.worker_info, s) for s in this_model_streams
-            ]
+            model_name:
+            [request_reply_stream.make_request_client(config.worker_info, s) for s in this_model_streams]
             for model_name, this_model_streams in config.model_streams.items()
         }
         self.__data_streams: List[request_reply_stream.NameResolvingRequestClient] = [
@@ -188,6 +194,9 @@ class MasterWorker(worker_base.Worker):
 
         self.MODEL_SAVE_ROOT = os.path.join(self.MODEL_SAVE_ROOT, config.worker_info.experiment_name,
                                             config.worker_info.trial_name)
+
+        # Used only for benchmark
+        self.__benchmark_steps = config.benchmark_steps
 
         return config.worker_info
 
@@ -292,20 +301,33 @@ class MasterWorker(worker_base.Worker):
             futures = [self.__thread_pool_executor.submit(task, self) for task in tasks]
             # TODO: shall we handle exceptions from future explicitly?
             [future.result() for future in futures]
-            logger.info(f"Execute tasks level {i + 1} in {time.perf_counter() - tik:.3f}s.")
+            level_time = time.perf_counter() - tik
+            logger.info(f"Execute tasks level {i + 1} in {level_time:.3f}s.")
+            self.level_time_history[i].append(level_time)
         self.data_registry.clear()
         total_time_consumption = time.perf_counter() - self._train_start_time
         time_per_step = total_time_consumption / (global_step + 1)
+        e2e_time = time.perf_counter() - execution_start
+        self.e2e_time_history.append(e2e_time)
         logger.info(
             f"Epoch {epoch + 1}/{self._ft_spec.total_train_epochs} "
             f"step {epoch_step + 1}/{self._ft_spec.steps_per_epoch} "
             f"(global step {global_step + 1}/{self._ft_spec.total_train_steps}) finishes. "
-            f"Execution time consumption: {time.perf_counter() - execution_start:.3f}s. "
+            f"#End to end# execution time: *{e2e_time:.3f}*s. "
             f"Total time consumption: {total_time_consumption:.3f}s. "
             f"Estimated remaining time: {time_per_step * (self._ft_spec.total_train_steps - global_step - 1):.3f}s."
         )
 
         bs = sample[list(sample.keys())[0]].shape[0]
+        if self.__benchmark_steps is not None and global_step >= self.__benchmark_steps:
+            logger.info(
+                f"Finished benchmark {self.__benchmark_steps}. Total time consumption {total_time_consumption:.3f}"
+            )
+            logger.info(f"avg #e2e# time *{np.mean(self.e2e_time_history):.3f}*")
+            for i, level_time_history in self.level_time_history.items():
+                logger.info(f"avg #level{i+1}# time *{np.mean(level_time_history):.3f}*")
+            raise RuntimeError(f"Benchmark completes! Yeah!!!")
+
         return worker_base.PollResult(sample_count=bs, batch_count=1)
 
     def exit(self):

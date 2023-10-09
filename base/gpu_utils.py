@@ -62,9 +62,12 @@ def setup_ddp(expr_name, trial_name, model_name, worker_index):
     world_size = len(global_peers)
     ddp_rank = global_peers.index(str(worker_index))
 
-    global GPU_DEVICES_ISOLATED
-    if not GPU_DEVICES_ISOLATED and 'RAY' not in os.environ['DLLM_MODE']:
+    # global GPU_DEVICES_ISOLATED
+    # if not GPU_DEVICES_ISOLATED and 'RAY' not in os.environ['DLLM_MODE']:
+    #     raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
+    if 'GPU_DEVICES_ISOLATED' not in os.environ and 'RAY' not in os.environ['DLLM_MODE']:
         raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
+
     assert len(os.environ['CUDA_VISIBLE_DEVICES'].split(',')) == 1, os.environ['CUDA_VISIBLE_DEVICES']
     local_gpu_id = int(os.environ['CUDA_VISIBLE_DEVICES'])
 
@@ -110,7 +113,7 @@ def isolate_cuda_device(worker_type, rank, world_size, experiment_name, trial_na
         rank,
         keepalive_ttl=30,
     )
-    logger.info(f"Rank {rank} waiting for peers, world size {world_size}...")
+    logger.info(f"Worker type {worker_type} rank {rank} waiting for peers, world size {world_size}...")
     while len(
             name_resolve.get_subtree(
                 names.trainer_ddp_peer(experiment_name, trial_name, name_resolve_identifier))) < world_size:
@@ -142,6 +145,6 @@ def isolate_cuda_device(worker_type, rank, world_size, experiment_name, trial_na
                 f"local peer index: {local_peer_index}, local gpu id {local_gpu_id}.")
 
     os.environ['CUDA_VISIBLE_DEVICES'] = str(local_gpu_id)
-
-    global GPU_DEVICES_ISOLATED
-    GPU_DEVICES_ISOLATED = True
+    os.environ['GPU_DEVICES_ISOLATED'] = "1"
+    # global GPU_DEVICES_ISOLATED
+    # GPU_DEVICES_ISOLATED = True

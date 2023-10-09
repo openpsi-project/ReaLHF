@@ -534,7 +534,7 @@ class LastLayerNormPipe(LastLayerNorm):
 
 
 def create_mqa_transformer(model_name_or_path, config, name, device):
-    # tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
+    # tokenizer = api.huggingface.load_hf_tokenizer(model_name_or_path)
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path,
                                                            fast_tokenizer=True,
                                                            padding_side="left")
@@ -545,7 +545,7 @@ def create_mqa_transformer(model_name_or_path, config, name, device):
 
 
 def create_mqa_transformer_pipe(model_name_or_path, config, topology, device, name):
-    # tokenizer = api.utils.load_hf_tokenizer(model_name_or_path)
+    # tokenizer = api.huggingface.load_hf_tokenizer(model_name_or_path)
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path,
                                                            fast_tokenizer=True,
                                                            padding_side="left")

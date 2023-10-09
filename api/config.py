@@ -28,12 +28,13 @@ _LLM_ENVVARS = {
     # "CUDA_LAUNCH_BLOCKING": "1",
     # "TORCH_USE_CUDA_DSA": "1",
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
+    "PYTHONUSERBASE": "/nonsense"
 }
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
 
 _LLM_GPU_IMAGE = "llm/llm-gpu"
-_LLM_CPU_IMAGE = "llm/llm-cpu"
+_LLM_CPU_IMAGE = "llm/llm-cpu:numba"
 
 
 @dataclasses.dataclass
@@ -42,10 +43,15 @@ class Scheduling:
     gpu: int
     mem: int
     gpu_type: str = "tesla"
+    node_type: str = None
     nodelist: str = None
     exclude: str = None
     container_image: str = _LLM_CPU_IMAGE
     env_vars: Dict[str, str] = dataclasses.field(default_factory=lambda: _LLM_ENVVARS)
+    # time utils from "https://slurm.schedmd.com/sbatch.html"
+    time_limit: Optional[str] = None  # see  "--time" option for format
+    begin: Optional[str] = None  # see "--begin" option for format
+    deadline: Optional[str] = None  # see "--deadline" option for format
 
     @staticmethod
     def master_worker_default(**kwargs):
@@ -165,8 +171,10 @@ class ModelWorker:
     # cuda & cudnn config
     cudnn_benchmark: bool = False
     cudnn_deterministic: bool = False
-    ccc_freq_secs: Optional[float] = None  # ccc=clean cuda cache
-    ccc_freq_steps: Optional[int] = None
+    cuda_cache_cleanliness: bool = True
+    cuda_cache_clear_freq: int = 10
+    # ccc_freq_secs: Optional[float] = None  # ccc=clean cuda cache
+    # ccc_freq_steps: Optional[int] = None
     worker_info: Optional[WorkerInformation] = None
 
 
@@ -198,6 +206,7 @@ class MasterWorker:
     data_streams: List[Union[str, RequestReplyStream]]
     model_streams: Dict[str, List[Union[str, RequestReplyStream]]]
     leveled_exec_funcs: api.ecs.MasterWorkerExecutable
+    benchmark_steps: Optional[int] = None
     worker_info: Optional[WorkerInformation] = None
 
 
@@ -230,6 +239,8 @@ class ExperimentConfig:
     eval_frequency_epochs: Optional[int] = None
     eval_frequency_steps: Optional[int] = None
     eval_frequency_seconds: Optional[int] = None
+    benchmark_steps: Optional[int] = None  # only used for benchmark
+    config: Optional[Any] = None
 
     def __post_init__(self):
         model_streams = collections.defaultdict(list)
@@ -237,16 +248,18 @@ class ExperimentConfig:
             model_streams[w.model_name].append(w.stream)
         data_streams = [d.stream for d in self.data_worker]
         self.master_worker = [
-            MasterWorker(total_train_epochs=self.total_train_epochs,
-                         save_frequency_epochs=self.save_frequency_epochs,
-                         save_frequency_steps=self.save_frequency_steps,
-                         save_frequency_seconds=self.save_frequency_seconds,
-                         eval_frequency_epochs=self.eval_frequency_epochs,
-                         eval_frequency_steps=self.eval_frequency_steps,
-                         eval_frequency_seconds=self.eval_frequency_seconds,
-                         data_streams=data_streams,
-                         model_streams=dict(model_streams),
-                         leveled_exec_funcs=self.master_ecs.build())
+            MasterWorker(
+                total_train_epochs=self.total_train_epochs,
+                save_frequency_epochs=self.save_frequency_epochs,
+                save_frequency_steps=self.save_frequency_steps,
+                save_frequency_seconds=self.save_frequency_seconds,
+                eval_frequency_epochs=self.eval_frequency_epochs,
+                eval_frequency_steps=self.eval_frequency_steps,
+                eval_frequency_seconds=self.eval_frequency_seconds,
+                data_streams=data_streams,
+                model_streams=dict(model_streams),
+                benchmark_steps=self.benchmark_steps,  # only used for benchmark
+                leveled_exec_funcs=self.master_ecs.build())
         ]
 
     def set_worker_information(self, experiment_name, trial_name):
@@ -316,10 +329,9 @@ def config_to_dataclass(config: Union[List, Dict]):
         return [config_to_dataclass(c) for c in config]
     elif isinstance(config, dict):
         if "config_class" in config.keys():
-            return getattr(sys.modules[__name__], config["config_class"])(**{
-                k: config_to_dataclass(v)
-                for k, v in config["config_value"].items()
-            })
+            return getattr(sys.modules[__name__], config["config_class"])(
+                **{k: config_to_dataclass(v)
+                   for k, v in config["config_value"].items()})
         else:
             return config
     elif isinstance(config, (str, int, float)) or config is None:
