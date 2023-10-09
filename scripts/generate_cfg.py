@@ -2,7 +2,7 @@ import json
 import os
 import shutil
 
-from scripts.cfg_templates.model_info import *
+from scripts.models.model_info import *
 
 def generate_cfg(name):
     example_config_dir = get_example_config_dir(name)
