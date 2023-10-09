@@ -3,6 +3,7 @@ import impl.model.backend.pipeline
 import impl.model.interface.wps_actor_critic
 import impl.model.interface.simple
 import impl.model.nn.mqa_transformer
+import impl.model.interface.chat
 import impl.model.nn.basic
 import impl.model.nn.rw
 

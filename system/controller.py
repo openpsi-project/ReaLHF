@@ -1,11 +1,20 @@
+from dataclasses import asdict
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+import copy
 import dataclasses
 import enum
+import getpass
+import json
 import logging
+import os
 import time
+import traceback
 
-from system import WORKER_TYPES
+import ray
+import ray.util.queue as rq
+
+from system import load_worker, WORKER_TYPES
 from system.worker_base import WorkerServerStatus as Wss
 import api.config
 import base.monitoring
@@ -44,35 +53,24 @@ class ControllerExitStatus(enum.Enum):
 
 class Controller:
 
-    def __init__(self, experiment_name, trial_name, mode="local"):
-        """Initialization method of controller.
-        Args:
-            experiment_name: name of the experiment, as registered to experiments.config_.ALL_EXPERIMENT_CLASSES.
-            trial_name: the unique name of this trial.
-            mode: scheduler mode. Currently supported are "local" and "slurm"
-        """
+    def __init__(self, experiment_name, trial_name, panel: system.worker_base.WorkerControlPanel):
         assert "_" not in experiment_name, f"_ not allowed in experiment_name (args: -e) " \
                                            f"{experiment_name}, use '-' instead."
         assert "_" not in trial_name, f"_ not allowed in trial_name (args: -f) {trial_name}, use '-' instead."
         self.experiment_name = experiment_name
         self.trial_name = trial_name
-        self.__mode = mode
 
-        self.__control = system.worker_control.make_control(experiment_name=self.experiment_name,
-                                                            trial_name=self.trial_name)
         logger.info("Experiment: %s %s", self.experiment_name, self.trial_name)
+
+        self.__control = panel
+        self.json_config_file_path = f"/data/aigc/llm/logs/{getpass.getuser()}/{self.experiment_name}_{self.trial_name}"
 
     def reconnect(self):
         """Automatically reconnect to workers. And list all jobs to scheduler.
         """
         self.__control.auto_connect()
 
-    def start(self, experiment, ignore_worker_error=False):
-        """Start an experiment.
-        Args:
-            experiment: An experiment class, with `initial_setup` method returning workers configurations.
-            ignore_worker_error: If True, do not stop experiment when part of worker(s) fail.
-        """
+    def start(self, experiment: api.config.Experiment, ignore_worker_error=False):
         if ignore_worker_error:
             check_worker_status = ()
             remove_worker_status = (Wss.COMPLETED, Wss.ERROR, Wss.LOST, Wss.UNKNOWN)
@@ -84,8 +82,11 @@ class Controller:
         setup = experiment.initial_setup()
         setup.set_worker_information(experiment_name=self.experiment_name, trial_name=self.trial_name)
 
+        with open(os.path.join(self.json_config_file_path, "config.json"), "w") as f:
+            json.dump(asdict(setup.config), f, indent=4)
+
         # Scheduling and connecting to workers.
-        workers_configs = []
+        # TODO for heterogeneous workers of the same type k, list scheduling[k] and setup[k] should match.
         workers_configs = [(k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES]
 
         for name, config, schedule in workers_configs:
@@ -96,9 +97,6 @@ class Controller:
                 raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
             logger.info(f"Configuration has {len(config)} {name}.")
 
-        # State clean-up.
-        logger.info("Cleaning up previous states")
-        base.name_resolve.clear_subtree(names.trial_root(self.experiment_name, self.trial_name))
         base.name_resolve.add(names.trial_registry(self.experiment_name, self.trial_name),
                               value=datetime.now().strftime("%Y%m%d"),
                               delete_on_exit=False,
@@ -142,11 +140,12 @@ class Controller:
                     worker_kwargs=[dict(config=cfg) for cfg in cfgs],
                     progress=True)
         except Exception as e:
-            logger.error("Configuring Failed. Exiting Workers.")
+            logger.error(f"Configuring Failed: {e}. Exiting Workers.")
+            logger.error(traceback.format_exc())
             self.interrupt(wait_timeout=120)
             raise e
 
-        # # Configure monitoring.
+        # Configure monitoring.
         logger.info("Configuring monitoring")
         mon_addresses = []
         mon_repo = base.monitoring.TargetRepository()
@@ -167,20 +166,20 @@ class Controller:
         else:
             raise RuntimeError("Failed to start monitoring.")
 
-        with mon_repo.add_target_group(f"{self.experiment_name}.{self.trial_name}",
-                                       mon_addresses,
-                                       delete_on_exit=True):
-            logger.info("Start workers...")
-            self.__control.group_request("start")
-            logger.info("Started.")
-            try:
-                self.wait(timeout=None, check_status=check_worker_status, remove_status=remove_worker_status)
-            except system.worker_base.WorkerException as e:
-                logger.error(e)
-                self.interrupt(wait_timeout=30)
-            except KeyboardInterrupt:
-                logger.info("Interrupted.")
-                self.interrupt(wait_timeout=30)
+        # with mon_repo.add_target_group(f"{self.experiment_name}.{self.trial_name}",
+        #                                mon_addresses,
+        #                                delete_on_exit=True):
+        logger.info("Start workers...")
+        self.__control.group_request("start")
+        logger.info("Started.")
+        try:
+            self.wait(timeout=None, check_status=check_worker_status, remove_status=remove_worker_status)
+        except system.worker_base.WorkerException as e:
+            logger.error(e)
+            self.interrupt(wait_timeout=30)
+        except KeyboardInterrupt:
+            logger.info("Interrupted.")
+            self.interrupt(wait_timeout=30)
 
     def wait(self, timeout: Optional[int], check_status: Tuple[Wss, ...], remove_status: Tuple[Wss, ...]):
         deadline = None if timeout is None else time.time() + timeout
@@ -235,3 +234,138 @@ class Controller:
                       remove_status=(Wss.ERROR, Wss.LOST, Wss.COMPLETED, Wss.INTERRUPTED))
         except TimeoutError:
             raise RuntimeError(f"Fail to interrupt workers, timeout={wait_timeout}.")
+
+
+def run_ray_worker(worker_type, idx, experiment_name, trial_name, comm: Tuple[rq.Queue, rq.Queue]):
+    worker_name = f"{worker_type}/{idx}"
+    server = system.worker_control.make_server(
+        'ray',
+        worker_name=worker_name,
+        experiment_name=experiment_name,
+        trial_name=trial_name,
+        comm=comm,
+    )
+    worker = load_worker(worker_type)(server=server)
+    try:
+        worker.run()
+    except Exception as e:
+        logging.error("Worker %s failed with exception: %s", worker_name, e)
+        logging.error(traceback.format_exc())
+        raise e
+
+
+class RayController:
+    """A controller that uses Ray to manage workers.
+    
+    It uses the basic Controller to configure workers.
+    Besides, it launchs all remote workers using Ray,
+    instead of submitting them to the scheduelr.
+    """
+
+    def __init__(self, experiment_name, trial_name, local_mode: bool):
+        # base controller will be lazier initialized when launching workers.
+        self.__experiment_name = experiment_name
+        self.__trial_name = trial_name
+        self.__base_controller = None
+
+        self.__workers_reply_comm = None
+        self.__workers_request_comm = None
+        self.__workers_ref = None
+
+        self.__local_mode = local_mode
+
+    def _launch_workers(self, workers_configs: List[Tuple[str, List, api.config.TasksGroup]]):
+        # Launch remote workers.
+        logger.info("Launching remote workers using Ray...")
+        self.__workers_ref: Dict[str, ray.ObjectRef] = {}
+        self.__workers_request_comm: Dict[str, rq.Queue] = dict()
+        self.__workers_reply_comm: Dict[str, rq.Queue] = dict()
+        for worker_type, config, schedule in workers_configs:
+            count = len(config)
+            all_schedules: List[api.config.TasksGroup] = []
+            if isinstance(schedule, List):
+                for s in schedule:
+                    for _ in range(s.count):
+                        s_ = copy.deepcopy(s)
+                        s_.count = 1
+                        all_schedules.append(s_)
+            else:
+                for _ in range(schedule.count):
+                    s_ = copy.deepcopy(schedule)
+                    s_.count = 1
+                    all_schedules.append(s_)
+            assert len(all_schedules) == len(config)
+            comms = [(rq.Queue(maxsize=8), rq.Queue(maxsize=8)) for _ in all_schedules]
+            jobs = [
+                ray.remote(
+                    num_cpus=sch.scheduling.cpu,
+                    num_gpus=sch.scheduling.gpu,
+                    memory=sch.scheduling.mem,
+                    name=f"{worker_type}/{idx}",
+                )(run_ray_worker).remote(worker_type, idx, self.__experiment_name, self.__trial_name, comm)
+                for idx, (comm, sch) in enumerate(zip(comms, all_schedules))
+            ]
+            for idx, (job, c) in enumerate(zip(jobs, comms)):
+                name = f"{worker_type}/{idx}"
+                self.__workers_ref[name] = job
+                self.__workers_request_comm[name] = c[0]
+                self.__workers_reply_comm[name] = c[1]
+            logger.info(f"Launched {count} {worker_type}.")
+
+        panel = system.worker_control.make_control(
+            "ray",
+            self.__experiment_name,
+            self.__trial_name,
+            request_comms=self.__workers_request_comm,
+            reply_comms=self.__workers_reply_comm,
+        )
+        self.__base_controller = Controller(self.__experiment_name, self.__trial_name, panel)
+        logger.info("All Ray workers are lauched.")
+
+    def start(self, experiment: api.config.Experiment, ignore_worker_error=False):
+        scheduling: api.config.ExperimentScheduling = experiment.scheduling_setup()
+        setup = experiment.initial_setup()
+        setup.set_worker_information(experiment_name=self.__experiment_name, trial_name=self.__trial_name)
+        workers_configs = [(k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES]
+        workers_configs: List[Tuple[str, List, api.config.TasksGroup]]
+
+        if self.__local_mode:
+            ray.init()
+        else:
+            for name, config, schedule in workers_configs:
+                count = sum([s.count for s in schedule]) if isinstance(schedule, list) else schedule.count
+                if len(config) != count:
+                    logger.error("Scheduling and config mismatch, interrupting all workers.")
+                    raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
+                for idx in range(count):
+                    try:
+                        base.name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
+                                                                 f"{name}/{idx}"),
+                                               timeout=300)
+                    except TimeoutError:
+                        raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
+            logger.info("Ray cluster started.")
+
+            try:
+                ray_head_addr = base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
+                                                                         self.__trial_name, "address"),
+                                                       timeout=300)
+            except TimeoutError:
+                raise RuntimeError("Timeout waiting for ray cluster head address.")
+            ray.init(address=ray_head_addr)
+
+        logger.info("Ray initialized! Ready to run workers.")
+
+        try:
+            self._launch_workers(workers_configs)
+            self.__base_controller.start(experiment, ignore_worker_error)
+        except Exception as e:
+            self.shutdown()
+
+    def shutdown(self):
+        ray_exiting_name = names.ray_cluster(self.__experiment_name, self.__trial_name, "exiting")
+        base.name_resolve.add(ray_exiting_name, value="1", delete_on_exit=True)
+        del self.__workers_reply_comm
+        del self.__workers_request_comm
+        del self.__workers_ref
+        ray.shutdown()

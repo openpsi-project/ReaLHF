@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional, Type
 import logging
+import math
 import os
 import time
 
@@ -9,19 +10,27 @@ import transformers
 logger = logging.getLogger("HuggingFace Model")
 
 
-def load_hf_tokenizer(model_name_or_path: str, fast_tokenizer=True) -> transformers.PreTrainedTokenizerFast:
+def load_hf_tokenizer(model_name_or_path: str,
+                      fast_tokenizer=True,
+                      padding_side: Optional[str] = None) -> transformers.PreTrainedTokenizerFast:
+    kwargs = {}
+    if padding_side is not None:
+        kwargs["padding_side"] = padding_side
     if os.path.exists(model_name_or_path):
         # Locally tokenizer loading has some issue, so we need to force download
         model_json = os.path.join(model_name_or_path, "config.json")
         if "codet5" in model_name_or_path:
             tokenizer = transformers.RobertaTokenizer.from_pretrained(model_name_or_path,
-                                                                      fast_tokenizer=fast_tokenizer)
+                                                                      fast_tokenizer=fast_tokenizer,
+                                                                      **kwargs)
         if os.path.exists(model_json):
             tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path,
-                                                                   fast_tokenizer=fast_tokenizer)
+                                                                   fast_tokenizer=fast_tokenizer,
+                                                                   **kwargs)
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path,
-                                                               fast_tokenizer=fast_tokenizer)
+                                                               fast_tokenizer=fast_tokenizer,
+                                                               **kwargs)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
     return tokenizer
@@ -78,6 +87,8 @@ def create_hf_nn(
 
     # load model
     model_config = transformers.AutoConfig.from_pretrained(model_name_or_path)
+    # print(model_config)
+    # model_config.dropout = 0.0 # TODO: temp
     logger.info(f"Loading from {model_name_or_path}...")
     st = time.monotonic()
     if init_from_scratch:
@@ -92,6 +103,7 @@ def create_hf_nn(
             from_pretrained_kwargs['quantization_config'] = qconfig
         model: transformers.PreTrainedModel = model_class.from_pretrained(
             model_name_or_path,
+            config=model_config,
             **from_pretrained_kwargs,
         )
     if quantization_kwargs is not None:
@@ -115,6 +127,16 @@ def create_hf_nn(
             **raw_generation_config.to_dict(),
             **generation_kwargs
         })
+
+    model.resize_token_embeddings(int(8 * math.ceil(len(tokenizer) / 8.0)))
+
+    try:
+        model._num_params = sum(
+            [p.ds_numel if hasattr(p, "ds_tensor") else p.numel() for p in model.parameters()])
+        logger.info(f"Created model {type(model)}, num params {model._num_params/(1e9):.4f} B")
+    except Exception as e:
+        logger.info(f"Calculate num params failed, exception: {e}")
+
     logger.debug("Hugginface model generation config: ", model.generation_config)
 
     return model

@@ -1,95 +1,162 @@
-from typing import List
+from typing import Dict, List, Optional
 import argparse
 import getpass
 import logging
 import os
 import re
+import time
 
+from base.constants import DATE_FORMAT, LOG_FORMAT
 import api.config as config_package
 import experiments
 import scheduler.client
 import system
 
-LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
-DATE_FORMAT = "%Y%m%d-%H:%M:%S"
-
 logger = logging.getLogger("main")
 
 
-def main_start(args):
+def scheduler_mode(mode: str) -> str:
+    if mode == 'ray' or mode == 'slurm':
+        return 'slurm'
+    elif 'local' in mode:
+        return 'local'
 
-    def submit_workers(expr_name, trial_name, debug, worker_type, scheduling_configs) -> List[str]:
-        if len(scheduling_configs) == 0:
-            return []
 
-        scheduled_jobs = []
-        for sch_cfg in scheduling_configs:
-            job_environs = {
-                "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
-                "WANDB_MODE": args.wandb_mode,
-                "LOGLEVEL": args.LOGLEVEL,
-                "DLLM_MODE": args.mode.upper(),
-                **sch_cfg.scheduling.env_vars,
-            }
+def _submit_workers(
+    sched: scheduler.client.SchedulerClient,
+    expr_name: str,
+    trial_name: str,
+    debug: bool,
+    worker_type: str,
+    scheduling_configs: List[config_package.TasksGroup],
+    environs: Dict[str, str],
+    image_name: Optional[str] = None,
+    use_ray_cluster: bool = False,
+) -> List[str]:
+    if len(scheduling_configs) == 0:
+        return []
+
+    scheduled_jobs = []
+    for sch_cfg in scheduling_configs:
+
+        job_environs = {**environs, **sch_cfg.scheduling.env_vars}
+        if use_ray_cluster:
+            cmd = scheduler.client.ray_cluster_cmd(
+                expr_name,
+                trial_name,
+                worker_type=worker_type,
+            )
+        else:
             cmd = scheduler.client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
-            logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
 
-            nodelist = sch_cfg.scheduling.nodelist
-            exclude = sch_cfg.scheduling.exclude
+        logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
 
-            scheduled_jobs.append(
-                sched.submit_array(worker_type,
-                                   cmd,
-                                   count=sch_cfg.count,
-                                   cpu=sch_cfg.scheduling.cpu,
-                                   gpu=sch_cfg.scheduling.gpu,
-                                   gpu_type=sch_cfg.scheduling.gpu_type,
-                                   mem=sch_cfg.scheduling.mem,
-                                   container_image=args.image_name or sch_cfg.scheduling.container_image,
-                                   nodelist=nodelist,
-                                   exclude=exclude,
-                                   env_vars=job_environs,
-                                   hostfile=True))
-        return scheduled_jobs
+        nodelist = sch_cfg.scheduling.nodelist
+        exclude = sch_cfg.scheduling.exclude
+        node_type = sch_cfg.scheduling.node_type
+        container_image = image_name or sch_cfg.scheduling.container_image
+        job_name = worker_type
+        if use_ray_cluster:
+            job_name = f'rc_{worker_type}'
+
+        scheduled_jobs.append(
+            sched.submit_array(
+                task_name=job_name,
+                cmd=cmd,
+                count=sch_cfg.count,
+                cpu=sch_cfg.scheduling.cpu,
+                gpu=sch_cfg.scheduling.gpu,
+                gpu_type=sch_cfg.scheduling.gpu_type,
+                mem=sch_cfg.scheduling.mem,
+                container_image=container_image,
+                node_type=node_type,
+                nodelist=nodelist,
+                exclude=exclude,
+                env_vars=job_environs,
+                hostfile=True,
+                multiprog=True,
+                begin=sch_cfg.scheduling.begin,
+                deadline=sch_cfg.scheduling.deadline,
+                time_limit=sch_cfg.scheduling.time_limit,
+            ),)
+    return scheduled_jobs
+
+
+def main_start(args):
+    if args.mode == 'ray' and args.image_name is None:
+        raise ValueError("--image_name must be specified when using ray cluster. "
+                         "This is becuase ray cluster requires all workers to have "
+                         "the same version of Python and ray.")
 
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
     experiment = config_package.make_experiment(args.experiment_name)
-    sched = scheduler.client.make(mode=args.mode, job_name=f"{args.experiment_name}_{trial_name}")
+    sched = scheduler.client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
 
     setup = experiment.scheduling_setup()
 
-    simple_env_vars = {"PYTHONPATH": os.path.dirname(os.path.dirname(__file__)), "LOGLEVEL": args.LOGLEVEL}
+    base_environs = {
+        "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
+        "WANDB_MODE": args.wandb_mode,
+        "LOGLEVEL": args.LOGLEVEL,
+        "DLLM_MODE": args.mode.upper(),
+    }
 
     logger.info(f"Resetting name resolving repo...")
     sched.submit(
         "setup",
         scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
-        env_vars=simple_env_vars,
+        env_vars=base_environs,
+        node_type="g1",  # frl cluster only
     )
 
-    sched.wait(timeout=120, update=True)
+    sched.wait(timeout=300, update=True)
     logger.info(f"Resetting name resolving repo... Done.")
 
     logger.info(f"Running configuration: {experiment.__class__.__name__}")
+
     # Schedule controller
+    if args.mode == 'ray':
+        controller_type = 'ray'
+    elif args.mode == 'local_ray':
+        controller_type = 'local_ray'
+    else:
+        controller_type = 'zmq'
     sched.submit_array(
         task_name="ctl",
-        cmd=scheduler.client.control_cmd(expr_name, trial_name, args.debug, args.ignore_worker_error),
+        cmd=scheduler.client.control_cmd(
+            expr_name,
+            trial_name,
+            args.debug,
+            args.ignore_worker_error,
+            controller_type,
+        ),
         count=1,
         cpu=1,
         gpu=0,
         mem=1024,
-        env_vars=simple_env_vars,
-        #    exclude='frl2g[084-086],frl2g008,frl2g093,frl2g094,frl8g[136-137]',
+        env_vars=base_environs,
+        container_image=args.image_name or setup.controller_image,
+        node_type="g1",  # frl cluster only
     )
 
-    workers_configs = ((k, getattr(setup, k)) for k in system.WORKER_TYPES)
+    if args.mode != 'local_ray':
+        workers_configs = ((k, getattr(setup, k)) for k in system.WORKER_TYPES)
 
-    for name, scheduling_setup in workers_configs:
-        if not isinstance(scheduling_setup, list):
-            scheduling_setup = [scheduling_setup]
-        submit_workers(expr_name, trial_name, args.debug, name, scheduling_setup)
+        for name, scheduling_setup in workers_configs:
+            if not isinstance(scheduling_setup, list):
+                scheduling_setup = [scheduling_setup]
+            # For local or slurm mode, launch all workers.
+            # For ray mode, launch the ray cluster for all workers via slurm.
+            _submit_workers(sched,
+                            expr_name,
+                            trial_name,
+                            args.debug,
+                            name,
+                            scheduling_setup,
+                            base_environs,
+                            args.image_name,
+                            use_ray_cluster=(args.mode == 'ray'))
 
     try:
         sched.wait()
@@ -99,7 +166,8 @@ def main_start(args):
 
 
 def main_stop(args):
-    sched = scheduler.client.make(mode=args.mode, job_name=f"{args.experiment_name}_{args.trial_name}")
+    sched = scheduler.client.make(mode=scheduler_mode(args.mode),
+                                  job_name=f"{args.experiment_name}_{args.trial_name}")
     sched.find_all()
     sched.stop_all()
 
@@ -128,7 +196,7 @@ def main():
                            type=str,
                            default=None,
                            help="trial name; by default uses '<USER>-test'")
-    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm"])
+    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
     subparser.add_argument("--wandb_mode",
                            type=str,
@@ -150,7 +218,7 @@ def main():
     subparser = subparsers.add_parser("stop", help="stops an experiment. only slurm experiment is supported.")
     subparser.add_argument("--experiment_name", "-e", type=str, required=True, help="name of the experiment")
     subparser.add_argument("--trial_name", "-f", type=str, required=True, help="name of the trial")
-    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm"])
+    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.set_defaults(func=main_stop)
 
     subparser = subparsers.add_parser("find_config",

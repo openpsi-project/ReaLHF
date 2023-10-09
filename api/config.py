@@ -18,21 +18,23 @@ DATASET_CACHE_PATH = f'/data/aigc/llm/.cache/{getpass.getuser()}/datasets'
 TORCH_EXTENSIONS_DIR = f"/data/aigc/llm/.cache/{getpass.getuser()}/torch/extensions"
 
 _LLM_ENVVARS = {
-    "NCCL_P2P_DISABLE": "1",
-    "NCCL_IB_DISABLE": "1",
+    # "NCCL_P2P_DISABLE": "1",
+    # "NCCL_IB_DISABLE": "1",
     "TRANSFORMERS_OFFLINE": "1",
     "PYTORCH_KERNEL_CACHE_PATH": PYTORCH_KERNEL_CACHE_PATH,
     "TRITON_CACHE_DIR": TRITON_CACHE_PATH,
     "TOKENIZERS_PARALLELISM": "true",
     "TORCH_EXTENSIONS_DIR": TORCH_EXTENSIONS_DIR,
-    "CUDA_LAUNCH_BLOCKING": "1",
-    "TORCH_USE_CUDA_DSA": "1",
+    # "CUDA_LAUNCH_BLOCKING": "1",
+    # "TORCH_USE_CUDA_DSA": "1",
+    "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
+    "PYTHONUSERBASE": "/nonsense"
 }
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
 
 _LLM_GPU_IMAGE = "llm/llm-gpu"
-_LLM_CPU_IMAGE = "llm/llm-gpu"
+_LLM_CPU_IMAGE = "llm/llm-cpu"
 
 
 @dataclasses.dataclass
@@ -41,10 +43,15 @@ class Scheduling:
     gpu: int
     mem: int
     gpu_type: str = "tesla"
+    node_type: str = None
     nodelist: str = None
     exclude: str = None
     container_image: str = _LLM_CPU_IMAGE
     env_vars: Dict[str, str] = dataclasses.field(default_factory=lambda: _LLM_ENVVARS)
+    # time utils from "https://slurm.schedmd.com/sbatch.html"
+    time_limit: Optional[str] = None  # see  "--time" option for format
+    begin: Optional[str] = None  # see "--begin" option for format
+    deadline: Optional[str] = None  # see "--deadline" option for format
 
     @staticmethod
     def master_worker_default(**kwargs):
@@ -196,6 +203,7 @@ class MasterWorker:
     data_streams: List[Union[str, RequestReplyStream]]
     model_streams: Dict[str, List[Union[str, RequestReplyStream]]]
     leveled_exec_funcs: api.ecs.MasterWorkerExecutable
+    benchmark_steps: Optional[int] = None
     worker_info: Optional[WorkerInformation] = None
 
 
@@ -228,6 +236,8 @@ class ExperimentConfig:
     eval_frequency_epochs: Optional[int] = None
     eval_frequency_steps: Optional[int] = None
     eval_frequency_seconds: Optional[int] = None
+    benchmark_steps: Optional[int] = None  # only used for benchmark
+    config: Optional[Any] = None
 
     def __post_init__(self):
         model_streams = collections.defaultdict(list)
@@ -235,16 +245,18 @@ class ExperimentConfig:
             model_streams[w.model_name].append(w.stream)
         data_streams = [d.stream for d in self.data_worker]
         self.master_worker = [
-            MasterWorker(total_train_epochs=self.total_train_epochs,
-                         save_frequency_epochs=self.save_frequency_epochs,
-                         save_frequency_steps=self.save_frequency_steps,
-                         save_frequency_seconds=self.save_frequency_seconds,
-                         eval_frequency_epochs=self.eval_frequency_epochs,
-                         eval_frequency_steps=self.eval_frequency_steps,
-                         eval_frequency_seconds=self.eval_frequency_seconds,
-                         data_streams=data_streams,
-                         model_streams=dict(model_streams),
-                         leveled_exec_funcs=self.master_ecs.build())
+            MasterWorker(
+                total_train_epochs=self.total_train_epochs,
+                save_frequency_epochs=self.save_frequency_epochs,
+                save_frequency_steps=self.save_frequency_steps,
+                save_frequency_seconds=self.save_frequency_seconds,
+                eval_frequency_epochs=self.eval_frequency_epochs,
+                eval_frequency_steps=self.eval_frequency_steps,
+                eval_frequency_seconds=self.eval_frequency_seconds,
+                data_streams=data_streams,
+                model_streams=dict(model_streams),
+                benchmark_steps=self.benchmark_steps,  # only used for benchmark
+                leveled_exec_funcs=self.master_ecs.build())
         ]
 
     def set_worker_information(self, experiment_name, trial_name):

@@ -1,5 +1,4 @@
-from hashlib import new
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import dataclasses
 import enum
 import logging
@@ -9,7 +8,6 @@ import socket
 import threading
 import time
 
-import prometheus_client
 import wandb
 
 from api import config as config_pkg
@@ -22,8 +20,9 @@ import base.network
 
 logger = logging.getLogger("worker")
 
-_WANDB_LOG_FREQUENCY_SECONDS = 10
 _MAX_SOCKET_CONCURRENCY = 1000
+WORKER_WAIT_FOR_CONTROLLER_SECONDS = 3600
+WORKER_JOB_STATUS_LINGER_SECONDS = 60
 
 
 class WorkerException(Exception):
@@ -50,47 +49,162 @@ class WorkerServerStatus(str, enum.Enum):
     LOST = "LOST"  # CANNOT be set
 
 
+class NoRequstForWorker(Exception):
+    pass
+
+
+class WorkerServerTaskQueue:
+
+    def try_get_request(self) -> Tuple[str, Dict[str, Any]]:
+        raise NotImplementedError()
+
+    def respond(self, response):
+        raise NotImplementedError()
+
+    @property
+    def port(self) -> int:
+        return -1
+
+
 class WorkerServer:
-    """The abstract class that defines how a worker exposes RPC stubs to the controller.
+    """A light-weight implementation of an RPC server.
+
+    Note that this server only allows a single client connection for now, as that is sufficient for
+    workers which respond to the controller only.
+
+    Example:
+        # Server side.
+        server = RpcServer(port)
+        server.register_handler('foo', foo)
+        while True:
+            server.handle_requests()
+
+        # Client side.
+        client = RpcClient(host, port)
+        client.request('foo', x=42, y='str') # foo(x=42, y='str') will be called on the server side.
     """
 
-    def __init__(self, worker_name):
+    def __init__(self, worker_name, experiment_name, trial_name, task_queue: WorkerServerTaskQueue):
         """Specifies the name of the worker that WorkerControlPanel can used to find and manage.
         Args:
             worker_name: Typically "<worker_type>/<worker_index>".
         """
-        self.worker_name = worker_name
+        self.__worker_name = worker_name
+        self.__experiment_name = experiment_name
+        self.__trial_name = trial_name
+
+        self.__task_queue = task_queue
+
+        self.__handlers = {}
+        host_ip = socket.gethostbyname(socket.gethostname())
+
+        try:
+            controller_status = base.name_resolve.wait(base.names.worker_status(
+                experiment_name, trial_name, "ctl"),
+                                                       timeout=WORKER_WAIT_FOR_CONTROLLER_SECONDS)
+        except TimeoutError:
+            raise TimeoutError(
+                f"Worker ({experiment_name, trial_name, worker_name}) connect to controller timeout from host {socket.gethostname()}."
+            )
+
+        if controller_status != "READY":
+            raise RuntimeError(f"Abnormal controller state on experiment launch {controller_status}.")
+
+        if experiment_name is not None and trial_name is not None:
+            key = base.names.worker(experiment_name, trial_name, worker_name)
+            address = f"{host_ip}:{self.__task_queue.port}"
+            base.name_resolve.add(key, address, keepalive_ttl=10, delete_on_exit=True)
+            logger.info("Added name_resolve entry %s for worker server at %s", key, address)
 
     def register_handler(self, command, fn):
         """Registers an RPC command. The handler `fn` shall be called when `self.handle_requests()` sees an
         incoming command of the registered type.
         """
-        raise NotImplementedError()
+        if command in self.__handlers:
+            raise KeyError(f"Command '{command}' exists")
+        self.__handlers[command] = fn
 
     def handle_requests(self, max_count=None):
-        raise NotImplementedError()
+        """Handles queued requests in order, optionally limited by `max_count`.
+
+        Returns:
+            The count of requests handled.
+        """
+        count = 0
+        while max_count is None or count < max_count:
+            try:
+                command, kwargs = self.__task_queue.try_get_request()
+            except NoRequstForWorker:
+                # Currently no request in the queue.
+                break
+            logger.debug("Handle request %s with kwargs %s", command, kwargs)
+            if command in self.__handlers:
+                try:
+                    response = self.__handlers[command](**kwargs)
+                    logger.debug("Handle request: %s, ok", command)
+                except WorkerException:
+                    raise
+                except Exception as e:
+                    logger.error("Handle request: %s, error", command)
+                    logger.error(e, exc_info=True)
+                    response = e
+            else:
+                logger.error("Handle request: %s, no such command", command)
+                response = KeyError(f'No such command: {command}')
+            self.__task_queue.respond(response)
+            logger.debug("Handle request: %s, sent reply", command)
+            count += 1
+        return count
 
     def set_status(self, status: WorkerServerStatus):
-        raise NotImplementedError()
+        """On graceful exit, worker status is cleared.
+        """
+        base.name_resolve.add(
+            base.names.worker_status(experiment_name=self.__experiment_name,
+                                     trial_name=self.__trial_name,
+                                     worker_name=self.__worker_name),
+            value=status.value,
+            keepalive_ttl=WORKER_JOB_STATUS_LINGER_SECONDS,  # Job Status lives one minutes after worker exit.
+            replace=True,
+            delete_on_exit=False)
 
 
-class WorkerControlPanel:
-    """The abstract class that defines the management utilities to all the workers of an experiment trial.
-    """
+class WorkerControlPanelRequester:
 
     class Future:
 
         def result(self, timeout=None):
             raise NotImplementedError()
 
+    def async_request(self,
+                      worker_name: str,
+                      address: str,
+                      command: str,
+                      wait_for_response: bool = True,
+                      **kwargs) -> Future:
+        raise NotImplementedError()
+
+
+class WorkerControlPanel:
+    """A class that defines the management utilities to all the workers of an experiment trial.
+    """
+
     @dataclasses.dataclass
     class Response:
         worker_name: str
-        result: Any
+        result: WorkerControlPanelRequester.Future
         timed_out: bool = False
 
-    def __init__(self):
+    def __init__(self, experiment_name, trial_name, requester: WorkerControlPanelRequester):
         self.__closed = False
+
+        self.__experiment_name = experiment_name
+        self.__trial_name = trial_name
+        self.__worker_addresses = {}
+
+        self.__requester = requester
+
+        self.__logger = logging.getLogger("worker control panel")
 
     def __del__(self):
         if not self.__closed:
@@ -106,7 +220,7 @@ class WorkerControlPanel:
             self.__closed = True
 
     def close(self):
-        raise NotImplementedError()
+        self.__logger.info("Closing worker control panel.")
 
     @staticmethod
     def name(worker_type, worker_index):
@@ -122,7 +236,7 @@ class WorkerControlPanel:
         """Returns current connected workers. A WorkerControlPanel initializes with no connected workers.
         Workers are connected via either self.connect(names), or self.auto_connect().
         """
-        raise NotImplementedError()
+        return list(self.__worker_addresses.keys())
 
     def connect(self,
                 worker_names: List[str],
@@ -145,7 +259,34 @@ class WorkerControlPanel:
             A list of successfully connected or reconnected workers. If a specified worker is missing, it can
             either be that it is already connected and `reconnect` is False, or that the connection timed out.
         """
-        raise NotImplementedError()
+        rs = []
+        deadline = time.monotonic() + (timeout or 0)
+        if progress:
+            try:
+                import tqdm
+                worker_names = tqdm.tqdm(worker_names, leave=False)
+            except ModuleNotFoundError:
+                pass
+        for name in worker_names:
+            if name in self.__worker_addresses:
+                if reconnect:
+                    del self.__worker_addresses[name]
+                else:
+                    continue
+            try:
+                if timeout is not None:
+                    timeout = max(0, deadline - time.monotonic())
+                server_address = base.name_resolve.wait(base.names.worker(self.__experiment_name,
+                                                                          self.__trial_name, name),
+                                                        timeout=timeout)
+            except TimeoutError as e:
+                if raises_timeout_error:
+                    raise e
+                continue
+            # self.__worker_addresses[name] stores address
+            self.__worker_addresses[name] = server_address
+            rs.append(name)
+        return rs
 
     def auto_connect(self) -> List[str]:
         """Auto-detects available workers belonging to the experiment trial, and connects to them.
@@ -153,17 +294,15 @@ class WorkerControlPanel:
         Returns:
             Names of successfully connected workers.
         """
-        raise NotImplementedError()
+        name_root = base.names.worker_root(self.__experiment_name, self.__trial_name)
+        worker_names = [r[len(name_root):] for r in base.name_resolve.find_subtree(name_root)]
+        return self.connect(worker_names, timeout=0, raises_timeout_error=True)
 
     def request(self, worker_name: str, command, **kwargs) -> Any:
         """Sends an request to the specified worker.
         """
-        return self.async_request(worker_name, command, **kwargs).result()
-
-    def async_request(self, worker_name: str, command, **kwargs) -> Future:
-        """Posts an request to the specified worker.
-        """
-        raise NotImplementedError()
+        address = self.__worker_addresses[worker_name]
+        return self.__requester.async_request(worker_name, address, command, **kwargs).result()
 
     def group_request(self,
                       command,
@@ -206,13 +345,13 @@ class WorkerControlPanel:
         rs = []
         deadline = time.monotonic() + (timeout or 0)
         for j in range(0, len(selected), _MAX_SOCKET_CONCURRENCY):
-            sub_rs = []
+            sub_rs: List[WorkerControlPanel.Response] = []
             sub_selected = selected[j:j + _MAX_SOCKET_CONCURRENCY]
             sub_worker_kwargs = worker_kwargs[j:j + _MAX_SOCKET_CONCURRENCY]
             for name, kwargs in zip(sub_selected, sub_worker_kwargs):
-                sub_rs.append(
-                    self.Response(worker_name=name,
-                                  result=self.async_request(name, command, wait_response, **kwargs)))
+                address = self.__worker_addresses[name]
+                result_fut = self.__requester.async_request(name, address, command, wait_response, **kwargs)
+                sub_rs.append(WorkerControlPanel.Response(worker_name=name, result=result_fut))
 
             if not wait_response:
                 continue
@@ -239,7 +378,17 @@ class WorkerControlPanel:
         Raises:
             ValueError if worker is not connected.
         """
-        raise NotImplementedError()
+        try:
+            status_str = base.name_resolve.wait(
+                base.names.worker_status(experiment_name=self.__experiment_name,
+                                         trial_name=self.__trial_name,
+                                         worker_name=worker_name),
+                timeout=60,
+            )
+            status = WorkerServerStatus(status_str)
+        except base.name_resolve.NameEntryNotFoundError:
+            status = WorkerServerStatus.LOST
+        return status
 
     def pulse(self):
         return {name: self.get_worker_status(name) for name in self.worker_names}
@@ -315,12 +464,8 @@ class Worker:
 
     def __set_status(self, status: WorkerServerStatus):
         if self._server is not None:
-            self.logger.debug(f"Setting worker server status to {status}")
+            self.logger.info(f"Setting worker server status to {status}")
             self._server.set_status(status)
-
-    def __del__(self):
-        if self.__wandb_run is not None:
-            self.__wandb_run.finish()
 
     @property
     def is_configured(self):
@@ -417,16 +562,17 @@ class Worker:
         if_log_wandb = (self.__worker_index == 0 and self.__worker_type == 'trainer') \
                        if self.__worker_info.log_wandb is None else self.__worker_info.log_wandb
 
-        prometheus_metrics = dict(marl_worker_sample_count="Counter",
-                                  marl_worker_batch_count="Counter",
-                                  marl_worker_wait_seconds="Histogram",
-                                  marl_worker_cpu_percent="Summary",
-                                  marl_worker_memory_rss_mb="Summary",
-                                  marl_worker_memory_vms_mb="Summary",
-                                  marl_worker_memory_shared_mb="Summary",
-                                  marl_worker_gpu_percent="Summary",
-                                  marl_worker_gpu_mem_util_percent="Summary",
-                                  marl_worker_gpu_memory_mb="Summary")
+        # prometheus_metrics = dict(marl_worker_sample_count="Counter",
+        #                           marl_worker_batch_count="Counter",
+        #                           marl_worker_wait_seconds="Histogram",
+        #                           marl_worker_cpu_percent="Summary",
+        #                           marl_worker_memory_rss_mb="Summary",
+        #                           marl_worker_memory_vms_mb="Summary",
+        #                           marl_worker_memory_shared_mb="Summary",
+        #                           marl_worker_gpu_percent="Summary",
+        #                           marl_worker_gpu_mem_util_percent="Summary",
+        #                           marl_worker_gpu_memory_mb="Summary")
+        prometheus_metrics = {}
         monitor_info = base.monitoring.MonitorInfo(
             prometheus_labels=prometheus_labels,
             prometheus_metrics=prometheus_metrics,
@@ -476,27 +622,28 @@ class Worker:
                     if self.__last_successful_poll_time is not None:
                         # Account the waiting time since the last successful step.
                         wait_seconds = (start_time - self.__last_successful_poll_time) / 1e9
+                        self.logger.debug(f"Waited {wait_seconds} seconds since last successful poll.")
                     self.__last_successful_poll_time = time.monotonic_ns()
 
                     if r.sample_count == r.batch_count == 0:
                         if self.__worker_type != "actor":
                             time.sleep(0.002)
                     else:
-                        self.monitor.metric("marl_worker_sample_count").inc(r.sample_count)
-                        self.monitor.metric("marl_worker_batch_count").inc(r.batch_count)
-                        self.monitor.metric("marl_worker_wait_seconds").observe(wait_seconds)
+                        # self.monitor.metric("marl_worker_sample_count").inc(r.sample_count)
+                        # self.monitor.metric("marl_worker_batch_count").inc(r.batch_count)
+                        # self.monitor.metric("marl_worker_wait_seconds").observe(wait_seconds)
 
                         now = time.monotonic_ns()
                         if self.__last_update_ns is not None:  # Update new stats with 10 seconds frequency.
                             if (now - self.__last_update_ns) / 1e9 >= 10:
                                 duration = (time.monotonic_ns() - self._start_time_ns) / 1e9
                                 new_stats = dict(
-                                    samples=self.monitor.metric("marl_worker_sample_count")._value.get() /
-                                    duration,
-                                    batches=self.monitor.metric("marl_worker_batch_count")._value.get() /
-                                    duration,
-                                    idleTime=self.monitor.metric("marl_worker_wait_seconds")._sum.get() /
-                                    duration,
+                                    # samples=self.monitor.metric("marl_worker_sample_count")._value.get() /
+                                    # duration,
+                                    # batches=self.monitor.metric("marl_worker_batch_count")._value.get() /
+                                    # duration,
+                                    # idleTime=self.monitor.metric("marl_worker_wait_seconds")._sum.get() /
+                                    # duration,
                                     **self._stats())
                                 self.monitor_thread.update_stats(new_stats)
                                 t1, t2, perc = self.monitor_thread.thread_profiles()

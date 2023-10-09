@@ -14,19 +14,18 @@ logger = logging.getLogger("Reward Model")
 
 class RewardModel(nn.Module):
 
-    def __init__(
-        self,
-        base_model_name_or_path: str,
-        from_pretrained_kwargs: Dict[str, Any],
-        quantization_kwargs: Dict[str, Any],
-        output_scaling: float,
-        output_bias: float,
-    ):
+    def __init__(self,
+                 base_model_name_or_path: str,
+                 from_pretrained_kwargs: Dict[str, Any],
+                 quantization_kwargs: Dict[str, Any],
+                 output_scaling: float,
+                 output_bias: float,
+                 init_from_scratch: bool = False):
         super().__init__()
         base_model = api.utils.create_hf_nn(
             transformers.AutoModel,
             model_name_or_path=base_model_name_or_path,
-            init_from_scratch=False,
+            init_from_scratch=init_from_scratch,
             from_pretrained_kwargs=from_pretrained_kwargs,
             quantization_kwargs=quantization_kwargs,
         )
@@ -90,6 +89,7 @@ def create_wps_reward_model(
     output_scaling: float = 1.0,
     output_bias: float = 0.0,
     load_v_head_path: Optional[str] = None,
+    init_from_scratch: bool = False,
 ) -> api.model.Model:
     module = RewardModel(
         base_model_name_or_path=model_name_or_path,
@@ -97,6 +97,7 @@ def create_wps_reward_model(
         quantization_kwargs=quantization_kwargs,
         output_bias=output_bias,
         output_scaling=output_scaling,
+        init_from_scratch=init_from_scratch,
     )
 
     if load_v_head_path is not None:

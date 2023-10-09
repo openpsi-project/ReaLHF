@@ -1,14 +1,8 @@
-from typing import Any, Optional, Tuple
-import datetime
 import gc
-import logging
-import os
-import queue
 import socket
-import threading
 import time
 
-import numpy as np
+from deepspeed.accelerator import get_accelerator
 import torch
 import torch.utils.data
 
@@ -18,10 +12,13 @@ import api.model
 import base.gpu_utils as gpu_utils
 import base.namedarray as namedarray
 import base.seeding as seeding
+import base.timeutil as timeutil
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
-# some modif
+# Register all implemented datasets and models.
+import impl.model  # isort:skip
+import impl.data  # isort:skip
 
 
 class ModelWorker(worker_base.Worker):
@@ -35,6 +32,7 @@ class ModelWorker(worker_base.Worker):
         self.__ddp_rank = None
 
         self.__stream = None
+        self.__clear_cache_frequency = timeutil.FrequencyControl(frequency_steps=10)
 
     @property
     def is_master(self):
@@ -46,9 +44,8 @@ class ModelWorker(worker_base.Worker):
 
         self.__experiment_name = self.config.worker_info.experiment_name
         self.__trial_name = self.config.worker_info.trial_name
+        # NOTE: here worker_index is different from peer/ddp rank
         self.__worker_index = cfg.worker_info.worker_index
-        assert int(self.__worker_index) == int(os.environ['SLURM_PROCID']), (self.__worker_index,
-                                                                             os.environ['SLURM_PROCID'])
 
         torch.backends.cudnn.benchmark = cfg.cudnn_benchmark
         torch.backends.cudnn.deterministic = cfg.cudnn_deterministic
@@ -76,6 +73,7 @@ class ModelWorker(worker_base.Worker):
             f" type \"{self.config.model_name}\" located at {socket.gethostname()} GPU {local_gpu_id}.")
 
         self.__device = torch.device('cuda:0')
+
         self.__model = api.model.make_model(
             self.config.model,
             name=self.model_name,
@@ -89,7 +87,7 @@ class ModelWorker(worker_base.Worker):
                 api.data.make_dataset(
                     d,
                     self.config.seed,
-                    self.__worker_index,
+                    self.__ddp_rank,
                     self.__world_size,
                     self.__model.tokenizer,
                     self.config.worker_info.experiment_name,
@@ -113,7 +111,7 @@ class ModelWorker(worker_base.Worker):
             return worker_base.PollResult(0, 0)
 
         tik = time.perf_counter()
-        if self.__worker_index == 0:
+        if self.is_master:
             self.logger.info(f"Model worker {self.model_name} received request {request.handle_name}.")
         try:
             if request.handle_name == 'initialize':
@@ -134,18 +132,33 @@ class ModelWorker(worker_base.Worker):
         except RuntimeError as e:
             self.print_monitor_info()
             raise e
-        if self.__worker_index == 0:
-            self.logger.info(f"Model worker {self.model_name} handle request {request.handle_name}"
-                             f" in {time.perf_counter() - tik:.4f}s")
+        if self.is_master:
+            self.logger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
+                             f" in **{time.perf_counter() - tik:.4f}**s")
         reply = request_reply_stream.Reply(data=res)
 
         self.__stream.post_reply(reply)
 
         if self.config.cuda_cache_cleanliness:
-            # following huggingface trl
-            gc.collect()
-            torch.cuda.empty_cache()
-            gc.collect()
+            if self.__clear_cache_frequency.check():
+                # following huggingface trl # ALWAYS COST 0.3+ SEC
+                st = time.monotonic()
+                gc.collect()
+                torch.cuda.empty_cache()
+                gc.collect()
+                et = time.monotonic()
+                if self.is_master:
+                    self.logger.info(f"Model worker {self.model_name} CLEAN CACHE in {et-st:.4f}s")
+
+        # logging gpu/cpu stats
+        # self.print_monitor_info()
+        tik = time.perf_counter()
+        self.logger.info(("Model worker {}: MemAllocated={}GB, MaxMemAllocated={}GB".format(
+            self.model_name,
+            round(get_accelerator().memory_allocated() / 1024**3, 2),
+            round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+        )))
+        self.logger.info(f"monitoring overhead {time.perf_counter()-tik}s")
 
         sample_count = request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 0
         return worker_base.PollResult(sample_count=sample_count, batch_count=1)

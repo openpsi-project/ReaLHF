@@ -35,7 +35,7 @@ class WpsRewardModelingExperiment(Experiment):
 
     def __init__(
         self,
-        n_models=2,
+        n_models=1,
         seed=1,
         weight_decay=0.0,
         lr=2.5e-4,

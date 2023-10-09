@@ -78,3 +78,7 @@ def shared_memory(experiment_name, trial_name, stream_name):
 
 def shared_memory_dock_server(experiment_name, trial_name, stream_name, server_type):
     return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/shared_memory_dock_server/{server_type}/{stream_name}"
+
+
+def ray_cluster(experiment_name, trial_name, name):
+    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/ray_cluster/{name}"
