@@ -14,8 +14,8 @@ from impl.model.backend.pipe_engine.topology import PipeDataParallelTopology
 from impl.model.utils.data import (mask_eos_token, TensorDataclassToTupleInterface, upcast_masked_softmax,
                                    upcast_softmax)
 from impl.model.utils.logits_warper import top_k_top_p_logits
-import api.model
 import api.huggingface
+import api.model
 
 
 @dataclasses.dataclass

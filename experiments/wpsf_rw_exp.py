@@ -97,8 +97,7 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
         ]
 
         eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args[
-            'dataset_path'] = "/data/aigc/llm/datasets/wps-formula-rw/dataset_val.jsonl"
+        eval_dataset.args['dataset_path'] = "/data/aigc/llm/datasets/wps-formula-rw/dataset_val.jsonl"
         eval_dataset.args['n_tokens_per_batch'] = max_seq_len * eval_batch_size_per_device
 
         backend = ModelBackend(

@@ -7,8 +7,8 @@ import os
 import torch
 import transformers
 
-import api.model
 import api.huggingface
+import api.model
 
 logger = logging.getLogger("Model Save")
 

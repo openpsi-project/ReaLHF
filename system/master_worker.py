@@ -105,7 +105,7 @@ def wrap_func(
             # This part is to resolve arguments to actual their implementations.
             # e.g. if an argument to this method is ModelQuery, it is now replace with a DuckModel, which
             # execute generate/inference/train/evaluate remotely.
-            # Methods generate/inference/train/evaluate are hard coded here. 
+            # Methods generate/inference/train/evaluate are hard coded here.
             # They correspond to method implemented by abstract class ModelInterface from api/model.py.
             if isinstance(type_hint(), ModelQuery):
                 # If the operation is ModelQuery, find the model stream first.

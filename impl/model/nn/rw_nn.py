@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 import transformers
 
-import api.model
 import api.huggingface
+import api.model
 
 logger = logging.getLogger("Reward Model")
 

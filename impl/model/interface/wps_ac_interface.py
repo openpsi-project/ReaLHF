@@ -18,8 +18,8 @@ from base.namedarray import from_dict, NamedArray, recursive_aggregate, recursiv
 from impl.model.utils.data import gather_shifted_log_probs, get_eos_indices, masked_normalization
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.save import save_hf_or_lora_model
-import api.model
 import api.huggingface
+import api.model
 
 logger = logging.getLogger("WPS Actor Critic")
 
@@ -424,7 +424,8 @@ class WPSActorInterface(api.model.ModelInterface):
             ignoring_logits_ratio = logits_ignoring_mask.float().mean()
             stats['ignoring_logits_ratio'] = ignoring_logits_ratio
 
-        if self.early_stop_kl is not None and api.huggingface.get_all_reduce_mean(approx_kl) > self.early_stop_kl:
+        if self.early_stop_kl is not None and api.huggingface.get_all_reduce_mean(
+                approx_kl) > self.early_stop_kl:
             logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
                            f"than early stop threshold {self.early_stop_kl}. Abort actor update.")
             return stats

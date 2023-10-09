@@ -330,7 +330,9 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
             codes = [random.choice(pos_codes)] + existing_neg_codes
             label = [0] + [1] + [0] * len(existing_neg_codes)
         elif n_pos > 0:
-            pos_code_indices = np.random.choice(len(pos_codes), size=self.contrastive_dim - len(existing_neg_codes), replace=False)
+            pos_code_indices = np.random.choice(len(pos_codes),
+                                                size=self.contrastive_dim - len(existing_neg_codes),
+                                                replace=False)
             pos_codes = [pos_codes[kk] for kk in pos_code_indices]
             codes = pos_codes + existing_neg_codes
             label = [0] + [1 / len(pos_codes)] * len(pos_codes) + [0] * len(existing_neg_codes)

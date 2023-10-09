@@ -3,8 +3,8 @@ from typing import Any, Dict, List, Optional, Union
 import torch
 import transformers
 
-import api.model
 import api.huggingface
+import api.model
 
 
 def hf_model_factory(model_cls):

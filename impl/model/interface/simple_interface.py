@@ -5,8 +5,8 @@ import torch
 import torch.nn as nn
 
 from base.namedarray import from_dict, NamedArray, recursive_aggregate, recursive_apply
-import api.model
 import api.huggingface
+import api.model
 
 
 @dataclasses.dataclass
