@@ -289,7 +289,10 @@ class NfsNameRecordRepository(NameRecordRepository):
         rs = []
         if os.path.isdir(dir_path):
             for item in os.listdir(dir_path):
-                rs.append(self.get(os.path.join(name_root, item)))
+                try:
+                    rs.append(self.get(os.path.join(name_root, item)))
+                except NameEntryNotFoundError:
+                    pass
         return rs
 
     def find_subtree(self, name_root):

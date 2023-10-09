@@ -73,7 +73,7 @@ def main():
     )
     backend = api.model.make_backend(backend_config)
 
-    actor_path = '/lustre/meizy/base_models/opt-125m'
+    actor_path = "/data/meizy/models/cfgonly/opt-1024-24"
     generation_kwargs = dict(
         max_new_tokens=256,
         min_new_tokens=256,

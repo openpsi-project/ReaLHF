@@ -80,13 +80,14 @@ def create_hf_nn(
     model_class: Type,
     model_name_or_path: str,
     init_from_scratch: bool = False,
+    low_cpu_mem_usage: bool = True,
     from_pretrained_kwargs: Optional[Dict[str, Any]] = None,
     generation_kwargs: Optional[Dict[str, Any]] = None,
     quantization_kwargs: Optional[Dict[str, Any]] = None,
 ) -> transformers.PreTrainedModel:
-
     # load model
-    model_config = transformers.AutoConfig.from_pretrained(model_name_or_path)
+    model_config = transformers.AutoConfig.from_pretrained(model_name_or_path,
+                                                           low_cpu_mem_usage=low_cpu_mem_usage)
     # print(model_config)
     # model_config.dropout = 0.0 # TODO: temp
     logger.info(f"Loading from {model_name_or_path}...")
@@ -120,13 +121,10 @@ def create_hf_nn(
     raw_generation_config.pad_token_id = tokenizer.pad_token_id
     assert tokenizer.eos_token_id is not None
     raw_generation_config.eos_token_id = tokenizer.eos_token_id
-    if generation_kwargs is None:
-        model.generation_config = raw_generation_config
-    else:
-        model.generation_config = transformers.GenerationConfig.from_dict({
-            **raw_generation_config.to_dict(),
-            **generation_kwargs
-        })
+
+    model.generation_config = raw_generation_config
+    if generation_kwargs is not None:
+        model.generation_config.update(**generation_kwargs,)
 
     model.resize_token_embeddings(int(8 * math.ceil(len(tokenizer) / 8.0)))
 

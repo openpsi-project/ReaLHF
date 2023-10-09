@@ -276,9 +276,11 @@ class WorkerControlPanel:
             try:
                 if timeout is not None:
                     timeout = max(0, deadline - time.monotonic())
+                self.__logger.info(f"Connecting to worker {name}, timeout {timeout}")
                 server_address = base.name_resolve.wait(base.names.worker(self.__experiment_name,
                                                                           self.__trial_name, name),
                                                         timeout=timeout)
+                self.__logger.info(f"Connecting to worker {name} done")
             except TimeoutError as e:
                 if raises_timeout_error:
                     raise e

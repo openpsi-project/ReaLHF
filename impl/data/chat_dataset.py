@@ -108,13 +108,13 @@ api.data.register_dataloader("chat_rlhf", RLHFDataLoader)
 api.data.register_dataset("chat_prompt", ChatPromptDataset)
 
 if __name__ == "__main__":
-    tokenizer = api.utils.load_hf_tokenizer("/lustre/meizy/base_models/opt-125m")
+    tokenizer = api.utils.load_hf_tokenizer("/data/meizy/models/cfgonly/opt-1024-24")
     utils = [
         api.data.DatasetUtility(seed=1, ddp_rank=rank, world_size=4, tokenizer=tokenizer) for rank in range(4)
     ]
 
     datasets = [
-        ChatPromptDataset(utils[rank], "/lustre/meizy/datasets/Dahoas/rm-static/data/data.jsonl", 512)
+        ChatPromptDataset(utils[rank], "/data/meizy/datasets/Dahoas/rm-static/data.jsonl", 512)
         for rank in range(4)
     ]
 

@@ -134,7 +134,7 @@ class ModelWorker(worker_base.Worker):
             raise e
         if self.is_master:
             self.logger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
-                             f" in **{time.perf_counter() - tik:.4f}**s")
+                             f" in ${time.perf_counter() - tik:.4f}$s")
         reply = request_reply_stream.Reply(data=res)
 
         self.__stream.post_reply(reply)
@@ -153,7 +153,7 @@ class ModelWorker(worker_base.Worker):
         # logging gpu/cpu stats
         # self.print_monitor_info()
         tik = time.perf_counter()
-        self.logger.info(("Model worker {}: MemAllocated={}GB, MaxMemAllocated={}GB".format(
+        self.logger.info(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
             self.model_name,
             round(get_accelerator().memory_allocated() / 1024**3, 2),
             round(get_accelerator().max_memory_allocated() / 1024**3, 2),

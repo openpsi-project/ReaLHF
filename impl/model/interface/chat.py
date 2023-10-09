@@ -201,20 +201,11 @@ class ChatActorInterface(api.model.ModelInterface):
         else:
             max_token_len = module.generation_config.max_length
 
-        t0 = time.perf_counter()
+        # TODO: fix generation config
         data = recursive_apply(data, lambda x: x.to(model.device))
-        t1 = time.perf_counter()
-        # logger.info(f"generation config = {module.generation_config}")
-        # logger.info("generate(): recursive apply time: %.4f", t1 - t0)
-        # logger.info(f"generate(): prompts shape {data.prompts.shape}")
         seq = module.generate(data.prompts,
                               attention_mask=data.prompt_att_mask,
-                              generation_config=module.generation_config,
-                              synced_gpus=False)
-        t2 = time.perf_counter()
-        # logger.info("generate(): generate time: %.4f", t2 - t1)
-        # logger.info(f"generate(): generation config: {module.generation_config}")
-        # logger.info(f"generate(): seq shape: {seq.shape}")
+                              generation_config=module.generation_config)
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
@@ -225,10 +216,7 @@ class ChatActorInterface(api.model.ModelInterface):
 
         # module.eval()
         # TODO: optimize this
-        t3 = time.perf_counter()
         logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits.float()
-        t4 = time.perf_counter()
-        #logger.info("generate(): forward logits time: %.4f", t4 - t3)
         # logits_ignoring_mask = generate_logits_ignoring_mask(logits, module.generation_config.top_p,
         #                                                      module.generation_config.top_k)
         # logits.masked_fill_(logits_ignoring_mask.bool(), torch.finfo(logits.dtype).min)

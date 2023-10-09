@@ -26,9 +26,9 @@ logger = logging.getLogger("master worker")
 
 def request_all(streams, handle_type, datas):
     tik = time.perf_counter()
-    logger.info(f"master worker #request_all# *start* time **{time.time_ns()}**")
+    logger.info(f"master worker #request_all# *start* time ${time.time_ns()}$")
     requests = [request_reply_stream.Request(handle_type, data) for data in datas]
-    logger.info(f"master worker #request_all# *end* time **{time.time_ns()}**")
+    logger.info(f"master worker #request_all# *end* time ${time.time_ns()}$")
     tik = time.perf_counter()
     for s, r in zip(streams, requests):
         s.post_request(r)
@@ -39,9 +39,9 @@ def request_all(streams, handle_type, datas):
 
 def gather_all_replies(streams):
     tik = time.perf_counter()
-    logger.info(f"master worker #gather_all_replies# *start* time **{time.time_ns()}**")
+    logger.info(f"master worker #gather_all_replies# *start* time ${time.time_ns()}$")
     responses = [s.poll_reply().data for s in streams]
-    logger.info(f"master worker #gather_all_replies# *end* time **{time.time_ns()}**")
+    logger.info(f"master worker #gather_all_replies# *end* time ${time.time_ns()}$")
     return responses
 
 
@@ -297,7 +297,7 @@ class MasterWorker(worker_base.Worker):
             f"Epoch {epoch + 1}/{self._ft_spec.total_train_epochs} "
             f"step {epoch_step + 1}/{self._ft_spec.steps_per_epoch} "
             f"(global step {global_step + 1}/{self._ft_spec.total_train_steps}) finishes. "
-            f"#End to end# execution time: **{e2e_time:.3f}**s. "
+            f"#End to end# execution time: *{e2e_time:.3f}*s. "
             f"Total time consumption: {total_time_consumption:.3f}s. "
             f"Estimated remaining time: {time_per_step * (self._ft_spec.total_train_steps - global_step - 1):.3f}s."
         )
@@ -307,9 +307,9 @@ class MasterWorker(worker_base.Worker):
             logger.info(
                 f"Finished benchmark {self.__benchmark_steps}. Total time consumption {total_time_consumption:.3f}"
             )
-            logger.info(f"avg e2e time {np.mean(self.e2e_time_history):.3f}")
+            logger.info(f"avg #e2e# time *{np.mean(self.e2e_time_history):.3f}*")
             for i, level_time_history in self.level_time_history.items():
-                logger.info(f"avg level {i} time {np.mean(level_time_history):.3f}")
+                logger.info(f"avg #level{i+1}# time *{np.mean(level_time_history):.3f}*")
             raise RuntimeError(f"Benchmark completes! Yeah!!!")
 
         return worker_base.PollResult(sample_count=bs, batch_count=1)

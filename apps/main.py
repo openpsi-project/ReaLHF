@@ -14,6 +14,8 @@ import system
 
 logger = logging.getLogger("main")
 
+CONTROLLER_TIME_LIMIT = None
+
 
 def scheduler_mode(mode: str) -> str:
     if mode == 'ray' or mode == 'slurm':
@@ -107,10 +109,13 @@ def main_start(args):
         "setup",
         scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
         env_vars=base_environs,
-        node_type="g1",  # frl cluster only
     )
 
-    sched.wait(timeout=300, update=True)
+    try:
+        sched.wait(timeout=3600, update=True)
+    except:
+        # temp bypassing
+        logger.warning(f"Resetting name resolving repo failed.")
     logger.info(f"Resetting name resolving repo... Done.")
 
     logger.info(f"Running configuration: {experiment.__class__.__name__}")
@@ -137,7 +142,7 @@ def main_start(args):
         mem=1024,
         env_vars=base_environs,
         container_image=args.image_name or setup.controller_image,
-        node_type="g1",  # frl cluster only
+        time_limit=CONTROLLER_TIME_LIMIT,
     )
 
     if args.mode != 'local_ray':

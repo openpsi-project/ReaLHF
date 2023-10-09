@@ -135,6 +135,36 @@ class ChatRLHFBenchmarkConfig:
     gpu_per_reward: float = 0.25
     gpu_per_ref: float = 0.25
     # optimization options
+    actor_model_name: str = "opt-768-12"
+    critic_model_name: str = "opt-768-12"
+    actor_zero_stage: int = 2
+    critic_zero_stage: int = 2
+    hybrid_engine: bool = True
+    batch_size_per_device: int = 1
+    max_prompt_length: int = 256
+    max_answer_length: int = 256
+    offload_actor_param: bool = False
+    offload_actor_optimizer_state: bool = False
+    offload_critic_param: bool = False
+    offload_critic_optimizer_states: bool = False
+    offload_ref: bool = False
+    offload_reward: bool = False
+    gradient_checkpointing: bool = False
+
+
+@dataclasses.dataclass
+class ChatRLHFBenchmarkConfig:
+    # resource
+    n_actors: int = 1
+    n_critics: int = 1
+    n_rewards: int = 1
+    n_refs: int = 1
+    seed: int = 1
+    gpu_per_actor: float = 0.25
+    gpu_per_critic: float = 0.25
+    gpu_per_reward: float = 0.25
+    gpu_per_ref: float = 0.25
+    # optimization options
     actor_model_name: str = "opt-125m"
     critic_model_name: str = "opt-125m"
     init_from_scratch: bool = False
@@ -199,7 +229,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 cpu=4,
                 gpu=last_gpu_per_type,
                 gpu_type='tesla',
-                mem=int(100000 * last_gpu_per_type),
+                mem=int(60000 * last_gpu_per_type),
                 # nodelist='YL-com02',
                 node_type="a100",
                 deadline=EXPR_DEADLINE,
@@ -341,11 +371,12 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             args=dict(
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
-                zero_stage=2,
+                zero_stage=self.config.actor_zero_stage,
                 offload_param=self.config.offload_actor_param,
                 offload_optimizer_state=self.config.offload_actor_optimizer_state,
                 enable_fp16=True,
                 enable_hybrid_engine=self.config.hybrid_engine,
+                gradient_checkpointing=self.config.gradient_checkpointing,
             ),
         )
         critic_backend = ModelBackend(
@@ -353,17 +384,22 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             args=dict(
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
-                zero_stage=2,
+                zero_stage=self.config.critic_zero_stage,
                 offload_param=self.config.offload_critic_param,
                 offload_optimizer_state=self.config.offload_critic_optimizer_states,
                 enable_fp16=True,
                 enable_hybrid_engine=False,
+                gradient_checkpointing=False,
             ),
         )
         ref_backend = ModelBackend('ds_inference',
-                                   args=dict(enable_fp16=True, offload=self.config.offload_ref))
+                                   args=dict(enable_fp16=True,
+                                             zero_stage=3 if self.config.offload_ref else 0,
+                                             offload=self.config.offload_ref))
         rw_backend = ModelBackend('ds_inference',
-                                  args=dict(enable_fp16=True, offload=self.config.offload_reward))
+                                  args=dict(enable_fp16=True,
+                                            zero_stage=3 if self.config.offload_reward else 0,
+                                            offload=self.config.offload_reward))
 
         ppo_kwargs = dict(
             ppo_epochs=1,
@@ -441,44 +477,3 @@ class ChatRLHFBenchmarkExperiment(Experiment):
 
 
 register_experiment("chat-rlhf-benchmark", ChatRLHFBenchmarkExperiment)
-
-import functools
-import itertools
-
-spec_to_n_params = {
-    (9216, 64): "66b",
-    (7168, 48): "30b",
-    (6144, 60): "27.5b",
-    (6144, 40): "18.4b",
-    (5120, 60): "19b",
-    (5120, 40): "13b",
-    (4096, 36): "7.5b",
-    (4096, 24): "5b",
-    (2048, 24): "1.3b",
-    (1024, 24): "350m",
-    (768, 12): "125m",
-}
-
-# OPT small scale exps: one card benchmark
-actor_model_specs = [(2048, 24), (1024, 24), (768, 12), (4096, 24), (4096, 36),
-                     (5120, 40)]  # tuple (hidden_size, layer)
-critic_model_specs = [(1024, 24), (768, 12), (2048, 24)]
-
-for actor_spec, critic_spec in itertools.product(actor_model_specs, critic_model_specs):
-    actor_name = f"opt-{actor_spec[0]}-{actor_spec[1]}"
-    critic_name = f"opt-{critic_spec[0]}-{critic_spec[1]}"
-    actor_n_params = spec_to_n_params[actor_spec]
-    critic_n_params = spec_to_n_params[critic_spec]
-    exp_name = f"opt-{actor_n_params}+{critic_n_params}-chat-rlhf-benchmark"
-    config = ChatRLHFBenchmarkConfig(
-        actor_model_name=actor_name,
-        critic_model_name=critic_name,
-        n_actors=1,
-        n_critics=1,
-        n_rewards=1,
-        n_refs=1,
-    )
-    register_class = functools.partial(ChatRLHFBenchmarkExperiment, config=config)
-    register_experiment(exp_name, register_class)
-
-# Starcoder

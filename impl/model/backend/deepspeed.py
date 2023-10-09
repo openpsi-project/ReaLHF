@@ -123,6 +123,9 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             lr_scheduler=lr_scheduler,
         )
 
+        if self.gradient_checkpointing:
+            module.gradient_checkpointing_enable()
+
         model.module = module
         return model
 

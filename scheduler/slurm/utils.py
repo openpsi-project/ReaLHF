@@ -201,12 +201,8 @@ class SlurmTaskInfo:
 
     def update(self):
         task_infos = query_tasks(slurm_names=[self.slurm_name])
-        # assert len(task_infos) <= 1, "Multiple tasks with the same name, have all previous tasks been canceled?"
-        # if returned multiple task_infos, pick the latest one
         task_infos = sorted(task_infos, key=lambda x: parse_formatted_time(x.submit_time), reverse=True)
         self.task_info = task_infos[0] if len(task_infos) > 0 else None
-        # logger.info(f"All task infos: {task_infos}")
-        # logger.info(f"Updated task info for {self.slurm_name}: {self.task_info}")
         if self.task_info:
             return self.task_info.state
         else:
@@ -225,6 +221,8 @@ class SlurmTaskInfo:
         if gpu_per_worker < 1 and gpu_per_worker > 0:
             self.resource_requirement.gpu = 1
             self.workers_per_task = math.ceil(1 / gpu_per_worker)
+            self.resource_requirement.cpu *= self.workers_per_task
+            self.resource_requirement.mem *= self.workers_per_task
             self.ntasks = math.ceil(self.ntasks / self.workers_per_task)
             logger.info(f"Resolved fractional GPU requirement for {self.slurm_name}")
             logger.info(f"GPU per worker {gpu_per_worker}, workers per task {self.workers_per_task}, "
@@ -604,6 +602,10 @@ def allocate_resources(infos: List[SlurmTaskInfo],
                 allocated[hostname] = tmp - task_left
             all_resources[hostname] = resource
         if task_left > 0:
+            now_all_resources = get_all_node_resources()
+            for hn, res in now_all_resources.items():
+                logger.info("Node: {}, Resource: {}".format(hn, res))
+            logger.info("Task: {}, Resource: {}".format(info.slurm_name, info.resource_requirement))
             raise SlurmResourceNotEnoughException()
         hostlist = []
         for hostname, task_num in allocated.items():
