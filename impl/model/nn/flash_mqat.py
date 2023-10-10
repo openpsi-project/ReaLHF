@@ -411,6 +411,7 @@ class VocabPositionEmbedding(nn.Module):
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[Union[str, torch.device]] = None):
         super().__init__()
+        print(device)
         self.wte = nn.Embedding(vocab_size, hidden_dim, dtype=dtype, device=device)
         self.wpe = nn.Embedding(n_positions, hidden_dim, dtype=dtype, device=device)
         self.embed_drop = nn.Dropout(embed_pdrop)

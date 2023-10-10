@@ -87,6 +87,7 @@ class TiedLayerSpec(LayerSpec):
 
 
 class PipelineModule(nn.Module):
+    ### This module should only be used by pipeline engine!!
     """Modules to be parallelized with pipeline parallelism.
 
     The key constraint that enables pipeline parallelism is the
@@ -117,6 +118,7 @@ class PipelineModule(nn.Module):
         seed_fn(type, optional): The custom seed generating function. Defaults to random seed generator.
         base_seed (int, optional): The starting seed. Defaults to 1234.
         partition_method (str, optional): The method upon which the layers are partitioned. Defaults to 'parameters'.
+        # do not support activation checkpoint now
         activation_checkpoint_interval (int, optional): The granularity activation checkpointing in terms of number of layers. 0 disables activation checkpointing.
         activation_checkpoint_func (callable, optional): The function to use for activation checkpointing. Defaults to ``deepspeed.checkpointing.checkpoint``.
         checkpointable_layers(list, optional): Checkpointable layers may not be checkpointed. Defaults to None which does not additional filtering.
@@ -143,11 +145,6 @@ class PipelineModule(nn.Module):
         self.micro_offset = 0
 
         self.loss_fn = loss_fn
-
-        self.checkpointable_layers = checkpointable_layers
-        if checkpointable_layers is not None:
-            assert isinstance(checkpointable_layers,
-                              list), "param `checkpointable_layers` must be type of list."
 
         self.seed_layers = seed_layers
         self.seed_fn = seed_fn
@@ -209,9 +206,6 @@ class PipelineModule(nn.Module):
 
         self.tied_comms = self._index_tied_modules()
         self._synchronize_tied_weights()
-
-        self.activation_checkpoint_interval = activation_checkpoint_interval
-        self.activation_checkpoint_func = activation_checkpoint_func
 
     def _build(self):
         specs = self._layer_specs
@@ -307,56 +301,59 @@ class PipelineModule(nn.Module):
             raise RuntimeError(f"Partitioning '{layername}' found no valid layers to partition.")
         return idxs
 
-    def forward(self, forward_input):
+    def forward(self, forward_input, other_inputs):
         # We need to offset the seed by the microbatch ID. Save it in a local var to
         # ensure it is preserved in the closure. Otherwise checkpointed forward funcs
         # will see a different offset.
+
+        # forward input is a tensor tuple
+        # other inputs should be a list of tensor tuples that are additional inputs of each layer (other than the output of last layer)
+        # other input sequence should match the layers
+
         self.micro_offset += 1
+        assert isinstance(other_inputs, list), "other_inputs should be a list"
+        assert len(other_inputs) == len(
+            self.forward_funcs), "other_inputs should have the same length as layers"
 
-        def exec_range_func(start, end):
-            ''' Helper function to be used with checkpoint()
-            Adapted from torch.utils.checkpoint:checkpoint_sequential()
-            '''
-            local_micro_offset = self.micro_offset + 1
+        # def exec_range_func(start, end):
+        #     ''' Helper function to be used with checkpoint()
+        #     Adapted from torch.utils.checkpoint:checkpoint_sequential()
+        #     '''
+        #     local_micro_offset = self.micro_offset + 1
 
-            def exec_func(*inputs):
-                # Single tensor inputs need to be unwrapped
-                if len(inputs) == 1:
-                    inputs = inputs[0]
-                for idx, layer in enumerate(self.forward_funcs[start:end]):
-                    self.curr_layer = idx + self._local_start
-                    if self.seed_layers:
-                        new_seed = (self.base_seed * local_micro_offset) + self.curr_layer
-                        if self.seed_fn:
-                            self.seed_fn(new_seed)
-                        else:
-                            ds_utils.set_random_seed(new_seed)
+        #     def exec_func(*inputs):
+        #         # Single tensor inputs need to be unwrapped
+        #         # if len(inputs) == 1:
+        #         #     inputs = inputs[0]
+        #         for idx, (layer, other_input) in enumerate(zip(self.forward_funcs[start:end], other_inputs)):
+        #             self.curr_layer = idx + self._local_start
+        #             if self.seed_layers:
+        #                 new_seed = (self.base_seed * local_micro_offset) + self.curr_layer
+        #                 if self.seed_fn:
+        #                     self.seed_fn(new_seed)
+        #                 else:
+        #                     ds_utils.set_random_seed(new_seed)
 
-                    inputs = layer(inputs)
-                return inputs
+        #             inputs = layer(inputs, other_input)
+        #         return inputs
 
-            return exec_func
+        #     return exec_func
 
-        if self.activation_checkpoint_interval == 0:
-            func = exec_range_func(0, len(self.forward_funcs))
-            x = func(forward_input)
-        else:
-            num_layers = len(self.forward_funcs)
-            x = forward_input
-            for start_idx in range(0, num_layers, self.activation_checkpoint_interval):
-                end_idx = min(start_idx + self.activation_checkpoint_interval, num_layers)
+        # func = exec_range_func(0, len(self.forward_funcs))
 
-                funcs = self.forward_funcs[start_idx:end_idx]
-                # Since we either pass tensors or tuples of tensors without unpacking, we
-                # need to be careful not to double-wrap tensors with tuple.
-                if not isinstance(x, tuple):
-                    x = (x,)
-
-                if self._is_checkpointable(funcs):
-                    x = self.activation_checkpoint_func(exec_range_func(start_idx, end_idx), *x)
+        local_micro_offset = self.micro_offset + 1
+        for idx, (layer, other_input) in enumerate(zip(self.forward_funcs, other_inputs)):
+            self.curr_layer = idx + self._local_start
+            if self.seed_layers:
+                new_seed = (self.base_seed * local_micro_offset) + self.curr_layer
+                if self.seed_fn:
+                    self.seed_fn(new_seed)
                 else:
-                    x = exec_range_func(start_idx, end_idx)(*x)
-        return x
+                    ds_utils.set_random_seed(new_seed)
+
+            forward_input = layer(forward_input, other_input)
+
+        return forward_input
 
     def _partition_layers(self, method='uniform'):
         num_stages = self._topo.get_dim('pipe')

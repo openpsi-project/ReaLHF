@@ -5,4 +5,4 @@
 
 from .engine import PipelineEngine
 from .module import LayerSpec, PipelineModule, TiedLayerSpec
-from .topology import ProcessTopology
+from .topology import PipeDataParallelTopology, ProcessTopology

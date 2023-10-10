@@ -65,6 +65,7 @@ def setup_ddp(expr_name, trial_name, model_name, worker_index):
     # global GPU_DEVICES_ISOLATED
     # if not GPU_DEVICES_ISOLATED and 'RAY' not in os.environ['DLLM_MODE']:
     #     raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
+
     if 'GPU_DEVICES_ISOLATED' not in os.environ and 'RAY' not in os.environ['DLLM_MODE']:
         raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
 
@@ -72,6 +73,7 @@ def setup_ddp(expr_name, trial_name, model_name, worker_index):
     local_gpu_id = int(os.environ['CUDA_VISIBLE_DEVICES'])
 
     ddp_master_name = names.trainer_ddp_master(expr_name, trial_name, model_name)
+
     if ddp_rank == 0:
         host_ip = socket.gethostbyname(socket.gethostname())
         port = network.find_free_port()

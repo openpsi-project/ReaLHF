@@ -36,9 +36,13 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     tp_gather_partition_size: int = 8
     # addtional deepspeed args
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
+    engine_type: str = "deepspeed"
 
     def __post_init__(self):
-        pass
+        if self.engine_type == "pipe":
+            assert self.zero_stage < 2
+            assert self.enable_hybrid_engine is False
+            assert self.gradient_checkpointing is False
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -117,6 +121,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             optimizer=optimizer,
             config=ds_config,
             lr_scheduler=lr_scheduler,
+            engine_type=self.engine_type,
         )
 
         if self.gradient_checkpointing:

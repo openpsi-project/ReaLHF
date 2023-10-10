@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Type, Union
+from typing import List, Optional, Tuple, Type, Union
 import dataclasses
 import logging
 
@@ -129,17 +129,37 @@ def from_tensor(x: torch.Tensor, _type: Type):
 class TensorDataclassToTupleInterface:
 
     def to_tuple(self):
+        # the first element of the tuple is the length of the tuple
+        # sometimes the tuple can be mutliple tensor dataclass instances
         t = []
         for v in dataclasses.asdict(self).values():
             t.append(to_tensor(v))
+        t = [len(t)] + t
         return tuple(t)
 
     @classmethod
     def from_tuple(cls, t):
         x = cls()
         for i, f in enumerate(dataclasses.fields(x)):
-            setattr(x, f.name, from_tensor(t[i], f.type))
+            setattr(x, f.name, from_tensor(t[i + 1], f.type))
         return x
+
+
+def tensor_data_list_to_tuple(tensor_data_list: List[TensorDataclassToTupleInterface]):
+    res = []
+    for tensor_data in tensor_data_list:
+        res += list(tensor_data.to_tuple())
+    return tuple(res)
+
+
+def tuple_to_tensor_data_list(t: tuple):
+    res = []
+    i = 0
+    while i < len(t):
+        num_fields = t[i]
+        res.append(TensorDataclassToTupleInterface.from_tuple(t[i:i + num_fields + 1]))
+        i += num_fields + 1
+    return res
 
 
 @torch.jit.script

@@ -7,6 +7,8 @@ from deepspeed.runtime.engine import DeepSpeedEngine, DeepSpeedOptimizerCallable
 import deepspeed
 import torch
 
+from impl.model.backend.pipe_engine import PipelineEngine
+
 DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU = 32  # A place-holder for inference.
 
 
@@ -101,35 +103,48 @@ def get_optimizer_grouped_parameters(
 def deepspeed_initialize(
     model: torch.nn.Module,
     config: Dict,
+    engine_type: str = "deepspeed",
     optimizer: Optional[Union[torch.optim.Optimizer, DeepSpeedOptimizerCallable]] = None,
     model_parameters: Optional[torch.nn.Module] = None,
     lr_scheduler: Optional[Union[torch.optim.lr_scheduler._LRScheduler, DeepSpeedSchedulerCallable]] = None,
     mpu=None,
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
+    if engine_type == "deepspeed":
+        # Disable zero.Init context if it's currently enabled
+        zero.partition_parameters.shutdown_init_context()
 
-    # Disable zero.Init context if it's currently enabled
-    zero.partition_parameters.shutdown_init_context()
+        from deepspeed import comm as dist
+        deepspeed.dist = dist
 
-    from deepspeed import comm as dist
-    deepspeed.dist = dist
+        config_class = DeepSpeedConfig(config, mpu)
+        engine = DeepSpeedEngine(
+            args=None,
+            model=model,
+            optimizer=optimizer,
+            model_parameters=model_parameters,
+            lr_scheduler=lr_scheduler,
+            mpu=mpu,
+            dist_init_required=False,
+            config=config,
+            config_class=config_class,
+            # dont_change_device=True,
+        )
 
-    config_class = DeepSpeedConfig(config, mpu)
-    engine = DeepSpeedEngine(
-        args=None,
-        model=model,
-        optimizer=optimizer,
-        model_parameters=model_parameters,
-        lr_scheduler=lr_scheduler,
-        mpu=mpu,
-        dist_init_required=False,
-        config=config,
-        config_class=config_class,
-        # dont_change_device=True,
-    )
+        # Restore zero.Init context if necessary
+        zero.partition_parameters.restore_init_context()
+        return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
+    elif engine_type == "pipe":
+        mpu = model.mpu()
+        config_class = DeepSpeedConfig(config, mpu)
+        engine = PipelineEngine(model=model,
+                                args=None,
+                                config=config,
+                                config_class=config_class,
+                                mpu=mpu,
+                                optimizer=optimizer,
+                                lr_scheduler=lr_scheduler,
+                                dist_init_required=False)
+        return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
 
-    # Restore zero.Init context if necessary
-    zero.partition_parameters.restore_init_context()
-
-    return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
     return tuple(return_items)
