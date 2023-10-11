@@ -9,24 +9,18 @@ import multiprocessing as mp
 import random
 import time
 
-import deepspeed
+# import deepspeed
 import torch
 
 mp.set_start_method('spawn', force=True)
 
 import logging
 
-from deepspeed.accelerator import get_accelerator
-
 from base.namedarray import NamedArray
-from impl.model.backend.pipe_engine import PipeDataParallelTopology
-from tests.pipe_utils import *
 import api.config as config_package
-import api.model
 import base.gpu_utils
 import base.name_resolve as name_resolve
 import base.names as names
-import impl.model.nn.pipe_nn
 
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
@@ -34,18 +28,27 @@ logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
 
 logger = logging.getLogger("test")
 
+model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
+EXPR_NAME = "test"
+TRIAL_NAME = "test"
+MODEL_NAME = "pipedatamodel"
+MODEL_TYPE = "model_worker"
+PIPE_DEGREE = 3
+DATA_DEGREE = 1
 
-def setup_gpu(worker_index):
+
+def setup_gpu(worker_index, b):
     name_resolve.clear_subtree(names.trainer_ddp_peer(EXPR_NAME, TRIAL_NAME, MODEL_NAME))
-    time.sleep(1)
+    b.wait()
     base.gpu_utils.isolate_cuda_device(MODEL_TYPE, worker_index, PIPE_DEGREE * DATA_DEGREE, EXPR_NAME,
                                        TRIAL_NAME)
-    time.sleep(1)
+    b.wait()
     base.gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME, MODEL_NAME, worker_index)
-    time.sleep(1)
+    b.wait()
     world_size, ddp_rank, local_gpu_id = base.gpu_utils.setup_ddp(EXPR_NAME, TRIAL_NAME, MODEL_NAME,
                                                                   worker_index)
     device = torch.device('cuda', 0)
+    import deepspeed
     deepspeed.init_distributed()
     return device
 
@@ -55,10 +58,15 @@ def print_rank(s, rank):
     print(s)
 
 
-def main(worker_index=0):
+def main(worker_index, b):
+    device = setup_gpu(worker_index, b)
+    from impl.model.backend.pipe_engine import PipeDataParallelTopology
+    from tests.pipe_utils import (get_example_batch, get_finetune_spec, get_pipe_backend, get_pipe_model,
+                                  get_simple_interface)
+    import impl.model.nn.pipe_nn
+
     # os.environ["NCCL_IB_DISABLE"] = "1"
     # os.environ["NCCL_P2P_DISABLE"] = "1"
-    device = setup_gpu(worker_index)
     rank = torch.distributed.get_rank()
     cuda_visible = os.environ["CUDA_VISIBLE_DEVICES"]
     logger.info(
@@ -67,27 +75,37 @@ def main(worker_index=0):
     dp_world_size = 1
     bs_per_device = 4
 
-    a = torch.tensor([rank], dtype=torch.float16, device=device)
-    print(f"{rank}: {a}")
-    torch.distributed.all_reduce(a)
-    print(f"{rank}: {a}")
-    # model = get_pipe_model(model_path, device)
-    # backend = get_pipe_backend()
-    # ft_spec = get_finetune_spec()
-    # interface = get_simple_interface()
+    model = get_pipe_model(model_path, device)
+    backend = get_pipe_backend()
+    ft_spec = get_finetune_spec()
+    interface = get_simple_interface()
 
-    # backend.initialize(model, ft_spec)
-    # logger.info(("gpu mem info: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
-    #     round(get_accelerator().memory_allocated() / 1024**3, 2),
-    #     round(get_accelerator().max_memory_allocated() / 1024**3, 2),
-    # )))
+    backend.initialize(model, ft_spec)
+    from deepspeed.accelerator import get_accelerator
+    logger.info(("gpu mem info: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
+        round(get_accelerator().memory_allocated() / 1024**3, 2),
+        round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+    )))
+
+    print(f"rank {worker_index}: model initialized")
+    input_ids, attention_mask = get_example_batch(model.tokenizer, device, 4, 0, 1)
+
+    data = NamedArray(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+    )
+    print(f"rank {worker_index}: begin inference")
+    outputs = interface.inference(model, data)
+    print(f"rank {worker_index}: end inference")
+    print(f"rank {worker_index}: inference outputs: {outputs}")
 
 
 if __name__ == "__main__":
+    b = mp.Barrier(PIPE_DEGREE)
     # main()
     name_resolve.clear_subtree(names.trial_root(experiment_name=EXPR_NAME, trial_name=TRIAL_NAME))
     os.environ["DLLM_MODE"] = "LOCAL"
-    ps = [mp.Process(target=main, args=(i,)) for i in range(3)]
+    ps = [mp.Process(target=main, args=(i, b)) for i in range(PIPE_DEGREE)]
 
     for p in ps:
         p.start()

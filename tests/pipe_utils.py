@@ -39,7 +39,8 @@ def get_pipe_backend():
                                               warmup_steps_proportion=0.0,
                                               min_lr_ratio=0.0,
                                               zero_stage=1,
-                                              engine_type="pipe")))
+                                              engine_type="pipe",
+                                              num_pipeline_stages=3)))
 
 
 def get_pipe_model(model_path, device):

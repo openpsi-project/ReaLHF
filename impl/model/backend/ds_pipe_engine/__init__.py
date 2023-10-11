@@ -3,6 +3,6 @@
 
 # DeepSpeed Team
 
-from .pipe_engine import PipelineEngine
-from .pipe_module import LayerSpec, PipelineModule, TiedLayerSpec
+from .engine import PipelineEngine
+from .module import LayerSpec, PipelineModule, TiedLayerSpec
 from .topology import PipeDataParallelTopology, ProcessTopology

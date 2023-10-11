@@ -66,14 +66,6 @@ class PipelineEngine(DeepSpeedEngine):
         self.eval_return_logits = False
         self.outputs = None
 
-        # used to disable the pipeline all-reduce when used with 1-bit Adam/1-bit LAMB
-        self.pipeline_enable_backward_allreduce = True
-
-        if self.elasticity_enabled():
-            if not self.is_elastic_model_parallel_supported():
-                assert not self.elasticity_enabled(), "Elasticity is not currently supported" \
-                " with pipeline parallelism."
-
         # pipeline step for logging
         self.log_batch_step_id = -1
 

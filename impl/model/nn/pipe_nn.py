@@ -149,6 +149,8 @@ def make_flash_mqat_pipe_model(
         tokenizer_path = model_path
     if from_type == 'starcoder':
         tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token_id = tokenizer.eos_token_id
         module, layer_key_mappings = make_starcoder_flash_mqat_pipe_module(model_path, topology, dtype,
                                                                            device)
         module = load_starcoder_flash_mqat_pipe(module, layer_key_mappings, model_path=model_path)
