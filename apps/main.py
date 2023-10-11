@@ -109,8 +109,7 @@ def main_start(args):
         "setup",
         scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
         env_vars=base_environs,
-        container_image="llm/llm-cpu",
-        node_type="g1",
+        container_image=args.image_name or setup.controller_image,
     )
 
     try:
@@ -129,6 +128,7 @@ def main_start(args):
         controller_type = 'local_ray'
     else:
         controller_type = 'zmq'
+    # For local_ray mode, the controller will start all remote workers.
     sched.submit_array(
         task_name="ctl",
         cmd=scheduler.client.control_cmd(
@@ -142,7 +142,6 @@ def main_start(args):
         cpu=1,
         gpu=0,
         mem=1024,
-        node_type="g1",
         env_vars=base_environs,
         container_image=args.image_name or setup.controller_image,
         time_limit=CONTROLLER_TIME_LIMIT,
