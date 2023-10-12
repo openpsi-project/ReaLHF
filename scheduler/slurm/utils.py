@@ -10,8 +10,7 @@ import os
 import shutil
 import subprocess
 
-from scheduler.client import TaskException, TaskInfo, TaskState
-import base.names
+from scheduler.client import JobException, JobInfo, JobState
 
 logger = logging.getLogger("scheduler.slurm.utils")
 
@@ -29,15 +28,15 @@ SQUEUE_FIELDS = [
     "tres-alloc",
 ]
 STATUS_MAPPING = {
-    "RUNNING": TaskState.RUNNING,
-    "COMPLETING": TaskState.RUNNING,
-    "PENDING": TaskState.PENDING,
-    "CANCELLED": TaskState.CANCELLED,
-    "FAILED": TaskState.FAILED,
-    "COMPLETED": TaskState.COMPLETED,
-    "OUT_OF_MEMORY": TaskState.FAILED,
-    "DEADLINE": TaskState.COMPLETED,
-    "TIMEOUT": TaskState.COMPLETED
+    "RUNNING": JobState.RUNNING,
+    "COMPLETING": JobState.RUNNING,
+    "PENDING": JobState.PENDING,
+    "CANCELLED": JobState.CANCELLED,
+    "FAILED": JobState.FAILED,
+    "COMPLETED": JobState.COMPLETED,
+    "OUT_OF_MEMORY": JobState.FAILED,
+    "DEADLINE": JobState.COMPLETED,
+    "TIMEOUT": JobState.COMPLETED
 }
 LOG_BASE_PATH = f"/data/aigc/llm/logs/{getpass.getuser()}"
 
@@ -130,16 +129,57 @@ class SlurmResource:
 
 
 @dataclasses.dataclass
-class SlurmTaskInfo:
-    """ Contain all informantion required to **launch** a slurm task
-    Matching one TasksGroup in expr config
+class SlurmLaunchInfo:
+    """A SlurmLaunchInfo contains all informantion required to **launch** a slurm job.
+
+    Matching one `TasksGroup` in `SchedulingConfig` and one slurm job.
+    
+    The naming conventions:
+        - `job`: Literally a slurm job with a (maybe non-unique) job name and an unique job ID,
+            which may contain multiple job steps and processes. It corresponds an `sbatch` or `srun` call.
+            Job names are guaranteed to be unique using the scheduler within this repo.
+        - `jobstep`: Literally a slurm job step with a unique job step ID, i.e., ${jobID}.${stepID},
+            which corresponds to a running instance `apps.remote` script, but may still contain multiple processes.
+            A job step occupies at most one GPU. Processes in the same job step must share the same GPU.
+        - `wproc`: A single worker process launched by `apps.remote` script, which may occupy less than 1 GPU.
+            A worker just corresponds to a process.
+        - `task`: The alias of `jobstep`. It is easier to under stand this concept in the context of `srun` command.
+            `--ntasks' is just the number of jobsteps. We use the alternative term `jobstep` to avoid confusion.
+
+    Attributes:
+        run_name (str): Identifier of this run, typically ${exp_name}_${trial_name}.
+        worker_type (str): Type of workers to be launched, e.g. model_worker, data_worker, etc.
+        worker_submission_idx (int): For heterogeneous scheduling, we submit jobs of the same worker_type to slurm
+            for multiple times. `worker_submission_idx` is used to distinguish them, so the (global) slurm job name will
+            be ${run_name}:${worker_type}:${worker_submission_idx}.
+        wprocs_in_job: The number of worker processes in this slurm job (of all job steps).
+        n_jobsteps (int): The number of job steps of this slurm job. This is also the group size of the multiprog file.
+            Will be resolved automatically according to GPU requirement.
+        wprocs_per_jobstep: The number of worker processes in each job step, as well as the number of sub-processes
+            spawned by `apps.remote`. Will be resolved automatically according to GPU requirement.
+
+        resource_requirement (SlurmResource): The resource requirement of this job, including all job steps.
+        cmd (str): The command to be executed.
+        container_image (str): .
+        container_mounts (str): .
+        env_vars (dict): .
+        node_type (str): .
+        nodelist (str): .
+        exclude (str): .
+        partition (str, optional): .
+        time_limit (str, optional): Slurm job time limit.
+        begin (str, optional): Scheduled worker start time.
+        deadline (str, optional): Scheduled worker end time.
+        hostfile (bool): Whether to use hostfile for `--distribution=arbitrary` scheduling.
+        hostfile_content (str, optional): The content of the hostfile.
+        multiprog (bool): Whether to use multiprog file for `--multi-prog` job submission.
+        multiprog_content (str, optional): The content of the multiprog file.
     """
-    # common
-    job_name: str
-    task_name: str  # hierarchy: job_name:task_name:task_id,
-    # specifically, GPU in the same communication group should share a task_name
-    task_id: int  # for heterogeneous task scheduling
-    ntasks: int
+    run_name: str
+    worker_type: str
+    worker_submission_idx: int
+    wprocs_in_job: int
+
     resource_requirement: SlurmResource
     cmd: str
     container_image: str
@@ -148,130 +188,130 @@ class SlurmTaskInfo:
     node_type: str
     nodelist: str
     exclude: str
-    #
     partition: Optional[str] = None
-    workers_per_task: int = 1
-    nworkers: int = 0
-    # time configs
     time_limit: Optional[str] = None
-    begin: Optional[str] = None  # scheduled worker start time
-    deadline: Optional[str] = None  # scheduled worker end time
+    begin: Optional[str] = None
+    deadline: Optional[str] = None
     # hostfile
     hostfile: bool = True
     hostfile_content: Optional[str] = None
     # multiprog options, override cmd
     multiprog: bool = True
     multiprog_content: Optional[str] = None
-    # addtional info for worker scheduling
-    # submitted task infos
-    task_info: Optional[TaskInfo] = None
+
+    n_jobsteps: int = None
+    wprocs_per_jobstep: int = None
+
+    job_info: Optional[JobInfo] = None
+
+    def __post_init__(self):
+        """ resolve fractional GPU resource requirement
+        """
+        gpu_per_worker = self.resource_requirement.gpu
+        assert gpu_per_worker <= 1 and gpu_per_worker >= 0
+        if gpu_per_worker < 1 and gpu_per_worker > 0:
+            self.resource_requirement.gpu = 1
+            self.wprocs_per_jobstep = math.floor(1 / gpu_per_worker)
+            self.resource_requirement.cpu *= self.wprocs_per_jobstep
+            self.resource_requirement.mem *= self.wprocs_per_jobstep
+            self.n_jobsteps = math.ceil(self.wprocs_in_job / self.wprocs_per_jobstep)
+            logger.info(f"Resolved fractional GPU requirement for {self.slurm_name}")
+            logger.info(
+                f"GPU per worker {gpu_per_worker}, workers per jobstep (process size in `apps.remote`) {self.wprocs_per_jobstep}, "
+                f"number of jobsteps (instance of running `apps.remote`) {self.n_jobsteps}")
+        else:
+            self.wprocs_per_jobstep = self.wprocs_in_job
+            self.n_jobsteps = 1
 
     @property
     def slurm_name(self) -> str:
-        # unique slurm name for a task
-        return f"{self.job_name}:{self.task_name}:{self.task_id}"
+        return f"{self.run_name}:{self.worker_type}:{self.worker_submission_idx}"
 
     @property
     def slurm_id(self) -> Optional[str]:
-        if self.task_info:
-            return self.task_info.slurm_id
+        if self.job_info:
+            return self.job_info.slurm_id
         else:
             return None
 
     @property
     def log_path(self) -> str:
-        return os.path.join(LOG_BASE_PATH, self.job_name, f"{self.task_name}-{self.task_id}")
+        return os.path.join(LOG_BASE_PATH, self.run_name, f"{self.worker_type}-{self.worker_submission_idx}")
 
     @property
     def multiprog_path(self) -> str:
-        return os.path.join(LOG_BASE_PATH, self.job_name, f"{self.task_name}-{self.task_id}.multiprog")
+        return os.path.join(LOG_BASE_PATH, self.run_name,
+                            f"{self.worker_type}-{self.worker_submission_idx}.multiprog")
 
     @property
     def hostfile_path(self) -> str:
-        return os.path.join(LOG_BASE_PATH, self.job_name, f"{self.task_name}-{self.task_id}.hostfile")
+        return os.path.join(LOG_BASE_PATH, self.run_name,
+                            f"{self.worker_type}-{self.worker_submission_idx}.hostfile")
 
     def show_log(self):
         try:
             terminal_columns = os.get_terminal_size().columns
         except OSError:
             terminal_columns = shutil.get_terminal_size().columns
-        logger.info(f"Showing log of task: {self.task_name}-{self.task_id}\n\n{'-'*terminal_columns}")
+        logger.info(
+            f"Showing log of slurm job: {self.worker_type}-{self.worker_submission_idx}\n\n{'-'*terminal_columns}"
+        )
         subprocess.Popen(["tail", "-n50", self.log_path]).wait(timeout=3)
-        logger.info(f"End of log: {self.task_name}-{self.task_id}\n\n{'-'*terminal_columns}")
+        logger.info(f"End of log: {self.worker_type}-{self.worker_submission_idx}\n\n{'-'*terminal_columns}")
 
     def update(self):
-        task_infos = query_tasks(slurm_names=[self.slurm_name])
-        task_infos = sorted(task_infos, key=lambda x: parse_formatted_time(x.submit_time), reverse=True)
-        self.task_info = task_infos[0] if len(task_infos) > 0 else None
-        if self.task_info:
-            return self.task_info.state
+        job_infos = query_jobs(slurm_names=[self.slurm_name])
+        job_infos = sorted(job_infos, key=lambda x: parse_formatted_time(x.submit_time), reverse=True)
+        self.job_info = job_infos[0] if len(job_infos) > 0 else None
+        if self.job_info:
+            return self.job_info.state
         else:
             return None
 
     def cancel(self):
-        cancel_tasks(slurm_names=[self.slurm_name])
-        self.task_info = TaskInfo(name=self.slurm_name, state=TaskState.CANCELLED)
-
-    def resolve_gpu_requirement(self):
-        """ resolve fractional GPU resource requirement
-        """
-        gpu_per_worker = self.resource_requirement.gpu
-        assert gpu_per_worker <= 1 and gpu_per_worker >= 0
-        self.nworkers = self.ntasks
-        if gpu_per_worker < 1 and gpu_per_worker > 0:
-            self.resource_requirement.gpu = 1
-            self.workers_per_task = math.ceil(1 / gpu_per_worker)
-            self.resource_requirement.cpu *= self.workers_per_task
-            self.resource_requirement.mem *= self.workers_per_task
-            self.ntasks = math.ceil(self.ntasks / self.workers_per_task)
-            logger.info(f"Resolved fractional GPU requirement for {self.slurm_name}")
-            logger.info(f"GPU per worker {gpu_per_worker}, workers per task {self.workers_per_task}, "
-                        f"ntasks {self.ntasks}")
+        cancel_jobs(slurm_names=[self.slurm_name])
+        self.job_info = JobInfo(name=self.slurm_name, state=JobState.CANCELLED)
 
     def __str__(self):
-        s = f"SlurmTaskInfo [{self.slurm_name}] \n"
+        s = f"SlurmLaunchInfo [{self.slurm_name}] \n"
         s += f"Resources: [\n{self.resource_requirement}\n]\n"
         s += f"Multiprog Filepath: [{self.multiprog_path}]\n"
         s += f"Multiprog Content: [\n{self.multiprog_content}\n]\n"
         s += f"Hostfile Filepath: [{self.hostfile_path}]\n"
         s += f"Hostfile Content: [\n{self.hostfile_content}\n]\n"
-        if self.task_info is None:
-            task_info_str = "None"
+        if self.job_info is None:
+            job_info_str = "None"
         else:
-            task_info_str = "\n".join([f"{k}: {v}" for k, v in self.task_info.__dict__.items()])
-        s += f"Runtime TaskInfo: [\n{task_info_str}\n]\n"
+            job_info_str = "\n".join([f"{k}: {v}" for k, v in self.job_info.__dict__.items()])
+        s += f"Runtime JobInfo: [\n{job_info_str}\n]\n"
         env_var_str = "\n".join([f"{k}: {v}" for k, v in self.env_vars.items()])
         s += f"Env vars: [\n{env_var_str}\n]\n"
         return s
 
     def commit(self):
-        """ Commit a task to slurm scheduler
-        """
         os.makedirs(os.path.dirname(self.log_path), exist_ok=True, mode=0o775)
 
-        ntasks = self.ntasks
+        ntasks = self.n_jobsteps
         mem = self.resource_requirement.mem
         cpu = self.resource_requirement.cpu
         gpu = self.resource_requirement.gpu
 
         cmd = self.cmd
 
-        assert gpu == 1 or gpu == 0, "Slurm task GPU requirement should be resolved to a integer."
+        assert gpu == 1 or gpu == 0, "Slurm job GPU requirement should be resolved to a integer."
         gpu_type = self.resource_requirement.gpu_type
 
-        with open(self.multiprog_path, "w") as f:
-            f.write(self.multiprog_content)
-        with open(self.hostfile_path, "w") as f:
-            f.write(self.hostfile_content)
-
-        # reconstruct worker index in remote.py by adding env var
-        # start : start_index + args.group_offset * args.task_size
-        # end : start_index + min((args.group_offset + 1) * args.task_size, spec.ntasks))
+        if self.multiprog:
+            with open(self.multiprog_path, "w") as f:
+                f.write(self.multiprog_content)
+        if self.hostfile:
+            with open(self.hostfile_path, "w") as f:
+                f.write(self.hostfile_content)
 
         logger.info(
-            f"Allocating {ntasks} task(s) \"{self.task_name}\" task id {self.task_id} with {cpu} cpu, {gpu} gpu and {mem} MB memory."
-        )
-        logger.info(f"To check the output, run \n\t\t\t\t\t\t`tail -f {self.log_path}`.")
+            f"Allocating {ntasks} jobstep(s) \"{self.worker_type}\" submission index {self.worker_submission_idx}"
+            f" with {cpu} cpu, {gpu} gpu and {mem} MB memory.")
+        logger.info(f"To check the output, run \n\t`tail -f {self.log_path}`.")
 
         # Setup sbatch
         # head
@@ -315,7 +355,6 @@ class SlurmTaskInfo:
             srun_cmd = f'srun -l {" ".join(srun_flags)} {cmd}'
 
         lines += [
-            'echo "*************************************"',
             'echo "[Runner] StartTime: $(date -u)"',
             'echo "[Runner] Host: $(hostname)"',
             "echo '[Runner] Command: {}'".format(srun_cmd),
@@ -330,18 +369,26 @@ class SlurmTaskInfo:
             'exit $RETCODE',
         ]
 
-        script_strs = '\n'.join(lines) + '\n'
+        script_strs = '\n'.join(list(filter(lambda x: x, lines))) + '\n'
         script = script_strs.encode('ascii')
 
+        def pad_output_str_to_length(s: str, pad_s: str, length: int):
+            assert len(pad_s) == 1
+            assert len(s) + 2 <= length
+            n_pads = (length - len(s) - 2) // 2
+            return pad_s * n_pads + " " + s + " " + pad_s * n_pads
+
         with open(self.log_path, "w") as f:
-            f.write("=" * 20 + " SBATCH SCRIPT " + "=" * 20 + "\n")
+            f.write(pad_output_str_to_length("SBATCH SCRIPT BEGIN", "=", 80) + "\n")
             f.write(script_strs)
-            f.write("=" * 20 + " SLURM TASK INFO " + "=" * 20 + "\n")
+            f.write(pad_output_str_to_length("SBATCH SCRIPT END", "=", 80) + "\n")
+            f.write(pad_output_str_to_length("SBATCH JOB INFO BEGIN", "=", 80) + "\n")
             f.write(str(self))
-            f.write("=" * 20 + " OUTPUT " + "=" * 20 + "\n")
+            f.write(pad_output_str_to_length("SBATCH JOB INFO END", "=", 80) + "\n")
+            f.write(pad_output_str_to_length("JOB OUTPUT BEGIN", "=", 80) + "\n")
         r = subprocess.check_output(['sbatch', '--parsable'], input=script,
                                     env=srun_env).decode('ascii').strip()
-        self.task_info = TaskInfo(name=self.slurm_name, state=TaskState.PENDING)
+        self.job_info = JobInfo(name=self.slurm_name, state=JobState.PENDING)
 
 
 def parse_formatted_time(time_string: str) -> int:
@@ -359,10 +406,10 @@ def unparse_formatted_time(timestamp: int) -> str:
 
 
 # slurm command execute and output parsing
-def query_tasks(slurm_names: Optional[List[str]] = None,
-                slurm_ids: Optional[List[str]] = None,
-                status: str = "all",
-                delimiter: str = "__PSI__") -> List[TaskInfo]:
+def query_jobs(slurm_names: Optional[List[str]] = None,
+               slurm_ids: Optional[List[str]] = None,
+               status: str = "all",
+               delimiter: str = "__PSI__") -> List[JobInfo]:
     squeue_format = f":.{delimiter},".join(SQUEUE_FIELDS)
     cmd = ["squeue", "-O", squeue_format, f"-t{status}"]
     if slurm_names is not None:
@@ -374,16 +421,16 @@ def query_tasks(slurm_names: Optional[List[str]] = None,
     for line in output.split("\n")[1:]:
         job_id, state, submit_time, start_time, slurm_name, nodelist, *_ = line.split(delimiter)
         rs.append(
-            TaskInfo(name=slurm_name,
-                     state=STATUS_MAPPING[state],
-                     host=nodelist,
-                     submit_time=submit_time,
-                     start_time=start_time,
-                     slurm_id=job_id.strip()))
+            JobInfo(name=slurm_name,
+                    state=STATUS_MAPPING[state],
+                    host=nodelist,
+                    submit_time=submit_time,
+                    start_time=start_time,
+                    slurm_id=job_id.strip()))
     return rs
 
 
-def cancel_tasks(slurm_names: Optional[List[str]] = None, slurm_ids: Optional[List[str]] = None):
+def cancel_jobs(slurm_names: Optional[List[str]] = None, slurm_ids: Optional[List[str]] = None):
     assert slurm_names is not None or slurm_ids is not None, "Must specify slurm_names or slurm_ids."
     assert not (slurm_names and slurm_ids), "Cannot specify both slurm_names and slurm_ids."
     cmd = ["scancel"]
@@ -392,7 +439,7 @@ def cancel_tasks(slurm_names: Optional[List[str]] = None, slurm_ids: Optional[Li
     elif slurm_ids is not None:
         cmd += ["-j", ",".join([str(s) for s in slurm_ids])]
     subprocess.check_call(cmd)
-    logger.info(f"Cancelled Slurm task: slurm identifiers {slurm_names if slurm_ids is None else slurm_ids}")
+    logger.info(f"Cancelled Slurm job: slurm identifiers {slurm_names if slurm_ids is None else slurm_ids}")
 
 
 def parse_output_status_line(status):
@@ -565,9 +612,9 @@ def get_all_node_resources() -> Dict[str, SlurmResource]:
     return all_rres
 
 
-def allocate_resources(infos: List[SlurmTaskInfo],
+def allocate_resources(infos: List[SlurmLaunchInfo],
                        # strategy: Literal["pack", "plane"] = "pack",
-                       ) -> List[SlurmTaskInfo]:
+                       ) -> List[SlurmLaunchInfo]:
     """ Allocate all slurm task specs, fill in the hostfile field of the specs
     Only support simple greedy strategy now, which allocates tasks to node with the most 
     available resources without considering other tasks.
@@ -576,7 +623,7 @@ def allocate_resources(infos: List[SlurmTaskInfo],
     # all_resources = sorted([(k, v) for k, v in all_resources.items()],
     #                 key=lambda x: x[1],
     #                 reverse=True)
-    infos = sorted(infos, key=lambda x: x.resource_requirement * x.ntasks, reverse=True)
+    infos = sorted(infos, key=lambda x: x.resource_requirement, reverse=True)
     for info in infos:
         valid_hostnames = available_hostnames(
             node_type=info.node_type,
@@ -586,7 +633,7 @@ def allocate_resources(infos: List[SlurmTaskInfo],
         valid_hostnames = list(filter(lambda x: x in all_resources, valid_hostnames))
         valid_resources = {hn: all_resources[hn] for hn in valid_hostnames}
         valid_resources = sorted(valid_resources.items(), key=lambda x: x[1], reverse=True)
-        task_left = info.ntasks
+        task_left = info.n_jobsteps
         allocated = dict()
         for hostname, resource in valid_resources:
             tmp = task_left
@@ -605,7 +652,7 @@ def allocate_resources(infos: List[SlurmTaskInfo],
             now_all_resources = get_all_node_resources()
             for hn, res in now_all_resources.items():
                 logger.info("Node: {}, Resource: {}".format(hn, res))
-            logger.info("Task: {}, Resource: {}".format(info.slurm_name, info.resource_requirement))
+            logger.info("Job: {}, Resource: {}".format(info.slurm_name, info.resource_requirement))
             raise SlurmResourceNotEnoughException()
         hostlist = []
         for hostname, task_num in allocated.items():

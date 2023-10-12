@@ -112,7 +112,8 @@ class SchedulerClient:
 def remote_worker_cmd(expr_name, trial_name, debug, worker_type):
     # requires information in scheduler package
     return f"python3 {'' if debug else '-O'} -m apps.remote worker -w {worker_type} " \
-           f"-e {expr_name} -f {trial_name} -i {{group_id}} -o {{group_offset}} -g {{group_size}} -r {{group_index}}"
+           f"-e {expr_name} -f {trial_name} -i {{jobstep_id}} -g {{n_jobsteps}} -r {{worker_submission_index}} " \
+           f"-p {{wprocs_per_jobstep}} -j {{wprocs_in_job}} -o {{wproc_offset}}"
 
 
 def setup_cmd(expr_name, trial_name, debug):

@@ -14,8 +14,8 @@ class LocalSchedulerClient(SchedulerClient):
     on the local host and keeps a collection of task processes.
     """
 
-    def __init__(self, job_name):
-        super().__init__(job_name)
+    def __init__(self, expr_name, trial_name):
+        super().__init__(expr_name, trial_name)
         self._tasks: Dict[str, subprocess.Popen] = {}
         self._gpu_counter = 0
         self._cuda_devices: List[str] = os.environ.get('CUDA_VISIBLE_DEVICES', '').split(',')
