@@ -225,7 +225,7 @@ class WpsRLHFExperiment(Experiment):
                         threshold=6.0,
                     ),
                 ),
-                lora_key_to_replace='attn',
+                lora_keys_to_replace='attn',
             ),
         )
         ref_model = Model(
@@ -255,7 +255,7 @@ class WpsRLHFExperiment(Experiment):
                         threshold=6.0,
                     ),
                 ),
-                lora_key_to_replace='attn',
+                lora_keys_to_replace='attn',
                 load_lora_path=os.path.join(rw_lora_head_path, "lora.bin"),
                 lora_op_after_creation='squash',
             ),

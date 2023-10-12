@@ -219,9 +219,12 @@ class SlurmLaunchInfo:
             logger.info(
                 f"GPU per worker {gpu_per_worker}, workers per jobstep (process size in `apps.remote`) {self.wprocs_per_jobstep}, "
                 f"number of jobsteps (instance of running `apps.remote`) {self.n_jobsteps}")
-        else:
+        elif gpu_per_worker == 0:
             self.wprocs_per_jobstep = self.wprocs_in_job
             self.n_jobsteps = 1
+        elif gpu_per_worker == 1:
+            self.n_jobsteps = self.wprocs_in_job
+            self.wprocs_per_jobstep = 1
 
     @property
     def slurm_name(self) -> str:
@@ -378,7 +381,7 @@ class SlurmLaunchInfo:
             n_pads = (length - len(s) - 2) // 2
             return pad_s * n_pads + " " + s + " " + pad_s * n_pads
 
-        with open(self.log_path, "w") as f:
+        with open(self.log_path, "a") as f:
             f.write(pad_output_str_to_length("SBATCH SCRIPT BEGIN", "=", 80) + "\n")
             f.write(script_strs)
             f.write(pad_output_str_to_length("SBATCH SCRIPT END", "=", 80) + "\n")
