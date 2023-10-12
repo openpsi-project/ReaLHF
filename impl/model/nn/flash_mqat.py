@@ -386,7 +386,7 @@ class FlashMQATBlock(nn.Module):
             )
         h = h + attn_out
         if self.ckpt_mlp:
-            h = torch.utils.checkpoint.checkpoint(self.mlp, h) + h
+            h = torch.utils.checkpoint.checkpoint(self.mlp, h, use_reentrant=True) + h
         else:
             h = self.mlp(h) + h
         if self.output_layernorm:
