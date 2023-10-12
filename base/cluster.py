@@ -27,7 +27,12 @@ class ClusterSpec(abc.ABC):
     def gpu_type_from_node_name(self, node_name: str) -> str:
         ...
 
+    @property
     def fileroot(self) -> str:
+        ...
+    
+    @property
+    def default_mount(self) -> str:
         ...
 
 
@@ -51,8 +56,13 @@ class QizhiClusterSpec(ClusterSpec):
         else:
             return 'tesla'
 
+    @property
     def fileroot(self) -> str:
         return "/data/aigc/llm"
+    
+    @property
+    def default_mount(self) -> str:
+        return "/lustre:/lustre,/data:/data,/hddlustre:/hddlustre"
 
 
 class QHClusterSpec(ClusterSpec):
@@ -64,8 +74,13 @@ class QHClusterSpec(ClusterSpec):
     def gpu_type_from_node_name(self, node_name: str) -> str:
         return 'tesla'
 
+    @property
     def fileroot(self) -> str:
         return "/lustre/aigc/llm"
+    
+    @property
+    def default_mount(self) -> str:
+        return "/lustre:/lustre"
 
 
 class YLClusterSpec(ClusterSpec):
@@ -77,8 +92,13 @@ class YLClusterSpec(ClusterSpec):
     def gpu_type_from_node_name(self, node_name: str) -> str:
         return 'tesla'
 
+    @property
     def fileroot(self) -> str:
         return "/data/aigc/llm"
+    
+    @property
+    def default_mount(self) -> str:
+        return "/data:/data"
 
 
 hostname = socket.gethostname()

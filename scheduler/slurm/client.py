@@ -48,7 +48,7 @@ class SlurmSchedulerClient(SchedulerClient):
             mem: int = 1024,  # MB
             env_vars: Optional[Dict] = None,
             container_image: str = "llm/llm-gpu",
-            container_mounts: str = f"{cluster_spec.fileroot}:{cluster_spec.fileroot}",
+            container_mounts: str = cluster_spec.default_mount,
             node_type: Optional[str] = None,
             nodelist: Optional[str] = None,
             exclude: Optional[str] = None,
