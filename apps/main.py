@@ -108,7 +108,7 @@ def main_start(args):
     if args.remote_reset:
         sched.submit(
             "setup",
-            scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
+            cmd=scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
             env_vars=base_environs,
             container_image=args.image_name or setup.controller_image,
             multiprog=False,

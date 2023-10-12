@@ -83,6 +83,7 @@ class Controller:
         setup.set_worker_information(experiment_name=self.experiment_name, trial_name=self.trial_name)
 
         if setup.config is not None:
+            os.makedirs(self.json_config_file_path, exist_ok=True)
             with open(os.path.join(self.json_config_file_path, "config.json"), "w") as f:
                 json.dump(asdict(setup.config), f, indent=4)
 
