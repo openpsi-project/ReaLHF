@@ -4,19 +4,19 @@ import os
 import re
 import subprocess
 
-from scheduler.client import SchedulerClient, SchedulerError, TaskInfo, TaskState
+from scheduler.client import SchedulerClient, SchedulerError, JobInfo, JobState
 
 logger = logging.getLogger("Local Scheduler")
 
 
 class LocalSchedulerClient(SchedulerClient):
-    """Instead of talking to the scheduler server (the typical behaviour), this client starts tasks directly
-    on the local host and keeps a collection of task processes.
+    """Instead of talking to the scheduler server (the typical behaviour), this client starts jobs directly
+    on the local host and keeps a collection of job processes.
     """
 
     def __init__(self, expr_name, trial_name):
         super().__init__(expr_name, trial_name)
-        self._tasks: Dict[str, subprocess.Popen] = {}
+        self._jobs: Dict[str, subprocess.Popen] = {}
         self._gpu_counter = 0
         self._cuda_devices: List[str] = os.environ.get('CUDA_VISIBLE_DEVICES', '').split(',')
         if len(self._cuda_devices) < 1:
@@ -29,13 +29,13 @@ class LocalSchedulerClient(SchedulerClient):
 
     def submit(
         self,
-        task_name,
-        cmd,
+        worker_type: str,
+        cmd: str,
         gpu: int = 0,
         env_vars: Optional[Dict] = None,
         **kwargs,
     ):
-        assert task_name not in self._tasks
+        assert worker_type not in self._jobs
         if env_vars is None:
             env_vars = {}
         if gpu > 0:
@@ -45,48 +45,48 @@ class LocalSchedulerClient(SchedulerClient):
         cmd = ' '.join(str(k) + '=' + str(v) for k, v in env_vars.items()) + ' ' + cmd
         logger.info("Starting local process with command: %s", cmd)
         process = subprocess.Popen(cmd, shell=isinstance(cmd, str))
-        self._tasks[task_name] = process
+        self._jobs[worker_type] = process
 
-    def submit_array(self, task_name, cmd, count, gpu: int = 0, **kwargs):
+    def submit_array(self, worker_type, cmd, count, gpu: int = 0, **kwargs):
         if gpu > 0 and count > len(self._cuda_devices):
-            raise RuntimeError(f"Number of \"{task_name}\" exceeds the number of GPUs.")
-        return super().submit_array(task_name, cmd, count, gpu=gpu, **kwargs)
+            raise RuntimeError(f"Number of \"{worker_type}\" exceeds the number of GPUs.")
+        return super().submit_array(worker_type, cmd, count, gpu=gpu, **kwargs)
 
-    def stop(self, task_name):
-        assert task_name in self._tasks
-        logger.info("Stopping local process, pid: %d", self._tasks[task_name].pid)
-        self._tasks[task_name].kill()
-        self._tasks[task_name].wait()
-        del self._tasks[task_name]
+    def stop(self, worker_type):
+        assert worker_type in self._jobs
+        logger.info("Stopping local process, pid: %d", self._jobs[worker_type].pid)
+        self._jobs[worker_type].kill()
+        self._jobs[worker_type].wait()
+        del self._jobs[worker_type]
 
     def stop_all(self):
-        for name in list(self._tasks):
+        for name in list(self._jobs):
             self.stop(name)
 
-    def find(self, task_name):
-        if task_name in self._tasks:
-            return TaskInfo(name=task_name, state=TaskState.RUNNING, host="localhost")
+    def find(self, job_name):
+        if job_name in self._jobs:
+            return JobInfo(name=job_name, state=JobState.RUNNING, host="localhost")
         else:
-            return TaskInfo(name=task_name, state=TaskState.NOT_FOUND)
+            return JobInfo(name=job_name, state=JobState.NOT_FOUND)
 
-    def find_all(self, task_name_regex=".*"):
+    def find_all(self, job_name_regex=".*"):
         rs = []
-        for name in self._tasks:
-            if re.fullmatch(task_name_regex, name):
+        for name in self._jobs:
+            if re.fullmatch(job_name_regex, name):
                 rs.append(self.find(name))
         return rs
 
     def wait(self, timeout=None, update=False, **kwargs):
-        logger.info("Waiting %d local running processes, pids: %s", len(self._tasks),
-                    " ".join(str(task.pid) for task in self._tasks.values()))
+        logger.info("Waiting %d local running processes, pids: %s", len(self._jobs),
+                    " ".join(str(job.pid) for job in self._jobs.values()))
         to_remove = []
         try:
-            for key, task in self._tasks.items():
-                task.wait(timeout)
+            for key, job in self._jobs.items():
+                job.wait(timeout)
                 if update:
                     to_remove.append(key)
         except subprocess.TimeoutExpired:
             raise TimeoutError()
         finally:
             for k in to_remove:
-                self._tasks.pop(k)
+                self._jobs.pop(k)
