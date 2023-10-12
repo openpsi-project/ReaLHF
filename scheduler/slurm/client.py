@@ -9,15 +9,16 @@ import shutil
 import subprocess
 import time
 
-from scheduler.client import SchedulerClient, JobException, JobInfo, JobState
-from scheduler.slurm.utils import (allocate_resources, SlurmResource, SlurmResourceNotEnoughException,
-                                   SlurmLaunchInfo)
+from base.cluster import spec as cluster_spec
+from scheduler.client import JobException, JobInfo, JobState, SchedulerClient
+from scheduler.slurm.utils import (allocate_resources, SlurmLaunchInfo, SlurmResource,
+                                   SlurmResourceNotEnoughException)
 
 logger = logging.getLogger("Slurm scheduler")
 
 SCHEDULING_RETRY_INTERVAL_SECONDS = 30
 SCHEDULING_TIMEOUT_MAX_SECONDS = 3600 * 24
-LOCK_FILE_NAME = "/data/aigc/llm/logs/slurm_scheduler.lock"
+LOCK_FILE_NAME = f"{cluster_spec.fileroot}/logs/slurm_scheduler.lock"
 
 
 class SlurmSchedulerClient(SchedulerClient):
@@ -47,7 +48,7 @@ class SlurmSchedulerClient(SchedulerClient):
             mem: int = 1024,  # MB
             env_vars: Optional[Dict] = None,
             container_image: str = "llm/llm-gpu",
-            container_mounts: str = "/data:/data,/lustre:/lustre",
+            container_mounts: str = f"{cluster_spec.fileroot}:{cluster_spec.fileroot}",
             node_type: Optional[str] = None,
             nodelist: Optional[str] = None,
             exclude: Optional[str] = None,

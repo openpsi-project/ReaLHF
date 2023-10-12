@@ -8,6 +8,7 @@ import random
 
 from api.config import *
 from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
+from base.cluster import spec as cluster_spec
 
 
 def train_plackett_luce_rw(
@@ -138,8 +139,7 @@ class WpsPlackettLuceRewardExperiment(Experiment):
         self.min_lr_ratio = 0.0
         self.total_train_epochs = 8
 
-        root_dir = "/data"
-        model_path = f"{root_dir}/aigc/llm/checkpoints/4l-starcoder/"
+        model_path = f"{cluster_spec.fileroot}/checkpoints/4l-starcoder/"
         train_batch_size_per_device = 1
         eval_batch_size_per_device = 12
         max_seq_len = 512
@@ -148,7 +148,7 @@ class WpsPlackettLuceRewardExperiment(Experiment):
         dataset = Dataset(
             'wps_reward_plackett_luce',
             args=dict(
-                dataset_path=f"{root_dir}/aigc/llm/datasets/rw-contrastive/train.jsonl",
+                dataset_path=f"{cluster_spec.fileroot}/datasets/rw-contrastive/train.jsonl",
                 max_seq_len=max_seq_len,
                 contrastive_dim=contrastive_dim,
             ),
@@ -172,7 +172,7 @@ class WpsPlackettLuceRewardExperiment(Experiment):
         ]
 
         eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args['dataset_path'] = f"{root_dir}/aigc/llm/datasets/rw-contrastive/valid.jsonl"
+        eval_dataset.args['dataset_path'] = f"{cluster_spec.fileroot}/datasets/rw-contrastive/valid.jsonl"
         eval_dataloader = DataLoader("default_eval", args=dict(batch_size=eval_batch_size_per_device))
 
         backend = ModelBackend(

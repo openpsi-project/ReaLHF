@@ -979,8 +979,8 @@ def generate(
                 Can be saved for continuing generation.
     """
     if attention_mask is None:
-        attention_mask = torch.logical_and(input_ids != tokenizer.pad_token_id,
-                                           input_ids != tokenizer.eos_token_id)
+        attention_mask = torch.logical_and(input_ids != tokenizer.pad_token_id, input_ids
+                                           != tokenizer.eos_token_id)
     if (k_caches is None) != (v_caches is None) or (k_caches is None) != (cache_seqlens is None):
         raise ValueError("k_cache, v_cache, cache_seqlens must be all None or all not None")
     device = input_ids.device

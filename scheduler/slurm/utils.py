@@ -8,9 +8,12 @@ import logging
 import math
 import os
 import shutil
+import socket
 import subprocess
 
+from base.cluster import spec as cluster_spec
 from scheduler.client import JobException, JobInfo, JobState
+import base.cluster
 
 logger = logging.getLogger("scheduler.slurm.utils")
 
@@ -38,7 +41,7 @@ STATUS_MAPPING = {
     "DEADLINE": JobState.COMPLETED,
     "TIMEOUT": JobState.COMPLETED
 }
-LOG_BASE_PATH = f"/data/aigc/llm/logs/{getpass.getuser()}"
+LOG_BASE_PATH = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}"
 
 
 class SlurmResourceNotEnoughException(Exception):
@@ -548,32 +551,7 @@ def available_hostnames(
         if hn not in all_hostnames:
             raise ValueError(f"Invalid host name: {hn}. Available host names: {all_hostnames}.")
 
-    def _filter_node_type(node_type, node_name):
-        if node_type is not None:
-            if not isinstance(node_type, list):
-                node_type = [node_type]
-            nt_condition = []
-            for nt in node_type:
-                if nt == 'g1' and 'frl1g' not in node_name:
-                    cond = False
-                elif nt == 'g2' and 'frl2g' not in node_name:
-                    cond = False
-                elif nt == 'g8' and 'frl8g' not in node_name:
-                    cond = False
-                elif nt == 'a100' and 'frl8a' not in node_name and 'frl4a' not in node_name:
-                    cond = False
-                elif nt == 'a800' and "YL-com" not in node_name:
-                    cond = False
-                elif nt not in ['g1', 'g2', 'g8', 'a100', 'a800']:
-                    raise ValueError("Unknown node type.")
-                else:
-                    cond = True
-                nt_condition.append(cond)
-            return any(nt_condition)
-        else:
-            return True
-
-    return list(filter(lambda x: _filter_node_type(node_type, x), valid_hostnames))
+    return list(filter(lambda x: base.cluster.node_name_is_node_type(x, node_type), valid_hostnames))
 
 
 def get_all_node_resources() -> Dict[str, SlurmResource]:
@@ -602,10 +580,7 @@ def get_all_node_resources() -> Dict[str, SlurmResource]:
                 ctres = _parse_output_tres_line(l)
             if l.startswith("AllocTRES"):
                 atres = _parse_output_tres_line(l)
-        if "8a" in node_name or "4a" in node_name or "YL-com" in node_name:
-            ctres.gpu_type = atres.gpu_type = "tesla"
-        else:
-            ctres.gpu_type = atres.gpu_type = "geforce"
+        ctres.gpu_type = atres.gpu_type = base.cluster.spec.gpu_type_from_node_name(node_name)
         rres = ctres - atres
         if rres.valid():
             all_rres[node_name] = rres
@@ -666,7 +641,9 @@ def allocate_resources(infos: List[SlurmLaunchInfo],
 
 def show_tesla():
     all_rres = get_all_node_resources()
-    for k in available_hostnames(node_type=["a100"]):
+    hostname = socket.gethostname()
+    for k in available_hostnames(
+            node_type=["a100" if "YL" not in hostname and "QH" not in hostname else "a800"]):
         print(k, all_rres[k])
 
 

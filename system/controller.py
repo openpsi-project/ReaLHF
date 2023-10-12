@@ -14,6 +14,7 @@ import traceback
 import ray
 import ray.util.queue as rq
 
+from base.cluster import spec as cluster_spec
 from system import load_worker, WORKER_TYPES
 from system.worker_base import WorkerServerStatus as Wss
 import api.config
@@ -62,7 +63,7 @@ class Controller:
         logger.info("Experiment: %s %s", self.experiment_name, self.trial_name)
 
         self.__control = panel
-        self.json_config_file_path = f"/data/aigc/llm/logs/{getpass.getuser()}/{self.experiment_name}_{self.trial_name}"
+        self.json_config_file_path = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}/{self.experiment_name}_{self.trial_name}"
 
     def reconnect(self):
         """Automatically reconnect to workers. And list all jobs to scheduler.

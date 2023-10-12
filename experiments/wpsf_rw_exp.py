@@ -4,6 +4,7 @@ import random
 
 from api.config import *
 from api.ecs import Commands, MasterWorkerECS, ModelQuery, RawDataQuery
+from base.cluster import spec as cluster_spec
 
 
 def rw(
@@ -68,8 +69,7 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = "/data/aigc/llm/checkpoints/4l-starcoder/"
-        # model_path = "/data/aigc/public/starcoder-16bit/"
+        model_path = f"{cluster_spec.fileroot}/checkpoints/4l-starcoder/"
         train_batch_size_per_device = 5
         eval_batch_size_per_device = 2
         max_seq_len = 4096
@@ -83,7 +83,7 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
                 max_n_seqs_per_batch=500,
                 contrastive_dim=contrastive_dim,
                 enforce_one_or_less_pos=True,
-                json_path="/data/aigc/llm/datasets/wps-formula-rw/dataset_train.jsonl",
+                json_path=f"{cluster_spec.fileroot}/datasets/wps-formula-rw/dataset_train.jsonl",
             ),
         )
         dataloader = eval_dataloader = DataLoader('iterable_dataset_loader')
@@ -98,7 +98,8 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
         ]
 
         eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args['dataset_path'] = "/data/aigc/llm/datasets/wps-formula-rw/dataset_val.jsonl"
+        eval_dataset.args[
+            'dataset_path'] = f"{cluster_spec.fileroot}/datasets/wps-formula-rw/dataset_val.jsonl"
         eval_dataset.args['n_tokens_per_batch'] = max_seq_len * eval_batch_size_per_device
 
         backend = ModelBackend(
@@ -131,7 +132,7 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
                 ),
                 lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
                 load_lora_path=
-                "/data/aigc/llm/checkpoints/fw/wpsf-sft-flash-s1/test20230927/default/epoch0step0/lora.bin",
+                f"{cluster_spec.fileroot}/checkpoints/fw/wpsf-sft-flash-s1/test20230927/default/epoch0step0/lora.bin",
                 lora_op_after_creation='squash_init',
             ))
 

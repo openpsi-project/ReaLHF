@@ -2,6 +2,7 @@ import torch
 
 from api.config import *
 from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
+from base.cluster import spec as cluster_spec
 
 
 def rollout(
@@ -158,8 +159,8 @@ class WpsRLHFExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        actor_path = "/data/aigc/llm/checkpoints/4l-starcoder/"
-        rw_lora_head_path = "/data/aigc/llm/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
+        actor_path = f"{cluster_spec.fileroot}/checkpoints/4l-starcoder/"
+        rw_lora_head_path = f"{cluster_spec.fileroot}/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
 
         self.lora_dim = 32
         self.lora_scaling = 32.0
@@ -175,7 +176,7 @@ class WpsRLHFExperiment(Experiment):
         dataset = Dataset(
             'excel_prompt',
             args=dict(
-                dataset_path="/data/aigc/llm/datasets/wps-prompts/train-small.jsonl",
+                dataset_path=f"{cluster_spec.fileroot}/datasets/wps-prompts/train-small.jsonl",
                 max_seq_len=max_prompt_len,
             ),
         )
