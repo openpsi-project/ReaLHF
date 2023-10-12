@@ -174,8 +174,6 @@ class ModelWorker:
     cudnn_deterministic: bool = False
     cuda_cache_cleanliness: bool = True
     cuda_cache_clear_freq: int = 10
-    # ccc_freq_secs: Optional[float] = None  # ccc=clean cuda cache
-    # ccc_freq_steps: Optional[int] = None
     worker_info: Optional[WorkerInformation] = None
 
 

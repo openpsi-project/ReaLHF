@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import transformers
+import torch.utils.checkpoint
 
 from impl.model.utils.data import (build_packed_inputs, mask_eos_token, repeat_kv,
                                    TensorDataclassToTupleInterface, unpack_tensor, upcast_masked_softmax,
@@ -371,6 +372,7 @@ class FlashMQATBlock(nn.Module):
                 y.cache_seqlens,
                 x.attention_mask,
                 x.max_seqlen,
+                use_reentrant=True,
             )
         else:
             attn_out, k, v = self.attn(

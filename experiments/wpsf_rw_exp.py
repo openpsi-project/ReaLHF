@@ -28,7 +28,7 @@ def rw(
 
 class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
 
-    def __init__(self, n_models=1, seed=1, total_train_epochs=4):
+    def __init__(self, n_models=1, seed=1, total_train_epochs=4, benchmark_only=False):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -42,6 +42,9 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
         self.seed = seed
 
         self.total_train_epochs = total_train_epochs
+        self.benchmark_only = benchmark_only
+        if benchmark_only:
+            self.n_models = self.n_data_workers = 1
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -62,14 +65,18 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    node_type="a100",
                     mem=60000,
                 ),
             ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = f"{cluster_spec.fileroot}/checkpoints/4l-starcoder/"
+        if self.benchmark_only:
+            model_path = f"{cluster_spec.fileroot}/checkpoints/1l-starcoder/"
+        else:
+            model_path = f"{cluster_spec.fileroot}/checkpoints/starcoder/"
+        sft_lora_path = f"{cluster_spec.fileroot}/checkpoints/fw/wpsf-sft-flash-s1/test20230927/default/epoch0step0/lora.bin"
+
         train_batch_size_per_device = 5
         eval_batch_size_per_device = 2
         max_seq_len = 4096
@@ -121,20 +128,18 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
             ),
         )
 
-        model = Model(
-            "flash_mqat_critic_lora",
-            args=dict(
-                model_path=model_path,
-                from_type='starcoder',
-                lora_module_kwargs=dict(
-                    lora_dim=self.lora_dim,
-                    lora_scaling=self.lora_scaling,
-                ),
-                lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
-                load_lora_path=
-                f"{cluster_spec.fileroot}/checkpoints/fw/wpsf-sft-flash-s1/test20230927/default/epoch0step0/lora.bin",
-                lora_op_after_creation='squash_init',
-            ))
+        model = Model("flash_mqat_critic_lora",
+                      args=dict(
+                          model_path=model_path,
+                          from_type='starcoder',
+                          lora_module_kwargs=dict(
+                              lora_dim=self.lora_dim,
+                              lora_scaling=self.lora_scaling,
+                          ),
+                          lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
+                          load_lora_path=sft_lora_path if not self.benchmark_only else None,
+                          lora_op_after_creation='squash_init',
+                      ))
 
         interface = ModelInterface('flash_plrw')
 

@@ -33,6 +33,7 @@ class LocalSchedulerClient(SchedulerClient):
         cmd: str,
         gpu: int = 0,
         env_vars: Optional[Dict] = None,
+        multiprog: bool = False,
         **kwargs,
     ):
         assert worker_type not in self._jobs
@@ -42,7 +43,11 @@ class LocalSchedulerClient(SchedulerClient):
             available_device_id = self._gpu_counter % len(self._cuda_devices)
             env_vars['CUDA_VISIBLE_DEVICES'] = str(self._cuda_devices[available_device_id])
             self._gpu_counter += 1
-        cmd = ' '.join(str(k) + '=' + str(v) for k, v in env_vars.items()) + ' ' + cmd
+        cmd_envvar = ' '.join(str(k) + '=' + str(v) for k, v in env_vars.items()) + ' '
+        if not multiprog:
+            cmd = cmd_envvar + cmd
+        else:
+            cmd = cmd_envvar + cmd.format()
         logger.info("Starting local process with command: %s", cmd)
         process = subprocess.Popen(cmd, shell=isinstance(cmd, str))
         self._jobs[worker_type] = process
