@@ -29,7 +29,7 @@ def sample_log_uniform(low, high):
 
 class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
-    def __init__(self, n_models=4, seed=1, total_train_epochs=4):
+    def __init__(self, n_models=1, seed=1, total_train_epochs=4):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -142,7 +142,6 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                 stream=streams[i],
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
-                ccc_freq_secs=None,
             ) for i in range(self.n_models)
         ]
 

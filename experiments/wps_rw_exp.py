@@ -8,19 +8,20 @@ import random
 
 from api.config import *
 from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
+from base.cluster import spec as cluster_spec
 
 
-def train_rw(
+def train_plackett_luce_rw(
     commands: Commands,
     model: ModelQuery['default'],
     input_ids: RawDataQuery['input_ids'],
     attention_mask: RawDataQuery['attention_mask'],
-    correctness_labels: RawDataQuery['correctness_labels'],
+    labels: RawDataQuery['labels'],
 ):
     inputs = commands.build_model_inputs(
         input_ids=input_ids,
         attention_mask=attention_mask,
-        correctness_labels=correctness_labels,
+        labels=labels,
     )
     commands.log(model.train_step(inputs))
 
@@ -31,7 +32,7 @@ def sample_log_uniform(low, high):
     return math.exp(low + (high - low) * random.random())
 
 
-class WpsRewardModelingExperiment(Experiment):
+class WpsPlackettLuceRewardExperiment(Experiment):
 
     def __init__(
         self,
@@ -128,143 +129,6 @@ class WpsRewardModelingExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        assert False
-        root_dir = "/data"
-        model_path = f"{root_dir}/aigc/llm/checkpoints/starcoder-wps-best/"
-        train_batch_size_per_device = 2
-        eval_batch_size_per_device = 12
-        max_seq_len = 512
-
-        # with open(f"{root_dir}/aigc/llm/datasets/rw-unpaired/train.jsonl", 'r') as f:
-        #     data = [json.loads(ff) for ff in f]
-        #     n_pos = len([d for d in data if d['correctness_label']])
-        #     n_neg = len(data) - n_pos
-        #     pos_weight = n_neg / n_pos
-        # print(pos_weight)
-        pos_weight = 2.044542447629548
-
-        dataset = Dataset(
-            'excel_reward_modeling_unpaired',
-            args=dict(
-                dataset_path=f"{root_dir}/aigc/llm/datasets/rw-unpaired/train.jsonl",
-                max_seq_len=max_seq_len,
-            ),
-        )
-        dataloader = DataLoader(
-            'default',
-            args=dict(
-                shuffle=True,
-                drop_last=False,
-                batch_size=train_batch_size_per_device * self.n_models // self.n_data_workers,
-            ),
-        )
-        data_worker = [
-            DataWorker(
-                tokenizer_name_or_path=model_path,
-                datasets=[dataset],
-                stream=RequestReplyStream(f"data{i}"),
-                dataloader=dataloader,
-                seed=self.seed,
-            ) for i in range(self.n_data_workers)
-        ]
-
-        eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args['dataset_path'] = f"{root_dir}/aigc/llm/datasets/rw-unpaired/valid.jsonl"
-        eval_dataloader = DataLoader("default_eval", args=dict(batch_size=eval_batch_size_per_device))
-
-        backend = ModelBackend(
-            'ds_train',
-            args=dict(
-                optimizer_name='adam',
-                optimizer_config=dict(
-                    lr=self.lora_lr,
-                    weight_decay=self.weight_decay,
-                    eps=1e-5,
-                    betas=self.adam_betas,
-                ),
-                lr_scheduler_type=self.lr_scheduler_type,
-                warmup_steps_proportion=self.warmup_steps_proportion,
-                min_lr_ratio=self.min_lr_ratio,
-                zero_stage=2,
-            ),
-        )
-
-        rw_model = Model(
-            "wps_reward_lora",
-            args=dict(
-                model_name_or_path=model_path,
-                load_state_dict=False,
-                lora_dim=self.lora_dim,
-                lora_module_name='attn',
-                additional_module_names_to_opt=["v_head"],
-                lora_scaling=self.lora_scaling,
-            ),
-        )
-
-        interface = ModelInterface('wps_reward_unpaired', args=dict(pos_weight=pos_weight))
-
-        streams = [RequestReplyStream(f"model{i}") for i in range(self.n_models)]
-
-        model_worker = [
-            ModelWorker(
-                seed=self.seed,
-                model=rw_model,
-                backend=backend,
-                interface=interface,
-                model_name='default',
-                stream=streams[i],
-                eval_datasets=[dataset],
-                eval_dataloader=eval_dataloader,
-            ) for i in range(self.n_models)
-        ]
-
-        ecs = MasterWorkerECS(model_worker).add_systems([train_rw])
-
-        cfg = ExperimentConfig(
-            total_train_epochs=self.total_train_epochs,
-            save_frequency_steps=None,
-            save_frequency_epochs=None,
-            save_frequency_seconds=None,
-            eval_frequency_epochs=1,
-            master_ecs=ecs,
-            data_worker=data_worker,
-            model_worker=model_worker,
-        )
-        if not self.enable_sweep:
-            cfg.save_frequency_epochs = 1
-        return cfg
-
-
-seeds = range(1, 6)
-for s in seeds:
-    exp_name = f"wps-rw-s{s}"
-    register_experiment(
-        exp_name,
-        functools.partial(
-            WpsRewardModelingExperiment,
-            seed=s,
-        ),
-    )
-
-
-def train_plackett_luce_rw(
-    commands: Commands,
-    model: ModelQuery['default'],
-    input_ids: RawDataQuery['input_ids'],
-    attention_mask: RawDataQuery['attention_mask'],
-    labels: RawDataQuery['labels'],
-):
-    inputs = commands.build_model_inputs(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        labels=labels,
-    )
-    commands.log(model.train_step(inputs))
-
-
-class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
-
-    def initial_setup(self) -> ExperimentConfig:
         self.weight_decay = 0.1
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -275,8 +139,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
         self.min_lr_ratio = 0.0
         self.total_train_epochs = 8
 
-        root_dir = "/data"
-        model_path = f"{root_dir}/aigc/llm/checkpoints/4l-starcoder/"
+        model_path = f"{cluster_spec.fileroot}/checkpoints/4l-starcoder/"
         train_batch_size_per_device = 1
         eval_batch_size_per_device = 12
         max_seq_len = 512
@@ -285,7 +148,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
         dataset = Dataset(
             'wps_reward_plackett_luce',
             args=dict(
-                dataset_path=f"{root_dir}/aigc/llm/datasets/rw-contrastive/train.jsonl",
+                dataset_path=f"{cluster_spec.fileroot}/datasets/rw-contrastive/train.jsonl",
                 max_seq_len=max_seq_len,
                 contrastive_dim=contrastive_dim,
             ),
@@ -309,7 +172,7 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
         ]
 
         eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args['dataset_path'] = f"{root_dir}/aigc/llm/datasets/rw-contrastive/valid.jsonl"
+        eval_dataset.args['dataset_path'] = f"{cluster_spec.fileroot}/datasets/rw-contrastive/valid.jsonl"
         eval_dataloader = DataLoader("default_eval", args=dict(batch_size=eval_batch_size_per_device))
 
         backend = ModelBackend(
@@ -335,16 +198,16 @@ class WpsPlackettLuceRewardExperiment(WpsRewardModelingExperiment):
             args=dict(
                 model_name_or_path=model_path,
                 from_pretrained_kwargs=dict(torch_dtype=torch.float16),
-                quantization_kwargs=dict(load_in_8bit=True),
+                # quantization_kwargs=dict(load_in_8bit=True),
                 lora_module_kwargs=dict(
                     lora_dim=self.lora_dim,
                     lora_scaling=self.lora_scaling,
-                    bnb_8bit_kwargs=dict(
-                        trainable=True,
-                        threshold=6.0,
-                    ),
+                    # bnb_8bit_kwargs=dict(
+                    #     trainable=True,
+                    #     threshold=6.0,
+                    # ),
                 ),
-                lora_key_to_replace='attn',
+                lora_keys_to_replace='attn',
                 additional_module_names_to_opt=["v_head"],
             ),
         )

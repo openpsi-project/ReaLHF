@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from api.ecs import Commands, DataQuery, ModelQuery, RawDataQuery
+from base.cluster import spec as cluster_spec
 import api.config as config_pkg
 import api.data as data_api
 import api.model as model_api
@@ -131,8 +132,7 @@ def wrap_func(
 
 
 class MasterWorker(worker_base.Worker):
-    # MODEL_SAVE_ROOT = f"/data/aigc/llm/{getpass.getuser()}/checkpoints"
-    MODEL_SAVE_ROOT = f"/data/aigc/llm/checkpoints/{getpass.getuser()}"
+    MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
     os.makedirs(MODEL_SAVE_ROOT, exist_ok=True)
 
     def __init__(self, server=None):
@@ -164,8 +164,9 @@ class MasterWorker(worker_base.Worker):
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
         self.__model_streams: Dict[str, List[request_reply_stream.NameResolvingRequestClient]] = {
-            model_name:
-            [request_reply_stream.make_request_client(config.worker_info, s) for s in this_model_streams]
+            model_name: [
+                request_reply_stream.make_request_client(config.worker_info, s) for s in this_model_streams
+            ]
             for model_name, this_model_streams in config.model_streams.items()
         }
         self.__data_streams: List[request_reply_stream.NameResolvingRequestClient] = [

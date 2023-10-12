@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger("scheduler")
 
 
-class TaskState(enum.Enum):
+class JobState(enum.Enum):
     NOT_FOUND = 0
     PENDING = 1
     RUNNING = 2
@@ -22,24 +22,24 @@ class SchedulerError(Exception):
     pass
 
 
-class TaskException(Exception):
+class JobException(Exception):
 
-    def __init__(self, job_name, task_name, host, reason: TaskState):
-        super().__init__(f"Task {job_name}:{task_name} {reason} at node {host}")
-        self.job_name = job_name
-        self.task_name = task_name
+    def __init__(self, run_name, worker_type, host, reason: JobState):
+        super().__init__(f"Job {run_name}:{worker_type} {reason} at node {host}")
+        self.run_name = run_name
+        self.worker_type = worker_type
         self.host = host
         self.reason = reason
 
 
 @dataclasses.dataclass
-class TaskInfo:
+class JobInfo:
     name: str
-    state: TaskState
-    host: str = None  # The host on which the task is/was running. None if the task had not run.
+    state: JobState
+    host: str = None  # The host on which the job is/was running. None if the job had not run.
     submit_time: str = None
     start_time: str = None
-    slurm_id: str = None  # Slurm only. The Slurm id of the task.
+    slurm_id: str = None  # Slurm only. The Slurm id of the job.
 
 
 class SchedulerClient:
@@ -47,31 +47,31 @@ class SchedulerClient:
     def __init__(self, expr_name, trial_name):
         self.expr_name = expr_name
         self.trial_name = trial_name
-        self.job_name = f"{expr_name}_{trial_name}"
+        self.run_name = f"{expr_name}_{trial_name}"
 
-    def submit(self, task_name, cmd, **kwargs):
-        """Submits a task to the scheduler. Raises exception if the task is already running.
+    def submit(self, worker_type, cmd, **kwargs):
+        """Submits a job to the scheduler. Raises exception if the job is already running.
 
         Args:
-            task_name: Name of the task. The job name is specified when initializing the client.
-            cmd (str or List[str]): The command of the task process. If this is str, the command is parsed by
+            worker_type: The worker type to be submitted. The job name is specified when initializing the client.
+            cmd (str or List[str]): The command of this job. If this is str, the command is parsed by
                 shell; otherwise it is executed directly.
         """
         raise NotImplementedError()
 
-    def submit_array(self, task_name, cmd, count, **kwargs):
-        """Submits an array of tasks to the scheduler.
+    def submit_array(self, worker_type, cmd, count, **kwargs):
+        """Submits an array of jobs to the scheduler.
 
         Args:
-            task_name: The tasks share the same name.
-            cmd: Command template of the tasks that may contain an "{index}" format placeholder.
-            count: Number of tasks. The indices of the tasks shall be 0..count-1.
+            worker_type: The worker type to be submitted, shared by all jobs.
+            cmd: Command template of the jobs that may contain an "{index}" format placeholder.
+            count: Number of jobs. The indices of the jobs shall be 0..count-1.
         """
         for index in range(count):
-            self.submit(task_name + "_" + str(index), cmd.format(index=index, count=count), **kwargs)
+            self.submit(worker_type + "_" + str(index), cmd.format(index=index, count=count), **kwargs)
 
-    def stop(self, task_name):
-        """Stops a running task. Raises exception if there is no such task, but passes if the task has stopped
+    def stop(self, job_name):
+        """Stops a running job. Raises exception if there is no such job, but passes if the job has stopped
         either successfully or not.
         """
         raise NotImplementedError()
@@ -81,30 +81,30 @@ class SchedulerClient:
         """
         raise NotImplementedError()
 
-    def find(self, task_name) -> Optional[TaskInfo]:
-        """Gets the status of a task of this job.
+    def find(self, job_name) -> Optional[JobInfo]:
+        """Gets the status of a job of this job.
 
         Args:
-            task_name: Name of the task.
+            job_name: Name of the job.
 
         Returns:
-            A TaskInfo if the task is found, or None otherwise.
+            A JobInfo if the job is found, or None otherwise.
         """
         raise NotImplementedError()
 
-    def find_all(self, task_name_regex=".*") -> List[TaskInfo]:
-        """Finds tasks.
+    def find_all(self, job_name_regex=".*") -> List[JobInfo]:
+        """Finds jobs.
 
         Args:
-            task_name_regex: Task name regex.
+            job_name_regex: job name regex.
 
         Returns:
-            A list of found TaskInfo.
+            A list of found JobInfo.
         """
         raise NotImplementedError()
 
     def wait(self, timeout=None, **kwargs):
-        """Waits until all tasks submitted via this client instance finish.
+        """Waits until all jobs submitted via this client instance finish.
         """
         raise NotImplementedError()
 
@@ -112,7 +112,8 @@ class SchedulerClient:
 def remote_worker_cmd(expr_name, trial_name, debug, worker_type):
     # requires information in scheduler package
     return f"python3 {'' if debug else '-O'} -m apps.remote worker -w {worker_type} " \
-           f"-e {expr_name} -f {trial_name} -i {{group_id}} -o {{group_offset}} -g {{group_size}} -r {{group_index}}"
+           f"-e {expr_name} -f {trial_name} -i {{jobstep_id}} -g {{n_jobsteps}} -r {{worker_submission_index}} " \
+           f"-p {{wprocs_per_jobstep}} -j {{wprocs_in_job}} -o {{wproc_offset}}"
 
 
 def setup_cmd(expr_name, trial_name, debug):
