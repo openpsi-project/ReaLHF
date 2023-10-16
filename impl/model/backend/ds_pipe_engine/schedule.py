@@ -375,6 +375,11 @@ class TrainSchedule(PipeSchedule):
 
             cmds = []
 
+            # First/last stage loads
+            if self.stage_id == 0 or self.stage_id == self.stages - 1:
+                if is_forward and self._valid_micro_batch(micro_batch_id):
+                    cmds.append(LoadMicroBatch(curr_buffer))
+
             # Exchange activations
             if is_forward:
                 if self._valid_micro_batch(prev_micro_batch_id) and self._valid_stage(self.prev_stage):
@@ -386,11 +391,6 @@ class TrainSchedule(PipeSchedule):
                     cmds.append(RecvGrad(curr_buffer))
                 if self._valid_micro_batch(prev_micro_batch_id) and self._valid_stage(self.next_stage):
                     cmds.append(SendActivation(prev_buffer))
-
-            # First/last stage loads
-            if self.stage_id == 0 or self.stage_id == self.stages - 1:
-                if is_forward and self._valid_micro_batch(micro_batch_id):
-                    cmds.append(LoadMicroBatch(curr_buffer))
 
             # Computation
             if self._valid_micro_batch(micro_batch_id):

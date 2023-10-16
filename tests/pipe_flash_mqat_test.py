@@ -60,10 +60,9 @@ def print_rank(s, rank):
 
 def main(worker_index, b):
     device = setup_gpu(worker_index, b)
-    from impl.model.backend.pipe_engine import PipeDataParallelTopology
+    from impl.model.utils.data import build_packed_inputs, unpack_tensor
     from tests.pipe_utils import (get_example_batch, get_finetune_spec, get_pipe_backend, get_pipe_model,
                                   get_simple_interface)
-    import impl.model.nn.pipe_nn
 
     # os.environ["NCCL_IB_DISABLE"] = "1"
     # os.environ["NCCL_P2P_DISABLE"] = "1"
@@ -89,15 +88,17 @@ def main(worker_index, b):
 
     print(f"rank {worker_index}: model initialized")
     input_ids, attention_mask = get_example_batch(model.tokenizer, device, 4, 0, 1)
-
+    packed_input_ids, cu_seqlens, max_seqlen = build_packed_inputs(input_ids, attention_mask)
+    prompt_mask = torch.zeros_like(packed_input_ids)
     data = NamedArray(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
+        packed_input_ids=packed_input_ids,
+        cu_seqlens=cu_seqlens,
+        prompt_mask=prompt_mask,
     )
-    print(f"rank {worker_index}: begin inference")
-    outputs = interface.inference(model, data)
-    print(f"rank {worker_index}: end inference")
-    print(f"rank {worker_index}: inference outputs: {outputs}")
+    print(f"rank {worker_index}: begin train_step")
+    outputs = interface.train_step(model, data)
+    print(f"rank {worker_index}: end train_step")
+    print(f"rank {worker_index}: train_step outputs: {outputs}")
 
 
 if __name__ == "__main__":

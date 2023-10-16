@@ -61,7 +61,7 @@ class PackedParallelDataRouter(ParallelDataRouter):
         if 'input_lens' not in src:
             src['input_lens'] = torch.diff(src['cu_seqlens'])
 
-        print(src['input_lens'])
+        # print(src['input_lens'])
         partitions = datapack.min_abs_diff_partition(src['input_lens'].cpu().numpy().astype(np.int64), n_dp)
 
         input_lens: List[torch.IntTensor] = [src['input_lens'][start:end] for start, end in partitions]

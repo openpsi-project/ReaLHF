@@ -2,7 +2,7 @@ import random
 
 import torch
 
-from impl.model.backend.pipe_engine import PipeDataParallelTopology
+from impl.model.backend.ds_pipe_engine import PipeDataParallelTopology
 import api.config as config_package
 import api.model
 
@@ -16,7 +16,7 @@ DATA_DEGREE = 1
 
 
 def get_simple_interface():
-    return api.model.make_interface(config_package.ModelInterface(type_="simple", args=dict()))
+    return api.model.make_interface(config_package.ModelInterface(type_="pipe_flash_sft", args=dict()))
 
 
 def get_finetune_spec(bs_per_device=4):
@@ -40,7 +40,7 @@ def get_pipe_backend():
                                               min_lr_ratio=0.0,
                                               zero_stage=1,
                                               engine_type="pipe",
-                                              num_pipeline_stages=3)))
+                                              num_pipeline_stages=PIPE_DEGREE)))
 
 
 def get_pipe_model(model_path, device):

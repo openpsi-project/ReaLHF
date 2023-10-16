@@ -7,7 +7,8 @@ import torch.utils.data
 import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
-from impl.model.utils.data import gather_packed_shifted_log_probs
+from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.utils.data import gather_packed_shifted_log_probs, PipeCacheData, PipeTransferData
 from impl.model.utils.save import save_hf_or_lora_model
 import api.data
 import api.model
@@ -36,36 +37,22 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
         n_seqs = (cu_seqlens == total_seq_len).nonzero()[0][0]
         cu_seqlens = cu_seqlens[:n_seqs + 1]  # shape [bs + 1]
         prompt_mask: torch.BoolTensor = data['prompt_mask'].squeeze()  # shape [tot_seqlen]
-        module: deepspeed.DeepSpeedEngine = model.module
+        module: DeepSpeedPipelineEngine = model.module
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
         module.train()
 
-        fwd_output_list = module(packed_input_ids=packed_input_ids,
-                                 cu_seqlens=cu_seqlens,
-                                 max_seqlen=max_seqlen,
-                                 prompt_mask=prompt_mask)
-        losses = None
-        if fwd_output_list is not None:
-            losses = []
-            for fwd_output in fwd_output_list:
-                logits = fwd_output.logits.float()
-                packed_input_ids = fwd_output.packed_input_ids
-                cu_seqlens = fwd_output.cu_seqlens
-                prompt_mask = fwd_output.prompt_mask
-                loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask.float())
-                losses.append(loss)
+        module.set_loss_fn(compute_packed_sft_loss)
 
-        module.backward(losses)
-        module.step()
+        agg_loss = module.train_batch(packed_input_ids=packed_input_ids,
+                                      cu_seqlens=cu_seqlens,
+                                      prompt_mask=prompt_mask)
+
         cur_epoch = model.version.epoch
         model.inc_version()
         if model.version.epoch > cur_epoch:
             module.tput_timer.update_epoch_count()
-        if loss:
-            return dict(loss=loss.detach().item())
-        else:
-            return dict(loss=None)
+        return dict(loss=agg_loss)
 
     def save(self, model: api.model.Model, save_dir: str):
         save_hf_or_lora_model(model, save_dir)
@@ -89,7 +76,7 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
         prompt_mask: torch.BoolTensor = data['prompt_mask'].squeeze()  # shape [tot_seqlen]
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
-        fwd_output = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+        fwd_output = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, prompt_mask=prompt_mask)
         if fwd_output is not None:
             logits = fwd_output.logits.float()
 

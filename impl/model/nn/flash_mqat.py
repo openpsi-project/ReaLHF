@@ -10,7 +10,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import transformers
 
-from impl.model.utils.data import (build_packed_inputs, mask_eos_token, repeat_kv,
+from impl.model.utils.data import (build_packed_inputs, DuckGenerationOutput, DuckModelOutput, mask_eos_token,
+                                   PipeCacheData, PipeTransferData, repeat_kv,
                                    TensorDataclassToTupleInterface, unpack_tensor, upcast_masked_softmax,
                                    upcast_softmax)
 from impl.model.utils.logits_warper import top_k_top_p_logits
@@ -50,70 +51,6 @@ class GenerationConfig:
     top_p: float = 1.0
     top_k: int = 0
     num_samples: int = 1
-
-
-@dataclasses.dataclass
-class PipeTransferData(TensorDataclassToTupleInterface):
-    """Data structure for transferring data between stages.
-
-    Each pipeline stage has exactly one PipeTransferData as the input and the output,
-    no matter how many layers are in this stage.
-
-    Attributes:
-        pp_input: The input to the current stage. Usually hidden states
-            with shape [bs, seq_len, hidden_dim].
-        pp_output: The output of the current stage, also the input to the next stage.
-            Usually hidden states with shape [bs, seq_len, hidden_dim].
-        cu_seqlens: The cumulative sequence lengths of packed input_ids.
-            Used by flash_attn_varlen_func. Will not be used during generation.
-            It's configuration-like data that must be transfered from the first stage
-            to the last. Shape [bs + 1].
-        max_seqlen: The maximum sequence length of packed input_ids.
-            Used by flash_attn_varlen_func. Will not be used during generation.
-            It's configuration-like data that must be transfered from the first stage
-            to the last.
-        attention_mask: The attention mask of the input, the same as huggingface transformers.
-            Used by torch_attn_func to examine the outputs of PyTorch attention and flash
-            attention are the same. Only for debugging. Shape [bs, seq_len].
-    """
-    pp_input: Optional[torch.Tensor] = None
-    pp_output: Optional[torch.Tensor] = None
-
-    # The followings are "configuration"-like data that should be passed across all stages.
-    cu_seqlens: Optional[torch.Tensor] = None
-    max_seqlen: Optional[int] = None
-
-    # Only used for debugging
-    attention_mask: Optional[torch.Tensor] = None
-
-
-@dataclasses.dataclass
-class PipeCacheData(TensorDataclassToTupleInterface):
-    """Data structure for caching data locally that will not be trasferred.
-    
-    Each layer has exactly one PipeCacheData as the input.
-    If a pipeline stage has multiple layers, a list of PipeCacheData should be passed
-    as the input. The cached tensors will be changed in-place.
-
-    Attributes:
-        input_ids: The input token ids. Used only at the first stage.
-            Can be packed with shape [total_seq_len] or unpacked with shape [bs, seq].
-        position_ids: Input position IDs. Can be resolved automatically in most cases.
-            Used only at the first stage. The same shape as input_ids.
-            If None, will be resolved automatically.
-        k_cache: Key cache used for generation, shape [bs, max_seq, n_kv_heads, head_dim].
-            Note that this is the cache for a specific layer, not for all layers.
-        v_cache: Value cache used for generation, shape [bs, max_seq, n_kv_heads, head_dim].
-            Note that this is the cache for a specific layer, not for all layers.
-        cache_seqlens: The sequence lengths of the cached tokens. Used for generation. Shape [bs]. 
-    """
-    # Only cached in the first stage.
-    input_ids: Optional[torch.Tensor] = None
-    position_ids: Optional[torch.Tensor] = None
-    # Cached in each transformer layer.
-    k_cache: Optional[torch.Tensor] = None
-    v_cache: Optional[torch.Tensor] = None
-    cache_seqlens: Optional[torch.Tensor] = None
 
 
 def torch_attn_func(
@@ -411,7 +348,6 @@ class VocabPositionEmbedding(nn.Module):
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[Union[str, torch.device]] = None):
         super().__init__()
-        print(device)
         self.wte = nn.Embedding(vocab_size, hidden_dim, dtype=dtype, device=device)
         self.wpe = nn.Embedding(n_positions, hidden_dim, dtype=dtype, device=device)
         self.embed_drop = nn.Dropout(embed_pdrop)
@@ -444,6 +380,10 @@ class VocabPositionEmbedding(nn.Module):
             lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             y.position_ids = torch.cat(
                 [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
+            # print(f"flash_mqat.py y.position_ids.shape={y.position_ids.shape} "
+            #       f"y.input_ids.shape={y.input_ids.shape}\n"
+            #       f"y.position_ids={y.position_ids}"
+            #       f"y.input_ids={y.input_ids}")
             assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
             assert y.position_ids.shape == y.input_ids.shape
 
@@ -629,18 +569,6 @@ class FlashMQATForCausalLM(nn.Module):
         model = cls(config, dtype, device)
         model.load_state_dict(state_dict)
         return model
-
-
-@dataclasses.dataclass
-class DuckModelOutput:
-    logits: Optional[torch.Tensor] = None
-
-
-@dataclasses.dataclass
-class DuckGenerationOutput:
-    sequences: torch.Tensor
-    scores: Optional[torch.Tensor] = None
-    logits_mask: Optional[torch.Tensor] = None
 
 
 class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):

@@ -5,41 +5,11 @@ import torch
 import torch.nn as nn
 import transformers
 
-from impl.model.backend.pipe_engine import (LayerSpec, PipeDataParallelTopology, PipelineModule,
-                                            ProcessTopology)
+from impl.model.backend.ds_pipe_engine import (LayerSpec, PipeDataParallelTopology, PipelineModule,
+                                               ProcessTopology)
 from impl.model.nn.flash_mqat import *
 from impl.model.utils.data import tensor_data_list_to_tuple, tuple_to_tensor_data_list
 import api.model
-
-# in pipeline transformer model, the entire module is divided into stages with a minimum unit of a wrapped module
-# the wrapped module should take a tuple of tensors as input and output a tuple of tensors
-# the wrapped module should be a subclass of nn.Module
-
-
-class WrappedPipeLayer(nn.Module):
-
-    def __init__(self, inner_module: nn.Module):
-        super().__init__()
-        self.inner_module = inner_module
-
-    def forward(self, forward_input: Tuple[torch.Tensor, ...],
-                other_input: Tuple[torch.Tensor, ...]) -> Tuple[torch.Tensor, ...]:
-        args = tuple_to_tensor_data_list([forward_input, other_input])
-        out = self.inner_module(*args)
-        return tensor_data_list_to_tuple(out)
-
-
-class WrappedPipeModule(PipelineModule):
-
-    def __init__(self, modules: List[WrappedPipeLayer], topology: PipeDataParallelTopology):
-        self.layer_specs = []
-        for module in modules:
-            self.layer_specs.append(LayerSpec(WrappedPipeLayer, module))
-
-        def compute_loss(output, label):
-            return output.loss
-
-        super().__init__(layers=self.layer_specs, loss_fn=compute_loss, topology=topology)
 
 
 def make_causal_flash_mqat_pipe_module(
@@ -48,51 +18,58 @@ def make_causal_flash_mqat_pipe_module(
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
 ):
-    layers = []
+    layer_specs = []
     # vocab pos embedding
-    embedding_layer = VocabPositionEmbedding(config.vocab_size,
-                                             config.n_positions,
-                                             config.hidden_dim,
-                                             config.embd_pdrop,
-                                             dtype=dtype,
-                                             device=device)
-    layers.append(embedding_layer)
+    embedding_layer = LayerSpec(VocabPositionEmbedding,
+                                config.vocab_size,
+                                config.n_positions,
+                                config.hidden_dim,
+                                config.embd_pdrop,
+                                dtype=dtype,
+                                device=device)
+
+    layer_specs.append(embedding_layer)
 
     for i in range(config.n_layers):
-        flash_mqat_block = FlashMQATBlock(config,
-                                          layer_index=i,
-                                          output_layernorm=(i == config.n_layers - 1),
-                                          ckpt_attn=(i > 0 and config.ckpt_attn),
-                                          ckpt_mlp=(i > 0 and config.ckpt_mlp),
-                                          dtype=dtype,
-                                          device=device)
-        layers.append(flash_mqat_block)
+        flash_mqat_block = LayerSpec(FlashMQATBlock,
+                                     config,
+                                     layer_index=i,
+                                     output_layernorm=(i == config.n_layers - 1),
+                                     ckpt_attn=(i > 0 and config.ckpt_attn),
+                                     ckpt_mlp=(i > 0 and config.ckpt_mlp),
+                                     dtype=dtype,
+                                     device=device)
+        layer_specs.append(flash_mqat_block)
 
-    lm_head = LanguageModelHead(
+    lm_head = LayerSpec(
+        LanguageModelHead,
         config.hidden_dim,
         config.vocab_size,
         bias=False,
         device=device,
         dtype=dtype,
     )
-    layers.append(lm_head)
+    layer_specs.append(lm_head)
 
     layer_key_mappings = {
-        "transformer.wte.": "0.inner_module.wte.",
-        "transformer.wpe.": "0.inner_module.wpe.",
+        "transformer.wte.": "0.wte.",
+        "transformer.wpe.": "0.wpe.",
     }
     for i in range(config.n_layers):
-        layer_key_mappings[f"transformer.h.{i}.attn.c_proj."] = f"{i+1}.inner_module.attn.c_proj."
-        layer_key_mappings[f"transformer.h.{i}.mlp.c_proj."] = f"{i+1}.inner_module.mlp.c_proj."
-        layer_key_mappings[f"transformer.h.{i}.mlp.c_fc."] = f"{i+1}.inner_module.mlp.c_fc."
-        layer_key_mappings[f"transformer.h.{i}.ln_1."] = f"{i+1}.inner_module.attn.c_attn.ln."
-        layer_key_mappings[f"transformer.h.{i}.ln_2."] = f"{i+1}.inner_module.mlp.ln."
-        layer_key_mappings[f"transformer.h.{i}.attn.c_attn."] = f"{i+1}.inner_module.attn.c_attn.linear."
+        layer_key_mappings[f"transformer.h.{i}.attn.c_proj."] = f"{i+1}.attn.c_proj."
+        layer_key_mappings[f"transformer.h.{i}.mlp.c_proj."] = f"{i+1}.mlp.c_proj."
+        layer_key_mappings[f"transformer.h.{i}.mlp.c_fc."] = f"{i+1}.mlp.c_fc."
+        layer_key_mappings[f"transformer.h.{i}.ln_1."] = f"{i+1}.attn.c_attn.ln."
+        layer_key_mappings[f"transformer.h.{i}.ln_2."] = f"{i+1}.mlp.ln."
+        layer_key_mappings[f"transformer.h.{i}.attn.c_attn."] = f"{i+1}.attn.c_attn.linear."
         if i == config.n_layers - 1:
-            layer_key_mappings[f"transformer.ln_f."] = f"{i+1}.inner_module.ln_f."
-    layer_key_mappings["lm_head."] = f"{config.n_layers+1}.inner_module."
+            layer_key_mappings[f"transformer.ln_f."] = f"{i+1}.ln_f."
+    layer_key_mappings["lm_head."] = f"{config.n_layers+1}."
 
-    return WrappedPipeModule(layers, topology), layer_key_mappings
+    def compute_loss(output, label):
+        return output.loss
+
+    return PipelineModule(layers=layer_specs, loss_fn=compute_loss, topology=topology), layer_key_mappings
 
 
 def make_starcoder_flash_mqat_pipe_module(
@@ -118,7 +95,7 @@ def make_starcoder_flash_mqat_pipe_module(
     return make_causal_flash_mqat_pipe_module(config, topology, dtype, device)
 
 
-def load_starcoder_flash_mqat_pipe(module: WrappedPipeModule,
+def load_starcoder_flash_mqat_pipe(module: torch.nn.Module,
                                    layer_key_mappings: Dict[str, str],
                                    model_path: Optional[str] = None):
     try:

@@ -4,6 +4,7 @@
 # DeepSpeed Team
 
 from functools import partial
+from typing import List, Tuple
 import glob
 import os
 import re as regex
@@ -18,6 +19,8 @@ import torch
 import torch.nn as nn
 
 from .topology import PipeDataParallelTopology, PipelineParallelGrid
+from impl.model.utils.data import (data_list_to_tensor_tuple, PipeCacheData, PipeTransferData,
+                                   tensor_tuple_to_data_list)
 
 
 class PipelineError(Exception):
@@ -301,48 +304,18 @@ class PipelineModule(nn.Module):
             raise RuntimeError(f"Partitioning '{layername}' found no valid layers to partition.")
         return idxs
 
-    def forward(self, forward_input, other_inputs):
-        # We need to offset the seed by the microbatch ID. Save it in a local var to
-        # ensure it is preserved in the closure. Otherwise checkpointed forward funcs
-        # will see a different offset.
+    @property
+    def num_layers(self):
+        """ number of layers in current pipeline stage
+        """
+        return len(self.forward_funcs)
 
-        # forward input is a tensor tuple
-        # other inputs should be a list of tensor tuples that are additional inputs of each layer (other than the output of last layer)
-        # other input sequence should match the layers
-
-        self.micro_offset += 1
-        assert isinstance(other_inputs, list), "other_inputs should be a list"
-        assert len(other_inputs) == len(
-            self.forward_funcs), "other_inputs should have the same length as layers"
-
-        # def exec_range_func(start, end):
-        #     ''' Helper function to be used with checkpoint()
-        #     Adapted from torch.utils.checkpoint:checkpoint_sequential()
-        #     '''
-        #     local_micro_offset = self.micro_offset + 1
-
-        #     def exec_func(*inputs):
-        #         # Single tensor inputs need to be unwrapped
-        #         # if len(inputs) == 1:
-        #         #     inputs = inputs[0]
-        #         for idx, (layer, other_input) in enumerate(zip(self.forward_funcs[start:end], other_inputs)):
-        #             self.curr_layer = idx + self._local_start
-        #             if self.seed_layers:
-        #                 new_seed = (self.base_seed * local_micro_offset) + self.curr_layer
-        #                 if self.seed_fn:
-        #                     self.seed_fn(new_seed)
-        #                 else:
-        #                     ds_utils.set_random_seed(new_seed)
-
-        #             inputs = layer(inputs, other_input)
-        #         return inputs
-
-        #     return exec_func
-
-        # func = exec_range_func(0, len(self.forward_funcs))
-
+    def forward(self, forward_input_tuple: Tuple):
+        inputs = tensor_tuple_to_data_list(forward_input_tuple)
+        x: PipeTransferData = inputs[0]
+        ys: List[PipeCacheData] = inputs[1:]
         local_micro_offset = self.micro_offset + 1
-        for idx, (layer, other_input) in enumerate(zip(self.forward_funcs, other_inputs)):
+        for idx, (layer, y) in enumerate(zip(self.forward_funcs, ys)):
             self.curr_layer = idx + self._local_start
             if self.seed_layers:
                 new_seed = (self.base_seed * local_micro_offset) + self.curr_layer
@@ -351,9 +324,15 @@ class PipelineModule(nn.Module):
                 else:
                     ds_utils.set_random_seed(new_seed)
 
-            forward_input = layer(forward_input, other_input)
+            x = layer(x, y)
+            x.pp_input = x.pp_output
 
-        return forward_input
+        if self.stage_id == self.num_stages - 1:
+            # on last stage, set x.pp_input to original input for loss computation
+            x.pp_input = inputs[0].pp_input
+
+        outputs = data_list_to_tensor_tuple([x])
+        return outputs
 
     def _partition_layers(self, method='uniform'):
         num_stages = self._topo.get_dim('pipe')
