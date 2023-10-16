@@ -40,7 +40,7 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
         module: DeepSpeedPipelineEngine = model.module
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
-        module.train()
+        module.eval()
 
         module.set_loss_fn(compute_packed_sft_loss)
 

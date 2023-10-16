@@ -186,7 +186,7 @@ class InferenceSchedule(PipeSchedule):
             # print(f"rank {torch.cuda.current_device()}, step_id: {step_id}, micro_batch_id: {micro_batch_id}, stage_id: {self.stage_id}\n"
             #       f"prev stage id: {self.prev_stage}, next stage id: {self.next_stage} \n"
             #       f"cmds: {cmds} \n")
-            yield cmds
+            yield step_id, micro_batch_id, cmds
 
     def num_pipe_buffers(self):
         """Only two pipeline buffers are required for inferencing.

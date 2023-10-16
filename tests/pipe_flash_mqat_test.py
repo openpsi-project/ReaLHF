@@ -33,8 +33,8 @@ EXPR_NAME = "test"
 TRIAL_NAME = "test"
 MODEL_NAME = "pipedatamodel"
 MODEL_TYPE = "model_worker"
-PIPE_DEGREE = 3
-DATA_DEGREE = 1
+PIPE_DEGREE = 4
+DATA_DEGREE = 2
 
 
 def setup_gpu(worker_index, b):
@@ -71,10 +71,11 @@ def main(worker_index, b):
     logger.info(
         f"WORKER INDEX: {worker_index}; TORCH DIST RANK: {torch.distributed.get_rank()}; CUDA VISIBLE: {cuda_visible}"
     )
-    dp_world_size = 1
-    bs_per_device = 4
+    topo, model = get_pipe_model(model_path, device)
 
-    model = get_pipe_model(model_path, device)
+    dp_worldsize = 2
+    dp_rank = torch.distributed.get_rank() % 2
+
     backend = get_pipe_backend()
     ft_spec = get_finetune_spec()
     interface = get_simple_interface()
@@ -87,7 +88,7 @@ def main(worker_index, b):
     )))
 
     print(f"rank {worker_index}: model initialized")
-    input_ids, attention_mask = get_example_batch(model.tokenizer, device, 4, 0, 1)
+    input_ids, attention_mask = get_example_batch(model.tokenizer, device, 8, dp_rank, dp_worldsize)
     packed_input_ids, cu_seqlens, max_seqlen = build_packed_inputs(input_ids, attention_mask)
     prompt_mask = torch.zeros_like(packed_input_ids)
     data = NamedArray(
@@ -100,13 +101,18 @@ def main(worker_index, b):
     print(f"rank {worker_index}: end train_step")
     print(f"rank {worker_index}: train_step outputs: {outputs}")
 
+    # print(f"rank {worker_index}: begin inference")
+    # outputs = interface.inference(model, data)
+    # print(f"rank {worker_index}: end inference")
+    # print(f"rank {worker_index}: inference outputs: {outputs}")
+
 
 if __name__ == "__main__":
-    b = mp.Barrier(PIPE_DEGREE)
+    b = mp.Barrier(PIPE_DEGREE * DATA_DEGREE)
     # main()
     name_resolve.clear_subtree(names.trial_root(experiment_name=EXPR_NAME, trial_name=TRIAL_NAME))
     os.environ["DLLM_MODE"] = "LOCAL"
-    ps = [mp.Process(target=main, args=(i, b)) for i in range(PIPE_DEGREE)]
+    ps = [mp.Process(target=main, args=(i, b)) for i in range(PIPE_DEGREE * DATA_DEGREE)]
 
     for p in ps:
         p.start()

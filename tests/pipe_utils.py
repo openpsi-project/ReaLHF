@@ -11,8 +11,8 @@ EXPR_NAME = "test"
 TRIAL_NAME = "test"
 MODEL_NAME = "pipedatamodel"
 MODEL_TYPE = "model_worker"
-PIPE_DEGREE = 3
-DATA_DEGREE = 1
+PIPE_DEGREE = 4
+DATA_DEGREE = 2
 
 
 def get_simple_interface():
@@ -44,7 +44,7 @@ def get_pipe_backend():
 
 
 def get_pipe_model(model_path, device):
-    topology = PipeDataParallelTopology(num_pp=3, num_dp=1)
+    topology = PipeDataParallelTopology(num_pp=PIPE_DEGREE, num_dp=DATA_DEGREE)
     model_config = config_package.Model(type_="starcoder_flash_mqat_pipe",
                                         args=dict(
                                             model_path=model_path,
@@ -52,7 +52,7 @@ def get_pipe_model(model_path, device):
                                             dtype=torch.float16,
                                         ))
     model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
-    return model
+    return topology, model
 
 
 def get_input(tokenizer, device, s):

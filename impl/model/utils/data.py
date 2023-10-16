@@ -235,6 +235,7 @@ class PipeCacheData(TensorDataclassToTupleInterface):
     """
     # Only cached in the first stage.
     input_ids: torch.Tensor = None
+    prompt_mask: torch.Tensor = None
     position_ids: torch.Tensor = None
     # Cached in each transformer layer.
     k_cache: torch.Tensor = None

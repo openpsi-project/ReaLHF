@@ -267,7 +267,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         def input_to_pipe_model_input(input: NamedArray):
             max_seqlen = int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))
             x = PipeTransferData(cu_seqlens=input.cu_seqlens, max_seqlen=max_seqlen)
-            ys = [PipeCacheData(input_ids=input.packed_input_ids)
+            ys = [PipeCacheData(input_ids=input.packed_input_ids, prompt_mask=input.prompt_mask)
                   ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
             return (x, ys)
 
@@ -500,9 +500,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 logits = o.pp_input
                 packed_input_ids = y0.input_ids
                 cu_seqlens = x.cu_seqlens
-                loss_mask = torch.ones_like(packed_input_ids,
-                                            dtype=torch.float16,
-                                            device=torch.cuda.current_device())
+                loss_mask = 1 - y0.prompt_mask.float()
                 assert self._loss_fn is not None, "loss function is not set, please use engine.set_loss_fn(fn)"
                 self.loss = self._loss_fn(logits, packed_input_ids, cu_seqlens, loss_mask)
                 if self.total_loss is None:
