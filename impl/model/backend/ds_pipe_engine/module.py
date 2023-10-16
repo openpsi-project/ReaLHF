@@ -325,11 +325,9 @@ class PipelineModule(nn.Module):
                     ds_utils.set_random_seed(new_seed)
 
             x = layer(x, y)
+            # if self.stage_id < self.num_stages - 1:
             x.pp_input = x.pp_output
-
-        if self.stage_id == self.num_stages - 1:
-            # on last stage, set x.pp_input to original input for loss computation
-            x.pp_input = inputs[0].pp_input
+            x.pp_output = None
 
         outputs = data_list_to_tensor_tuple([x])
         return outputs

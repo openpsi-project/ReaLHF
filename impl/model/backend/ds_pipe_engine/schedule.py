@@ -56,6 +56,7 @@ class PipeSchedule(ABC):
         self.next_stage = self.stage_id + 1
 
         self.terminate_hooks = []
+        self.current_micro_batch_id = 0
 
     def terminate(self):
         return self.terminate_hooks
@@ -196,161 +197,6 @@ class InferenceSchedule(PipeSchedule):
         return 2
 
 
-class BackwardOptimizeSchedule(PipeSchedule):
-    """ A trivial backward pipeline schedule
-    """
-
-    def steps(self):
-        total_steps = self.micro_batches + self.stages - 1
-        for step_id in range(total_steps):
-            cmds = []
-            micro_batch_id = step_id + self.stage_id - self.stages + 1
-
-            # Alternate send/recv buffers, buffer id is global for all stages
-            if _is_even(self.stage_id):
-                recv_buf = step_id % 2
-                send_buf = (step_id + 1) % 2
-            else:
-                recv_buf = (step_id + 1) % 2
-                send_buf = step_id % 2
-
-            if self.is_last_stage:
-                if self._valid_micro_batch(micro_batch_id):
-                    cmds.append(LoadMicroBatch(recv_buf))
-
-            if _is_even(self.stages - 1 - self.stage_id):
-                # from backward
-                if self._valid_stage(self.prev_stage):
-                    if self._valid_micro_batch(micro_batch_id - 1):
-                        cmds.append(SendGrad(send_buf))
-                if self._valid_stage(self.next_stage):
-                    if self._valid_micro_batch(micro_batch_id):
-                        cmds.append(RecvGrad(recv_buf))
-            else:
-                if self._valid_stage(self.next_stage):
-                    if self._valid_micro_batch(micro_batch_id):
-                        cmds.append(RecvGrad(recv_buf))
-
-                if self._valid_stage(self.prev_stage):
-                    if self._valid_micro_batch(micro_batch_id - 1):
-                        cmds.append(SendGrad(send_buf))
-
-            if self._valid_micro_batch(micro_batch_id):
-                cmds.append(BackwardPass(recv_buf))
-
-            # Model step at the end of the batch
-            if step_id == total_steps - 1:
-                cmds.append(ReduceTiedGrads())
-                cmds.append(ReduceGrads())
-                cmds.append(OptimizerStep())
-
-            yield cmds
-
-    def num_pipe_buffers(self):
-        return 2
-
-
-class GenerateInferenceSchedule(PipeSchedule):
-    """A schedule for inference. 
-    Difference between this schedule and InferenceSchedule is that last stage will not load data,
-    and the last stage will send the result to the first stage for next generation.
-    """
-
-    def __init__(self, micro_batches, stages, stage_id, max_new_tokens):
-        super().__init__(micro_batches, stages, stage_id)
-        self.prev_stage = self.prev_stage % self.stages
-        self.next_stage = self.next_stage % self.stages
-        self.max_steps = max_new_tokens * max(self.num_micro_batches, self.stages) \
-                            + self.num_micro_batches - 1 # a configurable upper bound
-
-    def steps(self):
-        last_micro_batch_id = -1
-        for step_id in range(self.max_steps):
-            cmds = []
-            micro_batch_id = (step_id - self.stage_id) % max(self.num_micro_batches, self.stages) \
-                             if step_id - self.stage_id >= 0 else -1
-            first_round = step_id < self.num_micro_batches
-
-            if _is_even(self.stage_id):
-                recv_buf = step_id % 2
-                send_buf = (step_id + 1) % 2
-            else:
-                recv_buf = (step_id + 1) % 2
-                send_buf = step_id % 2
-            last_stage_buf = micro_batch_id + 2
-
-            # Alternate send/recv buffers
-            if _is_even(self.stage_id):
-                recv_buf = step_id % 2
-                send_buf = (step_id + 1) % 2
-            else:
-                recv_buf = (step_id + 1) % 2
-                send_buf = step_id % 2
-
-            # if self.is_last_stage and micro_batch_id == 0:
-            #     cmds.append(ClearFwdOutput(0))
-
-            should_load_batch = (self.is_first_stage and first_round)
-            if should_load_batch:
-                if self._valid_micro_batch(micro_batch_id):
-                    cmds.append(LoadMicroBatch(recv_buf))
-
-            # TODO: FIX BUG, from last stage to first stage, need one buffer for each microbatch?
-            if _is_even(self.stage_id):
-                if self._valid_micro_batch(last_micro_batch_id) and not self.is_last_stage:
-                    cmds.append(SendActivation(send_buf))
-                # intermediate stage recv
-                if self._valid_micro_batch(micro_batch_id) and not self.is_first_stage:
-                    cmds.append(RecvActivation(recv_buf))
-                # when not loading from dataset, first stage recv from last stage
-                if self._valid_micro_batch(micro_batch_id) and self.is_first_stage and not should_load_batch:
-                    cmds.append(RecvActivation(last_stage_buf))
-            else:
-                # odd stage could not be first stage
-                if self._valid_micro_batch(micro_batch_id):
-                    cmds.append(RecvActivation(recv_buf))
-                # last stage should not send activation except first stage requires
-                if self._valid_micro_batch(last_micro_batch_id) and not self.is_last_stage:
-                    cmds.append(SendActivation(send_buf))
-
-            # last stage send activation when first stage requires.
-            if not first_round:
-                first_stage_micro_batch_id = step_id % max(self.num_micro_batches, self.stages)
-                first_stage_buf = first_stage_micro_batch_id + 2
-                if self.is_last_stage and self._valid_micro_batch(first_stage_micro_batch_id):
-                    cmds.append(SendActivation(first_stage_buf))
-
-            if self._valid_micro_batch(micro_batch_id):
-                src_buf = last_stage_buf if self.is_first_stage and not first_round else recv_buf
-                dst_buf = last_stage_buf if self.is_last_stage else recv_buf
-                buf_args = (src_buf, dst_buf)
-                if self.is_first_stage:
-                    cmds.append(PrepareGenerateInput(src_buf))
-                cmds.append(ForwardPass(buf_args))
-                if self.is_last_stage:
-                    cmds.append(PostprocessGenerateOutput(dst_buf))
-
-            # print(f"rank {torch.cuda.current_device()}, step_id: {step_id}, micro_batch_id: {micro_batch_id}, stage_id: {self.stage_id} \n"
-            #       f"last_micro_batch_id: {last_micro_batch_id}, should_load_batch: {should_load_batch} \n"
-            #       f"cmds: {cmds} \n")
-
-            last_micro_batch_id = micro_batch_id
-            # if self.is_last_stage:
-            #     if self._valid_micro_batch(micro_batch_id):
-            #         self.register_terminate_hook(SaveOutput(recv_buf))
-
-            yield cmds
-
-    def num_pipe_buffers(self):
-        """2 buffers for inter stage transfer (except last stage to first stage)
-        self.num_micro_batches buffers for last stage to first stage transfer
-
-        Returns:
-            ``2 + self.num_micro_batches``
-        """
-        return 2 + self.num_micro_batches
-
-
 class TrainSchedule(PipeSchedule):
     """A schedule for training a batch using hybrid parallelism.
 
@@ -407,7 +253,8 @@ class TrainSchedule(PipeSchedule):
 
             # Prepare state for next time
             prev_micro_batch_id = micro_batch_id
-            yield cmds
+            # TODO: TEMP FOR DEBUG
+            yield step_id, micro_batch_id, cmds
 
     def num_pipe_buffers(self):
         """Return the number of pipeline buffers required for this stage.

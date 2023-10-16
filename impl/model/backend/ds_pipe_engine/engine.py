@@ -271,7 +271,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                   ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
             return (x, ys)
 
-        return iter([input_to_pipe_model_input(x) for x in splitted])
+        batches = [input_to_pipe_model_input(x) for x in splitted]
+        batch_lengths = [b[1][0].input_ids.shape[0] for b in batches]
+        logger.info("self._prepare_input:: batch_lengths: {}".format(batch_lengths))
+        return iter(batches)
 
     def eval(self):
         self.module.eval()
@@ -299,7 +302,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # Reset any buffers that may have been populated during the forward passes.
         # ds_checkpointing.reset()
         if len(output) > 0:
-            logits = [PipeTransferData.from_tuple(o).pp_output for o in output]
+            logits = [PipeTransferData.from_tuple(o).pp_input for o in output]
             # logits = [TransformerData.from_tuple(o).logits for o in output]
             # loss = torch.cat(raw_input_ids, dim=0)
             return DuckModelOutput(logits=torch.cat(logits, dim=0))
@@ -398,6 +401,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # Scale loss, average among DP ranks, and bcast loss to the rest of my DP group
         if self.is_last_stage():
             loss = self._scale_loss_by_gas(self.total_loss)
+            logger.info("self._aggregate_total_loss:: total_loss: {}, loss: {}, gas: {}".format(
+                self.total_loss, loss, self.gradient_accumulation_steps()))
             self.dp_group_loss = loss.clone().detach()
 
             ## Average loss across all data-parallel groups
@@ -492,7 +497,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 o: PipeTransferData = tensor_tuple_to_data_list(outputs)[0]
                 x, y0 = self.original_input.pop(0)
                 # compute loss, currently hard coded
-                logits = o.pp_output
+                logits = o.pp_input
                 packed_input_ids = y0.input_ids
                 cu_seqlens = x.cu_seqlens
                 loss_mask = torch.ones_like(packed_input_ids,
@@ -500,6 +505,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                                             device=torch.cuda.current_device())
                 assert self._loss_fn is not None, "loss function is not set, please use engine.set_loss_fn(fn)"
                 self.loss = self._loss_fn(logits, packed_input_ids, cu_seqlens, loss_mask)
+                if self.total_loss is None:
+                    self.total_loss = torch.zeros_like(self.loss)
+                self.total_loss += self.loss.detach()
             else:
                 self.fwd_outputs.append(outputs)
 
@@ -534,6 +542,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.pipe_buffers['output_tensors'][buffer_id] = None
         self.pipe_buffers['outputs'][buffer_id] = None
         grad_tensors = None
+        self.grad_layer = None
 
     def _exec_load_micro_batch(self, buffer_id):
         if self.is_first_stage():
@@ -714,6 +723,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def _exec_send_grads(self, buffer_id):
         inputs = self.pipe_buffers['inputs'][buffer_id]
+
         if isinstance(inputs, torch.Tensor):
             assert inputs.grad is not None
             p2p.send(inputs.grad, self.prev_stage)
@@ -917,7 +927,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 if terminate_condition():
                     break
             # For each instruction in the step
-            logger.info(f"rank {self.global_rank} step {step_count}, step_cmds: {step_cmds}")
+            step_id, micro_batch_id, step_cmds = step_cmds
+            logger.info(
+                f"rank {self.global_rank} step {step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
+            )
             for cmd in step_cmds:
                 logger.info(f"rank {self.global_rank} exec cmd: {cmd}")
                 if type(cmd) not in self._INSTRUCTION_MAP:
