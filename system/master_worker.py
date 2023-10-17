@@ -212,11 +212,14 @@ class MasterWorker(worker_base.Worker):
                              f"\nTotal train steps: {ft_spec.total_train_steps}" +
                              f"\nSteps per epoch: {ft_spec.steps_per_epoch}" +
                              f"\nEffective batch size: {batch_size}\n" + "=" * 40 + "\n")
+            logger.info(f"ft_spec = {ft_spec}")
 
+            # TODO: fix, match data streams with only models with raw inputs from datasets.
             for model_name, model_streams in self.__model_streams.items():
                 model_ft_spec = copy.deepcopy(ft_spec)
-                assert batch_size % len(model_streams) == 0, (batch_size, len(model_streams))
-                model_ft_spec.batch_size_per_device = batch_size // len(model_streams)
+                assert batch_size % len(self.__data_streams) == 0, (batch_size, len(self.__data_streams))
+                model_ft_spec.batch_size_per_device = batch_size // len(self.__data_streams)
+                logger.info(f"model {model_name} model_ft_spec = {model_ft_spec}")
                 request_all(model_streams, 'initialize', [model_ft_spec for _ in model_streams])
             all_model_streams = list(itertools.chain.from_iterable(self.model_streams.values()))
             gather_all_replies(all_model_streams)
@@ -242,6 +245,18 @@ class MasterWorker(worker_base.Worker):
         self._global_step = global_step = data_batches[0].global_step
         self.commands._update_counter(epoch, epoch_step, global_step)
         datas = [x.data for x in data_batches]
+        logger.info(f"len datas: {len(datas)}")
+
+        # TODO: fix, only for models with raw inputs
+        # for pipeline parallel
+        for model_name, model_streams in self.__model_streams.items():
+            if len(model_streams) > len(self.__data_streams):
+                assert len(model_streams) % len(
+                    self.__data_streams) == 0, "n model streams = n data streams * n pipe stages"
+                num_pipeline_stages = len(model_streams) // len(self.__data_streams)
+                datas = datas * num_pipeline_stages
+                break
+        logger.info(f"len datas after expand: {len(datas)}")
 
         # Manage fetched data. We assume fetched data is a flattened dict.
         sample = {}

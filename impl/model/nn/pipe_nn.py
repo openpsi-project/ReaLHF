@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional, Tuple, Union
+import logging
 import os
 
 import torch
@@ -10,6 +11,8 @@ from impl.model.backend.ds_pipe_engine import (LayerSpec, PipeDataParallelTopolo
 from impl.model.nn.flash_mqat import *
 from impl.model.utils.data import tensor_data_list_to_tuple, tuple_to_tensor_data_list
 import api.model
+
+logger = logging.getLogger("pipe_nn")
 
 
 def make_causal_flash_mqat_pipe_module(
@@ -117,8 +120,9 @@ def make_flash_mqat_pipe_model(
     name: str,
     device: torch.device,
     model_path: str,
-    dtype: torch.dtype,
-    topology: PipeDataParallelTopology,
+    num_pp: int,
+    num_dp: int,
+    dtype: torch.dtype = torch.float16,
     from_type: str = 'starcoder',
     tokenizer_path: Optional[str] = None,
 ):
@@ -128,9 +132,13 @@ def make_flash_mqat_pipe_model(
         tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token_id = tokenizer.eos_token_id
+        # logger.info("tokenizer initialized")
+        topology = PipeDataParallelTopology(num_pp=num_pp, num_dp=num_dp)
         module, layer_key_mappings = make_starcoder_flash_mqat_pipe_module(model_path, topology, dtype,
                                                                            device)
+        # logger.info("module initialized")
         module = load_starcoder_flash_mqat_pipe(module, layer_key_mappings, model_path=model_path)
+        # logger.info("model loaded")
     else:
         raise NotImplementedError()
     return api.model.Model(name, module, tokenizer, device)

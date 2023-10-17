@@ -3,6 +3,7 @@ import socket
 import time
 
 from deepspeed.accelerator import get_accelerator
+import deepspeed
 import torch
 import torch.utils.data
 
@@ -74,6 +75,9 @@ class ModelWorker(worker_base.Worker):
             f"SetUp Information - Model worker index {self.__worker_index}"
             f" type \"{self.config.model_name}\" located at {socket.gethostname()} GPU {local_gpu_id}.")
 
+        if self.config.backend.type_ in ["ds_train", "ds_inference"]:
+            self.logger.info("deepspeed init distributed on model worker")
+            deepspeed.init_distributed()
         self.__device = torch.device('cuda:0')
 
         self.__model = api.model.make_model(
@@ -83,6 +87,7 @@ class ModelWorker(worker_base.Worker):
         )
         self.__interface = api.model.make_interface(self.config.interface)
         self.__backend = api.model.make_backend(self.config.backend)
+        self.__backend.set_worker_index(self.__worker_index, self.__ddp_rank)
 
         if self.config.eval_datasets is not None and self.config.eval_dataloader is not None:
             eval_datasets = [

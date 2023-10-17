@@ -7,6 +7,7 @@ import math
 import deepspeed
 import torch
 
+from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
 import api.model
 import base.deepspeed_utils as deepspeed_utils
 
@@ -38,6 +39,9 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
     engine_type: str = "deepspeed"
     num_pipeline_stages: int = 1
+    # TODO: for logging, we should find a way to set this as a global info
+    worker_index: int = -1
+    ddp_global_rank: int = -1
 
     def __post_init__(self):
         if self.engine_type == "pipe":
@@ -47,6 +51,10 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             assert self.num_pipeline_stages > 1
         else:
             assert self.num_pipeline_stages == 1
+
+    def set_worker_index(self, i, ddp_global_rank):
+        self.worker_index = i
+        self.ddp_global_rank = ddp_global_rank
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -127,6 +135,13 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             lr_scheduler=lr_scheduler,
             engine_type=self.engine_type,
         )
+
+        if self.engine_type == "pipe":
+            # log pipeline infos
+            assert isinstance(module, DeepSpeedPipelineEngine)
+            logger.info(
+                f"PipelineEngine:: worker id = {self.worker_index}; ddp rank = {self.ddp_global_rank}; "
+                f"pipe id = {module.stage_id}; dp id = {module.dp_id};")
 
         if self.gradient_checkpointing:
             module.gradient_checkpointing_enable()

@@ -47,12 +47,13 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
         agg_loss = module.train_batch(packed_input_ids=packed_input_ids,
                                       cu_seqlens=cu_seqlens,
                                       prompt_mask=prompt_mask)
+        # agg_loss = average loss of data parallel batches
 
         cur_epoch = model.version.epoch
         model.inc_version()
         if model.version.epoch > cur_epoch:
             module.tput_timer.update_epoch_count()
-        return dict(loss=agg_loss)
+        return dict(loss=agg_loss.detach().item())
 
     def save(self, model: api.model.Model, save_dir: str):
         save_hf_or_lora_model(model, save_dir)
@@ -85,9 +86,12 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
             losses += (1 - prompt_mask.float()).sum() * loss.float()
             n_tokens += (1 - prompt_mask.float()).sum()
 
-            return dict(losses=losses, n_tokens=n_tokens)
+            return dict(losses=losses.detach().item())
         else:
             return dict()
+
+    def save(self, model: api.model.Model, save_dir: str):
+        pass
 
     @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
@@ -108,19 +112,24 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
             prompt_mask: torch.BoolTensor = data['prompt_mask'].squeeze()  # shape [tot_seqlen]
             max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
-            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-                            max_seqlen=max_seqlen).logits.float()
+            fwd_output = module(packed_input_ids=packed_input_ids,
+                                cu_seqlens=cu_seqlens,
+                                prompt_mask=prompt_mask)
 
-            loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask.float())
+            if fwd_output is not None:
+                logits = fwd_output.logits.float()
+                loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask.float())
 
-            losses += (1 - prompt_mask.float()).sum() * loss.float()
-            n_tokens += (1 - prompt_mask.float()).sum()
-        losses = losses / n_tokens
-        try:
-            perplexity = torch.exp(losses).item()
-        except OverflowError:
-            perplexity = float("inf")
-        return dict(ppl=perplexity)
+                losses += (1 - prompt_mask.float()).sum() * loss.float()
+                n_tokens += (1 - prompt_mask.float()).sum()
+                losses = losses / n_tokens
+                try:
+                    perplexity = torch.exp(losses).item()
+                except OverflowError:
+                    perplexity = float("inf")
+                return dict(ppl=perplexity)
+            else:
+                return dict()
 
 
 api.model.register_interface("pipe_flash_sft", PipePackedSupervisedFinetuningInterface)

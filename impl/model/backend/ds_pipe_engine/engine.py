@@ -59,6 +59,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         assert self.zero_optimization_stage(
         ) < 2, "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
+        logger.info("DeepSpeedEngine initialized!")
 
         # We schedule the all-reduces, so disable it in super().backward()
         self.enable_backward_allreduce = False
@@ -78,6 +79,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         assert self.dp_world_size == self.grid.data_parallel_size
         self.num_stages = self.grid.pipe_parallel_size
         self.stage_id = self.grid.get_stage_id()
+        self.dp_id = self.grid.data_parallel_id
 
         self.micro_batch_size = self.train_micro_batch_size_per_gpu()
         self.num_micro_batches = num_micro_batches if num_micro_batches else self.num_stages

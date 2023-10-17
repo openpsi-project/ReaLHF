@@ -108,6 +108,7 @@ def register_backend(name, cls_):
 
 
 def make_model(cfg: api.config.Model, name: str, device: Union[str, torch.device]) -> Model:
+    logger.info(f"making model {cfg.type_} on {device}")
     model_cls = ALL_MODEL_CLASSES[cfg.type_]
     model = model_cls(**cfg.args, name=name, device=device)
     assert isinstance(model, Model)

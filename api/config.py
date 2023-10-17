@@ -162,7 +162,7 @@ class ModelWorker:
     backend: ModelBackend
     model_name: str
     # stream
-    stream: Union[str, RequestReplyStream]
+    stream: Optional[Union[str, RequestReplyStream]]
     # evaluation
     eval_datasets: Optional[List[Dataset]] = None
     eval_dataloader: Optional[DataLoader] = None

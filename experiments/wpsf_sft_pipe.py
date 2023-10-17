@@ -21,15 +21,9 @@ def sft(
     commands.log(model.train_step(inputs))
 
 
-def sample_log_uniform(low, high):
-    low = math.log(low)
-    high = math.log(high)
-    return math.exp(low + (high - low) * random.random())
+class WpsFormulaSFTPipelineExperiment(Experiment):
 
-
-class WpsFormulaSupervisedFinetuningExperiment(Experiment):
-
-    def __init__(self, n_models=4, seed=1, total_train_epochs=4):
+    def __init__(self, n_models=8, num_pipeline_stages=4, seed=1, total_train_epochs=4):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -38,8 +32,9 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         self.lr_scheduler_type = 'cosine'
         self.warmup_proportion = 0.02
 
-        self.n_models = self.n_data_workers = n_models
-        assert self.n_models == self.n_data_workers
+        self.n_models = n_models
+        self.num_pipeline_stages = num_pipeline_stages
+        self.n_data_workers = self.dp_worldsize = self.n_models // self.num_pipeline_stages
         self.seed = seed
 
         self.total_train_epochs = total_train_epochs
@@ -48,14 +43,11 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         return ExperimentScheduling(
             data_worker=TasksGroup(
                 count=self.n_data_workers,
-                scheduling=Scheduling.data_worker_default(
-                    cpu=2,
-                    mem=10000,
-                ),
+                scheduling=Scheduling.data_worker_default(cpu=2, mem=10000, node_type="g1"),
             ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=4, mem=10000),
+                scheduling=Scheduling.master_worker_default(cpu=4, mem=10000, node_type="g1"),
             ),
             model_worker=TasksGroup(
                 count=self.n_models,
@@ -103,34 +95,29 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
         backend = ModelBackend(
             'ds_train',
-            args=dict(
-                optimizer_name='adam',
-                optimizer_config=dict(
-                    lr=self.lora_lr,
-                    weight_decay=self.weight_decay,
-                    eps=1e-5,
-                    betas=self.adam_betas,
-                ),
-                lr_scheduler_type=self.lr_scheduler_type,
-                warmup_steps_proportion=self.warmup_proportion,
-                min_lr_ratio=0.0,
-                zero_stage=2,
-                enable_fp16=True,
-                gradient_checkpointing=True,
-            ),
+            args=dict(optimizer_name='adam',
+                      optimizer_config=dict(
+                          lr=self.lora_lr,
+                          weight_decay=self.weight_decay,
+                          eps=1e-5,
+                          betas=self.adam_betas,
+                      ),
+                      lr_scheduler_type=self.lr_scheduler_type,
+                      warmup_steps_proportion=self.warmup_proportion,
+                      min_lr_ratio=0.0,
+                      zero_stage=1,
+                      enable_fp16=True,
+                      gradient_checkpointing=False,
+                      engine_type="pipe",
+                      num_pipeline_stages=self.num_pipeline_stages),
         )
 
-        model = Model("flash_mqat_clm_hf_lora",
-                      args=dict(
-                          model_path=model_path,
-                          lora_module_kwargs=dict(
-                              lora_dim=self.lora_dim,
-                              lora_scaling=self.lora_scaling,
-                          ),
-                          lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
-                      ))
+        model = Model("starcoder_flash_mqat_pipe",
+                      args=dict(model_path=model_path,
+                                num_pp=self.num_pipeline_stages,
+                                num_dp=self.dp_worldsize))
 
-        interface = ModelInterface('flash_sft')
+        interface = ModelInterface('pipe_flash_sft')
 
         streams = [RequestReplyStream(f"model{i}") for i in range(self.n_models)]
 
@@ -164,5 +151,5 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
 seeds = range(1, 6)
 for s in seeds:
-    exp_name = f"wpsf-sft-flash-s{s}"
-    register_experiment(exp_name, functools.partial(WpsFormulaSupervisedFinetuningExperiment, seed=s))
+    exp_name = f"wpsf-sft-flash-pipe-s{s}"
+    register_experiment(exp_name, functools.partial(WpsFormulaSFTPipelineExperiment, seed=s))
