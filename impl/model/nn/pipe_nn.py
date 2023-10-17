@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import transformers
 
+from base.monitor import process_memory_mb
 from impl.model.backend.ds_pipe_engine import (LayerSpec, PipeDataParallelTopology, PipelineModule,
                                                ProcessTopology)
 from impl.model.nn.flash_mqat import *
@@ -98,13 +99,17 @@ def make_starcoder_flash_mqat_pipe_module(
     return make_causal_flash_mqat_pipe_module(config, topology, dtype, device)
 
 
-def load_starcoder_flash_mqat_pipe(module: torch.nn.Module,
+def load_starcoder_flash_mqat_pipe(module: PipelineModule,
                                    layer_key_mappings: Dict[str, str],
                                    model_path: Optional[str] = None):
+
+    process_memory_mb("before_init_state_dict")
     try:
         state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
     except FileNotFoundError:
         state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
+
+    process_memory_mb("after_init_state_dict")
 
     new_state_dict = {}
     for k, v in state_dict.items():
@@ -113,6 +118,8 @@ def load_starcoder_flash_mqat_pipe(module: torch.nn.Module,
                 k = k.replace(replace_from, replace_to)
         new_state_dict[k] = v
     module.load_state_dict(new_state_dict, strict=False)
+
+    process_memory_mb("after_load_state_dict")
     return module
 
 
@@ -136,6 +143,7 @@ def make_flash_mqat_pipe_model(
         topology = PipeDataParallelTopology(num_pp=num_pp, num_dp=num_dp)
         module, layer_key_mappings = make_starcoder_flash_mqat_pipe_module(model_path, topology, dtype,
                                                                            device)
+        process_memory_mb("after_make_pipe_module")
         # logger.info("module initialized")
         module = load_starcoder_flash_mqat_pipe(module, layer_key_mappings, model_path=model_path)
         # logger.info("model loaded")

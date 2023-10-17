@@ -70,11 +70,11 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        # model_path = "/data/aigc/public/starcoder-16bit"
-        model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
+        model_path = "/data/aigc/public/starcoder-16bit"
+        # model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
         train_batch_size_per_device = 4
         eval_batch_size_per_device = 4
-        max_seq_len = 2048
+        max_seq_len = 4096
 
         dataset = Dataset(
             'wpsf_sft_packed',

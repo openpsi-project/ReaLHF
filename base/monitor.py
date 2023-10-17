@@ -60,10 +60,9 @@ def parse_time_point_dir(dir_name):
     return tps
 
 
-def plot_time_info(tps, name_pairs, time_range):
-    """ 
-    Arguments:
-        tps: Time points returned by parse_time_point_dir. Keys are process ids or GPU global ranks.
-             
-    """
-    import matplotlib.pyplot as plt
+def process_memory_mb(name):
+    process = psutil.Process()
+    memory_info = process.memory_info()
+    memory_usage_mb = memory_info.rss / 1024**2
+    pid = process.pid
+    logger.info(f"Process PID {pid} memory usage @{name}: {memory_usage_mb}.")
