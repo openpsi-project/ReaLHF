@@ -29,7 +29,7 @@ def main_worker(args):
 
     group_name = f"{args.worker_type}-{args.worker_submission_index}"
     logger.info(f"{args.worker_type} group id {args.jobstep_id}, "
-                f"worker index {worker_index_start}:{worker_index_end - 1}")
+                f"worker index {worker_index_start}:{worker_index_end}")
 
     # Isolate within the same slurm job, among different jobsteps.
     base.gpu_utils.isolate_cuda_device(group_name, args.jobstep_id, args.n_jobsteps, args.experiment_name,

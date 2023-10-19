@@ -45,6 +45,7 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
         self.benchmark_only = benchmark_only
         if benchmark_only:
             self.n_models = self.n_data_workers = 1
+            self.total_train_epochs = 1
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -163,7 +164,7 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=None,
-            save_frequency_epochs=1,
+            save_frequency_epochs=1 if not self.benchmark_only else None,
             save_frequency_seconds=None,
             eval_frequency_epochs=None,
             master_ecs=ecs,
@@ -177,3 +178,5 @@ seeds = range(1, 6)
 for s in seeds:
     exp_name = f"wpsf-plrw-flash-s{s}"
     register_experiment(exp_name, functools.partial(WpsFormulaPlackettLuceRewardModelingExperiment, seed=s))
+register_experiment("wpsf-plrw-flash-benchmark",
+                    functools.partial(WpsFormulaPlackettLuceRewardModelingExperiment, benchmark_only=True))

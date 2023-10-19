@@ -29,7 +29,7 @@ def sample_log_uniform(low, high):
 
 class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
-    def __init__(self, n_models=1, seed=1, total_train_epochs=4):
+    def __init__(self, n_models=1, seed=1, total_train_epochs=4, benchmark_only=False):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -43,6 +43,10 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         self.seed = seed
 
         self.total_train_epochs = total_train_epochs
+        self.benchmark_only = benchmark_only
+        if self.benchmark_only:
+            self.n_models = self.n_data_workers = 1
+            self.total_train_epochs = 1
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -69,7 +73,10 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = "/data/aigc/public/starcoder-16bit"
+        if not self.benchmark_only:
+            model_path = "/data/aigc/public/starcoder-16bit"
+        else:
+            model_path = "/data/aigc/llm/checkpoints/1l-starcoder"
         train_batch_size_per_device = 4
         eval_batch_size_per_device = 4
         max_seq_len = 4096
@@ -150,9 +157,9 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=None,
-            save_frequency_epochs=1,
+            save_frequency_epochs=None if self.benchmark_only else 1,
             save_frequency_seconds=None,
-            eval_frequency_epochs=1,
+            eval_frequency_epochs=None if self.benchmark_only else 1,
             master_ecs=ecs,
             data_worker=data_worker,
             model_worker=model_worker,
@@ -164,3 +171,5 @@ seeds = range(1, 6)
 for s in seeds:
     exp_name = f"wpsf-sft-flash-s{s}"
     register_experiment(exp_name, functools.partial(WpsFormulaSupervisedFinetuningExperiment, seed=s))
+register_experiment("wpsf-sft-flash-benchmark",
+                    functools.partial(WpsFormulaSupervisedFinetuningExperiment, benchmark_only=True))
