@@ -16,6 +16,7 @@ from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
 import redis
 
+from base.cluster import spec as cluster_spec
 import base.security
 import base.timeutil
 
@@ -231,7 +232,7 @@ class MemoryNameRecordRepository(NameRecordRepository):
 
 
 class NfsNameRecordRepository(NameRecordRepository):
-    RECORD_ROOT = f"/data/aigc/llm/name_resolve/"
+    RECORD_ROOT = f"{cluster_spec.fileroot}/name_resolve/"
 
     def __init__(self, **kwargs):
         self.__to_delete = set()
@@ -289,7 +290,10 @@ class NfsNameRecordRepository(NameRecordRepository):
         rs = []
         if os.path.isdir(dir_path):
             for item in os.listdir(dir_path):
-                rs.append(self.get(os.path.join(name_root, item)))
+                try:
+                    rs.append(self.get(os.path.join(name_root, item)))
+                except NameEntryNotFoundError:
+                    pass
         return rs
 
     def find_subtree(self, name_root):
@@ -449,7 +453,8 @@ def make_repository(type_="nfs", **kwargs):
         raise NotImplementedError(f"No such name resolver: {type_}")
 
 
-DEFAULT_REPOSITORY_TYPE = "redis" if socket.gethostname().startswith("frl") else "nfs"
+# DEFAULT_REPOSITORY_TYPE = "redis" if socket.gethostname().startswith("frl") else "nfs"
+DEFAULT_REPOSITORY_TYPE = "nfs"
 DEFAULT_REPOSITORY = make_repository(DEFAULT_REPOSITORY_TYPE)
 add = DEFAULT_REPOSITORY.add
 add_subentry = DEFAULT_REPOSITORY.add_subentry

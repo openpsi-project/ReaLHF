@@ -4,6 +4,7 @@ import getpass
 import logging
 import os
 import re
+import time
 
 from base.constants import DATE_FORMAT, LOG_FORMAT
 import api.config as config_package
@@ -12,6 +13,8 @@ import scheduler.client
 import system
 
 logger = logging.getLogger("main")
+
+CONTROLLER_TIME_LIMIT = None
 
 
 def scheduler_mode(mode: str) -> str:
@@ -47,29 +50,35 @@ def _submit_workers(
             )
         else:
             cmd = scheduler.client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
+
         logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
 
         nodelist = sch_cfg.scheduling.nodelist
         exclude = sch_cfg.scheduling.exclude
+        node_type = sch_cfg.scheduling.node_type
         container_image = image_name or sch_cfg.scheduling.container_image
-        job_name = worker_type
         if use_ray_cluster:
-            job_name = f'rc_{worker_type}'
+            worker_type = f'rc_{worker_type}'
 
         scheduled_jobs.append(
             sched.submit_array(
-                job_name,
-                cmd,
+                worker_type=worker_type,
+                cmd=cmd,
                 count=sch_cfg.count,
                 cpu=sch_cfg.scheduling.cpu,
                 gpu=sch_cfg.scheduling.gpu,
                 gpu_type=sch_cfg.scheduling.gpu_type,
                 mem=sch_cfg.scheduling.mem,
                 container_image=container_image,
+                node_type=node_type,
                 nodelist=nodelist,
                 exclude=exclude,
                 env_vars=job_environs,
                 hostfile=True,
+                multiprog=True,
+                begin=sch_cfg.scheduling.begin,
+                deadline=sch_cfg.scheduling.deadline,
+                time_limit=sch_cfg.scheduling.time_limit,
             ),)
     return scheduled_jobs
 
@@ -79,11 +88,11 @@ def main_start(args):
         raise ValueError("--image_name must be specified when using ray cluster. "
                          "This is becuase ray cluster requires all workers to have "
                          "the same version of Python and ray.")
+
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
     experiment = config_package.make_experiment(args.experiment_name)
-    sched = scheduler.client.make(mode=scheduler_mode(args.mode),
-                                  job_name=f"{args.experiment_name}_{trial_name}")
+    sched = scheduler.client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
 
     setup = experiment.scheduling_setup()
 
@@ -95,13 +104,28 @@ def main_start(args):
     }
 
     logger.info(f"Resetting name resolving repo...")
-    sched.submit(
-        "setup",
-        scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
-        env_vars=base_environs,
-    )
 
-    sched.wait(timeout=300, update=True)
+    if args.remote_reset:
+        sched.submit(
+            "setup",
+            cmd=scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
+            env_vars=base_environs,
+            container_image=args.image_name or setup.controller_image,
+            multiprog=False,
+            hostfile=False,
+        )
+        try:
+            sched.wait(timeout=3600, update=True)
+        except Exception as e:
+            logger.warning(f"Resetting name resolving repo failed.")
+            raise e
+    else:
+        from apps.remote import main_reset_name_resolve
+        try:
+            main_reset_name_resolve(args)
+        except Exception as e:
+            logger.warning(f"Resetting name resolving repo failed.")
+            raise e
     logger.info(f"Resetting name resolving repo... Done.")
 
     logger.info(f"Running configuration: {experiment.__class__.__name__}")
@@ -113,8 +137,9 @@ def main_start(args):
         controller_type = 'local_ray'
     else:
         controller_type = 'zmq'
+    # For local_ray mode, the controller will start all remote workers.
     sched.submit_array(
-        task_name="ctl",
+        worker_type="ctl",
         cmd=scheduler.client.control_cmd(
             expr_name,
             trial_name,
@@ -128,6 +153,7 @@ def main_start(args):
         mem=1024,
         env_vars=base_environs,
         container_image=args.image_name or setup.controller_image,
+        time_limit=CONTROLLER_TIME_LIMIT,
     )
 
     if args.mode != 'local_ray':
@@ -150,7 +176,7 @@ def main_start(args):
 
     try:
         sched.wait()
-    except (KeyboardInterrupt, scheduler.client.TaskException):
+    except (KeyboardInterrupt, scheduler.client.JobException):
         sched.stop_all()
         raise
 
@@ -202,6 +228,10 @@ def main():
     subparser.add_argument("--debug",
                            action="store_true",
                            help="If True, activate all assertions in the code.")
+    subparser.add_argument(
+        "--remote_reset",
+        action="store_true",
+        help='If True, reset name resolve repo remotely in computation nodes. Otherwise reset locally.')
     subparser.set_defaults(ignore_worker_error=False)
     subparser.set_defaults(func=main_start)
 

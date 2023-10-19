@@ -1,9 +1,12 @@
 import argparse
 import logging
+import multiprocessing
 import os
 import re
 import socket
 import subprocess
+
+multiprocessing.set_start_method("spawn", force=True)
 
 from base.constants import DATE_FORMAT, LOG_FORMAT
 import base.gpu_utils
@@ -20,8 +23,20 @@ def main_reset_name_resolve(args):
 
 
 def main_worker(args):
-    base.gpu_utils.isolate_cuda_device(args.worker_type, args.group_id, args.group_size, args.experiment_name,
+    worker_index_start = args.jobstep_id * args.wprocs_per_jobstep + args.wproc_offset
+    worker_index_end = min(worker_index_start + args.wprocs_per_jobstep,
+                           args.wprocs_in_job + args.wproc_offset)
+
+    group_name = f"{args.worker_type}-{args.worker_submission_index}"
+    logger.info(f"{args.worker_type} group id {args.jobstep_id}, "
+                f"worker index {worker_index_start}:{worker_index_end}")
+
+    # Isolate within the same slurm job, among different jobsteps.
+    base.gpu_utils.isolate_cuda_device(group_name, args.jobstep_id, args.n_jobsteps, args.experiment_name,
                                        args.trial_name)
+    if os.environ.get("CUDA_VISIBLE_DEVICES", None):
+        logger.info("CUDA_VISIBLE_DEVICES: %s", os.environ['CUDA_VISIBLE_DEVICES'])
+
     import experiments
     import impl.data
     import impl.model
@@ -30,13 +45,45 @@ def main_worker(args):
     logger.info(f"Run {args.worker_type} worker with args: %s", args)
     assert not args.experiment_name.startswith(
         "/"), f"Invalid experiment_name \"{args.experiment_name}\" starts with \"/\""
-    system.run_worker(
-        worker_type=args.worker_type,
-        experiment_name=args.experiment_name,
-        trial_name=args.trial_name,
-        worker_name=f"{args.worker_type}/{args.group_id}",
-        worker_server_type='zmq',
-    )
+    if args.wprocs_per_jobstep == 1:
+        system.run_worker(
+            worker_type=args.worker_type,
+            experiment_name=args.experiment_name,
+            trial_name=args.trial_name,
+            worker_name=f"{args.worker_type}/{worker_index_start}",
+            worker_server_type='zmq',
+        )
+    else:
+        workers = []
+        for wid in range(worker_index_start, worker_index_end):
+            worker_args = dict(worker_type=args.worker_type,
+                               experiment_name=args.experiment_name,
+                               trial_name=args.trial_name,
+                               worker_name=f"{args.worker_type}/{wid}",
+                               worker_server_type='zmq')
+            p = multiprocessing.Process(target=system.run_worker, kwargs=worker_args)
+            p.name = f"{args.worker_type}/{wid}"
+            p.start()
+            workers.append(p)
+
+        logger.info(
+            f"Waiting for {args.wprocs_per_jobstep} {args.worker_type} workers of group id {args.jobstep_id}."
+        )
+        worker_exit_code = 0
+        while not worker_exit_code:
+            for p in workers:
+                if p.exitcode is None:
+                    p.join(timeout=5)
+                elif p.exitcode == 0:
+                    pass
+                else:
+                    logger.error(f"{p.name} exitcode: {p.exitcode}")
+                    worker_exit_code = p.exitcode
+                    break
+        for p in workers:
+            if p.is_alive():
+                p.kill()
+        exit(worker_exit_code)
 
 
 def main_controller(args):
@@ -102,7 +149,7 @@ def main_ray(args):
 
     host_ip = socket.gethostbyname(socket.gethostname())
     base.name_resolve.add(base.names.ray_cluster(args.experiment_name, args.trial_name,
-                                                 f"{args.worker_type}/{args.group_id}"),
+                                                 f"{args.worker_type}/{args.jobstep_id}"),
                           host_ip,
                           delete_on_exit=True,
                           keepalive_ttl=300)
@@ -139,11 +186,44 @@ def main():
     subparser.set_defaults(func=main_controller)
 
     subparser = subparsers.add_parser("worker", help="run a standalone worker")
-    subparser.add_argument("--worker_type", '-w', type=str, required=True)
     subparser.add_argument("--experiment_name", "-e", type=str, required=True)
     subparser.add_argument("--trial_name", "-f", type=str, required=True)
-    subparser.add_argument("--group_id", "-i", type=int, required=True)
-    subparser.add_argument("--group_size", "-g", type=int, required=True)
+    subparser.add_argument("--worker_type", '-w', type=str, required=True)
+    subparser.add_argument("--jobstep_id",
+                           "-i",
+                           type=int,
+                           required=True,
+                           help="jobstep/task ID in a slurm job.")
+    subparser.add_argument("--n_jobsteps",
+                           "-g",
+                           type=int,
+                           required=True,
+                           help="`--ntasks` of `srun`, aka SLURM_NPROCS.")
+    subparser.add_argument(
+        "--worker_submission_index",
+        "-r",
+        type=int,
+        required=True,
+        help="Submission index to slurm for this worker. Used for locating job name and logs.")
+    subparser.add_argument("--wprocs_per_jobstep",
+                           "-p",
+                           type=int,
+                           required=True,
+                           help="Number of worker processes launched by multiprocessing in this script.")
+    subparser.add_argument("--wprocs_in_job",
+                           "-j",
+                           type=int,
+                           required=True,
+                           help="Number of worker processes in this slurm job.")
+    subparser.add_argument(
+        "--wproc_offset",
+        "-o",
+        type=int,
+        required=True,
+        help="Offset of worker processes of this slurm job. "
+        "For example, we may allocate 4 type `A` workers with 1 GPU each and 2 with 0.5 GPU each. "
+        "This launches 2 jobs, the former with 4 job steps and the latter with 2 job steps. "
+        "The offset is 0 for the 1st job and 4 for the 2nd job.")
     subparser.set_defaults(func=main_worker)
 
     subparser = subparsers.add_parser("reset_name_resolve", help="reset name resolve repo for a trial")
@@ -155,8 +235,8 @@ def main():
     subparser.add_argument("--experiment_name", "-e", type=str, required=True)
     subparser.add_argument("--trial_name", "-f", type=str, required=True)
     subparser.add_argument("--worker_type", '-w', type=str, required=True)
-    subparser.add_argument("--group_id", "-i", type=int, required=True)
-    subparser.add_argument("--group_size", "-g", type=int, required=True)
+    subparser.add_argument("--jobstep_id", "-i", type=int, required=True)
+    subparser.add_argument("--n_jobsteps", "-g", type=int, required=True)
     subparser.set_defaults(func=main_ray)
 
     args = parser.parse_args()

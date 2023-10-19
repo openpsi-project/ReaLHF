@@ -1,9 +1,11 @@
 import os
 import subprocess
 
+from base.cluster import spec as cluster_spec
+
 exp_name = "wps-rw-pl-s1"
 trial_name_prefix = "lora-sweep-20230731"
-log_dir_path = "/data/aigc/llm/logs/fw"
+log_dir_path = f"{cluster_spec.fileroot}/logs/fw"
 
 count = 0
 for root, dirs, files in os.walk(log_dir_path):

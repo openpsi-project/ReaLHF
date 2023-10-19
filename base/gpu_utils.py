@@ -62,9 +62,12 @@ def setup_ddp(expr_name, trial_name, model_name, worker_index):
     world_size = len(global_peers)
     ddp_rank = global_peers.index(str(worker_index))
 
-    global GPU_DEVICES_ISOLATED
-    if not GPU_DEVICES_ISOLATED and 'RAY' not in os.environ['DLLM_MODE']:
+    # global GPU_DEVICES_ISOLATED
+    # if not GPU_DEVICES_ISOLATED and 'RAY' not in os.environ['DLLM_MODE']:
+    #     raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
+    if 'GPU_DEVICES_ISOLATED' not in os.environ and 'RAY' not in os.environ['DLLM_MODE']:
         raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
+
     assert len(os.environ['CUDA_VISIBLE_DEVICES'].split(',')) == 1, os.environ['CUDA_VISIBLE_DEVICES']
     local_gpu_id = int(os.environ['CUDA_VISIBLE_DEVICES'])
 
@@ -94,7 +97,23 @@ def setup_ddp(expr_name, trial_name, model_name, worker_index):
     return world_size, ddp_rank, local_gpu_id
 
 
-def isolate_cuda_device(worker_type, rank, world_size, experiment_name, trial_name):
+def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment_name: str, trial_name: str):
+    """Isolate CUDA_VISIBLE_DEVICES for each Slurm jobstep.
+    
+    To distinguish the concept of job/jobstep/worker/task, check scheduler/slurm/utils.py.
+    A slurm job with multiple jobsteps will not set CUDA_VISIBLE_DEVICES properly.
+    For example, if a job has 2 jobsteps, each with 1 GPU, and is allocated onto GPU 0 and 1,
+    then CUDA_VISIBLE_DEVICES of these jobsteps will be 0,1, instead of 0 and 1.
+    We use this function in `apps.remote` to isolate CUDA_VISIBLE_DEVICES for each jobstep.
+
+    Args:
+        worker_type (str): .
+        rank (int): Rank of the **jobstep**.
+        world_size (int): Size of the **jobsteps**, aka SLURM_NPROCS. However, we may call this function
+            in other cases (e.g. local scheduler), so we don't use this environment variable directly.
+        experiment_name (str): .
+        trial_name (str): .
+    """
     if not os.environ.get('CUDA_VISIBLE_DEVICES'):
         return
 
@@ -110,7 +129,7 @@ def isolate_cuda_device(worker_type, rank, world_size, experiment_name, trial_na
         rank,
         keepalive_ttl=30,
     )
-    logger.info(f"Rank {rank} waiting for peers, world size {world_size}...")
+    logger.info(f"Worker type {worker_type} rank {rank} waiting for peers, world size {world_size}...")
     while len(
             name_resolve.get_subtree(
                 names.trainer_ddp_peer(experiment_name, trial_name, name_resolve_identifier))) < world_size:
@@ -142,6 +161,4 @@ def isolate_cuda_device(worker_type, rank, world_size, experiment_name, trial_na
                 f"local peer index: {local_peer_index}, local gpu id {local_gpu_id}.")
 
     os.environ['CUDA_VISIBLE_DEVICES'] = str(local_gpu_id)
-
-    global GPU_DEVICES_ISOLATED
-    GPU_DEVICES_ISOLATED = True
+    os.environ['GPU_DEVICES_ISOLATED'] = "1"

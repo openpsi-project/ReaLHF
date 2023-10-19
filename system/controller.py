@@ -1,15 +1,20 @@
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 import copy
 import dataclasses
 import enum
+import getpass
+import json
 import logging
+import os
 import time
 import traceback
 
 import ray
 import ray.util.queue as rq
 
+from base.cluster import spec as cluster_spec
 from system import load_worker, WORKER_TYPES
 from system.worker_base import WorkerServerStatus as Wss
 import api.config
@@ -58,6 +63,7 @@ class Controller:
         logger.info("Experiment: %s %s", self.experiment_name, self.trial_name)
 
         self.__control = panel
+        self.json_config_file_path = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}/{self.experiment_name}_{self.trial_name}"
 
     def reconnect(self):
         """Automatically reconnect to workers. And list all jobs to scheduler.
@@ -76,8 +82,13 @@ class Controller:
         setup = experiment.initial_setup()
         setup.set_worker_information(experiment_name=self.experiment_name, trial_name=self.trial_name)
 
+        if setup.config is not None:
+            os.makedirs(self.json_config_file_path, exist_ok=True)
+            with open(os.path.join(self.json_config_file_path, "config.json"), "w") as f:
+                json.dump(asdict(setup.config), f, indent=4)
+
         # Scheduling and connecting to workers.
-        workers_configs = []
+        # TODO for heterogeneous workers of the same type k, list scheduling[k] and setup[k] should match.
         workers_configs = [(k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES]
 
         for name, config, schedule in workers_configs:

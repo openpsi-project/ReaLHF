@@ -275,9 +275,11 @@ class WorkerControlPanel:
             try:
                 if timeout is not None:
                     timeout = max(0, deadline - time.monotonic())
+                self.__logger.info(f"Connecting to worker {name}, timeout {timeout}")
                 server_address = base.name_resolve.wait(base.names.worker(self.__experiment_name,
                                                                           self.__trial_name, name),
                                                         timeout=timeout)
+                self.__logger.info(f"Connecting to worker {name} done")
             except TimeoutError as e:
                 if raises_timeout_error:
                     raise e
@@ -382,7 +384,7 @@ class WorkerControlPanel:
                 base.names.worker_status(experiment_name=self.__experiment_name,
                                          trial_name=self.__trial_name,
                                          worker_name=worker_name),
-                timeout=1,
+                timeout=60,
             )
             status = WorkerServerStatus(status_str)
         except base.name_resolve.NameEntryNotFoundError:
@@ -453,7 +455,7 @@ class Worker:
 
     def __set_status(self, status: WorkerServerStatus):
         if self._server is not None:
-            self.logger.debug(f"Setting worker server status to {status}")
+            self.logger.info(f"Setting worker server status to {status}")
             self._server.set_status(status)
 
     @property

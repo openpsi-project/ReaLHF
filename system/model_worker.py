@@ -2,6 +2,7 @@ import gc
 import socket
 import time
 
+from deepspeed.accelerator import get_accelerator
 import torch
 import torch.utils.data
 
@@ -57,6 +58,9 @@ class ModelWorker(worker_base.Worker):
                                       self.__worker_index)
         self.__ddp_env_resolved = False
 
+        self.__clear_cache_frequency = base.timeutil.FrequencyControl(
+            frequency_steps=self.config.cuda_cache_clear_freq)
+
         r = self.config.worker_info
         r.model_name = cfg.model_name
         return r
@@ -71,6 +75,7 @@ class ModelWorker(worker_base.Worker):
             f" type \"{self.config.model_name}\" located at {socket.gethostname()} GPU {local_gpu_id}.")
 
         self.__device = torch.device('cuda:0')
+
         self.__model = api.model.make_model(
             self.config.model,
             name=self.model_name,
@@ -78,9 +83,6 @@ class ModelWorker(worker_base.Worker):
         )
         self.__interface = api.model.make_interface(self.config.interface)
         self.__backend = api.model.make_backend(self.config.backend)
-
-        self.__ccc_freq_ctl = base.timeutil.FrequencyControl(self.config.ccc_freq_secs,
-                                                             self.config.ccc_freq_steps)
 
         if self.config.eval_datasets is not None and self.config.eval_dataloader is not None:
             eval_datasets = [
@@ -136,16 +138,34 @@ class ModelWorker(worker_base.Worker):
         except RuntimeError as e:
             # We may print some info here.
             raise e
-        self.__stream.post_reply(request_reply_stream.Reply(data=res))
-        if self.is_master:
-            self.logger.info(f"Model worker {self.model_name} handle request {request.handle_name}"
-                             f" in {time.perf_counter() - tik:.4f}s")
 
-        if self.__ccc_freq_ctl.check():
-            # following huggingface trl
-            gc.collect()
-            torch.cuda.empty_cache()
-            gc.collect()
+        if self.is_master:
+            self.logger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
+                             f" in ${time.perf_counter() - tik:.4f}$s")
+
+        reply = request_reply_stream.Reply(data=res)
+        self.__stream.post_reply(reply)
+
+        if self.config.cuda_cache_cleanliness:
+            if self.__clear_cache_frequency.check():
+                # following huggingface trl # ALWAYS COST 0.3+ SEC
+                st = time.monotonic()
+                gc.collect()
+                torch.cuda.empty_cache()
+                gc.collect()
+                et = time.monotonic()
+                if self.is_master:
+                    self.logger.info(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
+
+        # logging gpu/cpu stats
+        # self.print_monitor_info()
+        tik = time.perf_counter()
+        self.logger.info(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
+            self.model_name,
+            round(get_accelerator().memory_allocated() / 1024**3, 2),
+            round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+        )))
+        self.logger.info(f"monitoring overhead {time.perf_counter()-tik}s")
 
         sample_count = request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 0
         return worker_base.PollResult(sample_count=sample_count, batch_count=1)
