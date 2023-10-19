@@ -108,7 +108,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
                                    top_k=50,
                                    top_p=1.0,
                                    num_samples=1)
-        generated, glogprobs, glmask, _ = generate(model=self.model,
+        generated, glogprobs, glmask, _, _ = generate(model=self.model,
                                                    tokenizer=self.tokenizer,
                                                    input_ids=input_ids,
                                                    attention_mask=attention_mask,
@@ -161,7 +161,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
                                    top_k=50,
                                    top_p=1.0,
                                    num_samples=1)
-        seq, log_probs, logits_mask, ys = generate(model=self.model,
+        seq, log_probs, logits_mask, ys, _ = generate(model=self.model,
                                                    tokenizer=self.tokenizer,
                                                    input_ids=prompts,
                                                    attention_mask=prompt_att_mask,
@@ -169,7 +169,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
 
         first_n_tokens = 50 - prompt_len
         gconfig.max_new_tokens = first_n_tokens
-        seq21, log_probs21, logits_mask21, tmp_ys = generate(model=self.model,
+        seq21, log_probs21, logits_mask21, tmp_ys, _ = generate(model=self.model,
                                                              tokenizer=self.tokenizer,
                                                              input_ids=prompts,
                                                              attention_mask=prompt_att_mask,
@@ -179,7 +179,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         cache_seqlens = tmp_ys[0].cache_seqlens
         gconfig.min_new_tokens = 0
         gconfig.max_new_tokens = origin_max_new_tokens - first_n_tokens
-        seq22, log_probs22, logits_mask22, ys2 = generate(model=self.model,
+        seq22, log_probs22, logits_mask22, ys2, _ = generate(model=self.model,
                                                           tokenizer=self.tokenizer,
                                                           input_ids=seq21[:, -1:],
                                                           k_caches=k_caches,
@@ -462,7 +462,7 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
                                                         attention_mask=prompt_att_mask,
                                                         gconfig=gconfig)
 
-        g, logprob, mask, _ = generate(model=self.model,
+        g, logprob, mask, _, _ = generate(model=self.model,
                                        tokenizer=self.tokenizer,
                                        input_ids=prompt,
                                        attention_mask=prompt_att_mask,

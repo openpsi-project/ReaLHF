@@ -945,7 +945,7 @@ def generate(
     v_caches: Optional[List[torch.Tensor]] = None,
     cache_seqlens: Optional[torch.Tensor] = None,
     gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData], Optional[torch.Tensor]]:
     """Generete a sequence with a FlashMQAT.
 
     Args:
@@ -974,9 +974,11 @@ def generate(
         The tuple of
             gen_tokens: Generated tokens. Shape [bs, #new_tokens].
             log_probs: Log probabilities of generated tokens. Shape [bs, #new_tokens].
-            mask: The mask of logits. None if no mask otherwise a tensor of shape [bs, vocab_size].
+            mask: The mask of logits. None if no mask otherwise a tensor of shape [bs, #new_tokens, vocab_size].
+                1 if the logits is valid else 0, e.g., should be used as `logits.masked_fill_(mask.logical_not(), -1e10)`.
             ys: List of PipeCacheData. Length equals to the number of transformer layers.
                 Can be saved for continuing generation.
+            prompt_logits: Output logits of prompts. None if k/v caches are passed in. Shape [#tot_prompt_tokens].
     """
     if attention_mask is None:
         attention_mask = torch.logical_and(input_ids != tokenizer.pad_token_id, input_ids
@@ -995,6 +997,7 @@ def generate(
     gen_logprob_ph = []
     gen_logits_mask_ph = []
 
+    prompt_logits = None
     # Prepare inputs for generation iterations
     if k_caches is None:
         # Generate from scratch.
@@ -1008,8 +1011,8 @@ def generate(
         ys = [PipeCacheData(input_ids=packed_input_ids)
               ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
         # Model forward will set k/v cache in PipeCacheData.
-        logits = model(x, ys).pp_output
-        logits = logits[cu_seqlens[1:] - 1]
+        prompt_logits = model(x, ys).pp_output
+        logits = prompt_logits[cu_seqlens[1:] - 1]
         for y in ys[1:-1]:
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             k_cache = torch.zeros((bs, max_seq_len + gconfig.max_new_tokens, *y.k_cache.shape[1:]),
@@ -1078,7 +1081,7 @@ def generate(
         gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
         logits_mask = torch.stack(gen_logits_mask_ph, -2)
 
-    return gen_tokens, log_probs, logits_mask, ys[1:-1]
+    return gen_tokens, log_probs, logits_mask, ys[1:-1], prompt_logits
 
 
 @torch.no_grad()
