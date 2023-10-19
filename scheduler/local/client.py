@@ -105,7 +105,7 @@ class LocalSchedulerClient(SchedulerClient):
         for k, p in zip(keys, procs):
             self._jobs.pop(k)
             del p
-        self._running_worker_types.pop(worker_type)
+        self._running_worker_types.remove(worker_type)
 
     def stop_all(self):
         for name in self._job_counter:
