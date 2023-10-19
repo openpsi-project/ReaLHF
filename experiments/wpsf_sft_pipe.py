@@ -23,7 +23,7 @@ def sft(
 
 class WpsFormulaSFTPipelineExperiment(Experiment):
 
-    def __init__(self, n_models=8, num_pipeline_stages=4, seed=1, total_train_epochs=4):
+    def __init__(self, n_models=4, num_pipeline_stages=4, seed=1, total_train_epochs=4):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -55,15 +55,16 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    nodelist="frl8a138",
+                    nodelist="frl4a135",
                     mem=60000,
                 ),
             ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = "/data/aigc/public/starcoder-16bit"
+        # model_path = "/data/aigc/public/starcoder-16bit"
         # model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
+        model_path = "/lustre/meizy/backup_zy/model_saves/pipe_4l_starcoder"
         train_batch_size_per_device = 4
         eval_batch_size_per_device = 4
         max_seq_len = 2048
@@ -115,7 +116,8 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
         model = Model("starcoder_flash_mqat_pipe",
                       args=dict(model_path=model_path,
                                 num_pp=self.num_pipeline_stages,
-                                num_dp=self.dp_worldsize))
+                                num_dp=self.dp_worldsize,
+                                load_from_full_ckpt=False))
 
         interface = ModelInterface('pipe_flash_sft')
 

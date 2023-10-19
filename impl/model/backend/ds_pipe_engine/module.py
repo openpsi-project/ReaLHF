@@ -19,6 +19,7 @@ import torch
 import torch.nn as nn
 
 from .topology import PipeDataParallelTopology, PipelineParallelGrid
+from base.monitor import process_memory_mb
 from impl.model.utils.data import (data_list_to_tensor_tuple, PipeCacheData, PipeTransferData,
                                    tensor_tuple_to_data_list)
 
@@ -526,18 +527,26 @@ class PipelineModule(nn.Module):
         ckpt_files.sort()
         return ckpt_files
 
-    def save_state_dict(self, save_dir, file_name_suffix="pytorch_model.bin"):
+    def save(self, save_dir, *save_args, **save_kwargs):
         dp_rank = self._grid.data_parallel_id
         if dp_rank > 0:  # only save on dp_rank = 0
             return
-        save_fn = f"pipestage_{self.stage_id}-{file_name_suffix}"
+        save_fn = f"pytorch_model-stage-{self.stage_id}.bin"
         save_abs_fn = os.path.join(save_dir, save_fn)
-        torch.save(self.state_dict(), save_abs_fn)
+        torch.save(self.state_dict(), save_abs_fn, *save_args, **save_kwargs)
 
-    def load_state_dir(self, load_dir, file_name_suffix="pytorch_model.bin"):
-        load_fn = f"pipestage_{self.stage_id}-{file_name_suffix}"
-        load_abs_fn = os.path.join(load_dir, load_fn)
-        self.load_state_dict(load_abs_fn)
+    def load(self, load_dir, from_full_ckpt=False, *load_args, **load_kwargs):
+        # TODO: support loading from shards
+        if not from_full_ckpt:
+            load_fn = f"pytorch_model-stage-{self.stage_id}.bin"
+            load_abs_fn = os.path.join(load_dir, load_fn)
+        else:
+            load_fn = "pytorch_model.bin"
+            load_abs_fn = os.path.join(load_dir, load_fn)
+        logger.info("Loading model from {}".format(load_abs_fn))
+        state_dict = torch.load(load_abs_fn, *load_args, **load_kwargs)
+        process_memory_mb("after_load_state_dict")
+        self.load_state_dict(state_dict, strict=True)
 
     # def save_state_dict(self, save_dir, checkpoint_engine):
     #     # Processes having the same model parallel rank on different data parallel instances

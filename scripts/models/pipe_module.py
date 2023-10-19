@@ -18,7 +18,8 @@ from deepspeed.utils import logger
 import torch
 import torch.nn as nn
 
-from .topology import PipeDataParallelTopology, PipelineParallelGrid
+from impl.model.backend.ds_pipe_engine.module import *
+from impl.model.backend.ds_pipe_engine.topology import *
 from impl.model.utils.data import (data_list_to_tensor_tuple, PipeCacheData, PipeTransferData,
                                    tensor_tuple_to_data_list)
 
@@ -130,15 +131,7 @@ class PipelineModule(nn.Module):
     def __init__(self,
                  layers,
                  num_stages=None,
-                 topology=None,
-                 loss_fn=None,
-                 seed_layers=False,
-                 seed_fn=None,
-                 base_seed=1234,
-                 partition_method='parameters',
-                 activation_checkpoint_interval=0,
-                 activation_checkpoint_func=checkpointing.checkpoint,
-                 checkpointable_layers=None):
+                 partition_method='parameters'):
 
         super().__init__()
 
@@ -146,18 +139,6 @@ class PipelineModule(nn.Module):
             raise RuntimeError('must provide num_stages or topology')
 
         self.micro_offset = 0
-
-        self.loss_fn = loss_fn
-
-        self.seed_layers = seed_layers
-        self.seed_fn = seed_fn
-        self.base_seed = base_seed
-        if dist.get_rank() == 0:
-            try:
-                seed_str = self.seed_fn.__name__
-            except AttributeError:
-                seed_str = None
-            print(f'SEED_LAYERS={self.seed_layers} BASE_SEED={self.base_seed} SEED_FN={seed_str}')
 
         # Setup world info
         self.world_group = dist.new_group(ranks=range(dist.get_world_size()))
@@ -167,19 +148,8 @@ class PipelineModule(nn.Module):
         print("GPU rank info:", self.world_group, self.global_rank, self.world_size, self.local_rank)
         assert self.local_rank != None
 
-        if topology:
-            self._topo = topology
-            self.num_stages = self._topo.get_dim('pipe')
-        else:
-            self.num_stages = num_stages
-            if topology is None:
-                if self.world_size % self.num_stages != 0:
-                    raise RuntimeError(
-                        f'num_stages ({self.num_stages}) must divide distributed world size ({self.world_size})'
-                    )
-                dp = self.world_size // num_stages
-                topology = PipeDataParallelTopology(num_pp=num_stages, num_dp=dp)
-                self._topo = topology
+        topology = PipeDataParallelTopology(num_pp=num_stages, num_dp=1)
+        self._topo = topology
 
         # Construct communicators for pipeline topology
         self._grid = PipelineParallelGrid(process_group=self.world_group, topology=self._topo)
@@ -208,61 +178,6 @@ class PipelineModule(nn.Module):
         self.to(get_accelerator().device_name(self.local_rank))
 
         self.tied_comms = self._index_tied_modules()
-        self._synchronize_tied_weights()
-
-    def _build(self):
-        specs = self._layer_specs
-
-        for local_idx, layer in enumerate(specs[self._local_start:self._local_stop]):
-            layer_idx = local_idx + self._local_start
-            if self.seed_layers:
-                if self.seed_fn:
-                    self.seed_fn(self.base_seed + layer_idx)
-                else:
-                    ds_utils.set_random_seed(self.base_seed + layer_idx)
-
-            # Recursively build PipelineModule objects
-            if isinstance(layer, PipelineModule):
-                raise NotImplementedError('RECURSIVE BUILD NOT YET IMPLEMENTED')
-
-            # LayerSpec objects contain an nn.Module that should be allocated now.
-            elif isinstance(layer, nn.Module):
-                name = str(layer_idx)
-                self.forward_funcs.append(layer)
-                self.fwd_map.update({name: len(self.forward_funcs) - 1})
-                self.add_module(name, layer)
-
-            # TiedLayerSpec objects contain an nn.Module that should be allocated now.
-            elif isinstance(layer, TiedLayerSpec):
-                # Build and register the module if we haven't seen it before.
-                if layer.key not in self.tied_modules:
-                    self.tied_modules[layer.key] = layer.build()
-                    self.tied_weight_attrs[layer.key] = layer.tied_weight_attr
-
-                if layer.forward_fn is None:
-                    # Just use forward()
-                    self.forward_funcs.append(self.tied_modules[layer.key])
-                else:
-                    # User specified fn with args (module, input)
-                    self.forward_funcs.append(partial(layer.forward_fn, self.tied_modules[layer.key]))
-
-            # LayerSpec objects contain an nn.Module that should be allocated now.
-            elif isinstance(layer, LayerSpec):
-                module = layer.build()
-                name = str(layer_idx)
-                self.forward_funcs.append(module)
-                self.fwd_map.update({name: len(self.forward_funcs) - 1})
-                self.add_module(name, module)
-
-            # Last option: layer may be a functional (e.g., lambda). We do nothing in
-            # that case and just use it in forward()
-            else:
-                self.forward_funcs.append(layer)
-
-        # All pipeline parameters should be considered as model parallel in the context
-        # of our FP16 optimizer
-        for p in self.parameters():
-            p.ds_pipe_replicated = False
 
     def _count_layer_params(self):
         """Count the trainable parameters in individual layers.
@@ -303,38 +218,10 @@ class PipelineModule(nn.Module):
         if len(idxs) == 0:
             raise RuntimeError(f"Partitioning '{layername}' found no valid layers to partition.")
         return idxs
-
-    @property
-    def num_layers(self):
-        """ number of layers in current pipeline stage
-        """
-        return len(self.forward_funcs)
-
-    def forward(self, forward_input_tuple: Tuple):
-        inputs = tensor_tuple_to_data_list(forward_input_tuple)
-        x: PipeTransferData = inputs[0]
-        ys: List[PipeCacheData] = inputs[1:]
-        local_micro_offset = self.micro_offset + 1
-        for idx, (layer, y) in enumerate(zip(self.forward_funcs, ys)):
-            self.curr_layer = idx + self._local_start
-            if self.seed_layers:
-                new_seed = (self.base_seed * local_micro_offset) + self.curr_layer
-                if self.seed_fn:
-                    self.seed_fn(new_seed)
-                else:
-                    ds_utils.set_random_seed(new_seed)
-
-            x = layer(x, y)
-            # if self.stage_id < self.num_stages - 1:
-            x.pp_input = x.pp_output
-            x.pp_output = None
-
-        outputs = data_list_to_tensor_tuple([x])
-        return outputs
+    
 
     def _partition_layers(self, method='uniform'):
         num_stages = self._topo.get_dim('pipe')
-        stage_id = self._topo.get_coord(self.global_rank).pipe
 
         if self.global_rank == 0:
             logger.info(f'Partitioning pipeline stages with method {method}')
@@ -360,51 +247,24 @@ class PipelineModule(nn.Module):
             raise NotImplementedError(f'Partitioning method {method} not implemented.')
 
         # Print some information on the partitioning.
-        if self.global_rank == 0:
-            for stage in range(num_stages):
-                start = self.parts[stage]
-                stop = self.parts[stage + 1]
-                print(f'stage={stage} layers={stop - start}')
-                for idx, layer in enumerate(self._layer_specs[start:stop]):
-                    name = str(layer)
-                    if isinstance(layer, LayerSpec):
-                        name = layer.typename.__name__
-                    if isinstance(layer, nn.Module):
-                        name = layer.__class__.__name__
-                    else:
-                        try:
-                            name = layer.__name__
-                        except AttributeError:
-                            pass
-                    print(f'    {idx+start:2d}: {name}')
-            if self.loss_fn:
-                try:
-                    print(f'  loss: {self.loss_fn.__name__}')
-                except AttributeError:
-                    print(f'  loss: {self.loss_fn.__class__.__name__}')
+        for stage in range(num_stages):
+            start = self.parts[stage]
+            stop = self.parts[stage + 1]
+            print(f'stage={stage} layers={stop - start}')
+            for idx, layer in enumerate(self._layer_specs[start:stop]):
+                name = str(layer)
+                if isinstance(layer, LayerSpec):
+                    name = layer.typename.__name__
+                if isinstance(layer, nn.Module):
+                    name = layer.__class__.__name__
+                else:
+                    try:
+                        name = layer.__name__
+                    except AttributeError:
+                        pass
+                print(f'    {idx+start:2d}: {name}')
 
-        self._set_bounds(start=self.parts[stage_id], stop=self.parts[stage_id + 1])
-
-    def allreduce_tied_weight_gradients(self):
-        '''All reduce the gradients of the tied weights between tied stages'''
-        for key, comm in self.tied_comms.items():
-            weight = getattr(self.tied_modules[key], comm['weight_attr'])
-            dist.all_reduce(weight.grad, group=comm['group'])
-
-    def get_tied_weights_and_groups(self):
-        weight_group_list = []
-        for key, comm in self.tied_comms.items():
-            weight = getattr(self.tied_modules[key], comm['weight_attr'])
-            weight_group_list.append((weight, comm['group']))
-        return weight_group_list
-
-    def _synchronize_tied_weights(self):
-        for key, comm in self.tied_comms.items():
-            dist.broadcast(
-                getattr(comm['module'], comm['weight_attr']),
-                src=min(comm['ranks']),
-                group=comm['group'],
-            )
+        # self._set_bounds(start=self.parts[stage_id], stop=self.parts[stage_id + 1])
 
     def _index_tied_modules(self):
         ''' Build communication structures for tied modules. '''
@@ -527,14 +387,8 @@ class PipelineModule(nn.Module):
         return ckpt_files
 
     def save_state_dict(self, save_dir, file_name_suffix="pytorch_model.bin"):
-        dp_rank = self._grid.data_parallel_id
-        if dp_rank > 0:  # only save on dp_rank = 0
-            return
         save_fn = f"pipestage_{self.stage_id}-{file_name_suffix}"
         save_abs_fn = os.path.join(save_dir, save_fn)
         torch.save(self.state_dict(), save_abs_fn)
 
-    def load_state_dir(self, load_dir, file_name_suffix="pytorch_model.bin"):
-        load_fn = f"pipestage_{self.stage_id}-{file_name_suffix}"
-        load_abs_fn = os.path.join(load_dir, load_fn)
-        self.load_state_dict(load_abs_fn)
+    def load(self, load_path):

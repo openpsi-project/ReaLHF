@@ -28,13 +28,14 @@ logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
 
 logger = logging.getLogger("test")
 
-model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
+# model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
+model_path = "/lustre/meizy/backup_zy/model_saves/pipe_4l_starcoder"
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
 MODEL_NAME = "pipedatamodel"
 MODEL_TYPE = "model_worker"
 PIPE_DEGREE = 4
-DATA_DEGREE = 2
+DATA_DEGREE = 1
 
 
 def setup_gpu(worker_index, b):
@@ -73,8 +74,9 @@ def main(worker_index, b):
     )
     topo, model = get_pipe_model(model_path, device)
 
-    dp_worldsize = 2
-    dp_rank = torch.distributed.get_rank() % 2
+    dp_worldsize = 1
+    dp_rank = 0
+    # dp_rank = torch.distributed.get_rank() % 2
 
     backend = get_pipe_backend()
     ft_spec = get_finetune_spec()
@@ -96,15 +98,15 @@ def main(worker_index, b):
         cu_seqlens=cu_seqlens,
         prompt_mask=prompt_mask,
     )
-    print(f"rank {worker_index}: begin train_step")
-    outputs = interface.train_step(model, data)
-    print(f"rank {worker_index}: end train_step")
-    print(f"rank {worker_index}: train_step outputs: {outputs}")
+    # print(f"rank {worker_index}: begin train_step")
+    # outputs = interface.train_step(model, data)
+    # print(f"rank {worker_index}: end train_step")
+    # print(f"rank {worker_index}: train_step outputs: {outputs}")
 
-    # print(f"rank {worker_index}: begin inference")
-    # outputs = interface.inference(model, data)
-    # print(f"rank {worker_index}: end inference")
-    # print(f"rank {worker_index}: inference outputs: {outputs}")
+    print(f"rank {worker_index}: begin inference")
+    outputs = interface.inference(model, data)
+    print(f"rank {worker_index}: end inference")
+    print(f"rank {worker_index}: inference outputs: {outputs}")
 
 
 if __name__ == "__main__":

@@ -101,25 +101,30 @@ def make_starcoder_flash_mqat_pipe_module(
 
 def load_starcoder_flash_mqat_pipe(module: PipelineModule,
                                    layer_key_mappings: Dict[str, str],
+                                   load_from_full_ckpt: Optional[bool] = False,
                                    model_path: Optional[str] = None):
+    if load_from_full_ckpt:
+        process_memory_mb("before_init_state_dict")
+        try:
+            state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
+        except FileNotFoundError:
+            state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
 
-    process_memory_mb("before_init_state_dict")
-    try:
-        state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
-    except FileNotFoundError:
-        state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
+        process_memory_mb("after_init_state_dict")
 
-    process_memory_mb("after_init_state_dict")
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            for replace_from, replace_to in layer_key_mappings.items():
+                if replace_from in k:
+                    k = k.replace(replace_from, replace_to)
+            new_state_dict[k] = v
+        module.load_state_dict(new_state_dict, strict=False)
 
-    new_state_dict = {}
-    for k, v in state_dict.items():
-        for replace_from, replace_to in layer_key_mappings.items():
-            if replace_from in k:
-                k = k.replace(replace_from, replace_to)
-        new_state_dict[k] = v
-    module.load_state_dict(new_state_dict, strict=False)
-
-    process_memory_mb("after_load_state_dict")
+        process_memory_mb("after_load_state_dict")
+    else:
+        process_memory_mb("before_load")
+        module.load(model_path)
+        # process_memory_mb("after_load")
     return module
 
 
@@ -132,6 +137,7 @@ def make_flash_mqat_pipe_model(
     dtype: torch.dtype = torch.float16,
     from_type: str = 'starcoder',
     tokenizer_path: Optional[str] = None,
+    load_from_full_ckpt: Optional[bool] = False,
 ):
     if tokenizer_path is None:
         tokenizer_path = model_path
@@ -145,7 +151,10 @@ def make_flash_mqat_pipe_model(
                                                                            device)
         process_memory_mb("after_make_pipe_module")
         # logger.info("module initialized")
-        module = load_starcoder_flash_mqat_pipe(module, layer_key_mappings, model_path=model_path)
+        module = load_starcoder_flash_mqat_pipe(module,
+                                                layer_key_mappings,
+                                                load_from_full_ckpt,
+                                                model_path=model_path)
         # logger.info("model loaded")
     else:
         raise NotImplementedError()

@@ -6,13 +6,14 @@ from impl.model.backend.ds_pipe_engine import PipeDataParallelTopology
 import api.config as config_package
 import api.model
 
-model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
+model_path = "/lustre/meizy/backup_zy/model_saves/pipe_4l_starcoder"
+# model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
 MODEL_NAME = "pipedatamodel"
 MODEL_TYPE = "model_worker"
 PIPE_DEGREE = 4
-DATA_DEGREE = 2
+DATA_DEGREE = 1
 
 
 def get_simple_interface():
@@ -48,7 +49,9 @@ def get_pipe_model(model_path, device):
     model_config = config_package.Model(type_="starcoder_flash_mqat_pipe",
                                         args=dict(
                                             model_path=model_path,
-                                            topology=topology,
+                                            num_pp=PIPE_DEGREE,
+                                            num_dp=DATA_DEGREE,
+                                            load_from_full_ckpt=False,
                                             dtype=torch.float16,
                                         ))
     model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
