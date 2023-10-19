@@ -262,4 +262,5 @@ for s in range(1, 6):
             seed=s,
         ),
     )
-register_experiment("wps-rw-pl-benchmark", functools.partial(WpsPlackettLuceRewardExperiment, benchmark_only=True))
+register_experiment("wps-rw-pl-benchmark",
+                    functools.partial(WpsPlackettLuceRewardExperiment, benchmark_only=True))
