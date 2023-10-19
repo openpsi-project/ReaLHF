@@ -407,7 +407,6 @@ from impl.model.utils.data import build_packed_inputs, gather_shifted_log_probs,
 #         assert torch.allclose(vgmask.cpu(), vcmask)
 
 
-
 class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod

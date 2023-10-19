@@ -10,6 +10,7 @@ import numpy as np
 import torch.utils.data
 import transformers
 
+from base.cluster import spec as cluster_spec
 import api.config
 import api.huggingface
 
@@ -87,10 +88,8 @@ def make_dataset(
         return dataset_cls(util=util, **cfg.args)
 
     # Create and check cache path.
-    if (not cache_root.startswith("/data") and not cache_root.startswith("/hddlustre")
-            and not cache_root.startswith("/home")):
-        raise ValueError(f"Data cache path {cache_root} is not on NFS"
-                         " (either '/home', '/data' or '/hddlustre').")
+    if (not cache_root.startswith(cluster_spec.fileroot) and not cache_root.startswith("/home")):
+        raise ValueError(f"Data cache path {cache_root} should be /home or under {cluster_spec.fileroot}.")
     if "_" in experiment_name or "_" in trial_name:
         raise ValueError(f"Invalid experiment/trial name.")
 

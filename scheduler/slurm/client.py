@@ -9,15 +9,16 @@ import shutil
 import subprocess
 import time
 
-from scheduler.client import SchedulerClient, TaskException, TaskInfo, TaskState
-from scheduler.slurm.utils import (allocate_resources, SlurmResource, SlurmResourceNotEnoughException,
-                                   SlurmTaskInfo)
+from base.cluster import spec as cluster_spec
+from scheduler.client import JobException, JobInfo, JobState, SchedulerClient
+from scheduler.slurm.utils import (allocate_resources, SlurmLaunchInfo, SlurmResource,
+                                   SlurmResourceNotEnoughException)
 
 logger = logging.getLogger("Slurm scheduler")
 
 SCHEDULING_RETRY_INTERVAL_SECONDS = 30
 SCHEDULING_TIMEOUT_MAX_SECONDS = 3600 * 24
-LOCK_FILE_NAME = "/data/aigc/llm/logs/slurm_scheduler.lock"
+LOCK_FILE_NAME = f"{cluster_spec.fileroot}/logs/slurm_scheduler.lock"
 
 
 class SlurmSchedulerClient(SchedulerClient):
@@ -26,18 +27,19 @@ class SlurmSchedulerClient(SchedulerClient):
 
     def __init__(self, expr_name, trial_name):
         super().__init__(expr_name, trial_name)
-        self.__pending_tasks: Dict[str, SlurmTaskInfo] = dict()
-        self.__committed_tasks: Dict[str, SlurmTaskInfo] = dict()
-        self.__pending_task_array_counter = defaultdict(int)
-        self.__pending_task_counter = defaultdict(int)
-        self.__pending_worker_counter = defaultdict(int)
 
-    def submit(self, task_name, cmd, **kwargs):
-        self.submit_array(task_name, cmd, count=1, **kwargs)
+        self.__pending_jobs: Dict[str, SlurmLaunchInfo] = dict()
+        self.__committed_jobs: Dict[str, SlurmLaunchInfo] = dict()
+
+        self.__submission_counter = defaultdict(int)
+        self.__wprocs_counter = defaultdict(int)
+
+    def submit(self, worker_type, cmd, **kwargs):
+        self.submit_array(worker_type, cmd, count=1, **kwargs)
 
     def submit_array(
             self,
-            task_name: str,
+            worker_type: str,
             cmd: str,  # XXX: should be None for workers
             count: int,
             cpu: int = 1,
@@ -46,7 +48,7 @@ class SlurmSchedulerClient(SchedulerClient):
             mem: int = 1024,  # MB
             env_vars: Optional[Dict] = None,
             container_image: str = "llm/llm-gpu",
-            container_mounts: str = "/data:/data,/lustre:/lustre",
+            container_mounts: str = cluster_spec.default_mount,
             node_type: Optional[str] = None,
             nodelist: Optional[str] = None,
             exclude: Optional[str] = None,
@@ -55,147 +57,139 @@ class SlurmSchedulerClient(SchedulerClient):
             begin: str = None,
             deadline: str = None,
             time_limit: str = None):
-        # record information of the task, do not submit to slurm until `wait()` is called
-        resource_requirement = SlurmResource(mem=mem, cpu=cpu, gpu=gpu, gpu_type=gpu_type)
-        task_info = SlurmTaskInfo(task_name=task_name,
-                                  ntasks=count,
-                                  resource_requirement=resource_requirement,
-                                  cmd=cmd,
-                                  job_name=self.job_name,
-                                  container_image=container_image,
-                                  container_mounts=container_mounts,
-                                  env_vars=env_vars,
-                                  node_type=node_type,
-                                  nodelist=nodelist,
-                                  exclude=exclude,
-                                  hostfile=hostfile,
-                                  multiprog=multiprog,
-                                  task_id=self.__pending_task_array_counter[task_name],
-                                  begin=begin,
-                                  deadline=deadline,
-                                  time_limit=time_limit)
-        if task_info.slurm_name in self.__pending_tasks \
-            or task_info.slurm_name in self.__committed_tasks:
-            raise ValueError(f"Task name {task_info.slurm_name} already existed.")
-        self.__pending_task_array_counter[task_name] += 1
-        # fractional GPU count to integer
-        task_info.resolve_gpu_requirement()
-        if task_info.multiprog:
-            task_info = self.__resolve_multiprog_file(task_info)
-            task_info = self.__resolve_envvar(task_info)
-        self.__pending_task_counter[task_name] += task_info.ntasks
-        self.__pending_worker_counter[task_name] += task_info.nworkers
-        self.__pending_tasks[task_info.slurm_name] = task_info
-        logger.info(f"Registered Slurm task {task_info.slurm_name} to scheduler.")
+        # record launch information, do not submit to slurm until `wait()` is called
+        # NOTE: fractional GPU requirement will be resolved automatically in `__post_init__` of SlurnLaunchInfo
+        launch_info = SlurmLaunchInfo(
+            worker_type=worker_type,
+            wprocs_in_job=count,
+            resource_requirement=SlurmResource(mem=mem, cpu=cpu, gpu=gpu, gpu_type=gpu_type),
+            cmd=cmd,
+            run_name=self.run_name,
+            container_image=container_image,
+            container_mounts=container_mounts,
+            env_vars=env_vars,
+            node_type=node_type,
+            nodelist=nodelist,
+            exclude=exclude,
+            hostfile=hostfile,
+            multiprog=multiprog,
+            worker_submission_idx=self.__submission_counter[worker_type],
+            begin=begin,
+            deadline=deadline,
+            time_limit=time_limit,
+        )
 
-    def __resolve_multiprog_file(self, task_info: SlurmTaskInfo):
-        cmd = task_info.cmd.format(group_id=str(self.__pending_task_counter[task_info.task_name]),
-                                   group_offset='%t',
-                                   group_size=str(task_info.ntasks),
-                                   group_index=str(self.__pending_task_array_counter[task_info.task_name]))
-        task_info.multiprog_content = f"0-{task_info.ntasks-1} {cmd}\n"
-        return task_info
+        if launch_info.slurm_name in self.__pending_jobs \
+            or launch_info.slurm_name in self.__committed_jobs:
+            raise ValueError(f"job name {launch_info.slurm_name} already existed.")
 
-    def __resolve_envvar(self, task_info: SlurmTaskInfo):
-        env_vars = task_info.env_vars.copy() if task_info.env_vars is not None else {}
-        env_vars.update({
-            "COMMIT_INDEX_START": str(self.__pending_worker_counter[task_info.task_name]),
-            "TASK_SIZE": str(task_info.workers_per_task),
-            "COMMIT_N_WORKERS": str(task_info.nworkers)
-        })
-        task_info.env_vars = env_vars
-        return task_info
+        if launch_info.multiprog:
+            launch_info = self.__resolve_multiprog_file(launch_info)
 
-    def __allocate_and_commit_pending_tasks(self):
-        """Allocate resources to all pending task specs.
-        Generate hostfiles for each task info
+        self.__submission_counter[worker_type] += 1
+        self.__wprocs_counter[worker_type] += count
+
+        self.__pending_jobs[launch_info.slurm_name] = launch_info
+        logger.info(f"Registered Slurm job {launch_info.slurm_name} to scheduler.")
+
+    def __resolve_multiprog_file(self, launch_info: SlurmLaunchInfo):
+        worker_type = launch_info.worker_type
+        cmd = launch_info.cmd.format(
+            jobstep_id='%t',
+            n_jobsteps=launch_info.n_jobsteps,
+            worker_submission_index=self.__submission_counter[worker_type],
+            wprocs_per_jobstep=launch_info.wprocs_per_jobstep,
+            wprocs_in_job=launch_info.wprocs_in_job,
+            wproc_offset=self.__wprocs_counter[worker_type],
+        )
+        launch_info.multiprog_content = f"0-{launch_info.n_jobsteps - 1} {cmd}\n"
+        return launch_info
+
+    def __allocate_and_commit_pending_jobs(self):
+        """Allocate resources to all pending job specs.
+        Generate hostfiles for each job info
         """
         start_time = time.monotonic()
         while True:
             try:
                 fp = open(LOCK_FILE_NAME, "w")
                 fcntl.flock(fp, fcntl.LOCK_EX)
-                infos = list(self.__pending_tasks.values())
+                infos = list(self.__pending_jobs.values())
                 infos = allocate_resources(infos)
-                self.__pending_tasks = {info.slurm_name: info for info in infos}
-                # logger.info("Allocated tasks: ")
+                self.__pending_jobs = {info.slurm_name: info for info in infos}
+                # logger.info("Allocated jobs: ")
                 # for info in infos:
                 #     logger.info(info)
                 break
             except SlurmResourceNotEnoughException:
-                logger.info("Not enough resources to allocate all pending tasks. Retrying ...")
+                logger.info("Not enough resources to allocate all pending jobs. Retrying ...")
                 logger.info("Time since start: %d seconds", time.monotonic() - start_time)
                 fcntl.flock(fp, fcntl.LOCK_UN)
                 time.sleep(SCHEDULING_RETRY_INTERVAL_SECONDS)
                 if time.monotonic() - start_time > SCHEDULING_TIMEOUT_MAX_SECONDS:
-                    raise TimeoutError(f"Timeout waiting for {self.job_name} to schedule.")
+                    raise TimeoutError(f"Timeout waiting for {self.run_name} to schedule.")
 
         try:
-            for slurm_name, task_info in self.__pending_tasks.items():
-                task_info.commit()
-                self.__committed_tasks[slurm_name] = task_info
-            self.__pending_tasks = dict()
-            states = [None for _ in self.__committed_tasks]
-            while TaskState.PENDING in states or None in states:
+            for slurm_name, launch_info in self.__pending_jobs.items():
+                launch_info.commit()
+                self.__committed_jobs[slurm_name] = launch_info
+            self.__pending_jobs = dict()
+            states = [None for _ in self.__committed_jobs]
+            while JobState.PENDING in states or None in states:
                 time.sleep(0.1)
                 states = self.__update_all()
             # time.sleep(2)
             fcntl.flock(fp, fcntl.LOCK_UN)
-            # self.__pending_task_array_counter = defaultdict(int)
-            # self.__pending_task_counter = defaultdict(int)
-            # self.__pending_worker_counter = defaultdict(int)
         except Exception as e:
-            for task_info in self.__committed_tasks.values():
-                task_info.cancel()
+            for launch_info in self.__committed_jobs.values():
+                launch_info.cancel()
             fcntl.flock(fp, fcntl.LOCK_UN)
             raise e
 
     def stop(self, slurm_name: str):
-        task_info = self.__committed_tasks.get(slurm_name, None)
-        if task_info:
-            task_info.cancel()
+        launch_info = self.__committed_jobs.get(slurm_name, None)
+        if launch_info:
+            launch_info.cancel()
 
     def stop_all(self):
-        for task_info in self.__committed_tasks.values():
-            logger.info(f"Canceling task {task_info.slurm_name}")
-            task_info.cancel()
+        for launch_info in self.__committed_jobs.values():
+            logger.info(f"Canceling job {launch_info.slurm_name}")
+            launch_info.cancel()
         time.sleep(0.2)
-        # print("before stop wait", self.__pending_tasks)
+        # print("before stop wait", self.__pending_jobs)
         self.wait(check_status=(),
-                  remove_status=(TaskState.CANCELLED, TaskState.NOT_FOUND, TaskState.FAILED,
-                                 TaskState.COMPLETED))
+                  remove_status=(JobState.CANCELLED, JobState.NOT_FOUND, JobState.FAILED, JobState.COMPLETED))
 
-    def find(self, slurm_name: str) -> TaskInfo:
-        task_info = self.__committed_tasks.get(slurm_name, None)
-        if task_info is None or task_info.task_info is None:
-            return TaskInfo(name=slurm_name, state=TaskState.NOT_FOUND)
+    def find(self, slurm_name: str) -> JobInfo:
+        launch_info = self.__committed_jobs.get(slurm_name, None)
+        if launch_info is None or launch_info.job_info is None:
+            return JobInfo(name=slurm_name, state=JobState.NOT_FOUND)
         else:
-            return task_info.task_info
+            return launch_info.job_info
 
-    def find_all(self, task_name_regex: str = ".*") -> List[TaskInfo]:
+    def find_all(self, job_name_regex: str = ".*") -> List[JobInfo]:
         self.__update_all()
         infos = []
-        for r in self.__committed_tasks.values():
-            if r.task_info is None:
+        for r in self.__committed_jobs.values():
+            if r.job_info is None:
                 continue
-            if re.fullmatch(task_name_regex, r.slurm_name):
-                infos.append(r.task_info)
+            if re.fullmatch(job_name_regex, r.slurm_name):
+                infos.append(r.job_info)
         return infos
 
     def wait(
             self,
             timeout=None,
-            check_status: Tuple[TaskState,
-                                ...] = (TaskState.CANCELLED, TaskState.FAILED, TaskState.NOT_FOUND),
-            remove_status: Tuple[TaskState, ...] = (TaskState.COMPLETED,),
+            check_status: Tuple[JobState, ...] = (JobState.CANCELLED, JobState.FAILED, JobState.NOT_FOUND),
+            remove_status: Tuple[JobState, ...] = (JobState.COMPLETED,),
             update=False,
     ):
-        # before wait, commit all remaining pending task specs
+        # before wait, commit all remaining pending jobs
         # TODO: grab global file lock to avoid multi-experiment deadlocks
-        self.__allocate_and_commit_pending_tasks()
+        self.__allocate_and_commit_pending_jobs()
         # begin wait
         deadline = None if timeout is None else time.time() + timeout
-        left = set(self.__committed_tasks.keys())
+        left = set(self.__committed_jobs.keys())
         num_jobs_left = len(left)
         logger.info(f"Waiting for {num_jobs_left} jobs.")
         while len(left) > 0:
@@ -203,7 +197,7 @@ class SlurmSchedulerClient(SchedulerClient):
                 num_jobs_left = len(left)
                 logger.info(f"Waiting for {num_jobs_left} jobs.")
             if deadline is not None and time.time() > deadline:
-                raise TimeoutError(f"Timeout waiting for {self.job_name}: {', '.join(sorted(left))}")
+                raise TimeoutError(f"Timeout waiting for {self.run_name}: {', '.join(sorted(left))}")
             try:
                 self.__update_all()
             except subprocess.CalledProcessError:
@@ -211,28 +205,26 @@ class SlurmSchedulerClient(SchedulerClient):
                     "Calling squeue failed. Check slurm manually if you continue to see this warning.")
                 time.sleep(30)
                 continue
-            for task_slurm_name in list(left):
-                task_info = self.__committed_tasks[task_slurm_name]
-                if task_info.slurm_id is None:
+            for job_slurm_name in list(left):
+                launch_info = self.__committed_jobs[job_slurm_name]
+                if launch_info.slurm_id is None:
                     continue
-                if task_info.task_info.state in check_status:
-                    task_info.show_log()
-                    raise TaskException(job_name=self.job_name,
-                                        task_name=task_info.slurm_name,
-                                        host=task_info.task_info.host,
-                                        reason=task_info.task_info.state)
-                if task_info.task_info.state in remove_status:
-                    logger.info(f"Task {task_info.slurm_name} is {task_info.task_info.state}.(Removed)")
-                    left.remove(task_slurm_name)
+                if launch_info.job_info.state in check_status:
+                    launch_info.show_log()
+                    raise JobException(run_name=self.run_name,
+                                       worker_type=launch_info.worker_type,
+                                       host=launch_info.job_info.host,
+                                       reason=launch_info.job_info.state)
+                if launch_info.job_info.state in remove_status:
+                    logger.info(f"Job {launch_info.slurm_name} is {launch_info.job_info.state}.(Removed)")
+                    left.remove(job_slurm_name)
                     if update:
-                        self.__committed_tasks.pop(task_slurm_name)
+                        self.__committed_jobs.pop(job_slurm_name)
             time.sleep(2)
 
     def __update_all(self):
         states = []
-        for task_info in self.__committed_tasks.values():
-            state = task_info.update()
+        for launch_info in self.__committed_jobs.values():
+            state = launch_info.update()
             states.append(state)
         return states
-
-    # def __update_subset(self, slurm_names):

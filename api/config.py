@@ -10,12 +10,13 @@ import sys
 
 import yaml
 
+from base.cluster import spec as cluster_spec
 import api.ecs
 
-PYTORCH_KERNEL_CACHE_PATH = f"/data/aigc/llm/.cache/{getpass.getuser()}/torch/kernels"
-TRITON_CACHE_PATH = f"/data/aigc/llm/.cache/{getpass.getuser()}/triton"
-DATASET_CACHE_PATH = f'/data/aigc/llm/.cache/{getpass.getuser()}/datasets'
-TORCH_EXTENSIONS_DIR = f"/data/aigc/llm/.cache/{getpass.getuser()}/torch/extensions"
+PYTORCH_KERNEL_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/kernels"
+TRITON_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/triton"
+DATASET_CACHE_PATH = f'{cluster_spec.fileroot}/.cache/{getpass.getuser()}/datasets'
+TORCH_EXTENSIONS_DIR = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/extensions"
 
 _LLM_ENVVARS = {
     # "NCCL_P2P_DISABLE": "1",
@@ -173,8 +174,6 @@ class ModelWorker:
     cudnn_deterministic: bool = False
     cuda_cache_cleanliness: bool = True
     cuda_cache_clear_freq: int = 10
-    # ccc_freq_secs: Optional[float] = None  # ccc=clean cuda cache
-    # ccc_freq_steps: Optional[int] = None
     worker_info: Optional[WorkerInformation] = None
 
 

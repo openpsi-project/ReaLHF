@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from api.ecs import Commands, DataQuery, ModelQuery, RawDataQuery
+from base.cluster import spec as cluster_spec
 import api.config as config_pkg
 import api.data as data_api
 import api.model as model_api
@@ -131,8 +132,7 @@ def wrap_func(
 
 
 class MasterWorker(worker_base.Worker):
-    # MODEL_SAVE_ROOT = f"/data/aigc/llm/{getpass.getuser()}/checkpoints"
-    MODEL_SAVE_ROOT = f"/data/aigc/llm/checkpoints/{getpass.getuser()}"
+    MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
     os.makedirs(MODEL_SAVE_ROOT, exist_ok=True)
 
     def __init__(self, server=None):
@@ -262,11 +262,7 @@ class MasterWorker(worker_base.Worker):
         sample = {}
         for k in datas[0].keys():
             if isinstance(datas[0][k], torch.Tensor):
-                if len(datas[0][k].shape) < 2:
-                    raise RuntimeError(
-                        f"Data {k} is not batched. Expect the first dimension to be batch size."
-                        f"For packed inputs, please unsqueeze the first dimension and pad the second dimension to be the same."
-                    )
+                # TODO: use dataparallel broker
                 sample[k] = torch.cat([x[k] for x in datas], dim=0)
             else:
                 # There may be other metadata, e.g. pad token id.

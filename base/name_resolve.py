@@ -16,6 +16,7 @@ from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
 import redis
 
+from base.cluster import spec as cluster_spec
 import base.security
 import base.timeutil
 
@@ -231,7 +232,7 @@ class MemoryNameRecordRepository(NameRecordRepository):
 
 
 class NfsNameRecordRepository(NameRecordRepository):
-    RECORD_ROOT = f"/data/aigc/llm/name_resolve/"
+    RECORD_ROOT = f"{cluster_spec.fileroot}/name_resolve/"
 
     def __init__(self, **kwargs):
         self.__to_delete = set()

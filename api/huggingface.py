@@ -85,11 +85,8 @@ def create_hf_nn(
     generation_kwargs: Optional[Dict[str, Any]] = None,
     quantization_kwargs: Optional[Dict[str, Any]] = None,
 ) -> transformers.PreTrainedModel:
-    # load model
     model_config = transformers.AutoConfig.from_pretrained(model_name_or_path,
                                                            low_cpu_mem_usage=low_cpu_mem_usage)
-    # print(model_config)
-    # model_config.dropout = 0.0 # TODO: temp
     logger.info(f"Loading from {model_name_or_path}...")
     st = time.monotonic()
     if init_from_scratch:
@@ -126,6 +123,7 @@ def create_hf_nn(
     if generation_kwargs is not None:
         model.generation_config.update(**generation_kwargs,)
 
+    # Adopted from DeepSpeed. It may be slower if we omit this.
     model.resize_token_embeddings(int(8 * math.ceil(len(tokenizer) / 8.0)))
 
     try:

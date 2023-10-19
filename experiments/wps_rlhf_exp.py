@@ -1,7 +1,10 @@
+import functools
+
 import torch
 
 from api.config import *
 from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
+from base.cluster import spec as cluster_spec
 
 
 def rollout(
@@ -117,17 +120,23 @@ def train_critic(
 
 class WpsRLHFExperiment(Experiment):
 
-    def __init__(self, n_actors=1, n_critics=1, n_rewards=1, n_refs=1, seed=1):
+    def __init__(self, n_actors=1, n_critics=1, n_rewards=1, n_refs=1, seed=1, benchmark_only=False):
+        if benchmark_only:
+            n_actors = n_critics = n_rewards = n_refs = 1
+            
         self.n_actors = n_actors
         self.n_rewards = n_rewards
         self.n_refs = n_refs
         self.n_critics = n_critics
+        
 
         self.n_total = n_actors + n_rewards + n_refs + n_critics
 
         self.n_data_workers = n_actors
 
         self.seed = seed
+        
+        self.benchmark_only = benchmark_only
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -158,8 +167,12 @@ class WpsRLHFExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        actor_path = "/data/aigc/llm/checkpoints/4l-starcoder/"
-        rw_lora_head_path = "/data/aigc/llm/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
+        if self.benchmark_only:
+            actor_path = f"{cluster_spec.fileroot}/checkpoints/1l-starcoder/"
+            rw_lora_head_path = None
+        else:
+            actor_path = f"{cluster_spec.fileroot}/checkpoints/starcoder/"
+            rw_lora_head_path = f"{cluster_spec.fileroot}/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
 
         self.lora_dim = 32
         self.lora_scaling = 32.0
@@ -175,7 +188,7 @@ class WpsRLHFExperiment(Experiment):
         dataset = Dataset(
             'excel_prompt',
             args=dict(
-                dataset_path="/data/aigc/llm/datasets/wps-prompts/train-small.jsonl",
+                dataset_path=f"{cluster_spec.fileroot}/datasets/wps-prompts/train-small.jsonl",
                 max_seq_len=max_prompt_len,
             ),
         )
@@ -216,16 +229,16 @@ class WpsRLHFExperiment(Experiment):
                 init_from_scratch=False,
                 from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 generation_kwargs=generation_kwargs,
-                quantization_kwargs=dict(load_in_8bit=True),
+                # quantization_kwargs=dict(load_in_8bit=True),
                 lora_module_kwargs=dict(
                     lora_dim=self.lora_dim,
                     lora_scaling=self.lora_scaling,
-                    bnb_8bit_kwargs=dict(
-                        trainable=True,
-                        threshold=6.0,
-                    ),
+                    # bnb_8bit_kwargs=dict(
+                    #     trainable=True,
+                    #     threshold=6.0,
+                    # ),
                 ),
-                lora_key_to_replace='attn',
+                lora_keys_to_replace='attn',
             ),
         )
         ref_model = Model(
@@ -235,7 +248,7 @@ class WpsRLHFExperiment(Experiment):
                 init_from_scratch=False,
                 from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 generation_kwargs=generation_kwargs,
-                quantization_kwargs=dict(load_in_8bit=True),
+                # quantization_kwargs=dict(load_in_8bit=True),
             ),
         )
         rw_model = Model(
@@ -243,20 +256,20 @@ class WpsRLHFExperiment(Experiment):
             args=dict(
                 model_name_or_path=actor_path,
                 from_pretrained_kwargs=dict(torch_dtype=torch.float16),
-                quantization_kwargs=dict(load_in_8bit=True),
+                # quantization_kwargs=dict(load_in_8bit=True),
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
-                load_v_head_path=os.path.join(rw_lora_head_path, "rw_v_head.bin"),
+                load_v_head_path=os.path.join(rw_lora_head_path, "rw_v_head.bin") if not self.benchmark_only else None,
                 lora_module_kwargs=dict(
                     lora_dim=self.lora_dim,
                     lora_scaling=self.lora_scaling,
-                    bnb_8bit_kwargs=dict(
-                        trainable=True,
-                        threshold=6.0,
-                    ),
+                    # bnb_8bit_kwargs=dict(
+                    #     trainable=True,
+                    #     threshold=6.0,
+                    # ),
                 ),
-                lora_key_to_replace='attn',
-                load_lora_path=os.path.join(rw_lora_head_path, "lora.bin"),
+                lora_keys_to_replace='attn',
+                load_lora_path=os.path.join(rw_lora_head_path, "lora.bin")  if not self.benchmark_only else None,
                 lora_op_after_creation='squash',
             ),
         )
@@ -277,7 +290,6 @@ class WpsRLHFExperiment(Experiment):
                 warmup_steps_proportion=0.075,
                 min_lr_ratio=0.0,
                 zero_stage=2,
-                enable_fp16=False,
             ),
         )
         critic_backend = ModelBackend(
@@ -296,7 +308,6 @@ class WpsRLHFExperiment(Experiment):
                 zero_stage=2,
                 offload_param=False,
                 offload_optimizer_state=False,
-                enable_fp16=False,
             ),
         )
         ref_backend = rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=False))
@@ -367,7 +378,7 @@ class WpsRLHFExperiment(Experiment):
         ])
 
         return ExperimentConfig(
-            total_train_epochs=8,
+            total_train_epochs=8 if not self.benchmark_only else 1,
             save_frequency_epochs=None,
             save_frequency_seconds=None,
             master_ecs=ecs,
@@ -377,3 +388,4 @@ class WpsRLHFExperiment(Experiment):
 
 
 register_experiment("wps-rlhf", WpsRLHFExperiment)
+register_experiment("wps-rlhf-benchmark", functools.partial(WpsRLHFExperiment, benchmark_only=True))

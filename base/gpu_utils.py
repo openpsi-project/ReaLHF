@@ -99,7 +99,23 @@ def setup_ddp(expr_name, trial_name, model_name, worker_index):
     return world_size, ddp_rank, local_gpu_id
 
 
-def isolate_cuda_device(worker_type, rank, world_size, experiment_name, trial_name):
+def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment_name: str, trial_name: str):
+    """Isolate CUDA_VISIBLE_DEVICES for each Slurm jobstep.
+    
+    To distinguish the concept of job/jobstep/worker/task, check scheduler/slurm/utils.py.
+    A slurm job with multiple jobsteps will not set CUDA_VISIBLE_DEVICES properly.
+    For example, if a job has 2 jobsteps, each with 1 GPU, and is allocated onto GPU 0 and 1,
+    then CUDA_VISIBLE_DEVICES of these jobsteps will be 0,1, instead of 0 and 1.
+    We use this function in `apps.remote` to isolate CUDA_VISIBLE_DEVICES for each jobstep.
+
+    Args:
+        worker_type (str): .
+        rank (int): Rank of the **jobstep**.
+        world_size (int): Size of the **jobsteps**, aka SLURM_NPROCS. However, we may call this function
+            in other cases (e.g. local scheduler), so we don't use this environment variable directly.
+        experiment_name (str): .
+        trial_name (str): .
+    """
     if not os.environ.get('CUDA_VISIBLE_DEVICES'):
         return
 
@@ -148,5 +164,3 @@ def isolate_cuda_device(worker_type, rank, world_size, experiment_name, trial_na
 
     os.environ['CUDA_VISIBLE_DEVICES'] = str(local_gpu_id)
     os.environ['GPU_DEVICES_ISOLATED'] = "1"
-    # global GPU_DEVICES_ISOLATED
-    # GPU_DEVICES_ISOLATED = True

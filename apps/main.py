@@ -57,13 +57,12 @@ def _submit_workers(
         exclude = sch_cfg.scheduling.exclude
         node_type = sch_cfg.scheduling.node_type
         container_image = image_name or sch_cfg.scheduling.container_image
-        job_name = worker_type
         if use_ray_cluster:
-            job_name = f'rc_{worker_type}'
+            worker_type = f'rc_{worker_type}'
 
         scheduled_jobs.append(
             sched.submit_array(
-                task_name=job_name,
+                worker_type=worker_type,
                 cmd=cmd,
                 count=sch_cfg.count,
                 cpu=sch_cfg.scheduling.cpu,
@@ -105,19 +104,28 @@ def main_start(args):
     }
 
     logger.info(f"Resetting name resolving repo...")
-    sched.submit(
-        "setup",
-        scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
-        env_vars=base_environs,
-        container_image="llm/llm-cpu",
-        node_type="g1",
-    )
 
-    try:
-        sched.wait(timeout=3600, update=True)
-    except:
-        # temp bypassing
-        logger.warning(f"Resetting name resolving repo failed.")
+    if args.remote_reset:
+        sched.submit(
+            "setup",
+            cmd=scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
+            env_vars=base_environs,
+            container_image=args.image_name or setup.controller_image,
+            multiprog=False,
+            hostfile=False,
+        )
+        try:
+            sched.wait(timeout=3600, update=True)
+        except Exception as e:
+            logger.warning(f"Resetting name resolving repo failed.")
+            raise e
+    else:
+        from apps.remote import main_reset_name_resolve
+        try:
+            main_reset_name_resolve(args)
+        except Exception as e:
+            logger.warning(f"Resetting name resolving repo failed.")
+            raise e
     logger.info(f"Resetting name resolving repo... Done.")
 
     logger.info(f"Running configuration: {experiment.__class__.__name__}")
@@ -129,8 +137,9 @@ def main_start(args):
         controller_type = 'local_ray'
     else:
         controller_type = 'zmq'
+    # For local_ray mode, the controller will start all remote workers.
     sched.submit_array(
-        task_name="ctl",
+        worker_type="ctl",
         cmd=scheduler.client.control_cmd(
             expr_name,
             trial_name,
@@ -142,7 +151,6 @@ def main_start(args):
         cpu=1,
         gpu=0,
         mem=1024,
-        node_type="g1",
         env_vars=base_environs,
         container_image=args.image_name or setup.controller_image,
         time_limit=CONTROLLER_TIME_LIMIT,
@@ -168,7 +176,7 @@ def main_start(args):
 
     try:
         sched.wait()
-    except (KeyboardInterrupt, scheduler.client.TaskException):
+    except (KeyboardInterrupt, scheduler.client.JobException):
         sched.stop_all()
         raise
 
@@ -220,6 +228,10 @@ def main():
     subparser.add_argument("--debug",
                            action="store_true",
                            help="If True, activate all assertions in the code.")
+    subparser.add_argument(
+        "--remote_reset",
+        action="store_true",
+        help='If True, reset name resolve repo remotely in computation nodes. Otherwise reset locally.')
     subparser.set_defaults(ignore_worker_error=False)
     subparser.set_defaults(func=main_start)
 

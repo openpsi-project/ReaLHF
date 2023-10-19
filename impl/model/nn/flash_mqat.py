@@ -8,6 +8,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint
 import transformers
 
 from impl.model.utils.data import (build_packed_inputs, DuckGenerationOutput, DuckModelOutput, mask_eos_token,
@@ -308,6 +309,7 @@ class FlashMQATBlock(nn.Module):
                 y.cache_seqlens,
                 x.attention_mask,
                 x.max_seqlen,
+                use_reentrant=True,
             )
         else:
             attn_out, k, v = self.attn(
@@ -321,7 +323,7 @@ class FlashMQATBlock(nn.Module):
             )
         h = h + attn_out
         if self.ckpt_mlp:
-            h = torch.utils.checkpoint.checkpoint(self.mlp, h) + h
+            h = torch.utils.checkpoint.checkpoint(self.mlp, h, use_reentrant=True) + h
         else:
             h = self.mlp(h) + h
         if self.output_layernorm:
