@@ -87,7 +87,6 @@ class ModelWorker(worker_base.Worker):
         )
         self.__interface = api.model.make_interface(self.config.interface)
         self.__backend = api.model.make_backend(self.config.backend)
-        self.__backend.set_worker_index(self.__worker_index, self.__ddp_rank)
 
         if self.config.eval_datasets is not None and self.config.eval_dataloader is not None:
             eval_datasets = [
