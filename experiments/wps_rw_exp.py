@@ -47,6 +47,7 @@ class WpsPlackettLuceRewardExperiment(Experiment):
         min_lr_ratio=None,
         warmup_steps_proportion=None,
         total_train_epochs=4,
+        benchmark_only=False,
     ):
         self.n_models = self.n_data_workers = n_models
         self.seed = seed
@@ -104,6 +105,11 @@ class WpsPlackettLuceRewardExperiment(Experiment):
         else:
             self.total_train_epochs = total_train_epochs
 
+        self.benchmark_only = benchmark_only
+        if self.benchmark_only:
+            self.total_train_epochs = 1
+            self.n_models = self.n_data_workers = 1
+
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
             data_worker=TasksGroup(
@@ -139,7 +145,10 @@ class WpsPlackettLuceRewardExperiment(Experiment):
         self.min_lr_ratio = 0.0
         self.total_train_epochs = 8
 
-        model_path = f"{cluster_spec.fileroot}/checkpoints/4l-starcoder/"
+        if self.benchmark_only:
+            model_path = f"{cluster_spec.fileroot}/checkpoints/1l-starcoder/"
+        else:
+            model_path = f"{cluster_spec.fileroot}/checkpoints/starcoder/"
         train_batch_size_per_device = 1
         eval_batch_size_per_device = 12
         max_seq_len = 512
@@ -235,9 +244,9 @@ class WpsPlackettLuceRewardExperiment(Experiment):
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=None,
-            save_frequency_epochs=1,
+            save_frequency_epochs=1 if not self.benchmark_only else None,
             save_frequency_seconds=None,
-            eval_frequency_epochs=1,
+            eval_frequency_epochs=1 if not self.benchmark_only else None,
             master_ecs=ecs,
             data_worker=data_worker,
             model_worker=model_worker,
@@ -253,3 +262,4 @@ for s in range(1, 6):
             seed=s,
         ),
     )
+register_experiment("wps-rw-pl-benchmark", functools.partial(WpsPlackettLuceRewardExperiment, benchmark_only=True))
