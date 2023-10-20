@@ -22,6 +22,7 @@ import torch
 from . import p2p, schedule
 from .module import PipelineError, PipelineModule
 from base.dataparallel import PackedParallelDataRouter
+from base.monitor import gpu_memory_mb
 from base.namedarray import NamedArray
 from impl.model.utils.data import (data_list_to_tensor_tuple, DuckGenerationOutput, DuckModelOutput,
                                    PipeCacheData, PipeTransferData, tensor_tuple_to_data_list)
@@ -54,9 +55,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     DTYPE_TO_ID = {dtype: id_ for id_, dtype in enumerate(ID_TO_DTYPE)}
 
     def __init__(self, num_micro_batches=None, *super_args, **super_kwargs):
+        gpu_memory_mb("before_deepspeedengine_init")
         super().__init__(*super_args, **super_kwargs)
         assert isinstance(self.module, PipelineModule), "model must base PipelineModule"
 
+        gpu_memory_mb("after_deepspeedengine_init")
         assert self.zero_optimization_stage(
         ) < 2, "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
         logger.info("DeepSpeedEngine initialized!")
@@ -103,6 +106,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.is_data_parallel = self.grid.data_parallel_size > 1
         self.is_model_parallel = self.grid.model_parallel_size > 1
 
+        gpu_memory_mb("before_model_params")
+
         model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
         num_params = sum([p.numel() for p in model_parameters])
         unique_params = num_params
@@ -113,6 +118,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 if self.global_rank != min(d['ranks']):
                     tied_params += sum(p.numel() for p in d['module'].parameters())
             unique_params -= tied_params
+
+        gpu_memory_mb("before_params_tensor")
         params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(self.device)
         dist.all_reduce(params_tensor, group=self.grid.get_model_parallel_group())
         params_tensor = params_tensor.tolist()
@@ -127,9 +134,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                         f'TOTAL_PARAMS={total_params} ({total_params/1e6:0.3f}M) '
                         f'UNIQUE_PARAMS={unique_params} ({unique_params/1e6:0.3f}M)')
 
+        gpu_memory_mb("after_params_tensor_all_reduce")
+
         # initialize peer-2-peer communication and allreduce groups
         if self.is_pipe_parallel:
             p2p.init_process_groups(self.grid)
+
+        gpu_memory_mb("after_init_pipe_pg")
 
         # Pipeline buffers
         self.num_pipe_buffers = 0
@@ -171,6 +182,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.original_input = []  # fifo queue for original input, only used in last stage
 
         self.pipe_cache_data = data_list_to_tensor_tuple([PipeCacheData() for _ in range(self.num_layers)])
+
+        gpu_memory_mb("init_finished")
 
     def set_loss_fn(self, fn):
         self._loss_fn = fn

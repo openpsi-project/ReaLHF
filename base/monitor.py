@@ -3,6 +3,7 @@ import logging
 import os
 import time
 
+from deepspeed.accelerator import get_accelerator
 import psutil
 
 logger = logging.getLogger("benchmarkutils")
@@ -66,3 +67,10 @@ def process_memory_mb(name):
     memory_usage_mb = memory_info.rss / 1024**2
     pid = process.pid
     logger.info(f"Process PID {pid} memory usage @{name}: {memory_usage_mb}.")
+
+
+def gpu_memory_mb(name):
+    import torch.distributed as dist
+    logger.info(
+        f"{name} GPU rank {dist.get_rank()}: memory usage: {round(get_accelerator().memory_allocated() / 1024**2, 2)}MB, "
+        f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB")

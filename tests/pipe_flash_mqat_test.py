@@ -29,12 +29,15 @@ logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
 logger = logging.getLogger("test")
 
 # model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
-model_path = "/lustre/meizy/backup_zy/model_saves/pipe_4l_starcoder"
+# model_path = "/lustre/meizy/base_models/pipe_starcoder"
+model_path = "/lustre/meizy/base_models/pipe_starcoder_6pp_3s"
+# model_path = "/lustre/meizy/base_models/pipe_4l_starcoder"
+# model_path = "/lustre/meizy/backup_zy/starcoder"
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
 MODEL_NAME = "pipedatamodel"
 MODEL_TYPE = "model_worker"
-PIPE_DEGREE = 4
+PIPE_DEGREE = 6
 DATA_DEGREE = 1
 
 
@@ -60,6 +63,7 @@ def print_rank(s, rank):
 
 
 def main(worker_index, b):
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     device = setup_gpu(worker_index, b)
     from impl.model.utils.data import build_packed_inputs, unpack_tensor
     from tests.pipe_utils import (get_example_batch, get_finetune_spec, get_pipe_backend, get_pipe_model,

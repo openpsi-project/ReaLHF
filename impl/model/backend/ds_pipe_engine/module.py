@@ -211,6 +211,9 @@ class PipelineModule(nn.Module):
         self.tied_comms = self._index_tied_modules()
         self._synchronize_tied_weights()
 
+        # for saving checkpoints
+        self.num_checkpoint_shards = 1
+
     def _build(self):
         specs = self._layer_specs
 
@@ -527,26 +530,69 @@ class PipelineModule(nn.Module):
         ckpt_files.sort()
         return ckpt_files
 
-    def save(self, save_dir, *save_args, **save_kwargs):
+    def save(self, save_dir):
         dp_rank = self._grid.data_parallel_id
         if dp_rank > 0:  # only save on dp_rank = 0
             return
-        save_fn = f"pytorch_model-stage-{self.stage_id}.bin"
-        save_abs_fn = os.path.join(save_dir, save_fn)
-        torch.save(self.state_dict(), save_abs_fn, *save_args, **save_kwargs)
 
-    def load(self, load_dir, from_full_ckpt=False, *load_args, **load_kwargs):
+        keys = list(self.state_dict().keys())
+        # if len(keys) < n_shards:
+        #     raise ValueError(f"state_dict has {len(keys)} keys, but n_shards={n_shards}")
+
+        shard_size = len(keys) // self.num_checkpoint_shards
+        extra = len(keys) % self.num_checkpoint_shards
+        shard_size_list = [shard_size for _ in range(self.num_checkpoint_shards)]
+        shard_size_list[-1] = shard_size + extra
+        start, shards = 0, []
+        for i, size in enumerate(shard_size_list):
+            shard = {}
+            for j in range(start, start + size):
+                shard[keys[j]] = self.state_dict()[keys[j]]
+                print(f"shard {i} key {keys[j]}")
+            start += size
+            save_fn = f"pytorch_model-pp-{self.stage_id}-mp-00-s-{i}.bin"
+            save_abs_fn = os.path.join(save_dir, save_fn)
+            torch.save(shard, save_abs_fn)
+
+    def load(self, load_dir, from_full_ckpt=False):
         # TODO: support loading from shards
+        n_shards = 0
         if not from_full_ckpt:
-            load_fn = f"pytorch_model-stage-{self.stage_id}.bin"
-            load_abs_fn = os.path.join(load_dir, load_fn)
+            fn_to_load = []
+            for file in os.listdir(load_dir):
+                if file.endswith(".bin"):
+                    # filename format should be:
+                    # pytorch_model-pp-{pp_index:02d}-mo-{mp_index:02d}-s-{shard_index:02d}
+                    pp_stage = int(file.split("-")[2])
+                    if pp_stage == self.stage_id:
+                        fn_to_load.append(file)
+            for fn in fn_to_load:
+                shard = torch.load(os.path.join(load_dir, fn))
+                self.load_state_dict(shard, strict=False)
+                logger.info(f"loaded shard {fn}")
+                n_shards += 1
+                process_memory_mb(f"after_load_shard_{n_shards}")
         else:
-            load_fn = "pytorch_model.bin"
-            load_abs_fn = os.path.join(load_dir, load_fn)
-        logger.info("Loading model from {}".format(load_abs_fn))
-        state_dict = torch.load(load_abs_fn, *load_args, **load_kwargs)
+            single_file_path = os.path.join(load_dir, "pytorch_model.bin")
+            if os.path.exists(single_file_path):
+                shard = torch.load(single_file_path)
+                self.load_state_dict(shard, strict=True)
+                logger.info(f"loaded shard pytorch_model.bin")
+                n_shards += 1
+                process_memory_mb(f"after_load_shard_{n_shards}")
+            else:
+                for file in os.listdir(load_dir):
+                    if file.endswith(".bin"):
+                        shard = torch.load(os.path.join(load_dir, file))
+                        self.load_state_dict(shard, strict=False)
+                        logger.info(f"loaded shard {file}")
+                        n_shards += 1
+                    process_memory_mb(f"after_load_shard_{n_shards}")
+
+        self.num_checkpoint_shards = n_shards
+        logger.info("Loaded model from {}".format(load_dir))
         process_memory_mb("after_load_state_dict")
-        self.load_state_dict(state_dict, strict=True)
+        # self.load_state_dict(state_dict, strict=True)
 
     # def save_state_dict(self, save_dir, checkpoint_engine):
     #     # Processes having the same model parallel rank on different data parallel instances

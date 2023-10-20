@@ -6,13 +6,15 @@ from impl.model.backend.ds_pipe_engine import PipeDataParallelTopology
 import api.config as config_package
 import api.model
 
-model_path = "/lustre/meizy/backup_zy/model_saves/pipe_4l_starcoder"
+model_path = "/lustre/meizy/base_models/pipe_starcoder_6pp_3s"
 # model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
+# model_path = "/lustre/meizy/base_models/pipe_4l_starcoder"
+# model_path = "/lustre/meizy/backup_zy/starcoder"
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
 MODEL_NAME = "pipedatamodel"
 MODEL_TYPE = "model_worker"
-PIPE_DEGREE = 4
+PIPE_DEGREE = 6
 DATA_DEGREE = 1
 
 
