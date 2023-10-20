@@ -163,7 +163,7 @@ class ModelWorker:
     backend: ModelBackend
     model_name: str
     # stream
-    stream: Union[str, RequestReplyStream]
+    stream: Optional[Union[str, RequestReplyStream]]
     # evaluation
     eval_datasets: Optional[List[Dataset]] = None
     eval_dataloader: Optional[DataLoader] = None
@@ -328,10 +328,9 @@ def config_to_dataclass(config: Union[List, Dict]):
         return [config_to_dataclass(c) for c in config]
     elif isinstance(config, dict):
         if "config_class" in config.keys():
-            return getattr(sys.modules[__name__], config["config_class"])(**{
-                k: config_to_dataclass(v)
-                for k, v in config["config_value"].items()
-            })
+            return getattr(sys.modules[__name__], config["config_class"])(
+                **{k: config_to_dataclass(v)
+                   for k, v in config["config_value"].items()})
         else:
             return config
     elif isinstance(config, (str, int, float)) or config is None:

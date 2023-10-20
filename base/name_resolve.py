@@ -277,6 +277,8 @@ class NfsNameRecordRepository(NameRecordRepository):
         if os.path.isdir(dir_path):
             logger.info("Removing name resolve path: %s", dir_path)
             shutil.rmtree(dir_path)
+        else:
+            logger.info("No such name resolve path: %s", dir_path)
 
     def get(self, name):
         path = self.__file_path(name)
@@ -309,7 +311,7 @@ class NfsNameRecordRepository(NameRecordRepository):
         for name in list(self.__to_delete):
             try:
                 self.delete(name)
-            except NameEntryNotFoundError:
+            except:
                 pass
         self.__to_delete = {}
 

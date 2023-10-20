@@ -21,15 +21,9 @@ def sft(
     commands.log(model.train_step(inputs))
 
 
-def sample_log_uniform(low, high):
-    low = math.log(low)
-    high = math.log(high)
-    return math.exp(low + (high - low) * random.random())
+class WpsFormulaSFTPipelineExperiment(Experiment):
 
-
-class WpsFormulaSupervisedFinetuningExperiment(Experiment):
-
-    def __init__(self, n_models=1, seed=1, total_train_epochs=4, benchmark_only=False):
+    def __init__(self, n_models=4, num_pipeline_stages=4, seed=1, total_train_epochs=4):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -38,28 +32,22 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         self.lr_scheduler_type = 'cosine'
         self.warmup_proportion = 0.02
 
-        self.n_models = self.n_data_workers = n_models
-        assert self.n_models == self.n_data_workers
+        self.n_models = n_models
+        self.num_pipeline_stages = num_pipeline_stages
+        self.n_data_workers = self.dp_worldsize = self.n_models // self.num_pipeline_stages
         self.seed = seed
 
         self.total_train_epochs = total_train_epochs
-        self.benchmark_only = benchmark_only
-        if self.benchmark_only:
-            self.n_models = self.n_data_workers = 1
-            self.total_train_epochs = 1
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
             data_worker=TasksGroup(
                 count=self.n_data_workers,
-                scheduling=Scheduling.data_worker_default(
-                    cpu=2,
-                    mem=10000,
-                ),
+                scheduling=Scheduling.data_worker_default(cpu=2, mem=10000, node_type="g1"),
             ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=4, mem=10000),
+                scheduling=Scheduling.master_worker_default(cpu=4, mem=10000, node_type="g1"),
             ),
             model_worker=TasksGroup(
                 count=self.n_models,
@@ -67,20 +55,19 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    nodelist="frl8a138",
+                    nodelist="frl4a135",
                     mem=60000,
                 ),
             ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        if not self.benchmark_only:
-            model_path = "/data/aigc/public/starcoder-16bit"
-        else:
-            model_path = "/data/aigc/llm/checkpoints/1l-starcoder"
+        # model_path = "/data/aigc/public/starcoder-16bit"
+        # model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
+        model_path = "/lustre/meizy/backup_zy/model_saves/pipe_4l_starcoder"
         train_batch_size_per_device = 4
         eval_batch_size_per_device = 4
-        max_seq_len = 4096
+        max_seq_len = 2048
 
         dataset = Dataset(
             'wpsf_sft_packed',
@@ -109,34 +96,30 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
         backend = ModelBackend(
             'ds_train',
-            args=dict(
-                optimizer_name='adam',
-                optimizer_config=dict(
-                    lr=self.lora_lr,
-                    weight_decay=self.weight_decay,
-                    eps=1e-5,
-                    betas=self.adam_betas,
-                ),
-                lr_scheduler_type=self.lr_scheduler_type,
-                warmup_steps_proportion=self.warmup_proportion,
-                min_lr_ratio=0.0,
-                zero_stage=2,
-                enable_fp16=True,
-                gradient_checkpointing=True,
-            ),
+            args=dict(optimizer_name='adam',
+                      optimizer_config=dict(
+                          lr=self.lora_lr,
+                          weight_decay=self.weight_decay,
+                          eps=1e-5,
+                          betas=self.adam_betas,
+                      ),
+                      lr_scheduler_type=self.lr_scheduler_type,
+                      warmup_steps_proportion=self.warmup_proportion,
+                      min_lr_ratio=0.0,
+                      zero_stage=1,
+                      enable_fp16=True,
+                      gradient_checkpointing=False,
+                      engine_type="pipe",
+                      num_pipeline_stages=self.num_pipeline_stages),
         )
 
-        model = Model("flash_mqat_clm_hf_lora",
-                      args=dict(
-                          model_path=model_path,
-                          lora_module_kwargs=dict(
-                              lora_dim=self.lora_dim,
-                              lora_scaling=self.lora_scaling,
-                          ),
-                          lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
-                      ))
+        model = Model("starcoder_flash_mqat_pipe",
+                      args=dict(model_path=model_path,
+                                num_pp=self.num_pipeline_stages,
+                                num_dp=self.dp_worldsize,
+                                load_from_full_ckpt=False))
 
-        interface = ModelInterface('flash_sft')
+        interface = ModelInterface('pipe_flash_sft')
 
         streams = [RequestReplyStream(f"model{i}") for i in range(self.n_models)]
 
@@ -158,9 +141,9 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=None,
-            save_frequency_epochs=None if self.benchmark_only else 1,
+            save_frequency_epochs=1,
             save_frequency_seconds=None,
-            eval_frequency_epochs=None if self.benchmark_only else 1,
+            eval_frequency_epochs=1,
             master_ecs=ecs,
             data_worker=data_worker,
             model_worker=model_worker,
@@ -170,7 +153,5 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
 seeds = range(1, 6)
 for s in seeds:
-    exp_name = f"wpsf-sft-flash-s{s}"
-    register_experiment(exp_name, functools.partial(WpsFormulaSupervisedFinetuningExperiment, seed=s))
-register_experiment("wpsf-sft-flash-benchmark",
-                    functools.partial(WpsFormulaSupervisedFinetuningExperiment, benchmark_only=True))
+    exp_name = f"wpsf-sft-flash-pipe-s{s}"
+    register_experiment(exp_name, functools.partial(WpsFormulaSFTPipelineExperiment, seed=s))

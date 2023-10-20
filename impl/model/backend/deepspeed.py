@@ -7,6 +7,7 @@ import math
 import deepspeed
 import torch
 
+from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
 import api.model
 import base.deepspeed_utils as deepspeed_utils
 
@@ -36,9 +37,17 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     tp_gather_partition_size: int = 8
     # addtional deepspeed args
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
+    engine_type: str = "deepspeed"
+    num_pipeline_stages: int = 1
 
     def __post_init__(self):
-        pass
+        if self.engine_type == "pipe":
+            assert self.zero_stage < 2
+            assert self.enable_hybrid_engine is False
+            assert self.gradient_checkpointing is False
+            assert self.num_pipeline_stages > 1
+        else:
+            assert self.num_pipeline_stages == 1
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -73,8 +82,8 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
         )
 
         ds_config['train_micro_batch_size_per_gpu'] = spec.batch_size_per_device
-        ds_config['train_batch_size'] = spec.batch_size_per_device * torch.distributed.get_world_size(
-        ) * self.gradient_accumulation_steps
+        ds_config['train_batch_size'] = (spec.batch_size_per_device * torch.distributed.get_world_size() *
+                                         self.gradient_accumulation_steps) // self.num_pipeline_stages
 
         def warmup_then_cosine_anneal(step, warmup_steps_proportion, total_steps, min_lr_ratio):
             warmup_steps = max(5, int(total_steps * warmup_steps_proportion))
@@ -117,7 +126,14 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             optimizer=optimizer,
             config=ds_config,
             lr_scheduler=lr_scheduler,
+            engine_type=self.engine_type,
         )
+
+        if self.engine_type == "pipe":
+            # log pipeline infos
+            assert isinstance(module, DeepSpeedPipelineEngine)
+            logger.info(f"PipelineEngine:: ddp rank = {torch.distributed.get_rank()}; "
+                        f"pipe id = {module.stage_id}; dp id = {module.dp_id};")
 
         if self.gradient_checkpointing:
             module.gradient_checkpointing_enable()
