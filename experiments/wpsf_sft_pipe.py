@@ -91,8 +91,7 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
         ]
 
         eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args[
-            'dataset_path'] = "/lustre/meizy/data/dllm-valid-0908-formula-psi.json"
+        eval_dataset.args['dataset_path'] = "/lustre/meizy/data/dllm-valid-0908-formula-psi.json"
         eval_dataset.args['n_tokens_per_batch'] = max_seq_len * eval_batch_size_per_device
 
         backend = ModelBackend(

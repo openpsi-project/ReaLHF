@@ -1,14 +1,17 @@
 import os
 import sys
+
 sys.path.append("../")
 
-from api.huggingface import create_hf_nn
+import json
+import logging
+
 from transformers import AutoModelForCausalLM
 import torch
 
-import logging 
-import json
 from scripts.transform_to_pipe_ckpt import copy_configs
+
+from api.huggingface import create_hf_nn
 
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
@@ -33,7 +36,7 @@ if __name__ == "__main__":
                 new_state_dict[k] = state_dict[k]
         else:
             new_state_dict[k] = state_dict[k]
-    
+
     for k in new_state_dict.keys():
         print(k)
 

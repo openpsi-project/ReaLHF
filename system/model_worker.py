@@ -7,6 +7,7 @@ import deepspeed
 import torch
 import torch.utils.data
 
+from base.monitor import time_mark_ms
 import api.config as config
 import api.data
 import api.model
@@ -16,8 +17,6 @@ import base.seeding as seeding
 import base.timeutil
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
-
-from base.monitor import time_mark_ms
 
 # Register all implemented datasets and models.
 import impl.model  # isort:skip
