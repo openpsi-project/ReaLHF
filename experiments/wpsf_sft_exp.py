@@ -29,7 +29,7 @@ def sample_log_uniform(low, high):
 
 class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
-    def __init__(self, n_models=1, seed=1, total_train_epochs=4, benchmark_only=False):
+    def __init__(self, n_models=8, seed=1, total_train_epochs=4, benchmark_only=False):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -67,28 +67,29 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    nodelist="frl8a138",
-                    mem=60000,
+                    nodelist="QH-com10",
+                    mem=100000,
                 ),
             ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        if not self.benchmark_only:
-            model_path = "/data/aigc/public/starcoder-16bit"
-        else:
-            model_path = "/data/aigc/llm/checkpoints/1l-starcoder"
-        train_batch_size_per_device = 4
-        eval_batch_size_per_device = 4
-        max_seq_len = 4096
+        # if not self.benchmark_only:
+        #     model_path = "/data/aigc/public/starcoder-16bit"
+        # else:
+        #     model_path = "/data/aigc/llm/checkpoints/1l-starcoder"
+        model_path = "/lustre/meizy/models/starcoder_4l"
+        train_batch_size_per_device = 8
+        eval_batch_size_per_device = 8
+        max_seq_len = 2048
 
         dataset = Dataset(
             'wpsf_sft_packed',
             args=dict(
                 n_tokens_per_batch=max_seq_len * train_batch_size_per_device,
                 max_length=max_seq_len,
-                max_n_seqs_per_batch=500,
-                json_path="/data/aigc/llm/datasets/wps-formula-sft/dllm-train-0908-formula-psi.json",
+                max_n_seqs_per_batch=1000,
+                json_path="/lustre/meizy/data/dllm-train-0908-formula-psi.json",
             ),
         )
         dataloader = eval_dataloader = DataLoader('iterable_dataset_loader')
@@ -104,7 +105,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
         eval_dataset = copy.deepcopy(dataset)
         eval_dataset.args[
-            'dataset_path'] = "/data/aigc/llm/datasets/wps-formula-sft/dllm-valid-0908-formula-psi.json"
+            'dataset_path'] = "/lustre/meizy/data/dllm-valid-0908-formula-psi.json"
         eval_dataset.args['n_tokens_per_batch'] = max_seq_len * eval_batch_size_per_device
 
         backend = ModelBackend(
@@ -150,6 +151,8 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                 stream=streams[i],
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
+                cuda_cache_cleanliness=True,
+                cuda_cache_clear_freq=1,
             ) for i in range(self.n_models)
         ]
 

@@ -1,5 +1,3 @@
-from typing import Dict, List, Optional, Tuple, Union
-import logging
 import os
 import sys
 
@@ -12,17 +10,15 @@ import torch.nn as nn
 import transformers
 
 from base.monitor import process_memory_mb
-from impl.model.backend.ds_pipe_engine import (LayerSpec, PipeDataParallelTopology, PipelineModule,
-                                               ProcessTopology)
+from impl.model.backend.ds_pipe_engine import LayerSpec
 from impl.model.nn.flash_mqat import *
-from impl.model.utils.data import tensor_data_list_to_tuple, tuple_to_tensor_data_list
 
 # FULL_MODEL_DIR = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
-FULL_MODEL_DIR = "/lustre/meizy/backup_zy/starcoder"
+FULL_MODEL_DIR = "/lustre/meizy/models/starcoder_scratch"
 # PIPE_MODEL_DIR = "/lustre/meizy/base_models/pipe_4l_starcoder"
-NUM_PIPE_STAGES = 6
+NUM_PIPE_STAGES = 4
 NUM_SHARDS = 3
-PIPE_MODEL_DIR = f"/lustre/meizy/base_models/pipe_starcoder_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
+PIPE_MODEL_DIR = f"/lustre/meizy/models/pipe_starcoder_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
 TEST_EXPR_NAME = "test"
 TEST_TRIAL_NAME = "test"
 TEST_MODEL_NAME = "default"
