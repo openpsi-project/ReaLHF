@@ -22,7 +22,7 @@ import torch
 from . import p2p, schedule
 from .module import PipelineError, PipelineModule
 from base.dataparallel import PackedParallelDataRouter
-from base.monitor import gpu_memory_mb
+from base.monitor import gpu_memory_mb, time_mark
 from base.namedarray import NamedArray
 from impl.model.utils.data import (data_list_to_tensor_tuple, DuckGenerationOutput, DuckModelOutput,
                                    PipeCacheData, PipeTransferData, tensor_tuple_to_data_list)
@@ -941,19 +941,22 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     break
             # For each instruction in the step
             step_id, micro_batch_id, step_cmds = step_cmds
-            logger.info(
-                f"rank {self.global_rank} step {step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
-            )
+            # logger.info(
+            #     f"rank {self.global_rank} step {step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
+            # )
             for cmd in step_cmds:
-                logger.info(f"rank {self.global_rank} exec cmd: {cmd}")
+                # logger.info(f"rank {self.global_rank} exec cmd: {cmd}")
                 if type(cmd) not in self._INSTRUCTION_MAP:
                     raise RuntimeError(
                         f'{self.__class__.__name__} does not understand instruction {repr(cmd)}')
 
                 # Equivalent to: self._exec_forward_pass(buffer_id=0)
                 try:
+                    cmd_type_string = str(type(cmd)).split('\'')[1].split(".")[-1]
+                    time_mark(name=f"{cmd_type_string}_start", identifier=str(self.global_rank))
                     self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
                     self._exec_instr(**cmd.kwargs)
+                    time_mark(name=f"{cmd_type_string}_end", identifier=str(self.global_rank))
                 except Exception as e:
                     logger.error(f"Rank {self.global_rank} step {step_count}, Exception in cmd {cmd}")
                     raise e
