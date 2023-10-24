@@ -224,6 +224,7 @@ class PipeCacheData(TensorDataclassToTupleInterface):
     Attributes:
         input_ids: The input token ids. Used only at the first stage.
             Can be packed with shape [total_seq_len] or unpacked with shape [bs, seq].
+        prompt_mask: Prompt mask used
         position_ids: Input position IDs. Can be resolved automatically in most cases.
             Used only at the first stage. The same shape as input_ids.
             If None, will be resolved automatically.
@@ -235,7 +236,6 @@ class PipeCacheData(TensorDataclassToTupleInterface):
     """
     # Only cached in the first stage.
     input_ids: torch.Tensor = None
-    prompt_mask: torch.Tensor = None
     position_ids: torch.Tensor = None
     # Cached in each transformer layer.
     k_cache: torch.Tensor = None

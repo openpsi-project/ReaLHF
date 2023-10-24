@@ -4,7 +4,8 @@
 # DeepSpeed Team
 
 from types import MethodType
-from typing import Optional, Union
+from typing import List, Optional, Tuple, Union
+import dataclasses
 import logging
 import time
 
@@ -18,12 +19,14 @@ from deepspeed.runtime.zero.config import ZeroStageEnum
 from deepspeed.utils import logger
 from deepspeed.utils.timer import ThroughputTimer
 import torch
+import transformers
 
 from . import p2p, schedule
 from .module import PipelineError, PipelineModule
 from base.dataparallel import PackedParallelDataRouter
 from base.monitor import gpu_memory_mb, time_mark
 from base.namedarray import NamedArray
+from impl.model.nn.flash_mqat import GenerationConfig
 from impl.model.utils.data import (data_list_to_tensor_tuple, DuckGenerationOutput, DuckModelOutput,
                                    PipeCacheData, PipeTransferData, tensor_tuple_to_data_list)
 
@@ -55,11 +58,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     DTYPE_TO_ID = {dtype: id_ for id_, dtype in enumerate(ID_TO_DTYPE)}
 
     def __init__(self, num_micro_batches=None, *super_args, **super_kwargs):
-        gpu_memory_mb("before_deepspeedengine_init")
         super().__init__(*super_args, **super_kwargs)
         assert isinstance(self.module, PipelineModule), "model must base PipelineModule"
 
-        gpu_memory_mb("after_deepspeedengine_init")
         assert self.zero_optimization_stage(
         ) < 2, "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
         logger.info("DeepSpeedEngine initialized!")
@@ -106,8 +107,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.is_data_parallel = self.grid.data_parallel_size > 1
         self.is_model_parallel = self.grid.model_parallel_size > 1
 
-        gpu_memory_mb("before_model_params")
-
         model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
         num_params = sum([p.numel() for p in model_parameters])
         unique_params = num_params
@@ -119,7 +118,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     tied_params += sum(p.numel() for p in d['module'].parameters())
             unique_params -= tied_params
 
-        gpu_memory_mb("before_params_tensor")
         params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(self.device)
         dist.all_reduce(params_tensor, group=self.grid.get_model_parallel_group())
         params_tensor = params_tensor.tolist()
@@ -134,13 +132,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                         f'TOTAL_PARAMS={total_params} ({total_params/1e6:0.3f}M) '
                         f'UNIQUE_PARAMS={unique_params} ({unique_params/1e6:0.3f}M)')
 
-        gpu_memory_mb("after_params_tensor_all_reduce")
-
         # initialize peer-2-peer communication and allreduce groups
         if self.is_pipe_parallel:
             p2p.init_process_groups(self.grid)
-
-        gpu_memory_mb("after_init_pipe_pg")
 
         # Pipeline buffers
         self.num_pipe_buffers = 0
@@ -179,11 +173,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._loss_fn = None
         # store original inputs for each micro_batch to calculate loss
         self.next_batch_micro_batch_id = 0
-        self.original_input = []  # fifo queue for original input, only used in last stage
+        self.original_input_cache = []  # fifo queue for original input, only used in last stage
 
-        self.pipe_cache_data = data_list_to_tensor_tuple([PipeCacheData() for _ in range(self.num_layers)])
-
-        gpu_memory_mb("init_finished")
+        self.pipe_cache_data = [PipeCacheData() for _ in range(self.num_layers)]
 
     def set_loss_fn(self, fn):
         self._loss_fn = fn
@@ -268,21 +260,22 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.meta_buffer = None
 
     def _prepare_input(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor,
-                       prompt_mask: torch.Tensor):
+                       prompt_mask: Optional[torch.Tensor]):
         """ Prepare input for train or inference
         split all input tensors into micro batches for pipeline parallel
+
+        Args:
+            packed_input_ids (torch.Tensor): packed input ids of shape [total_seq_len]
+            cu_seqlens (torch.Tensor): cu_seqlens of shape [batch_size]
         """
-        data = NamedArray(
-            packed_input_ids=packed_input_ids,
-            cu_seqlens=cu_seqlens,
-            prompt_mask=prompt_mask,
-        )
+        data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, prompt_mask=prompt_mask)
         splitted = PackedParallelDataRouter.scatter_to(data, self.num_micro_batches)
+        self.original_input_cache = splitted
 
         def input_to_pipe_model_input(input: NamedArray):
             max_seqlen = int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))
             x = PipeTransferData(cu_seqlens=input.cu_seqlens, max_seqlen=max_seqlen)
-            ys = [PipeCacheData(input_ids=input.packed_input_ids, prompt_mask=input.prompt_mask)
+            ys = [PipeCacheData(input_ids=input.packed_input_ids)
                   ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
             return (x, ys)
 
@@ -290,6 +283,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         batch_lengths = [b[1][0].input_ids.shape[0] for b in batches]
         logger.info("self._prepare_input:: batch_lengths: {}".format(batch_lengths))
         return iter(batches)
+
+    def _prepare_generate_input(self):
+        pass
 
     def eval(self):
         self.module.eval()
@@ -326,8 +322,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def train_batch(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor,
                     prompt_mask: torch.Tensor):
-        """
-        """
         if not torch._C.is_grad_enabled():
             raise RuntimeError(f'train_batch() requires gradients enabled. Use eval_batch() instead.')
 
@@ -357,6 +351,22 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                       f'samples/sec: {tput:0.3f}')
 
         return self.agg_train_loss
+
+    @torch.no_grad()
+    def generate(
+        self,
+        tokenizer: transformers.PreTrainedTokenizerFast,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
+        if attention_mask is None:
+            attention_mask = torch.logical_and(input_ids != tokenizer.pad_token_id, input_ids
+                                               != tokenizer.eos_token_id)
+
+        # data_iter = self._prepare_input(packed_input_ids, cu_seqlens, prompt_mask)
+        # self.set_dataiterator(data_iter)
+        pass
 
     def is_first_stage(self):
         """True if this process is in the first stage in the pipeline."""
@@ -496,7 +506,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         assert isinstance(self.pipe_buffers['inputs'][src_buffer_id], tuple)
         inputs = tuple(t.clone() for t in self.pipe_buffers['inputs'][src_buffer_id])
         # TODO: this is only a temp solution to get the pipeline running, fix afterwards
-        inputs += self.pipe_cache_data
+        inputs += data_list_to_tensor_tuple(self.pipe_cache_data)
 
         self._zero_grads(inputs)
 
@@ -510,12 +520,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if self.is_last_stage():
             if self._compute_loss:  # 1f1b only
                 o: PipeTransferData = tensor_tuple_to_data_list(outputs)[0]
-                x, y0 = self.original_input.pop(0)
+                original_input = self.original_input_cache.pop(0)
                 # compute loss, currently hard coded
                 logits = o.pp_input
-                packed_input_ids = y0.input_ids
-                cu_seqlens = x.cu_seqlens
-                loss_mask = 1 - y0.prompt_mask.float()
+                packed_input_ids = original_input.packed_input_ids
+                cu_seqlens = original_input.cu_seqlens
+                loss_mask = 1 - original_input.prompt_mask.float()
                 assert self._loss_fn is not None, "loss function is not set, please use engine.set_loss_fn(fn)"
                 self.loss = self._loss_fn(logits, packed_input_ids, cu_seqlens, loss_mask)
                 if self.total_loss is None:
@@ -561,7 +571,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if self.is_first_stage():
             batch, caches = self._next_batch()
             batch = data_list_to_tensor_tuple([batch])  # PipeTransferData as input
-            caches = data_list_to_tensor_tuple(caches)
+            # caches = data_list_to_tensor_tuple(caches)
             self.pipe_cache_data = caches
             # batch should be a tuple in all conditions
             # all stages should be the same
@@ -570,39 +580,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             loaded = []
             for x in batch:
                 assert torch.is_tensor(x)
-                mine = x.clone().detach().to(self.device)
+                # mine = x.clone().detach().to(self.device) # TODO: check if this is necessary
+                mine = x.to(self.device)
                 mine.requires_grad = mine.is_floating_point()
                 loaded.append(mine)
             loaded = tuple(loaded)
             self.pipe_buffers['inputs'][buffer_id] = loaded
-
-        if self._compute_loss:
-            # prepare for loss computation, send original inputs to last stage
-            if self.is_first_stage():
-                # TODO: this is currently hard coded for specific loss computation
-                original_inputs = batch + caches
-                self._send_tensor_meta(original_inputs, self.num_stages - 1)
-                for idx, buffer in enumerate(original_inputs):
-                    # logger.info(f"DEBUG:: sending buffer {buffer}, device: {buffer.device}")
-                    p2p.send(buffer, self.num_stages - 1)
-            elif self.is_last_stage():
-                # on last stage recv and store original inputs
-                input_buffer = self._recv_tensor_meta(0)
-                assert isinstance(input_buffer, tuple)
-                recvd = [None] * len(input_buffer)
-                for idx, buffer in enumerate(input_buffer):
-                    assert torch.is_tensor(buffer)
-                    p2p.recv(buffer, 0)
-                    recvd[idx] = buffer.clone().detach()
-
-                recvd = tuple(recvd)
-
-                for buffer in recvd:
-                    buffer.requires_grad = buffer.is_floating_point()
-
-                original_inputs = tensor_tuple_to_data_list(recvd)
-                logger.debug(f"recvd original inputs: {original_inputs[0]}, {original_inputs[1]}")
-                self.original_input.append((original_inputs[0], original_inputs[1]))
 
     def _send_tensor_meta(self, buffer, recv_stage):
         """ Communicate metadata about upcoming p2p transfers.
