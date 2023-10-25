@@ -1,11 +1,11 @@
+from collections import defaultdict
 from typing import Dict, List, Optional
 import logging
 import os
 import re
 import subprocess
-from collections import defaultdict
 
-from scheduler.client import SchedulerClient, SchedulerError, JobInfo, JobState
+from scheduler.client import JobInfo, JobState, SchedulerClient, SchedulerError
 
 logger = logging.getLogger("Local Scheduler")
 

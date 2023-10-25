@@ -7,7 +7,6 @@ import os
 import random
 
 from api.config import *
-from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
 from base.cluster import spec as cluster_spec
 
 
@@ -262,4 +261,5 @@ for s in range(1, 6):
             seed=s,
         ),
     )
-register_experiment("wps-rw-pl-benchmark", functools.partial(WpsPlackettLuceRewardExperiment, benchmark_only=True))
+register_experiment("wps-rw-pl-benchmark",
+                    functools.partial(WpsPlackettLuceRewardExperiment, benchmark_only=True))

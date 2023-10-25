@@ -1,10 +1,12 @@
-import torch
-import base.namedarray as namedarray
 from typing import Dict, List, Union
-import numpy as np
 import abc
-import base.datapack as datapack
 import collections
+
+import numpy as np
+import torch
+
+import base.datapack as datapack
+import base.namedarray as namedarray
 
 InterfaceReturnDataType = Union[namedarray.NamedArray, Dict]
 
@@ -20,10 +22,7 @@ class ParallelDataBroker:
                 for k, v in reply.items():
                     cnt[k] = cnt.get(k, 0) + 1
                     stats[k] = stats.get(k, 0) + v
-            return {
-                k: v / cnt
-                for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())
-            }
+            return {k: v / cnt for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())}
         elif isinstance(src[0], namedarray.NamedArray):
             return namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
         else:

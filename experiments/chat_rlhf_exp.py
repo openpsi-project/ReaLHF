@@ -3,7 +3,6 @@ import os
 import torch
 
 from api.config import *
-from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
 from api.dfg import ModelInterfaceType, ModelRPC
 import base.topology as topology
 

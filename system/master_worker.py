@@ -1,5 +1,6 @@
 from collections import defaultdict
 from typing import Dict, List
+import asyncio
 import copy
 import getpass
 import logging
@@ -11,16 +12,15 @@ import torch
 
 from base.cluster import spec as cluster_spec
 import api.config as config_pkg
-import base.dataparallel as dataparallel
 import api.data as data_api
+import api.dfg
 import api.model as model_api
+import base.dataparallel as dataparallel
 import base.namedarray as namedarray
 import base.timeutil
+import base.topology as topology
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
-import asyncio
-import api.dfg
-import base.topology as topology
 
 logger = logging.getLogger("master worker")
 

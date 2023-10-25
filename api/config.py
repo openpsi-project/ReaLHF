@@ -1,13 +1,13 @@
-from typing import Any, Callable, Dict, List, Optional, Union, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import collections
 import copy
 import dataclasses
 import enum
 import getpass
+import itertools
 import math
 import os
 import sys
-import itertools
 
 import yaml
 

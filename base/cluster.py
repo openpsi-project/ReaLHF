@@ -30,7 +30,7 @@ class ClusterSpec(abc.ABC):
     @property
     def fileroot(self) -> str:
         ...
-    
+
     @property
     def default_mount(self) -> str:
         ...
@@ -59,7 +59,7 @@ class QizhiClusterSpec(ClusterSpec):
     @property
     def fileroot(self) -> str:
         return "/data/aigc/llm"
-    
+
     @property
     def default_mount(self) -> str:
         return "/lustre:/lustre,/data:/data,/hddlustre:/hddlustre"
@@ -77,7 +77,7 @@ class QHClusterSpec(ClusterSpec):
     @property
     def fileroot(self) -> str:
         return "/lustre/aigc/llm"
-    
+
     @property
     def default_mount(self) -> str:
         return "/lustre:/lustre"
@@ -95,7 +95,7 @@ class YLClusterSpec(ClusterSpec):
     @property
     def fileroot(self) -> str:
         return "/data/aigc/llm"
-    
+
     @property
     def default_mount(self) -> str:
         return "/data:/data"

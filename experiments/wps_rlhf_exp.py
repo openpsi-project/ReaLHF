@@ -1,8 +1,8 @@
 import functools
+
 import torch
 
 from api.config import *
-from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
 from base.cluster import spec as cluster_spec
 
 
@@ -122,19 +122,18 @@ class WpsRLHFExperiment(Experiment):
     def __init__(self, n_actors=1, n_critics=1, n_rewards=1, n_refs=1, seed=1, benchmark_only=False):
         if benchmark_only:
             n_actors = n_critics = n_rewards = n_refs = 1
-            
+
         self.n_actors = n_actors
         self.n_rewards = n_rewards
         self.n_refs = n_refs
         self.n_critics = n_critics
-        
 
         self.n_total = n_actors + n_rewards + n_refs + n_critics
 
         self.n_data_workers = n_actors
 
         self.seed = seed
-        
+
         self.benchmark_only = benchmark_only
 
     def scheduling_setup(self) -> ExperimentScheduling:
@@ -258,7 +257,8 @@ class WpsRLHFExperiment(Experiment):
                 # quantization_kwargs=dict(load_in_8bit=True),
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
-                load_v_head_path=os.path.join(rw_lora_head_path, "rw_v_head.bin") if not self.benchmark_only else None,
+                load_v_head_path=os.path.join(rw_lora_head_path, "rw_v_head.bin")
+                if not self.benchmark_only else None,
                 lora_module_kwargs=dict(
                     lora_dim=self.lora_dim,
                     lora_scaling=self.lora_scaling,
@@ -268,7 +268,8 @@ class WpsRLHFExperiment(Experiment):
                     # ),
                 ),
                 lora_keys_to_replace='attn',
-                load_lora_path=os.path.join(rw_lora_head_path, "lora.bin")  if not self.benchmark_only else None,
+                load_lora_path=os.path.join(rw_lora_head_path, "lora.bin")
+                if not self.benchmark_only else None,
                 lora_op_after_creation='squash',
             ),
         )
