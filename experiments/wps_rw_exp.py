@@ -8,21 +8,12 @@ import random
 
 from api.config import *
 from base.cluster import spec as cluster_spec
+from api.dfg import ModelRPC, ModelInterfaceType
+from base.topology import PipeModelDataParallelTopology
 
-
-def train_plackett_luce_rw(
-    commands: Commands,
-    model: ModelQuery['default'],
-    input_ids: RawDataQuery['input_ids'],
-    attention_mask: RawDataQuery['attention_mask'],
-    labels: RawDataQuery['labels'],
-):
-    inputs = commands.build_model_inputs(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        labels=labels,
-    )
-    commands.log(model.train_step(inputs))
+train_rw = ModelRPC("default",
+                    ModelInterfaceType.TRAIN_STEP,
+                    input_data=["input_ids", "attention_mask", "labels"])
 
 
 def sample_log_uniform(low, high):
@@ -173,7 +164,6 @@ class WpsPlackettLuceRewardExperiment(Experiment):
             DataWorker(
                 datasets=[dataset],
                 tokenizer_name_or_path=model_path,
-                stream=RequestReplyStream(f"data{i}"),
                 dataloader=dataloader,
                 seed=self.seed,
             ) for i in range(self.n_data_workers)
@@ -222,8 +212,6 @@ class WpsPlackettLuceRewardExperiment(Experiment):
 
         interface = ModelInterface('wps_plackett_luce_reward')
 
-        streams = [RequestReplyStream(f"model{i}") for i in range(self.n_models)]
-
         model_worker = [
             ModelWorker(
                 seed=self.seed,
@@ -231,14 +219,13 @@ class WpsPlackettLuceRewardExperiment(Experiment):
                 backend=backend,
                 interface=interface,
                 model_name='default',
-                stream=streams[i],
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
                 cuda_cache_cleanliness=False,
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_models),
             ) for i in range(self.n_models)
         ]
-
-        ecs = MasterWorkerECS(model_worker).add_systems([train_plackett_luce_rw])
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
@@ -246,7 +233,7 @@ class WpsPlackettLuceRewardExperiment(Experiment):
             save_frequency_epochs=1 if not self.benchmark_only else None,
             save_frequency_seconds=None,
             eval_frequency_epochs=1 if not self.benchmark_only else None,
-            master_ecs=ecs,
+            model_rpcs=[train_rw],
             data_worker=data_worker,
             model_worker=model_worker,
         )

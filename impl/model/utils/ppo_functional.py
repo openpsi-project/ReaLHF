@@ -1,7 +1,7 @@
-from typing import Optional
-from typing import Tuple, Dict
-import torch
+from typing import Dict, Optional, Tuple
 import functools
+
+import torch
 
 
 class AdaptiveKLController:

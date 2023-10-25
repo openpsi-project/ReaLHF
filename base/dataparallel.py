@@ -92,13 +92,13 @@ class PackedParallelDataBroker(ParallelDataBroker):
                 elif k == 'seq_no_eos_mask':
                     start, end = partitions[i]
                     sp[k] = v[start:end]
-                elif k == 'packed_seq' or k == 'packed_logits_mask' or k == 'prompt_mask':
+                elif k == 'packed_seq' or k == 'packed_logits_mask' or k == 'prompt_mask' or k == 'packed_input_ids':
                     sp[k] = v[offsets[i]:offsets[i] + cu_seqlens[i][-1]]
                 elif k == 'packed_logprobs':
                     sp[k] = v[short1offsets[i]:short1offsets[i] + short1cu_seqlens[i][-1]]
                 else:
                     raise RuntimeError(f"Unknown key {k} in packed data. We don't know how to split it. "
-                                       f"Implemented keys include ")
+                                       f"Check base/dataparallel.py for implemented keys.")
         splitted_data = [namedarray.from_dict(dict(x)) for x in splitted_data]
         for x in splitted_data:
             x.register_metadata(**src.metadata)

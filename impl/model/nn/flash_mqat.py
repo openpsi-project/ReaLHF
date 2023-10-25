@@ -8,8 +8,8 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import transformers
 import torch.utils.checkpoint
+import transformers
 
 from impl.model.utils.data import (build_packed_inputs, mask_eos_token, repeat_kv,
                                    TensorDataclassToTupleInterface, unpack_tensor, upcast_masked_softmax,
@@ -499,7 +499,7 @@ class FlashMQATBase(nn.Module):
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
         layers = self.to_layers()
-        assert len(ys) == len(layers)
+        assert len(ys) == len(layers), (len(ys), len(layers))
         raw_pp_input = x.pp_input
         for layer, y in zip(layers, ys):
             x = layer(x, y)  # This will set pp_output.
@@ -785,11 +785,11 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         if packed_input_ids is not None:
             x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
             ys = [PipeCacheData(input_ids=packed_input_ids)
-                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+                  ] + [PipeCacheData() for _ in range(self.config.n_layers)]
         else:
             x = PipeTransferData()
             ys = [PipeCacheData(input_ids=input_ids)
-                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+                  ] + [PipeCacheData() for _ in range(self.config.n_layers)]
         hidden_states = self.net(x, ys).pp_output
         if build_packed:
             hidden_states = unpack_tensor(hidden_states, cu_seqlens, max_seqlen)

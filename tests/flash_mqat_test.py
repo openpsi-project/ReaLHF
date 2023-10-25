@@ -109,10 +109,10 @@ class FlashMQATStarCoderTest(unittest.TestCase):
                                    top_p=1.0,
                                    num_samples=1)
         generated, glogprobs, glmask, _, _ = generate(model=self.model,
-                                                   tokenizer=self.tokenizer,
-                                                   input_ids=input_ids,
-                                                   attention_mask=attention_mask,
-                                                   gconfig=gconfig)
+                                                      tokenizer=self.tokenizer,
+                                                      input_ids=input_ids,
+                                                      attention_mask=attention_mask,
+                                                      gconfig=gconfig)
         self.assertIsNone(glmask)
         tgconfig = transformers.GenerationConfig(
             min_new_tokens=0,
@@ -162,30 +162,30 @@ class FlashMQATStarCoderTest(unittest.TestCase):
                                    top_p=1.0,
                                    num_samples=1)
         seq, log_probs, logits_mask, ys, _ = generate(model=self.model,
-                                                   tokenizer=self.tokenizer,
-                                                   input_ids=prompts,
-                                                   attention_mask=prompt_att_mask,
-                                                   gconfig=gconfig)
+                                                      tokenizer=self.tokenizer,
+                                                      input_ids=prompts,
+                                                      attention_mask=prompt_att_mask,
+                                                      gconfig=gconfig)
 
         first_n_tokens = 50 - prompt_len
         gconfig.max_new_tokens = first_n_tokens
         seq21, log_probs21, logits_mask21, tmp_ys, _ = generate(model=self.model,
-                                                             tokenizer=self.tokenizer,
-                                                             input_ids=prompts,
-                                                             attention_mask=prompt_att_mask,
-                                                             gconfig=gconfig)
+                                                                tokenizer=self.tokenizer,
+                                                                input_ids=prompts,
+                                                                attention_mask=prompt_att_mask,
+                                                                gconfig=gconfig)
         k_caches = [y.k_cache for y in tmp_ys]
         v_caches = [y.v_cache for y in tmp_ys]
         cache_seqlens = tmp_ys[0].cache_seqlens
         gconfig.min_new_tokens = 0
         gconfig.max_new_tokens = origin_max_new_tokens - first_n_tokens
         seq22, log_probs22, logits_mask22, ys2, _ = generate(model=self.model,
-                                                          tokenizer=self.tokenizer,
-                                                          input_ids=seq21[:, -1:],
-                                                          k_caches=k_caches,
-                                                          v_caches=v_caches,
-                                                          cache_seqlens=cache_seqlens,
-                                                          gconfig=gconfig)
+                                                             tokenizer=self.tokenizer,
+                                                             input_ids=seq21[:, -1:],
+                                                             k_caches=k_caches,
+                                                             v_caches=v_caches,
+                                                             cache_seqlens=cache_seqlens,
+                                                             gconfig=gconfig)
         self.assertIsNone(logits_mask22)
         seq2 = torch.cat([seq21, seq22], -1)
         log_probs2 = torch.cat([log_probs21, log_probs22], -1)
@@ -463,10 +463,10 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
                                                         gconfig=gconfig)
 
         g, logprob, mask, _, _ = generate(model=self.model,
-                                       tokenizer=self.tokenizer,
-                                       input_ids=prompt,
-                                       attention_mask=prompt_att_mask,
-                                       gconfig=gconfig)
+                                          tokenizer=self.tokenizer,
+                                          input_ids=prompt,
+                                          attention_mask=prompt_att_mask,
+                                          gconfig=gconfig)
 
         # print(self.tokenizer.batch_decode(torch.cat([prompt, g], -1)))
         assert torch.allclose(g, vg), (g, vg)

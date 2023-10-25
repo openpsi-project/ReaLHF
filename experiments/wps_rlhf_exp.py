@@ -4,117 +4,73 @@ import torch
 
 from api.config import *
 from base.cluster import spec as cluster_spec
+from api.dfg import ModelRPC, ModelInterfaceType
+from base.topology import PipeModelDataParallelTopology
 
+rollout = ModelRPC(
+    "actor",
+    ModelInterfaceType.GENERATE,
+    input_data=["prompts", "prompt_att_mask"],
+    output_data=["seq", "logp", "attention_mask", 'logits_ignoring_mask'],
+)
+inf_reward = ModelRPC(
+    "reward",
+    ModelInterfaceType.INFERENCE,
+    input_data=["seq", "attention_mask", "prompts"],
+    input_key_remap={'seq': "input_ids"},
+    output_data=["scores"],
+    output_key_remap={"scores": "rewards"},
+)
 
-def rollout(
-    commands: Commands,
-    model: ModelQuery['actor'],
-    prompts: RawDataQuery['prompts'],
-    prompt_att_mask: RawDataQuery['prompt_att_mask'],
-):
-    inputs = commands.build_model_inputs(
-        prompts=prompts,
-        prompt_att_mask=prompt_att_mask,
-    )
-    res = model.generate(inputs)
-    commands.set_data('seq', res['seq'])
-    commands.set_data('logp', res['logp'])
-    commands.set_data('attention_mask', res['attention_mask'])
-    commands.set_data('logits_ignoring_mask', res['logits_ignoring_mask'])
+inf_ref_logits = ModelRPC(
+    "ref",
+    ModelInterfaceType.INFERENCE,
+    input_data=["seq", "attention_mask", 'logits_ignoring_mask'],
+    input_key_remap={'seq': "input_ids"},
+    output_data=["logp"],
+    output_key_remap={"logp": "ref_logp"},
+)
 
+inf_values = ModelRPC(
+    "critic",
+    ModelInterfaceType.INFERENCE,
+    input_data=["seq", "attention_mask", "prompts"],
+    input_key_remap={'seq': "input_ids"},
+    output_data=["scores"],
+    output_key_remap={"scores": "values"},
+)
 
-def inference_reward(
-    commands: Commands,
-    model: ModelQuery['reward'],
-    seq: DataQuery['seq'],
-    attention_mask: DataQuery['attention_mask'],
-    prompts: DataQuery['prompts'],
-):
-    inputs = commands.build_model_inputs(
-        input_ids=seq,
-        attention_mask=attention_mask,
-        prompts=prompts,
-    )
-    res = model(inputs)
-    commands.set_data('rewards', res['scores'])
+train_actor = ModelRPC(
+    "actor",
+    ModelInterfaceType.TRAIN_STEP,
+    input_key_remap={'seq': "input_ids"},
+    input_data=[
+        "seq",
+        "attention_mask",
+        "logp",
+        "rewards",
+        "ref_logp",
+        "values",
+        "prompts",
+        'logits_ignoring_mask',
+    ],
+)
 
-
-def inference_ref_logits(
-    commands: Commands,
-    model: ModelQuery['ref'],
-    seq: DataQuery['seq'],
-    attention_mask: DataQuery['attention_mask'],
-    logits_ignoring_mask: DataQuery['logits_ignoring_mask'],
-):
-    inputs = commands.build_model_inputs(input_ids=seq,
-                                         attention_mask=attention_mask,
-                                         logits_ignoring_mask=logits_ignoring_mask)
-    res = model(inputs)
-    commands.set_data('ref_logp', res['logp'])
-
-
-def inference_values(
-    commands: Commands,
-    model: ModelQuery['critic'],
-    prompts: DataQuery['prompts'],
-    seq: DataQuery['seq'],
-    attention_mask: DataQuery['attention_mask'],
-):
-    inputs = commands.build_model_inputs(
-        input_ids=seq,
-        prompts=prompts,
-        attention_mask=attention_mask,
-    )
-    res = model(inputs)
-    commands.set_data('values', res['scores'])
-
-
-def train_actor(
-    commands: Commands,
-    model: ModelQuery['actor'],
-    seq: DataQuery['seq'],
-    rewards: DataQuery['rewards'],
-    values: DataQuery['values'],
-    logp: DataQuery['logp'],
-    ref_logp: DataQuery['ref_logp'],
-    prompts: DataQuery['prompts'],
-    attention_mask: DataQuery['attention_mask'],
-    logits_ignoring_mask: DataQuery['logits_ignoring_mask'],
-):
-    data = commands.build_model_inputs(
-        input_ids=seq,
-        rewards=rewards,
-        values=values,
-        logp=logp,
-        ref_logp=ref_logp,
-        prompts=prompts,
-        attention_mask=attention_mask,
-        logits_ignoring_mask=logits_ignoring_mask,
-    )
-    commands.log(model.train_step(data))
-
-
-def train_critic(
-    commands: Commands,
-    model: ModelQuery['critic'],
-    seq: DataQuery['seq'],
-    rewards: DataQuery['rewards'],
-    values: DataQuery['values'],
-    logp: DataQuery['logp'],
-    ref_logp: DataQuery['ref_logp'],
-    prompts: DataQuery['prompts'],
-    attention_mask: DataQuery['attention_mask'],
-):
-    data = commands.build_model_inputs(
-        input_ids=seq,
-        rewards=rewards,
-        values=values,
-        logp=logp,
-        ref_logp=ref_logp,
-        prompts=prompts,
-        attention_mask=attention_mask,
-    )
-    commands.log(model.train_step(data))
+train_critic = ModelRPC(
+    "critic",
+    ModelInterfaceType.TRAIN_STEP,
+    input_key_remap={'seq': "input_ids"},
+    input_data=[
+        "seq",
+        "attention_mask",
+        "values",
+        "logp",
+        "rewards",
+        "ref_logp",
+        "values",
+        "prompts",
+    ],
+)
 
 
 class WpsRLHFExperiment(Experiment):
@@ -203,7 +159,6 @@ class WpsRLHFExperiment(Experiment):
             DataWorker(
                 tokenizer_name_or_path=actor_path,
                 datasets=[dataset],
-                stream=RequestReplyStream(f"data{i}"),
                 dataloader=dataloader,
                 seed=self.seed,
             ) for i in range(self.n_data_workers)
@@ -333,55 +288,53 @@ class WpsRLHFExperiment(Experiment):
         # critic_interface.args['mini_batch_size'] = mini_batch_size_per_device * self.n_actors // self.n_critics
         rw_interface = ModelInterface('wps_reward_unpaired')
 
-        actor_streams = [RequestReplyStream(f"actor{i}") for i in range(self.n_actors)]
-        reward_streams = [RequestReplyStream(f"reward{i}") for i in range(self.n_rewards)]
-        ref_model_streams = [RequestReplyStream(f"ref{i}") for i in range(self.n_refs)]
-        critic_streams = [RequestReplyStream(f"critic{i}") for i in range(self.n_critics)]
-
         model_worker = [
-            ModelWorker(seed=self.seed,
-                        model=actor_model,
-                        backend=actor_backend,
-                        interface=actor_interface,
-                        model_name='actor',
-                        stream=actor_streams[i]) for i in range(self.n_actors)
+            ModelWorker(
+                seed=self.seed,
+                model=actor_model,
+                backend=actor_backend,
+                interface=actor_interface,
+                model_name='actor',
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_actors),
+            ) for i in range(self.n_actors)
         ] + [
-            ModelWorker(seed=self.seed,
-                        model=rw_model,
-                        backend=rw_backend,
-                        interface=rw_interface,
-                        model_name='reward',
-                        stream=reward_streams[i]) for i in range(self.n_rewards)
+            ModelWorker(
+                seed=self.seed,
+                model=rw_model,
+                backend=rw_backend,
+                interface=rw_interface,
+                model_name='reward',
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_rewards),
+            ) for i in range(self.n_rewards)
         ] + [
-            ModelWorker(seed=self.seed,
-                        model=ref_model,
-                        backend=ref_backend,
-                        interface=ref_interface,
-                        model_name='ref',
-                        stream=ref_model_streams[i]) for i in range(self.n_refs)
+            ModelWorker(
+                seed=self.seed,
+                model=ref_model,
+                backend=ref_backend,
+                interface=ref_interface,
+                model_name='ref',
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_refs),
+            ) for i in range(self.n_refs)
         ] + [
-            ModelWorker(seed=self.seed,
-                        model=critic_model,
-                        backend=critic_backend,
-                        interface=critic_interface,
-                        model_name='critic',
-                        stream=critic_streams[i]) for i in range(self.n_critics)
+            ModelWorker(
+                seed=self.seed,
+                model=critic_model,
+                backend=critic_backend,
+                interface=critic_interface,
+                model_name='critic',
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_critics),
+            ) for i in range(self.n_critics)
         ]
-
-        ecs = MasterWorkerECS(model_worker).add_systems([
-            rollout,
-            inference_ref_logits,
-            inference_reward,
-            inference_values,
-            train_actor,
-            train_critic,
-        ])
 
         return ExperimentConfig(
             total_train_epochs=8 if not self.benchmark_only else 1,
             save_frequency_epochs=None,
             save_frequency_seconds=None,
-            master_ecs=ecs,
+            model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
             data_worker=data_worker,
             model_worker=model_worker,
         )
