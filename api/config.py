@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union, Tuple
 import collections
 import copy
 import dataclasses
@@ -7,11 +7,13 @@ import getpass
 import math
 import os
 import sys
+import itertools
 
 import yaml
 
 from base.cluster import spec as cluster_spec
-import api.ecs
+import api.dfg
+import base.topology
 
 PYTORCH_KERNEL_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/kernels"
 TRITON_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/triton"
@@ -161,9 +163,13 @@ class ModelWorker:
     model: Model
     interface: ModelInterface
     backend: ModelBackend
-    model_name: str
-    # stream
-    stream: Union[str, RequestReplyStream]
+    model_name: str  # the name of this whole model, not this shard
+    # parallelism ranks, used to reveal model shard's identity
+    dp_rank: int = 0
+    mp_rank: int = 0
+    pp_rank: int = 0
+    topo: Optional[base.topology.PipeModelDataParallelTopology] = dataclasses.field(
+        default_factory=lambda x: base.topology.PipeModelDataParallelTopology(1, 1, 1))
     # evaluation
     eval_datasets: Optional[List[Dataset]] = None
     eval_dataloader: Optional[DataLoader] = None
@@ -174,19 +180,25 @@ class ModelWorker:
     cudnn_deterministic: bool = False
     cuda_cache_cleanliness: bool = True
     cuda_cache_clear_freq: int = 10
+    # stream and worker_info will be configured automatically
+    stream: Optional[Union[str, RequestReplyStream]] = None
     worker_info: Optional[WorkerInformation] = None
+
+    def __post_init__(self):
+        assert '@' not in self.model_name
 
 
 @dataclasses.dataclass
 class DataWorker:
     tokenizer_name_or_path: str
     datasets: List[Union[str, Dataset]]
-    stream: Union[str, RequestReplyStream]
-    # dataset cache
     dataloader: Union[str, DataLoader] = "default"
     seed: int = 1
+    # dataset cache
     use_dataset_cache: bool = False
     dataset_cahce_root: str = DATASET_CACHE_PATH
+    # stream and worker_info will be configured automatically
+    stream: Optional[Union[str, RequestReplyStream]] = None
     worker_info: Optional[WorkerInformation] = None
 
 
@@ -202,10 +214,11 @@ class MasterWorker:
     eval_frequency_steps: int
     eval_frequency_seconds: int
     # main components
+    model_rpcs: List[api.dfg.ModelRPC]
     data_streams: List[Union[str, RequestReplyStream]]
-    model_streams: Dict[str, List[Union[str, RequestReplyStream]]]
-    leveled_exec_funcs: api.ecs.MasterWorkerExecutable
-    benchmark_steps: Optional[int] = None
+    model_streams: Dict[Tuple[str, int, int, int], Union[str, RequestReplyStream]]
+    model_topos: Dict[str, base.topology.PipeModelDataParallelTopology]
+    benchmark_steps: int
     worker_info: Optional[WorkerInformation] = None
 
 
@@ -227,7 +240,7 @@ class ExperimentScheduling:
 class ExperimentConfig:
     total_train_epochs: int
     # dataflow
-    master_ecs: api.ecs.MasterWorkerECS
+    model_rpcs: List[api.dfg.ModelRPC]
     data_worker: List[DataWorker] = dataclasses.field(default_factory=list)
     model_worker: List[ModelWorker] = dataclasses.field(default_factory=list)
     # eval control
@@ -239,13 +252,44 @@ class ExperimentConfig:
     eval_frequency_steps: Optional[int] = None
     eval_frequency_seconds: Optional[int] = None
     benchmark_steps: Optional[int] = None  # only used for benchmark
+    # master_worker will be set automatically
+    master_worker: Optional[List[MasterWorker]] = None
     config: Optional[Any] = None
 
     def __post_init__(self):
-        model_streams = collections.defaultdict(list)
-        for w in self.model_worker:
-            model_streams[w.model_name].append(w.stream)
+        assert self.master_worker is None
+
+        model_streams = {}
+        model_topos = {}
+        model_names = list(set([w.model_name for w in self.model_worker]))
+        for model_name in model_names:
+            mws = [w for w in self.model_worker if w.model_name == model_name]
+            ranks = [mw.topo.get_rank(pipe=mw.pp_rank, model=mw.mp_rank, data=mw.dp_rank) for mw in mws]
+            # Sanity check of parallelism ranks.
+            if set(ranks) != set(list(range(len(mws)))) or any(mw.topo.world_size() != len(mws)
+                                                               for mw in mws):
+                raise ValueError(f"Parallelism rank check failed: model name {model_name}, "
+                                 f"parallelism ranks pipe={[mw.pp_rank for mw in mws]}, "
+                                 f"model={[mw.mp_rank for mw in mws]}, "
+                                 f"data={[mw.dp_rank for mw in mws]}, "
+                                 f"flattened ranks {ranks}.")
+            model_topos[model_name] = mws[0].topo
+
+            # Set stream for model workers.
+            for mw in mws:
+                # Following the naming convention of deepspeed. Inner sep is '_' and outer sep is '-'.
+                model_id = f"{mw.model_name}@pp_{mw.pp_rank:02d}-mp_{mw.mp_rank:02d}-dp_{mw.dp_rank:02d}"
+                s = RequestReplyStream(model_id)
+                mw.stream = s
+                model_streams[model_id] = s
+
+        for i, d in enumerate(self.data_worker):
+            d.stream = RequestReplyStream(f"data_{i}")
         data_streams = [d.stream for d in self.data_worker]
+
+        for w in itertools.chain(self.model_worker, self.data_worker):
+            assert w.stream is not None
+
         self.master_worker = [
             MasterWorker(
                 total_train_epochs=self.total_train_epochs,
@@ -256,9 +300,11 @@ class ExperimentConfig:
                 eval_frequency_steps=self.eval_frequency_steps,
                 eval_frequency_seconds=self.eval_frequency_seconds,
                 data_streams=data_streams,
-                model_streams=dict(model_streams),
+                model_streams=model_streams,
+                model_topos=model_topos,
+                model_rpcs=self.model_rpcs,
                 benchmark_steps=self.benchmark_steps,  # only used for benchmark
-                leveled_exec_funcs=self.master_ecs.build())
+            )
         ]
 
     def set_worker_information(self, experiment_name, trial_name):
