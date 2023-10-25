@@ -73,8 +73,10 @@ async def parallel_rpc(
         data = data[0]
     elif sum([bool(x) for x in data]) == 1:
         data = [x for x in data if bool(x)][0]
+    elif sum([bool(x) for x in data]) == 0:
+        data = {}
     else:
-        raise RuntimeError()
+        raise RuntimeError(data)
     return data
 
 
