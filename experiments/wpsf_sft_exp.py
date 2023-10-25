@@ -3,7 +3,7 @@ import math
 import random
 
 from api.config import *
-from api.dfg import ModelRPC, ModelInterfaceType
+from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
 
 sft = ModelRPC(

@@ -7,8 +7,8 @@ import os
 import random
 
 from api.config import *
+from api.dfg import ModelInterfaceType, ModelRPC
 from base.cluster import spec as cluster_spec
-from api.dfg import ModelRPC, ModelInterfaceType
 from base.topology import PipeModelDataParallelTopology
 
 train_rw = ModelRPC("default",

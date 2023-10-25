@@ -788,8 +788,7 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
                   ] + [PipeCacheData() for _ in range(self.config.n_layers)]
         else:
             x = PipeTransferData()
-            ys = [PipeCacheData(input_ids=input_ids)
-                  ] + [PipeCacheData() for _ in range(self.config.n_layers)]
+            ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(self.config.n_layers)]
         hidden_states = self.net(x, ys).pp_output
         if build_packed:
             hidden_states = unpack_tensor(hidden_states, cu_seqlens, max_seqlen)

@@ -3,8 +3,8 @@ import functools
 import torch
 
 from api.config import *
+from api.dfg import ModelInterfaceType, ModelRPC
 from base.cluster import spec as cluster_spec
-from api.dfg import ModelRPC, ModelInterfaceType
 from base.topology import PipeModelDataParallelTopology
 
 rollout = ModelRPC(
