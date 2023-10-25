@@ -17,7 +17,7 @@ from deepspeed.utils import logger
 import torch
 import torch.nn as nn
 
-from .topology import PipeDataParallelTopology, PipelineParallelGrid
+from base.topology import PipeDataParallelTopology, PipelineParallelGrid
 
 
 class PipelineError(Exception):

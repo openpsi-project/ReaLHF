@@ -167,8 +167,8 @@ class WPSActorInterface(api.model.ModelInterface):
     eps_clip: float = 0.2
     value_eps_clip: float = 0.2
     max_reward_clip: float = 5.0
-    early_stop_kl: Optional[float] = None  # by default, 0.1
-    early_step_imp_ratio: Optional[float] = None  # by default, 10.0
+    early_stop_kl: Optional[float] = None
+    early_step_imp_ratio: Optional[float] = None
     adaptive_kl_ctl: bool = False
     adaptive_kl_target: Optional[float] = 6
     adaptive_kl_horizon: Optional[float] = 10000
@@ -466,7 +466,7 @@ class WPSCriticInterface(api.model.ModelInterface):
             old_value=old_values[:, shifted_start:-1],
             target_value=returns,
             loss_mask=loss_mask[:, shifted_start:],
-            loss_mask=self.value_eps_clip,
+            value_eps_clip=self.value_eps_clip,
         )
         clip_ratio = loss_stat['clip_ratio']
 

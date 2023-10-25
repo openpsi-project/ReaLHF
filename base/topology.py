@@ -3,10 +3,26 @@
 
 # DeepSpeed Team
 
-from collections import namedtuple
 from itertools import product as cartesian_product
+from typing import NamedTuple
 
-from deepspeed import comm as dist
+
+class PipeDataModelProcessCoord(NamedTuple):
+    pipe: int
+    data: int
+    model: int
+
+
+class PipeDataProcessCoord(NamedTuple):
+    pipe: int
+    data: int
+
+
+# Explicitly define these class to allow pickling.
+PROCESS_COORD_REGISTRY = {
+    "pipe#data#model": PipeDataModelProcessCoord,
+    "pipe#data": PipeDataProcessCoord,
+}
 
 
 class ProcessTopology:
@@ -35,7 +51,11 @@ class ProcessTopology:
         self.dims = dims  # length of each topology axis
 
         # This is actually a class that lets us hash {'row':3, 'col':2} mappings
-        self.ProcessCoord = namedtuple('ProcessCoord', axes)
+        try:
+            self.ProcessCoord = PROCESS_COORD_REGISTRY['#'.join(axes)]
+        except KeyError as e:
+            raise KeyError(f"Corresponding coordinate namedtuple not implemented for axes {axes}. "
+                           "Check base/topology.py and implement explicitly.") from e
 
         self.mapping = {}
         ranges = [range(d) for d in dims]
@@ -273,6 +293,7 @@ class PipelineParallelGrid:
 
     def __init__(self, topology=None, process_group=None):
         # TODO use process_group if provided
+        from deepspeed import comm as dist
         self.global_rank = dist.get_rank()
         self.world_size = dist.get_world_size()
         if topology is not None:
@@ -388,6 +409,7 @@ class PipelineParallelGrid:
         return p2p_lists
 
     def _is_grid_valid(self):
+        from deepspeed import comm as dist
         ranks = 1
         for ax in self._topo.get_axis_names():
             ranks *= self._topo.get_dim(ax)

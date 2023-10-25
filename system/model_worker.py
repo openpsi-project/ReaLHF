@@ -112,8 +112,9 @@ class ModelWorker(worker_base.Worker):
             self.__lazy_setup()
             self.__ddp_env_resolved = True
 
-        request: request_reply_stream.Request = self.__stream.poll_request()
-        if request is None:
+        try:
+            request: request_reply_stream.Request = self.__stream.poll_request()
+        except request_reply_stream.NoMessage:
             return worker_base.PollResult(0, 0)
 
         tik = time.perf_counter()
@@ -127,7 +128,7 @@ class ModelWorker(worker_base.Worker):
                 res = self.__interface.save(self.__model, request.data)  # -> None
             elif request.handle_name == 'inference':
                 res = self.__interface.inference(self.__model, request.data)  # -> NamedArray
-            elif request.handle_name == 'train':
+            elif request.handle_name == 'train_step':
                 res = self.__interface.train_step(self.__model, request.data)  # -> Dict
             elif request.handle_name == 'generate':
                 res = self.__interface.generate(self.__model, request.data)  # -> NamedArray

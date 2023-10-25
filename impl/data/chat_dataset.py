@@ -94,8 +94,6 @@ class DataCollatorRLHF:
             batch["prompt_att_mask"] = prompt_mask
         batch["prompts"] = batch["prompts"].flip(1)
         batch["prompt_att_mask"] = batch["prompt_att_mask"].flip(1)
-        batch['pad_token_id'] = pad_token_id
-        batch['eos_token_id'] = eos_token_id
         return batch
 
 
