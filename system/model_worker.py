@@ -93,8 +93,8 @@ class ModelWorker(worker_base.Worker):
                 api.data.make_dataset(
                     d,
                     self.config.seed,
-                    self.__ddp_rank,
-                    self.__world_size,
+                    self.config.dp_rank,
+                    self.config.topo.get_dim('data'),
                     self.__model.tokenizer,
                     self.config.worker_info.experiment_name,
                     self.config.worker_info.trial_name,
@@ -151,16 +151,15 @@ class ModelWorker(worker_base.Worker):
         reply = request_reply_stream.Reply(data=res)
         self.__stream.post_reply(reply)
 
-        if self.config.cuda_cache_cleanliness:
-            if self.__clear_cache_frequency.check():
-                # following huggingface trl # ALWAYS COST 0.3+ SEC
-                st = time.monotonic()
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
-                et = time.monotonic()
-                if self.is_master:
-                    self.logger.info(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
+        if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
+            # following huggingface trl # ALWAYS COST 0.3+ SEC
+            st = time.monotonic()
+            gc.collect()
+            torch.cuda.empty_cache()
+            gc.collect()
+            et = time.monotonic()
+            if self.is_master:
+                self.logger.info(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
 
         # logging gpu/cpu stats
         # self.print_monitor_info()

@@ -9,14 +9,13 @@ import base.namedarray as namedarray
 def get_packed_namedarray(nseqs):
     input_lens = torch.randint(10, 100, (nseqs,))
     vocab_size = 6000
-    x = dict(
-        seq_no_eos_mask=torch.randint(0, 2, (nseqs,)),
-        packed_seq=torch.cat([torch.randint(0, vocab_size, (l,)) for l in input_lens]),
-        packed_logprobs=torch.cat([torch.randn(l - 1) for l in input_lens]),
-        packed_logits_mask=torch.cat([torch.randint(0, 2, (l, vocab_size)) for l in input_lens]),
-        prompt_mask=torch.cat([torch.randint(0, 2, (l,)) for l in input_lens]),
-        input_lens=input_lens,
-    )
+    x = dict(seq_no_eos_mask=torch.randint(0, 2, (nseqs,)),
+             packed_seq=torch.cat([torch.randint(0, vocab_size, (l,)) for l in input_lens]),
+             packed_logprobs=torch.cat([torch.randn(l - 1) for l in input_lens]),
+             packed_logits_mask=torch.cat([torch.randint(0, 2, (l, vocab_size)) for l in input_lens]),
+             prompt_mask=torch.cat([torch.randint(0, 2, (l,)) for l in input_lens]),
+             input_lens=input_lens,
+             cu_seqlens=torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)]))
     return namedarray.from_dict(x)
 
 

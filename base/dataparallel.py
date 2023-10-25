@@ -24,7 +24,14 @@ class ParallelDataBroker:
                     stats[k] = stats.get(k, 0) + v
             return {k: v / cnt for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())}
         elif isinstance(src[0], namedarray.NamedArray):
-            return namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
+            if 'input_lens' in src[0]:
+                input_lens = torch.cat([x['input_lens'] for x in src], dim=0)
+            elif 'cu_seqlens' in src[0]:
+                input_lens = torch.cat([x['cu_seqlens'][1:] - x['cu_seqlens'][:-1] for x in src], dim=0)
+            res = namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
+            if 'cu_seqlens' in src[0]:
+                res['cu_seqlens'] = torch.cat([input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)])
+            return res
         else:
             raise NotImplementedError()
 

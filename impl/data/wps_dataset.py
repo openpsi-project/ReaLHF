@@ -345,6 +345,8 @@ class ExcelPlackettLuceRewardDataset(torch.utils.data.Dataset):
         self.contrastive_dim = contrastive_dim
         self.max_seq_len = max_seq_len
 
+        self.rng = np.random.RandomState(seed)
+
     def __len__(self):
         return len(self.raw_str_data)
 
@@ -359,18 +361,18 @@ class ExcelPlackettLuceRewardDataset(torch.utils.data.Dataset):
         sampled_other_code_indices = []
         sampled_rubbish_code_indices = []
         while len(existing_neg_codes) < n_required_neg_codes:
-            if np.random.random() < 0.1:
-                rubbish_code_idx = np.random.choice(len(RUBBISH_CODE_COLLECTIONS))
+            if self.rng.random() < 0.1:
+                rubbish_code_idx = self.rng.choice(len(RUBBISH_CODE_COLLECTIONS))
                 if rubbish_code_idx in sampled_rubbish_code_indices:
                     continue
                 existing_neg_codes.append(RUBBISH_CODE_COLLECTIONS[rubbish_code_idx])
                 sampled_rubbish_code_indices.append(rubbish_code_idx)
                 continue
 
-            other_data_idx = np.random.choice(len(self.global_data))
+            other_data_idx = self.rng.choice(len(self.global_data))
             if other_data_idx == idx:
                 continue
-            other_code_idx = np.random.choice(len(self.global_data[other_data_idx]['labeled_codes']))
+            other_code_idx = self.rng.choice(len(self.global_data[other_data_idx]['labeled_codes']))
             if (other_data_idx, other_code_idx) in sampled_other_code_indices:
                 continue
             other_code = self.global_data[other_data_idx]['labeled_codes'][other_code_idx]['code']
@@ -378,9 +380,8 @@ class ExcelPlackettLuceRewardDataset(torch.utils.data.Dataset):
             sampled_other_code_indices.append((other_data_idx, other_code_idx))
 
         if not is_all_neg:
-            codes = [
-                np.random.choice([x['code'] for x in self.labeled_codes[idx] if x['correctness_label']])
-            ] + existing_neg_codes
+            codes = [self.rng.choice([x['code'] for x in self.labeled_codes[idx] if x['correctness_label']])
+                     ] + existing_neg_codes
         else:
             codes = existing_neg_codes
         assert len(codes) == self.contrastive_dim, len(codes)

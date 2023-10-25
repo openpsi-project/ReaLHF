@@ -3,27 +3,20 @@ import math
 import random
 
 from api.config import *
-from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
+from api.dfg import ModelInterfaceType, ModelRPC
+from base.topology import PipeModelDataParallelTopology
 
-
-def sft(
-    commands: Commands,
-    model: ModelQuery['default'],
-    packed_input_ids: RawDataQuery['packed_input_ids'],
-    cu_seqlens: RawDataQuery['cu_seqlens'],
-    prompt_mask: RawDataQuery['prompt_mask'],
-):
-    inputs = commands.build_model_inputs(
-        packed_input_ids=packed_input_ids,
-        cu_seqlens=cu_seqlens,
-        prompt_mask=prompt_mask,
-    )
-    commands.log(model.train_step(inputs))
+sft = ModelRPC(
+    "default",
+    ModelInterfaceType.TRAIN_STEP,
+    input_data=['packed_input_ids', 'cu_seqlens', 'prompt_mask'],
+    dp_broker_type='packed',
+)
 
 
 class WpsFormulaSFTPipelineExperiment(Experiment):
 
-    def __init__(self, n_models=4, num_pipeline_stages=4, seed=1, total_train_epochs=4):
+    def __init__(self, n_models=8, num_pipeline_stages=4, seed=1, total_train_epochs=4):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -74,7 +67,6 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
             args=dict(
                 n_tokens_per_batch=max_seq_len * train_batch_size_per_device,
                 max_length=max_seq_len,
-                max_n_seqs_per_batch=500,
                 json_path="/data/aigc/llm/datasets/wps-formula-sft/dllm-train-0908-formula-psi.json",
             ),
         )
@@ -83,7 +75,6 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
             DataWorker(
                 tokenizer_name_or_path=model_path,
                 datasets=[dataset],
-                stream=RequestReplyStream(f"data{i}"),
                 dataloader=dataloader,
                 seed=self.seed,
             ) for i in range(self.n_data_workers)
@@ -121,22 +112,25 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
 
         interface = ModelInterface('pipe_flash_sft')
 
-        streams = [RequestReplyStream(f"model{i}") for i in range(self.n_models)]
-
-        model_worker = [
-            ModelWorker(
+        model_worker = []
+        assert self.dp_worldsize * self.num_pipeline_stages == self.n_models
+        topo = PipeModelDataParallelTopology(self.num_pipeline_stages, 1, self.dp_worldsize)
+        for i in range(self.n_models):
+            coord = topo.get_coord(i)
+            mw = ModelWorker(
                 seed=self.seed,
                 model=model,
                 backend=backend,
                 interface=interface,
                 model_name='default',
-                stream=streams[i],
+                topo=topo,
+                dp_rank=coord.data,
+                pp_rank=coord.pipe,
+                mp_rank=coord.model,
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
-            ) for i in range(self.n_models)
-        ]
-
-        ecs = MasterWorkerECS(model_worker).add_systems([sft])
+            )
+            model_worker.append(mw)
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
@@ -144,7 +138,7 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
             save_frequency_epochs=1,
             save_frequency_seconds=None,
             eval_frequency_epochs=1,
-            master_ecs=ecs,
+            model_rpcs=[sft],
             data_worker=data_worker,
             model_worker=model_worker,
         )

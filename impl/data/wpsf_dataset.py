@@ -2,7 +2,6 @@ from typing import Dict, List, Optional, Tuple
 import itertools
 import json
 import logging
-import random
 
 import numpy as np
 import torch.utils.data
@@ -92,10 +91,12 @@ class WPSFormulaPackedSFTDataset(torch.utils.data.IterableDataset):
 
         self.shuffle_cnt = 0
 
+        self.rng = np.random.RandomState(seed=util.seed)
+
         self._shuffle()
         assert all(seq <= self.n_tokens_per_batch for seq in self.seqlens)
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.seqlens), self.n_tokens_per_batch)
-        random.shuffle(self.__batch_indices)
+        self.rng.shuffle(self.__batch_indices)
 
     def _shuffle(self):
         shuffle_indices = api.data.get_shuffle_indices(
@@ -136,7 +137,7 @@ class WPSFormulaPackedSFTDataset(torch.utils.data.IterableDataset):
             )
         self._shuffle()
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.seqlens), self.n_tokens_per_batch)
-        random.shuffle(self.__batch_indices)
+        self.rng.shuffle(self.__batch_indices)
 
 
 api.data.register_dataset("wpsf_sft_packed", WPSFormulaPackedSFTDataset)
@@ -239,7 +240,9 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
         assert all(length <= self.n_tokens_per_batch
                    for length in self.lengths), (max(self.lengths), self.n_tokens_per_batch)
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.lengths), self.n_tokens_per_batch)
-        random.shuffle(self.__batch_indices)
+
+        self.rng = np.random.RandomState(seed=self.util.seed)
+        self.rng.shuffle(self.__batch_indices)
 
     def _build_shuffled_contrastive_tuples(self):
         codes, labels, lengths = list(
@@ -280,18 +283,18 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
         sampled_other_code_indices = []
         sampled_rubbish_code_indices = []
         while len(existing_neg_codes) < n_required_neg_codes:
-            if np.random.random() < 0.1:
-                rubbish_code_idx = np.random.choice(len(RUBBISH_CODE_COLLECTIONS))
+            if self.rng.random() < 0.1:
+                rubbish_code_idx = self.rng.choice(len(RUBBISH_CODE_COLLECTIONS))
                 if rubbish_code_idx in sampled_rubbish_code_indices:
                     continue
                 existing_neg_codes.append(self.rubbish_input_ids[rubbish_code_idx])
                 sampled_rubbish_code_indices.append(rubbish_code_idx)
                 continue
 
-            other_data_idx = np.random.choice(len(self.global_input_ids))
+            other_data_idx = self.rng.choice(len(self.global_input_ids))
             if other_data_idx == idx:
                 continue
-            other_code_idx = np.random.choice(len(self.global_input_ids[other_data_idx]))
+            other_code_idx = self.rng.choice(len(self.global_input_ids[other_data_idx]))
             if (other_data_idx, other_code_idx) in sampled_other_code_indices:
                 continue
             other_code = self.global_input_ids[other_data_idx][other_code_idx]
@@ -301,16 +304,16 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
         # randomly discard negative codes if too many
         # this may happend when contrastive_dim is set too small
         if len(existing_neg_codes) > n_required_neg_codes:
-            random.shuffle(existing_neg_codes)
+            self.rng.shuffle(existing_neg_codes)
             existing_neg_codes = existing_neg_codes[:n_required_neg_codes]
 
         if self.enforce_one_or_less_pos and n_pos > 1:
-            codes = [random.choice(pos_codes)] + existing_neg_codes
+            codes = [self.rng.choice(pos_codes)] + existing_neg_codes
             label = [0] + [1] + [0] * len(existing_neg_codes)
         elif n_pos > 0:
-            pos_code_indices = np.random.choice(len(pos_codes),
-                                                size=self.contrastive_dim - len(existing_neg_codes),
-                                                replace=False)
+            pos_code_indices = self.rng.choice(len(pos_codes),
+                                               size=self.contrastive_dim - len(existing_neg_codes),
+                                               replace=False)
             pos_codes = [pos_codes[kk] for kk in pos_code_indices]
             codes = pos_codes + existing_neg_codes
             label = [0] + [1 / len(pos_codes)] * len(pos_codes) + [0] * len(existing_neg_codes)
@@ -376,7 +379,7 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
         self._build_shuffled_contrastive_tuples()
         assert all(length <= self.n_tokens_per_batch for length in self.lengths)
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.lengths), self.n_tokens_per_batch)
-        random.shuffle(self.__batch_indices)
+        self.rng.shuffle(self.__batch_indices)
 
 
 api.data.register_dataset("wpsf_plrw_packed", WPSFormulaPackedRWDataset)

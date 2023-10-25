@@ -53,8 +53,9 @@ async def parallel_rpc(
     data: namedarray.NamedArray,
     streams: List[request_reply_stream.RequestClient],
 ):
-    req = request_reply_stream.Request(rpc_handle_name, data)
     for stream in streams:
+        # NOTE: Since post_request change req.data in-place, we need to construct a new request for each stream.
+        req = request_reply_stream.Request(rpc_handle_name, data)
         stream.post_request(req)
     all_res = []
     for stream in streams:
@@ -67,9 +68,13 @@ async def parallel_rpc(
         all_res.append(res)
 
     data = [res.data for res in all_res]
-    assert sum([x is not None for x in data]) == 1, [x is not None for x in data]
-
-    data = [x for x in data if x is not None][0]
+    if len(data) == sum([bool(x) for x in data]):
+        assert all([x == data[0] for x in data]), data
+        data = data[0]
+    elif sum([bool(x) for x in data]) == 1:
+        data = [x for x in data if bool(x)][0]
+    else:
+        raise RuntimeError()
     return data
 
 
@@ -96,6 +101,7 @@ async def model_rpc_func(
         else:
             data[rpc_config.input_key_remap[k]] = data_registry[k]
     data = namedarray.from_dict(data)
+    print(">>>?>>>>?>>>>>>>", data)
     data = dataparallel.get_broker(rpc_config.dp_broker_type).scatter_to(data, num_dp)
 
     awaitables = []
@@ -243,8 +249,8 @@ class MasterWorker(worker_base.Worker):
             dp0streams = {k: v for k, v in self.__model_streams.items() if 'dp_00' in k.split('@')[1]}
             assert len(dp0streams) > 0
             model_save_dirs = [os.path.join(self.MODEL_SAVE_ROOT, k) for k in dp0streams]
-            request_all(dp0streams, 'save', model_save_dirs)
-            gather_all_replies(dp0streams)
+            request_all(list(dp0streams.values()), 'save', model_save_dirs)
+            gather_all_replies(list(dp0streams.values()))
 
         if self._epoch >= self.__total_train_epochs:
             raise RuntimeError(f"Training completes! Yeah!!!")
