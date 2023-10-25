@@ -101,7 +101,6 @@ async def model_rpc_func(
         else:
             data[rpc_config.input_key_remap[k]] = data_registry[k]
     data = namedarray.from_dict(data)
-    print(">>>?>>>>?>>>>>>>", data)
     data = dataparallel.get_broker(rpc_config.dp_broker_type).scatter_to(data, num_dp)
 
     awaitables = []

@@ -380,7 +380,6 @@ class VocabPositionEmbedding(nn.Module):
         elif y.position_ids is None:
             # packed_input_ids is given
             lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
-            print("inside mqat", x.cu_seqlens, lengths)
             y.position_ids = torch.cat(
                 [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
             # print(f"flash_mqat.py y.position_ids.shape={y.position_ids.shape} "
