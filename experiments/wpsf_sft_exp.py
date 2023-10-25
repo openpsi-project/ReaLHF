@@ -3,22 +3,15 @@ import math
 import random
 
 from api.config import *
-from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
+from api.dfg import ModelInterfaceType, ModelRPC
+from base.topology import PipeModelDataParallelTopology
 
-
-def sft(
-    commands: Commands,
-    model: ModelQuery['default'],
-    packed_input_ids: RawDataQuery['packed_input_ids'],
-    cu_seqlens: RawDataQuery['cu_seqlens'],
-    prompt_mask: RawDataQuery['prompt_mask'],
-):
-    inputs = commands.build_model_inputs(
-        packed_input_ids=packed_input_ids,
-        cu_seqlens=cu_seqlens,
-        prompt_mask=prompt_mask,
-    )
-    commands.log(model.train_step(inputs))
+sft = ModelRPC(
+    "default",
+    ModelInterfaceType.TRAIN_STEP,
+    input_data=['packed_input_ids', 'cu_seqlens', 'prompt_mask'],
+    dp_broker_type='packed',
+)
 
 
 def sample_log_uniform(low, high):
@@ -87,7 +80,6 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
             args=dict(
                 n_tokens_per_batch=max_seq_len * train_batch_size_per_device,
                 max_length=max_seq_len,
-                max_n_seqs_per_batch=500,
                 json_path="/data/aigc/llm/datasets/wps-formula-sft/dllm-train-0908-formula-psi.json",
             ),
         )
@@ -96,7 +88,6 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
             DataWorker(
                 tokenizer_name_or_path=model_path,
                 datasets=[dataset],
-                stream=RequestReplyStream(f"data{i}"),
                 dataloader=dataloader,
                 seed=self.seed,
             ) for i in range(self.n_data_workers)
@@ -138,8 +129,6 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
         interface = ModelInterface('flash_sft')
 
-        streams = [RequestReplyStream(f"model{i}") for i in range(self.n_models)]
-
         model_worker = [
             ModelWorker(
                 seed=self.seed,
@@ -147,21 +136,20 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                 backend=backend,
                 interface=interface,
                 model_name='default',
-                stream=streams[i],
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_models),
             ) for i in range(self.n_models)
         ]
-
-        ecs = MasterWorkerECS(model_worker).add_systems([sft])
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=None,
-            save_frequency_epochs=None if self.benchmark_only else 1,
+            save_frequency_epochs=1,
             save_frequency_seconds=None,
-            eval_frequency_epochs=None if self.benchmark_only else 1,
-            master_ecs=ecs,
+            eval_frequency_epochs=1,
+            model_rpcs=[sft],
             data_worker=data_worker,
             model_worker=model_worker,
         )

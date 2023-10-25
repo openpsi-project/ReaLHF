@@ -2,19 +2,18 @@ from typing import Dict, List, Optional, Tuple
 import itertools
 import json
 import logging
-import random
 
 import numpy as np
 import torch.utils.data
 
-from impl.data.utils.pack import ffd_with_result_unsorted
+from base.datapack import ffd_with_result_unsorted
 import api.data
 
 logger = logging.getLogger("WPSFormulaPackedDataset")
 
-PROMPT_FORMAT = ("Below is an instruction that describes a task. "
-                 "Write a response that appropriately completes the request.\n\n"
-                 "### Instruction:\n{input}\n\n### Response:\n{output}")
+WIZARDCODER_PROMPT_FORMAT = ("Below is an instruction that describes a task. "
+                             "Write a response that appropriately completes the request.\n\n"
+                             "### Instruction:\n{input}\n\n### Response:\n{output}")
 
 
 class WPSFormulaPackedSFTDataset(torch.utils.data.IterableDataset):
@@ -23,7 +22,6 @@ class WPSFormulaPackedSFTDataset(torch.utils.data.IterableDataset):
         self,
         util: api.data.DatasetUtility,
         n_tokens_per_batch: int = 2048,
-        max_n_seqs_per_batch: int = 40,
         max_length: Optional[int] = None,
         json_path: str = "/data/aigc/public/wps-excel/train-0908-formula-psi.json",
     ):
@@ -54,9 +52,10 @@ class WPSFormulaPackedSFTDataset(torch.utils.data.IterableDataset):
         prompts_str = []
         prompt_chosen_str = []
         for entry in data:
-            prompts_str.append(PROMPT_FORMAT.format(input=entry['input'], output=""))
+            prompts_str.append(WIZARDCODER_PROMPT_FORMAT.format(input=entry['input'], output=""))
             prompt_chosen_str.append(
-                PROMPT_FORMAT.format(input=entry['input'], output=entry['output']) + tokenizer.eos_token)
+                WIZARDCODER_PROMPT_FORMAT.format(input=entry['input'], output=entry['output']) +
+                tokenizer.eos_token)
 
         prompt_encodings = tokenizer(prompts_str,
                                      truncation=True,
@@ -89,14 +88,15 @@ class WPSFormulaPackedSFTDataset(torch.utils.data.IterableDataset):
         self.prompt_masks = prompt_masks
 
         self.n_tokens_per_batch = n_tokens_per_batch
-        self.max_n_seqs_per_batch = max_n_seqs_per_batch
 
         self.shuffle_cnt = 0
+
+        self.rng = np.random.RandomState(seed=util.seed)
 
         self._shuffle()
         assert all(seq <= self.n_tokens_per_batch for seq in self.seqlens)
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.seqlens), self.n_tokens_per_batch)
-        random.shuffle(self.__batch_indices)
+        self.rng.shuffle(self.__batch_indices)
 
     def _shuffle(self):
         shuffle_indices = api.data.get_shuffle_indices(
@@ -116,49 +116,28 @@ class WPSFormulaPackedSFTDataset(torch.utils.data.IterableDataset):
     def __iter__(self):
         for indices in self.__batch_indices:
             seqlens = [self.seqlens[i] for i in indices]
-            prompt_lengths = [self.prompt_lengths[i] for i in indices]
             seqs = [self.seqs[i] for i in indices]
-            prompts = [self.prompts[i] for i in indices]
             prompt_masks = [self.prompt_masks[i] for i in indices]
 
             total_seqlen = sum(seqlens)
             assert total_seqlen <= self.n_tokens_per_batch, (total_seqlen, self.n_tokens_per_batch)
-            if total_seqlen < self.n_tokens_per_batch:
-                seqlen_to_pad = self.n_tokens_per_batch - total_seqlen
-                n_pads = (seqlen_to_pad + self.max_length - 1) // self.max_length
-                for j in range(n_pads):
-                    padlen = self.max_length if j < n_pads - 1 else seqlen_to_pad % self.max_length
-                    seqlens.append(padlen)
-                    prompt_lengths.append(padlen)
-                    seqs.append([self.util.tokenizer.pad_token_id] * padlen)
-                    prompts.append([self.util.tokenizer.pad_token_id] * padlen)
-                    prompt_masks.append([1] * padlen)
 
             seqlens = torch.tensor(seqlens, dtype=torch.int32)
             cu_seqlens = torch.cat([torch.tensor([0], dtype=torch.int32), torch.cumsum(seqlens, dim=0)])
-            assert cu_seqlens[-1] == self.n_tokens_per_batch, (cu_seqlens[-1], self.n_tokens_per_batch)
             prompt_masks = torch.cat([torch.tensor(m, dtype=torch.bool) for m in prompt_masks])
             packed_input_ids = torch.cat([torch.tensor(p, dtype=torch.long) for p in seqs])
 
-            if cu_seqlens.shape[0] > self.max_n_seqs_per_batch + 1:
-                raise RuntimeError(
-                    f"cu_seqlens.shape[0] ({cu_seqlens.shape[0]}) > max_n_seqs_per_batch + 1 ({self.max_n_seqs_per_batch + 1}), "
-                    f"please set a larger max_n_seqs_per_batch.")
-
-            cu_seqlens = torch.nn.functional.pad(cu_seqlens,
-                                                 (0, self.max_n_seqs_per_batch + 1 - cu_seqlens.shape[0]),
-                                                 value=-1)
-            assert packed_input_ids.shape[0] == prompt_masks.shape[0] == self.n_tokens_per_batch, (
-                packed_input_ids.shape[0], prompt_masks.shape[0], self.n_tokens_per_batch, total_seqlen)
+            assert packed_input_ids.shape[0] == prompt_masks.shape[0], (packed_input_ids.shape[0],
+                                                                        prompt_masks.shape[0], total_seqlen)
 
             yield dict(
-                packed_input_ids=packed_input_ids.unsqueeze(0),
-                prompt_mask=prompt_masks.unsqueeze(0),
-                cu_seqlens=cu_seqlens.unsqueeze(0),
+                packed_input_ids=packed_input_ids,
+                prompt_mask=prompt_masks,
+                cu_seqlens=cu_seqlens,
             )
         self._shuffle()
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.seqlens), self.n_tokens_per_batch)
-        random.shuffle(self.__batch_indices)
+        self.rng.shuffle(self.__batch_indices)
 
 
 api.data.register_dataset("wpsf_sft_packed", WPSFormulaPackedSFTDataset)
@@ -212,7 +191,7 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
         tokenizer = util.tokenizer
 
         all_seqs = [[
-            PROMPT_FORMAT.format(input=d['task'], output=x['code']) + tokenizer.eos_token
+            WIZARDCODER_PROMPT_FORMAT.format(input=d['task'], output=x['code']) + tokenizer.eos_token
             for x in d['labeled_codes']
         ] for d in global_data]
         n_labeled_codes = [len(x) for x in all_seqs]
@@ -261,7 +240,9 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
         assert all(length <= self.n_tokens_per_batch
                    for length in self.lengths), (max(self.lengths), self.n_tokens_per_batch)
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.lengths), self.n_tokens_per_batch)
-        random.shuffle(self.__batch_indices)
+
+        self.rng = np.random.RandomState(seed=self.util.seed)
+        self.rng.shuffle(self.__batch_indices)
 
     def _build_shuffled_contrastive_tuples(self):
         codes, labels, lengths = list(
@@ -302,18 +283,18 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
         sampled_other_code_indices = []
         sampled_rubbish_code_indices = []
         while len(existing_neg_codes) < n_required_neg_codes:
-            if np.random.random() < 0.1:
-                rubbish_code_idx = np.random.choice(len(RUBBISH_CODE_COLLECTIONS))
+            if self.rng.random() < 0.1:
+                rubbish_code_idx = self.rng.choice(len(RUBBISH_CODE_COLLECTIONS))
                 if rubbish_code_idx in sampled_rubbish_code_indices:
                     continue
                 existing_neg_codes.append(self.rubbish_input_ids[rubbish_code_idx])
                 sampled_rubbish_code_indices.append(rubbish_code_idx)
                 continue
 
-            other_data_idx = np.random.choice(len(self.global_input_ids))
+            other_data_idx = self.rng.choice(len(self.global_input_ids))
             if other_data_idx == idx:
                 continue
-            other_code_idx = np.random.choice(len(self.global_input_ids[other_data_idx]))
+            other_code_idx = self.rng.choice(len(self.global_input_ids[other_data_idx]))
             if (other_data_idx, other_code_idx) in sampled_other_code_indices:
                 continue
             other_code = self.global_input_ids[other_data_idx][other_code_idx]
@@ -323,16 +304,16 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
         # randomly discard negative codes if too many
         # this may happend when contrastive_dim is set too small
         if len(existing_neg_codes) > n_required_neg_codes:
-            random.shuffle(existing_neg_codes)
+            self.rng.shuffle(existing_neg_codes)
             existing_neg_codes = existing_neg_codes[:n_required_neg_codes]
 
         if self.enforce_one_or_less_pos and n_pos > 1:
-            codes = [random.choice(pos_codes)] + existing_neg_codes
+            codes = [self.rng.choice(pos_codes)] + existing_neg_codes
             label = [0] + [1] + [0] * len(existing_neg_codes)
         elif n_pos > 0:
-            pos_code_indices = np.random.choice(len(pos_codes),
-                                                size=self.contrastive_dim - len(existing_neg_codes),
-                                                replace=False)
+            pos_code_indices = self.rng.choice(len(pos_codes),
+                                               size=self.contrastive_dim - len(existing_neg_codes),
+                                               replace=False)
             pos_codes = [pos_codes[kk] for kk in pos_code_indices]
             codes = pos_codes + existing_neg_codes
             label = [0] + [1 / len(pos_codes)] * len(pos_codes) + [0] * len(existing_neg_codes)
@@ -398,7 +379,51 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
         self._build_shuffled_contrastive_tuples()
         assert all(length <= self.n_tokens_per_batch for length in self.lengths)
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.lengths), self.n_tokens_per_batch)
-        random.shuffle(self.__batch_indices)
+        self.rng.shuffle(self.__batch_indices)
 
 
 api.data.register_dataset("wpsf_plrw_packed", WPSFormulaPackedRWDataset)
+
+
+class PromptDataset(torch.utils.data.Dataset):
+
+    def __init__(self,
+                 util: api.data.DatasetUtility,
+                 max_prompt_len: int,
+                 dataset_path: str = "/data/aigc/llm/datasets/wps-formula-rw/dataset_train.jsonl"):
+        self.util = util
+        seed = self.util.seed
+        world_size = self.util.world_size
+        tokenizer = self.util.tokenizer
+        ddp_rank = self.util.ddp_rank
+
+        if not dataset_path.endswith(".jsonl"):
+            raise NotImplementedError("Only support .jsonal dataset format.")
+
+        with open(dataset_path, 'r') as f:
+            _data_bytes = [ff for ff in f]
+            datasize_per_rank = len(_data_bytes) // world_size
+            shuffle_indices = api.data.get_shuffle_indices(seed, datasize_per_rank * world_size)
+            subset_indices = shuffle_indices[ddp_rank * datasize_per_rank:(ddp_rank + 1) * datasize_per_rank]
+            data = [json.loads(_data_bytes[i]) for i in subset_indices]
+
+        prompts = [WIZARDCODER_PROMPT_FORMAT.format(input=x['task'], output="") for x in data]
+        original_padding_side = tokenizer.padding_side
+        tokenizer.padding_side = 'left'
+        prompt_tokens = tokenizer(prompts,
+                                  return_tensors='pt',
+                                  padding=True,
+                                  truncation=True,
+                                  max_length=max_prompt_len)
+        tokenizer.padding_side = original_padding_side
+
+        self.prompt_tokens = prompt_tokens
+
+    def __len__(self):
+        return len(self.prompt_tokens)
+
+    def __getitem__(self, idx):
+        return self.prompt_tokens[idx]["input_ids"], self.prompt_tokens[idx]["attention_mask"]
+
+
+api.data.register_dataset("wpsf_prompt", PromptDataset)

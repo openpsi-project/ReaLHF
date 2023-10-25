@@ -93,8 +93,8 @@ class ModelWorker(worker_base.Worker):
                 api.data.make_dataset(
                     d,
                     self.config.seed,
-                    self.__ddp_rank,
-                    self.__world_size,
+                    self.config.dp_rank,
+                    self.config.topo.get_dim('data'),
                     self.__model.tokenizer,
                     self.config.worker_info.experiment_name,
                     self.config.worker_info.trial_name,
@@ -116,8 +116,9 @@ class ModelWorker(worker_base.Worker):
             self.__lazy_setup()
             self.__ddp_env_resolved = True
 
-        request: request_reply_stream.Request = self.__stream.poll_request()
-        if request is None:
+        try:
+            request: request_reply_stream.Request = self.__stream.poll_request()
+        except request_reply_stream.NoMessage:
             return worker_base.PollResult(0, 0)
 
         tik = time.perf_counter()
@@ -131,7 +132,7 @@ class ModelWorker(worker_base.Worker):
                 res = self.__interface.save(self.__model, request.data)  # -> None
             elif request.handle_name == 'inference':
                 res = self.__interface.inference(self.__model, request.data)  # -> NamedArray
-            elif request.handle_name == 'train':
+            elif request.handle_name == 'train_step':
                 res = self.__interface.train_step(self.__model, request.data)  # -> Dict
             elif request.handle_name == 'generate':
                 res = self.__interface.generate(self.__model, request.data)  # -> NamedArray
@@ -150,16 +151,15 @@ class ModelWorker(worker_base.Worker):
         reply = request_reply_stream.Reply(data=res)
         self.__stream.post_reply(reply)
 
-        if self.config.cuda_cache_cleanliness:
-            if self.__clear_cache_frequency.check():
-                # following huggingface trl # ALWAYS COST 0.3+ SEC
-                st = time.monotonic()
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
-                et = time.monotonic()
-                if self.is_master:
-                    self.logger.info(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
+        if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
+            # following huggingface trl # ALWAYS COST 0.3+ SEC
+            st = time.monotonic()
+            gc.collect()
+            torch.cuda.empty_cache()
+            gc.collect()
+            et = time.monotonic()
+            if self.is_master:
+                self.logger.info(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
 
         # logging gpu/cpu stats
         # self.print_monitor_info()

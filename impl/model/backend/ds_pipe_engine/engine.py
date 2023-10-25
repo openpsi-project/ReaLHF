@@ -21,7 +21,7 @@ import torch
 
 from . import p2p, schedule
 from .module import PipelineError, PipelineModule
-from base.dataparallel import PackedParallelDataRouter
+from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import NamedArray
 from impl.model.utils.data import (data_list_to_tensor_tuple, DuckGenerationOutput, DuckModelOutput,
                                    PipeCacheData, PipeTransferData, tensor_tuple_to_data_list)
@@ -264,7 +264,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             cu_seqlens=cu_seqlens,
             prompt_mask=prompt_mask,
         )
-        splitted = PackedParallelDataRouter.scatter_to(data, self.num_micro_batches)
+        splitted = PackedParallelDataBroker.scatter_to(data, self.num_micro_batches)
 
         def input_to_pipe_model_input(input: NamedArray):
             max_seqlen = int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))

@@ -359,6 +359,17 @@ def unpack_tensor(packed_x: torch.Tensor, cu_seqlens: torch.IntTensor, padding_s
 
 
 def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.FloatTensor:
+    """Gather log probs of shifted labels from logits.
+
+    Args:
+        logits (torch.FloatTensor): Non-shifted logits with shape [bs, seqlen].
+            The final value at [:, seqlen -1] is not used.
+        labels (torch.LongTensor): Non-shifted labels/input_ids with shape [bs, seqlen].
+            The first value at [:, 0] has no corresponding log prob.
+
+    Returns:
+        torch.FloatTensor: Shifted log probability with shape [bs, seqlen -1].
+    """
     logits = logits[:, :-1]
     labels = labels[:, 1:]
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
@@ -368,6 +379,19 @@ def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor
 
 def gather_packed_shifted_log_probs(logits_: torch.FloatTensor, cu_seqlens: torch.Tensor,
                                     labels_: torch.LongTensor) -> torch.FloatTensor:
+    """Gather log probs from packed input_ids and logits.
+
+    Args:
+        logits_ (torch.FloatTensor): Shape [tot_seqlen]. The final value at the end of
+            each sequence is not used.
+        cu_seqlens (torch.Tensor): Shape [#seqs + 1]. Indices marking the start
+            and end of each sequences.
+        labels_ (torch.LongTensor): Labels or input_ids with shape [tot_seqlen].
+            The first value at the beginning of each sequence has no corresponding log prob.
+
+    Returns:
+        torch.FloatTensor: Log probability with shape [tot_seqlen - #seqs].
+    """
     leave_one_indices = torch.cat([
         torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
         for i in range(cu_seqlens.shape[0] - 1)

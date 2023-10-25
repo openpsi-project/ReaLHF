@@ -11,15 +11,27 @@ import base.namedarray as namedarray
 InterfaceReturnDataType = Union[namedarray.NamedArray, Dict]
 
 
-class ParallelDataRouter:
+class ParallelDataBroker:
 
     @staticmethod
     def gather_from(src: List[InterfaceReturnDataType]) -> InterfaceReturnDataType:
         """Gather outputs of a data-parallel model RPC."""
         if isinstance(src[0], Dict):
-            return {k: np.mean([r[k] for r in src]) for k in src[0].keys()}
+            cnt, stats = {}, {}
+            for reply in src:
+                for k, v in reply.items():
+                    cnt[k] = cnt.get(k, 0) + 1
+                    stats[k] = stats.get(k, 0) + v
+            return {k: v / cnt for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())}
         elif isinstance(src[0], namedarray.NamedArray):
-            return namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
+            if 'input_lens' in src[0]:
+                input_lens = torch.cat([x['input_lens'] for x in src], dim=0)
+            elif 'cu_seqlens' in src[0]:
+                input_lens = torch.cat([x['cu_seqlens'][1:] - x['cu_seqlens'][:-1] for x in src], dim=0)
+            res = namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
+            if 'cu_seqlens' in src[0]:
+                res['cu_seqlens'] = torch.cat([input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)])
+            return res
         else:
             raise NotImplementedError()
 
@@ -29,11 +41,11 @@ class ParallelDataRouter:
         pass
 
 
-class PaddedBatchParallelDataRouter(ParallelDataRouter):
+class PaddedBatchParallelDataBroker(ParallelDataBroker):
 
     @staticmethod
-    def gather_from(*src: List[InterfaceReturnDataType]) -> InterfaceReturnDataType:
-        return ParallelDataRouter.gather_from(src)
+    def gather_from(src: List[InterfaceReturnDataType]) -> InterfaceReturnDataType:
+        return ParallelDataBroker.gather_from(src)
 
     @staticmethod
     def scatter_to(src: namedarray.NamedArray, n_dp: int) -> List[namedarray.NamedArray]:
@@ -43,25 +55,21 @@ class PaddedBatchParallelDataRouter(ParallelDataRouter):
         return datas
 
 
-class PackedParallelDataRouter(ParallelDataRouter):
+class PackedParallelDataBroker(ParallelDataBroker):
 
     @staticmethod
     def gather_from(src: List[InterfaceReturnDataType]) -> InterfaceReturnDataType:
-        if not all(['input_lens' in x for x in src]):
-            raise RuntimeError("input_lens must be in the return data when using packed data router. "
-                               f"Current keys: {[list(x.keys()) for x in src]}.")
-        return ParallelDataRouter.gather_from(src)
+        return ParallelDataBroker.gather_from(src)
 
     @staticmethod
     def scatter_to(src: namedarray.NamedArray, n_dp: int) -> List[namedarray.NamedArray]:
-        if 'input_lens' not in src and 'cu_seqlens' not in src:
-            raise RuntimeError(
-                "input_lens or cu_seqlens must be in the return data when using packed data router. "
-                f"Current keys: {list(src.keys())}.")
         if 'input_lens' not in src:
-            src['input_lens'] = torch.diff(src['cu_seqlens'])
+            if 'cu_seqlens' in src:
+                src['input_lens'] = src['cu_seqlens'][1:] - src['cu_seqlens'][:-1]
+            else:
+                raise RuntimeError("input_lens must be in the return data when using packed data broker. "
+                                   f"Current keys: {list(src.keys())}.")
 
-        # print(src['input_lens'])
         partitions = datapack.min_abs_diff_partition(src['input_lens'].cpu().numpy().astype(np.int64), n_dp)
 
         input_lens: List[torch.IntTensor] = [src['input_lens'][start:end] for start, end in partitions]
@@ -83,9 +91,11 @@ class PackedParallelDataRouter(ParallelDataRouter):
                 # e.g., packed_seq has shape [tot_seqlen] and should be splited according to cumulative lengths,
                 # packed_logprobs has shape [tot_seqlen - bs] (each sequence is one-step shorter) and should be splitted
                 # according to short-1 cumulative lengths, seq_no_eos_mask has shape [bs] and performs similar as input_lens, ...
-                # so we must enumerate each possible key and deal with them separately.,
+                # so we must enumerate each possible key and deal with them separately, etc.
                 if k == 'input_lens':
                     sp[k] = input_lens[i]
+                elif k == 'cu_seqlens':
+                    sp[k] = cu_seqlens[i]
                 elif k == 'seq_no_eos_mask':
                     start, end = partitions[i]
                     sp[k] = v[start:end]
@@ -93,12 +103,19 @@ class PackedParallelDataRouter(ParallelDataRouter):
                     sp[k] = v[offsets[i]:offsets[i] + cu_seqlens[i][-1]]
                 elif k == 'packed_logprobs':
                     sp[k] = v[short1offsets[i]:short1offsets[i] + short1cu_seqlens[i][-1]]
-                elif k == "cu_seqlens":
-                    sp[k] = cu_seqlens[i] if not 'packed_logprobs' in src else short1cu_seqlens[i]
                 else:
                     raise RuntimeError(f"Unknown key {k} in packed data. We don't know how to split it. "
-                                       f"Implemented keys include ")
+                                       f"Check base/dataparallel.py for implemented keys.")
         splitted_data = [namedarray.from_dict(dict(x)) for x in splitted_data]
         for x in splitted_data:
             x.register_metadata(**src.metadata)
         return splitted_data
+
+
+def get_broker(type_: str) -> ParallelDataBroker:
+    if type_ == 'padded_batch':
+        return PaddedBatchParallelDataBroker
+    elif type_ == 'packed':
+        return PackedParallelDataBroker
+    else:
+        raise RuntimeError(f"Unknown data broker type {type_}.")

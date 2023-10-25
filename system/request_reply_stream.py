@@ -18,22 +18,8 @@ logger = logging.getLogger("Request-Replay Stream")
 ZMQ_IO_THREADS = 8
 
 
-class RequestClient:
-    # in master server
-    def post_request(self, payload):
-        raise NotImplementedError
-
-    def poll_reply(self):
-        raise NotImplementedError
-
-
-class ReplyServer:
-    # in model worker
-    def poll_request(self):
-        raise NotImplementedError
-
-    def post_reply(self):
-        raise NotImplementedError
+class NoMessage(Exception):
+    pass
 
 
 @dataclasses.dataclass
@@ -45,6 +31,24 @@ class Request:
 @dataclasses.dataclass
 class Reply:
     data: namedarray.NamedArray = None
+
+
+class RequestClient:
+    # in master server
+    def post_request(self, payload: Request):
+        raise NotImplementedError()
+
+    def poll_reply(self, block: bool = False) -> Reply:
+        raise NotImplementedError()
+
+
+class ReplyServer:
+    # in model worker
+    def poll_request(self, block: bool = False) -> Request:
+        raise NotImplementedError()
+
+    def post_reply(self, payload: Reply):
+        raise NotImplementedError()
 
 
 class IpRequestClient(RequestClient):
@@ -70,8 +74,12 @@ class IpRequestClient(RequestClient):
         self.__socket.send_multipart(
             [pickle.dumps(tik), payload.handle_name.encode('ascii'), encoding] + payload.data)
 
-    def poll_reply(self):
-        time_bytes, encoding, *data = self.__socket.recv_multipart()
+    def poll_reply(self, block: bool = False) -> Reply:
+        try:
+            time_bytes, encoding, *data = self.__socket.recv_multipart(flags=0 if block else zmq.NOBLOCK)
+        except zmq.ZMQError:
+            raise NoMessage()
+
         send_time = pickle.loads(time_bytes)
         if encoding == b'01':
             data = namedarray.loads(data)
@@ -95,11 +103,13 @@ class IpReplyServer(ReplyServer):
         self.__socket.setsockopt(zmq.LINGER, 0)
         self.__serialization_method = serialization_method
 
-    def poll_request(self):
+    def poll_request(self, block: bool = False) -> Request:
         try:
-            time_bytes, handle_name, encoding, *data = self.__socket.recv_multipart(flags=zmq.NOBLOCK)
+            time_bytes, handle_name, encoding, *data = self.__socket.recv_multipart(
+                flags=0 if block else zmq.NOBLOCK)
         except zmq.ZMQError:
-            return None
+            raise NoMessage()
+
         send_time = pickle.loads(time_bytes)
         handle_name = handle_name.decode('ascii')
         if encoding == b'01':

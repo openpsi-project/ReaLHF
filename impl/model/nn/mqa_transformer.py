@@ -9,8 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import transformers
 
+from base.topology import PipeDataParallelTopology
 from impl.model.backend.ds_pipe_engine import LayerSpec, PipelineModule
-from impl.model.backend.ds_pipe_engine.topology import PipeDataParallelTopology
 from impl.model.utils.data import (mask_eos_token, TensorDataclassToTupleInterface, upcast_masked_softmax,
                                    upcast_softmax)
 from impl.model.utils.logits_warper import top_k_top_p_logits

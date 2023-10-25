@@ -5,4 +5,4 @@
 
 from .engine import DeepSpeedPipelineEngine
 from .module import LayerSpec, PipelineModule, TiedLayerSpec
-from .topology import PipeDataParallelTopology, ProcessTopology
+from base.topology import PipeDataParallelTopology, PipeModelDataParallelTopology, ProcessTopology
