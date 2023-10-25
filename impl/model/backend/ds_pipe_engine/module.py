@@ -4,6 +4,7 @@
 # DeepSpeed Team
 
 from functools import partial
+from typing import List, Tuple
 import glob
 import os
 import re as regex
@@ -18,6 +19,9 @@ import torch
 import torch.nn as nn
 
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid
+from base.monitor import process_memory_mb
+from impl.model.utils.data import (data_list_to_tensor_tuple, PipeCacheData, PipeTransferData,
+                                   tensor_tuple_to_data_list)
 
 
 class PipelineError(Exception):
@@ -87,6 +91,7 @@ class TiedLayerSpec(LayerSpec):
 
 
 class PipelineModule(nn.Module):
+    ### This module should only be used by pipeline engine!!
     """Modules to be parallelized with pipeline parallelism.
 
     The key constraint that enables pipeline parallelism is the
@@ -117,6 +122,7 @@ class PipelineModule(nn.Module):
         seed_fn(type, optional): The custom seed generating function. Defaults to random seed generator.
         base_seed (int, optional): The starting seed. Defaults to 1234.
         partition_method (str, optional): The method upon which the layers are partitioned. Defaults to 'parameters'.
+        # do not support activation checkpoint now
         activation_checkpoint_interval (int, optional): The granularity activation checkpointing in terms of number of layers. 0 disables activation checkpointing.
         activation_checkpoint_func (callable, optional): The function to use for activation checkpointing. Defaults to ``deepspeed.checkpointing.checkpoint``.
         checkpointable_layers(list, optional): Checkpointable layers may not be checkpointed. Defaults to None which does not additional filtering.
@@ -143,11 +149,6 @@ class PipelineModule(nn.Module):
         self.micro_offset = 0
 
         self.loss_fn = loss_fn
-
-        self.checkpointable_layers = checkpointable_layers
-        if checkpointable_layers is not None:
-            assert isinstance(checkpointable_layers,
-                              list), "param `checkpointable_layers` must be type of list."
 
         self.seed_layers = seed_layers
         self.seed_fn = seed_fn
@@ -209,9 +210,6 @@ class PipelineModule(nn.Module):
 
         self.tied_comms = self._index_tied_modules()
         self._synchronize_tied_weights()
-
-        self.activation_checkpoint_interval = activation_checkpoint_interval
-        self.activation_checkpoint_func = activation_checkpoint_func
 
     def _build(self):
         specs = self._layer_specs
@@ -307,56 +305,33 @@ class PipelineModule(nn.Module):
             raise RuntimeError(f"Partitioning '{layername}' found no valid layers to partition.")
         return idxs
 
-    def forward(self, forward_input):
-        # We need to offset the seed by the microbatch ID. Save it in a local var to
-        # ensure it is preserved in the closure. Otherwise checkpointed forward funcs
-        # will see a different offset.
-        self.micro_offset += 1
+    @property
+    def num_layers(self):
+        """ number of layers in current pipeline stage
+        """
+        return len(self.forward_funcs)
 
-        def exec_range_func(start, end):
-            ''' Helper function to be used with checkpoint()
-            Adapted from torch.utils.checkpoint:checkpoint_sequential()
-            '''
-            local_micro_offset = self.micro_offset + 1
-
-            def exec_func(*inputs):
-                # Single tensor inputs need to be unwrapped
-                if len(inputs) == 1:
-                    inputs = inputs[0]
-                for idx, layer in enumerate(self.forward_funcs[start:end]):
-                    self.curr_layer = idx + self._local_start
-                    if self.seed_layers:
-                        new_seed = (self.base_seed * local_micro_offset) + self.curr_layer
-                        if self.seed_fn:
-                            self.seed_fn(new_seed)
-                        else:
-                            ds_utils.set_random_seed(new_seed)
-
-                    inputs = layer(inputs)
-                return inputs
-
-            return exec_func
-
-        if self.activation_checkpoint_interval == 0:
-            func = exec_range_func(0, len(self.forward_funcs))
-            x = func(forward_input)
-        else:
-            num_layers = len(self.forward_funcs)
-            x = forward_input
-            for start_idx in range(0, num_layers, self.activation_checkpoint_interval):
-                end_idx = min(start_idx + self.activation_checkpoint_interval, num_layers)
-
-                funcs = self.forward_funcs[start_idx:end_idx]
-                # Since we either pass tensors or tuples of tensors without unpacking, we
-                # need to be careful not to double-wrap tensors with tuple.
-                if not isinstance(x, tuple):
-                    x = (x,)
-
-                if self._is_checkpointable(funcs):
-                    x = self.activation_checkpoint_func(exec_range_func(start_idx, end_idx), *x)
+    def forward(self, forward_input_tuple: Tuple):
+        inputs = tensor_tuple_to_data_list(forward_input_tuple)
+        x: PipeTransferData = inputs[0]
+        ys: List[PipeCacheData] = inputs[1:]
+        local_micro_offset = self.micro_offset + 1
+        for idx, (layer, y) in enumerate(zip(self.forward_funcs, ys)):
+            self.curr_layer = idx + self._local_start
+            if self.seed_layers:
+                new_seed = (self.base_seed * local_micro_offset) + self.curr_layer
+                if self.seed_fn:
+                    self.seed_fn(new_seed)
                 else:
-                    x = exec_range_func(start_idx, end_idx)(*x)
-        return x
+                    ds_utils.set_random_seed(new_seed)
+
+            x = layer(x, y)
+            # if self.stage_id < self.num_stages - 1:
+            x.pp_input = x.pp_output
+            x.pp_output = None
+
+        outputs = data_list_to_tensor_tuple([x])
+        return outputs
 
     def _partition_layers(self, method='uniform'):
         num_stages = self._topo.get_dim('pipe')
@@ -552,68 +527,89 @@ class PipelineModule(nn.Module):
         ckpt_files.sort()
         return ckpt_files
 
-    def save_state_dict(self, save_dir, checkpoint_engine):
-        # Processes having the same model parallel rank on different data parallel instances
-        # have identical layer weights.  We can distribute the task of saving the layer weights
-        # among the data parallel ranks.  For example, if a pipeline stage has 9 layers and
-        # if there are 2 data parallel instances, rank 0 will save the first 5 layers and
-        # rank 1 will save the last 4.
+    def save(self, save_dir, *save_args, **save_kwargs):
         dp_rank = self._grid.data_parallel_id
-        dp_size = self._grid.data_parallel_size
-        num_layers = len(self.forward_funcs)
-        if self.checkpoint_parallel_write_pipeline:
-            # spread layers evenly across data parallel ranks
-            offsets = ds_utils.partition_uniform(num_layers, dp_size)
-            start, end = offsets[dp_rank], offsets[dp_rank + 1]
+        if dp_rank > 0:  # only save on dp_rank = 0
+            return
+        save_fn = f"pytorch_model-stage-{self.stage_id}.bin"
+        save_abs_fn = os.path.join(save_dir, save_fn)
+        torch.save(self.state_dict(), save_abs_fn, *save_args, **save_kwargs)
+
+    def load(self, load_dir, from_full_ckpt=False, *load_args, **load_kwargs):
+        # TODO: support loading from shards
+        if not from_full_ckpt:
+            load_fn = f"pytorch_model-stage-{self.stage_id}.bin"
+            load_abs_fn = os.path.join(load_dir, load_fn)
         else:
-            # data parallel rank 0 writes all layers
-            if dp_rank != 0:
-                return
-            start, end = 0, num_layers
-        layer_list = self.forward_funcs[start:end]
+            load_fn = "pytorch_model.bin"
+            load_abs_fn = os.path.join(load_dir, load_fn)
+        logger.info("Loading model from {}".format(load_abs_fn))
+        state_dict = torch.load(load_abs_fn, *load_args, **load_kwargs)
+        process_memory_mb("after_load_state_dict")
+        self.load_state_dict(state_dict, strict=True)
 
-        checkpoint_engine.makedirs(save_dir, exist_ok=True)
-        for idx, layer in enumerate(layer_list):
-            model_ckpt_path = self.ckpt_layer_path(save_dir, start + idx)
-            if not hasattr(layer, 'state_dict'):
-                continue
-            # We pass cloned tensors to torch.save() to avoid checkpoint bloat which occurs because torch.save()
-            # saves the underlying storage rather than the slice of the storage corresponding to individual tensors.
-            # This is a problem in DeepSpeed because we often allocate tensors using slices of large flattened buffers.
-            # Tensor cloning helps to avoid this problem because the storage of cloned tensors are closer to the true size.
-            # It is expected that the garbage collector will reclaim the cloned tensor storage to avoid memory bloat.
-            # See https://pytorch.org/docs/stable/notes/serialization.html#preserve-storage-sharing
-            orig_state_dict = layer.state_dict()
-            final_state_dict = type(orig_state_dict)({k: v.clone() for k, v in orig_state_dict.items()})
-            checkpoint_engine.save(final_state_dict, model_ckpt_path)
+    # def save_state_dict(self, save_dir, checkpoint_engine):
+    #     # Processes having the same model parallel rank on different data parallel instances
+    #     # have identical layer weights.  We can distribute the task of saving the layer weights
+    #     # among the data parallel ranks.  For example, if a pipeline stage has 9 layers and
+    #     # if there are 2 data parallel instances, rank 0 will save the first 5 layers and
+    #     # rank 1 will save the last 4.
+    #     dp_rank = self._grid.data_parallel_id
+    #     dp_size = self._grid.data_parallel_size
+    #     num_layers = len(self.forward_funcs)
+    #     if self.checkpoint_parallel_write_pipeline:
+    #         # spread layers evenly across data parallel ranks
+    #         offsets = ds_utils.partition_uniform(num_layers, dp_size)
+    #         start, end = offsets[dp_rank], offsets[dp_rank + 1]
+    #     else:
+    #         # data parallel rank 0 writes all layers
+    #         if dp_rank != 0:
+    #             return
+    #         start, end = 0, num_layers
+    #     layer_list = self.forward_funcs[start:end]
 
-    def load_state_dir(self, load_dir, checkpoint_engine, strict=True):
-        for idx, layer in enumerate(self.forward_funcs):
-            # Functions, etc. will not have state_dicts
-            if not hasattr(layer, 'load_state_dict'):
-                continue
+    #     checkpoint_engine.makedirs(save_dir, exist_ok=True)
+    #     for idx, layer in enumerate(layer_list):
+    #         model_ckpt_path = self.ckpt_layer_path(save_dir, start + idx)
+    #         if not hasattr(layer, 'state_dict'):
+    #             continue
+    #         # We pass cloned tensors to torch.save() to avoid checkpoint bloat which occurs because torch.save()
+    #         # saves the underlying storage rather than the slice of the storage corresponding to individual tensors.
+    #         # This is a problem in DeepSpeed because we often allocate tensors using slices of large flattened buffers.
+    #         # Tensor cloning helps to avoid this problem because the storage of cloned tensors are closer to the true size.
+    #         # It is expected that the garbage collector will reclaim the cloned tensor storage to avoid memory bloat.
+    #         # See https://pytorch.org/docs/stable/notes/serialization.html#preserve-storage-sharing
+    #         orig_state_dict = layer.state_dict()
+    #         final_state_dict = type(orig_state_dict)({k: v.clone() for k, v in orig_state_dict.items()})
+    #         checkpoint_engine.save(final_state_dict, model_ckpt_path)
 
-            # get all checkpoint files for the layer.
-            model_ckpt_list = self.ckpt_layer_path_list(load_dir, idx)
-            mp_rank = self._grid.get_slice_parallel_rank()
-            mp_world_size = self._grid.get_slice_parallel_world_size()
+    # def load_state_dir(self, load_dir, checkpoint_engine, strict=True):
+    #     for idx, layer in enumerate(self.forward_funcs):
+    #         # Functions, etc. will not have state_dicts
+    #         if not hasattr(layer, 'load_state_dict'):
+    #             continue
 
-            sd_loader = SDLoaderFactory.get_sd_loader(model_ckpt_list,
-                                                      version=2.0,
-                                                      checkpoint_engine=checkpoint_engine)
-            load_path, checkpoint, _ = sd_loader.load(mp_world_size,
-                                                      mp_rank,
-                                                      module_key=None,
-                                                      is_pipe_parallel=True)
+    #         # get all checkpoint files for the layer.
+    #         model_ckpt_list = self.ckpt_layer_path_list(load_dir, idx)
+    #         mp_rank = self._grid.get_slice_parallel_rank()
+    #         mp_world_size = self._grid.get_slice_parallel_world_size()
 
-            layer.load_state_dict(checkpoint)
+    #         sd_loader = SDLoaderFactory.get_sd_loader(model_ckpt_list,
+    #                                                   version=2.0,
+    #                                                   checkpoint_engine=checkpoint_engine)
+    #         load_path, checkpoint, _ = sd_loader.load(mp_world_size,
+    #                                                   mp_rank,
+    #                                                   module_key=None,
+    #                                                   is_pipe_parallel=True)
 
-            # if self._grid.data_parallel_id == 0:
-            #     logger.info(
-            #         f'RANK={self.global_rank} Loaded layer={idx+self._local_start} file={load_path}'
-            #     )
+    #         layer.load_state_dict(checkpoint)
 
-        self._synchronize_tied_weights()
+    #         # if self._grid.data_parallel_id == 0:
+    #         #     logger.info(
+    #         #         f'RANK={self.global_rank} Loaded layer={idx+self._local_start} file={load_path}'
+    #         #     )
+
+    #     self._synchronize_tied_weights()
 
     def _is_checkpointable(self, funcs):
         # This is an unfortunate hack related to torch and deepspeed activation checkpoint implementations.

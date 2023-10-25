@@ -60,7 +60,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
             if 'cu_seqlens' in src:
                 src['input_lens'] = src['cu_seqlens'][1:] - src['cu_seqlens'][:-1]
             else:
-                raise RuntimeError("input_lens must be in the return data when using packed data router. "
+                raise RuntimeError("input_lens must be in the return data when using packed data broker. "
                                    f"Current keys: {list(src.keys())}.")
 
         partitions = datapack.min_abs_diff_partition(src['input_lens'].cpu().numpy().astype(np.int64), n_dp)
@@ -92,7 +92,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
                 elif k == 'seq_no_eos_mask':
                     start, end = partitions[i]
                     sp[k] = v[start:end]
-                elif k == 'packed_seq' or k == 'packed_logits_mask' or k == 'prompt_mask' or k == 'packed_input_ids':
+                elif k in ['packed_seq', 'packed_logits_mask', 'prompt_mask', 'packed_input_ids']:
                     sp[k] = v[offsets[i]:offsets[i] + cu_seqlens[i][-1]]
                 elif k == 'packed_logprobs':
                     sp[k] = v[short1offsets[i]:short1offsets[i] + short1cu_seqlens[i][-1]]

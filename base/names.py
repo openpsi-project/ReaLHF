@@ -82,3 +82,7 @@ def shared_memory_dock_server(experiment_name, trial_name, stream_name, server_t
 
 def ray_cluster(experiment_name, trial_name, name):
     return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/ray_cluster/{name}"
+
+
+def model_controller(experiment_name, trial_name, model_name):
+    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/model_controller/{model_name}"

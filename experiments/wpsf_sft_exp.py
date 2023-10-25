@@ -60,6 +60,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
+                    nodelist="frl8a138",
                     mem=60000,
                 ),
             ),

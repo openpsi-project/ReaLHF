@@ -188,6 +188,7 @@ class MasterWorker(worker_base.Worker):
                              f"\nTotal train steps: {ft_spec.total_train_steps}" +
                              f"\nSteps per epoch: {ft_spec.steps_per_epoch}" +
                              f"\nEffective batch size: {batch_size}\n" + "=" * 40 + "\n")
+            logger.info(f"ft_spec = {ft_spec}")
 
             model_ft_specs = []
             for model_id in self.__model_streams:
