@@ -184,22 +184,21 @@ def get_lora_state_dict(model: nn.Module) -> List[Dict[str, torch.Tensor]]:
     return lora_sds
 
 
-def lora_wrap_fn(cls_):
+def lora_wrap_fn(
+    lora_module_kwargs: dict,
+    lora_keys_to_replace: List[str],
+    lora_exclude_module_names: Optional[List[str]] = None,
+    additional_module_names_to_opt: Optional[List[str]] = None,
+    load_lora_path: Optional[str] = None,
+    lora_op_after_creation: Optional[Literal['squash', 'fuse']] = None,
+):
 
-    def wrapped_cls(lora_module_kwargs: dict,
-                    lora_keys_to_replace: List[str],
-                    lora_exclude_module_names: Optional[List[str]] = None,
-                    additional_module_names_to_opt: Optional[List[str]] = None,
-                    load_lora_path: Optional[str] = None,
-                    lora_op_after_creation: Optional[Literal['squash', 'fuse']] = None,
-                    **kwargs) -> api.model.Model:
-        model: api.model.Model = cls_(**kwargs)
+    if additional_module_names_to_opt is None:
+        additional_module_names_to_opt = []
+    if lora_exclude_module_names is None:
+        lora_exclude_module_names = []
 
-        if additional_module_names_to_opt is None:
-            additional_module_names_to_opt = []
-        if lora_exclude_module_names is None:
-            lora_exclude_module_names = []
-
+    def lora_wrap_fn_(model: api.model.Model) -> api.model.Model:
         model.module = convert_linear_layer_to_lora(
             model.module,
             lora_keys_to_replace,
@@ -226,23 +225,12 @@ def lora_wrap_fn(cls_):
             model.module = delete_all_lora_layers(fuse_all_lora_layers(model.module))
         elif lora_op_after_creation == 'fuse':
             model.module = fuse_all_lora_layers(model.module)
-        elif lora_op_after_creation == "squash_init":
-            model.module = delete_all_lora_layers(fuse_all_lora_layers(model.module))
-            model.module = convert_linear_layer_to_lora(
-                model.module,
-                lora_keys_to_replace,
-                lora_module_kwargs=lora_module_kwargs,
-                lora_exclude_module_names=lora_exclude_module_names,
-            )
-            model.module = only_optimize_lora_parameters(model.module, additional_module_names_to_opt)
         else:
             raise NotImplementedError(f"Unknown lora_op_after_creation: {lora_op_after_creation}")
 
         return model
 
-    return wrapped_cls
+    return lora_wrap_fn_
 
 
-existing_model_classes = api.model.ALL_MODEL_CLASSES.copy()
-for k, cls_ in existing_model_classes.items():
-    api.model.register_model(f"{k}_lora", lora_wrap_fn(cls_))
+api.model.register_wrapper("lora", lora_wrap_fn)

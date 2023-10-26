@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, Callable
 import abc
 import dataclasses
 import logging
@@ -8,7 +8,7 @@ import torch
 import torch.utils.data
 import transformers
 
-from base.namedarray import NamedArray, recursive_apply
+from base.namedarray import NamedArray
 import api.config
 import api.huggingface
 
@@ -88,6 +88,7 @@ class ModelInterface(abc.ABC):
 ALL_MODEL_CLASSES = {}
 ALL_INTERFACE_CLASSES = {}
 ALL_BACKEND_CLASSES = {}
+ALL_WRAPPER_CLASSES = {}
 
 
 def register_model(name, model_cls):
@@ -96,15 +97,25 @@ def register_model(name, model_cls):
 
 
 def register_interface(name, cls_):
-    assert cls_ not in ALL_INTERFACE_CLASSES
+    assert name not in ALL_INTERFACE_CLASSES
     assert issubclass(cls_, ModelInterface)
     ALL_INTERFACE_CLASSES[name] = cls_
 
 
 def register_backend(name, cls_):
-    assert cls_ not in ALL_BACKEND_CLASSES
+    assert name not in ALL_BACKEND_CLASSES
     assert issubclass(cls_, ModelBackend)
     ALL_BACKEND_CLASSES[name] = cls_
+
+
+def register_wrapper(name, cls_):
+    assert name not in ALL_WRAPPER_CLASSES
+    ALL_WRAPPER_CLASSES[name] = cls_
+
+
+def make_model_wrapper(cfg: api.config.ModelWrapper) -> Callable[[Model], Model]:
+    cls_ = ALL_WRAPPER_CLASSES[cfg.type_]
+    return cls_(**cfg.args)
 
 
 def make_model(cfg: api.config.Model, name: str, device: Union[str, torch.device]) -> Model:
@@ -112,6 +123,9 @@ def make_model(cfg: api.config.Model, name: str, device: Union[str, torch.device
     model_cls = ALL_MODEL_CLASSES[cfg.type_]
     model = model_cls(**cfg.args, name=name, device=device)
     assert isinstance(model, Model)
+    for w in cfg.wrappers:
+        model = make_model_wrapper(w)(model)
+        assert isinstance(model, Model)
     return model
 
 

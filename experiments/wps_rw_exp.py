@@ -192,22 +192,28 @@ class WpsPlackettLuceRewardExperiment(Experiment):
 
         import torch
         rw_model = Model(
-            "wps_reward_lora",
+            "wps_reward",
             args=dict(
                 model_name_or_path=model_path,
                 from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 # quantization_kwargs=dict(load_in_8bit=True),
-                lora_module_kwargs=dict(
-                    lora_dim=self.lora_dim,
-                    lora_scaling=self.lora_scaling,
-                    # bnb_8bit_kwargs=dict(
-                    #     trainable=True,
-                    #     threshold=6.0,
-                    # ),
-                ),
-                lora_keys_to_replace='attn',
-                additional_module_names_to_opt=["v_head"],
             ),
+            wrappers=[
+                ModelWrapper(
+                    'lora',
+                    args=dict(
+                        lora_module_kwargs=dict(
+                            lora_dim=self.lora_dim,
+                            lora_scaling=self.lora_scaling,
+                            # bnb_8bit_kwargs=dict(
+                            #     trainable=True,
+                            #     threshold=6.0,
+                            # ),
+                        ),
+                        lora_keys_to_replace='attn',
+                        additional_module_names_to_opt=["v_head"],
+                    ))
+            ],
         )
 
         interface = ModelInterface('wps_plackett_luce_reward')

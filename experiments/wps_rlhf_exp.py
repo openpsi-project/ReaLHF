@@ -176,24 +176,29 @@ class WpsRLHFExperiment(Experiment):
             num_return_sequences=1,
         )
         actor_model = Model(
-            "causal_lm_lora",
+            "causal_lm",
             args=dict(
                 model_name_or_path=actor_path,
                 init_from_scratch=False,
                 from_pretrained_kwargs=dict(torch_dtype=torch.float16),
                 generation_kwargs=generation_kwargs,
                 # quantization_kwargs=dict(load_in_8bit=True),
-                lora_module_kwargs=dict(
-                    lora_dim=self.lora_dim,
-                    lora_scaling=self.lora_scaling,
-                    # bnb_8bit_kwargs=dict(
-                    #     trainable=True,
-                    #     threshold=6.0,
-                    # ),
-                ),
-                lora_keys_to_replace='attn',
             ),
-        )
+            wrappers=[
+                ModelWrapper(
+                    'lora',
+                    args=dict(
+                        lora_module_kwargs=dict(
+                            lora_dim=self.lora_dim,
+                            lora_scaling=self.lora_scaling,
+                            # bnb_8bit_kwargs=dict(
+                            #     trainable=True,
+                            #     threshold=6.0,
+                            # ),
+                        ),
+                        lora_keys_to_replace='attn',
+                    ))
+            ])
         ref_model = Model(
             'causal_lm',
             args=dict(
@@ -205,7 +210,7 @@ class WpsRLHFExperiment(Experiment):
             ),
         )
         rw_model = Model(
-            "wps_reward_lora",
+            "wps_reward",
             args=dict(
                 model_name_or_path=actor_path,
                 from_pretrained_kwargs=dict(torch_dtype=torch.float16),
@@ -214,22 +219,27 @@ class WpsRLHFExperiment(Experiment):
                 output_scaling=rw_output_scaling,
                 load_v_head_path=os.path.join(rw_lora_head_path, "rw_v_head.bin")
                 if not self.benchmark_only else None,
-                lora_module_kwargs=dict(
-                    lora_dim=self.lora_dim,
-                    lora_scaling=self.lora_scaling,
-                    # bnb_8bit_kwargs=dict(
-                    #     trainable=True,
-                    #     threshold=6.0,
-                    # ),
-                ),
-                lora_keys_to_replace='attn',
-                load_lora_path=os.path.join(rw_lora_head_path, "lora.bin")
-                if not self.benchmark_only else None,
-                lora_op_after_creation='squash',
             ),
-        )
+            wrappers=[
+                ModelWrapper(
+                    'lora',
+                    args=dict(
+                        lora_module_kwargs=dict(
+                            lora_dim=self.lora_dim,
+                            lora_scaling=self.lora_scaling,
+                            # bnb_8bit_kwargs=dict(
+                            #     trainable=True,
+                            #     threshold=6.0,
+                            # ),
+                        ),
+                        lora_keys_to_replace='attn',
+                        load_lora_path=os.path.join(rw_lora_head_path, "lora.bin")
+                        if not self.benchmark_only else None,
+                        lora_op_after_creation='squash',
+                    ))
+            ])
         critic_model = copy.deepcopy(rw_model)
-        critic_model.args['lora_op_after_creation'] = None
+        critic_model.wrappers[0].args['lora_op_after_creation'] = None
 
         actor_backend = ModelBackend(
             'ds_train',

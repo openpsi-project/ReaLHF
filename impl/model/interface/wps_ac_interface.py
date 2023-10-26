@@ -430,9 +430,9 @@ class WPSCriticInterface(api.model.ModelInterface):
         mini_bs = sample.length(0)
 
         module.eval()
-        new_values = module(input_ids=sample['input_ids'],
-                            attention_mask=sample['attention_mask'],
-                            use_cache=False).float()
+        new_values: torch.FloatTensor = module(input_ids=sample['input_ids'],
+                                               attention_mask=sample['attention_mask'],
+                                               use_cache=False).float()
 
         old_logp: torch.Tensor = sample['logp']
         ref_logp: torch.Tensor = sample['ref_logp']

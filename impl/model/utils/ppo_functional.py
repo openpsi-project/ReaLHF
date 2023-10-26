@@ -60,6 +60,7 @@ def actor_loss_fn(
     advantages = advantages.clone()
 
     if loss_mask is not None:
+        # For numerical stability.
         ratio = torch.exp((logprobs - old_logprobs) * loss_mask)
     else:
         ratio = torch.exp(logprobs - old_logprobs)
@@ -232,6 +233,9 @@ def get_packed_rewards(
     short1cu_seqlens: torch.IntTensor,
     seq_no_eos_mask: torch.FloatTensor,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+    # Here log_probs/ref_log_probs is one-step shorter than packed_input_ids (the last step is removed),
+    # so the log_probs at the EOS token is not included in this tensor.
+    # We directly add reward scores of each sequence onto the final token of each sequence.
     tot_rewards = -kl_ctl * (log_probs - ref_log_probs)
     kl_rewards = tot_rewards.clone()
     reward_score = reward_score.clip(-clip_reward_value, clip_reward_value)

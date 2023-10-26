@@ -29,7 +29,7 @@ class ParallelDataBroker:
             elif 'cu_seqlens' in src[0]:
                 input_lens = torch.cat([x['cu_seqlens'][1:] - x['cu_seqlens'][:-1] for x in src], dim=0)
             res = namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
-            if 'cu_seqlens' in src[0]:
+            if 'cu_seqlens' in src[0] and len(src[0]['cu_seqlens'].shape) == 1:
                 res['cu_seqlens'] = torch.cat([input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)])
             return res
         else:
@@ -96,12 +96,12 @@ class PackedParallelDataBroker(ParallelDataBroker):
                     sp[k] = input_lens[i]
                 elif k == 'cu_seqlens':
                     sp[k] = cu_seqlens[i]
-                elif k == 'seq_no_eos_mask':
+                elif k == 'seq_no_eos_mask' or k == 'rewards':
                     start, end = partitions[i]
                     sp[k] = v[start:end]
-                elif k in ['packed_seq', 'packed_logits_mask', 'prompt_mask', 'packed_input_ids']:
+                elif k in ['packed_seq', 'packed_logits_mask', 'prompt_mask', 'packed_input_ids', 'values']:
                     sp[k] = v[offsets[i]:offsets[i] + cu_seqlens[i][-1]]
-                elif k == 'packed_logprobs':
+                elif k == 'packed_logprobs' or k == 'packed_ref_logprobs':
                     sp[k] = v[short1offsets[i]:short1offsets[i] + short1cu_seqlens[i][-1]]
                 else:
                     raise RuntimeError(f"Unknown key {k} in packed data. We don't know how to split it. "
