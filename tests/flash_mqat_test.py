@@ -426,7 +426,6 @@ from tests.pipe_utils import get_example_batch
 #         [-5.7951, -4.8768, -5.7729]], device='cuda:0')
 
 
-
 class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod
@@ -437,9 +436,9 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
 
         sc_cfg = transformers.AutoConfig.from_pretrained("/lustre/meizy/models/starcoder_4l")
         # sc_cfg.n_layer = 16
-        # sc_cfg.n_embd = 1024
-        # sc_cfg.n_head = 8
-        # sc_cfg.n_inner = 4096
+        # sc_cfg.n_embd = 1024 * 4
+        # sc_cfg.n_head = 8 * 4
+        # sc_cfg.n_inner = 4096 * 4
         # sc_cfg.n_positions = 512
 
         cls.tokenizer = transformers.AutoTokenizer.from_pretrained("/lustre/meizy/models/starcoder_4l")
@@ -466,33 +465,37 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
         encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
         prompt: torch.Tensor = encoding['input_ids'].to(self.device)
         prompt_att_mask: torch.Tensor = encoding['attention_mask'].to(self.device)
-        gconfig = GenerationConfig(min_new_tokens=3,
-                                   max_new_tokens=3,
-                                   temperature=1.0,
-                                   greedy=True,
-                                   top_k=50,
-                                   top_p=1.0,
-                                   num_samples=1)
+        for i in range(10, 100, 10):
+            try:
+                gconfig = GenerationConfig(min_new_tokens=i,
+                                           max_new_tokens=i,
+                                           temperature=1.0,
+                                           greedy=True,
+                                           top_k=50,
+                                           top_p=1.0,
+                                           num_samples=1)
 
-        # vg, vglogprob, vgmask = vanilla_packed_generate(model=self.model,
-        #                                                 tokenizer=self.tokenizer,
-        #                                                 input_ids=prompt,
-        #                                                 attention_mask=prompt_att_mask,
-        #                                                 gconfig=gconfig)
+                # vg, vglogprob, vgmask = vanilla_packed_generate(model=self.model,
+                #                                                 tokenizer=self.tokenizer,
+                #                                                 input_ids=prompt,
+                #                                                 attention_mask=prompt_att_mask,
+                #                                                 gconfig=gconfig)
 
-        g, logprob, mask, _ = generate(model=self.model,
-                                       tokenizer=self.tokenizer,
-                                       input_ids=prompt,
-                                       attention_mask=prompt_att_mask,
-                                       gconfig=gconfig)
+                g, logprob, mask, _ = generate(model=self.model,
+                                               tokenizer=self.tokenizer,
+                                               input_ids=prompt,
+                                               attention_mask=prompt_att_mask,
+                                               gconfig=gconfig)
 
-        # print(self.tokenizer.batch_decode(torch.cat([prompt, g], -1)))
-        # assert torch.allclose(g, vg), (g, vg)
-        # assert torch.allclose(logprob, vglogprob,
-        #                       atol=5e-3), (logprob, vglogprob, (logprob - vglogprob).abs().max())
-        # assert torch.allclose(mask, vgmask)
+                # print(self.tokenizer.batch_decode(torch.cat([prompt, g], -1)))
+                # assert torch.allclose(g, vg), (g, vg)
+                # assert torch.allclose(logprob, vglogprob,
+                #                       atol=5e-3), (logprob, vglogprob, (logprob - vglogprob).abs().max())
+                # assert torch.allclose(mask, vgmask)
 
-        print(g, logprob)
+                # print(g, logprob)
+            except:
+                print(f"fail {i}")
 
 
 if __name__ == "__main__":

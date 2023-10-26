@@ -212,8 +212,6 @@ class CausalSelfAttentionLayer(nn.Module):
             q = q.view(*q.shape[:2], self.nq, self.d)
             v = v.view(*v.shape[:2], self.nkv, self.d)
             k = k.view(*k.shape[:2], self.nkv, self.d)
-            print("USING KV CACHE")
-            print("shapes", q.shape, k_cache.shape, v_cache.shape, k.shape, v.shape, cache_seqlens.shape)
             # k_cache and v_cache will be modified in-place.
             hidden_states = flash_attn_with_kvcache(q,
                                                     k_cache,
@@ -944,12 +942,16 @@ def generate(
         # Model forward will set k/v cache in PipeCacheData.
         logits = model(x, ys).pp_output
         logits = logits[cu_seqlens[1:] - 1]
+        # print(max_seq_len, gconfig.max_new_tokens)
         for y in ys[1:-1]:
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
-            k_cache = torch.zeros((bs, max_seq_len + gconfig.max_new_tokens, *y.k_cache.shape[1:]),
+            kvcache_seqlen = max(max_seq_len + gconfig.max_new_tokens,
+                                 mconfig.hidden_dim // mconfig.head_dim + 10)
+            # fix of a flash attention bug
+            k_cache = torch.zeros((bs, kvcache_seqlen, *y.k_cache.shape[1:]),
                                   dtype=y.k_cache.dtype,
                                   device=device)
-            v_cache = torch.zeros((bs, max_seq_len + gconfig.max_new_tokens, *y.v_cache.shape[1:]),
+            v_cache = torch.zeros((bs, kvcache_seqlen, *y.v_cache.shape[1:]),
                                   dtype=y.v_cache.dtype,
                                   device=device)
             for i in range(bs):
