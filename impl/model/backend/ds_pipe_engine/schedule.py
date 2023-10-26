@@ -162,7 +162,7 @@ class InferenceSchedule(PipeSchedule):
 
             if self.is_first_stage:  # or self.is_last_stage:
                 if self._valid_micro_batch(micro_batch_id):
-                    cmds.append(LoadMicroBatch(recv_buf))
+                    cmds.append(LoadMicroBatch(recv_buf, micro_batch_id))
 
             if _is_even(self.stage_id):
                 if self._valid_stage(self.next_stage):
@@ -181,7 +181,7 @@ class InferenceSchedule(PipeSchedule):
                         cmds.append(SendActivation(send_buf))
 
             if self._valid_micro_batch(micro_batch_id):
-                cmds.append(ForwardPass(recv_buf))
+                cmds.append(ForwardPass(recv_buf, micro_batch_id=micro_batch_id))
 
             # print(f"rank {torch.cuda.current_device()}, step_id: {step_id}, micro_batch_id: {micro_batch_id}, stage_id: {self.stage_id}\n"
             #       f"prev stage id: {self.prev_stage}, next stage id: {self.next_stage} \n"
@@ -195,6 +195,114 @@ class InferenceSchedule(PipeSchedule):
             ``2``
         """
         return 2
+
+
+class GenerateSchedule(PipeSchedule):
+    """A schedule for generate. 
+    Difference between this schedule and InferenceSchedule is that last stage will not load data,
+    and the last stage will send the result to the first stage for the next generation round.
+    """
+
+    def __init__(self, micro_batches, stages, stage_id, max_new_tokens):
+        super().__init__(micro_batches, stages, stage_id)
+        self.prev_stage = self.prev_stage % self.stages
+        self.next_stage = self.next_stage % self.stages
+        self.max_new_tokens = max_new_tokens
+        self.max_steps = max_new_tokens * max(self.num_micro_batches, self.stages) \
+                            + self.num_micro_batches - 1 # a configurable upper bound
+
+    def _valid_token_id(self, token_id):
+        return token_id < self.max_new_tokens
+
+    def steps(self):
+        last_micro_batch_id = -1
+        last_token_id = -1
+        for step_id in range(self.max_steps):
+            cmds = []
+            micro_batch_id = (step_id - self.stage_id) % max(self.num_micro_batches, self.stages) \
+                             if step_id - self.stage_id >= 0 else -1 # micro batch id for current stage
+            first_round = step_id < self.num_micro_batches  # whether it is the first round of generate
+            last_stage_last_mbid = (step_id - self.stages) % max(self.num_micro_batches, self.stages)
+            # the micro_batch_id of the last stage on last step
+            token_id = (step_id - self.stage_id) // max(self.num_micro_batches, self.stages)
+            # token id in current round
+
+            # if token_id >= self.max_new_tokens:
+            #     yield step_id, micro_batch_id, cmds
+            #     continue
+
+            if _is_even(self.stage_id):
+                recv_buf = step_id % 2
+                send_buf = (step_id + 1) % 2
+            else:
+                recv_buf = (step_id + 1) % 2
+                send_buf = step_id % 2
+
+            # Alternate send/recv buffers
+            if _is_even(self.stage_id):
+                recv_buf = step_id % 2
+                send_buf = (step_id + 1) % 2
+            else:
+                recv_buf = (step_id + 1) % 2
+                send_buf = step_id % 2
+
+            # TODO: from last stage to first stage, need one buffer for each microbatch?
+            if _is_even(self.stage_id):
+                if self._valid_micro_batch(last_micro_batch_id) and self._valid_token_id(
+                        last_token_id) and not self.is_last_stage:
+                    cmds.append(SendActivation(send_buf))
+                # intermediate stage recv
+                if self._valid_micro_batch(micro_batch_id) and self._valid_token_id(
+                        token_id) and not self.is_first_stage:
+                    cmds.append(RecvActivation(recv_buf))
+            else:
+                # odd stage could not be first stage
+                if self._valid_micro_batch(micro_batch_id) and self._valid_token_id(token_id):
+                    cmds.append(RecvActivation(recv_buf))
+                # last stage should not send activation except first stage requires
+                if self._valid_micro_batch(last_micro_batch_id) and self._valid_token_id(
+                        last_token_id) and not self.is_last_stage:
+                    cmds.append(SendActivation(send_buf))
+
+            # last stage send next tokens when first stage requires.
+            if self.is_last_stage and self._valid_micro_batch(last_micro_batch_id) \
+                and self._valid_token_id(last_token_id):
+                cmds.append(SendNextTokens(last_micro_batch_id))
+            if self.is_first_stage and not first_round and self._valid_micro_batch(last_stage_last_mbid):
+                cmds.append(RecvNextTokens(last_stage_last_mbid))
+
+            should_load_batch = (self.is_first_stage and first_round)
+            if should_load_batch:  # first stage first token, load micro batch from dataset
+                if self._valid_micro_batch(micro_batch_id) and self._valid_token_id(token_id):
+                    cmds.append(LoadMicroBatch(recv_buf, micro_batch_id))
+            elif self._valid_micro_batch(micro_batch_id) and self._valid_token_id(
+                    token_id) and self.is_first_stage:
+                # first stage not first token, load from cache
+                cmds.append(LoadNextTokens(recv_buf, micro_batch_id=micro_batch_id))
+
+            if self._valid_micro_batch(micro_batch_id) and self._valid_token_id(token_id):
+                cmds.append(ForwardPass(recv_buf, micro_batch_id=micro_batch_id))
+
+            # print(f"rank {torch.cuda.current_device()}, step_id: {step_id}, micro_batch_id: {micro_batch_id}, stage_id: {self.stage_id} \n"
+            #       f"last_micro_batch_id: {last_micro_batch_id}, should_load_batch: {should_load_batch} \n"
+            #       f"cmds: {cmds} \n")
+
+            last_micro_batch_id = micro_batch_id
+            last_token_id = token_id
+            # if self.is_last_stage:
+            #     if self._valid_micro_batch(micro_batch_id):
+            #         self.register_terminate_hook(SaveOutput(recv_buf))
+
+            yield step_id, micro_batch_id, cmds
+
+    def num_pipe_buffers(self):
+        """2 buffers for inter stage transfer (except last stage to first stage)
+        self.num_micro_batches buffers for last stage to first stage transfer
+
+        Returns:
+            ``2 + self.num_micro_batches``
+        """
+        return 2  # + self.num_micro_batches
 
 
 class TrainSchedule(PipeSchedule):
@@ -224,7 +332,7 @@ class TrainSchedule(PipeSchedule):
             # First/last stage loads
             if self.stage_id == 0 or self.stage_id == self.stages - 1:
                 if is_forward and self._valid_micro_batch(micro_batch_id):
-                    cmds.append(LoadMicroBatch(curr_buffer))
+                    cmds.append(LoadMicroBatch(curr_buffer, micro_batch_id))
 
             # Exchange activations
             if is_forward:
@@ -241,7 +349,7 @@ class TrainSchedule(PipeSchedule):
             # Computation
             if self._valid_micro_batch(micro_batch_id):
                 if is_forward:
-                    cmds.append(ForwardPass(curr_buffer))
+                    cmds.append(ForwardPass(curr_buffer, micro_batch_id))
                 else:
                     cmds.append(BackwardPass(curr_buffer))
 
@@ -319,8 +427,8 @@ class DataParallelSchedule(PipeSchedule):
         """"""
         for step_id in range(self.micro_batches):
             cmds = [
-                LoadMicroBatch(buffer_id=0),
-                ForwardPass(buffer_id=0),
+                LoadMicroBatch(buffer_id=0, micro_batch_id=step_id),
+                ForwardPass(buffer_id=0, micro_batch_id=step_id),
                 BackwardPass(buffer_id=0),
             ]
             if step_id == self.micro_batches - 1:
@@ -346,14 +454,15 @@ class PipeInstruction:
         kwargs (optional): keyword arguments to store as members
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *args, **kwargs):
         self.name = self.__class__.__name__
         self.kwargs = kwargs
+        self.args = args
         for key, val in kwargs.items():
             setattr(self, key, val)
 
     def __repr__(self):
-        return call_to_str(self.name, **self.kwargs)
+        return call_to_str(self.name, self.args, self.kwargs)
 
 
 class OptimizerStep(PipeInstruction):
@@ -388,11 +497,13 @@ class BufferOpInstruction(PipeInstruction):
     """A pipeline instruction that operates on pipeline buffer(s).
 
     Args:
-        buffer_id (int): the index of the pipeline buffer() to modify.
+        # buffer_id (int): the index of the pipeline buffer() to modify.
+        args: positional input 
+        kwargs: other inputs to the instruction
     """
 
-    def __init__(self, buffer_id, **kwargs):
-        super().__init__(buffer_id=buffer_id, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 # IO
@@ -498,15 +609,21 @@ class RecvGrad(BufferOpInstruction):
     pass
 
 
-# Generate
-class PrepareGenerateInput(BufferOpInstruction):
-    """Prepare the input for generation.
+# instructions for generate
+class SendNextTokens(BufferOpInstruction):
+    """ In GenerateSchedule, send next tokens to the first stage. Only available in the last stage.
     """
     pass
 
 
-class PostprocessGenerateOutput(BufferOpInstruction):
-    """Postprocess the output for generation.
+class RecvNextTokens(BufferOpInstruction):
+    """ In GenerateSchedule, recv next tokens from the last stage. Only available in the first stage.
+    """
+    pass
+
+
+class LoadNextTokens(BufferOpInstruction):
+    """ In GenerateSchedule, load next tokens of this microbatch. Only available in the first stage.
     """
     pass
 

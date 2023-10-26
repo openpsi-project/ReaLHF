@@ -94,7 +94,7 @@ class PackedParallelDataRouter(ParallelDataRouter):
                 elif k == 'packed_logprobs':
                     sp[k] = v[short1offsets[i]:short1offsets[i] + short1cu_seqlens[i][-1]]
                 elif k == "cu_seqlens":
-                    sp[k] = cu_seqlens[i] if not 'packed_logprobs' in src else short1cu_seqlens[i]
+                    sp[k] = cu_seqlens[i]
                 else:
                     raise RuntimeError(f"Unknown key {k} in packed data. We don't know how to split it. "
                                        f"Implemented keys include ")

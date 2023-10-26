@@ -26,11 +26,13 @@ def gpu_memory_mb(name):
 
 
 def time_mark(name, identifier):
-    logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns())}$")
+    # logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns())}$")
+    pass
 
 
 def time_mark_ms(name, identifier):
-    logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e6)}$")
+    # logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e6)}$")
+    pass
 
 
 def parse_time_mark_in_line(line, name):

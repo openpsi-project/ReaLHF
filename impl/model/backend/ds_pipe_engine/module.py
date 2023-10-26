@@ -331,7 +331,6 @@ class PipelineModule(nn.Module):
             x = layer(x, y)
             # if self.stage_id < self.num_stages - 1:
             x.pp_input = x.pp_output
-            x.pp_output = None
 
         outputs = data_list_to_tensor_tuple([x])
         return outputs

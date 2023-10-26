@@ -28,16 +28,12 @@ logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
 
 logger = logging.getLogger("test")
 
-# model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
-# model_path = "/lustre/meizy/base_models/pipe_starcoder"
-model_path = "/lustre/meizy/base_models/pipe_starcoder_6pp_3s"
-# model_path = "/lustre/meizy/base_models/pipe_4l_starcoder"
-# model_path = "/lustre/meizy/backup_zy/starcoder"
+model_path = "/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
 MODEL_NAME = "pipedatamodel"
 MODEL_TYPE = "model_worker"
-PIPE_DEGREE = 6
+PIPE_DEGREE = 4
 DATA_DEGREE = 1
 
 
@@ -100,17 +96,19 @@ def main(worker_index, b):
     data = NamedArray(
         packed_input_ids=packed_input_ids,
         cu_seqlens=cu_seqlens,
-        prompt_mask=prompt_mask,
+        # prompt_mask=prompt_mask,
     )
     # print(f"rank {worker_index}: begin train_step")
     # outputs = interface.train_step(model, data)
     # print(f"rank {worker_index}: end train_step")
     # print(f"rank {worker_index}: train_step outputs: {outputs}")
 
-    print(f"rank {worker_index}: begin inference")
-    outputs = interface.inference(model, data)
-    print(f"rank {worker_index}: end inference")
-    print(f"rank {worker_index}: inference outputs: {outputs}")
+    print(f"rank {worker_index}: begin generate")
+    outputs = interface.generate(model, data)
+    print(f"rank {worker_index}: end generate")
+    for k, v in outputs.items():
+        print(f"rank {worker_index}: generate outputs: {k}: {v.shape}")
+        print(v)
 
 
 if __name__ == "__main__":

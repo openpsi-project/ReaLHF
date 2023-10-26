@@ -6,15 +6,12 @@ from impl.model.backend.ds_pipe_engine import PipeDataParallelTopology
 import api.config as config_package
 import api.model
 
-model_path = "/lustre/meizy/base_models/pipe_starcoder_6pp_3s"
-# model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
-# model_path = "/lustre/meizy/base_models/pipe_4l_starcoder"
-# model_path = "/lustre/meizy/backup_zy/starcoder"
+model_path = "/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
 MODEL_NAME = "pipedatamodel"
 MODEL_TYPE = "model_worker"
-PIPE_DEGREE = 6
+PIPE_DEGREE = 4
 DATA_DEGREE = 1
 
 
@@ -80,5 +77,5 @@ def get_example_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed
     random.seed(seed)
     whole_batch = [random_sentence() for _ in range(batch_size)]
     dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank:batch_size // dp_worldsize * (dp_rank + 1)]
-    print(f"global rank {torch.distributed.get_rank()}, dp rank {dp_rank} batch: {dp_batch}")
+    # print(f"global rank {torch.distributed.get_rank()}, dp rank {dp_rank} batch: {dp_batch}")
     return get_input(tokenizer, device, dp_batch)

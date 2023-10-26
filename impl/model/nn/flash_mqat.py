@@ -212,15 +212,18 @@ class CausalSelfAttentionLayer(nn.Module):
             q = q.view(*q.shape[:2], self.nq, self.d)
             v = v.view(*v.shape[:2], self.nkv, self.d)
             k = k.view(*k.shape[:2], self.nkv, self.d)
+            print("USING KV CACHE")
+            print("shapes", q.shape, k_cache.shape, v_cache.shape, k.shape, v.shape, cache_seqlens.shape)
             # k_cache and v_cache will be modified in-place.
             hidden_states = flash_attn_with_kvcache(q,
                                                     k_cache,
                                                     v_cache,
-                                                    k,
-                                                    v,
-                                                    cache_seqlens,
-                                                    scale_factor,
-                                                    causal=False)
+                                                    k=k,
+                                                    v=v,
+                                                    cache_seqlens=cache_seqlens,
+                                                    softmax_scale=scale_factor,
+                                                    causal=False,
+                                                    num_splits=1)
         elif cu_seqlens is not None:
             assert max_seqlen is not None
             assert len(qkv.shape) == 2

@@ -14,11 +14,11 @@ from impl.model.backend.ds_pipe_engine import LayerSpec
 from impl.model.nn.flash_mqat import *
 
 # FULL_MODEL_DIR = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
-FULL_MODEL_DIR = "/lustre/meizy/models/starcoder_scratch"
+FULL_MODEL_DIR = "/lustre/meizy/models/starcoder_4l"
 # PIPE_MODEL_DIR = "/lustre/meizy/base_models/pipe_4l_starcoder"
 NUM_PIPE_STAGES = 4
-NUM_SHARDS = 3
-PIPE_MODEL_DIR = f"/lustre/meizy/models/pipe_starcoder_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
+NUM_SHARDS = 1
+PIPE_MODEL_DIR = f"/lustre/meizy/models/pipe_starcoder_4l_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
 TEST_EXPR_NAME = "test"
 TEST_TRIAL_NAME = "test"
 TEST_MODEL_NAME = "default"
@@ -204,7 +204,7 @@ def load_full_ckpt(path):
 
 def split_state_dict_into_shards(state_dict, n_shards):
     if n_shards == 1:
-        return state_dict
+        return [state_dict]
 
     keys = list(state_dict.keys())
     if len(keys) < n_shards:

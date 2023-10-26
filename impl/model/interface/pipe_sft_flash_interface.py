@@ -8,6 +8,7 @@ import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.nn.flash_mqat import GenerationConfig
 from impl.model.utils.data import gather_packed_shifted_log_probs, PipeCacheData, PipeTransferData
 from impl.model.utils.save import save_hf_or_lora_model
 import api.data
@@ -130,6 +131,30 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 return dict(ppl=perplexity)
             else:
                 return dict()
+
+    @torch.inference_mode()
+    def generate(self, model_: api.model.Model, data: NamedArray) -> Dict:
+        packed_input_ids = data['packed_input_ids'].squeeze()
+        cu_seqlens = data['cu_seqlens'].squeeze()
+        gconfig = GenerationConfig(
+            min_new_tokens=3,
+            max_new_tokens=3,
+        )
+        module = model_.module
+        tokenizer = model_.tokenizer
+
+        module.eval()
+
+        res = module.generate(tokenizer=tokenizer,
+                              packed_input_ids=packed_input_ids,
+                              cu_seqlens=cu_seqlens,
+                              gconfig=gconfig)
+
+        if res is not None:
+            gen_tokens, log_probs, logits_mask = res
+            return dict(gen_tokens=gen_tokens, log_probs=log_probs, logits_mask=logits_mask)
+        else:
+            return dict()
 
 
 api.model.register_interface("pipe_flash_sft", PipePackedSupervisedFinetuningInterface)
