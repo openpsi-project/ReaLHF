@@ -43,7 +43,7 @@ def main_worker(args):
 
     # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
     import experiments
-    import impl.data
+    import impl.dataset
     import impl.model
     import system
 

@@ -22,7 +22,7 @@ def sample_log_uniform(low, high):
 
 class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
-    def __init__(self, n_models=1, seed=1, total_train_epochs=4, benchmark_only=False):
+    def __init__(self, n_models=8, seed=1, total_train_epochs=8, benchmark_only=False):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
