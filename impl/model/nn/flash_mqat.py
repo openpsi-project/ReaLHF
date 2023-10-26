@@ -17,8 +17,8 @@ from impl.model.utils.data import (build_packed_inputs, DuckGenerationOutput, Du
                                    upcast_softmax)
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP
-import api.model
 import api.huggingface
+import api.model
 
 try:
     from flash_attn import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache

@@ -132,10 +132,12 @@ class DataLoader:
     type_: str = "default"
     args: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
+
 @dataclasses.dataclass
 class ModelWrapper:
     type_: str
     args: Dict[str, Any] = dataclasses.field(default_factory=dict)
+
 
 @dataclasses.dataclass
 class Model:

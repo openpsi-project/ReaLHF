@@ -536,8 +536,8 @@ class LastLayerNormPipe(LastLayerNorm):
 def create_mqa_transformer(model_name_or_path, config, name, device):
     # tokenizer = api.huggingface.load_hf_tokenizer(model_name_or_path)
     tokenizer = api.huggingface.load_hf_tokenizer(model_name_or_path,
-                                                           fast_tokenizer=True,
-                                                           padding_side="left")
+                                                  fast_tokenizer=True,
+                                                  padding_side="left")
     tokenizer.pad_token_id = tokenizer.eos_token_id
     module = MQATransformerForCausalLM(config)
     module.load_from_path(model_name_or_path, device, torch.half)
@@ -547,8 +547,8 @@ def create_mqa_transformer(model_name_or_path, config, name, device):
 def create_mqa_transformer_pipe(model_name_or_path, config, topology, device, name):
     # tokenizer = api.huggingface.load_hf_tokenizer(model_name_or_path)
     tokenizer = api.huggingface.load_hf_tokenizer(model_name_or_path,
-                                                           fast_tokenizer=True,
-                                                           padding_side="left")
+                                                  fast_tokenizer=True,
+                                                  padding_side="left")
     tokenizer.pad_token_id = tokenizer.eos_token_id
     module = MQATransformerPipe(config, topology)
     module.load_from_path(model_name_or_path, device, torch.half)

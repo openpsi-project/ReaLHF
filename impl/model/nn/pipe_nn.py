@@ -11,8 +11,8 @@ from impl.model.backend.ds_pipe_engine import (LayerSpec, PipeDataParallelTopolo
                                                ProcessTopology)
 from impl.model.nn.flash_mqat import *
 from impl.model.utils.data import tensor_data_list_to_tuple, tuple_to_tensor_data_list
-import api.model
 import api.huggingface
+import api.model
 
 logger = logging.getLogger("pipe_nn")
 

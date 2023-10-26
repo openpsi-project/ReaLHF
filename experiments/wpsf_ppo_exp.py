@@ -1,9 +1,10 @@
-from api.config import *
 import functools
-from base.topology import PipeModelDataParallelTopology
+
 import torch
 
+from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
+from base.topology import PipeModelDataParallelTopology
 
 rollout = ModelRPC(
     "actor",
@@ -331,4 +332,5 @@ class WpsfFlashPPOExperiment(Experiment):
 
 
 register_experiment("wpsf-flash-ppo", WpsfFlashPPOExperiment)
-register_experiment("wpsf-flash-ppo-benchmark", functools.partial(WpsfFlashPPOExperiment, benchmark_only=True))
+register_experiment("wpsf-flash-ppo-benchmark", functools.partial(WpsfFlashPPOExperiment,
+                                                                  benchmark_only=True))
