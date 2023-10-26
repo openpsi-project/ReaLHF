@@ -116,18 +116,33 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
             ),
         )
 
-        model = Model("flash_mqat_critic_lora",
-                      args=dict(
-                          model_path=model_path,
-                          from_type='starcoder',
-                          lora_module_kwargs=dict(
-                              lora_dim=self.lora_dim,
-                              lora_scaling=self.lora_scaling,
-                          ),
-                          lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
-                          load_lora_path=sft_lora_path if not self.benchmark_only else None,
-                          lora_op_after_creation='squash_init',
-                      ))
+        model = Model(
+            "flash_mqat_critic",
+            args=dict(
+                model_path=model_path,
+                from_type='starcoder',
+            ),
+            wrappers=[
+                ModelWrapper('lora',
+                             args=dict(
+                                 lora_module_kwargs=dict(
+                                     lora_dim=self.lora_dim,
+                                     lora_scaling=self.lora_scaling,
+                                 ),
+                                 lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
+                                 load_lora_path=sft_lora_path if not self.benchmark_only else None,
+                                 lora_op_after_creation='squash',
+                             )),
+                ModelWrapper('lora',
+                             args=dict(
+                                 lora_module_kwargs=dict(
+                                     lora_dim=self.lora_dim,
+                                     lora_scaling=self.lora_scaling,
+                                 ),
+                                 lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
+                             ))
+            ],
+        )
 
         interface = ModelInterface('flash_plrw')
 

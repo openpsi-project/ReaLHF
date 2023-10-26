@@ -4,20 +4,21 @@ import torch
 
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
-from base.cluster import spec as cluster_spec
 from base.topology import PipeModelDataParallelTopology
 
 rollout = ModelRPC(
     "actor",
     ModelInterfaceType.GENERATE,
     input_data=["prompts", "prompt_att_mask"],
-    output_data=["seq", "logp", "attention_mask", 'logits_ignoring_mask'],
+    output_data=[
+        "seq_no_eos_mask", 'packed_seq', 'cu_seqlens', 'packed_logprobs', 'packed_logits_mask', 'prompt_mask'
+    ],
 )
 inf_reward = ModelRPC(
     "reward",
     ModelInterfaceType.INFERENCE,
-    input_data=["seq", "attention_mask", "prompts"],
-    input_key_remap={'seq': "input_ids"},
+    input_data=["packed_seq", "cu_seqlens"],
+    input_key_remap={'packed_seq': "packed_input_ids"},
     output_data=["scores"],
     output_key_remap={"scores": "rewards"},
 )
@@ -25,17 +26,15 @@ inf_reward = ModelRPC(
 inf_ref_logits = ModelRPC(
     "ref",
     ModelInterfaceType.INFERENCE,
-    input_data=["seq", "attention_mask", 'logits_ignoring_mask'],
-    input_key_remap={'seq': "input_ids"},
-    output_data=["logp"],
-    output_key_remap={"logp": "ref_logp"},
+    input_data=["packed_seq", "cu_seqlens", "packed_logits_mask"],
+    output_data=["logprobs"],
+    output_key_remap={"logprobs": "packed_ref_logprobs"},
 )
 
 inf_values = ModelRPC(
     "critic",
     ModelInterfaceType.INFERENCE,
-    input_data=["seq", "attention_mask", "prompts"],
-    input_key_remap={'seq': "input_ids"},
+    input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
     output_data=["scores"],
     output_key_remap={"scores": "values"},
 )
@@ -43,37 +42,36 @@ inf_values = ModelRPC(
 train_actor = ModelRPC(
     "actor",
     ModelInterfaceType.TRAIN_STEP,
-    input_key_remap={'seq': "input_ids"},
     input_data=[
-        "seq",
-        "attention_mask",
-        "logp",
+        "packed_seq",
+        "cu_seqlens",
+        "packed_logprobs",
+        "packed_ref_logprobs",
         "rewards",
-        "ref_logp",
         "values",
-        "prompts",
-        'logits_ignoring_mask',
+        "prompt_mask",
+        "seq_no_eos_mask",
+        'packed_logits_mask',
     ],
 )
 
 train_critic = ModelRPC(
     "critic",
     ModelInterfaceType.TRAIN_STEP,
-    input_key_remap={'seq': "input_ids"},
     input_data=[
-        "seq",
-        "attention_mask",
-        "values",
-        "logp",
+        "packed_seq",
+        "cu_seqlens",
+        "packed_logprobs",
+        "packed_ref_logprobs",
         "rewards",
-        "ref_logp",
         "values",
-        "prompts",
+        "prompt_mask",
+        "seq_no_eos_mask",
     ],
 )
 
 
-class WpsRLHFExperiment(Experiment):
+class WpsfFlashPPOExperiment(Experiment):
 
     def __init__(self, n_actors=1, n_critics=1, n_rewards=1, n_refs=1, seed=1, benchmark_only=False):
         if benchmark_only:
@@ -136,20 +134,19 @@ class WpsRLHFExperiment(Experiment):
 
         mini_batch_size_per_device = 1
         batch_size_per_device = 2
-        max_prompt_len = 128
-        max_answer_len = 512 - max_prompt_len
+        max_prompt_len = 2048
+        max_answer_len = 2048
 
         dataset = Dataset(
-            'excel_prompt',
+            'wpsf_prompt',
             args=dict(
-                dataset_path=f"{cluster_spec.fileroot}/datasets/wps-prompts/train-small.jsonl",
-                max_seq_len=max_prompt_len,
+                dataset_path="/data/aigc/llm/datasets/wps-formula-rw/dataset_train.jsonl",
+                max_prompt_len=max_prompt_len,
             ),
         )
         dataloader = DataLoader(
-            'excel_rlhf',
+            'default',
             args=dict(
-                max_token_len=max_prompt_len,
                 shuffle=True,
                 drop_last=True,
                 batch_size=batch_size_per_device * self.n_actors // self.n_data_workers,
@@ -167,79 +164,61 @@ class WpsRLHFExperiment(Experiment):
         generation_kwargs = dict(
             max_new_tokens=max_answer_len,
             min_new_tokens=10,
-            do_sample=True,
+            greedy=False,
             top_p=1.0,
             top_k=int(1e9),
             temperature=1.0,
-            num_beams=1,
-            num_beam_groups=1,
-            num_return_sequences=1,
         )
+
+        def lora_wrapper(load_path=None, squash=True):
+            return ModelWrapper(
+                'lora',
+                args=dict(
+                    lora_module_kwargs=dict(
+                        lora_dim=self.lora_dim,
+                        lora_scaling=self.lora_scaling,
+                    ),
+                    lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
+                    load_lora_path=load_path,
+                    lora_op_after_creation='squash' if squash else None,
+                ),
+            )
+
         actor_model = Model(
-            "causal_lm",
-            args=dict(
-                model_name_or_path=actor_path,
-                init_from_scratch=False,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16),
-                generation_kwargs=generation_kwargs,
-                # quantization_kwargs=dict(load_in_8bit=True),
-            ),
+            "flash_mqat_clm_hf",
+            args=dict(model_path=actor_path),
             wrappers=[
-                ModelWrapper(
-                    'lora',
-                    args=dict(
-                        lora_module_kwargs=dict(
-                            lora_dim=self.lora_dim,
-                            lora_scaling=self.lora_scaling,
-                            # bnb_8bit_kwargs=dict(
-                            #     trainable=True,
-                            #     threshold=6.0,
-                            # ),
-                        ),
-                        lora_keys_to_replace='attn',
-                    ))
-            ])
+                # FIXME: lora path
+                lora_wrapper(),
+                lora_wrapper(squash=False),
+            ],
+        )
         ref_model = Model(
-            'causal_lm',
-            args=dict(
-                model_name_or_path=actor_path,
-                init_from_scratch=False,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16),
-                generation_kwargs=generation_kwargs,
-                # quantization_kwargs=dict(load_in_8bit=True),
-            ),
+            'flash_mqat_clm_hf',
+            args=dict(model_path=actor_path,),
+            wrappers=[
+                # FIXME: lora path
+                lora_wrapper()
+            ],
         )
         rw_model = Model(
-            "wps_reward",
+            "flash_mqat_critic",
             args=dict(
-                model_name_or_path=actor_path,
-                from_pretrained_kwargs=dict(torch_dtype=torch.float16),
-                # quantization_kwargs=dict(load_in_8bit=True),
+                model_path=actor_path,
+                from_type='starcoder',
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
-                load_v_head_path=os.path.join(rw_lora_head_path, "rw_v_head.bin")
+                v_head_path=os.path.join(rw_lora_head_path, "rw_v_head.bin")
                 if not self.benchmark_only else None,
             ),
             wrappers=[
-                ModelWrapper(
-                    'lora',
-                    args=dict(
-                        lora_module_kwargs=dict(
-                            lora_dim=self.lora_dim,
-                            lora_scaling=self.lora_scaling,
-                            # bnb_8bit_kwargs=dict(
-                            #     trainable=True,
-                            #     threshold=6.0,
-                            # ),
-                        ),
-                        lora_keys_to_replace='attn',
-                        load_lora_path=os.path.join(rw_lora_head_path, "lora.bin")
-                        if not self.benchmark_only else None,
-                        lora_op_after_creation='squash',
-                    ))
-            ])
+                # FIXME: lora path
+                lora_wrapper(),
+                lora_wrapper(),
+            ],
+        )
         critic_model = copy.deepcopy(rw_model)
-        critic_model.wrappers[0].args['lora_op_after_creation'] = None
+        critic_model.wrappers.append(lora_wrapper(squash=False))
 
         actor_backend = ModelBackend(
             'ds_train',
@@ -273,12 +252,12 @@ class WpsRLHFExperiment(Experiment):
                 zero_stage=2,
                 offload_param=False,
                 offload_optimizer_state=False,
+                enable_fp16=True,
             ),
         )
-        ref_backend = rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=False))
+        ref_backend = rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=True))
 
         ppo_kwargs = dict(
-            ppo_epochs=1,
             mini_batch_size=mini_batch_size_per_device,
             kl_ctl=0.1,
             discount=1.0,
@@ -288,15 +267,17 @@ class WpsRLHFExperiment(Experiment):
             max_reward_clip=20.0,
         )
         actor_interface = ref_interface = ModelInterface(
-            'wps_actor',
-            args=copy.deepcopy(ppo_kwargs),
+            'flash_actor',
+            args={
+                **copy.deepcopy(ppo_kwargs), "generation_config": generation_kwargs
+            },
         )
         critic_interface = ModelInterface(
-            'wps_critic',
+            'flash_critic',
             args=copy.deepcopy(ppo_kwargs),
         )
         # critic_interface.args['mini_batch_size'] = mini_batch_size_per_device * self.n_actors // self.n_critics
-        rw_interface = ModelInterface('wps_reward_unpaired')
+        rw_interface = ModelInterface('flash_plrw')
 
         model_worker = [
             ModelWorker(
@@ -350,5 +331,6 @@ class WpsRLHFExperiment(Experiment):
         )
 
 
-register_experiment("wps-rlhf", WpsRLHFExperiment)
-register_experiment("wps-rlhf-benchmark", functools.partial(WpsRLHFExperiment, benchmark_only=True))
+register_experiment("wpsf-flash-ppo", WpsfFlashPPOExperiment)
+register_experiment("wpsf-flash-ppo-benchmark", functools.partial(WpsfFlashPPOExperiment,
+                                                                  benchmark_only=True))

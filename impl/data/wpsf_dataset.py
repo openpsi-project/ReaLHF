@@ -234,14 +234,14 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
 
         self.shuffle_cnt = 0
 
+        self.rng = np.random.RandomState(seed=self.util.seed)
+
         # build packed inputs for flash attention
         self.codes = self.labels = self.lengths = None
         self._build_shuffled_contrastive_tuples()
         assert all(length <= self.n_tokens_per_batch
                    for length in self.lengths), (max(self.lengths), self.n_tokens_per_batch)
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.lengths), self.n_tokens_per_batch)
-
-        self.rng = np.random.RandomState(seed=self.util.seed)
         self.rng.shuffle(self.__batch_indices)
 
     def _build_shuffled_contrastive_tuples(self):
@@ -308,7 +308,7 @@ class WPSFormulaPackedRWDataset(torch.utils.data.IterableDataset):
             existing_neg_codes = existing_neg_codes[:n_required_neg_codes]
 
         if self.enforce_one_or_less_pos and n_pos > 1:
-            codes = [self.rng.choice(pos_codes)] + existing_neg_codes
+            codes = [pos_codes[self.rng.choice(len(pos_codes))]] + existing_neg_codes
             label = [0] + [1] + [0] * len(existing_neg_codes)
         elif n_pos > 0:
             pos_code_indices = self.rng.choice(len(pos_codes),
@@ -420,10 +420,13 @@ class PromptDataset(torch.utils.data.Dataset):
         self.prompt_tokens = prompt_tokens
 
     def __len__(self):
-        return len(self.prompt_tokens)
+        return len(self.prompt_tokens['input_ids'])
 
     def __getitem__(self, idx):
-        return self.prompt_tokens[idx]["input_ids"], self.prompt_tokens[idx]["attention_mask"]
+        return {
+            "prompts": self.prompt_tokens["input_ids"][idx],
+            "prompt_att_mask": self.prompt_tokens["attention_mask"][idx],
+        }
 
 
 api.data.register_dataset("wpsf_prompt", PromptDataset)

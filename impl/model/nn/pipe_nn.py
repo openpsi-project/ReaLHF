@@ -11,6 +11,7 @@ from impl.model.backend.ds_pipe_engine import (LayerSpec, PipeDataParallelTopolo
                                                ProcessTopology)
 from impl.model.nn.flash_mqat import *
 from impl.model.utils.data import tensor_data_list_to_tuple, tuple_to_tensor_data_list
+import api.huggingface
 import api.model
 
 logger = logging.getLogger("pipe_nn")
@@ -142,7 +143,7 @@ def make_flash_mqat_pipe_model(
     if tokenizer_path is None:
         tokenizer_path = model_path
     if from_type == 'starcoder':
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
+        tokenizer = api.huggingface.load_hf_tokenizer(model_path)
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token_id = tokenizer.eos_token_id
         # logger.info("tokenizer initialized")

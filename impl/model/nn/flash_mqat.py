@@ -17,6 +17,7 @@ from impl.model.utils.data import (build_packed_inputs, DuckGenerationOutput, Du
                                    upcast_softmax)
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP
+import api.huggingface
 import api.model
 
 try:
@@ -664,12 +665,12 @@ def make_flash_mqat_clm_hf(
         module = HuggingfaceLikeFlashMQATForCausalLM.from_starcoder(model_path=model_path,
                                                                     dtype=dtype,
                                                                     device=device)
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
+        tokenizer = api.huggingface.load_hf_tokenizer(model_path)
     elif from_type == 'self':
         module = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(model_path=model_path,
                                                                      dtype=dtype,
                                                                      device=device)
-        tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_path)
+        tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
     else:
         raise NotImplementedError()
     return api.model.Model(name, module, tokenizer, device)
@@ -680,7 +681,7 @@ api.model.register_model("flash_mqat_clm_hf", make_flash_mqat_clm_hf)
 
 class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
 
-    def __init__(self, net: FlashMQATBase):
+    def __init__(self, net: FlashMQATBase, output_scaling: float = 1.0, output_bias: float = 0.0):
         super().__init__()
         self.net = net
         self.head = nn.Linear(net.config.hidden_dim,
@@ -688,6 +689,8 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
                               bias=False,
                               dtype=self.net.dtype,
                               device=self.net.device)
+        self.output_scaling = output_scaling
+        self.output_bias = output_bias
 
     @property
     def config(self):
@@ -721,7 +724,7 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         hidden_states = self.net(x, ys).pp_output
         if build_packed:
             hidden_states = unpack_tensor(hidden_states, cu_seqlens, max_seqlen)
-        return self.head(hidden_states).squeeze()
+        return (self.head(hidden_states).squeeze() - self.output_bias) / self.output_scaling
 
     @classmethod
     def from_starcoder(
@@ -730,11 +733,13 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
         v_head_path: Optional[str] = None,
+        output_scaling: float = 1.0,
+        output_bias: float = 0.0,
     ):
         from_model = HuggingfaceLikeFlashMQATForCausalLM.from_starcoder(model_path=model_path,
                                                                         dtype=dtype,
                                                                         device=device)
-        model = cls(from_model.net.transformer)
+        model = cls(from_model.net.transformer, output_bias=output_bias, output_scaling=output_scaling)
         if v_head_path is not None:
             model.head.load_state_dict(torch.load(v_head_path))
         return model
@@ -747,10 +752,12 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
         v_head_path: Optional[str] = None,
+        output_scaling: float = 1.0,
+        output_bias: float = 0.0,
     ):
         if from_model is None:
             from_model = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(model_path, dtype, device)
-        model = cls(from_model.net.transformer)
+        model = cls(from_model.net.transformer, output_bias=output_bias, output_scaling=output_scaling)
         if v_head_path is not None:
             model.head.load_state_dict(torch.load(v_head_path))
         return model
@@ -761,12 +768,14 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         model_path: str,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
+        output_scaling: float = 1.0,
+        output_bias: float = 0.0,
     ):
         with open(os.path.join(model_path, "config.json"), 'r') as f:
             config = FlashMQATConfig(**json.load(f))
         state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
         net = FlashMQATBase(config, dtype, device)
-        model = cls(net)
+        model = cls(net, output_bias=output_bias, output_scaling=output_scaling)
         model.load_state_dict(state_dict)
         return model
 
@@ -778,24 +787,35 @@ def make_flash_mqat_critic(
     dtype: Optional[torch.dtype] = None,
     from_type: str = 'sft',
     tokenizer_path: Optional[str] = None,
+    v_head_path: Optional[str] = None,
+    output_scaling: float = 1.0,
+    output_bias: float = 0.0,
 ):
     if tokenizer_path is None:
         tokenizer_path = model_path
     if from_type == 'sft':
         module = DeepSpeedChatLikeFlashMQATCriticModel.from_sft_model(model_path=model_path,
                                                                       dtype=dtype,
-                                                                      device=device)
+                                                                      device=device,
+                                                                      v_head_path=v_head_path,
+                                                                      output_scaling=output_scaling,
+                                                                      output_bias=output_bias)
     elif from_type == 'starcoder':
         module = DeepSpeedChatLikeFlashMQATCriticModel.from_starcoder(model_path=model_path,
                                                                       dtype=dtype,
-                                                                      device=device)
+                                                                      device=device,
+                                                                      v_head_path=v_head_path,
+                                                                      output_scaling=output_scaling,
+                                                                      output_bias=output_bias)
     elif from_type == 'self':
         module = DeepSpeedChatLikeFlashMQATCriticModel.from_pretrained(model_path=model_path,
                                                                        dtype=dtype,
-                                                                       device=device)
+                                                                       device=device,
+                                                                       output_scaling=output_scaling,
+                                                                       output_bias=output_bias)
     else:
         raise NotImplementedError()
-    tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_path)
+    tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
     return api.model.Model(name, module, tokenizer, device)
 
 

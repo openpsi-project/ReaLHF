@@ -6,6 +6,7 @@ import transformers
 from impl.model.nn.flash_mqat import (FlashMQATForCausalLM, generate, GenerationConfig, PipeCacheData,
                                       PipeTransferData, vanilla_cpu_generate, vanilla_packed_generate)
 from impl.model.utils.data import build_packed_inputs, gather_shifted_log_probs, unpack_tensor
+import api.huggingface
 
 
 class FlashMQATStarCoderTest(unittest.TestCase):
@@ -22,7 +23,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = transformers.AutoTokenizer.from_pretrained(
+        cls.tokenizer = api.huggingface.load_hf_tokenizer(
             "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
@@ -220,7 +221,7 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = transformers.AutoTokenizer.from_pretrained(
+        cls.tokenizer = api.huggingface.load_hf_tokenizer(
             "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
@@ -349,7 +350,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = transformers.AutoTokenizer.from_pretrained(
+        cls.tokenizer = api.huggingface.load_hf_tokenizer(
             "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
@@ -424,7 +425,7 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = transformers.AutoTokenizer.from_pretrained(
+        cls.tokenizer = api.huggingface.load_hf_tokenizer(
             "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 

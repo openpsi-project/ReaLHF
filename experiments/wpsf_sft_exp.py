@@ -117,15 +117,18 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
             ),
         )
 
-        model = Model("flash_mqat_clm_hf_lora",
-                      args=dict(
-                          model_path=model_path,
-                          lora_module_kwargs=dict(
-                              lora_dim=self.lora_dim,
-                              lora_scaling=self.lora_scaling,
-                          ),
-                          lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
-                      ))
+        model = Model("flash_mqat_clm_hf",
+                      args=dict(model_path=model_path,),
+                      wrappers=[
+                          ModelWrapper('lora',
+                                       args=dict(
+                                           lora_module_kwargs=dict(
+                                               lora_dim=self.lora_dim,
+                                               lora_scaling=self.lora_scaling,
+                                           ),
+                                           lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
+                                       ))
+                      ])
 
         interface = ModelInterface('flash_sft')
 

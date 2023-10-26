@@ -26,11 +26,6 @@ class PackedPlackettLuceRewardInterface(api.model.ModelInterface):
         packed_input_ids: torch.Tensor = data['packed_input_ids'].squeeze()
         cu_seqlens: torch.Tensor = data['cu_seqlens'].squeeze()
 
-        bs = data['n_seqs'].item()
-
-        cu_seqlens = cu_seqlens[:bs + 1]
-        packed_input_ids = packed_input_ids[:cu_seqlens[-1]]
-
         module: deepspeed.DeepSpeedEngine = model.module
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
