@@ -273,7 +273,7 @@ def get_packed_advantages_and_returns(
             delta = rewards[r_offset + t] + gamma * nextvalues - values[v_offset + t]
             lastgaelam = delta + gamma * lam * lastgaelam
             advantages_reversed.append(lastgaelam)
-            advantages_reversed.append(lastgaelam + values[v_offset + t])
+            returns_reversed.append(lastgaelam + values[v_offset + t])
 
     advantages = torch.stack(advantages_reversed[::-1])
     returns = torch.stack(returns_reversed[::-1])

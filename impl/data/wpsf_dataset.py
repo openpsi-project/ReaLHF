@@ -420,12 +420,12 @@ class PromptDataset(torch.utils.data.Dataset):
         self.prompt_tokens = prompt_tokens
 
     def __len__(self):
-        return len(self.prompt_tokens)
+        return len(self.prompt_tokens['input_ids'])
 
     def __getitem__(self, idx):
         return {
-            "prompts": self.prompt_tokens[idx]["input_ids"],
-            "prompt_att_mask": self.prompt_tokens[idx]["attention_mask"]
+            "prompts": self.prompt_tokens["input_ids"][idx],
+            "prompt_att_mask": self.prompt_tokens["attention_mask"][idx],
         }
 
 

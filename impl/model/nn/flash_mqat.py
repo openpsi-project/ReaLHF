@@ -18,6 +18,7 @@ from impl.model.utils.data import (build_packed_inputs, DuckGenerationOutput, Du
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP
 import api.model
+import api.huggingface
 
 try:
     from flash_attn import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache
@@ -664,12 +665,12 @@ def make_flash_mqat_clm_hf(
         module = HuggingfaceLikeFlashMQATForCausalLM.from_starcoder(model_path=model_path,
                                                                     dtype=dtype,
                                                                     device=device)
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
+        tokenizer = api.huggingface.load_hf_tokenizer(model_path)
     elif from_type == 'self':
         module = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(model_path=model_path,
                                                                      dtype=dtype,
                                                                      device=device)
-        tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_path)
+        tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
     else:
         raise NotImplementedError()
     return api.model.Model(name, module, tokenizer, device)
@@ -786,6 +787,7 @@ def make_flash_mqat_critic(
     dtype: Optional[torch.dtype] = None,
     from_type: str = 'sft',
     tokenizer_path: Optional[str] = None,
+    v_head_path: Optional[str] = None,
     output_scaling: float = 1.0,
     output_bias: float = 0.0,
 ):
@@ -795,12 +797,14 @@ def make_flash_mqat_critic(
         module = DeepSpeedChatLikeFlashMQATCriticModel.from_sft_model(model_path=model_path,
                                                                       dtype=dtype,
                                                                       device=device,
+                                                                      v_head_path=v_head_path,
                                                                       output_scaling=output_scaling,
                                                                       output_bias=output_bias)
     elif from_type == 'starcoder':
         module = DeepSpeedChatLikeFlashMQATCriticModel.from_starcoder(model_path=model_path,
                                                                       dtype=dtype,
                                                                       device=device,
+                                                                      v_head_path=v_head_path,
                                                                       output_scaling=output_scaling,
                                                                       output_bias=output_bias)
     elif from_type == 'self':
@@ -811,7 +815,7 @@ def make_flash_mqat_critic(
                                                                        output_bias=output_bias)
     else:
         raise NotImplementedError()
-    tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_path)
+    tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
     return api.model.Model(name, module, tokenizer, device)
 
 
