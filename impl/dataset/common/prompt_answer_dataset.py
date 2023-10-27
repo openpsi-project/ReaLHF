@@ -1,4 +1,4 @@
-from typing import Optional, Callable, List, Dict
+from typing import Callable, Dict, List, Optional
 import json
 import logging
 
@@ -11,23 +11,24 @@ import api.huggingface
 logger = logging.getLogger("Prompt Dataset")
 
 
-class PromptDataset(torch.utils.data.Dataset):
+class PromptAnswerDataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
         util: api.data.DatasetUtility,
-        max_prompt_len: int,
+        max_seq_len: int,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
     ):
-        """Prompt dataset used for RLHF (PPO).
+        """A dataset with prompts and corresponding answers. Usually used for SFT.
 
         Args:
-            util (api.data.DatasetUtility): Dataset utility.
-            max_prompt_len (int): The maximum prompt length. Prompts will be truncated and left-padded to this length.
+            util (api.data.DatasetUtility): .
+            n_tokens_per_batch (int, optional): The number of tokens in the batch.
+            max_length (Optional[int], optional): The maximum length of each sequence in the batch. Defaults to n_tokens_per_batch.
             dataset_path (Optional[str], optional): Path to the dataset json/jsonl file.
                 The json/jsonl file should be a list of dictionary. Each element in the list should have
-                the key "prompt". Defaults to None.
+                a key "prompt" and a key "answer". Defaults to None.
             dataset_builder (Optional[Callable[[], List[Dict]]], optional): Alternative to dataset_path.
                 A callable that returns a list of dictionary. Defaults to None.
         """
@@ -55,27 +56,43 @@ class PromptDataset(torch.utils.data.Dataset):
         subset_indices = shuffle_indices[ddp_rank * datasize_per_rank:(ddp_rank + 1) * datasize_per_rank]
         data: List[Dict[str, str]] = [data[i] for i in subset_indices]
 
+        seqs = [x['prompt'] + x['answer'] + tokenizer.eos_token for x in data]
         prompts = [x['prompt'] for x in data]
 
-        original_padding_side = tokenizer.padding_side
-        tokenizer.padding_side = 'left'
+        self.tokens = tokenizer(seqs,
+                                return_tensors='pt',
+                                padding=True,
+                                truncation=True,
+                                max_length=max_seq_len)
         prompt_tokens = tokenizer(prompts,
-                                  return_tensors='pt',
-                                  padding=True,
+                                  padding=False,
                                   truncation=True,
-                                  max_length=max_prompt_len)
-        tokenizer.padding_side = original_padding_side
+                                  max_length=max_seq_len,
+                                  return_length=True,
+                                  return_attention_mask=False)
+        prompt_lengths = prompt_tokens['length']
+        prompt_masks = []
+        for i in range(len(self)):
+            seq = self.tokens['input_ids'][i]
+            prompt_len = prompt_lengths[i]
+            prompt = prompt_tokens['input_ids'][i]
+            attention_mask = self.tokens['attention_mask'][i]
+            seqlen = attention_mask.sum()
+            assert seq[:prompt_len] == prompt
+            assert seqlen >= prompt_len, (seqlen, prompt_len)
+            prompt_masks.append(torch.tensor([1] * prompt_len + [0] * (seqlen - prompt_len)))
 
-        self.prompt_tokens = prompt_tokens
+        self.prompt_masks = prompt_masks
 
     def __len__(self):
-        return len(self.prompt_tokens['input_ids'])
+        return len(self.tokens['input_ids'])
 
     def __getitem__(self, idx):
         return {
-            "prompts": self.prompt_tokens["input_ids"][idx],
-            "prompt_att_mask": self.prompt_tokens["attention_mask"][idx],
+            "input_ids": self.tokens['input_ids'][idx],
+            "attention_mask": self.tokens['attention_mask'][idx],
+            "prompt_mask": self.prompt_masks[idx],
         }
 
 
-api.data.register_dataset("prompt", PromptDataset)
+api.data.register_dataset("prompt_answer", PromptAnswerDataset)
