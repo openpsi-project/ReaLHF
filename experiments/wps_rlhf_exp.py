@@ -140,16 +140,15 @@ class WpsRLHFExperiment(Experiment):
         max_answer_len = 512 - max_prompt_len
 
         dataset = Dataset(
-            'excel_prompt',
+            'prompt',
             args=dict(
-                dataset_path=f"{cluster_spec.fileroot}/datasets/wps-prompts/train-small.jsonl",
-                max_seq_len=max_prompt_len,
+                dataset_path=f"/lustre/fw/datasets/wps-prompts/train-small.jsonl",
+                max_prompt_len=max_prompt_len,
             ),
         )
         dataloader = DataLoader(
-            'excel_rlhf',
+            'default',
             args=dict(
-                max_token_len=max_prompt_len,
                 shuffle=True,
                 drop_last=True,
                 batch_size=batch_size_per_device * self.n_actors // self.n_data_workers,

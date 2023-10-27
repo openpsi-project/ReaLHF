@@ -19,7 +19,7 @@ import system.worker_base as worker_base
 
 # Register all implemented datasets and models.
 import impl.model  # isort:skip
-import impl.data  # isort:skip
+import impl.dataset  # isort:skip
 
 
 class ModelWorker(worker_base.Worker):

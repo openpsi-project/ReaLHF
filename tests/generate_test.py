@@ -12,8 +12,8 @@ import api.config
 import api.data
 import api.huggingface
 import api.model
-import impl.data
-import impl.data.chat_dataset
+import impl.dataset
+import impl.dataset.chat_dataset
 import impl.model
 
 

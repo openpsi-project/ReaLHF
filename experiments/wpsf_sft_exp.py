@@ -22,7 +22,7 @@ def sample_log_uniform(low, high):
 
 class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
-    def __init__(self, n_models=1, seed=1, total_train_epochs=4, benchmark_only=False):
+    def __init__(self, n_models=1, seed=1, total_train_epochs=8, benchmark_only=False):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -52,7 +52,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
             ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=4, mem=10000),
+                scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
             ),
             model_worker=TasksGroup(
                 count=self.n_models,
@@ -60,7 +60,6 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    nodelist="frl8a138",
                     mem=60000,
                 ),
             ),
@@ -76,11 +75,11 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         max_seq_len = 4096
 
         dataset = Dataset(
-            'wpsf_sft_packed',
+            'packed_prompt_answer',
             args=dict(
                 n_tokens_per_batch=max_seq_len * train_batch_size_per_device,
                 max_length=max_seq_len,
-                json_path="/data/aigc/llm/datasets/wps-formula-sft/dllm-train-0908-formula-psi.json",
+                dataset_path="/lustre/fw/datasets/wps-formula-sft/dllm-train-0908-formula-psi.jsonl",
             ),
         )
         dataloader = eval_dataloader = DataLoader('iterable_dataset_loader')
@@ -95,7 +94,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
         eval_dataset = copy.deepcopy(dataset)
         eval_dataset.args[
-            'dataset_path'] = "/data/aigc/llm/datasets/wps-formula-sft/dllm-valid-0908-formula-psi.json"
+            'dataset_path'] = "/lustre/fw/datasets/wps-formula-sft/dllm-valid-0908-formula-psi.jsonl"
         eval_dataset.args['n_tokens_per_batch'] = max_seq_len * eval_batch_size_per_device
 
         backend = ModelBackend(

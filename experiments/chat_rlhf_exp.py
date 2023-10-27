@@ -219,16 +219,15 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         max_answer_len = self.config.max_answer_length
 
         dataset = Dataset(
-            'chat_prompt',
+            'prompt',
             args=dict(
                 dataset_path=data_path,
-                max_seq_len=max_prompt_len,
+                max_prompt_len=max_prompt_len,
             ),
         )
         dataloader = DataLoader(
-            'chat_rlhf',
+            'default',
             args=dict(
-                max_token_len=max_prompt_len,
                 shuffle=True,
                 drop_last=True,
                 batch_size=batch_size_per_device * self.n_actors // self.n_data_workers,
