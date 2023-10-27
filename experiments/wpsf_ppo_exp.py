@@ -138,9 +138,9 @@ class WpsfFlashPPOExperiment(Experiment):
         max_answer_len = 2048
 
         dataset = Dataset(
-            'wpsf_prompt',
+            'prompt',
             args=dict(
-                dataset_path="/data/aigc/llm/datasets/wps-formula-rw/dataset_train.jsonl",
+                dataset_path="/lustre/fw/datasets/wps-formula-rw/dataset_train.jsonl",
                 max_prompt_len=max_prompt_len,
             ),
         )
