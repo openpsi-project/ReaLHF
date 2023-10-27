@@ -1,4 +1,3 @@
-import itertools
 import json
 import logging
 
@@ -8,7 +7,6 @@ import torch.utils.data
 
 import api.data
 import api.huggingface
-import base.namedarray
 
 logger = logging.getLogger("WPS Excel Dataset")
 
@@ -21,62 +19,6 @@ def get_prompt(head, task):
 def get_prompt_and_chosen(head, task, code):
     return get_prompt(head, task) + code
 
-
-class ExcelRewardModelingUnpairedDataset(torch.utils.data.Dataset):
-
-    def __init__(self, util: api.data.DatasetUtility, dataset_path, max_seq_len):
-        self.util = util
-        seed = self.util.seed
-        world_size = self.util.world_size
-        tokenizer = self.util.tokenizer
-        ddp_rank = self.util.ddp_rank
-
-        if not dataset_path.endswith(".jsonl"):
-            raise NotImplementedError("Only support .jsonal dataset format.")
-
-        with open(dataset_path, 'r') as f:
-            _data_bytes = [ff for ff in f]
-            datasize_per_rank = len(_data_bytes) // world_size
-            shuffle_indices = api.data.get_shuffle_indices(seed, datasize_per_rank * world_size)
-            subset_indices = shuffle_indices[ddp_rank * datasize_per_rank:(ddp_rank + 1) * datasize_per_rank]
-            data = [json.loads(_data_bytes[i]) for i in subset_indices]
-
-        end_of_conversation_token = tokenizer.eos_token
-
-        chosen_sentences_str = []
-        for i, tmp_data in enumerate(data):
-            # tokenize the text
-            chosen_sentence = get_prompt_and_chosen(tmp_data['head'], tmp_data['task'], tmp_data['code'])
-            chosen_sentence += end_of_conversation_token
-            chosen_sentences_str.append(chosen_sentence)
-        self.chosen_token = tokenizer(chosen_sentences_str,
-                                      max_length=max_seq_len,
-                                      padding="max_length",
-                                      truncation=True,
-                                      return_tensors="pt")
-        self.chosen_token['correctness_labels'] = torch.tensor([d['correctness_label'] for d in data],
-                                                               dtype=torch.long)
-
-        input_ids = self.chosen_token['input_ids']
-        eos_mask = (input_ids == tokenizer.eos_token_id).float()
-        seq_no_eos_mask = (eos_mask.sum(1) == 0).float()
-        eos_indices = eos_mask.argmax(1)
-        eos_indices = (eos_indices * (1 - seq_no_eos_mask) + seq_no_eos_mask * (max_seq_len - 1)).long()
-        self.chosen_token['eos_indices'] = eos_indices
-
-    def __len__(self):
-        return self.chosen_token['input_ids'].shape[0]
-
-    def __getitem__(self, idx):
-        return {
-            "input_ids": self.chosen_token["input_ids"][idx],
-            "attention_mask": self.chosen_token["attention_mask"][idx],
-            "correctness_labels": self.chosen_token["correctness_labels"][idx],
-            "eos_indices": self.chosen_token['eos_indices'][idx],
-        }
-
-
-api.data.register_dataset("excel_reward_modeling_unpaired", ExcelRewardModelingUnpairedDataset)
 
 from scripts.data.utils import RUBBISH_CODE_COLLECTIONS
 
