@@ -57,7 +57,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
 
         module.eval()
         losses = 0
-        n_tokens = 0
+        n_seqs = 0
 
         for step, data in enumerate(tqdm.tqdm(eval_dataloader)):
             data = recursive_apply(from_dict(data), lambda x: x.to(device))
@@ -70,9 +70,9 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                             max_seqlen=max_seqlen).logits.float()
             loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask.float())
 
-            losses += (1 - prompt_mask.float()).sum() * loss.float()
-            n_tokens += (1 - prompt_mask.float()).sum()
-        losses = losses / n_tokens
+            losses += (cu_seqlens.shape[0] - 1) * loss.float()
+            n_seqs += cu_seqlens.shape[0] - 1
+        losses = losses / n_seqs
         try:
             perplexity = torch.exp(losses).item()
         except OverflowError:

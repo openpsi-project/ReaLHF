@@ -111,6 +111,9 @@ async def model_rpc_func(
     res = await asyncio.gather(*awaitables)
 
     res = dataparallel.get_broker(rpc_config.dp_broker_type).gather_from(res)
+    if rpc_config.log_return_value:
+        logger.info(f"RPC name {rpc_config.name} returns {res}")
+
     for k in rpc_config.output_data:
         if k in rpc_config.output_key_remap:
             data_registry[rpc_config.output_key_remap[k]] = res[k]
@@ -186,7 +189,9 @@ class MasterWorker(worker_base.Worker):
         if not self.__initialized:
             # Request training specification from data workers, e.g. batch size and total train steps.
             request_all(self.__data_streams, 'spec', [None for _ in self.__data_streams])
-            ft_spec: model_api.FinetuneSpec = gather_all_replies(self.__data_streams)[0]
+            ft_specs: List[model_api.FinetuneSpec] = gather_all_replies(self.__data_streams)
+            assert len(set(x.steps_per_epoch for x in ft_specs)) == 1
+            ft_spec = ft_specs[0]
             ft_spec.total_train_epochs = self.config.total_train_epochs
             ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
 

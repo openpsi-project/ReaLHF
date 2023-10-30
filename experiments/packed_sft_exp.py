@@ -11,29 +11,26 @@ sft = ModelRPC(
     ModelInterfaceType.TRAIN_STEP,
     input_data=['packed_input_ids', 'cu_seqlens', 'prompt_mask'],
     dp_broker_type='packed',
+    log_return_value=True,
 )
-
-
-def sample_log_uniform(low, high):
-    low = math.log(low)
-    high = math.log(high)
-    return math.exp(low + (high - low) * random.random())
 
 
 class PackedSupervisedFinetuningExperiment(Experiment):
 
     def __init__(
         self,
-        n_models=1,
+        n_models=4,
         seed=1,
         total_train_epochs=8,
         base_model='starcoder',
         train_dataset_path="/lustre/fw/datasets/wps-formula-sft/dllm-train-0908-formula-psi.jsonl",
         valid_dataset_path="/lustre/fw/datasets/wps-formula-sft/dllm-valid-0908-formula-psi.jsonl",
+        use_lora: bool = True,
         benchmark_only=False,
     ):
+        self.use_lora = use_lora
         self.weight_decay = 0.05
-        self.lora_lr = 2.5e-4
+        self.lr = 2.5e-4 if use_lora else 1e-5
         self.lora_scaling = 32.0
         self.lora_dim = 32
         self.adam_betas = (0.9, 0.95)
@@ -88,7 +85,7 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                 raise NotImplementedError()
         else:
             model_path = "/data/aigc/llm/checkpoints/1l-starcoder"
-        train_batch_size_per_device = 4
+        train_batch_size_per_device = 1
         eval_batch_size_per_device = 4
         max_seq_len = 4096
 
@@ -124,7 +121,7 @@ class PackedSupervisedFinetuningExperiment(Experiment):
             args=dict(
                 optimizer_name='adam',
                 optimizer_config=dict(
-                    lr=self.lora_lr,
+                    lr=self.lr,
                     weight_decay=self.weight_decay,
                     eps=1e-5,
                     betas=self.adam_betas,
@@ -134,17 +131,13 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                 min_lr_ratio=0.0,
                 zero_stage=2,
                 enable_fp16=True,
-                gradient_checkpointing=True,
+                gradient_checkpointing=False,
             ),
         )
 
-        model = Model(
-            "flash_mqat_clm_hf",
-            args=dict(
-                model_path=model_path,
-                from_type=self.base_model,
-            ),
-            wrappers=[
+        model = Model("flash_mqat_clm_hf", args=dict(model_path=model_path, from_type=self.base_model))
+        if self.use_lora:
+            model.wrappers = [
                 ModelWrapper(
                     'lora',
                     args=dict(
@@ -155,8 +148,7 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                         lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
                     ),
                 ),
-            ],
-        )
+            ]
 
         interface = ModelInterface('flash_sft')
 
@@ -171,6 +163,7 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                 eval_dataloader=eval_dataloader,
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_models),
+                cuda_cache_clear_freq=60,
             ) for i in range(self.n_models)
         ]
 
@@ -200,6 +193,7 @@ for s in seeds:
             base_model='gpt2',
             train_dataset_path="/lustre/fw/datasets/imdb/rl/sft_pos_neg-train.jsonl",
             valid_dataset_path="/lustre/fw/datasets/imdb/rl/sft_pos_neg-valid.jsonl",
+            use_lora=False,
         ))
     exp_name = f"senti-sft-pos-s{s}"
     register_experiment(
@@ -210,6 +204,7 @@ for s in seeds:
             base_model='gpt2',
             train_dataset_path="/lustre/fw/datasets/imdb/rl/sft_pos-train.jsonl",
             valid_dataset_path="/lustre/fw/datasets/imdb/rl/sft_pos-valid.jsonl",
+            use_lora=False,
         ))
 register_experiment("wpsf-sft-flash-benchmark",
                     functools.partial(PackedSupervisedFinetuningExperiment, benchmark_only=True))

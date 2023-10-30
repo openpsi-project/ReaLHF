@@ -7,7 +7,6 @@ import os
 import torch
 import transformers
 
-import api.huggingface
 import api.model
 
 logger = logging.getLogger("Model Save")
@@ -50,7 +49,7 @@ def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
         )),
                 exist_ok=True)
     if not is_lora_model(module):
-        api.huggingface.save_hf_format(
+        save_hf_format(
             module,
             tokenizer,
             output_dir,
