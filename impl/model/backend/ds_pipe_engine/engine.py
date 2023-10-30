@@ -608,9 +608,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.pipe_buffers['outputs'][dst_buffer_id] = data_list_to_tensor_tuple([x])
 
         if self.generate_mode:
-            logger.debug(f"before squeeze shape {x.pp_output.shape}")
-            logits = x.pp_output.squeeze(dim=1)
-            logger.debug(f"after squeeze shape {logits.shape}")
+            logits = x.pp_input.squeeze(dim=1)
             # if kv cache is not reserved for this micro batch
             if micro_batch_id not in self.kv_cache_reserved:
                 cu_seqlens = x.cu_seqlens
@@ -646,13 +644,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 for i, y in enumerate(ys):
                     logger.debug("in _exec_forward_pass():: rank {} mbid {} in reserve ys[{}] cache_seqlens: {}, cu_seqlens: {}, input_lens: {}"\
                                  .format(self.global_rank, micro_batch_id, i, y.cache_seqlens, x.cu_seqlens, input_lens))
-                # for i, y in enumerate(ys):
-                # logger.debug("in _exec_forward_pass():: rank {} after reserve ys[{}] k_cache: {}"\
-                #              .format(self.global_rank, i, y.k_cache))
-                # ys = self.pipe_cache_data[micro_batch_id]
-                # for i, y in enumerate(ys):
-                #     logger.debug("in _exec_forward_pass():: rank {} in cache ys[{}] k_cache: {}"\
-                #                  .format(self.global_rank, i, y.k_cache))
                 self.kv_cache_reserved.append(micro_batch_id)
             else:
                 # else, only increase cache_seqlens
@@ -672,10 +663,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 logger.debug(f"self._exec_forward_pass:: rank {self.global_rank} terminate {self.terminate}")
                 self.unfinished_sequences[micro_batch_id] = unfinished_sequences
                 self.generated_idx[micro_batch_id] += 1
-                # if len(next_tokens.shape) == 0:
-                #     next_tokens = next_tokens.unsqueeze(0)
-                #     logprob = logprob.unsqueeze(0)
-                #     logits_mask = logits_mask.unsqueeze(0)
                 logger.debug(
                     f"next_tokens shape {next_tokens.shape}, logprob shape {logprob.shape}, logits_mask shape {logits_mask.shape}"
                 )
@@ -684,8 +671,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 self.gen_logits_mask_ph[micro_batch_id].append(logits_mask)
                 self.next_tokens_to_send = next_tokens
         else:
-            # if self.is_last_stage() and len(self.fwd_outputs) == self.micro_batches:
-            #     self.fwd_outputs.clear()
             if self.is_last_stage():
                 if self._compute_loss:  # 1f1b only
                     original_input = self.original_input_cache.pop(0)
@@ -958,7 +943,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 if not buffer.is_floating_point():
                     assert buffer.grad is None
                     continue
-                assert buffer.grad is not None
+                assert buffer.grad is not None, f"buffer {idx} does not have a grad, tensor: {buffer}"
                 p2p.send(buffer.grad, self.prev_stage)
 
         # We can free up the input buffer now

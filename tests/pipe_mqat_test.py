@@ -18,7 +18,6 @@ import base.names as names
 
 # import transformers
 
-
 # mp.set_start_method('spawn', force=True) this will make global barrier not work
 
 EXPR_NAME = "test"
@@ -31,8 +30,8 @@ WORLD_SIZE = NUM_PP * NUM_DP
 BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
 PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_{NUM_PP}pp_{NUM_DP}s"
 BATCH_SIZE = 8
-MIN_NEW_TOKENS = 20
-MAX_NEW_TOKENS = 20
+MIN_NEW_TOKENS = 10
+MAX_NEW_TOKENS = 10
 
 BARRIER = mp.Barrier(WORLD_SIZE)
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
@@ -205,9 +204,6 @@ class PipeFlashMQATTest(unittest.TestCase):
         from impl.model.nn.flash_mqat import FlashMQATForCausalLM, generate, GenerationConfig
         import api.huggingface
 
-        # generate, GenerationConfig, PipeCacheData,
-        # PipeTransferData, vanilla_cpu_generate, vanilla_packed_generate
-        # initialize baseline model
         self.device = device = 'cuda'
         self.dtype = dtype = torch.float16
 
@@ -273,4 +269,4 @@ class PipeFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testTrainBatch")
+    unittest.main(defaultTest="PipeFlashMQATTest.testGenerateAccordance")

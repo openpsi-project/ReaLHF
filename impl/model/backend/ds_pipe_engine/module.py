@@ -329,9 +329,8 @@ class PipelineModule(nn.Module):
                     ds_utils.set_random_seed(new_seed)
 
             x = layer(x, y)
-            # if self.stage_id < self.num_stages - 1:
             x.pp_input = x.pp_output
-
+            x.pp_output = None
         return x, ys
 
     def _partition_layers(self, method='uniform'):
