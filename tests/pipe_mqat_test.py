@@ -18,7 +18,7 @@ import base.names as names
 
 # import transformers
 
-# mp.set_start_method('spawn', force=True) this will make global barrier not work
+# mp.set_start_method('spawn', force=True) # this will make global barrier not work
 
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
@@ -30,19 +30,26 @@ WORLD_SIZE = NUM_PP * NUM_DP
 BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
 PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_{NUM_PP}pp_{NUM_DP}s"
 BATCH_SIZE = 8
-MIN_NEW_TOKENS = 10
-MAX_NEW_TOKENS = 10
+MIN_NEW_TOKENS = 20
+MAX_NEW_TOKENS = 20
 
 BARRIER = mp.Barrier(WORLD_SIZE)
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
-logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="DEBUG")
+# for plotting
+logging.basicConfig(filename="/home/meizy/logs/pipe_mqat.log",
+                    filemode="w",
+                    format=LOG_FORMAT,
+                    datefmt=DATE_FORMAT,
+                    level="DEBUG")
+# logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="DEBUG")
 
 logger = logging.getLogger("pipe_mqat_test")
 
 
 def setup_gpu(rank):
     os.environ["DLLM_MODE"] = "LOCAL"
+    # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     BARRIER.wait()
     base.gpu_utils.isolate_cuda_device(MODEL_TYPE, rank, WORLD_SIZE, EXPR_NAME, TRIAL_NAME)
     BARRIER.wait()
@@ -228,11 +235,13 @@ class PipeFlashMQATTest(unittest.TestCase):
         self.pipe_model_processes = [
             mp.Process(target=pipe_generate, args=(i, self.res_queue, self.seed)) for i in range(WORLD_SIZE)
         ]
+        s1 = time.monotonic()
         for p in self.pipe_model_processes:
             p.start()
 
         g = self.res_queue.get()
         logprob = self.res_queue.get()
+        t1 = time.monotonic() - s1
 
         for p in self.pipe_model_processes:
             p.join()
@@ -243,20 +252,43 @@ class PipeFlashMQATTest(unittest.TestCase):
         self.init_baseline_model()
         prompt, prompt_att_mask = make_batch(self.tokenizer, self.device, BATCH_SIZE, 0, 1, seed=self.seed)
 
+        s2 = time.monotonic()
         vg, vlogprob, vmask, _ = generate(model=self.baseline_model,
                                           tokenizer=self.tokenizer,
                                           input_ids=prompt,
                                           attention_mask=prompt_att_mask,
                                           gconfig=self.gconfig)
+        t2 = time.monotonic() - s2
+        print("pipe time:", t1)
+        print("vanilla time:", t2)
 
         assert torch.allclose(g, vg), (g, vg)
         assert torch.allclose(logprob, vlogprob, atol=0, rtol=0.01), (logprob, vlogprob)
+
+    @torch.no_grad()
+    def testGenerate(self):
+        clear_name_resolve()
+        self.seed = 1
+        self.res_queue = mp.Queue(maxsize=128)
+        self.pipe_model_processes = [
+            mp.Process(target=pipe_generate, args=(i, self.res_queue, self.seed)) for i in range(WORLD_SIZE)
+        ]
+        for p in self.pipe_model_processes:
+            p.start()
+
+        g = self.res_queue.get()
+        logprob = self.res_queue.get()
+
+        for p in self.pipe_model_processes:
+            p.join()
+
+        logger.info(g)
+        logger.info(logprob)
 
     def testTrainBatch(self):
         clear_name_resolve()
 
         self.seed = random.randint(0, 1000)
-        # self.seed = 1
         self.res_queue = mp.Queue(maxsize=128)
         self.pipe_model_processes = [
             mp.Process(target=pipe_train_batch, args=(i, self.res_queue, self.seed))

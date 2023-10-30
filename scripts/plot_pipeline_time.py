@@ -1,8 +1,6 @@
 import os
 import sys
 
-sys.path.append("../")
-
 from base.monitor import plot_time_points
 
 
@@ -58,5 +56,53 @@ def plot_rlhf():
     )
 
 
+def plot_debug_pipeline():
+    file_name = "/home/meizy/logs/pipe_mqat.log"
+    identifiers = [str(i) for i in range(4)]
+    fn = "/workspace/scripts/figs/pp_generate.png"
+    # start_keys = [
+    #     "forward_prepare_start", "outer_module_forward_start", "post_process_start", "reserve_kv_cache_start",
+    #     "postprocess_cache_start", "genstep_start"
+    # ]
+    # end_keys = [
+    #     "forward_prepare_end", "outer_module_forward_end", "post_process_end", "reserve_kv_cache_end",
+    #     "postprocess_cache_end", "genstep_end"
+    # ]
+    start_keys = [
+        "LoadMicroBatch_start", "ForwardPass_start", "LoadNextTokens_start", "SendNextTokens_start",
+        "RecvNextTokens_start", "RecvActivation_start", "SendActivation_start"
+    ]
+    end_keys = [
+        "LoadMicroBatch_end", "ForwardPass_end", "LoadNextTokens_end", "SendNextTokens_end",
+        "RecvNextTokens_end", "RecvActivation_end", "SendActivation_end"
+    ]
+    # start_keys = [
+    #     "pipe_cache_load_start", "input_tuple_clone_start", "tensor_to_tuple_start", "tuple_to_tensor_start",
+    #     "layer_0_start", "layer_1_start", "layer_2_start"
+    # ]
+    # end_keys = [
+    #     "pipe_cache_load_end", "input_tuple_clone_end", "tensor_to_tuple_end", "tuple_to_tensor_end",
+    #     "layer_0_end", "layer_1_end", "layer_2_end"
+    # ]
+    # start_keys = ["tensor_to_tuple_start", "tuple_to_tensor_start"]
+    # end_keys = ["tensor_to_tuple_end", "tuple_to_tensor_end"]
+    # start_keys = ["to_tensor_start", "from_tensor_start"]
+    # end_keys = ["to_tensor_end", "from_tensor_end"]
+    # start_keys = [
+    #     f"load_next_tokens_{i}_start" for i in range(1, 5)
+    # ]
+    # end_keys = [
+    #     f"load_next_tokens_{i}_end" for i in range(1, 5)
+    # ]
+    plot_time_points(
+        file_name=file_name,
+        start_keys=start_keys,
+        end_keys=end_keys,
+        identifiers=identifiers,
+        step_range=(0, 1000),
+        save_fig_path=fn,
+    )
+
+
 if __name__ == "__main__":
-    plot_rlhf()
+    plot_debug_pipeline()

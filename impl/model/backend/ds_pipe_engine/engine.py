@@ -594,23 +594,32 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         else:
             raise ValueError("buffer_id must be int or tuple of ints")
 
+        time_mark("forward_prepare_start", self.global_rank, step=self.step_count)
         ys = self.pipe_cache_data[micro_batch_id]
         assert isinstance(self.pipe_buffers['inputs'][src_buffer_id], tuple)
-        inputs = tuple(t.clone() for t in self.pipe_buffers['inputs'][src_buffer_id])
+        # inputs = tuple(t.clone() for t in self.pipe_buffers['inputs'][src_buffer_id])
+        inputs = self.pipe_buffers['inputs'][src_buffer_id]
         # TODO: this is only a temp solution to get the pipeline running, fix afterwards
         inputs += data_list_to_tensor_tuple(ys)
 
         self._zero_grads(inputs)
+        time_mark("forward_prepare_end", self.global_rank, step=self.step_count)
 
-        x, ys = super().forward(inputs)
+        time_mark("outer_module_forward_start", self.global_rank, step=self.step_count)
+        # x, ys = super().forward(inputs)
+        x, ys = self.module(inputs)
+        time_mark("outer_module_forward_end", self.global_rank, step=self.step_count)
 
+        time_mark("post_process_start", self.global_rank, step=self.step_count)
         self.pipe_cache_data[micro_batch_id] = ys
         self.pipe_buffers['outputs'][dst_buffer_id] = data_list_to_tensor_tuple([x])
+        time_mark("post_process_end", self.global_rank, step=self.step_count)
 
         if self.generate_mode:
             logits = x.pp_input.squeeze(dim=1)
             # if kv cache is not reserved for this micro batch
             if micro_batch_id not in self.kv_cache_reserved:
+                time_mark("reserve_kv_cache_start", self.global_rank, step=self.step_count)
                 cu_seqlens = x.cu_seqlens
                 logits = logits[cu_seqlens[1:] - 1]
                 input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
@@ -645,14 +654,18 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     logger.debug("in _exec_forward_pass():: rank {} mbid {} in reserve ys[{}] cache_seqlens: {}, cu_seqlens: {}, input_lens: {}"\
                                  .format(self.global_rank, micro_batch_id, i, y.cache_seqlens, x.cu_seqlens, input_lens))
                 self.kv_cache_reserved.append(micro_batch_id)
+                time_mark("reserve_kv_cache_end", self.global_rank, step=self.step_count)
             else:
+                time_mark("postprocess_cache_start", self.global_rank, step=self.step_count)
                 # else, only increase cache_seqlens
                 if self.is_last_stage():
                     ys = ys[:-1]
                 for y in ys:
                     y.cache_seqlens += 1
+                time_mark("postprocess_cache_end", self.global_rank, step=self.step_count)
 
             if self.is_last_stage():
+                time_mark("genstep_start", self.global_rank, step=self.step_count)
                 next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
                     logits, self.tokenizer, self.unfinished_sequences[micro_batch_id],
                     self.generated_idx[micro_batch_id], self.gconfig)
@@ -670,6 +683,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 self.gen_logprob_ph[micro_batch_id].append(logprob)
                 self.gen_logits_mask_ph[micro_batch_id].append(logits_mask)
                 self.next_tokens_to_send = next_tokens
+                time_mark("genstep_end", self.global_rank, step=self.step_count)
         else:
             if self.is_last_stage():
                 if self._compute_loss:  # 1f1b only
@@ -924,12 +938,20 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         assert micro_batch_id >= 0
         assert self.is_first_stage(), "_exec_load_next_tokens() should be only executed on the first stage"
         assert buffer_id in self.next_tokens_cache, f"next tokens cache of micro batch id {buffer_id} is empty"
+        time_mark("load_next_tokens_1_start", self.global_rank)
         x = PipeTransferData()
+        time_mark("load_next_tokens_1_end", self.global_rank)
+        time_mark("load_next_tokens_2_start", self.global_rank)
         ys = self.pipe_cache_data[micro_batch_id]
         ys[0].input_ids = self.next_tokens_cache[micro_batch_id].unsqueeze(-1)
         ys[0].position_ids = None
-        t = data_list_to_tensor_tuple([x] + ys)
+        time_mark("load_next_tokens_2_end", self.global_rank)
+        time_mark("load_next_tokens_3_start", self.global_rank)
+        t = data_list_to_tensor_tuple([x])
+        time_mark("load_next_tokens_3_end", self.global_rank)
+        time_mark("load_next_tokens_4_start", self.global_rank)
         self.pipe_buffers['inputs'][buffer_id] = t
+        time_mark("load_next_tokens_4_end", self.global_rank)
 
     def _exec_send_grads(self, buffer_id):
         inputs = self.pipe_buffers['inputs'][buffer_id]
@@ -1111,7 +1133,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.generate_outputs = []
 
         # For each step in the schedule
-        step_count = 0
+        self.step_count = 0
         for step_cmds in pipe_schedule:
             if terminate_condition is not None:
                 terminate_tensor = torch.tensor(0, dtype=torch.int32, device=self.device)
@@ -1126,7 +1148,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             # For each instruction in the step
             step_id, micro_batch_id, step_cmds = step_cmds
             logger.debug(
-                f"rank {self.global_rank} step {step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
+                f"rank {self.global_rank} step {self.step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
             )
             for cmd in step_cmds:
                 logger.debug(f"rank {self.global_rank} exec cmd: {cmd}")
@@ -1137,11 +1159,15 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 # Equivalent to: self._exec_forward_pass(buffer_id=0)
                 try:
                     cmd_type_string = str(type(cmd)).split('\'')[1].split(".")[-1]
-                    time_mark(name=f"{cmd_type_string}_start", identifier=str(self.global_rank))
+                    time_mark(name=f"{cmd_type_string}_start",
+                              identifier=str(self.global_rank),
+                              step=self.step_count)
                     self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
                     self._exec_instr(*cmd.args, **cmd.kwargs)
-                    time_mark(name=f"{cmd_type_string}_end", identifier=str(self.global_rank))
+                    time_mark(name=f"{cmd_type_string}_end",
+                              identifier=str(self.global_rank),
+                              step=self.step_count)
                 except Exception as e:
-                    logger.error(f"Rank {self.global_rank} step {step_count}, Exception in cmd {cmd}")
+                    logger.error(f"Rank {self.global_rank} step {self.step_count}, Exception in cmd {cmd}")
                     raise e
-            step_count += 1
+            self.step_count += 1

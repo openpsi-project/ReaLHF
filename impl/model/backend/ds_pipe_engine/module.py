@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 
 from .topology import PipeDataParallelTopology, PipelineParallelGrid
-from base.monitor import process_memory_mb
+from base.monitor import process_memory_mb, time_mark
 from impl.model.utils.data import (data_list_to_tensor_tuple, PipeCacheData, PipeTransferData,
                                    tensor_tuple_to_data_list)
 
@@ -315,11 +315,14 @@ class PipelineModule(nn.Module):
         return len(self.forward_funcs)
 
     def forward(self, forward_input_tuple: Tuple):
+        time_mark("module_forward_start", self.global_rank)
         inputs = tensor_tuple_to_data_list(forward_input_tuple)
         x: PipeTransferData = inputs[0]
         ys: List[PipeCacheData] = inputs[1:]
         local_micro_offset = self.micro_offset + 1
+        time_mark("module_forward_end", self.global_rank)
         for idx, (layer, y) in enumerate(zip(self.forward_funcs, ys)):
+            time_mark(f"layer_{idx}_start", dist.get_rank())
             self.curr_layer = idx + self._local_start
             if self.seed_layers:
                 new_seed = (self.base_seed * local_micro_offset) + self.curr_layer
@@ -331,6 +334,8 @@ class PipelineModule(nn.Module):
             x = layer(x, y)
             x.pp_input = x.pp_output
             x.pp_output = None
+            time_mark(f"layer_{idx}_end", dist.get_rank())
+
         return x, ys
 
     def _partition_layers(self, method='uniform'):
