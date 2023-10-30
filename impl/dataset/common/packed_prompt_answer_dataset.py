@@ -9,6 +9,8 @@ import torch.utils.data
 from base.datapack import ffd_with_result_unsorted
 import api.data
 
+logger = logging.getLogger("Packed Prompt Dataset")
+
 
 class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
 
@@ -67,8 +69,12 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
 
         tokenizer = util.tokenizer
 
+        for x in data:
+            if x['answer'].startswith(x['prompt']):
+                raise ValueError("Answer should not start with prompt.")
+
         prompts_str = [x['prompt'] for x in data]
-        prompt_chosen_str = [x['answer'] + tokenizer.eos_token for x in data]
+        prompt_chosen_str = [x['prompt'] + x['answer'] + tokenizer.eos_token for x in data]
 
         prompt_encodings = tokenizer(prompts_str,
                                      truncation=True,
@@ -88,17 +94,34 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
         seqlens = prompt_chosen_encodings['length']
         seqs = prompt_chosen_encodings['input_ids']
 
+        indices_to_pop = []
         prompt_masks = []
-        for seq, prompt, seqlen, prompt_len in zip(seqs, prompts, seqlens, prompt_lengths):
-            assert seq[:prompt_len] == prompt
-            assert seqlen >= prompt_len, (seqlen, prompt_len)
+        for ii, (seq, prompt, seqlen, prompt_len, pstr, pcstr) in enumerate(
+                zip(seqs, prompts, seqlens, prompt_lengths, prompts_str, prompt_chosen_str)):
+            try:
+                assert seq[:prompt_len] == prompt, (prompt, seq, prompt_len, pstr, pcstr)
+                assert seqlen >= prompt_len, (seqlen, prompt_len)
+            except AssertionError:
+                indices_to_pop.append(ii)
             prompt_masks.append([1] * prompt_len + [0] * (seqlen - prompt_len))
+
+        for ii in reversed(indices_to_pop):
+            seqlens.pop(ii)
+            seqs.pop(ii)
+            prompts.pop(ii)
+            prompt_lengths.pop(ii)
+            prompt_masks.pop(ii)
 
         self.seqlens = seqlens
         self.prompt_lengths = prompt_lengths
         self.seqs = seqs
         self.prompts = prompts
         self.prompt_masks = prompt_masks
+
+        assert len(self.seqlens) == len(self.prompt_lengths) == len(self.prompts) == len(
+            self.prompt_masks) == len(self.seqs)
+
+        logger.info(f"Number of sequences in the dataset: {len(self.seqs)}")
 
         self.n_tokens_per_batch = n_tokens_per_batch
 

@@ -20,9 +20,18 @@ def sample_log_uniform(low, high):
     return math.exp(low + (high - low) * random.random())
 
 
-class WpsFormulaSupervisedFinetuningExperiment(Experiment):
+class PackedSupervisedFinetuningExperiment(Experiment):
 
-    def __init__(self, n_models=1, seed=1, total_train_epochs=8, benchmark_only=False):
+    def __init__(
+        self,
+        n_models=1,
+        seed=1,
+        total_train_epochs=8,
+        base_model='starcoder',
+        train_dataset_path="/lustre/fw/datasets/wps-formula-sft/dllm-train-0908-formula-psi.jsonl",
+        valid_dataset_path="/lustre/fw/datasets/wps-formula-sft/dllm-valid-0908-formula-psi.jsonl",
+        benchmark_only=False,
+    ):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -37,9 +46,13 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
         self.total_train_epochs = total_train_epochs
         self.benchmark_only = benchmark_only
+        self.base_model = base_model
+        self.train_dataset_path = train_dataset_path
+        self.valid_dataset_path = valid_dataset_path
         if self.benchmark_only:
             self.n_models = self.n_data_workers = 1
             self.total_train_epochs = 1
+            self.base_model = 'starcoder'
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -67,19 +80,29 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
     def initial_setup(self) -> ExperimentConfig:
         if not self.benchmark_only:
-            model_path = "/data/aigc/public/starcoder-16bit"
+            if self.base_model == 'starcoder':
+                model_path = "/data/aigc/public/starcoder-16bit"
+            elif self.base_model == 'gpt2':
+                model_path = "/lustre/fw/pretrained/gpt2-large/"
+            else:
+                raise NotImplementedError()
         else:
             model_path = "/data/aigc/llm/checkpoints/1l-starcoder"
         train_batch_size_per_device = 4
         eval_batch_size_per_device = 4
         max_seq_len = 4096
+        
+        if self.base_model == 'gpt2':
+            train_batch_size_per_device *= max_seq_len // 1024
+            eval_batch_size_per_device *= max_seq_len // 1024
+            max_seq_len = 1024
 
         dataset = Dataset(
             'packed_prompt_answer',
             args=dict(
                 n_tokens_per_batch=max_seq_len * train_batch_size_per_device,
                 max_length=max_seq_len,
-                dataset_path="/lustre/fw/datasets/wps-formula-sft/dllm-train-0908-formula-psi.jsonl",
+                dataset_path=self.train_dataset_path,
             ),
         )
         dataloader = eval_dataloader = DataLoader('iterable_dataset_loader')
@@ -93,8 +116,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         ]
 
         eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args[
-            'dataset_path'] = "/lustre/fw/datasets/wps-formula-sft/dllm-valid-0908-formula-psi.jsonl"
+        eval_dataset.args['dataset_path'] = self.valid_dataset_path
         eval_dataset.args['n_tokens_per_batch'] = max_seq_len * eval_batch_size_per_device
 
         backend = ModelBackend(
@@ -116,18 +138,25 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
             ),
         )
 
-        model = Model("flash_mqat_clm_hf",
-                      args=dict(model_path=model_path,),
-                      wrappers=[
-                          ModelWrapper('lora',
-                                       args=dict(
-                                           lora_module_kwargs=dict(
-                                               lora_dim=self.lora_dim,
-                                               lora_scaling=self.lora_scaling,
-                                           ),
-                                           lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
-                                       ))
-                      ])
+        model = Model(
+            "flash_mqat_clm_hf",
+            args=dict(
+                model_path=model_path,
+                from_type=self.base_model,
+            ),
+            wrappers=[
+                ModelWrapper(
+                    'lora',
+                    args=dict(
+                        lora_module_kwargs=dict(
+                            lora_dim=self.lora_dim,
+                            lora_scaling=self.lora_scaling,
+                        ),
+                        lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
+                    ),
+                ),
+            ],
+        )
 
         interface = ModelInterface('flash_sft')
 
@@ -158,9 +187,29 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         return cfg
 
 
-seeds = range(1, 6)
+seeds = list(range(1, 6)) + [42]
 for s in seeds:
     exp_name = f"wpsf-sft-flash-s{s}"
-    register_experiment(exp_name, functools.partial(WpsFormulaSupervisedFinetuningExperiment, seed=s))
+    register_experiment(exp_name, functools.partial(PackedSupervisedFinetuningExperiment, seed=s))
+    exp_name = f"senti-sft-pos-neg-s{s}"
+    register_experiment(
+        exp_name,
+        functools.partial(
+            PackedSupervisedFinetuningExperiment,
+            seed=s,
+            base_model='gpt2',
+            train_dataset_path="/lustre/fw/datasets/imdb/rl/sft_pos_neg-train.jsonl",
+            valid_dataset_path="/lustre/fw/datasets/imdb/rl/sft_pos_neg-valid.jsonl",
+        ))
+    exp_name = f"senti-sft-pos-s{s}"
+    register_experiment(
+        exp_name,
+        functools.partial(
+            PackedSupervisedFinetuningExperiment,
+            seed=s,
+            base_model='gpt2',
+            train_dataset_path="/lustre/fw/datasets/imdb/rl/sft_pos-train.jsonl",
+            valid_dataset_path="/lustre/fw/datasets/imdb/rl/sft_pos-valid.jsonl",
+        ))
 register_experiment("wpsf-sft-flash-benchmark",
-                    functools.partial(WpsFormulaSupervisedFinetuningExperiment, benchmark_only=True))
+                    functools.partial(PackedSupervisedFinetuningExperiment, benchmark_only=True))

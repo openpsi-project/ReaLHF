@@ -364,6 +364,7 @@ class VocabPositionEmbedding(nn.Module):
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[Union[str, torch.device]] = None):
         super().__init__()
+        self.n_positions = n_positions
         self.wte = nn.Embedding(vocab_size, hidden_dim, dtype=dtype, device=device)
         self.wpe = nn.Embedding(n_positions, hidden_dim, dtype=dtype, device=device)
         self.embed_drop = nn.Dropout(embed_pdrop)
@@ -401,6 +402,8 @@ class VocabPositionEmbedding(nn.Module):
             #       f"y.input_ids.shape={y.input_ids.shape}\n"
             #       f"y.position_ids={y.position_ids}"
             #       f"y.input_ids={y.input_ids}")
+            if x.max_seqlen > self.n_positions:
+                raise ValueError(f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions}).")
             assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
             assert y.position_ids.shape == y.input_ids.shape
 
@@ -729,6 +732,16 @@ class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
         return cls(FlashMQATForCausalLM.from_starcoder(from_model, model_path, dtype, device))
 
     @classmethod
+    def from_gpt2(
+        cls,
+        from_model: Optional[transformers.PreTrainedModel] = None,
+        model_path: Optional[str] = None,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        return cls(FlashMQATForCausalLM.from_gpt2(from_model, model_path, dtype, device))
+
+    @classmethod
     def from_pretrained(
         cls,
         model_path: str,
@@ -758,6 +771,11 @@ def make_flash_mqat_clm_hf(
                                                                      dtype=dtype,
                                                                      device=device)
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
+    elif from_type == 'gpt2':
+        module = HuggingfaceLikeFlashMQATForCausalLM.from_gpt2(model_path=model_path,
+                                                               dtype=dtype,
+                                                               device=device)
+        tokenizer = api.huggingface.load_hf_tokenizer(model_path)
     else:
         raise NotImplementedError()
     return api.model.Model(name, module, tokenizer, device)
@@ -832,6 +850,24 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         return model
 
     @classmethod
+    def from_gpt2(
+        cls,
+        model_path: Optional[str] = None,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+        v_head_path: Optional[str] = None,
+        output_scaling: float = 1.0,
+        output_bias: float = 0.0,
+    ):
+        from_model = HuggingfaceLikeFlashMQATForCausalLM.from_gpt2(model_path=model_path,
+                                                                   dtype=dtype,
+                                                                   device=device)
+        model = cls(from_model.net.transformer, output_bias=output_bias, output_scaling=output_scaling)
+        if v_head_path is not None:
+            model.head.load_state_dict(torch.load(v_head_path))
+        return model
+
+    @classmethod
     def from_sft_model(
         cls,
         from_model: Optional[HuggingfaceLikeFlashMQATForCausalLM] = None,
@@ -894,6 +930,13 @@ def make_flash_mqat_critic(
                                                                       v_head_path=v_head_path,
                                                                       output_scaling=output_scaling,
                                                                       output_bias=output_bias)
+    elif from_type == 'gpt2':
+        module = DeepSpeedChatLikeFlashMQATCriticModel.from_gpt2(model_path=model_path,
+                                                                 dtype=dtype,
+                                                                 device=device,
+                                                                 v_head_path=v_head_path,
+                                                                 output_scaling=output_scaling,
+                                                                 output_bias=output_bias)
     elif from_type == 'self':
         module = DeepSpeedChatLikeFlashMQATCriticModel.from_pretrained(model_path=model_path,
                                                                        dtype=dtype,
