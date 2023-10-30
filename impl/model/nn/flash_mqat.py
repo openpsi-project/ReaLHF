@@ -42,6 +42,8 @@ class FlashMQATConfig:
     activation_function: str = "gelu"
     ckpt_attn: bool = False
     ckpt_mlp: bool = False
+    fixed_abs_position_ids: bool = False
+    scale_attn_by_inverse_layer_idx: bool = True
 
 
 @dataclasses.dataclass
@@ -106,6 +108,7 @@ def torch_attn_func(
         mask = torch.tril(torch.ones(seqlen, seqlen, device=q.device, dtype=torch.bool))
     else:
         mask_softmax = False
+    upcast_unscale = 1.0
     if mask_softmax:
         scores = upcast_masked_softmax(scores,
                                        mask,
@@ -135,6 +138,7 @@ class CausalSelfAttentionLayer(nn.Module):
         attn_pdrop: float,
         layer_index: int,
         layer_norm_epsilon: float,
+        scale_attn_by_inverse_layer_idx: bool,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -165,6 +169,8 @@ class CausalSelfAttentionLayer(nn.Module):
 
         self.layer_index = layer_index
 
+        self.scale_attn_by_inverse_layer_idx = scale_attn_by_inverse_layer_idx
+
     def train(self, mode: bool):
         if not mode:
             self.applied_attn_pdrop = 0.0
@@ -185,8 +191,12 @@ class CausalSelfAttentionLayer(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # input shape: [bs, seq, hidden_dim]
         # default upcast, scale
-        unscale = self.layer_index + 1
-        scale_factor = unscale**-1
+        if self.scale_attn_by_inverse_layer_idx:
+            unscale = self.layer_index + 1
+            scale_factor = unscale**-1
+        else:
+            unscale = 1.0
+            scale_factor = 1
         scale_factor /= self.d**0.5
 
         qkv: torch.Tensor = self.c_attn(hidden_states)
@@ -268,15 +278,17 @@ class FlashMQATBlock(nn.Module):
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
-        self.attn = CausalSelfAttentionLayer(hidden_dim=config.hidden_dim,
-                                             n_kv_heads=config.n_kv_heads,
-                                             head_dim=config.head_dim,
-                                             resid_pdrop=config.resid_pdrop,
-                                             attn_pdrop=config.attn_pdrop,
-                                             layer_index=layer_index,
-                                             layer_norm_epsilon=config.layer_norm_epsilon,
-                                             dtype=dtype,
-                                             device=device)
+        self.attn = CausalSelfAttentionLayer(
+            hidden_dim=config.hidden_dim,
+            n_kv_heads=config.n_kv_heads,
+            head_dim=config.head_dim,
+            resid_pdrop=config.resid_pdrop,
+            attn_pdrop=config.attn_pdrop,
+            layer_index=layer_index,
+            layer_norm_epsilon=config.layer_norm_epsilon,
+            scale_attn_by_inverse_layer_idx=config.scale_attn_by_inverse_layer_idx,
+            dtype=dtype,
+            device=device)
         self.mlp = LayerNormMLP(hidden_dim=config.hidden_dim,
                                 intermediate_dim=config.intermediate_dim,
                                 resid_pdrop=config.resid_pdrop,
@@ -348,6 +360,7 @@ class VocabPositionEmbedding(nn.Module):
                  n_positions: int,
                  hidden_dim: int,
                  embed_pdrop: float,
+                 fixed_abs_position_ids: bool,
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[Union[str, torch.device]] = None):
         super().__init__()
@@ -357,6 +370,7 @@ class VocabPositionEmbedding(nn.Module):
 
         self.self_attention_mask = torch.tril(
             torch.ones((n_positions, n_positions), dtype=torch.bool, device=device))
+        self.fixed_abs_position_ids = fixed_abs_position_ids
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         is_gen = y.cache_seqlens is not None
@@ -392,10 +406,14 @@ class VocabPositionEmbedding(nn.Module):
 
         if x.attention_mask is not None:
             # For debugging only.
-            # create position_ids on the fly for batch generation
             attention_mask = x.attention_mask
-            y.position_ids = attention_mask.long().cumsum(-1) - 1
-            y.position_ids.masked_fill_(attention_mask == 0, 1)
+            if self.fixed_abs_position_ids:
+                y.position_ids = torch.arange(y.input_ids.shape[-1],
+                                              dtype=torch.long,
+                                              device=y.input_ids.device).unsqueeze(0)
+            else:
+                y.position_ids = attention_mask.long().cumsum(-1) - 1
+                y.position_ids.masked_fill_(attention_mask == 0, 1)
             seqlen = y.input_ids.shape[-1]
             self_attention_mask = self.self_attention_mask[None, :seqlen, :seqlen]
             self_attention_mask = self_attention_mask * attention_mask.view(batch_size, 1, -1).to(
@@ -424,6 +442,7 @@ class FlashMQATBase(nn.Module):
                                                       config.n_positions,
                                                       config.hidden_dim,
                                                       config.embd_pdrop,
+                                                      fixed_abs_position_ids=config.fixed_abs_position_ids,
                                                       dtype=dtype,
                                                       device=device)
         self.h = nn.ModuleList([
@@ -555,6 +574,74 @@ class FlashMQATForCausalLM(nn.Module):
             for rf, rt in zip(replace_from, replace_to):
                 if rf in k:
                     k = k.replace(rf, rt)
+            new_state_dict[k] = v
+        model.load_state_dict(new_state_dict)
+        return model
+
+    @classmethod
+    def from_gpt2(
+        cls,
+        from_model: Optional[transformers.PreTrainedModel] = None,
+        model_path: Optional[str] = None,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        if from_model is None:
+            assert model_path is not None
+            gpt2config: transformers.GPT2Config = transformers.AutoConfig.from_pretrained(
+                os.path.join(model_path, "config.json"))
+            from_model = transformers.AutoModelForCausalLM.from_pretrained(model_path)
+        else:
+            gpt2config = from_model.config
+        config = FlashMQATConfig(
+            n_layers=gpt2config.n_layer,
+            n_kv_heads=gpt2config.n_head,
+            attn_pdrop=gpt2config.attn_pdrop,
+            embd_pdrop=gpt2config.embd_pdrop,
+            layer_norm_epsilon=gpt2config.layer_norm_epsilon,
+            hidden_dim=gpt2config.n_embd,
+            head_dim=gpt2config.n_embd // gpt2config.n_head,
+            intermediate_dim=gpt2config.n_inner if gpt2config.n_inner is not None else 4 * gpt2config.n_embd,
+            n_positions=gpt2config.n_positions,
+            resid_pdrop=gpt2config.resid_pdrop,
+            vocab_size=gpt2config.vocab_size,
+            activation_function=gpt2config.activation_function,
+            scale_attn_by_inverse_layer_idx=False,
+            fixed_abs_position_ids=True,
+        )
+        model = cls(config, dtype=dtype, device=device)
+
+        state_dict = from_model.state_dict()
+
+        new_state_dict = {}
+        replace_from = [
+            "wte.weight",
+            "wpe.weight",
+            ".ln_1.",
+            ".ln_2.",
+            ".c_attn.weight",
+            ".c_attn.bias",
+            "ln_f.weight",
+            "ln_f.bias",
+        ]
+        replace_to = [
+            "embedding_layer.wte.weight",
+            "embedding_layer.wpe.weight",
+            ".attn.c_attn.ln.",
+            ".mlp.ln.",
+            ".c_attn.linear.weight",
+            ".c_attn.linear.bias",
+            f"h.{config.n_layers - 1}.ln_f.weight",
+            f"h.{config.n_layers - 1}.ln_f.bias",
+        ]
+        for k, v in state_dict.items():
+            for rf, rt in zip(replace_from, replace_to):
+                if rf in k:
+                    k = k.replace(rf, rt)
+            if k.endswith(".attn.bias"):
+                continue
+            if k.endswith(".linear.weight") or k.endswith("proj.weight") or k.endswith('fc.weight'):
+                v = v.transpose(0, 1)
             new_state_dict[k] = v
         model.load_state_dict(new_state_dict)
         return model
