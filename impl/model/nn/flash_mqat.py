@@ -42,8 +42,9 @@ class FlashMQATConfig:
     activation_function: str = "gelu"
     ckpt_attn: bool = False
     ckpt_mlp: bool = False
-    fixed_abs_position_ids: bool = False
     scale_attn_by_inverse_layer_idx: bool = True
+    # only used for debugging
+    fixed_abs_position_ids: bool = False
 
 
 @dataclasses.dataclass
@@ -108,7 +109,6 @@ def torch_attn_func(
         mask = torch.tril(torch.ones(seqlen, seqlen, device=q.device, dtype=torch.bool))
     else:
         mask_softmax = False
-    upcast_unscale = 1.0
     if mask_softmax:
         scores = upcast_masked_softmax(scores,
                                        mask,
