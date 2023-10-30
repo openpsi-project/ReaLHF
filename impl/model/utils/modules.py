@@ -44,17 +44,20 @@ class LayerNormMLP(nn.Module):
         super().__init__()
         if dtype is None:
             dtype = torch.float16
+
         self.ln = nn.LayerNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
         self.c_fc = nn.Linear(hidden_dim, intermediate_dim, dtype=dtype, device=device)
         self.c_proj = nn.Linear(intermediate_dim, hidden_dim, dtype=dtype, device=device)
         if activation_function == "gelu":
             self.act = nn.functional.gelu
+        elif activation_function == 'gelu_new':
+            from .activations import new_gelu_activation
+            self.act = new_gelu_activation
         else:
             raise NotImplementedError("Only \"gelu\" activation function is available.")
         self.dropout = nn.Dropout(resid_pdrop)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        import pickle
         hidden_states = self.ln(hidden_states)
         hidden_states = self.c_fc(hidden_states)
         hidden_states = self.act(hidden_states)
