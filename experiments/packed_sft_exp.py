@@ -91,7 +91,7 @@ class PackedSupervisedFinetuningExperiment(Experiment):
         train_batch_size_per_device = 4
         eval_batch_size_per_device = 4
         max_seq_len = 4096
-        
+
         if self.base_model == 'gpt2':
             train_batch_size_per_device *= max_seq_len // 1024
             eval_batch_size_per_device *= max_seq_len // 1024

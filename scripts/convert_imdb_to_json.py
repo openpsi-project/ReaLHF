@@ -1,7 +1,8 @@
 import json
 import os
-import transformers
+
 import numpy as np
+import transformers
 
 tokenizer = transformers.AutoTokenizer.from_pretrained("/lustre/fw/pretrained/gpt2-large")
 if tokenizer.pad_token_id is None:
