@@ -332,8 +332,7 @@ class PipelineModule(nn.Module):
             # if self.stage_id < self.num_stages - 1:
             x.pp_input = x.pp_output
 
-        outputs = data_list_to_tensor_tuple([x])
-        return outputs
+        return x, ys
 
     def _partition_layers(self, method='uniform'):
         num_stages = self._topo.get_dim('pipe')

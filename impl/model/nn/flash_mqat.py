@@ -383,10 +383,6 @@ class VocabPositionEmbedding(nn.Module):
             lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             y.position_ids = torch.cat(
                 [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
-            # print(f"flash_mqat.py y.position_ids.shape={y.position_ids.shape} "
-            #       f"y.input_ids.shape={y.input_ids.shape}\n"
-            #       f"y.position_ids={y.position_ids}"
-            #       f"y.input_ids={y.input_ids}")
             assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
             assert y.position_ids.shape == y.input_ids.shape
 
@@ -942,7 +938,6 @@ def generate(
         # Model forward will set k/v cache in PipeCacheData.
         logits = model(x, ys).pp_output
         logits = logits[cu_seqlens[1:] - 1]
-        # print(max_seq_len, gconfig.max_new_tokens)
         for y in ys[1:-1]:
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(max_seq_len + gconfig.max_new_tokens,
@@ -994,7 +989,7 @@ def generate(
         ys[0].input_ids = next_tokens.unsqueeze(-1)  # [bs, 1], seqlen=1
         ys[0].position_ids = None
         # K/v cache will be changed in-place with flash attention.
-        logits = model(x, ys).pp_output.squeeze()
+        logits = model(x, ys).pp_output.squeeze(dim=1)
         for yidx, y in enumerate(ys[:-1]):
             y.cache_seqlens += 1
 

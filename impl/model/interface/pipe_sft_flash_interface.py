@@ -133,18 +133,23 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 return dict()
 
     @torch.inference_mode()
-    def generate(self, model_: api.model.Model, data: NamedArray) -> Dict:
+    def generate(self,
+                 model_: api.model.Model,
+                 data: NamedArray,
+                 gconfig: Optional[GenerationConfig] = None) -> Dict:
         packed_input_ids = data['packed_input_ids'].squeeze()
         cu_seqlens = data['cu_seqlens'].squeeze()
-        gconfig = GenerationConfig(
-            min_new_tokens=3,
-            max_new_tokens=3,
-        )
+        if gconfig is None:
+            gconfig = GenerationConfig(
+                min_new_tokens=10,
+                max_new_tokens=20,
+            )
         module = model_.module
         tokenizer = model_.tokenizer
 
         module.eval()
 
+        logger.debug(f"gconfig: {gconfig}")
         res = module.generate(tokenizer=tokenizer,
                               packed_input_ids=packed_input_ids,
                               cu_seqlens=cu_seqlens,
