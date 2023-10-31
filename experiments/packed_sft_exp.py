@@ -19,12 +19,14 @@ class PackedSupervisedFinetuningExperiment(Experiment):
 
     def __init__(
         self,
-        n_models=4,
+        dp_size=8,
         seed=1,
         total_train_epochs=8,
         base_model='starcoder',
-        train_dataset_path="/lustre/fw/datasets/wps-formula-sft/dllm-train-0908-formula-psi.jsonl",
-        valid_dataset_path="/lustre/fw/datasets/wps-formula-sft/dllm-valid-0908-formula-psi.jsonl",
+        train_dataset_path="/lustre/fw/datasets/wps-formula-sft/train.jsonl",
+        valid_dataset_path="/lustre/fw/datasets/wps-formula-sft/valid.jsonl",
+        train_tokens_per_batch: int = 32768,
+        eval_tokens_per_batch: int = 65536,
         use_lora: bool = True,
         benchmark_only=False,
     ):
@@ -37,8 +39,8 @@ class PackedSupervisedFinetuningExperiment(Experiment):
         self.lr_scheduler_type = 'cosine'
         self.warmup_proportion = 0.02
 
-        self.n_models = self.n_data_workers = n_models
-        assert self.n_models == self.n_data_workers
+        self.dp_size = dp_size
+        self.n_data_workers = 1
         self.seed = seed
 
         self.total_train_epochs = total_train_epochs
@@ -46,8 +48,12 @@ class PackedSupervisedFinetuningExperiment(Experiment):
         self.base_model = base_model
         self.train_dataset_path = train_dataset_path
         self.valid_dataset_path = valid_dataset_path
+
+        self.train_tokens_per_batch = train_tokens_per_batch
+        self.eval_tokens_per_batch = eval_tokens_per_batch
+
         if self.benchmark_only:
-            self.n_models = self.n_data_workers = 1
+            self.dp_size = self.n_data_workers = 1
             self.total_train_epochs = 1
             self.base_model = 'starcoder'
 
@@ -65,7 +71,7 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                 scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
             ),
             model_worker=TasksGroup(
-                count=self.n_models,
+                count=self.dp_size,
                 scheduling=Scheduling.model_worker_default(
                     cpu=4,
                     gpu=1,
@@ -85,19 +91,12 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                 raise NotImplementedError()
         else:
             model_path = "/data/aigc/llm/checkpoints/1l-starcoder"
-        train_batch_size_per_device = 1
-        eval_batch_size_per_device = 4
-        max_seq_len = 4096
-
-        if self.base_model == 'gpt2':
-            train_batch_size_per_device *= max_seq_len // 1024
-            eval_batch_size_per_device *= max_seq_len // 1024
-            max_seq_len = 1024
+        max_seq_len = 8192 if self.base_model == 'starcoder' else 1024
 
         dataset = Dataset(
             'packed_prompt_answer',
             args=dict(
-                n_tokens_per_batch=max_seq_len * train_batch_size_per_device,
+                n_tokens_per_batch=self.train_tokens_per_batch // self.n_data_workers,
                 max_length=max_seq_len,
                 dataset_path=self.train_dataset_path,
             ),
@@ -114,7 +113,7 @@ class PackedSupervisedFinetuningExperiment(Experiment):
 
         eval_dataset = copy.deepcopy(dataset)
         eval_dataset.args['dataset_path'] = self.valid_dataset_path
-        eval_dataset.args['n_tokens_per_batch'] = max_seq_len * eval_batch_size_per_device
+        eval_dataset.args['n_tokens_per_batch'] = self.eval_tokens_per_batch // self.n_data_workers
 
         backend = ModelBackend(
             'ds_train',
@@ -162,9 +161,9 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
                 dp_rank=i,
-                topo=PipeModelDataParallelTopology(1, 1, self.n_models),
+                topo=PipeModelDataParallelTopology(1, 1, self.dp_size),
                 cuda_cache_clear_freq=60,
-            ) for i in range(self.n_models)
+            ) for i in range(self.dp_size)
         ]
 
         cfg = ExperimentConfig(
