@@ -717,8 +717,8 @@ class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
         cache_seqlens: Optional[torch.Tensor] = None,
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
     ) -> DuckGenerationOutput:
-        seq, scores, mask = generate(self.net, tokenizer, input_ids, attention_mask, k_caches, v_caches,
-                                     cache_seqlens, gconfig)
+        seq, scores, mask, _, _ = generate(self.net, tokenizer, input_ids, attention_mask, k_caches, v_caches,
+                                           cache_seqlens, gconfig)
         return DuckGenerationOutput(seq, scores, mask)
 
     @classmethod
@@ -748,7 +748,13 @@ class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
-        return cls(FlashMQATForCausalLM.from_pretrained(model_path, dtype, device))
+        with open(os.path.join(model_path, "config.json"), 'r') as f:
+            config = FlashMQATConfig(**json.load(f))
+        state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
+        net = FlashMQATForCausalLM(config, dtype, device)
+        model = cls(net)
+        model.load_state_dict(state_dict)
+        return model
 
 
 def make_flash_mqat_clm_hf(
