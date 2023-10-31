@@ -190,7 +190,10 @@ class MasterWorker(worker_base.Worker):
             # Request training specification from data workers, e.g. batch size and total train steps.
             request_all(self.__data_streams, 'spec', [None for _ in self.__data_streams])
             ft_specs: List[model_api.FinetuneSpec] = gather_all_replies(self.__data_streams)
-            assert len(set(x.steps_per_epoch for x in ft_specs)) == 1
+            if len(set(x.steps_per_epoch for x in ft_specs)) != 1:
+                raise RuntimeError(f"steps_per_epoch not equal among data workers:"
+                                   f" {list(x.steps_per_epoch for x in ft_specs)}. "
+                                   "Consider launching less data workers.")
             ft_spec = ft_specs[0]
             ft_spec.total_train_epochs = self.config.total_train_epochs
             ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
@@ -207,7 +210,7 @@ class MasterWorker(worker_base.Worker):
                 model_name = model_id.split('@')[0]
                 num_dp = self.__model_topos[model_name].get_dim('data')
                 model_ft_spec = copy.deepcopy(ft_spec)
-                assert batch_size % num_dp == 0, (batch_size, num_dp)
+                # FIXME: batch size returned by data workers may be the number of tokens, is this correct for deepspeed config?
                 model_ft_spec.batch_size_per_device = batch_size // num_dp
                 model_ft_specs.append(model_ft_spec)
             request_all(list(self.__model_streams.values()), 'initialize', model_ft_specs)
