@@ -463,11 +463,11 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
                                                         attention_mask=prompt_att_mask,
                                                         gconfig=gconfig)
 
-        g, logprob, mask, *_ = generate(model=self.model,
-                                        tokenizer=self.tokenizer,
-                                        input_ids=prompt,
-                                        attention_mask=prompt_att_mask,
-                                        gconfig=gconfig)
+        g, logprob, mask, _, _ = generate(model=self.model,
+                                          tokenizer=self.tokenizer,
+                                          input_ids=prompt,
+                                          attention_mask=prompt_att_mask,
+                                          gconfig=gconfig)
 
         # print(self.tokenizer.batch_decode(torch.cat([prompt, g], -1)))
         assert torch.allclose(g, vg), (g, vg)

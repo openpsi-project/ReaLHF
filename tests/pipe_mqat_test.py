@@ -25,10 +25,10 @@ NUM_PP = 4
 NUM_DP = 1
 WORLD_SIZE = NUM_PP * NUM_DP
 BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
-PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_{NUM_PP}pp_{NUM_DP}s"
+PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_{NUM_PP}pp_1s"
 BATCH_SIZE = 8
-MIN_NEW_TOKENS = 20
-MAX_NEW_TOKENS = 20
+MIN_NEW_TOKENS = 50
+MAX_NEW_TOKENS = 50
 
 BARRIER = mp.Barrier(WORLD_SIZE)
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
@@ -302,4 +302,4 @@ class PipeFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testGenerateAccordance")
+    unittest.main(defaultTest="PipeFlashMQATTest.testGenerate")

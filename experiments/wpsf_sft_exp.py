@@ -3,22 +3,15 @@ import math
 import random
 
 from api.config import *
-from api.ecs import Commands, DataQuery, MasterWorkerECS, ModelQuery, RawDataQuery
+from api.dfg import ModelInterfaceType, ModelRPC
+from base.topology import PipeModelDataParallelTopology
 
-
-def sft(
-    commands: Commands,
-    model: ModelQuery['default'],
-    packed_input_ids: RawDataQuery['packed_input_ids'],
-    cu_seqlens: RawDataQuery['cu_seqlens'],
-    prompt_mask: RawDataQuery['prompt_mask'],
-):
-    inputs = commands.build_model_inputs(
-        packed_input_ids=packed_input_ids,
-        cu_seqlens=cu_seqlens,
-        prompt_mask=prompt_mask,
-    )
-    commands.log(model.train_step(inputs))
+sft = ModelRPC(
+    "default",
+    ModelInterfaceType.TRAIN_STEP,
+    input_data=['packed_input_ids', 'cu_seqlens', 'prompt_mask'],
+    dp_broker_type='packed',
+)
 
 
 def sample_log_uniform(low, high):
@@ -29,7 +22,7 @@ def sample_log_uniform(low, high):
 
 class WpsFormulaSupervisedFinetuningExperiment(Experiment):
 
-    def __init__(self, n_models=8, seed=1, total_train_epochs=4, benchmark_only=False):
+    def __init__(self, n_models=1, seed=1, total_train_epochs=8, benchmark_only=False):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -59,7 +52,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
             ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=4, mem=10000),
+                scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
             ),
             model_worker=TasksGroup(
                 count=self.n_models,
@@ -84,7 +77,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         max_seq_len = 2048
 
         dataset = Dataset(
-            'wpsf_sft_packed',
+            'packed_prompt_answer',
             args=dict(
                 n_tokens_per_batch=max_seq_len * train_batch_size_per_device,
                 max_length=max_seq_len,
@@ -97,7 +90,6 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
             DataWorker(
                 tokenizer_name_or_path=model_path,
                 datasets=[dataset],
-                stream=RequestReplyStream(f"data{i}"),
                 dataloader=dataloader,
                 seed=self.seed,
             ) for i in range(self.n_data_workers)
@@ -126,19 +118,20 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
             ),
         )
 
-        model = Model("flash_mqat_clm_hf_lora",
-                      args=dict(
-                          model_path=model_path,
-                          lora_module_kwargs=dict(
-                              lora_dim=self.lora_dim,
-                              lora_scaling=self.lora_scaling,
-                          ),
-                          lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
-                      ))
+        model = Model("flash_mqat_clm_hf",
+                      args=dict(model_path=model_path,),
+                      wrappers=[
+                          ModelWrapper('lora',
+                                       args=dict(
+                                           lora_module_kwargs=dict(
+                                               lora_dim=self.lora_dim,
+                                               lora_scaling=self.lora_scaling,
+                                           ),
+                                           lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
+                                       ))
+                      ])
 
         interface = ModelInterface('flash_sft')
-
-        streams = [RequestReplyStream(f"model{i}") for i in range(self.n_models)]
 
         model_worker = [
             ModelWorker(
@@ -147,23 +140,22 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                 backend=backend,
                 interface=interface,
                 model_name='default',
-                stream=streams[i],
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
                 cuda_cache_cleanliness=True,
-                cuda_cache_clear_freq=1,
+                cuda_cache_clear_freq=10,
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_models),
             ) for i in range(self.n_models)
         ]
-
-        ecs = MasterWorkerECS(model_worker).add_systems([sft])
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=None,
-            save_frequency_epochs=None if self.benchmark_only else 1,
+            save_frequency_epochs=1,
             save_frequency_seconds=None,
-            eval_frequency_epochs=None if self.benchmark_only else 1,
-            master_ecs=ecs,
+            eval_frequency_epochs=1,
+            model_rpcs=[sft],
             data_worker=data_worker,
             model_worker=model_worker,
         )

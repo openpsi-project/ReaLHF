@@ -3,27 +3,15 @@ import math
 import random
 
 from api.config import *
-from api.ecs import Commands, MasterWorkerECS, ModelQuery, RawDataQuery
+from api.dfg import ModelInterfaceType, ModelRPC
 from base.cluster import spec as cluster_spec
+from base.topology import PipeModelDataParallelTopology
 
-
-def rw(
-    commands: Commands,
-    model: ModelQuery['default'],
-    packed_input_ids: RawDataQuery['packed_input_ids'],
-    cu_seqlens: RawDataQuery['cu_seqlens'],
-    labels: RawDataQuery['labels'],
-    n_contrastive_batches: RawDataQuery['n_contrastive_batches'],
-    contrastive_dim: RawDataQuery['contrastive_dim'],
-):
-    inputs = commands.build_model_inputs(
-        packed_input_ids=packed_input_ids,
-        cu_seqlens=cu_seqlens,
-        labels=labels,
-        contrastive_dim=contrastive_dim,
-        n_contrastive_batches=n_contrastive_batches,
-    )
-    commands.log(model.train_step(inputs))
+train_rw = ModelRPC(
+    'default',
+    ModelInterfaceType.TRAIN_STEP,
+    input_data=['packed_input_ids', 'cu_seqlens', 'labels', 'n_contrastive_batches', 'contrastive_dim'],
+)
 
 
 class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
@@ -99,7 +87,6 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
             DataWorker(
                 tokenizer_name_or_path=model_path,
                 datasets=[dataset],
-                stream=RequestReplyStream(f"data{i}"),
                 dataloader=dataloader,
                 seed=self.seed,
             ) for i in range(self.n_data_workers)
@@ -129,22 +116,35 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
             ),
         )
 
-        model = Model("flash_mqat_critic_lora",
-                      args=dict(
-                          model_path=model_path,
-                          from_type='starcoder',
-                          lora_module_kwargs=dict(
-                              lora_dim=self.lora_dim,
-                              lora_scaling=self.lora_scaling,
-                          ),
-                          lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
-                          load_lora_path=sft_lora_path if not self.benchmark_only else None,
-                          lora_op_after_creation='squash_init',
-                      ))
+        model = Model(
+            "flash_mqat_critic",
+            args=dict(
+                model_path=model_path,
+                from_type='starcoder',
+            ),
+            wrappers=[
+                ModelWrapper('lora',
+                             args=dict(
+                                 lora_module_kwargs=dict(
+                                     lora_dim=self.lora_dim,
+                                     lora_scaling=self.lora_scaling,
+                                 ),
+                                 lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
+                                 load_lora_path=sft_lora_path if not self.benchmark_only else None,
+                                 lora_op_after_creation='squash',
+                             )),
+                ModelWrapper('lora',
+                             args=dict(
+                                 lora_module_kwargs=dict(
+                                     lora_dim=self.lora_dim,
+                                     lora_scaling=self.lora_scaling,
+                                 ),
+                                 lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
+                             ))
+            ],
+        )
 
         interface = ModelInterface('flash_plrw')
-
-        streams = [RequestReplyStream(f"model{i}") for i in range(self.n_models)]
 
         model_worker = [
             ModelWorker(
@@ -153,13 +153,12 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
                 backend=backend,
                 interface=interface,
                 model_name='default',
-                stream=streams[i],
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_models),
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
             ) for i in range(self.n_models)
         ]
-
-        ecs = MasterWorkerECS(model_worker).add_systems([rw])
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
@@ -167,7 +166,7 @@ class WpsFormulaPlackettLuceRewardModelingExperiment(Experiment):
             save_frequency_epochs=1 if not self.benchmark_only else None,
             save_frequency_seconds=None,
             eval_frequency_epochs=None,
-            master_ecs=ecs,
+            model_rpcs=[train_rw],
             data_worker=data_worker,
             model_worker=model_worker,
         )

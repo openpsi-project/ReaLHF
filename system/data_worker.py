@@ -6,7 +6,7 @@ import api.config as config_pkg
 import api.data as data_api
 import api.model as model_api
 import base.seeding as seeding
-import impl.data
+import impl.dataset
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
@@ -72,8 +72,9 @@ class DataWorker(worker_base.Worker):
                 self.__data_generator = enumerate(self.__dataloader)
                 self.__epoch_step, self.__dict_sample = next(self.__data_generator)
 
-        request: request_reply_stream.Request = self.__stream.poll_request()
-        if request is None:
+        try:
+            request: request_reply_stream.Request = self.__stream.poll_request()
+        except request_reply_stream.NoMessage:
             return worker_base.PollResult(0, 0)
 
         if request.handle_name == 'fetch':
@@ -90,6 +91,7 @@ class DataWorker(worker_base.Worker):
             if self.__dataloader.batch_size is not None:
                 batch_size = self.__dataloader.batch_size
             else:
+                # We assume that this is a packed dataset. Batch size equals to the number of tokens in the batch.
                 assert isinstance(self.__dataloader.dataset, torch.utils.data.IterableDataset)
                 batch_size = list(self.__dict_sample.values())[0].shape[0]
             res = model_api.FinetuneSpec(

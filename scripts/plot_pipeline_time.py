@@ -68,14 +68,14 @@ def plot_debug_pipeline():
     #     "forward_prepare_end", "outer_module_forward_end", "post_process_end", "reserve_kv_cache_end",
     #     "postprocess_cache_end", "genstep_end"
     # ]
-    start_keys = [
-        "LoadMicroBatch_start", "ForwardPass_start", "LoadNextTokens_start", "SendNextTokens_start",
-        "RecvNextTokens_start", "RecvActivation_start", "SendActivation_start"
-    ]
-    end_keys = [
-        "LoadMicroBatch_end", "ForwardPass_end", "LoadNextTokens_end", "SendNextTokens_end",
-        "RecvNextTokens_end", "RecvActivation_end", "SendActivation_end"
-    ]
+    # start_keys = [
+    #     "LoadMicroBatch_start", "ForwardPass_start", "LoadNextTokens_start", "SendNextTokens_start",
+    #     "RecvNextTokens_start", "RecvActivation_start", "SendActivation_start"
+    # ]
+    # end_keys = [
+    #     "LoadMicroBatch_end", "ForwardPass_end", "LoadNextTokens_end", "SendNextTokens_end",
+    #     "RecvNextTokens_end", "RecvActivation_end", "SendActivation_end"
+    # ]
     # start_keys = [
     #     "pipe_cache_load_start", "input_tuple_clone_start", "tensor_to_tuple_start", "tuple_to_tensor_start",
     #     "layer_0_start", "layer_1_start", "layer_2_start"
@@ -84,8 +84,8 @@ def plot_debug_pipeline():
     #     "pipe_cache_load_end", "input_tuple_clone_end", "tensor_to_tuple_end", "tuple_to_tensor_end",
     #     "layer_0_end", "layer_1_end", "layer_2_end"
     # ]
-    # start_keys = ["tensor_to_tuple_start", "tuple_to_tensor_start"]
-    # end_keys = ["tensor_to_tuple_end", "tuple_to_tensor_end"]
+    start_keys = ["tensor_to_tuple_start", "tuple_to_tensor_start"]
+    end_keys = ["tensor_to_tuple_end", "tuple_to_tensor_end"]
     # start_keys = ["to_tensor_start", "from_tensor_start"]
     # end_keys = ["to_tensor_end", "from_tensor_end"]
     # start_keys = [

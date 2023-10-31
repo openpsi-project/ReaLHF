@@ -153,7 +153,7 @@ def allocate(lengths: np.ndarray, lengths_cumsum: np.ndarray, c: int, rank: int,
     return result
 
 
-# @numba.njit
+@numba.njit
 def min_abs_diff_partition(arr: np.ndarray, k: int) -> List[Tuple[int]]:
     """Partition an array into k subarrays with minimum absolute difference of sums.
     

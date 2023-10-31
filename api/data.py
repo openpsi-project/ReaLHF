@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, Optional, Union
+from typing import Dict, Iterable, List, Optional, Union
 import dataclasses
 import functools
 import inspect
@@ -128,6 +128,18 @@ def make_dataloader(cfg: Union[str, api.config.DataLoader],
     dataloader_cls = ALL_DATALOADER_CLASSES[cfg.type_]
     return dataloader_cls(dataset, **cfg.args)
 
+
+class ConcatDataCollator:
+
+    def __call__(self, data: List[Dict]):
+        return {k: torch.cat([f[k] for f in data], 0) for k in data[0]}
+
+
+def ConcatDataLoader(dataset, *args, **kwargs):
+    return torch.utils.data.DataLoader(dataset, *args, collate_fn=ConcatDataCollator(), **kwargs)
+
+
+register_dataloader("concat", ConcatDataLoader)
 
 register_dataloader(
     'default',

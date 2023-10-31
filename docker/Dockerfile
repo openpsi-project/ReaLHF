@@ -35,10 +35,10 @@ WORKDIR /
 RUN pip3 install -I --no-binary=:all: pyzmq
 
 # something add-hoc
-RUN mkdir tools
-COPY ./TransformerEngine /tools/TransformerEngine
-COPY ./flash-attention /tools/flash-attention
-RUN pip3 install -e /tools/TransformerEngine
-COPY ./transformers /tools/transformers
-RUN pip3 install -e /tools/transformers
-RUN pip3 install sentencepiece
+# RUN mkdir tools
+# COPY ./TransformerEngine /tools/TransformerEngine
+# COPY ./flash-attention /tools/flash-attention
+# RUN pip3 install -e /tools/TransformerEngine
+# COPY ./transformers /tools/transformers
+# RUN pip3 install -e /tools/transformers
+RUN pip3 install -U sentencepiece numba

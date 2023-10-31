@@ -156,8 +156,11 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
                               gconfig=gconfig)
 
         if res is not None:
-            gen_tokens, log_probs, logits_mask = res
-            return dict(gen_tokens=gen_tokens, log_probs=log_probs, logits_mask=logits_mask)
+            gen_tokens, log_probs, logits_mask, _, prompt_logits = res
+            return dict(gen_tokens=gen_tokens,
+                        log_probs=log_probs,
+                        logits_mask=logits_mask,
+                        prompt_logits=prompt_logits)
         else:
             return dict()
 

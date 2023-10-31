@@ -6,6 +6,8 @@ import re
 import socket
 import subprocess
 
+import torch
+
 multiprocessing.set_start_method("spawn", force=True)
 
 from base.constants import DATE_FORMAT, LOG_FORMAT
@@ -32,13 +34,16 @@ def main_worker(args):
                 f"worker index {worker_index_start}:{worker_index_end}")
 
     # Isolate within the same slurm job, among different jobsteps.
+    if torch.cuda.is_initialized():
+        raise RuntimeError("CUDA already initialized before isolating CUDA devices. This should not happen.")
     base.gpu_utils.isolate_cuda_device(group_name, args.jobstep_id, args.n_jobsteps, args.experiment_name,
                                        args.trial_name)
     if os.environ.get("CUDA_VISIBLE_DEVICES", None):
         logger.info("CUDA_VISIBLE_DEVICES: %s", os.environ['CUDA_VISIBLE_DEVICES'])
 
+    # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
     import experiments
-    import impl.data
+    import impl.dataset
     import impl.model
     import system
 

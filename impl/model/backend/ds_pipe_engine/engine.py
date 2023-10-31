@@ -23,7 +23,7 @@ import transformers
 
 from . import p2p, schedule
 from .module import PipelineError, PipelineModule
-from base.dataparallel import PackedParallelDataRouter
+from base.dataparallel import PackedParallelDataBroker
 from base.monitor import gpu_memory_mb, time_mark
 from base.namedarray import NamedArray
 from impl.model.nn.flash_mqat import GenerationConfig, genstep
@@ -193,6 +193,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.gen_logits_mask_ph = {}
         # self.batch_size = None
         self.batch_lengths = []
+        self.prompt_logits = []
         self.generate_mode = False
 
     def set_loss_fn(self, fn):
@@ -228,6 +229,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.gen_logits_mask_ph = {i: [] for i in range(self.num_micro_batches)}
         self.generate_mode = True
         self.kv_cache_reserved = []
+        self.prompt_logits = []
 
     def _initialize_p2p(self):
         if is_even(self.stage_id):
@@ -308,7 +310,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                               prompt_mask=prompt_mask)
         else:
             data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
-        splitted = PackedParallelDataRouter.scatter_to(data, self.num_micro_batches)
+        splitted = PackedParallelDataBroker.scatter_to(data, self.num_micro_batches)
         self.original_input_cache = splitted
 
         def input_to_pipe_model_input(input: NamedArray):
@@ -454,7 +456,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 all_logits_mask = [torch.ones_like(mm) if m is None else m for m in all_logits_mask]
                 logits_mask = torch.cat(all_logits_mask, dim=0)
             # self._normal_mode()
-            return gen_tokens, log_probs, logits_mask
+            prompt_logits = torch.cat(self.prompt_logits, dim=0)
+            return gen_tokens, log_probs, logits_mask, None, prompt_logits
         else:
             return None
 
@@ -620,6 +623,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             # if kv cache is not reserved for this micro batch
             if micro_batch_id not in self.kv_cache_reserved:
                 time_mark("reserve_kv_cache_start", self.global_rank, step=self.step_count)
+                # store prompt logits
+                self.prompt_logits.append(logits)
+                # reserve kv cache
                 cu_seqlens = x.cu_seqlens
                 logits = logits[cu_seqlens[1:] - 1]
                 input_lens = cu_seqlens[1:] - cu_seqlens[:-1]

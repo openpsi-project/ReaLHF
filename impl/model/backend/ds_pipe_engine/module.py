@@ -18,8 +18,8 @@ from deepspeed.utils import logger
 import torch
 import torch.nn as nn
 
-from .topology import PipeDataParallelTopology, PipelineParallelGrid
 from base.monitor import process_memory_mb, time_mark
+from base.topology import PipeDataParallelTopology, PipelineParallelGrid
 from impl.model.utils.data import (data_list_to_tensor_tuple, PipeCacheData, PipeTransferData,
                                    tensor_tuple_to_data_list)
 
