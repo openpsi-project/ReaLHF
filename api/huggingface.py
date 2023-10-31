@@ -99,6 +99,8 @@ def create_hf_nn(
         if quantization_kwargs is not None:
             qconfig = transformers.BitsAndBytesConfig(**quantization_kwargs)
             from_pretrained_kwargs['quantization_config'] = qconfig
+        if from_pretrained_kwargs is None:
+            from_pretrained_kwargs = {}
         model: transformers.PreTrainedModel = model_class.from_pretrained(
             model_name_or_path,
             config=model_config,
