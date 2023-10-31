@@ -780,8 +780,6 @@ def make_flash_mqat_clm_hf(
     from_type: str = 'starcoder',
     tokenizer_path: Optional[str] = None,
 ):
-    if tokenizer_path is None:
-        tokenizer_path = model_path
     if from_type == 'starcoder':
         module = HuggingfaceLikeFlashMQATForCausalLM.from_starcoder(model_path=model_path,
                                                                     dtype=dtype,
@@ -791,6 +789,8 @@ def make_flash_mqat_clm_hf(
         module = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(model_path=model_path,
                                                                      dtype=dtype,
                                                                      device=device)
+        if tokenizer_path is None:
+            raise ValueError("tokenizer_path must be provided when from_type is 'self'.")
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
     elif from_type == 'gpt2':
         module = HuggingfaceLikeFlashMQATForCausalLM.from_gpt2(model_path=model_path,

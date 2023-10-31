@@ -1,5 +1,6 @@
 import impl.model.backend.deepspeed
 import impl.model.interface.chat
+import impl.model.interface.flash.gen_scoring_flash_interface
 import impl.model.interface.flash.ppo_flash_interface
 import impl.model.interface.flash.rw_flash_interface
 import impl.model.interface.flash.sft_flash_interface
