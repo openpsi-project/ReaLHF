@@ -71,6 +71,13 @@ class PackedParallelDataBroker(ParallelDataBroker):
                                    f"Current keys: {list(src.keys())}.")
 
         partitions = datapack.min_abs_diff_partition(src['input_lens'].cpu().numpy().astype(np.int64), n_dp)
+        last_end = 0
+        for start, end in partitions:
+            assert start == last_end
+            if end <= start:
+                raise RuntimeError("Data batch cannot be partitioned. Please increase batch size.")
+            last_end = end
+        assert end == len(src['input_lens'])
 
         input_lens: List[torch.IntTensor] = [src['input_lens'][start:end] for start, end in partitions]
         cu_seqlens = [torch.cat([x.new_zeros(1), torch.cumsum(x, dim=0)]) for x in input_lens]
