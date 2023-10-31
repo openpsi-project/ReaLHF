@@ -1,4 +1,5 @@
 from collections import defaultdict
+from statistics import mean
 import logging
 import os
 import time
@@ -23,6 +24,10 @@ def gpu_memory_mb(name):
     logger.info(
         f"{name} GPU rank {dist.get_rank()}: memory usage: {round(get_accelerator().memory_allocated() / 1024**2, 2)}MB, "
         f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB")
+
+
+def mock_time_mark_ms(name, identifier, t, step):
+    logger.info(f"*{name}* #{identifier}#  ${t}$ ms step &{step}&")
 
 
 def time_mark(name, identifier, step=0):
@@ -76,16 +81,18 @@ def parse_time_mark_in_dir(dir, name, step_range=None):
 MATPLOTLIB_COLORS = ["b", "g", "r", "c", "m", "y", "k", "w"]
 
 
-def plot_time_points(start_keys,
-                     end_keys,
-                     identifiers,
-                     dir_name=None,
-                     file_name=None,
-                     start_time=None,
-                     figsize=(12, 4),
-                     end_time=None,
-                     step_range=None,
-                     save_fig_path="time_points.png"):
+def summary_time_points(start_keys,
+                        end_keys,
+                        identifiers,
+                        dir_name=None,
+                        file_name=None,
+                        start_time=None,
+                        figsize=(12, 4),
+                        end_time=None,
+                        step_range=None,
+                        save_fig_path="time_points.png"):
+    """ Plot and summary time marks in logs
+    """
     import matplotlib.pyplot as plt
     assert file_name or dir_name, "dir or file name must be specified"
     all_time_points = {}
@@ -110,13 +117,18 @@ def plot_time_points(start_keys,
         xtick_labels = [f"{i%1000}" for i in xticks]
         ax.set_xticks(xticks)
         ax.set_xticklabels(xtick_labels)
-    label_set = {sk: False for sk in start_keys}
-    # f = True
-    # print(all_time_points)
 
+    label_set = {sk: False for sk in start_keys}
+    infos = {}
+    min_time = None
+    max_time = None
     for id_index, identifier in enumerate(identifiers):
+        time_sum = {}
+        time_list = {}
         for start_key_idx, (start_key, end_key) in enumerate(zip(start_keys, end_keys)):
             # print(start_key, identifier, all_time_points[start_key])
+            time_sum[start_key] = 0
+            time_list[start_key] = []
             try:
                 start_time_points = np.array(all_time_points[start_key][identifier])
                 end_time_points = np.array(all_time_points[end_key][identifier])
@@ -131,25 +143,49 @@ def plot_time_points(start_keys,
                 start_time_points = start_time_points[valid_indices]
                 end_time_points = end_time_points[valid_indices]
 
-            print(id_index, identifier, start_key_idx, start_key, end_key, start_time_points, end_time_points)
+            # print(id_index, identifier, start_key_idx, start_key, end_key, start_time_points, end_time_points)
 
             # plot time point pairs
             for stp, etp in zip(list(start_time_points), list(end_time_points)):
+                min_time = stp if min_time is None else min(min_time, stp)
+                max_time = etp if max_time is None else max(max_time, etp)
+                time_sum[start_key] += etp - stp
+                time_list[start_key].append(etp - stp)
+
                 if label_set[start_key] is False:
                     label = start_key
                     label_set[start_key] = True
                 else:
                     label = None
-                print(f"id={identifier} start_key={start_key} left={stp%1000} width={etp-stp}")
+
+                # print(f"id={identifier} start_key={start_key} left={stp%1000} width={etp-stp}")
+                # print((etp-stp)//1e6)
                 ax.barh(y=id_index,
                         width=etp - stp,
                         left=stp,
                         color=MATPLOTLIB_COLORS[start_key_idx],
                         label=label)
 
-                # print(int(identifier))
-                # print(start_key, MATPLOTLIB_COLORS[start_key_idx])
-                # f=False
+        infos[identifier] = (time_sum, time_list)
+
+        # summary time cost percent
+    for id_index, identifier in enumerate(identifiers):
+        print("=" * 30)
+        print(f"Identifier {identifier} time cost percent:")
+        bubble_time = 100
+        time_sum, time_list = infos[identifier]
+        for k in time_sum:
+            time_perc = round(time_sum[k] / (max_time - min_time) * 100, 2)
+            # print time cost percent
+            avg_val = round(mean(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
+            max_val = round(max(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
+            min_val = round(min(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
+
+            bubble_time -= time_perc
+            print(f"{k} -- {time_perc} %, "
+                  f"avg, min, max = {avg_val}, {min_val}, {max_val} ms, "
+                  f"sum, n = {round(time_sum[k]/10e6, 2)} ms, {len(time_list[k])}")
+        print(f"bubble time -- {round(bubble_time, 2)}%")
 
     plt.legend()
 

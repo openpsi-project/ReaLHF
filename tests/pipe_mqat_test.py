@@ -5,9 +5,6 @@ import time
 import unittest
 
 import torch
-# from impl.model.nn.flash_mqat import (FlashMQATForCausalLM, generate, GenerationConfig, PipeCacheData,
-#                                       PipeTransferData, vanilla_cpu_generate, vanilla_packed_generate)
-# import api.huggingface
 import torch.multiprocessing as mp
 
 from base.namedarray import NamedArray
@@ -179,7 +176,9 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
 
     from impl.model.nn.flash_mqat import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
+    st = time.monotonic()
     outputs = interface.generate(model, data, gconfig=gconfig)
+    t = time.monotonic() - st
     # logger.info(input_ids)
     if len(outputs) > 0 and res_queue is not None:
         # logger.info(input_ids)
@@ -187,6 +186,7 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
         # logger.info(outputs["log_probs"])
         res_queue.put(outputs["gen_tokens"])
         res_queue.put(outputs["log_probs"])
+        res_queue.put(t)
         time.sleep(1)  # wait for queue get, otherwise invalid tensor handle
 
 
@@ -235,13 +235,12 @@ class PipeFlashMQATTest(unittest.TestCase):
         self.pipe_model_processes = [
             mp.Process(target=pipe_generate, args=(i, self.res_queue, self.seed)) for i in range(WORLD_SIZE)
         ]
-        s1 = time.monotonic()
         for p in self.pipe_model_processes:
             p.start()
 
         g = self.res_queue.get()
         logprob = self.res_queue.get()
-        t1 = time.monotonic() - s1
+        t = self.res_queue.get()
 
         for p in self.pipe_model_processes:
             p.join()
@@ -259,7 +258,7 @@ class PipeFlashMQATTest(unittest.TestCase):
                                           attention_mask=prompt_att_mask,
                                           gconfig=self.gconfig)
         t2 = time.monotonic() - s2
-        print("pipe time:", t1)
+        print("pipe time:", t)
         print("vanilla time:", t2)
 
         assert torch.allclose(g, vg), (g, vg)
@@ -278,12 +277,14 @@ class PipeFlashMQATTest(unittest.TestCase):
 
         g = self.res_queue.get()
         logprob = self.res_queue.get()
+        t = self.res_queue.get()
 
         for p in self.pipe_model_processes:
             p.join()
 
-        logger.info(g)
-        logger.info(logprob)
+        print(g)
+        print(logprob)
+        print(t)
 
     def testTrainBatch(self):
         clear_name_resolve()

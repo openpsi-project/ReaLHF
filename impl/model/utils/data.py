@@ -154,16 +154,18 @@ class TensorDataclassToTupleInterface:
 
 
 def data_list_to_tensor_tuple(data_list: List[TensorDataclassToTupleInterface]):
-    time_mark("tensor_to_tuple_start", dist.get_rank())
+    rank = dist.get_rank()
+    time_mark("tensor_to_tuple_start", rank)
     res = []
     for data in data_list:
         res += list(data.to_tuple())
-    time_mark("tensor_to_tuple_end", dist.get_rank())
+    time_mark("tensor_to_tuple_end", rank)
     return tuple(res)
 
 
 def tensor_tuple_to_data_list(tensor_tuple: tuple):
-    time_mark("tuple_to_tensor_start", dist.get_rank())
+    rank = dist.get_rank()
+    time_mark("tuple_to_tensor_start", rank)
     res = []
     i = 0
     while i < len(tensor_tuple):
@@ -177,7 +179,7 @@ def tensor_tuple_to_data_list(tensor_tuple: tuple):
             raise NotImplementedError(f"Unknown type code {type_code}")
         res.append(cls_.from_tuple(tensor_tuple[i:i + num_fields + 2]))
         i += num_fields + 2
-    time_mark("tuple_to_tensor_end", dist.get_rank())
+    time_mark("tuple_to_tensor_end", rank)
     return res
 
 

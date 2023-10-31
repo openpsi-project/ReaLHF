@@ -1,7 +1,7 @@
 import os
 import sys
 
-from base.monitor import plot_time_points
+from base.monitor import summary_time_points
 
 
 def plot_pipeline():
@@ -20,7 +20,7 @@ def plot_pipeline():
         "LoadMicroBatch_end", "RecvActivation_end", "SendActivation_end", "RecvGrad_start", "RecvGrad_end",
         "ForwardPass_end", "BackwardPass_end"
     ]
-    plot_time_points(
+    summary_time_points(
         dir_name=dir_name,
         start_keys=start_keys,
         end_keys=end_keys,
@@ -45,7 +45,7 @@ def plot_rlhf():
         "actor_generate_end", "actor_train_end", "critic_inference_end", "critic_train_end",
         "ref_inference_end", "reward_inference_end"
     ]
-    plot_time_points(
+    summary_time_points(
         dir_name=dir_name,
         start_keys=start_keys,
         end_keys=end_keys,
@@ -59,7 +59,7 @@ def plot_rlhf():
 def plot_debug_pipeline():
     file_name = "/home/meizy/logs/pipe_mqat.log"
     identifiers = [str(i) for i in range(4)]
-    fn = "/workspace/scripts/figs/pp_generate.png"
+    fn = "/workspace/scripts/figs/data_load.png"
     # start_keys = [
     #     "forward_prepare_start", "outer_module_forward_start", "post_process_start", "reserve_kv_cache_start",
     #     "postprocess_cache_start", "genstep_start"
@@ -94,7 +94,7 @@ def plot_debug_pipeline():
     # end_keys = [
     #     f"load_next_tokens_{i}_end" for i in range(1, 5)
     # ]
-    plot_time_points(
+    summary_time_points(
         file_name=file_name,
         start_keys=start_keys,
         end_keys=end_keys,
