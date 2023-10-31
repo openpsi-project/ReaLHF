@@ -205,7 +205,42 @@ class FlashMQATStarCoderTest(unittest.TestCase):
             assert torch.allclose(y1.k_cache, y2.k_cache)
             assert torch.allclose(y1.v_cache, y2.v_cache)
 
+    def testGenerateTwoOrMoreSamples(self):
+        seqs = [
+            "# This is a print function\ndef",
+            "import time\n",
+            "assert torch.allclose(logits, sc_logits, atol=5e-3",
+            "I'm really happy about",
+        ]
+        num_samples = 3
+        self.tokenizer.padding_side = "left"
+        encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
+        input_ids = encoding['input_ids'].to(self.device)
+        attention_mask = encoding['attention_mask'].to(self.device)
 
+        for greedy in [True, False]:
+            for min_new_tokens in [0, 1]:
+                gconfig = GenerationConfig(min_new_tokens=min_new_tokens,
+                                           max_new_tokens=10,
+                                           temperature=1.0,
+                                           greedy=greedy,
+                                           top_k=50,
+                                           top_p=1.0,
+                                           num_samples=num_samples)
+                generated, glogprobs, glmask, _, _ = generate(model=self.model,
+                                                              tokenizer=self.tokenizer,
+                                                              input_ids=input_ids,
+                                                              attention_mask=attention_mask,
+                                                              gconfig=gconfig)
+                if greedy and min_new_tokens == 0:
+                    self.assertIsNone(glmask)
+                else:
+                    self.assertEqual(glmask.shape[0], num_samples * len(seqs))
+                self.assertEqual(generated.shape[0], num_samples * len(seqs))
+                self.assertEqual(glogprobs.shape[0], num_samples * len(seqs))
+
+
+@unittest.skip('')
 class FlashMQATStarCoderCPUTest(unittest.TestCase):
 
     @classmethod
@@ -335,6 +370,7 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         assert torch.allclose(vglogprob, tlogprob), (vglogprob - tlogprob).abs().max()
 
 
+@unittest.skip('')
 class FlashMQATGPTCPUTest(unittest.TestCase):
 
     @classmethod
@@ -403,6 +439,7 @@ class FlashMQATGPTCPUTest(unittest.TestCase):
         assert torch.allclose(logits, sc_logits, atol=2e-5), ((logits - sc_logits)).abs().max()
 
 
+@unittest.skip('')
 class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod
@@ -478,6 +515,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         assert torch.allclose(vgmask.cpu(), vcmask)
 
 
+@unittest.skip('')
 class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod

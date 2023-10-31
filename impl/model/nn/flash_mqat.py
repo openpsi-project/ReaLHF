@@ -4,6 +4,7 @@ import dataclasses
 import json
 import math
 import os
+import logging
 
 import torch
 import torch.nn as nn
@@ -24,6 +25,8 @@ try:
     from flash_attn import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache
 except ModuleNotFoundError:
     pass
+
+logger = logging.getLogger("FlashMQAT")
 
 
 @dataclasses.dataclass
@@ -405,7 +408,8 @@ class VocabPositionEmbedding(nn.Module):
             if x.max_seqlen > self.n_positions:
                 raise ValueError(f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions}).")
             assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
-            assert y.position_ids.shape == y.input_ids.shape
+            assert y.position_ids.shape == y.input_ids.shape, (y.position_ids.shape, y.input_ids.shape,
+                                                               lengths, x.cu_seqlens)
 
         if x.attention_mask is not None:
             # For debugging only.
@@ -547,9 +551,19 @@ class FlashMQATForCausalLM(nn.Module):
         model = cls(config, dtype=dtype, device=device)
 
         if from_model is None:
-            try:
+            if os.path.exists(os.path.join(model_path, "pytorch_model.bin")):
                 state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
-            except FileNotFoundError:
+            elif os.path.exists(os.path.join(model_path, "pytorch_model.bin.index.json")):
+                with open(os.path.join(model_path, "pytorch_model.bin.index.json"), 'r') as f:
+                    weight_map = json.load(f)['weight_map']
+                state_dict = {}
+                for filename in list(set(list(weight_map.values()))):
+                    assert os.path.exists(os.path.join(model_path, filename))
+                    state_dict.update(torch.load(os.path.join(model_path, filename)))
+            else:
+                logger.warning("No pytorch_model.bin or pytorch_model.bin.index.json found, "
+                               "using huggingface model initialization. "
+                               "This will probably cause (CPU) OOM.")
                 state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
         else:
             state_dict = from_model.state_dict()
@@ -593,6 +607,7 @@ class FlashMQATForCausalLM(nn.Module):
             assert model_path is not None
             gpt2config: transformers.GPT2Config = transformers.AutoConfig.from_pretrained(
                 os.path.join(model_path, "config.json"))
+            # GPT2 is not that large, so this will not cause OOM
             from_model = transformers.AutoModelForCausalLM.from_pretrained(model_path)
         else:
             gpt2config = from_model.config
@@ -1058,19 +1073,30 @@ def generate(
     Returns:
         Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
         The tuple of
-            gen_tokens: Generated tokens. Shape [bs, #new_tokens].
-            log_probs: Log probabilities of generated tokens. Shape [bs, #new_tokens].
-            mask: The mask of logits. None if no mask otherwise a tensor of shape [bs, #new_tokens, vocab_size].
-                1 if the logits is valid else 0, e.g., should be used as `logits.masked_fill_(mask.logical_not(), -1e10)`.
+            gen_tokens: Generated tokens. Shape [bs * num_samples, #new_tokens].
+            log_probs: Log probabilities of generated tokens. Shape [bs * num_samples, #new_tokens].
+            mask: The mask of logits. None if no mask otherwise a tensor of
+                shape [bs * num_samples, #new_tokens, vocab_size].
+                1 if the logits is valid else 0, e.g., should be used as
+                `logits.masked_fill_(mask.logical_not(), -1e10)`.
             ys: List of PipeCacheData. Length equals to the number of transformer layers.
                 Can be saved for continuing generation.
-            prompt_logits: Output logits of prompts. None if k/v caches are passed in. Shape [#tot_prompt_tokens].
+            prompt_logits: Output logits of prompts. None if k/v caches are passed in.
+                Shape [#tot_prompt_tokens * num_samples].
     """
     if attention_mask is None:
         attention_mask = torch.logical_and(input_ids != tokenizer.pad_token_id, input_ids
                                            != tokenizer.eos_token_id)
     if (k_caches is None) != (v_caches is None) or (k_caches is None) != (cache_seqlens is None):
         raise ValueError("k_cache, v_cache, cache_seqlens must be all None or all not None")
+    if gconfig.num_samples > 1 and k_caches is None:
+        input_ids = input_ids.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
+        attention_mask = attention_mask.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
+    elif k_caches is not None:
+        for k_cache, v_cache in zip(k_caches, v_caches):
+            assert (k_cache.shape[0] == v_cache.shape[0] == input_ids.shape[0] == attention_mask.shape[0] ==
+                    cache_seqlens.shape[0])
+
     device = input_ids.device
     mconfig: FlashMQATConfig = model.config
     bs, prompt_padded_len = input_ids.shape[:2]
