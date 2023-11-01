@@ -61,7 +61,7 @@ class PromptDataset(torch.utils.data.Dataset):
         tokenizer.padding_side = 'left'
         prompt_tokens = tokenizer(prompts,
                                   return_tensors='pt',
-                                  padding=True,
+                                  padding="max_length",
                                   truncation=True,
                                   max_length=max_prompt_len)
         tokenizer.padding_side = original_padding_side

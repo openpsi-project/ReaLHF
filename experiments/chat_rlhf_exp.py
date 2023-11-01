@@ -6,8 +6,8 @@ from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 import base.topology as topology
 
-EXPR_DEADLINE = "now+8hours"
-EXPR_TIME_LIMIT = "01:00:00"
+EXPR_DEADLINE = None
+EXPR_TIME_LIMIT = None
 
 rollout = ModelRPC(
     "actor",
@@ -78,22 +78,22 @@ train_critic = ModelRPC(
 @dataclasses.dataclass
 class ChatRLHFBenchmarkConfig:
     # resource
-    n_actors: int = 1
-    n_critics: int = 1
+    n_actors: int = 2
+    n_critics: int = 2
     n_rewards: int = 1
     n_refs: int = 1
     seed: int = 1
-    gpu_per_actor: float = 0.25
-    gpu_per_critic: float = 0.25
-    gpu_per_reward: float = 0.25
-    gpu_per_ref: float = 0.25
+    gpu_per_actor: float = 1
+    gpu_per_critic: float = 1
+    gpu_per_reward: float = 1
+    gpu_per_ref: float = 1
     # optimization options
     init_from_scratch: bool = False
-    actor_model_name: str = "opt-125m"
-    critic_model_name: str = "opt-125m"
+    actor_model_name: str = "starcoder_4l"
+    critic_model_name: str = "starcoder_4l"
     actor_zero_stage: int = 2
     critic_zero_stage: int = 2
-    hybrid_engine: bool = True
+    hybrid_engine: bool = False
     batch_size_per_device: int = 1
     max_prompt_length: int = 256
     max_answer_length: int = 256
@@ -153,9 +153,8 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 cpu=4,
                 gpu=last_gpu_per_type,
                 gpu_type='tesla',
-                mem=int(60000 * last_gpu_per_type),
-                # nodelist='YL-com02',
-                node_type="a100",
+                mem=100000,
+                nodelist='QH-com04',
                 deadline=EXPR_DEADLINE,
                 time_limit=EXPR_TIME_LIMIT,
             ),
@@ -173,34 +172,35 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         self.init_from_scratch = config.init_from_scratch
 
     def scheduling_setup(self) -> ExperimentScheduling:
-        return ExperimentScheduling(data_worker=TasksGroup(
-            count=self.n_data_workers,
-            scheduling=Scheduling.data_worker_default(
-                cpu=2,
-                mem=10000,
-                begin=None,
-                node_type="g1",
-                deadline=EXPR_DEADLINE,
-                time_limit=EXPR_TIME_LIMIT,
+        return ExperimentScheduling(
+            data_worker=TasksGroup(
+                count=self.n_data_workers,
+                scheduling=Scheduling.data_worker_default(
+                    cpu=2,
+                    mem=10000,
+                    begin=None,
+                    # node_type="g1",
+                    deadline=EXPR_DEADLINE,
+                    time_limit=EXPR_TIME_LIMIT,
+                ),
             ),
-        ),
-                                    master_worker=TasksGroup(
-                                        count=1,
-                                        scheduling=Scheduling.master_worker_default(
-                                            cpu=4,
-                                            mem=10000,
-                                            begin=None,
-                                            node_type="g1",
-                                            deadline=EXPR_DEADLINE,
-                                            time_limit=EXPR_TIME_LIMIT,
-                                        ),
-                                    ),
-                                    model_worker=self.model_worker_task_groups)
+            master_worker=TasksGroup(
+                count=1,
+                scheduling=Scheduling.master_worker_default(
+                    cpu=4,
+                    mem=10000,
+                    begin=None,
+                    # node_type="g1",
+                    deadline=EXPR_DEADLINE,
+                    time_limit=EXPR_TIME_LIMIT,
+                ),
+            ),
+            model_worker=self.model_worker_task_groups)
 
     def initial_setup(self) -> ExperimentConfig:
         # model_dir = "/lustre/meizy/base_models/cfgonly"
-        model_dir = "/lustre/meizy/base_models"
-        data_path = "/lustre/meizy/datasets/Dahoas/rm-static/data/data.jsonl"
+        model_dir = "/lustre/meizy/models"
+        data_path = "/lustre/meizy/data/rlhf/data.jsonl"
 
         actor_path = os.path.join(model_dir, self.actor_model_name)
         critic_path = os.path.join(model_dir, self.critic_model_name)

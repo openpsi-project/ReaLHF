@@ -10,7 +10,6 @@ from base.monitor import process_memory_mb
 from impl.model.backend.ds_pipe_engine import (LayerSpec, PipeDataParallelTopology, PipelineModule,
                                                ProcessTopology)
 from impl.model.nn.flash_mqat import *
-from impl.model.utils.data import tensor_data_list_to_tuple, tuple_to_tensor_data_list
 import api.huggingface
 import api.model
 

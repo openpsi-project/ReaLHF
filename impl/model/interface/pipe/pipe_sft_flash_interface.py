@@ -8,6 +8,7 @@ import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.nn.flash_mqat import GenerationConfig
 from impl.model.utils.data import gather_packed_shifted_log_probs, PipeCacheData, PipeTransferData
 from impl.model.utils.save import save_hf_or_lora_model
 import api.data
@@ -55,9 +56,6 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
             module.tput_timer.update_epoch_count()
         return dict(loss=agg_loss.detach().item())
 
-    def save(self, model: api.model.Model, save_dir: str):
-        save_hf_or_lora_model(model, save_dir)
-
     @torch.inference_mode()  # one time evaluate
     def inference(self, model_: api.model.Model, data: NamedArray) -> Dict:
         device = model_.device
@@ -91,7 +89,7 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
             return dict()
 
     def save(self, model: api.model.Model, save_dir: str):
-        pass
+        model.module.save(save_dir)
 
     @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
@@ -130,6 +128,38 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 return dict(ppl=perplexity)
             else:
                 return dict()
+
+    @torch.inference_mode()
+    def generate(self,
+                 model_: api.model.Model,
+                 data: NamedArray,
+                 gconfig: Optional[GenerationConfig] = None) -> Dict:
+        packed_input_ids = data['packed_input_ids'].squeeze()
+        cu_seqlens = data['cu_seqlens'].squeeze()
+        if gconfig is None:
+            gconfig = GenerationConfig(
+                min_new_tokens=10,
+                max_new_tokens=20,
+            )
+        module = model_.module
+        tokenizer = model_.tokenizer
+
+        module.eval()
+
+        logger.debug(f"gconfig: {gconfig}")
+        res = module.generate(tokenizer=tokenizer,
+                              packed_input_ids=packed_input_ids,
+                              cu_seqlens=cu_seqlens,
+                              gconfig=gconfig)
+
+        if res is not None:
+            gen_tokens, log_probs, logits_mask, _, prompt_logits = res
+            return dict(gen_tokens=gen_tokens,
+                        log_probs=log_probs,
+                        logits_mask=logits_mask,
+                        prompt_logits=prompt_logits)
+        else:
+            return dict()
 
 
 api.model.register_interface("pipe_flash_sft", PipePackedSupervisedFinetuningInterface)

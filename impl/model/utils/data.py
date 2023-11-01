@@ -7,6 +7,8 @@ import torch
 import torch.distributed as dist
 import transformers
 
+from base.monitor import time_mark
+
 logger = logging.getLogger("Data Manipulation")
 
 
@@ -101,10 +103,10 @@ def to_tensor(x: Union[int, bool, torch.Tensor, None]):
         return torch.tensor(-1, dtype=torch.long, device=device)
     elif torch.is_tensor(x):
         if x.dtype != torch.bool:
-            return x.to(device=device)
+            return x
         else:
             # convert bool tensor to int tensor
-            return x.to(dtype=torch.long, device=device)
+            return x.to(dtype=torch.long)  # .to(dtype=torch.long, device=device)
     else:
         raise NotImplementedError(f"Cannot convert {x} to tensor")
 
@@ -152,13 +154,18 @@ class TensorDataclassToTupleInterface:
 
 
 def data_list_to_tensor_tuple(data_list: List[TensorDataclassToTupleInterface]):
+    rank = dist.get_rank()
+    time_mark("tensor_to_tuple_start", rank)
     res = []
     for data in data_list:
         res += list(data.to_tuple())
+    time_mark("tensor_to_tuple_end", rank)
     return tuple(res)
 
 
 def tensor_tuple_to_data_list(tensor_tuple: tuple):
+    rank = dist.get_rank()
+    time_mark("tuple_to_tensor_start", rank)
     res = []
     i = 0
     while i < len(tensor_tuple):
@@ -172,6 +179,7 @@ def tensor_tuple_to_data_list(tensor_tuple: tuple):
             raise NotImplementedError(f"Unknown type code {type_code}")
         res.append(cls_.from_tuple(tensor_tuple[i:i + num_fields + 2]))
         i += num_fields + 2
+    time_mark("tuple_to_tensor_end", rank)
     return res
 
 
@@ -224,6 +232,7 @@ class PipeCacheData(TensorDataclassToTupleInterface):
     Attributes:
         input_ids: The input token ids. Used only at the first stage.
             Can be packed with shape [total_seq_len] or unpacked with shape [bs, seq].
+        prompt_mask: Prompt mask used
         position_ids: Input position IDs. Can be resolved automatically in most cases.
             Used only at the first stage. The same shape as input_ids.
             If None, will be resolved automatically.
@@ -235,7 +244,6 @@ class PipeCacheData(TensorDataclassToTupleInterface):
     """
     # Only cached in the first stage.
     input_ids: torch.Tensor = None
-    prompt_mask: torch.Tensor = None
     position_ids: torch.Tensor = None
     # Cached in each transformer layer.
     k_cache: torch.Tensor = None
@@ -244,23 +252,6 @@ class PipeCacheData(TensorDataclassToTupleInterface):
 
     def encode(self):
         return 1
-
-
-def tensor_data_list_to_tuple(tensor_data_list: List[TensorDataclassToTupleInterface]):
-    res = []
-    for tensor_data in tensor_data_list:
-        res += list(tensor_data.to_tuple())
-    return tuple(res)
-
-
-def tuple_to_tensor_data_list(t: tuple):
-    res = []
-    i = 0
-    while i < len(t):
-        num_fields = t[i]
-        res.append(TensorDataclassToTupleInterface.from_tuple(t[i:i + num_fields + 1]))
-        i += num_fields + 1
-    return res
 
 
 @dataclasses.dataclass

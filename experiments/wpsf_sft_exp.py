@@ -60,26 +60,28 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    mem=60000,
+                    nodelist="QH-com08",
+                    mem=100000,
                 ),
             ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        if not self.benchmark_only:
-            model_path = "/data/aigc/public/starcoder-16bit"
-        else:
-            model_path = "/data/aigc/llm/checkpoints/1l-starcoder"
-        train_batch_size_per_device = 4
-        eval_batch_size_per_device = 4
-        max_seq_len = 4096
+        # if not self.benchmark_only:
+        #     model_path = "/data/aigc/public/starcoder-16bit"
+        # else:
+        #     model_path = "/data/aigc/llm/checkpoints/1l-starcoder"
+        model_path = "/lustre/meizy/models/starcoder_4l"
+        train_batch_size_per_device = 8
+        eval_batch_size_per_device = 8
+        max_seq_len = 2048
 
         dataset = Dataset(
             'packed_prompt_answer',
             args=dict(
                 n_tokens_per_batch=max_seq_len * train_batch_size_per_device,
                 max_length=max_seq_len,
-                dataset_path="/lustre/fw/datasets/wps-formula-sft/dllm-train-0908-formula-psi.jsonl",
+                dataset_path="/lustre/meizy/data/dllm-train-0908-formula-psi.json",
             ),
         )
         dataloader = eval_dataloader = DataLoader('iterable_dataset_loader')
@@ -93,8 +95,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
         ]
 
         eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args[
-            'dataset_path'] = "/lustre/fw/datasets/wps-formula-sft/dllm-valid-0908-formula-psi.jsonl"
+        eval_dataset.args['dataset_path'] = "/lustre/meizy/data/dllm-valid-0908-formula-psi.json"
         eval_dataset.args['n_tokens_per_batch'] = max_seq_len * eval_batch_size_per_device
 
         backend = ModelBackend(
@@ -140,6 +141,8 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                 model_name='default',
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
+                cuda_cache_cleanliness=True,
+                cuda_cache_clear_freq=10,
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_models),
             ) for i in range(self.n_models)
