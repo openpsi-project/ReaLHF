@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import dataclasses
 
 import deepspeed
@@ -72,6 +72,13 @@ class PackedGenScoringInterface(api.model.ModelInterface):
         dist.all_gather(all_seq, seq)
 
         texts = model.tokenizer.batch_decode(seq, skip_special_tokens=True)
+
+        # pipe = transformers.pipeline("text-classification",
+        #                              model=self.score_model,
+        #                              tokenizer=self.score_tokenizer)
+        # # a list of dict which contains 'label' and 'score', 'label' can be 'NEGATIVE' or 'POSITIVE' and 'score' is the probability
+        # senti_res: List[Dict] = pipe(texts)
+
         score_encoding = self.score_tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
         logits = self.score_model(input_ids=score_encoding['input_ids'].cuda(),
                                   attention_mask=score_encoding['attention_mask'].cuda()).logits.float()
@@ -91,9 +98,12 @@ class PackedGenScoringInterface(api.model.ModelInterface):
         for i in range(bs * dist.get_world_size()):
             prompt = prompts_str[i]
             prompt_answers = texts[i * num_samples:(i + 1) * num_samples]
-            for j, a in enumerate(prompt_answers):
-                assert a.startswith(prompt), (a, prompt)
-                prompt_answers[j] = a[len(prompt):]
+            try:
+                for j, a in enumerate(prompt_answers):
+                    assert a.startswith(prompt), (a, prompt)
+                    prompt_answers[j] = a[len(prompt):]
+            except AssertionError:
+                continue
             s = score[i * num_samples:(i + 1) * num_samples]
             x = dict(prompt=prompt, answers=prompt_answers, scores=s.cpu().tolist())
             self.history_data.append(x)

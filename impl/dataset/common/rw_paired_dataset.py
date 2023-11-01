@@ -80,8 +80,8 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         neg_answer_tokens = []
         offset = 0
         for g in group_sizes:
-            pos_answer_tokens.append({k: v[offset:offset + g] for k, v in _pos_answer_tokens})
-            neg_answer_tokens.append({k: v[offset:offset + g] for k, v in _neg_answer_tokens})
+            pos_answer_tokens.append({k: v[offset:offset + g] for k, v in _pos_answer_tokens.items()})
+            neg_answer_tokens.append({k: v[offset:offset + g] for k, v in _neg_answer_tokens.items()})
             offset += g
 
         self.pos_answer_tokens = pos_answer_tokens

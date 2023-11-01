@@ -188,6 +188,7 @@ def _min_abs_diff_partition(arr: np.ndarray, k: int) -> List[Tuple[int]]:
                 partitions.append((x, i))
                 i = x
                 j -= 1
+                break
 
     partitions.append((0, i))
 
@@ -201,4 +202,12 @@ def min_abs_diff_partition(arr: Union[np.ndarray, List], k: int) -> List[Tuple[i
         raise ValueError(f"The array to be partitioned must be 1D. ({arr})")
     if len(arr) < k:
         raise ValueError(f"The array to be partitioned must have length >= k. (array {arr}, k={k})")
-    return _min_abs_diff_partition(arr, k)
+    partitions = _min_abs_diff_partition(arr, k)
+    last_end = 0
+    for start, end in partitions:
+        if start != last_end:
+            raise ValueError(f"Partition {start}-{end} is not contiguous.")
+        if end <= start:
+            raise ValueError(f"Partition {start}-{end} is empty.")
+        last_end = end
+    return partitions

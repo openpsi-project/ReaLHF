@@ -895,15 +895,12 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         model_path: Optional[str] = None,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
-        v_head_path: Optional[str] = None,
         output_scaling: float = 1.0,
         output_bias: float = 0.0,
     ):
         if from_model is None:
             from_model = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(model_path, dtype, device)
         model = cls(from_model.net.transformer, output_bias=output_bias, output_scaling=output_scaling)
-        if v_head_path is not None:
-            model.head.load_state_dict(torch.load(v_head_path))
         return model
 
     @classmethod
@@ -941,7 +938,6 @@ def make_flash_mqat_critic(
         module = DeepSpeedChatLikeFlashMQATCriticModel.from_sft_model(model_path=model_path,
                                                                       dtype=dtype,
                                                                       device=device,
-                                                                      v_head_path=v_head_path,
                                                                       output_scaling=output_scaling,
                                                                       output_bias=output_bias)
     elif from_type == 'starcoder':

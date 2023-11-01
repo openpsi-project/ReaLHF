@@ -96,9 +96,12 @@ class PackedParallelDataBroker(ParallelDataBroker):
                     sp[k] = input_lens[i]
                 elif k == 'cu_seqlens':
                     sp[k] = cu_seqlens[i]
-                elif k == 'seq_no_eos_mask' or k == 'rewards':
+                elif k == 'seq_no_eos_mask' or k == 'rewards' or k == 'group_factor':
                     start, end = partitions[i]
                     sp[k] = v[start:end]
+                elif k == 'pair_input_lens':
+                    start, end = partitions[i]
+                    sp[k] = v[2 * start:2 * end]
                 elif k in ['packed_seq', 'packed_logits_mask', 'prompt_mask', 'packed_input_ids', 'values']:
                     sp[k] = v[offsets[i]:offsets[i] + cu_seqlens[i][-1]]
                 elif k == 'packed_logprobs' or k == 'packed_ref_logprobs':

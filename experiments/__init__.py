@@ -8,4 +8,5 @@ import experiments.wps_rw_exp
 import experiments.wpsf_ppo_exp
 import experiments.wpsf_rw_exp
 import experiments.packed_gen_score_exp
+import experiments.packed_paired_rw_exp
 import experiments.wpsf_sft_pipe
