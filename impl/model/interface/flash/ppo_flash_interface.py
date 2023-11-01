@@ -23,10 +23,7 @@ logger = logging.getLogger("PackedPPOInterface")
 
 @dataclasses.dataclass
 class PackedActorInterface(api.model.ModelInterface):
-
     generation_config: Optional[Dict] = None
-
-    mini_batch_size: int = 8
 
     kl_ctl: float = 0.1
 
@@ -38,7 +35,7 @@ class PackedActorInterface(api.model.ModelInterface):
     max_reward_clip: float = 5.0
 
     early_stop_kl: Optional[float] = None  # e.g. 0.1
-    early_step_imp_ratio: Optional[float] = None  # e.g., 10.0
+    early_stop_imp_ratio: Optional[float] = None  # e.g., 10.0
 
     adaptive_kl_ctl: bool = False
     adaptive_kl_target: Optional[float] = 6
@@ -98,14 +95,15 @@ class PackedActorInterface(api.model.ModelInterface):
             prompts_list.append(prompts[i, prompt_max_len - prompt_len:])
             prompt_log_probs_list.append(logprobs.new_zeros(prompt_len - 1))
             if logits_mask is not None:
-                # logits mask is NOT one-step shorter because it directly operates on logits outputed by the model.
-                prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len, logits_mask.shape[-1])))
+                prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len - 1, logits_mask.shape[-1])))
 
             # Generated tokens are right-padded.
             gen_tokens_list.append(gen_tokens[i, :gen_len])
             gen_log_probs_list.append(logprobs[i, :gen_len])
             if logits_mask is not None:
-                gen_logits_mask_list.append(logits_mask[i, :gen_len])
+                gen_logits_mask_list.append(
+                    torch.cat([logits_mask[i, :gen_len],
+                               logits_mask.new_ones(1, logits_mask.shape[-1])]))
 
         # For complete sequences, EOS token is included. Otherwise the sequence may end with arbitrary token.
         # cu_seqlens marks the boundary of these sequences, no matter whether they are complete or not.
@@ -159,7 +157,6 @@ class PackedActorInterface(api.model.ModelInterface):
 
     def _ppo_actor_step(
         self,
-        ppo_epoch: int,
         module: api.model.NeuralNetwork,
         tokenizer: transformers.PreTrainedTokenizerFast,
         packed_input_ids: torch.LongTensor,
@@ -179,6 +176,17 @@ class PackedActorInterface(api.model.ModelInterface):
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
 
+        loss_mask = (1 - prompt_mask.float()) * (packed_input_ids != tokenizer.pad_token_id).logical_and(
+            packed_input_ids != tokenizer.eos_token_id).float()
+        shift_one_indices = torch.cat([
+            torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
+            for i in range(cu_seqlens.shape[0] - 1)
+        ])
+        loss_mask = loss_mask[shift_one_indices]
+
+        ref_logp *= loss_mask
+        old_logp *= loss_mask
+
         logits: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
                                            cu_seqlens=cu_seqlens,
                                            max_seqlen=max_seqlen).logits.float()
@@ -186,6 +194,9 @@ class PackedActorInterface(api.model.ModelInterface):
             logits.masked_fill_(logits_mask.logical_not(), torch.finfo(logits.dtype).min)
 
         new_logp = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
+
+        new_logp = new_logp * loss_mask
+
         kl_rewards, rewards = ppo_functional.get_packed_rewards(
             kl_ctl=self.kl_adapter.value,
             clip_reward_value=self.max_reward_clip,
@@ -205,14 +216,6 @@ class PackedActorInterface(api.model.ModelInterface):
             seq_no_eos_mask=seq_no_eos_mask,
         )
 
-        loss_mask = (1 - prompt_mask.float()) * (packed_input_ids != tokenizer.pad_token_id).logical_and(
-            packed_input_ids != tokenizer.eos_token_id).float()
-        shift_one_indices = torch.cat([
-            torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
-            for i in range(cu_seqlens.shape[0] - 1)
-        ])
-        loss_mask = loss_mask[shift_one_indices]
-
         loss, loss_stat = ppo_functional.actor_loss_fn(logprobs=new_logp,
                                                        old_logprobs=old_logp,
                                                        advantages=advantages,
@@ -221,15 +224,14 @@ class PackedActorInterface(api.model.ModelInterface):
 
         mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
 
-        # ignore
         # HACK: we don't consider data parallel here
         self.kl_adapter.update(mean_ref_kl, n_steps=input_lens.sum().item())
 
         importance_weight = loss_stat['importance_weight']
         clip_ratio = loss_stat['clip_ratio']
-        if self.early_step_imp_ratio is not None and importance_weight > self.early_step_imp_ratio:
+        if self.early_stop_imp_ratio is not None and importance_weight > self.early_stop_imp_ratio:
             logger.warning(f"Current importance ratio {importance_weight.item():.4f} is larger "
-                           f"than early stop threshold {self.early_step_imp_ratio}. Abandon this minibatch.")
+                           f"than early stop threshold {self.early_stop_imp_ratio}. Abandon this minibatch.")
             loss = loss * 0.0
 
         approx_kl = ((old_logp - new_logp).detach() * loss_mask).sum() / loss_mask.sum()
@@ -248,7 +250,6 @@ class PackedActorInterface(api.model.ModelInterface):
         if logits_mask is not None:
             stats['ignoring_logits_ratio'] = (1 - logits_mask).float().mean()
 
-        # ignore this
         if self.early_stop_kl is not None and api.huggingface.get_all_reduce_mean(
                 approx_kl) > self.early_stop_kl:
             logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
@@ -267,7 +268,6 @@ class PackedActorInterface(api.model.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         train_stats = self._ppo_actor_step(
-            ppo_epoch=0,
             module=module,
             tokenizer=tokenizer,
             packed_input_ids=data['packed_seq'],
@@ -297,8 +297,6 @@ class PackedActorInterface(api.model.ModelInterface):
 
 @dataclasses.dataclass
 class PackedCriticInterface(api.model.ModelInterface):
-    mini_batch_size: int = 8
-    ppo_epochs: int = 1
     kl_ctl: float = 0.1
     discount: float = 1.0
     gae_lambda: float = 0.95
@@ -343,7 +341,6 @@ class PackedCriticInterface(api.model.ModelInterface):
 
     def _ppo_critic_step(
         self,
-        ppo_epoch: int,
         module: api.model.NeuralNetwork,
         tokenizer: transformers.PreTrainedTokenizerFast,
         packed_input_ids: torch.LongTensor,
@@ -362,9 +359,20 @@ class PackedCriticInterface(api.model.ModelInterface):
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
 
+        loss_mask = (1 - prompt_mask.float()) * (packed_input_ids != tokenizer.pad_token_id).logical_and(
+            packed_input_ids != tokenizer.eos_token_id).float()
+        shift_one_indices = torch.cat([
+            torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
+            for i in range(cu_seqlens.shape[0] - 1)
+        ])
+        loss_mask = loss_mask[shift_one_indices]
+
         new_values: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
                                                cu_seqlens=cu_seqlens,
                                                max_seqlen=max_seqlen).float()
+
+        old_logp *= loss_mask
+        ref_logp *= loss_mask
 
         kl_rewards, rewards = ppo_functional.get_packed_rewards(
             kl_ctl=self.kl_adapter.value,
@@ -385,17 +393,10 @@ class PackedCriticInterface(api.model.ModelInterface):
             seq_no_eos_mask=seq_no_eos_mask,
         )
 
-        loss_mask = (1 - prompt_mask.float()) * (packed_input_ids != tokenizer.pad_token_id).logical_and(
-            packed_input_ids != tokenizer.eos_token_id).float()
-        shift_one_indices = torch.cat([
-            torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
-            for i in range(cu_seqlens.shape[0] - 1)
-        ])
         leave_one_indices = torch.cat([
             torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
             for i in range(cu_seqlens.shape[0] - 1)
         ])
-        loss_mask = loss_mask[shift_one_indices]
         new_values = new_values[leave_one_indices]
         values = values[leave_one_indices]
 
@@ -430,7 +431,6 @@ class PackedCriticInterface(api.model.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         train_stats = self._ppo_critic_step(
-            ppo_epoch=0,
             module=module,
             tokenizer=tokenizer,
             packed_input_ids=data['packed_seq'],

@@ -847,7 +847,7 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         hidden_states = self.net(x, ys).pp_output
         if build_packed:
             hidden_states = unpack_tensor(hidden_states, cu_seqlens, max_seqlen)
-        return (self.head(hidden_states).squeeze() - self.output_bias) / self.output_scaling
+        return (self.head(hidden_states).squeeze() - self.output_bias) * self.output_scaling
 
     @classmethod
     def from_starcoder(
