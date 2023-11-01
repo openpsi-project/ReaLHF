@@ -168,7 +168,7 @@ class WPSActorInterface(api.model.ModelInterface):
     value_eps_clip: float = 0.2
     max_reward_clip: float = 5.0
     early_stop_kl: Optional[float] = None
-    early_step_imp_ratio: Optional[float] = None
+    early_stop_imp_ratio: Optional[float] = None
     adaptive_kl_ctl: bool = False
     adaptive_kl_target: Optional[float] = 6
     adaptive_kl_horizon: Optional[float] = 10000
@@ -298,9 +298,9 @@ class WPSActorInterface(api.model.ModelInterface):
 
         importance_weight = loss_stat['importance_weight']
         clip_ratio = loss_stat['clip_ratio']
-        if self.early_step_imp_ratio is not None and importance_weight > self.early_step_imp_ratio:
+        if self.early_stop_imp_ratio is not None and importance_weight > self.early_stop_imp_ratio:
             logger.warning(f"Current importance ratio {importance_weight.item():.4f} is larger "
-                           f"than early stop threshold {self.early_step_imp_ratio}. Abandon this minibatch.")
+                           f"than early stop threshold {self.early_stop_imp_ratio}. Abandon this minibatch.")
             loss = loss * 0.0
 
         prompts: torch.LongTensor = sample['prompts']

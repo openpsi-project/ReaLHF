@@ -118,7 +118,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
     max_reward_clip: float = 5.0
 
     early_stop_kl: Optional[float] = None  # e.g. 0.1
-    early_step_imp_ratio: Optional[float] = None  # e.g., 10.0
+    early_stop_imp_ratio: Optional[float] = None  # e.g., 10.0
 
     adaptive_kl_ctl: bool = False
     adaptive_kl_target: Optional[float] = 6
