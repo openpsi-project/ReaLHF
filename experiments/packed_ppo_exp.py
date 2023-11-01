@@ -82,20 +82,14 @@ class PackedPPOExperiment(Experiment):
 
     def __init__(
         self,
-        n_actors=2,
-        n_critics=2,
-        n_rewards=1,
-        n_refs=1,
+        n_actors=4,
+        n_critics=3,
         seed=1,
         base_model: str = 'gpt2',
         train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl",
     ):
         self.n_actors = n_actors
-        self.n_rewards = n_rewards
-        self.n_refs = n_refs
         self.n_critics = n_critics
-
-        self.n_total = n_actors + n_rewards + n_refs + n_critics
 
         self.n_data_workers = 1
 
@@ -120,14 +114,26 @@ class PackedPPOExperiment(Experiment):
                     mem=10000,
                 ),
             ),
-            model_worker=TasksGroup(
-                count=self.n_total,
-                scheduling=Scheduling.model_worker_default(
-                    cpu=4,
-                    gpu=1,
-                    mem=60000,
+            model_worker=[
+                TasksGroup(
+                    count=self.n_actors + self.n_critics,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=1,
+                        mem=60000,
+                        nodelist='frl8a140',
+                    ),
                 ),
-            ),
+                TasksGroup(
+                    count=2,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=0.5,
+                        mem=30000,
+                        nodelist='frl8a140',
+                    ),
+                )
+            ],
         )
 
     def initial_setup(self) -> ExperimentConfig:
@@ -240,6 +246,7 @@ class PackedPPOExperiment(Experiment):
         ref_backend = rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=True))
 
         ppo_kwargs = dict(
+            n_minibatches=8,
             kl_ctl=0.1,
             discount=1.0,
             gae_lambda=1.0,
@@ -248,7 +255,7 @@ class PackedPPOExperiment(Experiment):
             max_reward_clip=20.0,
             adaptive_kl_ctl=False,
         )
-        actor_interface = ref_interface = ModelInterface(
+        actor_interface = ModelInterface(
             'flash_actor',
             args={
                 **copy.deepcopy(ppo_kwargs),
@@ -256,11 +263,13 @@ class PackedPPOExperiment(Experiment):
                 "early_stop_imp_ratio": 5.0,
             },
         )
+        ref_interface = copy.deepcopy(actor_interface)
+        ref_interface.args['enable_save'] = False
         critic_interface = ModelInterface(
             'flash_critic',
             args=copy.deepcopy(ppo_kwargs),
         )
-        rw_interface = ModelInterface('flash_paired_rw')
+        rw_interface = ModelInterface('flash_paired_rw', args=dict(enable_save=False))
 
         model_worker = [
             ModelWorker(
@@ -275,26 +284,6 @@ class PackedPPOExperiment(Experiment):
         ] + [
             ModelWorker(
                 seed=self.seed,
-                model=rw_model,
-                backend=rw_backend,
-                interface=rw_interface,
-                model_name='reward',
-                dp_rank=i,
-                topo=PipeModelDataParallelTopology(1, 1, self.n_rewards),
-            ) for i in range(self.n_rewards)
-        ] + [
-            ModelWorker(
-                seed=self.seed,
-                model=ref_model,
-                backend=ref_backend,
-                interface=ref_interface,
-                model_name='ref',
-                dp_rank=i,
-                topo=PipeModelDataParallelTopology(1, 1, self.n_refs),
-            ) for i in range(self.n_refs)
-        ] + [
-            ModelWorker(
-                seed=self.seed,
                 model=critic_model,
                 backend=critic_backend,
                 interface=critic_interface,
@@ -302,6 +291,26 @@ class PackedPPOExperiment(Experiment):
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_critics),
             ) for i in range(self.n_critics)
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=rw_model,
+                backend=rw_backend,
+                interface=rw_interface,
+                model_name='reward',
+                dp_rank=0,
+                topo=PipeModelDataParallelTopology(1, 1, 1),
+            )
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=ref_model,
+                backend=ref_backend,
+                interface=ref_interface,
+                model_name='ref',
+                dp_rank=0,
+                topo=PipeModelDataParallelTopology(1, 1, 1),
+            )
         ]
 
         return ExperimentConfig(

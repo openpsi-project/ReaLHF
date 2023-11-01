@@ -7,12 +7,12 @@ import random
 
 import deepspeed
 import torch
-import tqdm
 import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.utils.data import gather_packed_shifted_log_probs
 from impl.model.utils.save import save_hf_or_lora_model
+from base.dataparallel import PackedParallelDataBroker
 import api.huggingface
 import api.model
 import impl.model.nn.flash_mqat as flash_mqat
@@ -23,6 +23,8 @@ logger = logging.getLogger("PackedPPOInterface")
 
 @dataclasses.dataclass
 class PackedActorInterface(api.model.ModelInterface):
+    n_minibatches: int = 4
+
     generation_config: Optional[Dict] = None
 
     kl_ctl: float = 0.1
@@ -41,6 +43,8 @@ class PackedActorInterface(api.model.ModelInterface):
     adaptive_kl_target: Optional[float] = 6
     adaptive_kl_horizon: Optional[float] = 10000
 
+    enable_save: bool = True
+
     def __post_init__(self):
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
@@ -52,7 +56,8 @@ class PackedActorInterface(api.model.ModelInterface):
         self.kl_ctl = None
 
     def save(self, model: api.model.Model, save_dir: str):
-        save_hf_or_lora_model(model, save_dir)
+        if self.enable_save:
+            save_hf_or_lora_model(model, save_dir)
 
     @torch.inference_mode()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
@@ -267,20 +272,26 @@ class PackedActorInterface(api.model.ModelInterface):
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
 
-        train_stats = self._ppo_actor_step(
-            module=module,
-            tokenizer=tokenizer,
-            packed_input_ids=data['packed_seq'],
-            cu_seqlens=data['cu_seqlens'],
-            old_logp=data['packed_logprobs'],
-            ref_logp=data['packed_ref_logprobs'],
-            reward_score=data['rewards'],
-            values=data['values'],
-            prompt_mask=data['prompt_mask'],
-            seq_no_eos_mask=data['seq_no_eos_mask'],
-            version_steps=model.version.global_step,
-            logits_mask=data['packed_logits_mask'],
-        )
+        datas = PackedParallelDataBroker.scatter_to(data, self.n_minibatches)
+        random.shuffle(datas)
+        train_stats = collections.defaultdict(lambda: 0)
+        for data in datas:
+            stats = self._ppo_actor_step(
+                module=module,
+                tokenizer=tokenizer,
+                packed_input_ids=data['packed_seq'],
+                cu_seqlens=data['cu_seqlens'],
+                old_logp=data['packed_logprobs'],
+                ref_logp=data['packed_ref_logprobs'],
+                reward_score=data['rewards'],
+                values=data['values'],
+                prompt_mask=data['prompt_mask'],
+                seq_no_eos_mask=data['seq_no_eos_mask'],
+                version_steps=model.version.global_step,
+                logits_mask=data['packed_logits_mask'],
+            )
+            for k, v in stats.items():
+                train_stats[k] += v
 
         cur_epoch = model.version.epoch
         model.inc_version()
@@ -289,7 +300,7 @@ class PackedActorInterface(api.model.ModelInterface):
 
         train_stats: Dict[str, torch.Tensor] = dict(train_stats)
         for k, v in train_stats.items():
-            v = v.detach()
+            v = v.detach() / self.n_minibatches
             train_stats[k] = api.huggingface.get_all_reduce_mean(v).item()
 
         return train_stats
@@ -297,6 +308,8 @@ class PackedActorInterface(api.model.ModelInterface):
 
 @dataclasses.dataclass
 class PackedCriticInterface(api.model.ModelInterface):
+    n_minibatches: int = 4
+    enable_save: bool = True
     kl_ctl: float = 0.1
     discount: float = 1.0
     gae_lambda: float = 0.95
@@ -316,6 +329,10 @@ class PackedCriticInterface(api.model.ModelInterface):
         else:
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
         self.kl_ctl = None
+
+    def save(self, model: api.model.Model, save_dir: str):
+        if self.enable_save:
+            save_hf_or_lora_model(model, save_dir)
 
     @torch.inference_mode()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
@@ -430,19 +447,25 @@ class PackedCriticInterface(api.model.ModelInterface):
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
 
-        train_stats = self._ppo_critic_step(
-            module=module,
-            tokenizer=tokenizer,
-            packed_input_ids=data['packed_seq'],
-            cu_seqlens=data['cu_seqlens'],
-            old_logp=data['packed_logprobs'],
-            ref_logp=data['packed_ref_logprobs'],
-            reward_score=data['rewards'],
-            values=data['values'],
-            prompt_mask=data['prompt_mask'],
-            seq_no_eos_mask=data['seq_no_eos_mask'],
-            version_steps=model.version.global_step,
-        )
+        datas = PackedParallelDataBroker.scatter_to(data, self.n_minibatches)
+        random.shuffle(datas)
+        train_stats = collections.defaultdict(lambda: 0)
+        for data in datas:
+            stats = self._ppo_critic_step(
+                module=module,
+                tokenizer=tokenizer,
+                packed_input_ids=data['packed_seq'],
+                cu_seqlens=data['cu_seqlens'],
+                old_logp=data['packed_logprobs'],
+                ref_logp=data['packed_ref_logprobs'],
+                reward_score=data['rewards'],
+                values=data['values'],
+                prompt_mask=data['prompt_mask'],
+                seq_no_eos_mask=data['seq_no_eos_mask'],
+                version_steps=model.version.global_step,
+            )
+            for k, v in stats.items():
+                train_stats[k] += v
 
         cur_epoch = model.version.epoch
         model.inc_version()
@@ -451,7 +474,7 @@ class PackedCriticInterface(api.model.ModelInterface):
 
         train_stats: Dict[str, torch.Tensor] = dict(train_stats)
         for k, v in train_stats.items():
-            v = v.detach()
+            v = v.detach() / self.n_minibatches
             train_stats[k] = api.huggingface.get_all_reduce_mean(v).item()
 
         return train_stats

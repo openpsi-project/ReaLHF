@@ -21,6 +21,10 @@ def get_random_tmp():
 
 class ClusterSpec(abc.ABC):
 
+    @abc.abstractproperty
+    def name(self):
+        ...
+
     def node_type_from_node_name(self, node_name: str) -> str:
         ...
 
@@ -37,6 +41,10 @@ class ClusterSpec(abc.ABC):
 
 
 class QizhiClusterSpec(ClusterSpec):
+
+    @property
+    def name(self):
+        return 'qizhi'
 
     def node_type_from_node_name(self, node_name: str) -> str:
         if 'frl1g' in node_name:
@@ -67,6 +75,10 @@ class QizhiClusterSpec(ClusterSpec):
 
 class QHClusterSpec(ClusterSpec):
 
+    @property
+    def name(self):
+        return 'qh'
+
     def node_type_from_node_name(self, node_name: str) -> str:
         assert 'QH-com' in node_name
         return 'a800'
@@ -84,6 +96,10 @@ class QHClusterSpec(ClusterSpec):
 
 
 class YLClusterSpec(ClusterSpec):
+
+    @property
+    def name(self):
+        return 'yl'
 
     def node_type_from_node_name(self, node_name: str) -> str:
         assert 'YL-com' in node_name

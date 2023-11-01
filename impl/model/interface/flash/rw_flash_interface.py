@@ -16,6 +16,7 @@ logger = logging.getLogger("Packed Reward Modeling Interface")
 
 @dataclasses.dataclass
 class PackedPairedRewardInterface(api.model.ModelInterface):
+    enable_save: bool = True
 
     def __post_init__(self):
         self.train_total_predictions = self.train_total_correct_predictions = 0
@@ -89,6 +90,8 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
         )
 
     def save(self, model: api.model.Model, output_dir):
+        if not self.enable_save:
+            return
         from impl.model.nn.lora import is_lora_model
         save_hf_or_lora_model(model, output_dir)
         if is_lora_model(model.module):
@@ -143,6 +146,7 @@ api.model.register_interface("flash_paired_rw", PackedPairedRewardInterface)
 
 @dataclasses.dataclass
 class PackedPlackettLuceRewardInterface(api.model.ModelInterface):
+    enable_save: bool = True
 
     def __post_init__(self):
         self.train_total_predictions = self.train_total_correct_predictions = 0
@@ -224,6 +228,8 @@ class PackedPlackettLuceRewardInterface(api.model.ModelInterface):
         return dict(loss=loss.detach().item(), acc=acc)
 
     def save(self, model: api.model.Model, output_dir):
+        if not self.enable_save:
+            return
         from impl.model.nn.lora import is_lora_model
         save_hf_or_lora_model(model, output_dir)
         if is_lora_model(model.module):

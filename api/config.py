@@ -37,7 +37,7 @@ for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
 
 _LLM_GPU_IMAGE = "llm/llm-gpu"
-_LLM_CPU_IMAGE = "meizy/llm-cpu"
+_LLM_CPU_IMAGE = "llm/llm-cpu:numba" if cluster_spec.name == 'qizhi' else "meizy/llm-cpu"
 
 
 @dataclasses.dataclass
