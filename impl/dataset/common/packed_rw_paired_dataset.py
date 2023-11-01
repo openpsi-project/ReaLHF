@@ -2,12 +2,12 @@ from typing import Callable, Dict, List, Optional
 import itertools
 import json
 
+import numpy as np
 import torch
 import torch.utils.data
-import numpy as np
 
+from base.datapack import ffd_with_result_unsorted, min_abs_diff_partition
 import api.data
-from base.datapack import min_abs_diff_partition, ffd_with_result_unsorted
 
 
 class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
@@ -176,9 +176,10 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
 if __name__ != "__main__":
     api.data.register_dataset("packed_rw_pair", RewardModelingPackedPairedDataset)
 else:
+    import transformers
+
     from base.dataparallel import PackedParallelDataBroker
     from base.namedarray import from_dict
-    import transformers
 
     def have_common_prefix_at_least(a, b, n):
         return (a[:n] == b[:n]).all()

@@ -1,4 +1,5 @@
 import json
+
 import numpy as np
 
 for split in ['train', 'valid']:
