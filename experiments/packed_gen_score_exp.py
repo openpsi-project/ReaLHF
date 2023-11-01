@@ -20,7 +20,7 @@ class PackedGenerateScoringExperiment(Experiment):
         dp_size=8,
         seed=1,
         base_model='gpt2',
-        prompt_dataset_path="/lustre/fw/datasets/imdb/rl/rw_prompt-train.jsonl",
+        prompt_dataset_path="/lustre/fw/datasets/imdb/rl/rw_prompt-valid.jsonl",
         batch_size: int = 256,
     ):
         self.dp_size = dp_size
