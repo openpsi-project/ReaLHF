@@ -31,11 +31,11 @@ class ClusterSpec(abc.ABC):
     def gpu_type_from_node_name(self, node_name: str) -> str:
         ...
 
-    @property
+    @abc.abstractproperty
     def fileroot(self) -> str:
         ...
 
-    @property
+    @abc.abstractproperty
     def default_mount(self) -> str:
         ...
 
@@ -123,7 +123,7 @@ if not (hostname.startswith("YL-ctrl0") or hostname.startswith("QH-ctrl0") or ho
     raise RuntimeError(f"Unkown cluster with hostname {hostname}. "
                        "Please properly implement methods of `ClusterSpec` in base/cluster.py.")
 
-spec = ClusterSpec()
+spec = None
 if hostname.startswith("YL-ctrl0") or hostname.startswith("YL-com"):
     spec = YLClusterSpec()
 elif hostname.startswith("QH-ctrl0") or hostname.startswith("QH-com"):
