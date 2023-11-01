@@ -27,12 +27,9 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
 
     def train_step(self, model: api.model.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_input_ids: torch.Tensor = data['packed_input_ids'].squeeze()  # shape [tot_seqlen]
-        total_seq_len = packed_input_ids.shape[0]
-        cu_seqlens: torch.Tensor = data['cu_seqlens'].squeeze()
-        n_seqs = (cu_seqlens == total_seq_len).nonzero()[0][0]
-        cu_seqlens = cu_seqlens[:n_seqs + 1]  # shape [bs + 1]
-        prompt_mask: torch.BoolTensor = data['prompt_mask'].squeeze()  # shape [tot_seqlen]
+        packed_input_ids: torch.Tensor = data['packed_input_ids']  # shape [tot_seqlen]
+        cu_seqlens: torch.Tensor = data['cu_seqlens']
+        prompt_mask: torch.BoolTensor = data['prompt_mask']  # shape [tot_seqlen]
         module: deepspeed.DeepSpeedEngine = model.module
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
@@ -60,25 +57,22 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
 
         module.eval()
         losses = 0
-        n_tokens = 0
+        n_seqs = 0
 
         for step, data in enumerate(tqdm.tqdm(eval_dataloader)):
             data = recursive_apply(from_dict(data), lambda x: x.to(device))
-            packed_input_ids: torch.Tensor = data['packed_input_ids'].squeeze()  # shape [tot_seqlen]
-            total_seq_len = packed_input_ids.shape[0]
-            cu_seqlens: torch.Tensor = data['cu_seqlens'].squeeze()
-            n_seqs = (cu_seqlens == total_seq_len).nonzero()[0][0]
-            cu_seqlens = cu_seqlens[:n_seqs + 1]  # shape [bs + 1]
-            prompt_mask: torch.BoolTensor = data['prompt_mask'].squeeze()  # shape [tot_seqlen]
+            packed_input_ids: torch.Tensor = data['packed_input_ids']  # shape [tot_seqlen]
+            cu_seqlens: torch.Tensor = data['cu_seqlens']
+            prompt_mask: torch.BoolTensor = data['prompt_mask']  # shape [tot_seqlen]
             max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
             logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
                             max_seqlen=max_seqlen).logits.float()
             loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask.float())
 
-            losses += (1 - prompt_mask.float()).sum() * loss.float()
-            n_tokens += (1 - prompt_mask.float()).sum()
-        losses = losses / n_tokens
+            losses += (cu_seqlens.shape[0] - 1) * loss.float()
+            n_seqs += cu_seqlens.shape[0] - 1
+        losses = losses / n_seqs
         try:
             perplexity = torch.exp(losses).item()
         except OverflowError:

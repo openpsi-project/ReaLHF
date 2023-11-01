@@ -21,22 +21,30 @@ def get_random_tmp():
 
 class ClusterSpec(abc.ABC):
 
+    @abc.abstractproperty
+    def name(self):
+        ...
+
     def node_type_from_node_name(self, node_name: str) -> str:
         ...
 
     def gpu_type_from_node_name(self, node_name: str) -> str:
         ...
 
-    @property
+    @abc.abstractproperty
     def fileroot(self) -> str:
         ...
 
-    @property
+    @abc.abstractproperty
     def default_mount(self) -> str:
         ...
 
 
 class QizhiClusterSpec(ClusterSpec):
+
+    @property
+    def name(self):
+        return 'qizhi'
 
     def node_type_from_node_name(self, node_name: str) -> str:
         if 'frl1g' in node_name:
@@ -67,6 +75,10 @@ class QizhiClusterSpec(ClusterSpec):
 
 class QHClusterSpec(ClusterSpec):
 
+    @property
+    def name(self):
+        return 'qh'
+
     def node_type_from_node_name(self, node_name: str) -> str:
         assert 'QH-com' in node_name
         return 'a800'
@@ -84,6 +96,10 @@ class QHClusterSpec(ClusterSpec):
 
 
 class YLClusterSpec(ClusterSpec):
+
+    @property
+    def name(self):
+        return 'yl'
 
     def node_type_from_node_name(self, node_name: str) -> str:
         assert 'YL-com' in node_name
@@ -107,7 +123,7 @@ if not (hostname.startswith("YL-ctrl0") or hostname.startswith("QH-ctrl0") or ho
     raise RuntimeError(f"Unkown cluster with hostname {hostname}. "
                        "Please properly implement methods of `ClusterSpec` in base/cluster.py.")
 
-spec = ClusterSpec()
+spec = None
 if hostname.startswith("YL-ctrl0") or hostname.startswith("YL-com"):
     spec = YLClusterSpec()
 elif hostname.startswith("QH-ctrl0") or hostname.startswith("QH-com"):

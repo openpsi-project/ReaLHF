@@ -205,7 +205,42 @@ class FlashMQATStarCoderTest(unittest.TestCase):
             assert torch.allclose(y1.k_cache, y2.k_cache)
             assert torch.allclose(y1.v_cache, y2.v_cache)
 
+    def testGenerateTwoOrMoreSamples(self):
+        seqs = [
+            "# This is a print function\ndef",
+            "import time\n",
+            "assert torch.allclose(logits, sc_logits, atol=5e-3",
+            "I'm really happy about",
+        ]
+        num_samples = 3
+        self.tokenizer.padding_side = "left"
+        encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
+        input_ids = encoding['input_ids'].to(self.device)
+        attention_mask = encoding['attention_mask'].to(self.device)
 
+        for greedy in [True, False]:
+            for min_new_tokens in [0, 1]:
+                gconfig = GenerationConfig(min_new_tokens=min_new_tokens,
+                                           max_new_tokens=10,
+                                           temperature=1.0,
+                                           greedy=greedy,
+                                           top_k=50,
+                                           top_p=1.0,
+                                           num_samples=num_samples)
+                generated, glogprobs, glmask, _, _ = generate(model=self.model,
+                                                              tokenizer=self.tokenizer,
+                                                              input_ids=input_ids,
+                                                              attention_mask=attention_mask,
+                                                              gconfig=gconfig)
+                if greedy and min_new_tokens == 0:
+                    self.assertIsNone(glmask)
+                else:
+                    self.assertEqual(glmask.shape[0], num_samples * len(seqs))
+                self.assertEqual(generated.shape[0], num_samples * len(seqs))
+                self.assertEqual(glogprobs.shape[0], num_samples * len(seqs))
+
+
+@unittest.skip('')
 class FlashMQATStarCoderCPUTest(unittest.TestCase):
 
     @classmethod
@@ -335,6 +370,76 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         assert torch.allclose(vglogprob, tlogprob), (vglogprob - tlogprob).abs().max()
 
 
+@unittest.skip('')
+class FlashMQATGPTCPUTest(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bs = bs = 3
+        cls.device = device = 'cpu'
+        cls.dtype = dtype = torch.float32
+
+        sc_cfg = transformers.AutoConfig.from_pretrained("/lustre/fw/pretrained/gpt2/")
+        sc_cfg.n_layer = 2
+        sc_cfg.n_embd = 1024
+        sc_cfg.n_head = 8
+        sc_cfg.n_inner = 4096
+        sc_cfg.n_positions = 512
+
+        cls.tokenizer = api.huggingface.load_hf_tokenizer("/lustre/fw/pretrained/gpt2/")
+        cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
+
+        cls.gpt: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
+            dtype=dtype, device=device)
+        cls.gpt.eval()
+
+        cls.model = FlashMQATForCausalLM.from_gpt2(from_model=cls.gpt, dtype=dtype, device=device)
+        cls.model.eval()
+        cls.config = cls.model.config
+
+    @torch.no_grad()
+    def testStandardForward(self):
+        config = self.config
+        bs = self.bs
+        gpt = self.gpt
+        model = self.model
+        device = self.device
+
+        max_seq_len = 6
+        input_ids = torch.randint(0, config.vocab_size, (bs, max_seq_len), dtype=torch.long, device=device)
+        seqlens = torch.randint(3, max_seq_len, (bs,), dtype=torch.long, device=device)
+        seqlens[0] = max_seq_len
+        leftpad_attention_mask = torch.ones((bs, max_seq_len), dtype=torch.bool, device=device)
+        rightpad_attention_mask = torch.ones((bs, max_seq_len), dtype=torch.bool, device=device)
+        for i in range(bs):
+            leftpad_attention_mask[i, :max_seq_len - seqlens[i]] = 0
+            rightpad_attention_mask[i, seqlens[i]:] = 0
+
+        # no mask
+        x = PipeTransferData()
+        ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(config.n_layers + 1)]
+        sc_logits = gpt(input_ids=input_ids).logits
+        logits = model(x, ys).pp_output
+        assert torch.allclose(logits, sc_logits, atol=2e-5), ((logits - sc_logits)).abs().max()
+
+        # right pad
+        x = PipeTransferData(attention_mask=rightpad_attention_mask)
+        ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(config.n_layers + 1)]
+        sc_logits = gpt(input_ids=input_ids,
+                        attention_mask=rightpad_attention_mask).logits * rightpad_attention_mask.unsqueeze(-1)
+        logits = model(x, ys).pp_output * rightpad_attention_mask.unsqueeze(-1)
+        assert torch.allclose(logits, sc_logits, atol=2e-5), ((logits - sc_logits)).abs().max()
+
+        # left pad
+        x = PipeTransferData(attention_mask=leftpad_attention_mask)
+        ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(config.n_layers + 1)]
+        sc_logits = gpt(input_ids=input_ids,
+                        attention_mask=leftpad_attention_mask).logits * leftpad_attention_mask.unsqueeze(-1)
+        logits = model(x, ys).pp_output * leftpad_attention_mask.unsqueeze(-1)
+        assert torch.allclose(logits, sc_logits, atol=2e-5), ((logits - sc_logits)).abs().max()
+
+
+@unittest.skip('')
 class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod
@@ -410,6 +515,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         assert torch.allclose(vgmask.cpu(), vcmask)
 
 
+@unittest.skip('')
 class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod

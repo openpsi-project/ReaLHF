@@ -21,6 +21,7 @@ inf_reward = ModelRPC(
     input_key_remap={'packed_seq': "packed_input_ids"},
     output_data=["scores"],
     output_key_remap={"scores": "rewards"},
+    dp_broker_type='packed',
 )
 
 inf_ref_logits = ModelRPC(
@@ -29,6 +30,7 @@ inf_ref_logits = ModelRPC(
     input_data=["packed_seq", "cu_seqlens", "packed_logits_mask"],
     output_data=["logprobs"],
     output_key_remap={"logprobs": "packed_ref_logprobs"},
+    dp_broker_type='packed',
 )
 
 inf_values = ModelRPC(
@@ -37,6 +39,7 @@ inf_values = ModelRPC(
     input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
     output_data=["scores"],
     output_key_remap={"scores": "values"},
+    dp_broker_type='packed',
 )
 
 train_actor = ModelRPC(
@@ -53,6 +56,8 @@ train_actor = ModelRPC(
         "seq_no_eos_mask",
         'packed_logits_mask',
     ],
+    log_return_value=True,
+    dp_broker_type='packed',
 )
 
 train_critic = ModelRPC(
@@ -68,27 +73,30 @@ train_critic = ModelRPC(
         "prompt_mask",
         "seq_no_eos_mask",
     ],
+    dp_broker_type='packed',
+    log_return_value=True,
 )
 
 
-class WpsfFlashPPOExperiment(Experiment):
+class PackedPPOExperiment(Experiment):
 
-    def __init__(self, n_actors=1, n_critics=1, n_rewards=1, n_refs=1, seed=1, benchmark_only=False):
-        if benchmark_only:
-            n_actors = n_critics = n_rewards = n_refs = 1
-
+    def __init__(
+        self,
+        n_actors=4,
+        n_critics=3,
+        seed=1,
+        base_model: str = 'gpt2',
+        train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl",
+    ):
         self.n_actors = n_actors
-        self.n_rewards = n_rewards
-        self.n_refs = n_refs
         self.n_critics = n_critics
 
-        self.n_total = n_actors + n_rewards + n_refs + n_critics
-
-        self.n_data_workers = n_actors
+        self.n_data_workers = 1
 
         self.seed = seed
 
-        self.benchmark_only = benchmark_only
+        self.base_model = base_model
+        self.train_dataset_path = train_dataset_path
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -106,42 +114,51 @@ class WpsfFlashPPOExperiment(Experiment):
                     mem=10000,
                 ),
             ),
-            model_worker=TasksGroup(
-                count=self.n_total,
-                scheduling=Scheduling.model_worker_default(
-                    cpu=4,
-                    gpu=1,
-                    gpu_type='geforce',
-                    mem=60000,
-                    nodelist='frl8g134',
+            model_worker=[
+                TasksGroup(
+                    count=self.n_actors + self.n_critics,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=1,
+                        mem=60000,
+                        nodelist='frl8a140',
+                    ),
                 ),
-            ),
+                TasksGroup(
+                    count=2,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=0.5,
+                        mem=30000,
+                        nodelist='frl8a140',
+                    ),
+                )
+            ],
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        if self.benchmark_only:
-            actor_path = f"{cluster_spec.fileroot}/checkpoints/1l-starcoder/"
-            rw_lora_head_path = None
+        if self.base_model == 'starcoder':
+            base_model_path = "/data/aigc/public/starcoder-16bit"
+        elif self.base_model == 'gpt2':
+            base_model_path = "/lustre/fw/pretrained/gpt2-large/"
         else:
-            actor_path = f"{cluster_spec.fileroot}/checkpoints/starcoder/"
-            rw_lora_head_path = f"{cluster_spec.fileroot}/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
+            raise NotImplementedError()
+        sft_model_path = "/data/aigc/llm/checkpoints/fw/senti-sft-pos-s42/run20231031/default@pp_00-mp_00-dp_00/epoch8step0/"
+        rw_model_path = "/data/aigc/llm/checkpoints/fw/flash-rw-paired-s42/run20231101/default@pp_00-mp_00-dp_00/epoch0step19/"
 
-        self.lora_dim = 32
-        self.lora_scaling = 32.0
-
-        rw_output_scaling = 0.1
+        rw_output_scaling = 1.0
         rw_output_bias = 0.0
 
-        mini_batch_size_per_device = 1
-        batch_size_per_device = 2
-        max_prompt_len = 2048
-        max_answer_len = 2048
+        batch_size_per_device = 32
+        max_prompt_len = 50
+        max_answer_len = 512 - max_prompt_len
 
         dataset = Dataset(
             'prompt',
             args=dict(
-                dataset_path="/lustre/fw/datasets/wps-formula-rw/dataset_train.jsonl",
+                dataset_path=self.train_dataset_path,
                 max_prompt_len=max_prompt_len,
+                pad_to_max_length=False,
             ),
         )
         dataloader = DataLoader(
@@ -154,7 +171,7 @@ class WpsfFlashPPOExperiment(Experiment):
         )
         data_worker = [
             DataWorker(
-                tokenizer_name_or_path=actor_path,
+                tokenizer_name_or_path=base_model_path,
                 datasets=[dataset],
                 dataloader=dataloader,
                 seed=self.seed,
@@ -166,66 +183,37 @@ class WpsfFlashPPOExperiment(Experiment):
             min_new_tokens=10,
             greedy=False,
             top_p=1.0,
-            top_k=int(1e9),
+            top_k=200,
             temperature=1.0,
+            num_samples=1,
         )
 
-        def lora_wrapper(load_path=None, squash=True):
-            return ModelWrapper(
-                'lora',
-                args=dict(
-                    lora_module_kwargs=dict(
-                        lora_dim=self.lora_dim,
-                        lora_scaling=self.lora_scaling,
-                    ),
-                    lora_keys_to_replace=['c_attn.linear', 'c_proj.'],
-                    load_lora_path=load_path,
-                    lora_op_after_creation='squash' if squash else None,
-                ),
-            )
-
-        actor_model = Model(
+        actor_model = ref_model = Model(
             "flash_mqat_clm_hf",
-            args=dict(model_path=actor_path),
-            wrappers=[
-                # FIXME: lora path
-                lora_wrapper(),
-                lora_wrapper(squash=False),
-            ],
+            args=dict(
+                model_path=sft_model_path,
+                from_type="self",
+                tokenizer_path=base_model_path,
+            ),
         )
-        ref_model = Model(
-            'flash_mqat_clm_hf',
-            args=dict(model_path=actor_path,),
-            wrappers=[
-                # FIXME: lora path
-                lora_wrapper()
-            ],
-        )
-        rw_model = Model(
+
+        rw_model = critic_model = Model(
             "flash_mqat_critic",
             args=dict(
-                model_path=actor_path,
-                from_type='starcoder',
+                model_path=rw_model_path,
+                from_type='self',
+                tokenizer_path=base_model_path,
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
-                v_head_path=os.path.join(rw_lora_head_path, "rw_v_head.bin")
-                if not self.benchmark_only else None,
             ),
-            wrappers=[
-                # FIXME: lora path
-                lora_wrapper(),
-                lora_wrapper(),
-            ],
         )
-        critic_model = copy.deepcopy(rw_model)
-        critic_model.wrappers.append(lora_wrapper(squash=False))
 
         actor_backend = ModelBackend(
             'ds_train',
             args=dict(
                 optimizer_name='adam',
                 optimizer_config=dict(
-                    lr=2.5e-4,
+                    lr=9.65e-6,
                     weight_decay=0.0,
                     eps=1e-5,
                     betas=(0.9, 0.95),
@@ -241,7 +229,7 @@ class WpsfFlashPPOExperiment(Experiment):
             args=dict(
                 optimizer_name='adam',
                 optimizer_config=dict(
-                    lr=2.5e-4,
+                    lr=5e-6,
                     weight_decay=0.0,
                     eps=1e-5,
                     betas=(0.9, 0.95),
@@ -258,26 +246,30 @@ class WpsfFlashPPOExperiment(Experiment):
         ref_backend = rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=True))
 
         ppo_kwargs = dict(
-            mini_batch_size=mini_batch_size_per_device,
+            n_minibatches=8,
             kl_ctl=0.1,
             discount=1.0,
             gae_lambda=1.0,
             eps_clip=0.2,
             value_eps_clip=0.2,
             max_reward_clip=20.0,
+            adaptive_kl_ctl=False,
         )
-        actor_interface = ref_interface = ModelInterface(
+        actor_interface = ModelInterface(
             'flash_actor',
             args={
-                **copy.deepcopy(ppo_kwargs), "generation_config": generation_kwargs
+                **copy.deepcopy(ppo_kwargs),
+                "generation_config": generation_kwargs,
+                "early_stop_imp_ratio": 5.0,
             },
         )
+        ref_interface = copy.deepcopy(actor_interface)
+        ref_interface.args['enable_save'] = False
         critic_interface = ModelInterface(
             'flash_critic',
             args=copy.deepcopy(ppo_kwargs),
         )
-        # critic_interface.args['mini_batch_size'] = mini_batch_size_per_device * self.n_actors // self.n_critics
-        rw_interface = ModelInterface('flash_plrw')
+        rw_interface = ModelInterface('flash_paired_rw', args=dict(enable_save=False))
 
         model_worker = [
             ModelWorker(
@@ -292,26 +284,6 @@ class WpsfFlashPPOExperiment(Experiment):
         ] + [
             ModelWorker(
                 seed=self.seed,
-                model=rw_model,
-                backend=rw_backend,
-                interface=rw_interface,
-                model_name='reward',
-                dp_rank=i,
-                topo=PipeModelDataParallelTopology(1, 1, self.n_rewards),
-            ) for i in range(self.n_rewards)
-        ] + [
-            ModelWorker(
-                seed=self.seed,
-                model=ref_model,
-                backend=ref_backend,
-                interface=ref_interface,
-                model_name='ref',
-                dp_rank=i,
-                topo=PipeModelDataParallelTopology(1, 1, self.n_refs),
-            ) for i in range(self.n_refs)
-        ] + [
-            ModelWorker(
-                seed=self.seed,
                 model=critic_model,
                 backend=critic_backend,
                 interface=critic_interface,
@@ -319,11 +291,31 @@ class WpsfFlashPPOExperiment(Experiment):
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_critics),
             ) for i in range(self.n_critics)
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=rw_model,
+                backend=rw_backend,
+                interface=rw_interface,
+                model_name='reward',
+                dp_rank=0,
+                topo=PipeModelDataParallelTopology(1, 1, 1),
+            )
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=ref_model,
+                backend=ref_backend,
+                interface=ref_interface,
+                model_name='ref',
+                dp_rank=0,
+                topo=PipeModelDataParallelTopology(1, 1, 1),
+            )
         ]
 
         return ExperimentConfig(
-            total_train_epochs=8 if not self.benchmark_only else 1,
-            save_frequency_epochs=None,
+            total_train_epochs=8,
+            save_frequency_epochs=1,
             save_frequency_seconds=None,
             model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
             data_worker=data_worker,
@@ -331,6 +323,5 @@ class WpsfFlashPPOExperiment(Experiment):
         )
 
 
-register_experiment("wpsf-flash-ppo", WpsfFlashPPOExperiment)
-register_experiment("wpsf-flash-ppo-benchmark", functools.partial(WpsfFlashPPOExperiment,
-                                                                  benchmark_only=True))
+for s in range(1, 43):
+    register_experiment(f"flash-ppo-s{s}", functools.partial(PackedPPOExperiment, seed=s))

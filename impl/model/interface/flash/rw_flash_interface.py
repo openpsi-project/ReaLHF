@@ -11,11 +11,142 @@ from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.utils.save import save_hf_or_lora_model
 import api.model
 
-logger = logging.getLogger("Packed Plackett Luce Reward Interface")
+logger = logging.getLogger("Packed Reward Modeling Interface")
+
+
+@dataclasses.dataclass
+class PackedPairedRewardInterface(api.model.ModelInterface):
+    enable_save: bool = True
+
+    def __post_init__(self):
+        self.train_total_predictions = self.train_total_correct_predictions = 0
+
+    @torch.inference_mode()
+    def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+        data = recursive_apply(data, lambda x: x.to(model.device))
+        packed_input_ids: torch.Tensor = data['packed_input_ids'].squeeze()
+        cu_seqlens: torch.Tensor = data['cu_seqlens'].squeeze()
+
+        module: deepspeed.DeepSpeedEngine = model.module
+        max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+
+        module.eval()
+
+        scores: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
+                                           cu_seqlens=cu_seqlens,
+                                           max_seqlen=max_seqlen).float()
+        chosen_end_scores = scores[cu_seqlens[1:] - 1]  # [bs]
+
+        ###################### logging ######################
+        input_ids = [packed_input_ids[start:end] for start, end in zip(cu_seqlens[:-1], cu_seqlens[1:])]
+        seq_strs = model.tokenizer.batch_decode(input_ids,
+                                                clean_up_tokenization_spaces=False,
+                                                skip_special_tokens=True)
+        for seq_str, score in zip(seq_strs, chosen_end_scores):
+            logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
+        #####################################################
+
+        return from_dict(dict(scores=chosen_end_scores.cpu()))
+
+    def train_step(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+        data = recursive_apply(data, lambda x: x.to(model.device))
+
+        packed_input_ids: torch.Tensor = data['packed_input_ids']
+        input_lens: torch.Tensor = data['pair_input_lens']
+        group_factor: torch.Tensor = data['group_factor']
+        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0)
+
+        module: deepspeed.DeepSpeedEngine = model.module
+        max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+
+        module.train()
+
+        scores: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
+                                           cu_seqlens=cu_seqlens,
+                                           max_seqlen=max_seqlen).float()
+        scores = scores[cu_seqlens[1:] - 1].view(-1, 2)
+
+        loss = -(torch.nn.functional.logsigmoid(scores[:, 0] - scores[:, 1]) * group_factor).sum()
+
+        module.backward(loss)
+        module.step()
+
+        correct_predictions = (scores[:, 0] > scores[:, 1]).float().sum().detach().item()
+        self.train_total_correct_predictions += correct_predictions
+        self.train_total_predictions += scores.shape[0]
+        acc = self.train_total_correct_predictions / self.train_total_predictions
+
+        cur_epoch = model.version.epoch
+        model.inc_version()
+        if model.version.epoch > cur_epoch:
+            module.tput_timer.update_epoch_count()
+            self.train_total_predictions = self.train_total_correct_predictions = 0
+
+        return dict(
+            loss=loss.detach().item(),
+            acc=acc,
+            avg_pos_score=scores[:, 0].mean().detach().item(),
+            avg_neg_score=scores[:, 1].mean().detach().item(),
+        )
+
+    def save(self, model: api.model.Model, output_dir):
+        if not self.enable_save:
+            return
+        from impl.model.nn.lora import is_lora_model
+        save_hf_or_lora_model(model, output_dir)
+        if is_lora_model(model.module):
+            save_path = os.path.abspath(
+                os.path.join(
+                    output_dir,
+                    f"epoch{model.version.epoch}step{model.version.epoch_step}",
+                ))
+            os.makedirs(save_path, exist_ok=True)
+            torch.save(model.module.module.head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
+
+    @torch.inference_mode()
+    def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
+        device = model_.device
+        model = model_.module
+
+        model.eval()
+        total_predictions = correct_predictions = 0
+        loss = 0
+        pos_score = neg_score = 0
+
+        for step, data in enumerate(tqdm.tqdm(eval_dataloader)):
+            data = recursive_apply(from_dict(data), lambda x: x.to(device))
+
+            packed_input_ids: torch.Tensor = data['packed_input_ids']
+            input_lens: torch.Tensor = data['pair_input_lens']
+            group_factor: torch.Tensor = data['group_factor']
+            cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0)
+            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+
+            scores: torch.FloatTensor = model(packed_input_ids=packed_input_ids,
+                                              cu_seqlens=cu_seqlens,
+                                              max_seqlen=max_seqlen).float()
+            scores = scores[cu_seqlens[1:] - 1].view(-1, 2)
+
+            loss += -(torch.nn.functional.logsigmoid(scores[:, 0] - scores[:, 1]) * group_factor).sum()
+            correct_predictions += (scores[:, 0] > scores[:, 1]).float().sum().detach().item()
+            total_predictions += scores.shape[0]
+            pos_score += scores[:, 0].sum().detach().item()
+            neg_score += scores[:, 1].sum().detach().item()
+
+        return dict(
+            loss=float(loss / total_predictions),
+            acc=correct_predictions / total_predictions,
+            pos_score=float(pos_score / total_predictions),
+            neg_score=float(neg_score / total_predictions),
+        )
+
+
+api.model.register_interface("flash_paired_rw", PackedPairedRewardInterface)
 
 
 @dataclasses.dataclass
 class PackedPlackettLuceRewardInterface(api.model.ModelInterface):
+    enable_save: bool = True
 
     def __post_init__(self):
         self.train_total_predictions = self.train_total_correct_predictions = 0
@@ -97,6 +228,8 @@ class PackedPlackettLuceRewardInterface(api.model.ModelInterface):
         return dict(loss=loss.detach().item(), acc=acc)
 
     def save(self, model: api.model.Model, output_dir):
+        if not self.enable_save:
+            return
         from impl.model.nn.lora import is_lora_model
         save_hf_or_lora_model(model, output_dir)
         if is_lora_model(model.module):

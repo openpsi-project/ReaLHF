@@ -6,8 +6,10 @@ import logging
 import numpy as np
 import torch.utils.data
 
-from base.datapack import ffd_with_result_unsorted
+from base.datapack import ffd_with_result_unsorted, min_abs_diff_partition
 import api.data
+
+logger = logging.getLogger("Packed Prompt Dataset")
 
 
 class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
@@ -58,47 +60,67 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
             assert dataset_builder is not None
             data = dataset_builder()
 
-        dataset_size = len(data)
-        dataset_size_per_rank = dataset_size // util.world_size
-        shuffle_indices = api.data.get_shuffle_indices(util.seed, dataset_size)
-        subset_indices = shuffle_indices[util.ddp_rank * dataset_size_per_rank:(util.ddp_rank + 1) *
-                                         dataset_size_per_rank]
-        data = [data[i] for i in subset_indices]
+        shuffle_indices = api.data.get_shuffle_indices(util.seed, len(data))
+        data = [data[i] for i in shuffle_indices]
+        for x in data:
+            if x['answer'].startswith(x['prompt']):
+                raise ValueError("Answer should not start with prompt.")
 
-        tokenizer = util.tokenizer
+        all_prompt_str = [x['prompt'] for x in data]
+        all_prompt_chosen_str = [x['prompt'] + x['answer'] + util.tokenizer.eos_token for x in data]
+        all_prompt_encodings = util.tokenizer(all_prompt_str,
+                                              truncation=True,
+                                              max_length=max_length,
+                                              padding=False,
+                                              return_length=True,
+                                              return_attention_mask=False)
+        all_prompt_chosen_encodings = util.tokenizer(all_prompt_chosen_str,
+                                                     truncation=True,
+                                                     max_length=max_length,
+                                                     padding=False,
+                                                     return_length=True,
+                                                     return_attention_mask=False)
 
-        prompts_str = [x['prompt'] for x in data]
-        prompt_chosen_str = [x['answer'] + tokenizer.eos_token for x in data]
+        start, end = min_abs_diff_partition(np.array(all_prompt_chosen_encodings['length']),
+                                            util.world_size)[util.ddp_rank]
 
-        prompt_encodings = tokenizer(prompts_str,
-                                     truncation=True,
-                                     max_length=max_length,
-                                     padding=False,
-                                     return_length=True,
-                                     return_attention_mask=False)
-        prompt_lengths = prompt_encodings['length']
-        prompts = prompt_encodings['input_ids']
+        prompt_lengths = all_prompt_encodings['length'][start:end]
+        prompts = all_prompt_encodings['input_ids'][start:end]
 
-        prompt_chosen_encodings = tokenizer(prompt_chosen_str,
-                                            truncation=True,
-                                            max_length=max_length,
-                                            padding=False,
-                                            return_length=True,
-                                            return_attention_mask=False)
-        seqlens = prompt_chosen_encodings['length']
-        seqs = prompt_chosen_encodings['input_ids']
+        seqlens = all_prompt_chosen_encodings['length'][start:end]
+        seqs = all_prompt_chosen_encodings['input_ids'][start:end]
 
+        prompts_str = all_prompt_str[start:end]
+        prompt_chosen_str = all_prompt_chosen_str[start:end]
+
+        indices_to_pop = []
         prompt_masks = []
-        for seq, prompt, seqlen, prompt_len in zip(seqs, prompts, seqlens, prompt_lengths):
-            assert seq[:prompt_len] == prompt
-            assert seqlen >= prompt_len, (seqlen, prompt_len)
+        for ii, (seq, prompt, seqlen, prompt_len, pstr, pcstr) in enumerate(
+                zip(seqs, prompts, seqlens, prompt_lengths, prompts_str, prompt_chosen_str)):
+            try:
+                assert seq[:prompt_len] == prompt, (prompt, seq, prompt_len, pstr, pcstr)
+                assert seqlen >= prompt_len, (seqlen, prompt_len)
+            except AssertionError:
+                indices_to_pop.append(ii)
             prompt_masks.append([1] * prompt_len + [0] * (seqlen - prompt_len))
+
+        for ii in reversed(indices_to_pop):
+            seqlens.pop(ii)
+            seqs.pop(ii)
+            prompts.pop(ii)
+            prompt_lengths.pop(ii)
+            prompt_masks.pop(ii)
 
         self.seqlens = seqlens
         self.prompt_lengths = prompt_lengths
         self.seqs = seqs
         self.prompts = prompts
         self.prompt_masks = prompt_masks
+
+        assert len(self.seqlens) == len(self.prompt_lengths) == len(self.prompts) == len(
+            self.prompt_masks) == len(self.seqs)
+
+        logger.info(f"Number of sequences in the dataset: {len(self.seqs)}")
 
         self.n_tokens_per_batch = n_tokens_per_batch
 

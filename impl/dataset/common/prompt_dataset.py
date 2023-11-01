@@ -17,6 +17,7 @@ class PromptDataset(torch.utils.data.Dataset):
         self,
         util: api.data.DatasetUtility,
         max_prompt_len: int,
+        pad_to_max_length: bool = False,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
     ):
@@ -61,7 +62,7 @@ class PromptDataset(torch.utils.data.Dataset):
         tokenizer.padding_side = 'left'
         prompt_tokens = tokenizer(prompts,
                                   return_tensors='pt',
-                                  padding="max_length",
+                                  padding=True if not pad_to_max_length else 'max_length',
                                   truncation=True,
                                   max_length=max_prompt_len)
         tokenizer.padding_side = original_padding_side
