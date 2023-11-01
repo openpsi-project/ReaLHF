@@ -173,19 +173,6 @@ class PackedActorInterface(api.model.ModelInterface):
         version_steps: int,
         logits_mask: Optional[torch.BoolTensor] = None,
     ) -> Dict:
-        logger.info("_ppo_actor_step() inputs shapes:")
-        logger.info(f"packed_input_ids: {packed_input_ids.shape}")
-        logger.info(f"cu_seqlens: {cu_seqlens.shape}")
-        logger.info(f"old_logp: {old_logp.shape}")
-        logger.info(f"ref_logp: {ref_logp.shape}")
-        logger.info(f"reward_score: {reward_score.shape}")
-        logger.info(f"values: {values.shape}")
-        logger.info(f"prompt_mask: {prompt_mask.shape}")
-        logger.info(f"seq_no_eos_mask: {seq_no_eos_mask.shape}")
-        logger.info(f"version_steps: {version_steps}")
-        if logits_mask is not None:
-            logger.info(f"logits_mask: {logits_mask.shape}")
-
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
@@ -208,17 +195,6 @@ class PackedActorInterface(api.model.ModelInterface):
             short1cu_seqlens=short1cu_seqlens,
             seq_no_eos_mask=seq_no_eos_mask,
         )
-        logger.info("get_packed_rewards inputs: ")
-        logger.info(f"kl_ctl: {self.kl_adapter.value}")
-        logger.info(f"clip_reward_value: {self.max_reward_clip}")
-        logger.info(f"log_probs: {old_logp.shape}")
-        logger.info(f"ref_log_probs: {ref_logp.shape}")
-        logger.info(f"reward_score: {reward_score.shape}")
-        logger.info(f"short1cu_seqlens: {short1cu_seqlens.shape}")
-        logger.info(f"seq_no_eos_mask: {seq_no_eos_mask.shape}")
-        logger.info("get_packed_rewards outputs: ")
-        logger.info(f"kl_rewards: {kl_rewards.shape}")
-        logger.info(f"rewards: {rewards.shape}")
 
         advantages, _ = ppo_functional.get_packed_advantages_and_returns(
             gamma=self.discount,
@@ -228,16 +204,6 @@ class PackedActorInterface(api.model.ModelInterface):
             short1cu_seqlens=short1cu_seqlens,
             seq_no_eos_mask=seq_no_eos_mask,
         )
-
-        logger.info("get_packed_advantages_and_returns inputs: ")
-        logger.info(f"gamma: {self.discount}")
-        logger.info(f"lam: {self.gae_lambda}")
-        logger.info(f"values: {values.shape}")
-        logger.info(f"rewards: {rewards.shape}")
-        logger.info(f"short1cu_seqlens: {short1cu_seqlens.shape}")
-        logger.info(f"seq_no_eos_mask: {seq_no_eos_mask.shape}")
-        logger.info("get_packed_advantages_and_returns outputs: ")
-        logger.info(f"advantages: {advantages.shape}")
 
         loss_mask = (1 - prompt_mask.float()) * (packed_input_ids != tokenizer.pad_token_id).logical_and(
             packed_input_ids != tokenizer.eos_token_id).float()
@@ -252,15 +218,6 @@ class PackedActorInterface(api.model.ModelInterface):
                                                        advantages=advantages,
                                                        eps_clip=self.eps_clip,
                                                        loss_mask=loss_mask)
-        logger.info("actor_loss_fn inputs: ")
-        logger.info(f"logprobs: {new_logp.shape}")
-        logger.info(f"old_logprobs: {old_logp.shape}")
-        logger.info(f"advantages: {advantages.shape}")
-        logger.info(f"eps_clip: {self.eps_clip}")
-        logger.info(f"loss_mask: {loss_mask.shape}")
-        logger.info("actor_loss_fn outputs: ")
-        logger.info(f"loss: {loss}")
-        logger.info(f"loss_stat: {loss_stat}")
 
         mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
 

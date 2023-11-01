@@ -603,7 +603,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         else:
             raise ValueError("buffer_id must be int or tuple of ints")
 
-        time_mark("forward_prepare_start", self.global_rank, step=self.step_count)
         ys = self.pipe_cache_data[micro_batch_id]
         assert isinstance(self.pipe_buffers['inputs'][src_buffer_id], tuple)
         # inputs = tuple(t.clone() for t in self.pipe_buffers['inputs'][src_buffer_id])
@@ -615,23 +614,16 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             for i, y in enumerate(ys):
                 logger.info(f"rank {self.global_rank} layer {i} k_cache {y.k_cache}")
         self._zero_grads(inputs)
-        time_mark("forward_prepare_end", self.global_rank, step=self.step_count)
 
-        time_mark("outer_module_forward_start", self.global_rank, step=self.step_count)
-        # x, ys = super().forward(inputs)
         x, ys = super().forward(inputs)
-        time_mark("outer_module_forward_end", self.global_rank, step=self.step_count)
 
-        time_mark("post_process_start", self.global_rank, step=self.step_count)
         self.pipe_cache_data[micro_batch_id] = ys
         self.pipe_buffers['outputs'][dst_buffer_id] = data_list_to_tensor_tuple([x])
-        time_mark("post_process_end", self.global_rank, step=self.step_count)
 
         if self.generate_mode:
             logits = x.pp_input.squeeze(dim=1)
             # if kv cache is not reserved for this micro batch
             if micro_batch_id not in self.kv_cache_reserved:
-                time_mark("reserve_kv_cache_start", self.global_rank, step=self.step_count)
                 # store prompt logits
                 self.prompt_logits.append(logits)
                 # reserve kv cache
@@ -669,37 +661,25 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     logger.debug("in _exec_forward_pass():: rank {} mbid {} in reserve ys[{}] cache_seqlens: {}, cu_seqlens: {}, input_lens: {}"\
                                  .format(self.global_rank, micro_batch_id, i, y.cache_seqlens, x.cu_seqlens, input_lens))
                 self.kv_cache_reserved.append(micro_batch_id)
-                time_mark("reserve_kv_cache_end", self.global_rank, step=self.step_count)
             else:
-                time_mark("postprocess_cache_start", self.global_rank, step=self.step_count)
                 # else, only increase cache_seqlens
                 if self.is_last_stage():
                     ys = ys[:-1]
                 for y in ys:
                     y.cache_seqlens += 1
-                time_mark("postprocess_cache_end", self.global_rank, step=self.step_count)
 
             if self.is_last_stage():
-                time_mark("genstep_start", self.global_rank, step=self.step_count)
                 next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
                     logits, self.tokenizer, self.unfinished_sequences[micro_batch_id],
                     self.generated_idx[micro_batch_id], self.gconfig)
                 self.terminate[micro_batch_id] = terminate
-                logger.debug(
-                    f"self._exec_forward_pass:: rank {self.global_rank} mbid {micro_batch_id} terminate {terminate}"
-                )
-                logger.debug(f"self._exec_forward_pass:: rank {self.global_rank} terminate {self.terminate}")
                 self.unfinished_sequences[micro_batch_id] = unfinished_sequences
                 self.generated_idx[micro_batch_id] += 1
-                # logger.debug(
-                #     f"next_tokens shape {next_tokens.shape}, logprob shape {logprob.shape}, logits_mask shape {logits_mask.shape}"
-                # )
                 assert next_tokens is not None and logprob is not None
                 self.gen_token_ph[micro_batch_id].append(next_tokens)
                 self.gen_logprob_ph[micro_batch_id].append(logprob)
                 self.gen_logits_mask_ph[micro_batch_id].append(logits_mask)
                 self.next_tokens_to_send = next_tokens
-                time_mark("genstep_end", self.global_rank, step=self.step_count)
         else:
             if self.is_last_stage():
                 if self._compute_loss:  # 1f1b only
@@ -955,20 +935,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         assert micro_batch_id >= 0
         assert self.is_first_stage(), "_exec_load_next_tokens() should be only executed on the first stage"
         assert buffer_id in self.next_tokens_cache, f"next tokens cache of micro batch id {buffer_id} is empty"
-        time_mark("load_next_tokens_1_start", self.global_rank)
         x = PipeTransferData()
-        time_mark("load_next_tokens_1_end", self.global_rank)
-        time_mark("load_next_tokens_2_start", self.global_rank)
         ys = self.pipe_cache_data[micro_batch_id]
         ys[0].input_ids = self.next_tokens_cache[micro_batch_id].unsqueeze(-1)
         ys[0].position_ids = None
-        time_mark("load_next_tokens_2_end", self.global_rank)
-        time_mark("load_next_tokens_3_start", self.global_rank)
         t = data_list_to_tensor_tuple([x])
-        time_mark("load_next_tokens_3_end", self.global_rank)
-        time_mark("load_next_tokens_4_start", self.global_rank)
         self.pipe_buffers['inputs'][buffer_id] = t
-        time_mark("load_next_tokens_4_end", self.global_rank)
 
     def _exec_send_grads(self, buffer_id):
         inputs = self.pipe_buffers['inputs'][buffer_id]
