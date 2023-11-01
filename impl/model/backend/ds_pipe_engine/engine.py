@@ -4,7 +4,7 @@
 # DeepSpeed Team
 
 from types import MethodType
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 import dataclasses
 import logging
 import time
@@ -70,6 +70,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.has_bool_tensors = False
         self.eval_return_logits = False
         self.outputs = None
+
+        self.sched_count = 0
 
         # pipeline step for logging
         self.log_batch_step_id = -1
@@ -153,8 +155,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         #stores the loss for the current micro batch being processed
         self.loss = torch.tensor(0.0).to(self.device)
+        # stats for microbatches in this batch
+        self.stats = []
 
-        #stores the loss for the entire batch
+        #stores the loss for the entire batch # TODO: deprecate this
         self.total_loss = None
         self.agg_loss = torch.tensor(0.0, requires_grad=False).to(self.device)
         self.dp_group_loss = torch.tensor(0.0, requires_grad=False).to(self.device)
@@ -170,9 +174,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # loss related
         self._compute_loss = False
         self._loss_fn = None
+        self._loss_inputs = []
+        self._input_cache = []
+
         # store original inputs for each micro_batch to calculate loss
         self.next_batch_micro_batch_id = 0
-        self.original_input_cache = []  # fifo queue for original input, only used in last stage
         self.pipe_cache_data = {
             i: [PipeCacheData() for _ in range(self.num_layers)]
             for i in range(self.num_micro_batches)
@@ -196,8 +202,15 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.prompt_logits = []
         self.generate_mode = False
 
+        # optimizer lr scheduler variables
+        self.version_steps = 0
+
     def set_loss_fn(self, fn):
         self._loss_fn = fn
+
+    def set_version_steps(self, version_steps):
+        # version_steps = batch id (not micro batch !!)
+        self.version_steps = version_steps
 
     def _normal_mode(self):
         # for train and one step inference
@@ -206,6 +219,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._initialize_p2p()
         self.generate_mode = False
         self.kv_cache_reserved = []
+        self._loss_inputs = []
+        self._input_cache = []
+        self.pipe_cache_data = {
+            i: [PipeCacheData() for _ in range(self.num_layers)]
+            for i in range(self.num_micro_batches)
+        }
 
     def _generate_mode(self, tokenizer, gconfig):
         self.prev_stage = (self.stage_id - 1) % self.num_stages
@@ -294,24 +313,17 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             self.pipe_buffers[key].extend([None] * num_added)
         self.num_pipe_buffers = num_buffers
 
-    def _prepare_input(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor,
-                       prompt_mask: Optional[torch.Tensor]):
+    def _prepare_input(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor):
         """ Prepare input for train or inference
         split all input tensors into micro batches for pipeline parallel
 
         Args:
             packed_input_ids (torch.Tensor): packed input ids of shape [total_seq_len]
             cu_seqlens (torch.Tensor): cu_seqlens of shape [batch_size]
-            prompt_mask (Optional[torch.Tensor]): prompt_mask of shape [total_seq_len], used for loss computation
         """
-        if prompt_mask is not None:
-            data = NamedArray(packed_input_ids=packed_input_ids,
-                              cu_seqlens=cu_seqlens,
-                              prompt_mask=prompt_mask)
-        else:
-            data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
+        data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
         splitted = PackedParallelDataBroker.scatter_to(data, self.num_micro_batches)
-        self.original_input_cache = splitted
+        self._input_cache = splitted
 
         def input_to_pipe_model_input(input: NamedArray):
             max_seqlen = int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))
@@ -333,17 +345,22 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.batch_lengths = batch_lengths
         return iter(batches)
 
+    def _prepare_loss_input(self, **loss_kwargs):
+        data = NamedArray(**loss_kwargs)
+        splitted = PackedParallelDataBroker.scatter_to(data, self.num_micro_batches)
+        self._loss_inputs = splitted
+
     def eval(self):
         self.module.eval()
 
     def train(self):
         self.module.train()
 
-    def forward(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, prompt_mask: torch.Tensor):
+    def forward(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor):
         self._normal_mode()
         self._compute_loss = False
         # Use the provided data iterator
-        data_iter = self._prepare_input(packed_input_ids, cu_seqlens, prompt_mask)
+        data_iter = self._prepare_input(packed_input_ids, cu_seqlens)
         self.set_dataiterator(data_iter)
 
         # Do the work
@@ -367,38 +384,27 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         else:
             return None
 
-    def train_batch(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor,
-                    prompt_mask: torch.Tensor):
+    def train_batch(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, loss_fn: Callable,
+                    **loss_fn_kwargs):
         self._normal_mode()
         if not torch._C.is_grad_enabled():
             raise RuntimeError(f'train_batch() requires gradients enabled. Use eval_batch() instead.')
 
-        data_iter = self._prepare_input(packed_input_ids, cu_seqlens, prompt_mask)
+        data_iter = self._prepare_input(packed_input_ids, cu_seqlens)
+        self.set_loss_fn(loss_fn)
+        self._prepare_loss_input(**loss_fn_kwargs)
         self.set_dataiterator(data_iter)
 
         self.total_loss = None
         self._compute_loss = True
 
         # Do the work
-        st = time.time()
         sched = schedule.TrainSchedule(micro_batches=self.num_micro_batches,
                                        stages=self.num_stages,
                                        stage_id=self.stage_id)
         self._exec_schedule(sched)
-        self.agg_train_loss = self._aggregate_total_loss()
-        train_time = time.time() - st
 
-        if self.global_steps % self.steps_per_print() == 0:
-            if self.global_rank == 0:
-                elapsed = train_time
-                iter_time = elapsed / self.steps_per_print()
-                tput = self.train_batch_size() / iter_time
-                print(f'steps: {self.global_steps} '
-                      f'loss: {self.agg_train_loss:0.4f} '
-                      f'iter time (s): {iter_time:0.3f} '
-                      f'samples/sec: {tput:0.3f}')
-
-        return self.agg_train_loss
+        return self.stats
 
     @torch.no_grad()
     def generate(
@@ -409,7 +415,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
         self._compute_loss = False
-        data_iter = self._prepare_input(packed_input_ids, cu_seqlens, None)
+        data_iter = self._prepare_input(packed_input_ids, cu_seqlens)
         self._generate_mode(tokenizer=tokenizer, gconfig=gconfig)
         self.set_dataiterator(data_iter)
 
@@ -446,7 +452,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 all_gen_tokens.append(gen_tokens)
                 all_log_probs.append(log_probs)
                 all_logits_mask.append(logits_mask)
-                logger.info(f"microbatch {i}: {gen_tokens} {log_probs} {logits_mask}")
+                logger.debug(f"microbatch {i}: {gen_tokens} {log_probs} {logits_mask}")
             gen_tokens = torch.cat(all_gen_tokens, dim=0)
             log_probs = torch.cat(all_log_probs, dim=0)
             if all([m is None for m in all_logits_mask]):
@@ -605,12 +611,15 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # TODO: this is only a temp solution to get the pipeline running, fix afterwards
         inputs += data_list_to_tensor_tuple(ys)
 
+        if not self.generate_mode:
+            for i, y in enumerate(ys):
+                logger.info(f"rank {self.global_rank} layer {i} k_cache {y.k_cache}")
         self._zero_grads(inputs)
         time_mark("forward_prepare_end", self.global_rank, step=self.step_count)
 
         time_mark("outer_module_forward_start", self.global_rank, step=self.step_count)
         # x, ys = super().forward(inputs)
-        x, ys = self.module(inputs)
+        x, ys = super().forward(inputs)
         time_mark("outer_module_forward_end", self.global_rank, step=self.step_count)
 
         time_mark("post_process_start", self.global_rank, step=self.step_count)
@@ -682,9 +691,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 logger.debug(f"self._exec_forward_pass:: rank {self.global_rank} terminate {self.terminate}")
                 self.unfinished_sequences[micro_batch_id] = unfinished_sequences
                 self.generated_idx[micro_batch_id] += 1
-                logger.debug(
-                    f"next_tokens shape {next_tokens.shape}, logprob shape {logprob.shape}, logits_mask shape {logits_mask.shape}"
-                )
+                # logger.debug(
+                #     f"next_tokens shape {next_tokens.shape}, logprob shape {logprob.shape}, logits_mask shape {logits_mask.shape}"
+                # )
+                assert next_tokens is not None and logprob is not None
                 self.gen_token_ph[micro_batch_id].append(next_tokens)
                 self.gen_logprob_ph[micro_batch_id].append(logprob)
                 self.gen_logits_mask_ph[micro_batch_id].append(logits_mask)
@@ -693,14 +703,15 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         else:
             if self.is_last_stage():
                 if self._compute_loss:  # 1f1b only
-                    original_input = self.original_input_cache.pop(0)
                     # compute loss, currently hard coded
                     logits = x.pp_input
-                    packed_input_ids = original_input.packed_input_ids
-                    cu_seqlens = original_input.cu_seqlens
-                    loss_mask = 1 - original_input.prompt_mask.float()
+                    loss_kwargs = self._loss_inputs.pop(0)
+                    input_cache = self._input_cache.pop(0)
+                    packed_input_ids = input_cache.packed_input_ids
+                    cu_seqlens = input_cache.cu_seqlens
                     assert self._loss_fn is not None, "loss function is not set, please use engine.set_loss_fn(fn)"
-                    self.loss = self._loss_fn(logits, packed_input_ids, cu_seqlens, loss_mask)
+                    self.loss, stats = self._loss_fn(logits, packed_input_ids, cu_seqlens, **loss_kwargs)
+                    self.stats.append(stats)
                     if self.total_loss is None:
                         self.total_loss = torch.zeros_like(self.loss)
                     self.total_loss += self.loss.detach()
@@ -1010,9 +1021,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             for idx, buffer in enumerate(self.grad_layer):
                 p2p.recv(buffer, self.next_stage)
 
-    def _exec_optimizer_step(self, lr_kwargs=None):
+    def _exec_optimizer_step(self):
         self._force_grad_boundary = True
-        self._take_model_step(lr_kwargs)
+        self._take_model_step(lr_kwargs={'epoch': self.version_steps})
         self._force_grad_boundary = False
 
     def _zero_grads(self, inputs):
@@ -1167,13 +1178,15 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     cmd_type_string = str(type(cmd)).split('\'')[1].split(".")[-1]
                     time_mark(name=f"{cmd_type_string}_start",
                               identifier=str(self.global_rank),
-                              step=self.step_count)
+                              step=self.sched_count)
                     self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
                     self._exec_instr(*cmd.args, **cmd.kwargs)
                     time_mark(name=f"{cmd_type_string}_end",
                               identifier=str(self.global_rank),
-                              step=self.step_count)
+                              step=self.sched_count)
                 except Exception as e:
                     logger.error(f"Rank {self.global_rank} step {self.step_count}, Exception in cmd {cmd}")
                     raise e
             self.step_count += 1
+
+        self.sched_count += 1

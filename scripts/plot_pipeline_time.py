@@ -104,5 +104,30 @@ def plot_debug_pipeline():
     )
 
 
+def plot_pipeline_rlhf():
+    # dir_name = "/lustre/aigc/llm/logs/meizy/wpsf-flash-ppo-pipe_TEST-20231101-01"
+    file_name = "/lustre/aigc/llm/logs/meizy/wpsf-flash-ppo-pipe_TEST-20231101-02/model_worker-0"
+    identifiers = [str(i) for i in range(4)]
+    fn = "scripts/figs/pipeline_rlhf.png"
+    start_keys = [
+        "LoadMicroBatch_start", "RecvActivation_start", "SendActivation_start", "RecvGrad_start",
+        "RecvGrad_end", "ForwardPass_start", "BackwardPass_start", "LoadNextTokens_start",
+        "SendNextTokens_start", "RecvNextTokens_start"
+    ]
+    end_keys = [
+        "LoadMicroBatch_end", "RecvActivation_end", "SendActivation_end", "RecvGrad_start", "RecvGrad_end",
+        "ForwardPass_end", "BackwardPass_end", "LoadNextTokens_end", "SendNextTokens_end",
+        "RecvNextTokens_end"
+    ]
+    summary_time_points(file_name=file_name,
+                        start_keys=start_keys,
+                        end_keys=end_keys,
+                        identifiers=identifiers,
+                        step_range=(0, 2),
+                        save_fig_path=fn,
+                        figsize=(20, 4))
+
+
 if __name__ == "__main__":
-    plot_debug_pipeline()
+    # plot_debug_pipeline()
+    plot_pipeline_rlhf()

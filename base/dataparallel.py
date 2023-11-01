@@ -74,6 +74,8 @@ class PackedParallelDataBroker(ParallelDataBroker):
 
         input_lens: List[torch.IntTensor] = [src['input_lens'][start:end] for start, end in partitions]
         cu_seqlens = [torch.cat([x.new_zeros(1), torch.cumsum(x, dim=0)]) for x in input_lens]
+        batch_sizes = [cu_seqlen.shape[0] - 1 for cu_seqlen in cu_seqlens]
+
         offsets = torch.tensor([sum(x) for x in input_lens], dtype=torch.int32).cumsum(0)
         offsets = torch.cat([offsets.new_zeros(1), offsets[:-1]])
 
@@ -96,13 +98,19 @@ class PackedParallelDataBroker(ParallelDataBroker):
                     sp[k] = input_lens[i]
                 elif k == 'cu_seqlens':
                     sp[k] = cu_seqlens[i]
-                elif k == 'seq_no_eos_mask' or k == 'rewards':
+                elif k in ['seq_no_eos_mask', 'rewards', 'reward_score']:
                     start, end = partitions[i]
                     sp[k] = v[start:end]
-                elif k in ['packed_seq', 'packed_logits_mask', 'prompt_mask', 'packed_input_ids', 'values']:
+                elif k in [
+                        'packed_seq', 'packed_logits_mask', 'prompt_mask', 'packed_input_ids', 'values',
+                        'logits_mask'
+                ]:
                     sp[k] = v[offsets[i]:offsets[i] + cu_seqlens[i][-1]]
-                elif k == 'packed_logprobs' or k == 'packed_ref_logprobs':
+                elif k in ['packed_logprobs', 'packed_ref_logprobs', 'old_logp', 'ref_logp']:
                     sp[k] = v[short1offsets[i]:short1offsets[i] + short1cu_seqlens[i][-1]]
+                elif not torch.is_tensor(src[k]):
+                    # for constant, preserve value for each splitted instance
+                    sp[k] = src[k]
                 else:
                     raise RuntimeError(f"Unknown key {k} in packed data. We don't know how to split it. "
                                        f"Check base/dataparallel.py for implemented keys.")

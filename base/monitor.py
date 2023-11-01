@@ -57,11 +57,16 @@ def parse_time_mark_in_line(line, name, step_range=None):
 def parse_time_mark_in_file(file, name, step_range=None):
     time_points = defaultdict(list)
     with open(file, "r") as f:
+        count = 0
+        res_count = 0
         for line in f.readlines():
+            count += 1
             res = parse_time_mark_in_line(line, name, step_range=step_range)
             if res is not None:
+                res_count += 1
                 identifier, time_point = res
                 time_points[identifier].append(time_point)
+        # print(f"file {file} name {name} line count {count} res count {res_count}")
     return time_points
 
 
@@ -78,7 +83,10 @@ def parse_time_mark_in_dir(dir, name, step_range=None):
     return time_points
 
 
-MATPLOTLIB_COLORS = ["b", "g", "r", "c", "m", "y", "k", "w"]
+MATPLOTLIB_COLORS = [
+    'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'black', 'brown', 'gray', 'cyan', 'magenta',
+    'lime', 'olive', 'navy'
+]
 
 
 def summary_time_points(start_keys,
@@ -111,12 +119,6 @@ def summary_time_points(start_keys,
     ax.set_ylim(-1, len(identifiers))
     ax.set_yticks(list(range(len(identifiers))))
     ax.set_yticklabels(identifiers)
-    if start_time is not None:
-        ax.set_xlim(start_time, end_time)
-        xticks = np.arange(start_time, end_time, 100)
-        xtick_labels = [f"{i%1000}" for i in xticks]
-        ax.set_xticks(xticks)
-        ax.set_xticklabels(xtick_labels)
 
     label_set = {sk: False for sk in start_keys}
     infos = {}
@@ -168,7 +170,13 @@ def summary_time_points(start_keys,
 
         infos[identifier] = (time_sum, time_list)
 
-        # summary time cost percent
+    ax.set_xlim(min_time, max_time)
+    xticks = np.arange(min_time, max_time, 10 * 1e9)
+    xtick_labels = [f"{(i//1e9)%1000}" for i in xticks]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xtick_labels)
+
+    # summary time cost percent
     for id_index, identifier in enumerate(identifiers):
         print("=" * 30)
         print(f"Identifier {identifier} time cost percent:")
@@ -187,6 +195,7 @@ def summary_time_points(start_keys,
                   f"sum, n = {round(time_sum[k]/10e6, 2)} ms, {len(time_list[k])}")
         print(f"bubble time -- {round(bubble_time, 2)}%")
 
-    plt.legend()
+    plt.legend(loc=(1.01, 0.0))
+    plt.tight_layout()
 
     plt.savefig(save_fig_path)

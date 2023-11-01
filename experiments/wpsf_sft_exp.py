@@ -60,7 +60,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    nodelist="QH-com10",
+                    nodelist="QH-com08",
                     mem=100000,
                 ),
             ),
@@ -81,8 +81,7 @@ class WpsFormulaSupervisedFinetuningExperiment(Experiment):
             args=dict(
                 n_tokens_per_batch=max_seq_len * train_batch_size_per_device,
                 max_length=max_seq_len,
-                max_n_seqs_per_batch=1000,
-                json_path="/lustre/meizy/data/dllm-train-0908-formula-psi.json",
+                dataset_path="/lustre/meizy/data/dllm-train-0908-formula-psi.json",
             ),
         )
         dataloader = eval_dataloader = DataLoader('iterable_dataset_loader')

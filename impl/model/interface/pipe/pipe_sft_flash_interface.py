@@ -56,9 +56,6 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
             module.tput_timer.update_epoch_count()
         return dict(loss=agg_loss.detach().item())
 
-    def save(self, model: api.model.Model, save_dir: str):
-        save_hf_or_lora_model(model, save_dir)
-
     @torch.inference_mode()  # one time evaluate
     def inference(self, model_: api.model.Model, data: NamedArray) -> Dict:
         device = model_.device
@@ -92,7 +89,7 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
             return dict()
 
     def save(self, model: api.model.Model, save_dir: str):
-        pass
+        model.module.save(save_dir)
 
     @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
