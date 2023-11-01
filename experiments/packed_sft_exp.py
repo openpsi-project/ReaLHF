@@ -76,7 +76,8 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    mem=60000,
+                    nodelist="QH-com08",
+                    mem=100000,
                 ),
             ),
         )
@@ -160,6 +161,8 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                 model_name='default',
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
+                cuda_cache_cleanliness=True,
+                cuda_cache_clear_freq=10,
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.dp_size),
                 cuda_cache_clear_freq=60,

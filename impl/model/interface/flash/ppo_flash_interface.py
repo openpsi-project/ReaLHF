@@ -221,6 +221,7 @@ class PackedActorInterface(api.model.ModelInterface):
 
         mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
 
+        # ignore
         # HACK: we don't consider data parallel here
         self.kl_adapter.update(mean_ref_kl, n_steps=input_lens.sum().item())
 
@@ -247,6 +248,7 @@ class PackedActorInterface(api.model.ModelInterface):
         if logits_mask is not None:
             stats['ignoring_logits_ratio'] = (1 - logits_mask).float().mean()
 
+        # ignore this
         if self.early_stop_kl is not None and api.huggingface.get_all_reduce_mean(
                 approx_kl) > self.early_stop_kl:
             logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "

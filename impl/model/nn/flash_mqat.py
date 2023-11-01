@@ -230,11 +230,12 @@ class CausalSelfAttentionLayer(nn.Module):
             hidden_states = flash_attn_with_kvcache(q,
                                                     k_cache,
                                                     v_cache,
-                                                    k,
-                                                    v,
-                                                    cache_seqlens,
-                                                    scale_factor,
-                                                    causal=False)
+                                                    k=k,
+                                                    v=v,
+                                                    cache_seqlens=cache_seqlens,
+                                                    softmax_scale=scale_factor,
+                                                    causal=False,
+                                                    num_splits=1)
         elif cu_seqlens is not None:
             assert max_seqlen is not None
             assert len(qkv.shape) == 2
@@ -401,10 +402,6 @@ class VocabPositionEmbedding(nn.Module):
             lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             y.position_ids = torch.cat(
                 [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
-            # print(f"flash_mqat.py y.position_ids.shape={y.position_ids.shape} "
-            #       f"y.input_ids.shape={y.input_ids.shape}\n"
-            #       f"y.position_ids={y.position_ids}"
-            #       f"y.input_ids={y.input_ids}")
             if x.max_seqlen > self.n_positions:
                 raise ValueError(f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions}).")
             assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
@@ -1123,10 +1120,13 @@ def generate(
         logits = prompt_logits[cu_seqlens[1:] - 1]
         for y in ys[1:-1]:
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
-            k_cache = torch.zeros((bs, max_seq_len + gconfig.max_new_tokens, *y.k_cache.shape[1:]),
+            kvcache_seqlen = max(max_seq_len + gconfig.max_new_tokens,
+                                 mconfig.hidden_dim // mconfig.head_dim + 10)
+            # fix of a flash attention bug
+            k_cache = torch.zeros((bs, kvcache_seqlen, *y.k_cache.shape[1:]),
                                   dtype=y.k_cache.dtype,
                                   device=device)
-            v_cache = torch.zeros((bs, max_seq_len + gconfig.max_new_tokens, *y.v_cache.shape[1:]),
+            v_cache = torch.zeros((bs, kvcache_seqlen, *y.v_cache.shape[1:]),
                                   dtype=y.v_cache.dtype,
                                   device=device)
             for i in range(bs):
@@ -1169,7 +1169,7 @@ def generate(
         ys[0].input_ids = next_tokens.unsqueeze(-1)  # [bs, 1], seqlen=1
         ys[0].position_ids = None
         # K/v cache will be changed in-place with flash attention.
-        logits = model(x, ys).pp_output.squeeze()
+        logits = model(x, ys).pp_output.squeeze(dim=1)
         for yidx, y in enumerate(ys[:-1]):
             y.cache_seqlens += 1
 

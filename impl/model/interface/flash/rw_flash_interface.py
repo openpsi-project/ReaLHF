@@ -169,7 +169,7 @@ class PackedPlackettLuceRewardInterface(api.model.ModelInterface):
                                                 clean_up_tokenization_spaces=False,
                                                 skip_special_tokens=True)
         for seq_str, score in zip(seq_strs, chosen_end_scores):
-            logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
+            logger.debug(f"reward is {score.item()}, sequence is: {seq_str}")
         #####################################################
 
         return from_dict(dict(scores=chosen_end_scores.cpu()))

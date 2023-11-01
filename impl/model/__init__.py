@@ -4,7 +4,8 @@ import impl.model.interface.flash.gen_scoring_flash_interface
 import impl.model.interface.flash.ppo_flash_interface
 import impl.model.interface.flash.rw_flash_interface
 import impl.model.interface.flash.sft_flash_interface
-import impl.model.interface.pipe_sft_flash_interface
+import impl.model.interface.pipe.pipe_ppo_flash_interface
+import impl.model.interface.pipe.pipe_sft_flash_interface
 import impl.model.interface.simple_interface
 import impl.model.interface.wps_ac_interface
 import impl.model.nn.basic_nn

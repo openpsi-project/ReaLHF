@@ -1,5 +1,3 @@
-from typing import Dict, List, Optional, Tuple, Union
-import logging
 import os
 import sys
 
@@ -12,14 +10,15 @@ import torch.nn as nn
 import transformers
 
 from base.monitor import process_memory_mb
-from impl.model.backend.ds_pipe_engine import (LayerSpec, PipeDataParallelTopology, PipelineModule,
-                                               ProcessTopology)
+from impl.model.backend.ds_pipe_engine import LayerSpec
 from impl.model.nn.flash_mqat import *
-from impl.model.utils.data import tensor_data_list_to_tuple, tuple_to_tensor_data_list
 
-FULL_MODEL_DIR = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
-PIPE_MODEL_DIR = "/lustre/meizy/backup_zy/model_saves/pipe_4l_starcoder"
+# FULL_MODEL_DIR = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
+FULL_MODEL_DIR = "/lustre/meizy/models/starcoder_4l"
+# PIPE_MODEL_DIR = "/lustre/meizy/base_models/pipe_4l_starcoder"
 NUM_PIPE_STAGES = 4
+NUM_SHARDS = 1
+PIPE_MODEL_DIR = f"/lustre/meizy/models/pipe_starcoder_4l_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
 TEST_EXPR_NAME = "test"
 TEST_TRIAL_NAME = "test"
 TEST_MODEL_NAME = "default"
@@ -108,6 +107,7 @@ def count_layer_params(layer_specs):
         elif isinstance(layer, nn.Module):
             params = filter(lambda p: p.requires_grad, layer.parameters())
             param_counts[idx] = sum(p.numel() for p in params)
+        print(f"count_layer_params build layer {layer.typename.__name__}")
     return param_counts
 
 
@@ -171,11 +171,13 @@ def split_state_dict_by_stage(state_dict, stage_to_layer_idx):
     return stage_to_state_dict
 
 
-def save_stage_state_dict(stage_to_state_dict, model_dir):
+def save_state_dict(state_dict, stage_index, shard_index, model_dir):
     os.makedirs(model_dir, exist_ok=True)
-    for stage, state_dict in stage_to_state_dict.items():
-        torch.save(state_dict, os.path.join(model_dir, f"pytorch_model-stage-{stage}.bin"))
-        print(f"saved {state_dict.keys()} to {model_dir}/pytorch_model-stage-{stage}.bin")
+    torch.save(state_dict,
+               os.path.join(model_dir, f"pytorch_model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.bin"))
+    print(
+        f"saved {state_dict.keys()} to {model_dir}/pytorch_model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.bin"
+    )
 
 
 def copy_configs(src_model_dir, dst_model_dir):
@@ -184,15 +186,59 @@ def copy_configs(src_model_dir, dst_model_dir):
         print(f"copied {file} from {src_model_dir} to {dst_model_dir}")
 
 
+def load_full_ckpt(path):
+    single_file_path = os.path.join(path, "pytorch_model.bin")
+    state_dict = None
+    n_shards = 0
+    if os.path.exists(single_file_path):
+        state_dict = torch.load(single_file_path)
+        n_shards += 1
+    else:
+        state_dict = {}
+        for file in os.listdir(path):
+            if file.endswith(".bin"):
+                state_dict.update(torch.load(os.path.join(path, file)))
+                n_shards += 1
+    return state_dict, n_shards
+
+
+def split_state_dict_into_shards(state_dict, n_shards):
+    if n_shards == 1:
+        return [state_dict]
+
+    keys = list(state_dict.keys())
+    if len(keys) < n_shards:
+        raise ValueError(f"state_dict has {len(keys)} keys, but n_shards={n_shards}")
+
+    shard_size = len(keys) // n_shards
+    extra = len(keys) % n_shards
+    shard_size_list = [shard_size for _ in range(n_shards)]
+    shard_size_list[-1] = shard_size + extra
+    start, shards = 0, []
+    for i, size in enumerate(shard_size_list):
+        shard = {}
+        for j in range(start, start + size):
+            shard[keys[j]] = state_dict[keys[j]]
+            print(f"shard {i} key {keys[j]}")
+        start += size
+        shards.append(shard)
+    return shards
+
+
 def main():
     cfg = flash_mqat_config(FULL_MODEL_DIR)
     layer_specs, key_mappings = layer_specs_and_key_mappings(cfg)
-    state_dict = torch.load(os.path.join(FULL_MODEL_DIR, "pytorch_model.bin"))
+    # TODO: load and process full statedict by shard for large model that can not fit into memory
+    state_dict, _ = load_full_ckpt(FULL_MODEL_DIR)
     print("loaded full state_dict")
     state_dict = update_state_dict_keys(state_dict, key_mappings)
     stage_to_layer_idx = partition_layers(layer_specs, num_stages=NUM_PIPE_STAGES, method="parameters")
     stage_to_state_dict = split_state_dict_by_stage(state_dict, stage_to_layer_idx)
-    save_stage_state_dict(stage_to_state_dict, PIPE_MODEL_DIR)
+    for stage, state_dict in stage_to_state_dict.items():
+        shards = split_state_dict_into_shards(state_dict, NUM_SHARDS)
+        print(f"stage {stage} state_dict keys: {state_dict.keys()}")
+        for shard_index, shard in enumerate(shards):
+            save_state_dict(shard, stage, shard_index, PIPE_MODEL_DIR)
     copy_configs(FULL_MODEL_DIR, PIPE_MODEL_DIR)
 
 

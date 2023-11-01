@@ -36,11 +36,11 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
         return ExperimentScheduling(
             data_worker=TasksGroup(
                 count=self.n_data_workers,
-                scheduling=Scheduling.data_worker_default(cpu=2, mem=10000, node_type="g1"),
+                scheduling=Scheduling.data_worker_default(cpu=2, mem=10000),
             ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=4, mem=10000, node_type="g1"),
+                scheduling=Scheduling.master_worker_default(cpu=4, mem=10000),
             ),
             model_worker=TasksGroup(
                 count=self.n_models,
@@ -48,8 +48,8 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    nodelist="frl4a135",
-                    mem=60000,
+                    nodelist="QH-com13",
+                    mem=100000,
                 ),
             ),
         )
@@ -57,9 +57,10 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
     def initial_setup(self) -> ExperimentConfig:
         # model_path = "/data/aigc/public/starcoder-16bit"
         # model_path = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
-        model_path = "/lustre/meizy/backup_zy/model_saves/pipe_4l_starcoder"
-        train_batch_size_per_device = 4
-        eval_batch_size_per_device = 4
+        # model_path = "/lustre/meizy/backup_zy/model_saves/pipe_4l_starcoder"
+        model_path = "/lustre/meizy/models/pipe_starcoder_4pp_3s"
+        train_batch_size_per_device = 8
+        eval_batch_size_per_device = 8
         max_seq_len = 2048
 
         dataset = Dataset(
@@ -81,8 +82,7 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
         ]
 
         eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args[
-            'dataset_path'] = "/data/aigc/llm/datasets/wps-formula-sft/dllm-valid-0908-formula-psi.json"
+        eval_dataset.args['dataset_path'] = "/lustre/meizy/data/dllm-valid-0908-formula-psi.json"
         eval_dataset.args['n_tokens_per_batch'] = max_seq_len * eval_batch_size_per_device
 
         backend = ModelBackend(
@@ -129,6 +129,8 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
                 mp_rank=coord.model,
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
+                cuda_cache_cleanliness=True,
+                cuda_cache_clear_freq=10,
             )
             model_worker.append(mw)
 
