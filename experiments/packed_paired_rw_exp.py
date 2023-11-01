@@ -25,9 +25,9 @@ class PackedPairedRewardModelingExperiment(Experiment):
         base_model='gpt2',
         train_dataset_path="/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl",
         valid_dataset_path="/lustre/fw/datasets/imdb/rl/rm_paired-valid.jsonl",
-        train_tokens_per_batch: int = 32768,
-        eval_tokens_per_batch: int = 65536,
-        max_pairs_per_prompt: int = 10,
+        train_tokens_per_batch: int = 65536,
+        eval_tokens_per_batch: int = 131072,
+        max_pairs_per_prompt: int = 2,
         use_lora: bool = False,
     ):
         self.use_lora = use_lora
@@ -84,7 +84,7 @@ class PackedPairedRewardModelingExperiment(Experiment):
         else:
             raise NotImplementedError()
         sft_model_path = "/data/aigc/llm/checkpoints/fw/senti-sft-pos-s42/run20231031/default@pp_00-mp_00-dp_00/epoch8step0/"
-        max_seq_len = 8192 if self.base_model == 'starcoder' else 1024
+        max_seq_len = 8192 if self.base_model == 'starcoder' else 512
 
         dataset = Dataset(
             'packed_rw_pair',
@@ -168,8 +168,8 @@ class PackedPairedRewardModelingExperiment(Experiment):
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
-            save_frequency_steps=None,
-            save_frequency_epochs=1,
+            save_frequency_steps=20,
+            save_frequency_epochs=None,
             save_frequency_seconds=None,
             eval_frequency_epochs=1,
             model_rpcs=[rw_modeling],

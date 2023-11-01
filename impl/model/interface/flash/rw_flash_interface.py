@@ -81,7 +81,12 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
             module.tput_timer.update_epoch_count()
             self.train_total_predictions = self.train_total_correct_predictions = 0
 
-        return dict(loss=loss.detach().item(), acc=acc)
+        return dict(
+            loss=loss.detach().item(),
+            acc=acc,
+            avg_pos_score=scores[:, 0].mean().detach().item(),
+            avg_neg_score=scores[:, 1].mean().detach().item(),
+        )
 
     def save(self, model: api.model.Model, output_dir):
         from impl.model.nn.lora import is_lora_model
@@ -103,6 +108,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
         model.eval()
         total_predictions = correct_predictions = 0
         loss = 0
+        pos_score = neg_score = 0
 
         for step, data in enumerate(tqdm.tqdm(eval_dataloader)):
             data = recursive_apply(from_dict(data), lambda x: x.to(device))
@@ -121,8 +127,15 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
             loss += -(torch.nn.functional.logsigmoid(scores[:, 0] - scores[:, 1]) * group_factor).sum()
             correct_predictions += (scores[:, 0] > scores[:, 1]).float().sum().detach().item()
             total_predictions += scores.shape[0]
+            pos_score += scores[:, 0].sum().detach().item()
+            neg_score += scores[:, 1].sum().detach().item()
 
-        return dict(loss=float(loss / total_predictions), acc=correct_predictions / total_predictions)
+        return dict(
+            loss=float(loss / total_predictions),
+            acc=correct_predictions / total_predictions,
+            pos_score=float(pos_score / total_predictions),
+            neg_score=float(neg_score / total_predictions),
+        )
 
 
 api.model.register_interface("flash_paired_rw", PackedPairedRewardInterface)
