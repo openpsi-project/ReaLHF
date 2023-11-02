@@ -158,7 +158,8 @@ class PackedDPOExperiment(Experiment):
                 ),
             ]
 
-        interface = ModelInterface('flash_dpo', args=dict(beta=0.1))
+        interface = ModelInterface('flash_dpo', args=dict(beta=0.1, enable_save=True))
+        ref_interface = ModelInterface('flash_dpo', args=dict(beta=0.1, enable_save=False))
 
         model_worker = [
             ModelWorker(
@@ -176,7 +177,7 @@ class PackedDPOExperiment(Experiment):
                 seed=self.seed,
                 model=ref_model,
                 backend=inf_backend,
-                interface=interface,
+                interface=ref_interface,
                 model_name='ref',
                 dp_rank=0,
                 topo=PipeModelDataParallelTopology(1, 1, 1),
