@@ -11,4 +11,5 @@ import experiments.wps_rw_exp
 import experiments.wpsf_ppo_pipe
 import experiments.wpsf_rw_exp
 import experiments.packed_dpo_exp
+import experiments.dpo_exp
 import experiments.wpsf_sft_pipe
