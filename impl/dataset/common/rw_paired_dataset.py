@@ -2,11 +2,12 @@ from typing import Callable, Dict, List, Optional
 import itertools
 import json
 
+import numpy as np
 import torch
 import torch.utils.data
-import numpy as np
-import api.data
+
 from base.datapack import min_abs_diff_partition
+import api.data
 
 
 class RewardModelingPairedDataset(torch.utils.data.Dataset):
@@ -116,7 +117,8 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
 
         self.pos_answer_tokens = pos_answer_tokens
         self.neg_answer_tokens = neg_answer_tokens
-        assert len(self.prompt_tokens['input_ids']) == len(self.pos_answer_tokens) == len(self.neg_answer_tokens)
+        assert len(self.prompt_tokens['input_ids']) == len(self.pos_answer_tokens) == len(
+            self.neg_answer_tokens)
 
     def __len__(self):
         return len(self.pos_answer_tokens)

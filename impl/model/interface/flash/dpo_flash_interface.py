@@ -8,10 +8,10 @@ import torch
 import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
+from impl.model.utils.data import gather_packed_shifted_log_probs
 from impl.model.utils.save import save_hf_or_lora_model
 import api.model
 import impl.model.utils.dpo_functional as dpo_functional
-from impl.model.utils.data import gather_packed_shifted_log_probs
 
 logger = logging.getLogger("Packed DPO Interface")
 

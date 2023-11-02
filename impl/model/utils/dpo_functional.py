@@ -1,6 +1,7 @@
 from typing import Tuple
-import torch.nn.functional as F
+
 import torch
+import torch.nn.functional as F
 
 
 def dpo_loss(
