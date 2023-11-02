@@ -17,12 +17,18 @@ class PackedGenerateScoringExperiment(Experiment):
 
     def __init__(
         self,
-        dp_size=8,
+        dp_size=6,
         seed=1,
         base_model='gpt2',
-        prompt_dataset_path="/lustre/fw/datasets/imdb/rl/rw_prompt-valid.jsonl",
-        batch_size: int = 256,
+        prompt_dataset_path="/lustre/fw/datasets/imdb/rl/test_prompt.jsonl",
+        batch_size: int = 192,
+        model_type: str = 'sft',
+        epoch: int = 0,
+        step: int = 0,
+        num_samples: int = 1,
+        temperature: float = 0.7,
     ):
+        assert batch_size % dp_size == 0
         self.dp_size = dp_size
         self.n_data_workers = 1
         self.seed = seed
@@ -31,6 +37,13 @@ class PackedGenerateScoringExperiment(Experiment):
         self.prompt_dataset_path = prompt_dataset_path
 
         self.batch_size = batch_size
+
+        self.model_type = model_type
+        self.epoch = epoch
+        self.step = step
+
+        self.num_samples = num_samples
+        self.temperature = temperature
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -73,7 +86,12 @@ class PackedGenerateScoringExperiment(Experiment):
                 dataset_path=self.prompt_dataset_path,
             ),
         )
-        dataloader = DataLoader('default_eval', args=dict(batch_size=self.batch_size // self.n_data_workers))
+        dataloader = DataLoader('default',
+                                args=dict(
+                                    shuffle=False,
+                                    drop_last=True,
+                                    batch_size=self.batch_size // self.n_data_workers,
+                                ))
         data_worker = [
             DataWorker(
                 tokenizer_name_or_path=base_model_path,
@@ -85,11 +103,21 @@ class PackedGenerateScoringExperiment(Experiment):
 
         backend = ModelBackend('ds_inference', args=dict(enable_fp16=True))
 
+        if self.model_type == 'ppo':
+            model_path_root = "/data/aigc/llm/checkpoints/fw/flash-ppo-s42/run20231102/actor@pp_00-mp_00-dp_00/"
+            model_path = os.path.join(model_path_root, f"epoch{self.epoch}step{self.step}")
+        elif self.model_type == 'dpo':
+            model_path_root = "/data/aigc/llm/checkpoints/fw/flash-dpo-s42/run20231102/actor@pp_00-mp_00-dp_00/"
+            model_path = os.path.join(model_path_root, f"epoch{self.epoch}step{self.step}")
+        elif self.model_type == 'sft':
+            model_path = "/data/aigc/llm/checkpoints/fw/senti-sft-pos-neg-s42/run20231031/default@pp_00-mp_00-dp_00/epoch8step0/"
+        else:
+            raise NotImplementedError()
+
         model = Model(
             "flash_mqat_clm_hf",
             args=dict(
-                model_path=
-                "/data/aigc/llm/checkpoints/fw/senti-sft-pos-neg-s42/run20231031/default@pp_00-mp_00-dp_00/epoch8step0/",
+                model_path=model_path,
                 from_type="self",
                 tokenizer_path=base_model_path,
             ),
@@ -98,11 +126,11 @@ class PackedGenerateScoringExperiment(Experiment):
         gconfig = dict(
             min_new_tokens=10,
             max_new_tokens=512,
-            temperature=0.7,
+            temperature=self.temperature,
             greedy=False,
             top_p=1.0,
             top_k=50,
-            num_samples=10,
+            num_samples=self.num_samples,
         )
         interface = ModelInterface('flash_gen_score', args=dict(generation_config=gconfig))
 
@@ -134,5 +162,33 @@ class PackedGenerateScoringExperiment(Experiment):
 
 seeds = list(range(1, 6)) + [42]
 for s in seeds:
-    exp_name = f"senti-genscore-s{s}"
-    register_experiment(exp_name, functools.partial(PackedGenerateScoringExperiment, seed=s))
+    exp_name = f"senti-genscore-rw-valid-s{s}"
+    register_experiment(
+        exp_name,
+        functools.partial(
+            PackedGenerateScoringExperiment,
+            prompt_dataset_path="/lustre/fw/datasets/imdb/rl/rw_prompt-valid.jsonl",
+            seed=s,
+            num_samples=10,
+        ),
+    )
+    exp_name = f"senti-genscore-rw-train-s{s}"
+    register_experiment(
+        exp_name,
+        functools.partial(
+            PackedGenerateScoringExperiment,
+            prompt_dataset_path="/lustre/fw/datasets/imdb/rl/rw_prompt-train.jsonl",
+            seed=s,
+            num_samples=10,
+        ),
+    )
+    for model_type, epoch, step in itertools.product(['dpo', 'ppo'], range(9), range(400)):
+        exp_name = f"senti-genscore-{model_type}-epoch{epoch}step{step}-s{s}"
+        register_experiment(
+            exp_name,
+            functools.partial(PackedGenerateScoringExperiment,
+                              seed=s,
+                              epoch=epoch,
+                              step=step,
+                              model_type=model_type),
+        )

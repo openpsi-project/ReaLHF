@@ -27,20 +27,20 @@ class PackedDPOExperiment(Experiment):
 
     def __init__(
         self,
-        dp_size=3,
+        dp_size=7,
         seed=1,
         total_train_epochs=8,
         base_model='gpt2',
         dataset_path="/lustre/fw/datasets/imdb/rl/rm_paired-all.jsonl",
-        train_tokens_per_batch: int = 32768,
-        eval_tokens_per_batch: int = 65536,
+        train_tokens_per_batch: int = 65536,
+        eval_tokens_per_batch: int = 131072,
         max_pairs_per_prompt: int = 2,
         use_lora: bool = False,
         beta: float = 0.1,
     ):
         self.use_lora = use_lora
         self.weight_decay = 0.05
-        self.lr = 2.5e-4 if use_lora else 1e-5
+        self.lr = 2.5e-4 if use_lora else 1e-6
         self.lora_scaling = 32.0
         self.lora_dim = 32
         self.adam_betas = (0.9, 0.95)
@@ -81,6 +81,7 @@ class PackedDPOExperiment(Experiment):
                     gpu=1,
                     gpu_type='tesla',
                     mem=60000,
+                    nodelist='frl8a140',
                 ),
             ),
         )
@@ -187,8 +188,8 @@ class PackedDPOExperiment(Experiment):
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
-            save_frequency_steps=20,
-            save_frequency_epochs=None,
+            save_frequency_steps=50,
+            save_frequency_epochs=1,
             save_frequency_seconds=None,
             eval_frequency_epochs=None,
             model_rpcs=[dpo, ref_inf],

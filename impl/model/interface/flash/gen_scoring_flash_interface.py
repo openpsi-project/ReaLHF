@@ -54,12 +54,27 @@ class PackedGenScoringInterface(api.model.ModelInterface):
 
         prompt_att_mask: torch.BoolTensor = data['prompt_att_mask']
         bs, prompt_max_len = prompts.shape[:2]
-        gen_tokens = module.generate(
+        gen_res = module.generate(
             tokenizer=model.tokenizer,
             input_ids=prompts,
             attention_mask=prompt_att_mask,
             gconfig=gconfig,
-        ).sequences
+        )
+        gen_tokens = gen_res.sequences
+        logp = gen_res.scores
+
+        eos_token_id = model.tokenizer.eos_token_id
+        pad_token_id = model.tokenizer.pad_token_id
+        gen_lengths = (gen_tokens != pad_token_id).logical_and(gen_tokens != eos_token_id).sum(dim=-1) + 1
+        gen_lengths = gen_lengths.clip(max=gen_tokens.shape[-1])
+
+        seqlogp = []
+        for i in range(logp.shape[0]):
+            seqlogp.append(logp[i, :gen_lengths[i]].sum())
+        seqlogp = torch.stack(seqlogp)
+
+        all_seqlogp = [torch.zeros_like(seqlogp) for _ in range(dist.get_world_size())]
+        dist.all_gather(all_seqlogp, seqlogp)
 
         prompts = prompts.unsqueeze(1).repeat(1, num_samples, 1).flatten(end_dim=1)
         seq = torch.cat([prompts, gen_tokens], dim=1)
@@ -93,7 +108,8 @@ class PackedGenScoringInterface(api.model.ModelInterface):
         assert len(prompts_str) == bs * dist.get_world_size()
         texts = model.tokenizer.batch_decode(torch.cat(all_seq, 0), skip_special_tokens=True)
         score = torch.cat(all_score, 0)
-        assert len(texts) == bs * num_samples * dist.get_world_size() == score.shape[0]
+        seqlogp = torch.cat(all_seqlogp, 0)
+        assert len(texts) == bs * num_samples * dist.get_world_size() == score.shape[0] == seqlogp.shape[0]
 
         for i in range(bs * dist.get_world_size()):
             prompt = prompts_str[i]
@@ -104,8 +120,12 @@ class PackedGenScoringInterface(api.model.ModelInterface):
                     prompt_answers[j] = a[len(prompt):]
             except AssertionError:
                 continue
+            lp = seqlogp[i * num_samples:(i + 1) * num_samples]
             s = score[i * num_samples:(i + 1) * num_samples]
-            x = dict(prompt=prompt, answers=prompt_answers, scores=s.cpu().tolist())
+            x = dict(prompt=prompt,
+                     answers=prompt_answers,
+                     scores=s.cpu().tolist(),
+                     seqlogp=lp.cpu().tolist())
             self.history_data.append(x)
 
         return {}

@@ -83,7 +83,7 @@ class PackedPPOExperiment(Experiment):
     def __init__(
         self,
         n_actors=4,
-        n_critics=3,
+        n_critics=4,
         seed=1,
         base_model: str = 'gpt2',
         train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl",
@@ -116,12 +116,21 @@ class PackedPPOExperiment(Experiment):
             ),
             model_worker=[
                 TasksGroup(
-                    count=self.n_actors + self.n_critics,
+                    count=self.n_actors,
                     scheduling=Scheduling.model_worker_default(
                         cpu=4,
                         gpu=1,
                         mem=60000,
-                        nodelist='frl8a140',
+                        nodelist='frl8a138',
+                    ),
+                ),
+                TasksGroup(
+                    count=self.n_critics,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=1,
+                        mem=60000,
+                        nodelist='frl8a139',
                     ),
                 ),
                 TasksGroup(
@@ -130,7 +139,7 @@ class PackedPPOExperiment(Experiment):
                         cpu=4,
                         gpu=0.5,
                         mem=30000,
-                        nodelist='frl8a140',
+                        nodelist='frl8a139',
                     ),
                 )
             ],
@@ -316,6 +325,7 @@ class PackedPPOExperiment(Experiment):
         return ExperimentConfig(
             total_train_epochs=8,
             save_frequency_epochs=1,
+            save_frequency_steps=20,
             save_frequency_seconds=None,
             model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
             data_worker=data_worker,
