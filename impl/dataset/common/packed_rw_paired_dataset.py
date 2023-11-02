@@ -58,6 +58,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
                 if pa.startswith(x['prompt']) or na.startswith(x['prompt']):
                     raise ValueError("Answers should not start with prompt.")
 
+        prompts = [x['prompt'] for x in data]
         if max_pairs_per_prompt is not None:
             pos_answers = [[
                 x['prompt'] + c + tokenizer.eos_token
@@ -78,6 +79,16 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
                 raise RuntimeError("pos_answers and neg_answers must be non-empty.")
 
         group_sizes = [len(x) for x in pos_answers]
+
+        _prompt_tokens = tokenizer(
+            prompts,
+            max_length=max_length,
+            return_length=True,
+            return_attention_mask=False,
+            padding=False,
+            truncation=True,
+        )
+        prompt_lens = _prompt_tokens['length']
 
         _answer_tokens = tokenizer(
             list(itertools.chain.from_iterable(pos_answers + neg_answers)),
@@ -107,6 +118,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
 
         self.pos_answer_tokens = pos_answer_tokens[start:end]
         self.neg_answer_tokens = neg_answer_tokens[start:end]
+        self.prompt_lens = prompt_lens[start:end]
         self.group_sizes = group_sizes[start:end]
         self.group_posneg_seqlens = [
             sum(x['length']) + sum(y['length'])
@@ -130,6 +142,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
         self.neg_answer_tokens = [self.neg_answer_tokens[i] for i in shuffle_indices]
         self.group_posneg_seqlens = [self.group_posneg_seqlens[i] for i in shuffle_indices]
         self.group_sizes = [self.group_sizes[i] for i in shuffle_indices]
+        self.prompt_lens = [self.prompt_lens[i] for i in shuffle_indices]
         self.shuffle_cnt += 1
 
     def __len__(self):
@@ -137,6 +150,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         for indices in self.__batch_indices:
+            prompt_lens = [self.prompt_lens[i] for i in indices]
             group_pos_answers = [self.pos_answer_tokens[i]['input_ids'] for i in indices]
             group_neg_answers = [self.neg_answer_tokens[i]['input_ids'] for i in indices]
             pos_answers = list(itertools.chain.from_iterable(group_pos_answers))
@@ -157,7 +171,10 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
             packed_input_ids = torch.cat(
                 [torch.tensor(p) for p in itertools.chain.from_iterable(zip(pos_answers, neg_answers))])
             group_factor = torch.tensor([1 / g for _ in range(g) for g in group_sizes], dtype=torch.float32)
+            prompt_lens = torch.tensor([x for _ in range(g) for x, g in zip(prompt_lens, group_sizes)],
+                                       dtype=torch.int32)
 
+            assert prompt_lens.shape[0] == len(seqlens)
             assert packed_input_ids.shape[0] == sum(pair_seqlens) == sum(seqlens), (packed_input_ids.shape[0],
                                                                                     sum(pair_seqlens),
                                                                                     sum(seqlens))
@@ -166,6 +183,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
                 input_lens=torch.tensor(seqlens, dtype=torch.int32),
                 pair_input_lens=torch.tensor(pair_seqlens, dtype=torch.int32),
                 group_factor=group_factor,
+                prompt_lens=prompt_lens,
             )
         self._shuffle()
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.group_posneg_seqlens),
@@ -216,5 +234,4 @@ else:
                     b = data['packed_input_ids'][offset + len1:offset + len1 + len2]
                     assert have_common_prefix_at_least(a, b, 8), (a, b)
                     offset += len1 + len2
-                print(data['group_factor'])
             continue

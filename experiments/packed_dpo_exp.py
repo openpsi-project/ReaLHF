@@ -9,15 +9,15 @@ from base.topology import PipeModelDataParallelTopology
 ref_inf = ModelRPC(
     "ref",
     ModelInterfaceType.INFERENCE,
-    input_data=['packed_input_ids', 'input_lens', 'pair_input_lens'],
-    output_data=['logprobs'],
-    output_key_remap={'logprobs': 'packed_ref_logprobs'},
+    input_data=['packed_input_ids', 'input_lens', 'pair_input_lens', 'prompt_lens'],
+    output_data=['seqlogp'],
+    output_key_remap={'seqlogp': 'pair_ref_seqlogp'},
     dp_broker_type='packed',
 )
 dpo = ModelRPC(
     'actor',
     ModelInterfaceType.TRAIN_STEP,
-    input_data=['packed_input_ids', 'input_lens', 'pair_input_lens', 'packed_ref_logprobs'],
+    input_data=['packed_input_ids', 'input_lens', 'pair_input_lens', 'pair_ref_seqlogp', 'prompt_lens'],
     dp_broker_type='packed',
     log_return_value=True,
 )
@@ -27,13 +27,13 @@ class PackedDPOExperiment(Experiment):
 
     def __init__(
         self,
-        dp_size=1,
+        dp_size=3,
         seed=1,
         total_train_epochs=8,
         base_model='gpt2',
         dataset_path="/lustre/fw/datasets/imdb/rl/rm_paired-all.jsonl",
-        train_tokens_per_batch: int = 65536,
-        eval_tokens_per_batch: int = 131072,
+        train_tokens_per_batch: int = 32768,
+        eval_tokens_per_batch: int = 65536,
         max_pairs_per_prompt: int = 2,
         use_lora: bool = False,
         beta: float = 0.1,

@@ -158,7 +158,7 @@ class PackedPairedRewardModelingExperiment(Experiment):
                 backend=backend,
                 interface=interface,
                 model_name='default',
-                eval_datasets=[dataset],
+                eval_datasets=[eval_dataset],
                 eval_dataloader=eval_dataloader,
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.dp_size),
