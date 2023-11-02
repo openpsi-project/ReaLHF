@@ -62,11 +62,11 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
         if max_pairs_per_prompt is not None:
             pos_answers = [[
                 x['prompt'] + c + tokenizer.eos_token
-                for c in self.rng.choice(x['pos_answers'], max_pairs_per_prompt)
+                for c in self.rng.choice(x['pos_answers'], max_pairs_per_prompt, replace=False)
             ] for x in data]
             neg_answers = [[
                 x['prompt'] + c + tokenizer.eos_token
-                for c in self.rng.choice(x['neg_answers'], max_pairs_per_prompt)
+                for c in self.rng.choice(x['neg_answers'], max_pairs_per_prompt, replace=False)
             ] for x in data]
         else:
             pos_answers = [[x['prompt'] + c + tokenizer.eos_token for c in x['pos_answers']] for x in data]
