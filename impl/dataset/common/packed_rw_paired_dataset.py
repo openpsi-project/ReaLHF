@@ -173,10 +173,11 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
             packed_input_ids = torch.cat(
                 [torch.tensor(p) for p in itertools.chain.from_iterable(zip(pos_answers, neg_answers))])
             group_factor = torch.tensor([1 / g for _ in range(g) for g in group_sizes], dtype=torch.float32)
-            prompt_lens = torch.tensor([x for _ in range(g) for x, g in zip(prompt_lens, group_sizes)],
+            prompt_lens = torch.tensor(list(itertools.chain.from_iterable(
+                [[x for _ in range(g)] for x, g in zip(prompt_lens, group_sizes)])),
                                        dtype=torch.int32)
 
-            assert prompt_lens.shape[0] == len(seqlens)
+            assert prompt_lens.shape[0] == len(seqlens), (prompt_lens.shape[0], len(seqlens), len(indices))
             assert packed_input_ids.shape[0] == sum(pair_seqlens) == sum(seqlens), (packed_input_ids.shape[0],
                                                                                     sum(pair_seqlens),
                                                                                     sum(seqlens))
