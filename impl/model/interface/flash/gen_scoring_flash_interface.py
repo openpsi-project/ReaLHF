@@ -74,7 +74,7 @@ class PackedGenScoringInterface(api.model.ModelInterface):
         seqlogp = torch.stack(seqlogp)
 
         all_seqlogp = [torch.zeros_like(seqlogp) for _ in range(dist.get_world_size())]
-        dist.all_gather(all_seqlogp, logp)
+        dist.all_gather(all_seqlogp, seqlogp)
 
         prompts = prompts.unsqueeze(1).repeat(1, num_samples, 1).flatten(end_dim=1)
         seq = torch.cat([prompts, gen_tokens], dim=1)
