@@ -6,29 +6,37 @@ from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
 
-rw_modeling = ModelRPC(
-    "default",
+ref_inf = ModelRPC(
+    "ref",
+    ModelInterfaceType.INFERENCE,
+    input_data=['packed_input_ids', 'input_lens', 'pair_input_lens', 'prompt_lens'],
+    output_data=['seqlogp'],
+    output_key_remap={'seqlogp': 'pair_ref_seqlogp'},
+    dp_broker_type='packed',
+)
+dpo = ModelRPC(
+    'actor',
     ModelInterfaceType.TRAIN_STEP,
-    input_data=['packed_input_ids', 'input_lens', 'group_factor', 'pair_input_lens'],
+    input_data=['packed_input_ids', 'input_lens', 'pair_input_lens', 'pair_ref_seqlogp', 'prompt_lens'],
     dp_broker_type='packed',
     log_return_value=True,
 )
 
 
-class PackedPairedRewardModelingExperiment(Experiment):
+class PackedDPOExperiment(Experiment):
 
     def __init__(
         self,
-        dp_size=8,
+        dp_size=3,
         seed=1,
-        total_train_epochs=1,
+        total_train_epochs=8,
         base_model='gpt2',
-        train_dataset_path="/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl",
-        valid_dataset_path="/lustre/fw/datasets/imdb/rl/rm_paired-valid.jsonl",
-        train_tokens_per_batch: int = 65536,
-        eval_tokens_per_batch: int = 131072,
+        dataset_path="/lustre/fw/datasets/imdb/rl/rm_paired-all.jsonl",
+        train_tokens_per_batch: int = 32768,
+        eval_tokens_per_batch: int = 65536,
         max_pairs_per_prompt: int = 2,
         use_lora: bool = False,
+        beta: float = 0.1,
     ):
         self.use_lora = use_lora
         self.weight_decay = 0.05
@@ -45,12 +53,13 @@ class PackedPairedRewardModelingExperiment(Experiment):
 
         self.total_train_epochs = total_train_epochs
         self.base_model = base_model
-        self.train_dataset_path = train_dataset_path
-        self.valid_dataset_path = valid_dataset_path
+        self.dataset_path = dataset_path
 
         self.train_tokens_per_batch = train_tokens_per_batch
         self.eval_tokens_per_batch = eval_tokens_per_batch
         self.max_pairs_per_prompt = max_pairs_per_prompt
+
+        self.beta = beta
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -66,7 +75,7 @@ class PackedPairedRewardModelingExperiment(Experiment):
                 scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
             ),
             model_worker=TasksGroup(
-                count=self.dp_size,
+                count=self.dp_size + 1,
                 scheduling=Scheduling.model_worker_default(
                     cpu=4,
                     gpu=1,
@@ -92,10 +101,10 @@ class PackedPairedRewardModelingExperiment(Experiment):
                 n_tokens_per_batch=self.train_tokens_per_batch // self.n_data_workers,
                 max_length=max_seq_len,
                 max_pairs_per_prompt=self.max_pairs_per_prompt,
-                dataset_path=self.train_dataset_path,
+                dataset_path=self.dataset_path,
             ),
         )
-        dataloader = eval_dataloader = DataLoader('iterable_dataset_loader')
+        dataloader = DataLoader('iterable_dataset_loader')
         data_worker = [
             DataWorker(
                 tokenizer_name_or_path=base_model_path,
@@ -105,11 +114,7 @@ class PackedPairedRewardModelingExperiment(Experiment):
             ) for i in range(self.n_data_workers)
         ]
 
-        eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args['dataset_path'] = self.valid_dataset_path
-        eval_dataset.args['n_tokens_per_batch'] = self.eval_tokens_per_batch // self.n_data_workers
-
-        backend = ModelBackend(
+        train_backend = ModelBackend(
             'ds_train',
             args=dict(
                 optimizer_name='adam',
@@ -127,13 +132,17 @@ class PackedPairedRewardModelingExperiment(Experiment):
                 gradient_checkpointing=False,
             ),
         )
+        inf_backend = ModelBackend('ds_inference', args=dict(enable_fp16=True))
 
-        model = Model("flash_mqat_critic",
-                      args=dict(
-                          model_path=sft_model_path,
-                          from_type='sft',
-                          tokenizer_path=base_model_path,
-                      ))
+        model = Model(
+            "flash_mqat_clm_hf",
+            args=dict(
+                model_path=sft_model_path,
+                from_type="self",
+                tokenizer_path=base_model_path,
+            ),
+        )
+        ref_model = copy.deepcopy(model)
         if self.use_lora:
             model.wrappers = [
                 ModelWrapper(
@@ -149,21 +158,31 @@ class PackedPairedRewardModelingExperiment(Experiment):
                 ),
             ]
 
-        interface = ModelInterface('flash_paired_rw')
+        interface = ModelInterface('flash_dpo', args=dict(beta=0.1, enable_save=True))
+        ref_interface = ModelInterface('flash_dpo', args=dict(beta=0.1, enable_save=False))
 
         model_worker = [
             ModelWorker(
                 seed=self.seed,
                 model=model,
-                backend=backend,
+                backend=train_backend,
                 interface=interface,
-                model_name='default',
-                eval_datasets=[eval_dataset],
-                eval_dataloader=eval_dataloader,
+                model_name='actor',
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.dp_size),
                 cuda_cache_clear_freq=60,
             ) for i in range(self.dp_size)
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=ref_model,
+                backend=inf_backend,
+                interface=ref_interface,
+                model_name='ref',
+                dp_rank=0,
+                topo=PipeModelDataParallelTopology(1, 1, 1),
+                cuda_cache_clear_freq=60,
+            )
         ]
 
         cfg = ExperimentConfig(
@@ -171,8 +190,8 @@ class PackedPairedRewardModelingExperiment(Experiment):
             save_frequency_steps=20,
             save_frequency_epochs=None,
             save_frequency_seconds=None,
-            eval_frequency_epochs=1,
-            model_rpcs=[rw_modeling],
+            eval_frequency_epochs=None,
+            model_rpcs=[dpo, ref_inf],
             data_worker=data_worker,
             model_worker=model_worker,
         )
@@ -181,5 +200,5 @@ class PackedPairedRewardModelingExperiment(Experiment):
 
 seeds = list(range(1, 6)) + [42]
 for s in seeds:
-    exp_name = f"flash-rw-paired-s{s}"
-    register_experiment(exp_name, functools.partial(PackedPairedRewardModelingExperiment, seed=s))
+    exp_name = f"flash-dpo-s{s}"
+    register_experiment(exp_name, functools.partial(PackedDPOExperiment, seed=s))

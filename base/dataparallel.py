@@ -98,10 +98,10 @@ class PackedParallelDataBroker(ParallelDataBroker):
                     sp[k] = input_lens[i]
                 elif k == 'cu_seqlens':
                     sp[k] = cu_seqlens[i]
-                elif k == 'pair_input_lens':
+                elif k in ['pair_input_lens', 'pair_ref_seqlogp']:
                     start, end = partitions[i]
                     sp[k] = v[2 * start:2 * end]
-                elif k in ['seq_no_eos_mask', 'rewards', 'reward_score', 'group_factor']:
+                elif k in ['seq_no_eos_mask', 'rewards', 'reward_score', 'group_factor', 'prompt_lens']:
                     start, end = partitions[i]
                     sp[k] = v[start:end]
                 elif k in [
