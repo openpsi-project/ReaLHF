@@ -106,9 +106,11 @@ class PackedGenerateScoringExperiment(Experiment):
         if self.model_type == 'ppo':
             model_path_root = "/data/aigc/llm/checkpoints/fw/flash-ppo-s42/run20231102/actor@pp_00-mp_00-dp_00/"
             model_path = os.path.join(model_path_root, f"epoch{self.epoch}step{self.step}")
+            assert os.path.exists(model_path)
         elif self.model_type == 'dpo':
             model_path_root = "/data/aigc/llm/checkpoints/fw/flash-dpo-s42/run20231102/actor@pp_00-mp_00-dp_00/"
             model_path = os.path.join(model_path_root, f"epoch{self.epoch}step{self.step}")
+            assert os.path.exists(model_path)
         elif self.model_type == 'sft':
             model_path = "/data/aigc/llm/checkpoints/fw/senti-sft-pos-neg-s42/run20231031/default@pp_00-mp_00-dp_00/epoch8step0/"
         else:

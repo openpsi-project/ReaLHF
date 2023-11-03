@@ -219,6 +219,10 @@ class WPSActorInterface(api.model.ModelInterface):
                            top_p=module.generation_config.top_p,
                            inplace=True,
                            ordered=False)
+        prompt_len = data.prompt_att_mask.shape[1]
+        if module.generation_config.min_new_tokens > 0:
+            logits[:, prompt_len - 1:prompt_len + module.generation_config.min_new_tokens - 1,
+                   model.tokenizer.eos_token_id] = torch.finfo(logits.dtype).min
         logits_ignoring_mask = logits == torch.finfo(logits.dtype).min
         logp = gather_shifted_log_probs(logits, seq)
 
