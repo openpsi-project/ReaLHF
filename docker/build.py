@@ -3,13 +3,14 @@ import os
 import socket
 import time
 
-LATEST_TV = "23.08"
+LATEST_TV = "23.10"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--gpu", action='store_true')
 parser.add_argument("--cpu", action="store_true")
 parser.add_argument("--retry", type=int, default=100)
 parser.add_argument("--tv", type=str, default=LATEST_TV)
+parser.add_argument("--rebuild", action='store_true')
 args = parser.parse_args()
 
 if __name__ == "__main__":
@@ -26,6 +27,8 @@ if __name__ == "__main__":
             cmd += f" --build-arg base_image=nvcr.io/nvidia/pytorch:{args.tv}-py3"
         else:
             cmd += f" --build-arg base_image=ubuntu:22.04"
+        if args.rebuild:
+            cmd += " --no-cache "
         cmd += " /local/fw/packages/docker"
         print(cmd)
         os.system(cmd)
