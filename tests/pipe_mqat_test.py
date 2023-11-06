@@ -91,15 +91,16 @@ def make_pipe_backend():
                                               warmup_steps_proportion=0.0,
                                               min_lr_ratio=0.0,
                                               zero_stage=1,
-                                              engine_type="pipe",
+                                              engine_type="stream_pipe",
                                               num_pipeline_stages=NUM_PP)))
 
 
 def make_pipe_model(model_path, device):
-    from impl.model.backend.ds_pipe_engine import PipeDataParallelTopology
+    # from impl.model.backend.ds_pipe_engine import PipeDataParallelTopology
+    from impl.model.backend.stream_pipe_engine import PipeDataParallelTopology
     import api.model
     topology = PipeDataParallelTopology(num_pp=NUM_PP, num_dp=NUM_DP)
-    model_config = config_package.Model(type_="starcoder_flash_mqat_pipe",
+    model_config = config_package.Model(type_="starcoder_flash_mqat_stream_pipe",
                                         args=dict(
                                             model_path=model_path,
                                             num_pp=NUM_PP,
@@ -182,7 +183,7 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
     outputs = interface.generate(model, data, gconfig=gconfig)
     t0 = time.monotonic() - st
 
-    data = init_data(rank, model, device, seed=234)
+    data = init_data(rank, model, device, seed=seed)
     st = time.monotonic()
     outputs = interface.generate(model, data, gconfig=gconfig)
     t1 = time.monotonic() - st
