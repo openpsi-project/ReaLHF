@@ -203,6 +203,7 @@ class PipeTransferData(TensorDataclassToTupleInterface):
             Used by flash_attn_varlen_func. Will not be used during generation.
             It's configuration-like data that must be transfered from the first stage
             to the last.
+        store_kvcache: Whether to store the key and value cache for generation.
         attention_mask: The attention mask of the input, the same as huggingface transformers.
             Used by torch_attn_func to examine the outputs of PyTorch attention and flash
             attention are the same. Only for debugging. Shape [bs, seq_len].
@@ -212,7 +213,8 @@ class PipeTransferData(TensorDataclassToTupleInterface):
 
     # The followings are "configuration"-like data that should be passed across all stages.
     cu_seqlens: torch.Tensor = None
-    max_seqlen: int = None
+    max_seqlen: torch.Tensor = None
+    store_kvcache: torch.Tensor = None
 
     # Only used for debugging
     attention_mask: torch.Tensor = None

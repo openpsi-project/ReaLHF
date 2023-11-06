@@ -18,14 +18,16 @@ logger = logging.getLogger("pipe_flash_sft")
 
 
 def compute_packed_sft_loss(logits: torch.Tensor, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor,
-                            loss_mask: torch.Tensor) -> torch.Tensor:
+                            prompt_mask: torch.Tensor, **kwargs) -> torch.Tensor:
+    loss_mask = 1 - prompt_mask.float()
     logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
     shift_one_indices = torch.cat([
         torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
         for i in range(cu_seqlens.shape[0] - 1)
     ])
     loss_mask = loss_mask[shift_one_indices]
-    return -(logprobs * loss_mask).sum() / loss_mask.sum()
+    loss = -(logprobs * loss_mask).sum() / loss_mask.sum()
+    return loss, {"loss": loss.detach().cpu()}
 
 
 class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
@@ -41,14 +43,17 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
         module: DeepSpeedPipelineEngine = model.module
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
-        module.eval()
+        module.train()
 
-        module.set_loss_fn(compute_packed_sft_loss)
-
-        agg_loss = module.train_batch(packed_input_ids=packed_input_ids,
-                                      cu_seqlens=cu_seqlens,
-                                      prompt_mask=prompt_mask)
+        loss_fn_kwargs = dict(input_lens=cu_seqlens[1:] - cu_seqlens[:-1], prompt_mask=prompt_mask)
+        stats = module.train_batch(packed_input_ids=packed_input_ids,
+                                   cu_seqlens=cu_seqlens,
+                                   loss_fn=compute_packed_sft_loss,
+                                   **loss_fn_kwargs)
         # agg_loss = average loss of data parallel batches
+        agg_loss = torch.tensor(0.0)
+        for stat in stats:
+            agg_loss += stat["loss"]
 
         cur_epoch = model.version.epoch
         model.inc_version()

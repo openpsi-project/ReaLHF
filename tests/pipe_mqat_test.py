@@ -4,6 +4,8 @@ import random
 import time
 import unittest
 
+# import transformers
+from torch.profiler import profile, ProfilerActivity, record_function
 import torch
 import torch.multiprocessing as mp
 
@@ -12,8 +14,6 @@ import api.config as config_package
 import base.gpu_utils
 import base.name_resolve as name_resolve
 import base.names as names
-
-# import transformers
 
 # mp.set_start_method('spawn', force=True) # this will make global barrier not work
 
@@ -27,19 +27,20 @@ WORLD_SIZE = NUM_PP * NUM_DP
 BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
 PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_{NUM_PP}pp_1s"
 BATCH_SIZE = 8
-MIN_NEW_TOKENS = 50
-MAX_NEW_TOKENS = 50
+MIN_NEW_TOKENS = 30
+MAX_NEW_TOKENS = 30
 
 BARRIER = mp.Barrier(WORLD_SIZE)
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
 # for plotting
-logging.basicConfig(filename="/home/meizy/logs/pipe_mqat.log",
-                    filemode="w",
-                    format=LOG_FORMAT,
-                    datefmt=DATE_FORMAT,
-                    level="DEBUG")
-# logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="DEBUG")
+# logging.basicConfig(filename="/home/meizy/logs/generate_times.log",
+#                     filemode="w",
+#                     format=LOG_FORMAT,
+#                     datefmt=DATE_FORMAT,
+#                     level="DEBUG")
+
+logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
 
 logger = logging.getLogger("pipe_mqat_test")
 
@@ -172,13 +173,21 @@ def init_data(rank, model, device, seed):
 
 def pipe_generate(rank, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
-    data = init_data(rank, model, device, seed)
+    data = init_data(rank, model, device, seed=123)
 
     from impl.model.nn.flash_mqat import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
+    # first generate
     st = time.monotonic()
     outputs = interface.generate(model, data, gconfig=gconfig)
-    t = time.monotonic() - st
+    t0 = time.monotonic() - st
+
+    data = init_data(rank, model, device, seed=234)
+    st = time.monotonic()
+    outputs = interface.generate(model, data, gconfig=gconfig)
+    t1 = time.monotonic() - st
+
+    logger.info(f"generate time rank {rank} t0 {t0} t1 {t1}")
     # logger.info(input_ids)
     if len(outputs) > 0 and res_queue is not None:
         # logger.info(input_ids)
@@ -186,15 +195,34 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
         # logger.info(outputs["log_probs"])
         res_queue.put(outputs["gen_tokens"])
         res_queue.put(outputs["log_probs"])
-        res_queue.put(t)
+        res_queue.put(t1)
         time.sleep(1)  # wait for queue get, otherwise invalid tensor handle
 
 
 def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
-    data = init_data(rank, model, device, seed)
+    data = init_data(rank, model, device, seed=123)
+    # st = time.monotonic()
+
+    # first run
+    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,
+    #              profile_memory=True) as prof:
+    st = time.monotonic()
     outputs = interface.train_step(model, data)
-    logger.info(f"{rank} {outputs}")
+    t0 = time.monotonic() - st
+    # print("first train_step", prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+
+    data = init_data(rank, model, device, seed=234)
+    # st = time.monotonic()
+
+    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,
+    #              profile_memory=True) as prof:
+    st = time.monotonic()
+    outputs = interface.train_step(model, data)
+    t1 = time.monotonic() - st
+    # print("second train_step", prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+
+    logger.info(f"{rank} {outputs} t0 {t0} t1 {t1}")
 
 
 class PipeFlashMQATTest(unittest.TestCase):
@@ -252,11 +280,11 @@ class PipeFlashMQATTest(unittest.TestCase):
         prompt, prompt_att_mask = make_batch(self.tokenizer, self.device, BATCH_SIZE, 0, 1, seed=self.seed)
 
         s2 = time.monotonic()
-        vg, vlogprob, vmask, _ = generate(model=self.baseline_model,
-                                          tokenizer=self.tokenizer,
-                                          input_ids=prompt,
-                                          attention_mask=prompt_att_mask,
-                                          gconfig=self.gconfig)
+        vg, vlogprob, vmask, *_ = generate(model=self.baseline_model,
+                                           tokenizer=self.tokenizer,
+                                           input_ids=prompt,
+                                           attention_mask=prompt_att_mask,
+                                           gconfig=self.gconfig)
         t2 = time.monotonic() - s2
         print("pipe time:", t)
         print("vanilla time:", t2)
@@ -302,4 +330,4 @@ class PipeFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testGenerate")
+    unittest.main(defaultTest="PipeFlashMQATTest.testGenerateAccordance")

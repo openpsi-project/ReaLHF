@@ -4,11 +4,11 @@ import logging
 import os
 import time
 
-from deepspeed.accelerator import get_accelerator
 import numpy as np
 import psutil
 
 logger = logging.getLogger("benchmarkutils")
+IF_MARK = False
 
 
 def process_memory_mb(name):
@@ -20,26 +20,21 @@ def process_memory_mb(name):
 
 
 def gpu_memory_mb(name):
+    from deepspeed.accelerator import get_accelerator
     import torch.distributed as dist
     logger.info(
         f"{name} GPU rank {dist.get_rank()}: memory usage: {round(get_accelerator().memory_allocated() / 1024**2, 2)}MB, "
         f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB")
 
 
-def mock_time_mark_ms(name, identifier, t, step):
-    logger.info(f"*{name}* #{identifier}#  ${t}$ ms step &{step}&")
+def mock_time_mark(name, identifier, t, step):
+    if IF_MARK:
+        logger.debug(f"*{name}* #{identifier}#  ${t}$ ns step &{step}&")
 
 
 def time_mark(name, identifier, step=0):
-    logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns())}$ ns step &{step}&")
-
-
-def time_mark_ms(name, identifier, step=0):
-    logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e6)}$ ms step &{step}&")
-
-
-def time_mark_s(name, identifier, step=0):
-    logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e9)}$ s step &{step}&")
+    if IF_MARK:
+        logger.debug(f"*{name}* #{identifier}#  ${int(time.time_ns())}$ ns step &{step}&")
 
 
 def parse_time_mark_in_line(line, name, step_range=None):
@@ -98,7 +93,8 @@ def summary_time_points(start_keys,
                         figsize=(12, 4),
                         end_time=None,
                         step_range=None,
-                        save_fig_path="time_points.png"):
+                        save_fig_path="time_points.png",
+                        draw_boundary=False):
     """ Plot and summary time marks in logs
     """
     import matplotlib.pyplot as plt
@@ -165,14 +161,26 @@ def summary_time_points(start_keys,
                 ax.barh(y=id_index,
                         width=etp - stp,
                         left=stp,
+                        height=0.8,
                         color=MATPLOTLIB_COLORS[start_key_idx],
                         label=label)
+
+                if draw_boundary:
+                    ax.plot([stp, stp], [id_index - 0.4, id_index + 0.4],
+                            color='black',
+                            linestyle='-',
+                            linewidth=0.5)
+                    ax.plot([etp, etp], [id_index - 0.4, id_index + 0.4],
+                            color='black',
+                            linestyle='-',
+                            linewidth=0.5)
 
         infos[identifier] = (time_sum, time_list)
 
     ax.set_xlim(min_time, max_time)
-    xticks = np.arange(min_time, max_time, 10 * 1e9)
-    xtick_labels = [f"{(i//1e9)%1000}" for i in xticks]
+    total_width = max_time - min_time
+    xticks = np.arange(min_time - total_width // 12, max_time - total_width // 12, 10 * 1e9)
+    xtick_labels = [f"{int((i//1e9)%1000)}" for i in xticks]
     ax.set_xticks(xticks)
     ax.set_xticklabels(xtick_labels)
 

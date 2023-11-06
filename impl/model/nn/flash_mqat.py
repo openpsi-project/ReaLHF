@@ -24,6 +24,9 @@ try:
     from flash_attn import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache
 except ModuleNotFoundError:
     pass
+import logging
+
+logger = logging.getLogger("flash_mqat.py")
 
 
 @dataclasses.dataclass
@@ -333,12 +336,14 @@ class FlashMQATBlock(nn.Module):
         x.pp_output = h
         # Set kv cache during the first forward pass of generation.
         # Do we need an option to disable this?
-        if y.k_cache is None:
-            y.k_cache = k.detach()
-        if y.v_cache is None:
-            y.v_cache = v.detach()
-        if y.cache_seqlens is None and x.cu_seqlens is not None:
-            y.cache_seqlens = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
+        # TODO: option to disable this to avoid redundant kvcache store
+        if x.store_kvcache:
+            if y.k_cache is None:
+                y.k_cache = k.detach()
+            if y.v_cache is None:
+                y.v_cache = v.detach()
+            if y.cache_seqlens is None and x.cu_seqlens is not None:
+                y.cache_seqlens = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
         return x
 
 
@@ -953,7 +958,7 @@ def generate(
         packed_input_ids, cu_seqlens, max_seq_len = build_packed_inputs(input_ids, attention_mask)
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
 
-        x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seq_len)
+        x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seq_len, store_kvcache=torch.tensor(1))
         # one embedding layer, n_layers transformer block, one output layer
         ys = [PipeCacheData(input_ids=packed_input_ids)
               ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
@@ -977,7 +982,7 @@ def generate(
             y.k_cache = k_cache
             y.v_cache = v_cache
             y.cache_seqlens = input_lens.clone()
-        x = PipeTransferData()
+        x = PipeTransferData(store_kvcache=torch.tensor(1))
         ys[0].cache_seqlens = input_lens.clone()
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
@@ -998,7 +1003,7 @@ def generate(
                 k_caches[i] = nn.functional.pad(k_caches[i], pad)
             if v_caches[i].shape[1] < max_seq_len:
                 v_caches[i] = nn.functional.pad(v_caches[i], pad)
-        x = PipeTransferData()
+        x = PipeTransferData(store_kvcache=torch.tensor(1))
         ys = [PipeCacheData(cache_seqlens=cache_seqlens.clone())] + [
             PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens.clone())
             for k, v in zip(k_caches, v_caches)
