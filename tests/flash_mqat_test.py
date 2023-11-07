@@ -3,20 +3,14 @@ import unittest
 import torch
 import transformers
 
-from impl.model.nn.flash_mqat import (
-    FlashMQATForCausalLM,
-    generate,
-    GenerationConfig,
-    PipeCacheData,
-    PipeTransferData,
-    vanilla_cpu_generate,
-    vanilla_packed_generate,
-)
+from impl.model.nn.flash_mqat import (FlashMQATForCausalLM, generate, GenerationConfig, PipeCacheData,
+                                      PipeTransferData, vanilla_cpu_generate, vanilla_packed_generate)
 from impl.model.utils.data import build_packed_inputs, gather_shifted_log_probs, unpack_tensor
 import api.huggingface
 
 
 class FlashMQATStarCoderTest(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 4
@@ -30,18 +24,16 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         sc_cfg.n_positions = 512
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/"
-        )
+            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(
-            sc_cfg
-        ).to(dtype=torch.float16, device=device)
+            sc_cfg).to(dtype=torch.float16, device=device)
         cls.starcoder.eval()
 
-        cls.model = FlashMQATForCausalLM.from_starcoder(
-            from_model=cls.starcoder, dtype=torch.float16, device=device
-        )
+        cls.model = FlashMQATForCausalLM.from_starcoder(from_model=cls.starcoder,
+                                                        dtype=torch.float16,
+                                                        device=device)
         cls.model.eval()
         cls.config = cls.model.config
 
@@ -52,9 +44,10 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         model = self.model
         device = self.device
 
-        input_ids = torch.randint(
-            0, config.vocab_size, (bs, config.n_positions), dtype=torch.long, device=device
-        )
+        input_ids = torch.randint(0,
+                                  config.vocab_size, (bs, config.n_positions),
+                                  dtype=torch.long,
+                                  device=device)
 
         x = PipeTransferData()
         ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(config.n_layers + 1)]
@@ -70,17 +63,18 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         model = self.model
         device = self.device
 
-        input_ids = torch.randint(
-            0, config.vocab_size, (bs, config.n_positions), dtype=torch.long, device=device
-        )
+        input_ids = torch.randint(0,
+                                  config.vocab_size, (bs, config.n_positions),
+                                  dtype=torch.long,
+                                  device=device)
         input_len = torch.randint(10, config.n_positions, (bs,), dtype=torch.long, device=device)
         attention_mask = torch.ones(bs, config.n_positions, dtype=torch.bool, device=device)
         for i in range(bs):
-            attention_mask[i, input_len[i] :] = False
-        packed_input_ids = torch.cat([input_ids[i, : input_len[i]] for i in range(bs)])
+            attention_mask[i, input_len[i]:] = False
+        packed_input_ids = torch.cat([input_ids[i, :input_len[i]] for i in range(bs)])
         cu_seqlens = torch.cat(
-            [torch.tensor([0], dtype=torch.long, device=device), torch.cumsum(input_len, dim=0)]
-        )
+            [torch.tensor([0], dtype=torch.long, device=device),
+             torch.cumsum(input_len, dim=0)])
         max_seqlen = int(input_len.max().item())
         total_seqlen = input_len.sum()
 
@@ -89,12 +83,11 @@ class FlashMQATStarCoderTest(unittest.TestCase):
             # sc_logits = sc_output.flatten(end_dim=1)[:-100]
             sc_logits = torch.zeros(total_seqlen, config.vocab_size, dtype=torch.float16, device=device)
             for i in range(bs):
-                sc_logits[cu_seqlens[i] : cu_seqlens[i + 1]] = sc_output[i, : input_len[i]]
+                sc_logits[cu_seqlens[i]:cu_seqlens[i + 1]] = sc_output[i, :input_len[i]]
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
-            PipeCacheData() for _ in range(config.n_layers + 1)
-        ]
+        ys = [PipeCacheData(input_ids=packed_input_ids)
+              ] + [PipeCacheData() for _ in range(config.n_layers + 1)]
         with torch.no_grad():
             logits = model(x, ys).pp_output
         assert torch.allclose(logits, sc_logits, atol=5e-3), ((logits - sc_logits)).abs().max()
@@ -154,7 +147,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         ).long()
         tlogits = self.starcoder(input_ids=inf_input_ids, attention_mask=tam).logits.float()
         tlogprobs = gather_shifted_log_probs(tlogits, inf_input_ids)
-        tlogprobs = tlogprobs[:, prompt_len - 1 :]
+        tlogprobs = tlogprobs[:, prompt_len - 1:]
         assert torch.allclose(glogprobs, tlogprobs, atol=5e-3), (glogprobs - tlogprobs).abs().max()
 
     def testGenerateFromCache(self):
@@ -273,6 +266,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
 
 
 class FlashMQATStarCoderCPUTest(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 3
@@ -287,13 +281,11 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         sc_cfg.n_positions = 512
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/"
-        )
+            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(
-            sc_cfg
-        ).to(dtype=dtype, device=device)
+            sc_cfg).to(dtype=dtype, device=device)
         cls.starcoder.eval()
 
         cls.model = FlashMQATForCausalLM.from_starcoder(from_model=cls.starcoder, dtype=dtype, device=device)
@@ -315,8 +307,8 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         leftpad_attention_mask = torch.ones((bs, max_seq_len), dtype=torch.bool, device=device)
         rightpad_attention_mask = torch.ones((bs, max_seq_len), dtype=torch.bool, device=device)
         for i in range(bs):
-            leftpad_attention_mask[i, : max_seq_len - seqlens[i]] = 0
-            rightpad_attention_mask[i, seqlens[i] :] = 0
+            leftpad_attention_mask[i, :max_seq_len - seqlens[i]] = 0
+            rightpad_attention_mask[i, seqlens[i]:] = 0
 
         # no mask
         x = PipeTransferData()
@@ -375,12 +367,11 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         ).long()
 
         x = PipeTransferData(attention_mask=vam)
-        ys = [PipeCacheData(input_ids=vg_input_ids)] + [
-            PipeCacheData() for _ in range(self.model.config.n_layers + 1)
-        ]
+        ys = [PipeCacheData(input_ids=vg_input_ids)
+              ] + [PipeCacheData() for _ in range(self.model.config.n_layers + 1)]
         vglogits = self.model(x, ys).pp_output
         vglogprob = gather_shifted_log_probs(vglogits, vg_input_ids)
-        vglogprob = vglogprob[:, input_ids.shape[1] - 1 :]
+        vglogprob = vglogprob[:, input_ids.shape[1] - 1:]
         assert torch.allclose(vglogprob_, vglogprob)
 
         tgconfig = transformers.GenerationConfig(
@@ -400,18 +391,18 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
             attention_mask=attention_mask,
             generation_config=tgconfig,
         )
-        tam = torch.logical_and(
-            tseq.not_equal(self.tokenizer.pad_token_id), (tseq.not_equal(self.tokenizer.eos_token_id))
-        ).long()
+        tam = torch.logical_and(tseq.not_equal(self.tokenizer.pad_token_id),
+                                (tseq.not_equal(self.tokenizer.eos_token_id))).long()
         tlogits = self.starcoder(input_ids=tseq, attention_mask=tam).logits.float()
         tlogprob = gather_shifted_log_probs(tlogits, tseq)
-        tseq = tseq[:, input_ids.shape[1] :]
-        tlogprob = tlogprob[:, input_ids.shape[1] - 1 :]
+        tseq = tseq[:, input_ids.shape[1]:]
+        tlogprob = tlogprob[:, input_ids.shape[1] - 1:]
         assert torch.allclose(tseq, vg)
         assert torch.allclose(vglogprob, tlogprob), (vglogprob - tlogprob).abs().max()
 
 
 class FlashMQATGPTCPUTest(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 3
@@ -429,8 +420,7 @@ class FlashMQATGPTCPUTest(unittest.TestCase):
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.gpt: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
-            dtype=dtype, device=device
-        )
+            dtype=dtype, device=device)
         cls.gpt.eval()
 
         cls.model = FlashMQATForCausalLM.from_gpt2(from_model=cls.gpt, dtype=dtype, device=device)
@@ -452,8 +442,8 @@ class FlashMQATGPTCPUTest(unittest.TestCase):
         leftpad_attention_mask = torch.ones((bs, max_seq_len), dtype=torch.bool, device=device)
         rightpad_attention_mask = torch.ones((bs, max_seq_len), dtype=torch.bool, device=device)
         for i in range(bs):
-            leftpad_attention_mask[i, : max_seq_len - seqlens[i]] = 0
-            rightpad_attention_mask[i, seqlens[i] :] = 0
+            leftpad_attention_mask[i, :max_seq_len - seqlens[i]] = 0
+            rightpad_attention_mask[i, seqlens[i]:] = 0
 
         # no mask
         x = PipeTransferData()
@@ -465,23 +455,22 @@ class FlashMQATGPTCPUTest(unittest.TestCase):
         # right pad
         x = PipeTransferData(attention_mask=rightpad_attention_mask)
         ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(config.n_layers + 1)]
-        sc_logits = gpt(
-            input_ids=input_ids, attention_mask=rightpad_attention_mask
-        ).logits * rightpad_attention_mask.unsqueeze(-1)
+        sc_logits = gpt(input_ids=input_ids,
+                        attention_mask=rightpad_attention_mask).logits * rightpad_attention_mask.unsqueeze(-1)
         logits = model(x, ys).pp_output * rightpad_attention_mask.unsqueeze(-1)
         assert torch.allclose(logits, sc_logits, atol=2e-5), ((logits - sc_logits)).abs().max()
 
         # left pad
         x = PipeTransferData(attention_mask=leftpad_attention_mask)
         ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(config.n_layers + 1)]
-        sc_logits = gpt(
-            input_ids=input_ids, attention_mask=leftpad_attention_mask
-        ).logits * leftpad_attention_mask.unsqueeze(-1)
+        sc_logits = gpt(input_ids=input_ids,
+                        attention_mask=leftpad_attention_mask).logits * leftpad_attention_mask.unsqueeze(-1)
         logits = model(x, ys).pp_output * leftpad_attention_mask.unsqueeze(-1)
         assert torch.allclose(logits, sc_logits, atol=2e-5), ((logits - sc_logits)).abs().max()
 
 
 class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 7
@@ -496,13 +485,11 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         sc_cfg.n_positions = 512
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/"
-        )
+            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
-            dtype=dtype, device=device
-        )
+            dtype=dtype, device=device)
         starcoder.eval()
 
         cls.model = FlashMQATForCausalLM.from_starcoder(from_model=starcoder, dtype=dtype, device=device)
@@ -547,17 +534,15 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         vglogprob = vglogprob.float().cpu()
 
         seq = torch.cat([prompt, vcg], -1)
-        seq_attn_mask = torch.logical_and(
-            seq.ne(self.tokenizer.pad_token_id), seq.ne(self.tokenizer.eos_token_id)
-        )
+        seq_attn_mask = torch.logical_and(seq.ne(self.tokenizer.pad_token_id),
+                                          seq.ne(self.tokenizer.eos_token_id))
         packed_input_ids, cu_seqlens, max_seq_len = build_packed_inputs(seq, seq_attn_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens.cuda(), max_seqlen=max_seq_len)
-        ys = [PipeCacheData(input_ids=packed_input_ids.cuda())] + [
-            PipeCacheData() for _ in range(self.model.config.n_layers + 1)
-        ]
+        ys = [PipeCacheData(input_ids=packed_input_ids.cuda())
+              ] + [PipeCacheData() for _ in range(self.model.config.n_layers + 1)]
         inf_logits = self.model(x, ys).pp_output.float().cpu()
         inf_logits = unpack_tensor(inf_logits, cu_seqlens, padding_side="left")
-        inf_logprob = gather_shifted_log_probs(inf_logits, seq)[:, prompt.shape[1] - 1 :]
+        inf_logprob = gather_shifted_log_probs(inf_logits, seq)[:, prompt.shape[1] - 1:]
         assert torch.allclose(vcg, vg.cpu()), (vcg, vg)
         assert torch.allclose(inf_logprob, vclogprob, atol=5e-3), (
             inf_logprob,
@@ -573,6 +558,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
 
 
 class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 7
@@ -587,13 +573,11 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
         sc_cfg.n_positions = 512
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/"
-        )
+            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
-            dtype=dtype, device=device
-        )
+            dtype=dtype, device=device)
         starcoder.eval()
 
         cls.model = FlashMQATForCausalLM.from_starcoder(from_model=starcoder, dtype=dtype, device=device)

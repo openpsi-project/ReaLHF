@@ -14,6 +14,7 @@ gen_score = ModelRPC(
 
 
 class PackedGenerateScoringExperiment(Experiment):
+
     def __init__(
         self,
         dp_size=4,
@@ -99,22 +100,19 @@ class PackedGenerateScoringExperiment(Experiment):
                 datasets=[dataset],
                 dataloader=dataloader,
                 seed=self.seed,
-            )
-            for i in range(self.n_data_workers)
+            ) for i in range(self.n_data_workers)
         ]
 
         backend = ModelBackend("ds_inference", args=dict(enable_fp16=True))
 
         if self.model_type == "ppo":
             model_path_root = (
-                "/data/aigc/llm/checkpoints/fw/flash-ppo-s42/run20231106-rw2/actor@pp_00-mp_00-dp_00/"
-            )
+                "/data/aigc/llm/checkpoints/fw/flash-ppo-s42/run20231106-rw2/actor@pp_00-mp_00-dp_00/")
             model_path = os.path.join(model_path_root, f"epoch{self.epoch}step{self.step}")
             assert os.path.exists(model_path)
         elif self.model_type == "dpo":
             model_path_root = (
-                "/data/aigc/llm/checkpoints/fw/flash-dpo-s42/run20231102/actor@pp_00-mp_00-dp_00/"
-            )
+                "/data/aigc/llm/checkpoints/fw/flash-dpo-s42/run20231102/actor@pp_00-mp_00-dp_00/")
             model_path = os.path.join(model_path_root, f"epoch{self.epoch}step{self.step}")
             assert os.path.exists(model_path)
         elif self.model_type == "sft":
@@ -152,8 +150,7 @@ class PackedGenerateScoringExperiment(Experiment):
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.dp_size),
                 cuda_cache_clear_freq=60,
-            )
-            for i in range(self.dp_size)
+            ) for i in range(self.dp_size)
         ]
 
         cfg = ExperimentConfig(
@@ -195,7 +192,9 @@ for s in seeds:
         exp_name = f"senti-genscore-{model_type}-epoch{epoch}step{step}-s{s}"
         register_experiment(
             exp_name,
-            functools.partial(
-                PackedGenerateScoringExperiment, seed=s, epoch=epoch, step=step, model_type=model_type
-            ),
+            functools.partial(PackedGenerateScoringExperiment,
+                              seed=s,
+                              epoch=epoch,
+                              step=step,
+                              model_type=model_type),
         )

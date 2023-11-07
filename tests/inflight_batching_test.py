@@ -1,21 +1,18 @@
-from impl.model.nn.flash_mqat import (
-    InflightBatchingGenerator,
-    FlashMQATForCausalLM,
-    PipeCacheData,
-    PipeTransferData,
-    GenerationConfig,
-    generate,
-)
-import unittest
-import transformers
-import api.huggingface
-import torch
-import queue
 import math
+import queue
 import time
+import unittest
+
+import torch
+import transformers
+
+from impl.model.nn.flash_mqat import (FlashMQATForCausalLM, generate, GenerationConfig,
+                                      InflightBatchingGenerator, PipeCacheData, PipeTransferData)
+import api.huggingface
 
 
 class PackedKVCacheTest(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 4
@@ -24,9 +21,9 @@ class PackedKVCacheTest(unittest.TestCase):
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
 
-        cls.model = FlashMQATForCausalLM.from_starcoder(
-            model_path=model_path, dtype=torch.float16, device=device
-        )
+        cls.model = FlashMQATForCausalLM.from_starcoder(model_path=model_path,
+                                                        dtype=torch.float16,
+                                                        device=device)
         cls.model.eval()
         cls.config = cls.model.config
 
@@ -44,9 +41,8 @@ class PackedKVCacheTest(unittest.TestCase):
         cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)])
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
-            PipeCacheData() for _ in range(self.config.n_layers + 1)
-        ]
+        ys = [PipeCacheData(input_ids=packed_input_ids)
+              ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
         logits1 = self.model(x, ys).pp_output
         logits1 = logits1[cu_seqlens[1:] - 1]
 
@@ -66,8 +62,8 @@ class PackedKVCacheTest(unittest.TestCase):
         for layer_idx in range(self.config.n_layers):
             y = ys[1 + layer_idx]
             for i in range(self.bs):
-                k_caches[layer_idx, i, : input_lens[i]] = y.k_cache[cu_seqlens[i] : cu_seqlens[i + 1]]
-                v_caches[layer_idx, i, : input_lens[i]] = y.v_cache[cu_seqlens[i] : cu_seqlens[i + 1]]
+                k_caches[layer_idx, i, :input_lens[i]] = y.k_cache[cu_seqlens[i]:cu_seqlens[i + 1]]
+                v_caches[layer_idx, i, :input_lens[i]] = y.v_cache[cu_seqlens[i]:cu_seqlens[i + 1]]
             y.k_cache = k_caches[layer_idx]
             y.v_cache = v_caches[layer_idx]
             y.cache_seqlens = (input_lens - qlens).clone()
@@ -86,6 +82,7 @@ class PackedKVCacheTest(unittest.TestCase):
 
 
 class InflightBatchingGeneratorTest(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 4
@@ -94,9 +91,9 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
 
-        cls.model = FlashMQATForCausalLM.from_starcoder(
-            model_path=model_path, dtype=torch.float16, device=device
-        )
+        cls.model = FlashMQATForCausalLM.from_starcoder(model_path=model_path,
+                                                        dtype=torch.float16,
+                                                        device=device)
         cls.model.eval()
         cls.config = cls.model.config
 
@@ -152,21 +149,18 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
         t1 = time.perf_counter() - tik
 
         prompt = encoding["input_ids"]
-        gen_lens = (
-            (gen_tokens != self.tokenizer.pad_token_id)
-            .logical_and(gen_tokens != self.tokenizer.eos_token_id)
-            .sum(1)
-        )
+        gen_lens = ((gen_tokens != self.tokenizer.pad_token_id).logical_and(
+            gen_tokens != self.tokenizer.eos_token_id).sum(1))
         gen_lens = (gen_lens + 1).clip(max=gen_tokens.shape[1])
         prompt_lens = encoding["attention_mask"].sum(1)
 
         seqs = []
         logps = []
         for i in range(len(prompts_str)):
-            p = prompt[i, : prompt_lens[i]]
-            g = gen_tokens[i, : gen_lens[i]]
+            p = prompt[i, :prompt_lens[i]]
+            g = gen_tokens[i, :gen_lens[i]]
             seqs.append(torch.cat([p, g.cpu()]))
-            logps.append(logp[i, : gen_lens[i]])
+            logps.append(logp[i, :gen_lens[i]])
 
         # seqs_str = self.tokenizer.batch_decode(seqs, skip_special_tokens=True)
 
