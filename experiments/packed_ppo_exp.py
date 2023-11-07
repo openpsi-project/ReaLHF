@@ -153,7 +153,7 @@ class PackedPPOExperiment(Experiment):
         else:
             raise NotImplementedError()
         sft_model_path = "/data/aigc/llm/checkpoints/fw/senti-sft-pos-s42/run20231031/default@pp_00-mp_00-dp_00/epoch8step0/"
-        rw_model_path = "/data/aigc/llm/checkpoints/fw/flash-rw-paired-s42/run20231101/default@pp_00-mp_00-dp_00/epoch0step19/"
+        rw_model_path = "/data/aigc/llm/checkpoints/fw/flash-rw-paired-s42/run20231101/default@pp_00-mp_00-dp_00/epoch0step39/"
 
         rw_output_scaling = 1.0
         rw_output_bias = 0.0

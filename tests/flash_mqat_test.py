@@ -14,7 +14,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 4
-        cls.device = device = 'cuda'
+        cls.device = device = "cuda"
 
         sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
         sc_cfg.n_layer = 1
@@ -94,26 +94,31 @@ class FlashMQATStarCoderTest(unittest.TestCase):
 
     def testGenerate(self):
         seqs = [
-            "# This is a print function\ndef", "import time\n",
-            "assert torch.allclose(logits, sc_logits, atol=5e-3"
+            "# This is a print function\ndef",
+            "import time\n",
+            "assert torch.allclose(logits, sc_logits, atol=5e-3",
         ]
         self.tokenizer.padding_side = "left"
         encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
-        input_ids = encoding['input_ids'].to(self.device)
+        input_ids = encoding["input_ids"].to(self.device)
         prompt_len = input_ids.shape[1]
-        attention_mask = encoding['attention_mask'].to(self.device)
-        gconfig = GenerationConfig(min_new_tokens=0,
-                                   max_new_tokens=100,
-                                   temperature=1.0,
-                                   greedy=True,
-                                   top_k=50,
-                                   top_p=1.0,
-                                   num_samples=1)
-        generated, glogprobs, glmask, _, _ = generate(model=self.model,
-                                                      tokenizer=self.tokenizer,
-                                                      input_ids=input_ids,
-                                                      attention_mask=attention_mask,
-                                                      gconfig=gconfig)
+        attention_mask = encoding["attention_mask"].to(self.device)
+        gconfig = GenerationConfig(
+            min_new_tokens=0,
+            max_new_tokens=100,
+            temperature=1.0,
+            greedy=True,
+            top_k=50,
+            top_p=1.0,
+            num_samples=1,
+        )
+        generated, glogprobs, glmask, _, _ = generate(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            gconfig=gconfig,
+        )
         self.assertIsNone(glmask)
         tgconfig = transformers.GenerationConfig(
             min_new_tokens=0,
@@ -136,8 +141,10 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         assert torch.allclose(tseq, generated), (tseq, generated)
 
         inf_input_ids = torch.cat([input_ids, generated], -1)
-        tam = torch.logical_and(inf_input_ids.not_equal(self.tokenizer.pad_token_id),
-                                (inf_input_ids.not_equal(self.tokenizer.eos_token_id))).long()
+        tam = torch.logical_and(
+            inf_input_ids.not_equal(self.tokenizer.pad_token_id),
+            (inf_input_ids.not_equal(self.tokenizer.eos_token_id)),
+        ).long()
         tlogits = self.starcoder(input_ids=inf_input_ids, attention_mask=tam).logits.float()
         tlogprobs = gather_shifted_log_probs(tlogits, inf_input_ids)
         tlogprobs = tlogprobs[:, prompt_len - 1:]
@@ -145,57 +152,71 @@ class FlashMQATStarCoderTest(unittest.TestCase):
 
     def testGenerateFromCache(self):
         seqs = [
-            "# This is a print function\ndef", "import time\n",
-            "assert torch.allclose(logits, sc_logits, atol=5e-3"
+            "# This is a print function\ndef",
+            "import time\n",
+            "assert torch.allclose(logits, sc_logits, atol=5e-3",
         ]
         self.tokenizer.padding_side = "left"
         encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
-        prompts = encoding['input_ids'].to(self.device)
-        prompt_att_mask = encoding['attention_mask'].to(self.device)
+        prompts = encoding["input_ids"].to(self.device)
+        prompt_att_mask = encoding["attention_mask"].to(self.device)
         prompt_len = prompts.shape[1]
 
         origin_max_new_tokens = 100
-        gconfig = GenerationConfig(min_new_tokens=1,
-                                   max_new_tokens=origin_max_new_tokens,
-                                   temperature=1.0,
-                                   greedy=True,
-                                   top_k=50,
-                                   top_p=1.0,
-                                   num_samples=1)
-        seq, log_probs, logits_mask, ys, _ = generate(model=self.model,
-                                                      tokenizer=self.tokenizer,
-                                                      input_ids=prompts,
-                                                      attention_mask=prompt_att_mask,
-                                                      gconfig=gconfig)
+        gconfig = GenerationConfig(
+            min_new_tokens=1,
+            max_new_tokens=origin_max_new_tokens,
+            temperature=1.0,
+            greedy=True,
+            top_k=50,
+            top_p=1.0,
+            num_samples=1,
+        )
+        seq, log_probs, logits_mask, ys, _ = generate(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            input_ids=prompts,
+            attention_mask=prompt_att_mask,
+            gconfig=gconfig,
+        )
 
         first_n_tokens = 50 - prompt_len
         gconfig.max_new_tokens = first_n_tokens
-        seq21, log_probs21, logits_mask21, tmp_ys, _ = generate(model=self.model,
-                                                                tokenizer=self.tokenizer,
-                                                                input_ids=prompts,
-                                                                attention_mask=prompt_att_mask,
-                                                                gconfig=gconfig)
+        seq21, log_probs21, logits_mask21, tmp_ys, _ = generate(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            input_ids=prompts,
+            attention_mask=prompt_att_mask,
+            gconfig=gconfig,
+        )
         k_caches = [y.k_cache for y in tmp_ys]
         v_caches = [y.v_cache for y in tmp_ys]
         cache_seqlens = tmp_ys[0].cache_seqlens
         gconfig.min_new_tokens = 0
         gconfig.max_new_tokens = origin_max_new_tokens - first_n_tokens
-        seq22, log_probs22, logits_mask22, ys2, _ = generate(model=self.model,
-                                                             tokenizer=self.tokenizer,
-                                                             input_ids=seq21[:, -1:],
-                                                             k_caches=k_caches,
-                                                             v_caches=v_caches,
-                                                             cache_seqlens=cache_seqlens,
-                                                             gconfig=gconfig)
+        seq22, log_probs22, logits_mask22, ys2, _ = generate(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            input_ids=seq21[:, -1:],
+            k_caches=k_caches,
+            v_caches=v_caches,
+            cache_seqlens=cache_seqlens,
+            gconfig=gconfig,
+        )
         self.assertIsNone(logits_mask22)
         seq2 = torch.cat([seq21, seq22], -1)
         log_probs2 = torch.cat([log_probs21, log_probs22], -1)
-        logits_mask2 = torch.cat([
-            logits_mask21,
-            torch.ones((len(seqs), origin_max_new_tokens - first_n_tokens, self.config.vocab_size),
-                       dtype=torch.bool,
-                       device=self.device)
-        ], -2)
+        logits_mask2 = torch.cat(
+            [
+                logits_mask21,
+                torch.ones(
+                    (len(seqs), origin_max_new_tokens - first_n_tokens, self.config.vocab_size),
+                    dtype=torch.bool,
+                    device=self.device,
+                ),
+            ],
+            -2,
+        )
 
         assert torch.allclose(seq2, seq), (seq, seq21, seq22)
         assert torch.allclose(log_probs, log_probs2)
@@ -215,23 +236,27 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         num_samples = 3
         self.tokenizer.padding_side = "left"
         encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
-        input_ids = encoding['input_ids'].to(self.device)
-        attention_mask = encoding['attention_mask'].to(self.device)
+        input_ids = encoding["input_ids"].to(self.device)
+        attention_mask = encoding["attention_mask"].to(self.device)
 
         for greedy in [True, False]:
             for min_new_tokens in [0, 1]:
-                gconfig = GenerationConfig(min_new_tokens=min_new_tokens,
-                                           max_new_tokens=10,
-                                           temperature=1.0,
-                                           greedy=greedy,
-                                           top_k=50,
-                                           top_p=1.0,
-                                           num_samples=num_samples)
-                generated, glogprobs, glmask, _, _ = generate(model=self.model,
-                                                              tokenizer=self.tokenizer,
-                                                              input_ids=input_ids,
-                                                              attention_mask=attention_mask,
-                                                              gconfig=gconfig)
+                gconfig = GenerationConfig(
+                    min_new_tokens=min_new_tokens,
+                    max_new_tokens=10,
+                    temperature=1.0,
+                    greedy=greedy,
+                    top_k=50,
+                    top_p=1.0,
+                    num_samples=num_samples,
+                )
+                generated, glogprobs, glmask, _, _ = generate(
+                    model=self.model,
+                    tokenizer=self.tokenizer,
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    gconfig=gconfig,
+                )
                 if greedy and min_new_tokens == 0:
                     self.assertIsNone(glmask)
                 else:
@@ -240,13 +265,12 @@ class FlashMQATStarCoderTest(unittest.TestCase):
                 self.assertEqual(glogprobs.shape[0], num_samples * len(seqs))
 
 
-@unittest.skip('')
 class FlashMQATStarCoderCPUTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 3
-        cls.device = device = 'cpu'
+        cls.device = device = "cpu"
         cls.dtype = dtype = torch.float32
 
         sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
@@ -310,30 +334,37 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
     @torch.no_grad()
     def testGenerate(self):
         seqs = [
-            "# This is a print function\ndef", "import time\n",
-            "assert torch.allclose(logits, sc_logits, atol=5e-3"
+            "# This is a print function\ndef",
+            "import time\n",
+            "assert torch.allclose(logits, sc_logits, atol=5e-3",
         ]
         self.tokenizer.padding_side = "left"
         encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
-        input_ids = encoding['input_ids'].to(self.device)
-        attention_mask = encoding['attention_mask'].to(self.device)
-        gconfig = GenerationConfig(min_new_tokens=0,
-                                   max_new_tokens=100,
-                                   temperature=1.0,
-                                   greedy=True,
-                                   top_k=50,
-                                   top_p=1.0,
-                                   num_samples=1)
-        vg, vglogprob_, vglmask = vanilla_cpu_generate(model=self.model,
-                                                       tokenizer=self.tokenizer,
-                                                       input_ids=input_ids,
-                                                       attention_mask=attention_mask,
-                                                       gconfig=gconfig)
+        input_ids = encoding["input_ids"].to(self.device)
+        attention_mask = encoding["attention_mask"].to(self.device)
+        gconfig = GenerationConfig(
+            min_new_tokens=0,
+            max_new_tokens=100,
+            temperature=1.0,
+            greedy=True,
+            top_k=50,
+            top_p=1.0,
+            num_samples=1,
+        )
+        vg, vglogprob_, vglmask = vanilla_cpu_generate(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            gconfig=gconfig,
+        )
         self.assertIsNone(vglmask)
 
         vg_input_ids = torch.cat([input_ids, vg], -1)
-        vam = torch.logical_and(vg_input_ids.not_equal(self.tokenizer.pad_token_id),
-                                (vg_input_ids.not_equal(self.tokenizer.eos_token_id))).long()
+        vam = torch.logical_and(
+            vg_input_ids.not_equal(self.tokenizer.pad_token_id),
+            (vg_input_ids.not_equal(self.tokenizer.eos_token_id)),
+        ).long()
 
         x = PipeTransferData(attention_mask=vam)
         ys = [PipeCacheData(input_ids=vg_input_ids)
@@ -370,13 +401,12 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         assert torch.allclose(vglogprob, tlogprob), (vglogprob - tlogprob).abs().max()
 
 
-@unittest.skip('')
 class FlashMQATGPTCPUTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 3
-        cls.device = device = 'cpu'
+        cls.device = device = "cpu"
         cls.dtype = dtype = torch.float32
 
         sc_cfg = transformers.AutoConfig.from_pretrained("/lustre/fw/pretrained/gpt2/")
@@ -439,13 +469,12 @@ class FlashMQATGPTCPUTest(unittest.TestCase):
         assert torch.allclose(logits, sc_logits, atol=2e-5), ((logits - sc_logits)).abs().max()
 
 
-@unittest.skip('')
 class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 7
-        cls.device = device = 'cpu'
+        cls.device = device = "cpu"
         cls.dtype = dtype = torch.float32
 
         sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
@@ -470,31 +499,38 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
     @torch.no_grad()
     def testGenerate(self):
         seqs = [
-            "# This is a print function\ndef", "import time\n",
-            "assert torch.allclose(logits, sc_logits, atol=5e-3"
+            "# This is a print function\ndef",
+            "import time\n",
+            "assert torch.allclose(logits, sc_logits, atol=5e-3",
         ]
         self.tokenizer.padding_side = "left"
         encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
-        prompt: torch.Tensor = encoding['input_ids'].to(self.device)
-        prompt_att_mask: torch.Tensor = encoding['attention_mask'].to(self.device)
-        gconfig = GenerationConfig(min_new_tokens=10,
-                                   max_new_tokens=100,
-                                   temperature=1.0,
-                                   greedy=True,
-                                   top_k=50,
-                                   top_p=1.0,
-                                   num_samples=1)
-        vcg, vclogprob, vcmask = vanilla_cpu_generate(model=self.model,
-                                                      tokenizer=self.tokenizer,
-                                                      input_ids=prompt,
-                                                      attention_mask=prompt_att_mask,
-                                                      gconfig=gconfig)
+        prompt: torch.Tensor = encoding["input_ids"].to(self.device)
+        prompt_att_mask: torch.Tensor = encoding["attention_mask"].to(self.device)
+        gconfig = GenerationConfig(
+            min_new_tokens=10,
+            max_new_tokens=100,
+            temperature=1.0,
+            greedy=True,
+            top_k=50,
+            top_p=1.0,
+            num_samples=1,
+        )
+        vcg, vclogprob, vcmask = vanilla_cpu_generate(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            input_ids=prompt,
+            attention_mask=prompt_att_mask,
+            gconfig=gconfig,
+        )
         self.model = self.model.cuda().to(torch.float16)
-        vg, vglogprob, vgmask = vanilla_packed_generate(model=self.model.cuda(),
-                                                        tokenizer=self.tokenizer,
-                                                        input_ids=prompt.cuda(),
-                                                        attention_mask=prompt_att_mask.cuda(),
-                                                        gconfig=gconfig)
+        vg, vglogprob, vgmask = vanilla_packed_generate(
+            model=self.model.cuda(),
+            tokenizer=self.tokenizer,
+            input_ids=prompt.cuda(),
+            attention_mask=prompt_att_mask.cuda(),
+            gconfig=gconfig,
+        )
         vglogprob = vglogprob.float().cpu()
 
         seq = torch.cat([prompt, vcg], -1)
@@ -505,23 +541,28 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         ys = [PipeCacheData(input_ids=packed_input_ids.cuda())
               ] + [PipeCacheData() for _ in range(self.model.config.n_layers + 1)]
         inf_logits = self.model(x, ys).pp_output.float().cpu()
-        inf_logits = unpack_tensor(inf_logits, cu_seqlens, padding_side='left')
+        inf_logits = unpack_tensor(inf_logits, cu_seqlens, padding_side="left")
         inf_logprob = gather_shifted_log_probs(inf_logits, seq)[:, prompt.shape[1] - 1:]
         assert torch.allclose(vcg, vg.cpu()), (vcg, vg)
-        assert torch.allclose(inf_logprob, vclogprob,
-                              atol=5e-3), (inf_logprob, vclogprob, (inf_logprob - vclogprob).abs().max())
-        assert torch.allclose(vglogprob, vclogprob,
-                              atol=5e-3), (vglogprob, vclogprob, (vglogprob - vclogprob).abs().max())
+        assert torch.allclose(inf_logprob, vclogprob, atol=5e-3), (
+            inf_logprob,
+            vclogprob,
+            (inf_logprob - vclogprob).abs().max(),
+        )
+        assert torch.allclose(vglogprob, vclogprob, atol=5e-3), (
+            vglogprob,
+            vclogprob,
+            (vglogprob - vclogprob).abs().max(),
+        )
         assert torch.allclose(vgmask.cpu(), vcmask)
 
 
-@unittest.skip('')
 class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 7
-        cls.device = device = 'cuda'
+        cls.device = device = "cuda"
         cls.dtype = dtype = torch.float16
 
         sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
@@ -553,32 +594,41 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
         ]
         self.tokenizer.padding_side = "left"
         encoding = self.tokenizer(seqs, return_tensors="pt", padding=True)
-        prompt: torch.Tensor = encoding['input_ids'].to(self.device)
-        prompt_att_mask: torch.Tensor = encoding['attention_mask'].to(self.device)
-        gconfig = GenerationConfig(min_new_tokens=10,
-                                   max_new_tokens=100,
-                                   temperature=1.0,
-                                   greedy=True,
-                                   top_k=50,
-                                   top_p=1.0,
-                                   num_samples=1)
+        prompt: torch.Tensor = encoding["input_ids"].to(self.device)
+        prompt_att_mask: torch.Tensor = encoding["attention_mask"].to(self.device)
+        gconfig = GenerationConfig(
+            min_new_tokens=10,
+            max_new_tokens=100,
+            temperature=1.0,
+            greedy=True,
+            top_k=50,
+            top_p=1.0,
+            num_samples=1,
+        )
 
-        vg, vglogprob, vgmask = vanilla_packed_generate(model=self.model,
-                                                        tokenizer=self.tokenizer,
-                                                        input_ids=prompt,
-                                                        attention_mask=prompt_att_mask,
-                                                        gconfig=gconfig)
+        vg, vglogprob, vgmask = vanilla_packed_generate(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            input_ids=prompt,
+            attention_mask=prompt_att_mask,
+            gconfig=gconfig,
+        )
 
-        g, logprob, mask, _, _ = generate(model=self.model,
-                                          tokenizer=self.tokenizer,
-                                          input_ids=prompt,
-                                          attention_mask=prompt_att_mask,
-                                          gconfig=gconfig)
+        g, logprob, mask, _, _ = generate(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            input_ids=prompt,
+            attention_mask=prompt_att_mask,
+            gconfig=gconfig,
+        )
 
         # print(self.tokenizer.batch_decode(torch.cat([prompt, g], -1)))
         assert torch.allclose(g, vg), (g, vg)
-        assert torch.allclose(logprob, vglogprob,
-                              atol=5e-3), (logprob, vglogprob, (logprob - vglogprob).abs().max())
+        assert torch.allclose(logprob, vglogprob, atol=5e-3), (
+            logprob,
+            vglogprob,
+            (logprob - vglogprob).abs().max(),
+        )
         assert torch.allclose(mask, vgmask)
 
 

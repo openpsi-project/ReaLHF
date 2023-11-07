@@ -207,6 +207,7 @@ class PipeTransferData(TensorDataclassToTupleInterface):
             Used by torch_attn_func to examine the outputs of PyTorch attention and flash
             attention are the same. Only for debugging. Shape [bs, seq_len].
     """
+
     pp_input: torch.Tensor = None
     pp_output: torch.Tensor = None
 
@@ -224,7 +225,7 @@ class PipeTransferData(TensorDataclassToTupleInterface):
 @dataclasses.dataclass
 class PipeCacheData(TensorDataclassToTupleInterface):
     """Data structure for caching data locally that will not be trasferred.
-    
+
     Each layer has exactly one PipeCacheData as the input.
     If a pipeline stage has multiple layers, a list of PipeCacheData should be passed
     as the input. The cached tensors will be changed in-place.
@@ -240,8 +241,9 @@ class PipeCacheData(TensorDataclassToTupleInterface):
             Note that this is the cache for a specific layer, not for all layers.
         v_cache: Value cache used for generation, shape [bs, max_seq, n_kv_heads, head_dim].
             Note that this is the cache for a specific layer, not for all layers.
-        cache_seqlens: The sequence lengths of the cached tokens. Used for generation. Shape [bs]. 
+        cache_seqlens: The sequence lengths of the cached tokens. Used for generation. Shape [bs].
     """
+
     # Only cached in the first stage.
     input_ids: torch.Tensor = None
     position_ids: torch.Tensor = None
@@ -256,7 +258,7 @@ class PipeCacheData(TensorDataclassToTupleInterface):
 
 @dataclasses.dataclass
 class DuckModelOutput:
-    logits: Optional[torch.Tensor] = None
+    logits: Optional[Union[List[torch.Tensor], torch.Tensor]] = None
 
 
 @dataclasses.dataclass
@@ -332,20 +334,26 @@ def build_packed_inputs(input_ids: torch.LongTensor,
     return packed_input_ids, cu_seqlens, max_seq_len
 
 
-def unpack_tensor(packed_x: torch.Tensor, cu_seqlens: torch.IntTensor, padding_side: str):
+def unpack_tensor(packed_x: torch.Tensor,
+                  cu_seqlens: torch.IntTensor,
+                  padding_side: Optional[str] = None) -> Union[torch.Tensor, List[torch.Tensor]]:
     seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
     bs = cu_seqlens.shape[0] - 1
     max_seqlen = int(max(seqlens))
-    unpacked_x = torch.zeros((bs, max_seqlen, *packed_x.shape[1:]),
-                             dtype=packed_x.dtype,
-                             device=packed_x.device)
+    if padding_side:
+        unpacked_x = torch.zeros((bs, max_seqlen, *packed_x.shape[1:]),
+                                 dtype=packed_x.dtype,
+                                 device=packed_x.device)
+    else:
+        unpacked_x = []
     for i in range(bs):
-        if padding_side == 'right':
-            unpacked_x[i, :seqlens[i]] = packed_x[cu_seqlens[i]:cu_seqlens[i + 1]]
-        elif padding_side == 'left':
-            unpacked_x[i, max_seqlen - seqlens[i]:] = packed_x[cu_seqlens[i]:cu_seqlens[i + 1]]
+        seg = packed_x[cu_seqlens[i]:cu_seqlens[i + 1]]
+        if padding_side == "right":
+            unpacked_x[i, :seqlens[i]] = seg
+        elif padding_side == "left":
+            unpacked_x[i, max_seqlen - seqlens[i]:] = seg
         else:
-            raise NotImplementedError()
+            unpacked_x.append(seg)
     return unpacked_x
 
 
@@ -395,7 +403,7 @@ def gather_packed_shifted_log_probs(logits_: torch.FloatTensor, cu_seqlens: torc
     labels = labels_[shift_one_indices]
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
     log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
-    assert (log_probs_labels.shape[0] == logits_.shape[0] - cu_seqlens.shape[0] + 1), (
+    assert log_probs_labels.shape[0] == logits_.shape[0] - cu_seqlens.shape[0] + 1, (
         log_probs_labels.shape,
         logits_.shape,
         cu_seqlens.shape,

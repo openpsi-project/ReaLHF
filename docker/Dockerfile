@@ -18,21 +18,22 @@ RUN pip3 install -U ray[default,serve,data]
 RUN pip3 install -U transformers huggingface_hub datasets accelerate bitsandbytes
 RUN pip3 install -U deepspeed
 
-RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy h5py ninja packaging tensorboardx
+RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy h5py ninja packaging tensorboardx sentencepiece numba
 
-RUN pip3 install -U flash-attn --no-build-isolation
+COPY flash_attn-2.3.3+cu122torch2.1cxx11abiTRUE-cp310-cp310-linux_x86_64.whl /flash_attn-2.3.3+cu122torch2.1cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
+RUN pip3 install /flash_attn-2.3.3+cu122torch2.1cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
 
 ENV PATH="${PATH}:/opt/hpcx/ompi/bin:/opt/hpcx/ucx/bin"
 ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 
 # install zmq with pgm
-COPY ./zeromq-4.3.4.tar.gz /
-WORKDIR /
-RUN tar zxvf zeromq-4.3.4.tar.gz
-WORKDIR /zeromq-4.3.4
-RUN ./configure --with-pgm && make && make install
-WORKDIR /
-RUN pip3 install -I --no-binary=:all: pyzmq
+# COPY ./zeromq-4.3.4.tar.gz /
+# WORKDIR /
+# RUN tar zxvf zeromq-4.3.4.tar.gz
+# WORKDIR /zeromq-4.3.4
+# RUN ./configure --with-pgm && make && make install
+# WORKDIR /
+# RUN pip3 install -I --no-binary=:all: pyzmq
 
 # something add-hoc
 # RUN mkdir tools
@@ -41,4 +42,3 @@ RUN pip3 install -I --no-binary=:all: pyzmq
 # RUN pip3 install -e /tools/TransformerEngine
 # COPY ./transformers /tools/transformers
 # RUN pip3 install -e /tools/transformers
-RUN pip3 install -U sentencepiece numba
