@@ -9,23 +9,22 @@ from base.topology import PipeModelDataParallelTopology
 gen_score = ModelRPC(
     "default",
     ModelInterfaceType.GENERATE,
-    input_data=['prompts', 'prompt_att_mask'],
+    input_data=["prompts", "prompt_att_mask"],
 )
 
 
 class PackedGenerateScoringExperiment(Experiment):
-
     def __init__(
         self,
-        dp_size=6,
+        dp_size=4,
         seed=1,
-        base_model='gpt2',
+        base_model="gpt2",
         prompt_dataset_path="/lustre/fw/datasets/imdb/rl/test_prompt.jsonl",
         batch_size: int = 192,
-        model_type: str = 'sft',
+        model_type: str = "sft",
         epoch: int = 0,
         step: int = 0,
-        num_samples: int = 1,
+        num_samples: int = 2,
         temperature: float = 0.7,
     ):
         assert batch_size % dp_size == 0
@@ -63,55 +62,62 @@ class PackedGenerateScoringExperiment(Experiment):
                 scheduling=Scheduling.model_worker_default(
                     cpu=4,
                     gpu=1,
-                    gpu_type='tesla',
+                    gpu_type="tesla",
                     mem=60000,
                 ),
             ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        if self.base_model == 'starcoder':
+        if self.base_model == "starcoder":
             base_model_path = "/data/aigc/public/starcoder-16bit"
-        elif self.base_model == 'gpt2':
+        elif self.base_model == "gpt2":
             base_model_path = "/lustre/fw/pretrained/gpt2-large/"
         else:
             raise NotImplementedError()
 
         assert self.batch_size % self.n_data_workers == 0
         dataset = Dataset(
-            'prompt',
+            "prompt",
             args=dict(
                 max_prompt_len=256,
                 pad_to_max_length=True,
                 dataset_path=self.prompt_dataset_path,
             ),
         )
-        dataloader = DataLoader('default',
-                                args=dict(
-                                    shuffle=False,
-                                    drop_last=True,
-                                    batch_size=self.batch_size // self.n_data_workers,
-                                ))
+        dataloader = DataLoader(
+            "default",
+            args=dict(
+                shuffle=False,
+                drop_last=True,
+                batch_size=self.batch_size // self.n_data_workers,
+            ),
+        )
         data_worker = [
             DataWorker(
                 tokenizer_name_or_path=base_model_path,
                 datasets=[dataset],
                 dataloader=dataloader,
                 seed=self.seed,
-            ) for i in range(self.n_data_workers)
+            )
+            for i in range(self.n_data_workers)
         ]
 
-        backend = ModelBackend('ds_inference', args=dict(enable_fp16=True))
+        backend = ModelBackend("ds_inference", args=dict(enable_fp16=True))
 
-        if self.model_type == 'ppo':
-            model_path_root = "/data/aigc/llm/checkpoints/fw/flash-ppo-s42/run20231102/actor@pp_00-mp_00-dp_00/"
+        if self.model_type == "ppo":
+            model_path_root = (
+                "/data/aigc/llm/checkpoints/fw/flash-ppo-s42/run20231106-rw2/actor@pp_00-mp_00-dp_00/"
+            )
             model_path = os.path.join(model_path_root, f"epoch{self.epoch}step{self.step}")
             assert os.path.exists(model_path)
-        elif self.model_type == 'dpo':
-            model_path_root = "/data/aigc/llm/checkpoints/fw/flash-dpo-s42/run20231102/actor@pp_00-mp_00-dp_00/"
+        elif self.model_type == "dpo":
+            model_path_root = (
+                "/data/aigc/llm/checkpoints/fw/flash-dpo-s42/run20231102/actor@pp_00-mp_00-dp_00/"
+            )
             model_path = os.path.join(model_path_root, f"epoch{self.epoch}step{self.step}")
             assert os.path.exists(model_path)
-        elif self.model_type == 'sft':
+        elif self.model_type == "sft":
             model_path = "/data/aigc/llm/checkpoints/fw/senti-sft-pos-neg-s42/run20231031/default@pp_00-mp_00-dp_00/epoch8step0/"
         else:
             raise NotImplementedError()
@@ -134,7 +140,7 @@ class PackedGenerateScoringExperiment(Experiment):
             top_k=50,
             num_samples=self.num_samples,
         )
-        interface = ModelInterface('flash_gen_score', args=dict(generation_config=gconfig))
+        interface = ModelInterface("flash_gen_score", args=dict(generation_config=gconfig))
 
         model_worker = [
             ModelWorker(
@@ -142,11 +148,12 @@ class PackedGenerateScoringExperiment(Experiment):
                 model=model,
                 backend=backend,
                 interface=interface,
-                model_name='default',
+                model_name="default",
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.dp_size),
                 cuda_cache_clear_freq=60,
-            ) for i in range(self.dp_size)
+            )
+            for i in range(self.dp_size)
         ]
 
         cfg = ExperimentConfig(
@@ -184,13 +191,11 @@ for s in seeds:
             num_samples=10,
         ),
     )
-    for model_type, epoch, step in itertools.product(['dpo', 'ppo'], range(9), range(400)):
+    for model_type, epoch, step in itertools.product(["dpo", "ppo"], range(9), range(400)):
         exp_name = f"senti-genscore-{model_type}-epoch{epoch}step{step}-s{s}"
         register_experiment(
             exp_name,
-            functools.partial(PackedGenerateScoringExperiment,
-                              seed=s,
-                              epoch=epoch,
-                              step=step,
-                              model_type=model_type),
+            functools.partial(
+                PackedGenerateScoringExperiment, seed=s, epoch=epoch, step=step, model_type=model_type
+            ),
         )
