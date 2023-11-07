@@ -79,9 +79,9 @@ def get_eos_indices(
     if torch.any(input_ids[:, 0] == tokenizer.eos_token_id):
         indices = (input_ids[:, 0] == tokenizer.eos_token_id).nonzero().flatten()
         bad_input_ids = input_ids[indices]
-        bad_strs = tokenizer.batch_decode(bad_input_ids,
-                                          skip_special_tokens=True,
-                                          clean_up_tokenization_spaces=True)
+        bad_strs = tokenizer.batch_decode(
+            bad_input_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        )
         raise RuntimeError(f"Generated sequence terminates unexpectedly early: {bad_strs}")
     seq_len = input_ids.shape[1]
     eos_mask = (input_ids == tokenizer.eos_token_id).float()
@@ -128,7 +128,6 @@ def from_tensor(x: torch.Tensor, _type: Type):
 
 
 class TensorDataclassToTupleInterface:
-
     def to_tuple(self):
         # the first element of the tuple is the length of the tuple
         # sometimes the tuple can be mutliple tensor dataclass instances
@@ -177,7 +176,7 @@ def tensor_tuple_to_data_list(tensor_tuple: tuple):
             cls_ = PipeCacheData
         else:
             raise NotImplementedError(f"Unknown type code {type_code}")
-        res.append(cls_.from_tuple(tensor_tuple[i:i + num_fields + 2]))
+        res.append(cls_.from_tuple(tensor_tuple[i : i + num_fields + 2]))
         i += num_fields + 2
     time_mark("tuple_to_tensor_end", rank)
     return res
@@ -207,6 +206,7 @@ class PipeTransferData(TensorDataclassToTupleInterface):
             Used by torch_attn_func to examine the outputs of PyTorch attention and flash
             attention are the same. Only for debugging. Shape [bs, seq_len].
     """
+
     pp_input: torch.Tensor = None
     pp_output: torch.Tensor = None
 
@@ -224,7 +224,7 @@ class PipeTransferData(TensorDataclassToTupleInterface):
 @dataclasses.dataclass
 class PipeCacheData(TensorDataclassToTupleInterface):
     """Data structure for caching data locally that will not be trasferred.
-    
+
     Each layer has exactly one PipeCacheData as the input.
     If a pipeline stage has multiple layers, a list of PipeCacheData should be passed
     as the input. The cached tensors will be changed in-place.
@@ -240,8 +240,9 @@ class PipeCacheData(TensorDataclassToTupleInterface):
             Note that this is the cache for a specific layer, not for all layers.
         v_cache: Value cache used for generation, shape [bs, max_seq, n_kv_heads, head_dim].
             Note that this is the cache for a specific layer, not for all layers.
-        cache_seqlens: The sequence lengths of the cached tokens. Used for generation. Shape [bs]. 
+        cache_seqlens: The sequence lengths of the cached tokens. Used for generation. Shape [bs].
     """
+
     # Only cached in the first stage.
     input_ids: torch.Tensor = None
     position_ids: torch.Tensor = None
@@ -256,7 +257,7 @@ class PipeCacheData(TensorDataclassToTupleInterface):
 
 @dataclasses.dataclass
 class DuckModelOutput:
-    logits: Optional[torch.Tensor] = None
+    logits: Optional[Union[List[torch.Tensor], torch.Tensor]] = None
 
 
 @dataclasses.dataclass
@@ -267,8 +268,9 @@ class DuckGenerationOutput:
 
 
 @torch.jit.script
-def upcast_masked_softmax(x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor, scale: float,
-                          softmax_dtype: torch.dtype):
+def upcast_masked_softmax(
+    x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor, scale: float, softmax_dtype: torch.dtype
+):
     input_dtype = x.dtype
     x = x.to(softmax_dtype) * scale
     x = torch.where(mask, x, mask_value)
@@ -296,8 +298,11 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     bs, slen, n_kv_heads, head_dim = x.shape
     if n_rep == 1:
         return x
-    return (x[:, :, :, None, :].expand(bs, slen, n_kv_heads, n_rep,
-                                       head_dim).reshape(bs, slen, n_kv_heads * n_rep, head_dim))
+    return (
+        x[:, :, :, None, :]
+        .expand(bs, slen, n_kv_heads, n_rep, head_dim)
+        .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
+    )
 
 
 def mask_eos_token(
@@ -310,8 +315,9 @@ def mask_eos_token(
     return logits
 
 
-def build_packed_inputs(input_ids: torch.LongTensor,
-                        attention_mask: torch.BoolTensor) -> Tuple[torch.LongTensor, torch.IntTensor, int]:
+def build_packed_inputs(
+    input_ids: torch.LongTensor, attention_mask: torch.BoolTensor
+) -> Tuple[torch.LongTensor, torch.IntTensor, int]:
     bs, prompt_padded_len = input_ids.shape[:2]
     device = input_ids.device
     assert attention_mask.shape == input_ids.shape
@@ -332,20 +338,26 @@ def build_packed_inputs(input_ids: torch.LongTensor,
     return packed_input_ids, cu_seqlens, max_seq_len
 
 
-def unpack_tensor(packed_x: torch.Tensor, cu_seqlens: torch.IntTensor, padding_side: str):
+def unpack_tensor(
+    packed_x: torch.Tensor, cu_seqlens: torch.IntTensor, padding_side: Optional[str] = None
+) -> Union[torch.Tensor, List[torch.Tensor]]:
     seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
     bs = cu_seqlens.shape[0] - 1
     max_seqlen = int(max(seqlens))
-    unpacked_x = torch.zeros((bs, max_seqlen, *packed_x.shape[1:]),
-                             dtype=packed_x.dtype,
-                             device=packed_x.device)
+    if padding_side:
+        unpacked_x = torch.zeros(
+            (bs, max_seqlen, *packed_x.shape[1:]), dtype=packed_x.dtype, device=packed_x.device
+        )
+    else:
+        unpacked_x = []
     for i in range(bs):
-        if padding_side == 'right':
-            unpacked_x[i, :seqlens[i]] = packed_x[cu_seqlens[i]:cu_seqlens[i + 1]]
-        elif padding_side == 'left':
-            unpacked_x[i, max_seqlen - seqlens[i]:] = packed_x[cu_seqlens[i]:cu_seqlens[i + 1]]
+        seg = packed_x[cu_seqlens[i] : cu_seqlens[i + 1]]
+        if padding_side == "right":
+            unpacked_x[i, : seqlens[i]] = seg
+        elif padding_side == "left":
+            unpacked_x[i, max_seqlen - seqlens[i] :] = seg
         else:
-            raise NotImplementedError()
+            unpacked_x.append(seg)
     return unpacked_x
 
 
@@ -368,8 +380,9 @@ def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor
     return log_probs_labels.squeeze(-1)
 
 
-def gather_packed_shifted_log_probs(logits_: torch.FloatTensor, cu_seqlens: torch.Tensor,
-                                    labels_: torch.LongTensor) -> torch.FloatTensor:
+def gather_packed_shifted_log_probs(
+    logits_: torch.FloatTensor, cu_seqlens: torch.Tensor, labels_: torch.LongTensor
+) -> torch.FloatTensor:
     """Gather log probs from packed input_ids and logits.
 
     Args:
@@ -383,19 +396,23 @@ def gather_packed_shifted_log_probs(logits_: torch.FloatTensor, cu_seqlens: torc
     Returns:
         torch.FloatTensor: Log probability with shape [tot_seqlen - #seqs].
     """
-    leave_one_indices = torch.cat([
-        torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
-        for i in range(cu_seqlens.shape[0] - 1)
-    ])
-    shift_one_indices = torch.cat([
-        torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
-        for i in range(cu_seqlens.shape[0] - 1)
-    ])
+    leave_one_indices = torch.cat(
+        [
+            torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
+            for i in range(cu_seqlens.shape[0] - 1)
+        ]
+    )
+    shift_one_indices = torch.cat(
+        [
+            torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
+            for i in range(cu_seqlens.shape[0] - 1)
+        ]
+    )
     logits = logits_[leave_one_indices]
     labels = labels_[shift_one_indices]
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
     log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
-    assert (log_probs_labels.shape[0] == logits_.shape[0] - cu_seqlens.shape[0] + 1), (
+    assert log_probs_labels.shape[0] == logits_.shape[0] - cu_seqlens.shape[0] + 1, (
         log_probs_labels.shape,
         logits_.shape,
         cu_seqlens.shape,

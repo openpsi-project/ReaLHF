@@ -770,6 +770,7 @@ class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
         self,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        padding_side: Optional[str] = None,
         packed_input_ids: Optional[torch.Tensor] = None,
         cu_seqlens: Optional[torch.Tensor] = None,
         max_seqlen: Optional[int] = None,
@@ -791,7 +792,7 @@ class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
             ]
         logits = self.net(x, ys).pp_output
         if build_packed:
-            logits = unpack_tensor(logits, cu_seqlens, max_seqlen)
+            logits = unpack_tensor(logits, cu_seqlens, padding_side=padding_side)
         return DuckModelOutput(logits=logits)
 
     def generate(
