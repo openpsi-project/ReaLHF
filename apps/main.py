@@ -79,18 +79,15 @@ def _submit_workers(
                 begin=sch_cfg.scheduling.begin,
                 deadline=sch_cfg.scheduling.deadline,
                 time_limit=sch_cfg.scheduling.time_limit,
-            ),
-        )
+            ),)
     return scheduled_jobs
 
 
 def main_start(args):
     if args.mode == "ray" and args.image_name is None:
-        raise ValueError(
-            "--image_name must be specified when using ray cluster. "
-            "This is becuase ray cluster requires all workers to have "
-            "the same version of Python and ray."
-        )
+        raise ValueError("--image_name must be specified when using ray cluster. "
+                         "This is becuase ray cluster requires all workers to have "
+                         "the same version of Python and ray.")
 
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
@@ -193,9 +190,8 @@ def main_start(args):
 
 
 def main_stop(args):
-    sched = scheduler.client.make(
-        mode=scheduler_mode(args.mode), job_name=f"{args.experiment_name}_{args.trial_name}"
-    )
+    sched = scheduler.client.make(mode=scheduler_mode(args.mode),
+                                  job_name=f"{args.experiment_name}_{args.trial_name}")
     sched.find_all()
     sched.stop_all()
 
@@ -219,14 +215,17 @@ def main():
 
     subparser = subparsers.add_parser("start", help="starts an experiment")
     subparser.add_argument("--experiment_name", "-e", type=str, required=True, help="name of the experiment")
-    subparser.add_argument(
-        "--trial_name", "-f", type=str, default=None, help="trial name; by default uses '<USER>-test'"
-    )
+    subparser.add_argument("--trial_name",
+                           "-f",
+                           type=str,
+                           default=None,
+                           help="trial name; by default uses '<USER>-test'")
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
-    subparser.add_argument(
-        "--wandb_mode", type=str, default="disabled", choices=["online", "offline", "disabled"]
-    )
+    subparser.add_argument("--wandb_mode",
+                           type=str,
+                           default="disabled",
+                           choices=["online", "offline", "disabled"])
     subparser.add_argument(
         "--image_name",
         type=str,
@@ -236,9 +235,9 @@ def main():
     )
     subparser.add_argument("--LOGLEVEL", type=str, default="INFO")
     subparser.add_argument("--ignore_worker_error", action="store_true")
-    subparser.add_argument(
-        "--debug", action="store_true", help="If True, activate all assertions in the code."
-    )
+    subparser.add_argument("--debug",
+                           action="store_true",
+                           help="If True, activate all assertions in the code.")
     subparser.add_argument(
         "--remote_reset",
         action="store_true",
@@ -258,9 +257,8 @@ def main():
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.set_defaults(func=main_stop)
 
-    subparser = subparsers.add_parser(
-        "find_config", help="find configuration by matching regular expression."
-    )
+    subparser = subparsers.add_parser("find_config",
+                                      help="find configuration by matching regular expression.")
     subparser.add_argument("--regex", "-r", type=str, required=True)
     subparser.set_defaults(func=main_find_config)
 

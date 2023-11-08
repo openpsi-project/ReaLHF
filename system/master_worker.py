@@ -41,7 +41,8 @@ def request_all(
     for s, r in zip(streams, requests):
         s.post_request(r)
     t = time.perf_counter() - tik
-    logger.debug(f'Request "{handle_type}" time in total: ' f"{t:.4f}s, {t / len(requests):.4f}s per request")
+    logger.debug(f'Request "{handle_type}" time in total: '
+                 f"{t:.4f}s, {t / len(requests):.4f}s per request")
 
 
 def gather_all_replies(streams: List[request_reply_stream.RequestClient]) -> List[namedarray.NamedArray]:
@@ -171,22 +172,17 @@ class MasterWorker(worker_base.Worker):
         # Save and eval control.
         self.__total_train_epochs = config.total_train_epochs
         self.__save_step_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_seconds=config.save_frequency_seconds, frequency_steps=config.save_frequency_steps
-        )
+            frequency_seconds=config.save_frequency_seconds, frequency_steps=config.save_frequency_steps)
         self.__save_epoch_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_steps=config.save_frequency_epochs
-        )
+            frequency_steps=config.save_frequency_epochs)
 
         self.__eval_step_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_seconds=config.eval_frequency_seconds, frequency_steps=config.eval_frequency_steps
-        )
+            frequency_seconds=config.eval_frequency_seconds, frequency_steps=config.eval_frequency_steps)
         self.__eval_epoch_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_steps=config.eval_frequency_epochs
-        )
+            frequency_steps=config.eval_frequency_epochs)
 
-        self.MODEL_SAVE_ROOT = os.path.join(
-            self.MODEL_SAVE_ROOT, config.worker_info.experiment_name, config.worker_info.trial_name
-        )
+        self.MODEL_SAVE_ROOT = os.path.join(self.MODEL_SAVE_ROOT, config.worker_info.experiment_name,
+                                            config.worker_info.trial_name)
 
         # Used only for benchmark
         self.__benchmark_steps = config.benchmark_steps
@@ -199,26 +195,18 @@ class MasterWorker(worker_base.Worker):
             request_all(self.__data_streams, "spec", [None for _ in self.__data_streams])
             ft_specs: List[model_api.FinetuneSpec] = gather_all_replies(self.__data_streams)
             if len(set(x.steps_per_epoch for x in ft_specs)) != 1:
-                raise RuntimeError(
-                    f"steps_per_epoch not equal among data workers:"
-                    f" {list(x.steps_per_epoch for x in ft_specs)}. "
-                    "Consider launching less data workers."
-                )
+                raise RuntimeError(f"steps_per_epoch not equal among data workers:"
+                                   f" {list(x.steps_per_epoch for x in ft_specs)}. "
+                                   "Consider launching less data workers.")
             ft_spec = ft_specs[0]
             ft_spec.total_train_epochs = self.config.total_train_epochs
             ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
 
             batch_size = len(self.__data_streams) * ft_spec.batch_size_per_device
-            self.logger.info(
-                "\n\n"
-                + "=" * 40
-                + f"\nTotal train epochs: {ft_spec.total_train_epochs}"
-                + f"\nTotal train steps: {ft_spec.total_train_steps}"
-                + f"\nSteps per epoch: {ft_spec.steps_per_epoch}"
-                + f"\nEffective batch size: {batch_size}\n"
-                + "=" * 40
-                + "\n"
-            )
+            self.logger.info("\n\n" + "=" * 40 + f"\nTotal train epochs: {ft_spec.total_train_epochs}" +
+                             f"\nTotal train steps: {ft_spec.total_train_steps}" +
+                             f"\nSteps per epoch: {ft_spec.steps_per_epoch}" +
+                             f"\nEffective batch size: {batch_size}\n" + "=" * 40 + "\n")
             logger.info(f"ft_spec = {ft_spec}")
 
             model_ft_specs = []
@@ -266,8 +254,7 @@ class MasterWorker(worker_base.Worker):
             request_all(all_model_streams, "evaluate", [None for _ in all_model_streams])
             eval_stats = dataparallel.ParallelDataBroker.gather_from(gather_all_replies(all_model_streams))
             self.logger.info(
-                f"Evaluation results at epoch {self._epoch + 1} step {self._epoch_step + 1}: {eval_stats}"
-            )
+                f"Evaluation results at epoch {self._epoch + 1} step {self._epoch_step + 1}: {eval_stats}")
 
         # Save if necessary.
         step_should_save = self.__save_step_freq_ctl.check()
@@ -287,7 +274,8 @@ class MasterWorker(worker_base.Worker):
         tasks = []
         for i, rpc in enumerate(self.__model_rpcs):
             concerned_streams = {
-                k: v for k, v in self.__model_streams.items() if k.startswith(rpc.model_name)
+                k: v
+                for k, v in self.__model_streams.items() if k.startswith(rpc.model_name)
             }
             topo = self.__model_topos[rpc.model_name]
             reorg_streams = []
@@ -299,8 +287,7 @@ class MasterWorker(worker_base.Worker):
                 reorg_streams.append(dp_i_streams)
 
             task = self.__event_loop.create_task(
-                model_rpc_func(rpc, futures, self.__rpc_parents[i], self._data_registry, reorg_streams)
-            )
+                model_rpc_func(rpc, futures, self.__rpc_parents[i], self._data_registry, reorg_streams))
             tasks.append(task)
 
         self.__event_loop.run_until_complete(asyncio.gather(*tasks, *futures.values()))

@@ -1,6 +1,6 @@
-from typing import Optional, List, Union
 from collections import defaultdict
 from statistics import mean
+from typing import List, Optional, Union
 import logging
 import os
 import time
@@ -9,7 +9,6 @@ from deepspeed.accelerator import get_accelerator
 import numpy as np
 import psutil
 import viztracer
-
 
 logger = logging.getLogger("benchmarkutils")
 
@@ -27,8 +26,7 @@ def gpu_memory_mb(name):
 
     logger.info(
         f"{name} GPU rank {dist.get_rank()}: memory usage: {round(get_accelerator().memory_allocated() / 1024**2, 2)}MB, "
-        f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB"
-    )
+        f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB")
 
 
 def mock_time_mark_ms(name, identifier, t, step):
@@ -108,16 +106,16 @@ MATPLOTLIB_COLORS = [
 
 
 def summary_time_points(
-    start_keys,
-    end_keys,
-    identifiers,
-    dir_name=None,
-    file_name=None,
-    start_time=None,
-    figsize=(12, 4),
-    end_time=None,
-    step_range=None,
-    save_fig_path="time_points.png",
+        start_keys,
+        end_keys,
+        identifiers,
+        dir_name=None,
+        file_name=None,
+        start_time=None,
+        figsize=(12, 4),
+        end_time=None,
+        step_range=None,
+        save_fig_path="time_points.png",
 ):
     """Plot and summary time marks in logs"""
     import matplotlib.pyplot as plt
@@ -182,9 +180,11 @@ def summary_time_points(
 
                 # print(f"id={identifier} start_key={start_key} left={stp%1000} width={etp-stp}")
                 # print((etp-stp)//1e6)
-                ax.barh(
-                    y=id_index, width=etp - stp, left=stp, color=MATPLOTLIB_COLORS[start_key_idx], label=label
-                )
+                ax.barh(y=id_index,
+                        width=etp - stp,
+                        left=stp,
+                        color=MATPLOTLIB_COLORS[start_key_idx],
+                        label=label)
 
         infos[identifier] = (time_sum, time_list)
 
@@ -208,11 +208,9 @@ def summary_time_points(
             min_val = round(min(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
 
             bubble_time -= time_perc
-            print(
-                f"{k} -- {time_perc} %, "
-                f"avg, min, max = {avg_val}, {min_val}, {max_val} ms, "
-                f"sum, n = {round(time_sum[k]/10e6, 2)} ms, {len(time_list[k])}"
-            )
+            print(f"{k} -- {time_perc} %, "
+                  f"avg, min, max = {avg_val}, {min_val}, {max_val} ms, "
+                  f"sum, n = {round(time_sum[k]/10e6, 2)} ms, {len(time_list[k])}")
         print(f"bubble time -- {round(bubble_time, 2)}%")
 
     plt.legend(loc=(1.01, 0.0))

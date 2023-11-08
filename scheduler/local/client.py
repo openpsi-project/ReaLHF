@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import subprocess
+
 import psutil
 
 from scheduler.client import JobInfo, JobState, SchedulerClient, SchedulerError
@@ -43,8 +44,7 @@ class LocalSchedulerClient(SchedulerClient):
         if len(self._cuda_devices) < 1:
             raise RuntimeError(
                 f"Local mode can only run when there is at least one GPU. "
-                f"CUDA_VISIBLE_DEVICES is currently set to {os.environ['CUDA_VISIBLE_DEVICES']}."
-            )
+                f"CUDA_VISIBLE_DEVICES is currently set to {os.environ['CUDA_VISIBLE_DEVICES']}.")
 
     def __del__(self):
         self.wait(commit=False)
@@ -64,15 +64,13 @@ class LocalSchedulerClient(SchedulerClient):
         self._job_counter[worker_type] += count
         if worker_type in self._job_with_gpu:
             assert self._job_with_gpu[worker_type] == (
-                gpu > 0
-            ), "All workers of the same type must either use GPU or not use GPU."
+                gpu > 0), "All workers of the same type must either use GPU or not use GPU."
         else:
             self._job_with_gpu[worker_type] = gpu > 0
 
         if worker_type in self._job_env_vars:
-            assert (
-                self._job_env_vars[worker_type] == env_vars
-            ), "All workers of the same type must have the same env vars."
+            assert (self._job_env_vars[worker_type] == env_vars
+                    ), "All workers of the same type must have the same env vars."
         else:
             self._job_env_vars[worker_type] = env_vars
 
@@ -86,21 +84,18 @@ class LocalSchedulerClient(SchedulerClient):
 
     def __commit_all(self):
         for worker_type, count, use_gpu, env_vars in zip(
-            self._job_counter.keys(),
-            self._job_counter.values(),
-            self._job_with_gpu.values(),
-            self._job_env_vars.values(),
+                self._job_counter.keys(),
+                self._job_counter.values(),
+                self._job_with_gpu.values(),
+                self._job_env_vars.values(),
         ):
             for i in range(count):
                 if use_gpu:
                     available_device_id = self._gpu_counter % len(self._cuda_devices)
                     env_vars["CUDA_VISIBLE_DEVICES"] = str(self._cuda_devices[available_device_id])
                     self._gpu_counter += 1
-                cmd = (
-                    " ".join(str(k) + "=" + str(v) for k, v in env_vars.items())
-                    + " "
-                    + self._job_cmd[worker_type]
-                )
+                cmd = (" ".join(str(k) + "=" + str(v)
+                                for k, v in env_vars.items()) + " " + self._job_cmd[worker_type])
                 # Run `apps.remote` with a single process.
                 # This simulates a multi-prog slurm job with `count` jobsteps, with each jobstep having a single process.
                 cmd = cmd.format(
