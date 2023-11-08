@@ -42,3 +42,4 @@ ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 # RUN pip3 install -e /tools/TransformerEngine
 # COPY ./transformers /tools/transformers
 # RUN pip3 install -e /tools/transformers
+RUN pip3 install -U viztracer[full] -i https://mirrors.aliyun.com/pypi/simple/

@@ -82,8 +82,8 @@ class PackedPPOExperiment(Experiment):
 
     def __init__(
         self,
-        n_actors=4,
-        n_critics=4,
+        n_actors=1,
+        n_critics=1,
         seed=1,
         base_model: str = 'gpt2',
         train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl",
@@ -121,7 +121,7 @@ class PackedPPOExperiment(Experiment):
                         cpu=4,
                         gpu=1,
                         mem=60000,
-                        nodelist='frl8a138',
+                        nodelist='frl8a140',
                     ),
                 ),
                 TasksGroup(
@@ -323,9 +323,9 @@ class PackedPPOExperiment(Experiment):
         ]
 
         return ExperimentConfig(
-            total_train_epochs=8,
+            total_train_epochs=4,
             save_frequency_epochs=1,
-            save_frequency_steps=20,
+            save_frequency_steps=5,
             save_frequency_seconds=None,
             model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
             data_worker=data_worker,

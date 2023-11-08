@@ -27,9 +27,9 @@ class PackedDPOExperiment(Experiment):
 
     def __init__(
         self,
-        dp_size=7,
+        dp_size=6,
         seed=1,
-        total_train_epochs=8,
+        total_train_epochs=4,
         base_model='gpt2',
         dataset_path="/lustre/fw/datasets/imdb/rl/rm_paired-all.jsonl",
         train_tokens_per_batch: int = 65536,
@@ -188,7 +188,7 @@ class PackedDPOExperiment(Experiment):
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
-            save_frequency_steps=50,
+            save_frequency_steps=10,
             save_frequency_epochs=1,
             save_frequency_seconds=None,
             eval_frequency_epochs=None,

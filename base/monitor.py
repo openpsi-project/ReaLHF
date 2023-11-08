@@ -1,5 +1,6 @@
 from collections import defaultdict
 from statistics import mean
+from typing import List, Optional, Union
 import logging
 import os
 import time
@@ -7,6 +8,7 @@ import time
 from deepspeed.accelerator import get_accelerator
 import numpy as np
 import psutil
+import viztracer
 
 logger = logging.getLogger("benchmarkutils")
 
@@ -21,6 +23,7 @@ def process_memory_mb(name):
 
 def gpu_memory_mb(name):
     import torch.distributed as dist
+
     logger.info(
         f"{name} GPU rank {dist.get_rank()}: memory usage: {round(get_accelerator().memory_allocated() / 1024**2, 2)}MB, "
         f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB")
@@ -84,24 +87,39 @@ def parse_time_mark_in_dir(dir, name, step_range=None):
 
 
 MATPLOTLIB_COLORS = [
-    'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'black', 'brown', 'gray', 'cyan', 'magenta',
-    'lime', 'olive', 'navy'
+    "red",
+    "blue",
+    "green",
+    "yellow",
+    "orange",
+    "purple",
+    "pink",
+    "black",
+    "brown",
+    "gray",
+    "cyan",
+    "magenta",
+    "lime",
+    "olive",
+    "navy",
 ]
 
 
-def summary_time_points(start_keys,
-                        end_keys,
-                        identifiers,
-                        dir_name=None,
-                        file_name=None,
-                        start_time=None,
-                        figsize=(12, 4),
-                        end_time=None,
-                        step_range=None,
-                        save_fig_path="time_points.png"):
-    """ Plot and summary time marks in logs
-    """
+def summary_time_points(
+        start_keys,
+        end_keys,
+        identifiers,
+        dir_name=None,
+        file_name=None,
+        start_time=None,
+        figsize=(12, 4),
+        end_time=None,
+        step_range=None,
+        save_fig_path="time_points.png",
+):
+    """Plot and summary time marks in logs"""
     import matplotlib.pyplot as plt
+
     assert file_name or dir_name, "dir or file name must be specified"
     all_time_points = {}
     if file_name is None:
@@ -199,3 +217,60 @@ def summary_time_points(start_keys,
     plt.tight_layout()
 
     plt.savefig(save_fig_path)
+
+
+class NoopTracer:
+    """Dumb alternative for VizTracer."""
+
+    def __init__(self, **kwargs):
+        pass
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def save(self, *args, **kwargs):
+        pass
+
+
+def get_tracer(
+    tracer_entries: int = 1000000,
+    verbose: int = 1,
+    max_stack_depth: int = -1,
+    include_files: Optional[List[str]] = None,
+    exclude_files: Optional[List[str]] = None,
+    ignore_c_function: bool = False,
+    ignore_frozen: bool = False,
+    log_func_retval: bool = False,
+    log_func_args: bool = False,
+    log_print: bool = False,
+    log_gc: bool = False,
+    log_async: bool = False,
+    pid_suffix: bool = False,
+    register_global: bool = True,
+    min_duration: int = 0,
+    output_file: str = "result.json",
+) -> viztracer.VizTracer:
+    if os.environ.get("DLLM_TRACE") == "1":
+        return viztracer.VizTracer(
+            tracer_entries=tracer_entries,
+            verbose=verbose,
+            max_stack_depth=max_stack_depth,
+            include_files=include_files,
+            exclude_files=exclude_files,
+            ignore_c_function=ignore_c_function,
+            ignore_frozen=ignore_frozen,
+            log_func_retval=log_func_retval,
+            log_func_args=log_func_args,
+            log_print=log_print,
+            log_gc=log_gc,
+            log_async=log_async,
+            pid_suffix=pid_suffix,
+            register_global=register_global,
+            min_duration=min_duration,
+            output_file=output_file,
+        )
+    else:
+        return NoopTracer()

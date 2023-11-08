@@ -3,6 +3,7 @@ import queue
 import time
 import unittest
 
+from viztracer import VizTracer
 import torch
 import transformers
 
@@ -11,6 +12,7 @@ from impl.model.nn.flash_mqat import (FlashMQATForCausalLM, generate, Generation
 import api.huggingface
 
 
+@unittest.skip("")
 class PackedKVCacheTest(unittest.TestCase):
 
     @classmethod
@@ -111,6 +113,15 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
             max_prompt_len=cls.max_prompt_len,
         )
 
+        # The unit of min duration is us (1e-6).
+        cls.tracer = VizTracer(
+            max_stack_depth=10,
+            # ignore_c_function=False,
+            min_duration=500,
+            # include_files=['./impl/', './tests/'],
+            ignore_frozen=True,
+        )
+
     def testMain(self):
         prompts_str = [
             "I'm very happy today hahaha hahaha ",
@@ -120,6 +131,7 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
             "Get more random words",
             "试试中文的prompt",
             "NVIDIA Nsight system is a very good tool for",
+            "ghfjla hblka\n",
         ]
         encoding = self.tokenizer(
             prompts_str,
@@ -138,6 +150,7 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
             gconfig=self.gconfig,
         )
 
+        self.tracer.start()
         tik = time.perf_counter()
         gen_tokens, logp, logits_mask, _, _ = generate(
             model=self.model,
@@ -196,6 +209,8 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
             for y in logps2:
                 if x[0] == y[0]:
                     assert torch.allclose(x, y), (x, y)
+        self.tracer.stop()
+        self.tracer.save(output_file='result.json')
 
 
 if __name__ == "__main__":

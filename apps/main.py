@@ -15,13 +15,14 @@ import system
 logger = logging.getLogger("main")
 
 CONTROLLER_TIME_LIMIT = None
+TRACE_TIMEOUT = 300  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
 
 
 def scheduler_mode(mode: str) -> str:
-    if mode == 'ray' or mode == 'slurm':
-        return 'slurm'
-    elif 'local' in mode:
-        return 'local'
+    if mode == "ray" or mode == "slurm":
+        return "slurm"
+    elif "local" in mode:
+        return "local"
 
 
 def _submit_workers(
@@ -40,7 +41,6 @@ def _submit_workers(
 
     scheduled_jobs = []
     for sch_cfg in scheduling_configs:
-
         job_environs = {**environs, **sch_cfg.scheduling.env_vars}
         if use_ray_cluster:
             cmd = scheduler.client.ray_cluster_cmd(
@@ -58,7 +58,7 @@ def _submit_workers(
         node_type = sch_cfg.scheduling.node_type
         container_image = image_name or sch_cfg.scheduling.container_image
         if use_ray_cluster:
-            worker_type = f'rc_{worker_type}'
+            worker_type = f"rc_{worker_type}"
 
         scheduled_jobs.append(
             sched.submit_array(
@@ -84,7 +84,7 @@ def _submit_workers(
 
 
 def main_start(args):
-    if args.mode == 'ray' and args.image_name is None:
+    if args.mode == "ray" and args.image_name is None:
         raise ValueError("--image_name must be specified when using ray cluster. "
                          "This is becuase ray cluster requires all workers to have "
                          "the same version of Python and ray.")
@@ -101,6 +101,7 @@ def main_start(args):
         "WANDB_MODE": args.wandb_mode,
         "LOGLEVEL": args.LOGLEVEL,
         "DLLM_MODE": args.mode.upper(),
+        "DLLM_TRACE": "1" if args.trace else "0",
     }
 
     logger.info(f"Resetting name resolving repo...")
@@ -121,6 +122,7 @@ def main_start(args):
             raise e
     else:
         from apps.remote import main_reset_name_resolve
+
         try:
             main_reset_name_resolve(args)
         except Exception as e:
@@ -131,12 +133,12 @@ def main_start(args):
     logger.info(f"Running configuration: {experiment.__class__.__name__}")
 
     # Schedule controller
-    if args.mode == 'ray':
-        controller_type = 'ray'
-    elif args.mode == 'local_ray':
-        controller_type = 'local_ray'
+    if args.mode == "ray":
+        controller_type = "ray"
+    elif args.mode == "local_ray":
+        controller_type = "local_ray"
     else:
-        controller_type = 'zmq'
+        controller_type = "zmq"
     # For local_ray mode, the controller will start all remote workers.
     sched.submit_array(
         worker_type="ctl",
@@ -156,7 +158,7 @@ def main_start(args):
         time_limit=CONTROLLER_TIME_LIMIT,
     )
 
-    if args.mode != 'local_ray':
+    if args.mode != "local_ray":
         workers_configs = ((k, getattr(setup, k)) for k in system.WORKER_TYPES)
 
         for name, scheduling_setup in workers_configs:
@@ -164,21 +166,27 @@ def main_start(args):
                 scheduling_setup = [scheduling_setup]
             # For local or slurm mode, launch all workers.
             # For ray mode, launch the ray cluster for all workers via slurm.
-            _submit_workers(sched,
-                            expr_name,
-                            trial_name,
-                            args.debug,
-                            name,
-                            scheduling_setup,
-                            base_environs,
-                            args.image_name,
-                            use_ray_cluster=(args.mode == 'ray'))
+            _submit_workers(
+                sched,
+                expr_name,
+                trial_name,
+                args.debug,
+                name,
+                scheduling_setup,
+                base_environs,
+                args.image_name,
+                use_ray_cluster=(args.mode == "ray"),
+            )
 
+    timeout = None if not args.trace else TRACE_TIMEOUT  # run 5 mins to collect trace
     try:
-        sched.wait()
-    except (KeyboardInterrupt, scheduler.client.JobException):
+        sched.wait(timeout=timeout)
+    except (KeyboardInterrupt, scheduler.client.JobException, TimeoutError) as e:
+        if args.trace and isinstance(e, TimeoutError):
+            s = "#" * 30 + "  Trace complete. Killing all processes...  " + "#" * 30
+            logger.info("\n" + "#" * len(s) + "\n" + s + "\n" + "#" * len(s))
         sched.stop_all()
-        raise
+        raise e
 
 
 def main_stop(args):
@@ -218,11 +226,13 @@ def main():
                            type=str,
                            default="disabled",
                            choices=["online", "offline", "disabled"])
-    subparser.add_argument("--image_name",
-                           type=str,
-                           required=False,
-                           default=None,
-                           help="if specified, all workers will use this image. Useful in CI/CD pipeline.")
+    subparser.add_argument(
+        "--image_name",
+        type=str,
+        required=False,
+        default=None,
+        help="if specified, all workers will use this image. Useful in CI/CD pipeline.",
+    )
     subparser.add_argument("--LOGLEVEL", type=str, default="INFO")
     subparser.add_argument("--ignore_worker_error", action="store_true")
     subparser.add_argument("--debug",
@@ -231,7 +241,13 @@ def main():
     subparser.add_argument(
         "--remote_reset",
         action="store_true",
-        help='If True, reset name resolve repo remotely in computation nodes. Otherwise reset locally.')
+        help="If True, reset name resolve repo remotely in computation nodes. Otherwise reset locally.",
+    )
+    subparser.add_argument(
+        "--trace",
+        action="store_true",
+        help="Whether to use VizTracer to trace the execution time of each line of python code.",
+    )
     subparser.set_defaults(ignore_worker_error=False)
     subparser.set_defaults(func=main_start)
 
