@@ -7,8 +7,9 @@ import re
 import socket
 import threading
 import time
-
-import wandb
+import os
+import base.monitor
+import getpass
 
 from api import config as config_pkg
 from base.gpu_utils import set_cuda_device
@@ -16,16 +17,18 @@ import base.cluster
 import base.name_resolve
 import base.names
 import base.network
+import base.cluster
+import base.timeutil
 
 logger = logging.getLogger("worker")
 
 _MAX_SOCKET_CONCURRENCY = 1000
 WORKER_WAIT_FOR_CONTROLLER_SECONDS = 3600
 WORKER_JOB_STATUS_LINGER_SECONDS = 60
+TRACER_SAVE_INTERVAL_SECONDS = 60
 
 
 class WorkerException(Exception):
-
     def __init__(self, worker_name, worker_status, scenario):
         super(WorkerException, self).__init__(f"Worker {worker_name} is {worker_status} while {scenario}")
         self.worker_name = worker_name
@@ -37,6 +40,7 @@ class WorkerServerStatus(str, enum.Enum):
     """List of all possible Server status. This is typically set by workers hosting the server, and
     read by the controller.
     """
+
     READY = "READY"
     RUNNING = "RUNNING"
     PAUSED = "PAUSED"
@@ -53,7 +57,6 @@ class NoRequstForWorker(Exception):
 
 
 class WorkerServerTaskQueue:
-
     def try_get_request(self) -> Tuple[str, Dict[str, Any]]:
         raise NotImplementedError()
 
@@ -98,9 +101,10 @@ class WorkerServer:
         host_ip = socket.gethostbyname(socket.gethostname())
 
         try:
-            controller_status = base.name_resolve.wait(base.names.worker_status(
-                experiment_name, trial_name, "ctl"),
-                                                       timeout=WORKER_WAIT_FOR_CONTROLLER_SECONDS)
+            controller_status = base.name_resolve.wait(
+                base.names.worker_status(experiment_name, trial_name, "ctl"),
+                timeout=WORKER_WAIT_FOR_CONTROLLER_SECONDS,
+            )
         except TimeoutError:
             raise TimeoutError(
                 f"Worker ({experiment_name, trial_name, worker_name}) connect to controller timeout from host {socket.gethostname()}."
@@ -149,44 +153,40 @@ class WorkerServer:
                     response = e
             else:
                 logger.error("Handle request: %s, no such command", command)
-                response = KeyError(f'No such command: {command}')
+                response = KeyError(f"No such command: {command}")
             self.__task_queue.respond(response)
             logger.debug("Handle request: %s, sent reply", command)
             count += 1
         return count
 
     def set_status(self, status: WorkerServerStatus):
-        """On graceful exit, worker status is cleared.
-        """
+        """On graceful exit, worker status is cleared."""
         base.name_resolve.add(
-            base.names.worker_status(experiment_name=self.__experiment_name,
-                                     trial_name=self.__trial_name,
-                                     worker_name=self.__worker_name),
+            base.names.worker_status(
+                experiment_name=self.__experiment_name,
+                trial_name=self.__trial_name,
+                worker_name=self.__worker_name,
+            ),
             value=status.value,
             keepalive_ttl=WORKER_JOB_STATUS_LINGER_SECONDS,  # Job Status lives one minutes after worker exit.
             replace=True,
-            delete_on_exit=False)
+            delete_on_exit=False,
+        )
 
 
 class WorkerControlPanelRequester:
-
     class Future:
-
         def result(self, timeout=None):
             raise NotImplementedError()
 
-    def async_request(self,
-                      worker_name: str,
-                      address: str,
-                      command: str,
-                      wait_for_response: bool = True,
-                      **kwargs) -> Future:
+    def async_request(
+        self, worker_name: str, address: str, command: str, wait_for_response: bool = True, **kwargs
+    ) -> Future:
         raise NotImplementedError()
 
 
 class WorkerControlPanel:
-    """A class that defines the management utilities to all the workers of an experiment trial.
-    """
+    """A class that defines the management utilities to all the workers of an experiment trial."""
 
     @dataclasses.dataclass
     class Response:
@@ -237,12 +237,14 @@ class WorkerControlPanel:
         """
         return list(self.__worker_addresses.keys())
 
-    def connect(self,
-                worker_names: List[str],
-                timeout=None,
-                raises_timeout_error=False,
-                reconnect=False,
-                progress=False) -> List[str]:
+    def connect(
+        self,
+        worker_names: List[str],
+        timeout=None,
+        raises_timeout_error=False,
+        reconnect=False,
+        progress=False,
+    ) -> List[str]:
         """Waits until all the workers specified by the given names are ready for receiving commands.
 
         Args:
@@ -263,6 +265,7 @@ class WorkerControlPanel:
         if progress:
             try:
                 import tqdm
+
                 worker_names = tqdm.tqdm(worker_names, leave=False)
             except ModuleNotFoundError:
                 pass
@@ -276,9 +279,9 @@ class WorkerControlPanel:
                 if timeout is not None:
                     timeout = max(0, deadline - time.monotonic())
                 self.__logger.info(f"Connecting to worker {name}, timeout {timeout}")
-                server_address = base.name_resolve.wait(base.names.worker(self.__experiment_name,
-                                                                          self.__trial_name, name),
-                                                        timeout=timeout)
+                server_address = base.name_resolve.wait(
+                    base.names.worker(self.__experiment_name, self.__trial_name, name), timeout=timeout
+                )
                 self.__logger.info(f"Connecting to worker {name} done")
             except TimeoutError as e:
                 if raises_timeout_error:
@@ -296,24 +299,25 @@ class WorkerControlPanel:
             Names of successfully connected workers.
         """
         name_root = base.names.worker_root(self.__experiment_name, self.__trial_name)
-        worker_names = [r[len(name_root):] for r in base.name_resolve.find_subtree(name_root)]
+        worker_names = [r[len(name_root) :] for r in base.name_resolve.find_subtree(name_root)]
         return self.connect(worker_names, timeout=0, raises_timeout_error=True)
 
     def request(self, worker_name: str, command, **kwargs) -> Any:
-        """Sends an request to the specified worker.
-        """
+        """Sends an request to the specified worker."""
         address = self.__worker_addresses[worker_name]
         return self.__requester.async_request(worker_name, address, command, **kwargs).result()
 
-    def group_request(self,
-                      command,
-                      worker_names: Optional[List[str]] = None,
-                      worker_regex: Optional[str] = None,
-                      timeout=None,
-                      progress=False,
-                      worker_kwargs: Optional[List[Dict[str, Any]]] = None,
-                      wait_response=True,
-                      **kwargs) -> List[Response]:
+    def group_request(
+        self,
+        command,
+        worker_names: Optional[List[str]] = None,
+        worker_regex: Optional[str] = None,
+        timeout=None,
+        progress=False,
+        worker_kwargs: Optional[List[Dict[str, Any]]] = None,
+        wait_response=True,
+        **kwargs,
+    ) -> List[Response]:
         """Requests selected workers, or all connected workers if not specified.
 
         Args:
@@ -347,8 +351,8 @@ class WorkerControlPanel:
         deadline = time.monotonic() + (timeout or 0)
         for j in range(0, len(selected), _MAX_SOCKET_CONCURRENCY):
             sub_rs: List[WorkerControlPanel.Response] = []
-            sub_selected = selected[j:j + _MAX_SOCKET_CONCURRENCY]
-            sub_worker_kwargs = worker_kwargs[j:j + _MAX_SOCKET_CONCURRENCY]
+            sub_selected = selected[j : j + _MAX_SOCKET_CONCURRENCY]
+            sub_worker_kwargs = worker_kwargs[j : j + _MAX_SOCKET_CONCURRENCY]
             for name, kwargs in zip(sub_selected, sub_worker_kwargs):
                 address = self.__worker_addresses[name]
                 result_fut = self.__requester.async_request(name, address, command, wait_response, **kwargs)
@@ -361,6 +365,7 @@ class WorkerControlPanel:
             if progress:
                 try:
                     import tqdm
+
                     bar = tqdm.tqdm(bar, leave=False)
                 except ModuleNotFoundError:
                     pass
@@ -381,9 +386,11 @@ class WorkerControlPanel:
         """
         try:
             status_str = base.name_resolve.wait(
-                base.names.worker_status(experiment_name=self.__experiment_name,
-                                         trial_name=self.__trial_name,
-                                         worker_name=worker_name),
+                base.names.worker_status(
+                    experiment_name=self.__experiment_name,
+                    trial_name=self.__trial_name,
+                    worker_name=worker_name,
+                ),
                 timeout=60,
             )
             status = WorkerServerStatus(status_str)
@@ -435,13 +442,13 @@ class Worker:
 
         self._server = server
         if server is not None:
-            server.register_handler('configure', self.configure)
-            server.register_handler('reconfigure', self.reconfigure)
-            server.register_handler('start', self.start)
-            server.register_handler('pause', self.pause)
-            server.register_handler('exit', self.exit)
-            server.register_handler('interrupt', self.interrupt)
-            server.register_handler('ping', lambda: "pong")
+            server.register_handler("configure", self.configure)
+            server.register_handler("reconfigure", self.reconfigure)
+            server.register_handler("start", self.start)
+            server.register_handler("pause", self.pause)
+            server.register_handler("exit", self.exit)
+            server.register_handler("interrupt", self.interrupt)
+            server.register_handler("ping", lambda: "pong")
 
         self.logger = logging.getLogger("worker")
         self.__worker_type = None
@@ -489,15 +496,41 @@ class Worker:
         self.logger = logging.getLogger(r.worker_type + "-worker")
         if r.host_key is not None:
             self.__host_key(
-                base.names.worker_key(experiment_name=r.experiment_name,
-                                      trial_name=r.trial_name,
-                                      key=r.host_key))
+                base.names.worker_key(
+                    experiment_name=r.experiment_name, trial_name=r.trial_name, key=r.host_key
+                )
+            )
         if r.watch_keys is not None:
             keys = [r.watch_keys] if isinstance(r.watch_keys, str) else r.watch_keys
-            self.__watch_keys([
-                base.names.worker_key(experiment_name=r.experiment_name, trial_name=r.trial_name, key=k)
-                for k in keys
-            ])
+            self.__watch_keys(
+                [
+                    base.names.worker_key(experiment_name=r.experiment_name, trial_name=r.trial_name, key=k)
+                    for k in keys
+                ]
+            )
+
+        self._tracer_output_file = os.path.join(
+            base.cluster.spec.fileroot,
+            "logs",
+            getpass.getuser(),
+            f"{r.experiment_name}_{r.trial_name}",
+            "trace_results",
+            f"{r.worker_type}-{r.worker_index}.json",
+        )
+        os.makedirs(os.path.dirname(self._tracer_output_file), exist_ok=True)
+        self.__tracer = base.monitor.get_tracer(
+            tracer_entries=int(2e6),
+            max_stack_depth=10,
+            ignore_c_function=False,
+            ignore_frozen=True,
+            log_async=True,
+            min_duration=500,
+            output_file=self._tracer_output_file,
+        )
+        self.__tracer_save_freqctrl = base.timeutil.FrequencyControl(
+            frequency_seconds=TRACER_SAVE_INTERVAL_SECONDS
+        )
+        self.__tracer_launched = False
 
         self.__is_configured = True
         self.logger.info("Configured successfully")
@@ -528,9 +561,9 @@ class Worker:
     def interrupt(self):
         self.logger.info("Worker interrupted by remote control.")
         self.__set_status(WorkerServerStatus.INTERRUPTED)
-        raise WorkerException(worker_name="worker",
-                              worker_status=WorkerServerStatus.INTERRUPTED,
-                              scenario="running")
+        raise WorkerException(
+            worker_name="worker", worker_status=WorkerServerStatus.INTERRUPTED, scenario="running"
+        )
 
     def run(self):
         self._start_time_ns = time.monotonic_ns()
@@ -542,6 +575,9 @@ class Worker:
                 if not self.__running:
                     time.sleep(0.05)
                     continue
+                if not self.__tracer_launched:
+                    self.__tracer.start()
+                    self.__tracer_launched = True
                 if not self.__is_configured:
                     raise RuntimeError("Worker is not configured")
                 start_time = time.monotonic_ns()
@@ -563,6 +599,8 @@ class Worker:
                             self.__last_update_ns = now
                     else:
                         self.__last_update_ns = now
+                if self.__tracer_save_freqctrl.check():
+                    self.__tracer.save()
         except KeyboardInterrupt:
             self.exit()
         except Exception as e:
@@ -585,12 +623,9 @@ class MappingThread:
     A mapping thread gets from up_stream_queue, process data, and puts to down_stream_queue.
     """
 
-    def __init__(self,
-                 map_fn,
-                 interrupt_flag,
-                 upstream_queue,
-                 downstream_queue: queue.Queue = None,
-                 cuda_device=None):
+    def __init__(
+        self, map_fn, interrupt_flag, upstream_queue, downstream_queue: queue.Queue = None, cuda_device=None
+    ):
         """Init method of MappingThread for Policy Workers.
 
         Args:
@@ -615,13 +650,11 @@ class MappingThread:
         return self.__interrupt or self.__thread.is_alive()
 
     def start(self):
-        """Start the wrapped thread.
-        """
+        """Start the wrapped thread."""
         self.__thread.start()
 
     def join(self):
-        """Join the wrapped thread.
-        """
+        """Join the wrapped thread."""
         self.__thread.join()
 
     def _run(self):
@@ -640,8 +673,7 @@ class MappingThread:
             pass
 
     def stop(self):
-        """Stop the wrapped thread.
-        """
+        """Stop the wrapped thread."""
         self.__interrupt = True
         if self.__thread.is_alive():
             self.__thread.join()
