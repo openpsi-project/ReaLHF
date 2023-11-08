@@ -1204,6 +1204,7 @@ def generate(
         # Model forward will set k/v cache in PipeCacheData.
         prompt_logits = model(x, ys).pp_output
         logits = prompt_logits[cu_seqlens[1:] - 1]
+        cache_seqlens = input_lens
         for y in ys[1:-1]:
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(max_seq_len + gconfig.max_new_tokens,
@@ -1220,9 +1221,9 @@ def generate(
                 v_cache[i, :input_lens[i]] = y.v_cache[cu_seqlens[i]:cu_seqlens[i + 1]]
             y.k_cache = k_cache
             y.v_cache = v_cache
-            y.cache_seqlens = input_lens.clone()
+            y.cache_seqlens = cache_seqlens
         x = PipeTransferData()
-        ys[0].cache_seqlens = input_lens.clone()
+        ys[0].cache_seqlens = cache_seqlens
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
@@ -1243,8 +1244,8 @@ def generate(
             if v_caches[i].shape[1] < max_seq_len:
                 v_caches[i] = nn.functional.pad(v_caches[i], pad)
         x = PipeTransferData()
-        ys = ([PipeCacheData(cache_seqlens=cache_seqlens.clone())] + [
-            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens.clone())
+        ys = ([PipeCacheData(cache_seqlens=cache_seqlens)] + [
+            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens)
             for k, v in zip(k_caches, v_caches)
         ] + [PipeCacheData()])
         next_tokens = input_ids[:, -1]
@@ -1256,8 +1257,7 @@ def generate(
         ys[0].position_ids = None
         # K/v cache will be changed in-place with flash attention.
         logits = model(x, ys).pp_output.squeeze(dim=1)
-        for yidx, y in enumerate(ys[:-1]):
-            y.cache_seqlens += 1
+        cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
 
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
             logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
@@ -1431,21 +1431,23 @@ class InflightBatchingGenerator:
         self.prompt_tokens = [None for _ in range(batch_size)]
         self.unfinished_sequences = torch.zeros((batch_size,), dtype=torch.float32, device=device)
 
+        self.ys = ([PipeCacheData(
+            cache_seqlens=self.cache_seqlens,
+            input_ids=self.input_buf,
+        )] + [
+            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens)
+            for k, v in zip(self.k_caches, self.v_caches)
+        ] + [PipeCacheData()])
+
         # output buffers
         self.output_tokens_buf = [[] for _ in range(batch_size)]
         self.output_logprob_buf = [[] for _ in range(batch_size)]
         self.output_logits_mask = [[] for _ in range(batch_size)]
 
     def _get_non_eos_logits(self) -> torch.FloatTensor:
-        x = PipeTransferData()
-        ys = ([PipeCacheData(
-            cache_seqlens=self.cache_seqlens.clone(),
-            input_ids=self.input_buf.clone(),
-        )] + [
-            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens.clone())
-            for k, v in zip(self.k_caches, self.v_caches)
-        ] + [PipeCacheData()])
-        logits = self.model(x, ys).pp_output.squeeze(dim=1)
+        self.ys[0].position_ids = None
+        self.ys[0].input_ids = self.input_buf
+        logits = self.model(PipeTransferData(), self.ys).pp_output.squeeze(dim=1)
 
         self.cache_seqlens += 1
         return logits.float()
@@ -1511,14 +1513,9 @@ class InflightBatchingGenerator:
                                 input_lens.cumsum(0)]).to(device=packed_input_ids.device, dtype=torch.int32)
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        ys = ([PipeCacheData(
-            cache_seqlens=self.cache_seqlens.clone(),
-            input_ids=packed_input_ids,
-        )] + [
-            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens.clone())
-            for k, v in zip(self.k_caches, self.v_caches)
-        ] + [PipeCacheData()])
-        logits = self.model(x, ys).pp_output
+        self.ys[0].position_ids = None
+        self.ys[0].input_ids = packed_input_ids
+        logits = self.model(x, self.ys).pp_output
         logits = logits[cu_seqlens[1:] - 1]
 
         self.cache_seqlens += input_lens
