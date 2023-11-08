@@ -25,6 +25,10 @@ import system.worker_base as worker_base
 logger = logging.getLogger("master worker")
 
 
+class ExperimentComplete(Exception):
+    pass
+
+
 def request_all(
     streams: List[request_reply_stream.RequestClient],
     handle_type: str,
@@ -37,8 +41,7 @@ def request_all(
     for s, r in zip(streams, requests):
         s.post_request(r)
     t = time.perf_counter() - tik
-    logger.debug(f"Request \"{handle_type}\" time in total: "
-                 f"{t:.4f}s, {t / len(requests):.4f}s per request")
+    logger.debug(f'Request "{handle_type}" time in total: ' f"{t:.4f}s, {t / len(requests):.4f}s per request")
 
 
 def gather_all_replies(streams: List[request_reply_stream.RequestClient]) -> List[namedarray.NamedArray]:
@@ -168,17 +171,22 @@ class MasterWorker(worker_base.Worker):
         # Save and eval control.
         self.__total_train_epochs = config.total_train_epochs
         self.__save_step_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_seconds=config.save_frequency_seconds, frequency_steps=config.save_frequency_steps)
+            frequency_seconds=config.save_frequency_seconds, frequency_steps=config.save_frequency_steps
+        )
         self.__save_epoch_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_steps=config.save_frequency_epochs)
+            frequency_steps=config.save_frequency_epochs
+        )
 
         self.__eval_step_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_seconds=config.eval_frequency_seconds, frequency_steps=config.eval_frequency_steps)
+            frequency_seconds=config.eval_frequency_seconds, frequency_steps=config.eval_frequency_steps
+        )
         self.__eval_epoch_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_steps=config.eval_frequency_epochs)
+            frequency_steps=config.eval_frequency_epochs
+        )
 
-        self.MODEL_SAVE_ROOT = os.path.join(self.MODEL_SAVE_ROOT, config.worker_info.experiment_name,
-                                            config.worker_info.trial_name)
+        self.MODEL_SAVE_ROOT = os.path.join(
+            self.MODEL_SAVE_ROOT, config.worker_info.experiment_name, config.worker_info.trial_name
+        )
 
         # Used only for benchmark
         self.__benchmark_steps = config.benchmark_steps
@@ -188,32 +196,40 @@ class MasterWorker(worker_base.Worker):
     def _poll(self):
         if not self.__initialized:
             # Request training specification from data workers, e.g. batch size and total train steps.
-            request_all(self.__data_streams, 'spec', [None for _ in self.__data_streams])
+            request_all(self.__data_streams, "spec", [None for _ in self.__data_streams])
             ft_specs: List[model_api.FinetuneSpec] = gather_all_replies(self.__data_streams)
             if len(set(x.steps_per_epoch for x in ft_specs)) != 1:
-                raise RuntimeError(f"steps_per_epoch not equal among data workers:"
-                                   f" {list(x.steps_per_epoch for x in ft_specs)}. "
-                                   "Consider launching less data workers.")
+                raise RuntimeError(
+                    f"steps_per_epoch not equal among data workers:"
+                    f" {list(x.steps_per_epoch for x in ft_specs)}. "
+                    "Consider launching less data workers."
+                )
             ft_spec = ft_specs[0]
             ft_spec.total_train_epochs = self.config.total_train_epochs
             ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
 
             batch_size = len(self.__data_streams) * ft_spec.batch_size_per_device
-            self.logger.info("\n\n" + "=" * 40 + f"\nTotal train epochs: {ft_spec.total_train_epochs}" +
-                             f"\nTotal train steps: {ft_spec.total_train_steps}" +
-                             f"\nSteps per epoch: {ft_spec.steps_per_epoch}" +
-                             f"\nEffective batch size: {batch_size}\n" + "=" * 40 + "\n")
+            self.logger.info(
+                "\n\n"
+                + "=" * 40
+                + f"\nTotal train epochs: {ft_spec.total_train_epochs}"
+                + f"\nTotal train steps: {ft_spec.total_train_steps}"
+                + f"\nSteps per epoch: {ft_spec.steps_per_epoch}"
+                + f"\nEffective batch size: {batch_size}\n"
+                + "=" * 40
+                + "\n"
+            )
             logger.info(f"ft_spec = {ft_spec}")
 
             model_ft_specs = []
             for model_id in self.__model_streams:
-                model_name = model_id.split('@')[0]
-                num_dp = self.__model_topos[model_name].get_dim('data')
+                model_name = model_id.split("@")[0]
+                num_dp = self.__model_topos[model_name].get_dim("data")
                 model_ft_spec = copy.deepcopy(ft_spec)
                 # FIXME: batch size returned by data workers may be the number of tokens, is this correct for deepspeed config?
                 model_ft_spec.batch_size_per_device = batch_size // num_dp
                 model_ft_specs.append(model_ft_spec)
-            request_all(list(self.__model_streams.values()), 'initialize', model_ft_specs)
+            request_all(list(self.__model_streams.values()), "initialize", model_ft_specs)
             gather_all_replies(list(self.__model_streams.values()))
 
             self.__initialized = True
@@ -222,7 +238,7 @@ class MasterWorker(worker_base.Worker):
 
         # fetch data from dataloader
         fetch_data_start = time.perf_counter()
-        request_all(self.__data_streams, 'fetch', [None for _ in self.__data_streams])
+        request_all(self.__data_streams, "fetch", [None for _ in self.__data_streams])
         data_batches: List[data_api.DataBatch] = gather_all_replies(self.__data_streams)
         assert len(set(x.epoch for x in data_batches)) == 1
         assert len(set(x.epoch_step for x in data_batches)) == 1
@@ -247,22 +263,23 @@ class MasterWorker(worker_base.Worker):
         step_time_should_eval = self.__eval_step_freq_ctl.check()
         if epoch_should_eval or step_time_should_eval:
             all_model_streams = list(self.__model_streams.values())
-            request_all(all_model_streams, 'evaluate', [None for _ in all_model_streams])
+            request_all(all_model_streams, "evaluate", [None for _ in all_model_streams])
             eval_stats = dataparallel.ParallelDataBroker.gather_from(gather_all_replies(all_model_streams))
             self.logger.info(
-                f"Evaluation results at epoch {self._epoch + 1} step {self._epoch_step + 1}: {eval_stats}")
+                f"Evaluation results at epoch {self._epoch + 1} step {self._epoch_step + 1}: {eval_stats}"
+            )
 
         # Save if necessary.
         step_should_save = self.__save_step_freq_ctl.check()
         if epoch_should_save or step_should_save:
-            dp0streams = {k: v for k, v in self.__model_streams.items() if 'dp_00' in k.split('@')[1]}
+            dp0streams = {k: v for k, v in self.__model_streams.items() if "dp_00" in k.split("@")[1]}
             assert len(dp0streams) > 0
             model_save_dirs = [os.path.join(self.MODEL_SAVE_ROOT, k) for k in dp0streams]
-            request_all(list(dp0streams.values()), 'save', model_save_dirs)
+            request_all(list(dp0streams.values()), "save", model_save_dirs)
             gather_all_replies(list(dp0streams.values()))
 
         if self._epoch >= self.__total_train_epochs:
-            raise RuntimeError(f"Training completes! Yeah!!!")
+            raise ExperimentComplete(f"Training completes! Yeah!!!")
 
         # Main execution steps.
         execution_start = time.perf_counter()
@@ -270,20 +287,20 @@ class MasterWorker(worker_base.Worker):
         tasks = []
         for i, rpc in enumerate(self.__model_rpcs):
             concerned_streams = {
-                k: v
-                for k, v in self.__model_streams.items() if k.startswith(rpc.model_name)
+                k: v for k, v in self.__model_streams.items() if k.startswith(rpc.model_name)
             }
             topo = self.__model_topos[rpc.model_name]
             reorg_streams = []
-            for dp_i in range(topo.get_dim('data')):
+            for dp_i in range(topo.get_dim("data")):
                 dp_i_streams = [
-                    v for k, v in concerned_streams.items() if f'dp_{dp_i:02d}' in k.split('@')[1]
+                    v for k, v in concerned_streams.items() if f"dp_{dp_i:02d}" in k.split("@")[1]
                 ]
                 assert len(dp_i_streams) > 0
                 reorg_streams.append(dp_i_streams)
 
             task = self.__event_loop.create_task(
-                model_rpc_func(rpc, futures, self.__rpc_parents[i], self._data_registry, reorg_streams))
+                model_rpc_func(rpc, futures, self.__rpc_parents[i], self._data_registry, reorg_streams)
+            )
             tasks.append(task)
 
         self.__event_loop.run_until_complete(asyncio.gather(*tasks, *futures.values()))
@@ -310,6 +327,6 @@ class MasterWorker(worker_base.Worker):
             logger.info(f"avg #e2e# time *{np.mean(self.e2e_time_history):.3f}*")
             for i, level_time_history in self.level_time_history.items():
                 logger.info(f"avg #level{i+1}# time *{np.mean(level_time_history):.3f}*")
-            raise RuntimeError(f"Benchmark completes! Yeah!!!")
+            raise ExperimentComplete(f"Benchmark completes! Yeah!!!")
 
         return worker_base.PollResult(sample_count=bs, batch_count=1)
