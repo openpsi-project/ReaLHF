@@ -26,7 +26,7 @@ if __name__ == "__main__":
         if args.gpu:
             cmd += f" --build-arg base_image=nvcr.io/nvidia/pytorch:{args.tv}-py3"
         else:
-            cmd += f" --build-arg base_image=ubuntu:22.04"
+            cmd += f".cpu --build-arg base_image=ubuntu:22.04"
         if args.rebuild:
             cmd += " --no-cache "
         cmd += " /local/fw/packages/docker"
