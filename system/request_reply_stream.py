@@ -52,7 +52,6 @@ class ReplyServer:
 
 
 class IpRequestClient(RequestClient):
-
     def __init__(self, address, serialization_method):
         self.__context = zmq.Context(io_threads=ZMQ_IO_THREADS)
         self.__socket = self.__context.socket(zmq.REQ)
@@ -67,12 +66,13 @@ class IpRequestClient(RequestClient):
             assert isinstance(payload.data, namedarray.NamedArray), type(payload.data)
             payload.data = namedarray.recursive_apply(payload.data, lambda x: x.cpu().numpy())
             payload.data = namedarray.dumps(payload.data, method=self.__serialization_method)
-            encoding = b'01'
+            encoding = b"01"
         else:
             payload.data = [pickle.dumps(payload.data)]
-            encoding = b'00'
+            encoding = b"00"
         self.__socket.send_multipart(
-            [pickle.dumps(tik), payload.handle_name.encode('ascii'), encoding] + payload.data)
+            [pickle.dumps(tik), payload.handle_name.encode("ascii"), encoding] + payload.data
+        )
 
     def poll_reply(self, block: bool = False) -> Reply:
         try:
@@ -81,10 +81,10 @@ class IpRequestClient(RequestClient):
             raise NoMessage()
 
         send_time = pickle.loads(time_bytes)
-        if encoding == b'01':
+        if encoding == b"01":
             data = namedarray.loads(data)
             data = namedarray.recursive_apply(data, lambda x: torch.from_numpy(x))
-        elif encoding == b'00':
+        elif encoding == b"00":
             data = pickle.loads(data[0])
         else:
             raise NotImplementedError()
@@ -93,7 +93,6 @@ class IpRequestClient(RequestClient):
 
 
 class IpReplyServer(ReplyServer):
-
     def __init__(self, serialization_method):  # auto find port
         self.__context = zmq.Context(io_threads=ZMQ_IO_THREADS)
         self.__socket = self.__context.socket(zmq.REP)
@@ -106,16 +105,17 @@ class IpReplyServer(ReplyServer):
     def poll_request(self, block: bool = False) -> Request:
         try:
             time_bytes, handle_name, encoding, *data = self.__socket.recv_multipart(
-                flags=0 if block else zmq.NOBLOCK)
+                flags=0 if block else zmq.NOBLOCK
+            )
         except zmq.ZMQError:
             raise NoMessage()
 
         send_time = pickle.loads(time_bytes)
-        handle_name = handle_name.decode('ascii')
-        if encoding == b'01':
+        handle_name = handle_name.decode("ascii")
+        if encoding == b"01":
             data = namedarray.loads(data)
             data = namedarray.recursive_apply(data, lambda x: torch.from_numpy(x))
-        elif encoding == b'00':
+        elif encoding == b"00":
             data = pickle.loads(data[0])
         else:
             raise NotImplementedError()
@@ -128,17 +128,17 @@ class IpReplyServer(ReplyServer):
             assert isinstance(payload.data, namedarray.NamedArray), type(payload.data)
             payload.data = namedarray.recursive_apply(payload.data, lambda x: x.cpu().numpy())
             payload.data = namedarray.dumps(payload.data, method=self.__serialization_method)
-            encoding = b'01'
+            encoding = b"01"
         else:
             payload.data = [pickle.dumps(payload.data)]
-            encoding = b'00'
+            encoding = b"00"
         self.__socket.send_multipart([pickle.dumps(tik), encoding] + payload.data)
 
 
 class NameResolvingRequestClient(IpRequestClient):
-
-    def __init__(self, experiment_name, trial_name, stream_name,
-                 serialization_method):  # name should be formatted as {from_worker_name}_{to_worker_name}
+    def __init__(
+        self, experiment_name, trial_name, stream_name, serialization_method
+    ):  # name should be formatted as {from_worker_name}_{to_worker_name}
         # post address
         name = names.request_reply_stream(experiment_name, trial_name, stream_name)
         address = name_resolve.wait(name, timeout=15)
@@ -146,24 +146,27 @@ class NameResolvingRequestClient(IpRequestClient):
 
 
 class NameResolvingReplyServer(IpReplyServer):
-
     def __init__(self, experiment_name, trial_name, stream_name, serialization_method):
         super().__init__(serialization_method)
         name = names.request_reply_stream(experiment_name, trial_name, stream_name)
         name_resolve.add(name=name, value=self.address)
 
 
-def make_request_client(worker_info: api.config.WorkerInformation,
-                        config: Union[str, api.config.RequestReplyStream]):
+def make_request_client(
+    worker_info: api.config.WorkerInformation, config: Union[str, api.config.RequestReplyStream]
+):
     if isinstance(config, str):
         config = api.config.RequestReplyStream(stream_name=config)
-    return NameResolvingRequestClient(worker_info.experiment_name, worker_info.trial_name, config.stream_name,
-                                      config.serialization_method)
+    return NameResolvingRequestClient(
+        worker_info.experiment_name, worker_info.trial_name, config.stream_name, config.serialization_method
+    )
 
 
-def make_reply_server(worker_info: api.config.WorkerInformation,
-                      config: Union[str, api.config.RequestReplyStream]):
+def make_reply_server(
+    worker_info: api.config.WorkerInformation, config: Union[str, api.config.RequestReplyStream]
+):
     if isinstance(config, str):
         config = api.config.RequestReplyStream(stream_name=config)
-    return NameResolvingReplyServer(worker_info.experiment_name, worker_info.trial_name, config.stream_name,
-                                    config.serialization_method)
+    return NameResolvingReplyServer(
+        worker_info.experiment_name, worker_info.trial_name, config.stream_name, config.serialization_method
+    )
