@@ -197,10 +197,11 @@ class WPSActorInterface(api.model.ModelInterface):
         else:
             max_token_len = module.generation_config.max_length
 
+        prompt_lens = data.prompt_att_mask.sum(1)
         data = recursive_apply(data, lambda x: x.to(model.device))
         seq = module.generate(
-            data.prompts,
-            attention_mask=data.prompt_att_mask,
+            data.prompts,  # NOTE: left-pad
+            attention_mask=data.prompt_att_mask,  # NOTE: left-pad
             generation_config=module.generation_config,
             use_cache=True,
         )
@@ -210,7 +211,12 @@ class WPSActorInterface(api.model.ModelInterface):
         pad_length = max_token_len - seq.shape[1]
         if pad_length > 0:
             seq = torch.nn.functional.pad(seq, pad=(0, pad_length), mode='constant', value=pad_token_id)
+        # NOTE
         attention_mask = torch.logical_and(seq.not_equal(pad_token_id), (seq.not_equal(eos_token_id))).long()
+        eos_indices = attention_mask.shape[1] - torch.argmax((attention_mask.flip(1) != 0).float(), dim=1)
+        eos_indices.clip_(max=attention_mask.shape[1] - 1)
+        batch_indices = torch.arange(attention_mask.shape[0], device=model.device, dtype=torch.long)
+        attention_mask[batch_indices, eos_indices] = 1
 
         module.eval()
         logits: torch.FloatTensor = module(input_ids=seq, attention_mask=attention_mask).logits.float()
@@ -219,10 +225,18 @@ class WPSActorInterface(api.model.ModelInterface):
                            top_p=module.generation_config.top_p,
                            inplace=True,
                            ordered=False)
-        prompt_len = data.prompt_att_mask.shape[1]
-        if module.generation_config.min_new_tokens > 0:
-            logits[:, prompt_len - 1:prompt_len + module.generation_config.min_new_tokens - 1,
-                   model.tokenizer.eos_token_id] = torch.finfo(logits.dtype).min
+        bs = prompt_lens.shape[0]
+        # NOTE
+        if module.generation_config.min_new_tokens is not None and module.generation_config.min_new_tokens > 0:
+            prompt_padded_len = data.prompts.shape[1]
+            logits[:, prompt_padded_len - 1:prompt_padded_len - 1 + module.generation_config.min_new_tokens,
+                   eos_token_id] = torch.finfo(torch.float32).min
+        else:  # use min_length instead
+            for i in range(bs):
+                prompt_len = prompt_lens[i]
+                if module.generation_config.min_length > prompt_len:
+                    logits[i, prompt_len - 1:module.generation_config.min_length - 1,
+                           eos_token_id] = torch.finfo(torch.float32).min
         logits_ignoring_mask = logits == torch.finfo(logits.dtype).min
         logp = gather_shifted_log_probs(logits, seq)
 
@@ -265,15 +279,13 @@ class WPSActorInterface(api.model.ModelInterface):
         ref_logp: torch.Tensor = sample['ref_logp']
 
         prompt_len = sample['prompts'].size()[-1]
+        loss_mask = sample['attention_mask'].clone()
+        loss_mask[:, :prompt_len] = 0
+        loss_mask = loss_mask[:, 1:]
         shifted_start = prompt_len - 1
-        loss_mask = sample['attention_mask'][:, 1:].clone()
-        loss_mask[:, :shifted_start] = 0
 
         eos_indices, seq_no_eos_mask = get_eos_indices(sample['input_ids'][:, prompt_len:], tokenizer)
         eos_indices = eos_indices + prompt_len
-        for i in range(eos_indices.shape[0]):
-            if not seq_no_eos_mask[i]:
-                loss_mask[i, eos_indices[i] - 1] = 1
 
         kl_rewards, rewards = ppo_functional.compute_rewards(self.kl_adapter.value, self.max_reward_clip,
                                                              old_logp, ref_logp, sample['rewards'],
@@ -442,15 +454,13 @@ class WPSCriticInterface(api.model.ModelInterface):
         ref_logp: torch.Tensor = sample['ref_logp']
 
         prompt_len = sample['prompts'].size()[-1]
+        loss_mask = sample['attention_mask'].clone()
+        loss_mask[:, :prompt_len] = 0
+        loss_mask = loss_mask[:, 1:]
         shifted_start = prompt_len - 1
-        loss_mask = sample['attention_mask'][:, 1:].clone()
-        loss_mask[:, :shifted_start] = 0
 
         eos_indices, seq_no_eos_mask = get_eos_indices(sample['input_ids'][:, prompt_len:], tokenizer)
         eos_indices = eos_indices + prompt_len
-        for i in range(eos_indices.shape[0]):
-            if not seq_no_eos_mask[i]:
-                loss_mask[i, eos_indices[i] - 1] = 1
 
         old_values = sample['values']
         kl_rewards, rewards = ppo_functional.compute_rewards(self.kl_adapter.value, self.max_reward_clip,

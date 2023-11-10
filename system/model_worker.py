@@ -53,8 +53,6 @@ class ModelWorker(worker_base.Worker):
 
         seeding.set_random_seed(cfg.seed)
 
-        self.__stream = request_reply_stream.make_reply_server(cfg.worker_info, cfg.stream)
-
         # Reveal DDP identity of this worker to world.
         gpu_utils.reveal_ddp_identity(self.__experiment_name, self.__trial_name, self.model_name,
                                       self.__worker_index)
@@ -69,17 +67,19 @@ class ModelWorker(worker_base.Worker):
 
     def __lazy_setup(self):
         """Setup pytorch ddp processes, and algorithms."""
+        self.__stream = request_reply_stream.make_stream(self.config.worker_info, self.config.stream)
+
         self.__world_size, self.__ddp_rank, local_gpu_id = gpu_utils.setup_ddp(
             self.__experiment_name, self.__trial_name, self.model_name, self.__worker_index)
 
         self.logger.info(
             f"SetUp Information - Model worker index {self.__worker_index}"
-            f" type \"{self.config.model_name}\" located at {socket.gethostname()} GPU {local_gpu_id}.")
+            f' type "{self.config.model_name}" located at {socket.gethostname()} GPU {local_gpu_id}.')
 
         if self.config.backend.type_ in ["ds_train", "ds_inference"]:
             self.logger.info("deepspeed init distributed on model worker")
             deepspeed.init_distributed()
-        self.__device = torch.device('cuda:0')
+        self.__device = torch.device("cuda:0")
 
         self.__model = api.model.make_model(
             self.config.model,
@@ -95,7 +95,7 @@ class ModelWorker(worker_base.Worker):
                     d,
                     self.config.seed,
                     self.config.dp_rank,
-                    self.config.topo.get_dim('data'),
+                    self.config.topo.get_dim("data"),
                     self.__model.tokenizer,
                     self.config.worker_info.experiment_name,
                     self.config.worker_info.trial_name,
@@ -118,7 +118,7 @@ class ModelWorker(worker_base.Worker):
             self.__ddp_env_resolved = True
 
         try:
-            request: request_reply_stream.Request = self.__stream.poll_request()
+            request: request_reply_stream.Payload = self.__stream.poll()
         except request_reply_stream.NoMessage:
             return worker_base.PollResult(0, 0)
 
@@ -127,24 +127,24 @@ class ModelWorker(worker_base.Worker):
             self.logger.info(f"Model worker {self.model_name} received request {request.handle_name}.")
         try:
             worker_identifier = f"{self.model_name}_{self.__ddp_rank}"
-            if request.handle_name == 'initialize':
+            if request.handle_name == "initialize":
                 self.__model = self.__backend.initialize(self.__model, request.data)
                 res = None
-            elif request.handle_name == 'save':
+            elif request.handle_name == "save":
                 res = self.__interface.save(self.__model, request.data)  # -> None
-            elif request.handle_name == 'inference':
+            elif request.handle_name == "inference":
                 time_mark_ms(f"{self.model_name}_inference_start", worker_identifier)
                 res = self.__interface.inference(self.__model, request.data)  # -> NamedArray
                 time_mark_ms(f"{self.model_name}_inference_end", worker_identifier)
-            elif request.handle_name == 'train_step':
+            elif request.handle_name == "train_step":
                 time_mark_ms(f"{self.model_name}_train_start", worker_identifier)
                 res = self.__interface.train_step(self.__model, request.data)  # -> Dict
                 time_mark_ms(f"{self.model_name}_train_end", worker_identifier)
-            elif request.handle_name == 'generate':
+            elif request.handle_name == "generate":
                 time_mark_ms(f"{self.model_name}_generate_start", worker_identifier)
                 res = self.__interface.generate(self.__model, request.data)  # -> NamedArray
                 time_mark_ms(f"{self.model_name}_generate_end", worker_identifier)
-            elif request.handle_name == 'evaluate':
+            elif request.handle_name == "evaluate":
                 res = self.__interface.evaluate(self.__model, self.__eval_dataloader)  # -> Dict
             else:
                 raise NotImplementedError(f"Unknown request type: {request.handle_name}.")
@@ -156,8 +156,10 @@ class ModelWorker(worker_base.Worker):
             self.logger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
                              f" in ${time.perf_counter() - tik:.4f}$s")
 
-        reply = request_reply_stream.Reply(data=res)
-        self.__stream.post_reply(reply)
+        reply = request_reply_stream.Payload(request_id=request.request_id,
+                                             handle_name=request.handle_name,
+                                             data=res)
+        self.__stream.post(reply)
 
         if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
             # following huggingface trl # ALWAYS COST 0.3+ SEC

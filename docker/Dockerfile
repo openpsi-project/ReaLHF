@@ -11,14 +11,14 @@ RUN apt update
 RUN apt install -y libpgm-dev net-tools python3-opencv ffmpeg libsm6 libxext6 python3-pip pkg-config libopenblas-base libopenmpi-dev
 
 RUN pip3 install -U pip
-# RUN pip3 config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+# RUN pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
-RUN pip3 install torch
-RUN pip3 install -U ray[default,serve,data]
-RUN pip3 install -U transformers huggingface_hub datasets accelerate bitsandbytes
-RUN pip3 install -U deepspeed
+RUN pip3 install torch -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip3 install -U ray[default,serve,data] -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip3 install -U transformers huggingface_hub datasets accelerate bitsandbytes -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip3 install -U deepspeed -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy h5py ninja packaging tensorboardx sentencepiece numba
+RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy h5py ninja packaging tensorboardx sentencepiece numba viztracer[full] pyzmq -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 COPY flash_attn-2.3.3+cu122torch2.1cxx11abiTRUE-cp310-cp310-linux_x86_64.whl /flash_attn-2.3.3+cu122torch2.1cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
 RUN pip3 install /flash_attn-2.3.3+cu122torch2.1cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
@@ -42,4 +42,3 @@ ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 # RUN pip3 install -e /tools/TransformerEngine
 # COPY ./transformers /tools/transformers
 # RUN pip3 install -e /tools/transformers
-RUN pip3 install -U viztracer[full] -i https://mirrors.aliyun.com/pypi/simple/

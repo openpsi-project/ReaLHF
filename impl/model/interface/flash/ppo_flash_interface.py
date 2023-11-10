@@ -45,6 +45,8 @@ class PackedActorInterface(api.model.ModelInterface):
 
     enable_save: bool = True
 
+    force_no_logits_mask: bool = False
+
     def __post_init__(self):
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
@@ -99,13 +101,13 @@ class PackedActorInterface(api.model.ModelInterface):
             # Prompts are left-padded. Besides, prompt_log_probs is one-step shorter than prompts.
             prompts_list.append(prompts[i, prompt_max_len - prompt_len:])
             prompt_log_probs_list.append(logprobs.new_zeros(prompt_len - 1))
-            if logits_mask is not None:
+            if not self.force_no_logits_mask and logits_mask is not None:
                 prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len - 1, logits_mask.shape[-1])))
 
             # Generated tokens are right-padded.
             gen_tokens_list.append(gen_tokens[i, :gen_len])
             gen_log_probs_list.append(logprobs[i, :gen_len])
-            if logits_mask is not None:
+            if not self.force_no_logits_mask and logits_mask is not None:
                 gen_logits_mask_list.append(
                     torch.cat([logits_mask[i, :gen_len],
                                logits_mask.new_ones(1, logits_mask.shape[-1])]))
@@ -122,7 +124,7 @@ class PackedActorInterface(api.model.ModelInterface):
         assert packed_seq.shape[0] == packed_logprobs.shape[0] + bs, (packed_seq.shape, packed_logprobs.shape,
                                                                       bs)
         packed_logits_mask = None
-        if gen_logits_mask_list:
+        if not self.force_no_logits_mask and gen_logits_mask_list:
             packed_logits_mask = torch.cat(
                 list(itertools.chain.from_iterable(zip(prompt_logits_mask_list, gen_logits_mask_list))))
 
@@ -137,7 +139,7 @@ class PackedActorInterface(api.model.ModelInterface):
             packed_seq=packed_seq,
             cu_seqlens=cu_seqlens,
             packed_logprobs=packed_logprobs.float(),
-            packed_logits_mask=packed_logits_mask,
+            packed_logits_mask=packed_logits_mask if not self.force_no_logits_mask else None,
             prompt_mask=prompt_mask,
         )
         return recursive_apply(from_dict(res), lambda x: x.cpu())
@@ -155,7 +157,7 @@ class PackedActorInterface(api.model.ModelInterface):
         logits: torch.FloatTensor = module(packed_input_ids=data['packed_seq'],
                                            cu_seqlens=cu_seqlens,
                                            max_seqlen=max_seqlen).logits.float()
-        if data['packed_logits_mask'] is not None:
+        if 'packed_logits_mask' in data and data['packed_logits_mask'] is not None:
             logits.masked_fill_(data['packed_logits_mask'].logical_not(), torch.finfo(logits.dtype).min)
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data['packed_seq'])
         return from_dict(dict(logprobs=logprobs.cpu()))
@@ -181,8 +183,7 @@ class PackedActorInterface(api.model.ModelInterface):
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
 
-        loss_mask = (1 - prompt_mask.float()) * (packed_input_ids != tokenizer.pad_token_id).logical_and(
-            packed_input_ids != tokenizer.eos_token_id).float()
+        loss_mask = 1 - prompt_mask.float()
         shift_one_indices = torch.cat([
             torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
             for i in range(cu_seqlens.shape[0] - 1)
@@ -288,7 +289,7 @@ class PackedActorInterface(api.model.ModelInterface):
                 prompt_mask=data['prompt_mask'],
                 seq_no_eos_mask=data['seq_no_eos_mask'],
                 version_steps=model.version.global_step,
-                logits_mask=data['packed_logits_mask'],
+                logits_mask=data['packed_logits_mask'] if 'packed_logits_mask' in data else None,
             )
             for k, v in stats.items():
                 train_stats[k] += v
@@ -348,12 +349,10 @@ class PackedCriticInterface(api.model.ModelInterface):
                                            cu_seqlens=cu_seqlens,
                                            max_seqlen=max_seqlen).float()
         seq_no_eos_mask = data['seq_no_eos_mask']
-        offset = 0
         for i in range(seq_no_eos_mask.shape[0]):
             if not seq_no_eos_mask[i]:
                 # Set value at the EOS token to be zero.
-                scores[offset + input_lens[i] - 1] = 0.0
-            offset += input_lens[i]
+                scores[cu_seqlens[i + 1] - 1] = 0.0
         return from_dict(dict(scores=scores.cpu()))
 
     def _ppo_critic_step(
@@ -376,8 +375,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
 
-        loss_mask = (1 - prompt_mask.float()) * (packed_input_ids != tokenizer.pad_token_id).logical_and(
-            packed_input_ids != tokenizer.eos_token_id).float()
+        loss_mask = 1 - prompt_mask.float()
         shift_one_indices = torch.cat([
             torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
             for i in range(cu_seqlens.shape[0] - 1)

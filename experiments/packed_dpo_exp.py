@@ -143,6 +143,7 @@ class PackedDPOExperiment(Experiment):
                 tokenizer_path=base_model_path,
             ),
         )
+        # model = Model("flash_mqat_clm_hf", args=dict(model_path=base_model_path, from_type='gpt2'))
         ref_model = copy.deepcopy(model)
         if self.use_lora:
             model.wrappers = [
@@ -189,7 +190,7 @@ class PackedDPOExperiment(Experiment):
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=10,
-            save_frequency_epochs=1,
+            save_frequency_epochs=None,
             save_frequency_seconds=None,
             eval_frequency_epochs=None,
             model_rpcs=[dpo, ref_inf],

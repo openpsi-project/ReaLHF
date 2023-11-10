@@ -11,26 +11,35 @@ rollout = ModelRPC(
     ModelInterfaceType.GENERATE,
     input_data=["prompts", "prompt_att_mask"],
     output_data=[
-        "seq_no_eos_mask", 'packed_seq', 'cu_seqlens', 'packed_logprobs', 'packed_logits_mask', 'prompt_mask'
+        "seq_no_eos_mask",
+        "packed_seq",
+        "cu_seqlens",
+        "packed_logprobs",
+        "packed_logits_mask",
+        "prompt_mask",
     ],
 )
 inf_reward = ModelRPC(
     "reward",
     ModelInterfaceType.INFERENCE,
     input_data=["packed_seq", "cu_seqlens"],
-    input_key_remap={'packed_seq': "packed_input_ids"},
+    input_key_remap={"packed_seq": "packed_input_ids"},
     output_data=["scores"],
     output_key_remap={"scores": "rewards"},
-    dp_broker_type='packed',
+    dp_broker_type="packed",
 )
 
 inf_ref_logits = ModelRPC(
     "ref",
     ModelInterfaceType.INFERENCE,
-    input_data=["packed_seq", "cu_seqlens", "packed_logits_mask"],
+    input_data=[
+        "packed_seq",
+        "cu_seqlens",
+        "packed_logits_mask",
+    ],
     output_data=["logprobs"],
     output_key_remap={"logprobs": "packed_ref_logprobs"},
-    dp_broker_type='packed',
+    dp_broker_type="packed",
 )
 
 inf_values = ModelRPC(
@@ -39,7 +48,7 @@ inf_values = ModelRPC(
     input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
     output_data=["scores"],
     output_key_remap={"scores": "values"},
-    dp_broker_type='packed',
+    dp_broker_type="packed",
 )
 
 train_actor = ModelRPC(
@@ -54,10 +63,10 @@ train_actor = ModelRPC(
         "values",
         "prompt_mask",
         "seq_no_eos_mask",
-        'packed_logits_mask',
+        "packed_logits_mask",
     ],
     log_return_value=True,
-    dp_broker_type='packed',
+    dp_broker_type="packed",
 )
 
 train_critic = ModelRPC(
@@ -73,7 +82,7 @@ train_critic = ModelRPC(
         "prompt_mask",
         "seq_no_eos_mask",
     ],
-    dp_broker_type='packed',
+    dp_broker_type="packed",
     log_return_value=True,
 )
 
@@ -85,7 +94,7 @@ class PackedPPOExperiment(Experiment):
         n_actors=1,
         n_critics=1,
         seed=1,
-        base_model: str = 'gpt2',
+        base_model: str = "gpt2",
         train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl",
     ):
         self.n_actors = n_actors
@@ -121,7 +130,7 @@ class PackedPPOExperiment(Experiment):
                         cpu=4,
                         gpu=1,
                         mem=60000,
-                        nodelist='frl8a140',
+                        nodelist="frl8a139",
                     ),
                 ),
                 TasksGroup(
@@ -130,7 +139,7 @@ class PackedPPOExperiment(Experiment):
                         cpu=4,
                         gpu=1,
                         mem=60000,
-                        nodelist='frl8a139',
+                        nodelist="frl8a140",
                     ),
                 ),
                 TasksGroup(
@@ -139,21 +148,21 @@ class PackedPPOExperiment(Experiment):
                         cpu=4,
                         gpu=0.5,
                         mem=30000,
-                        nodelist='frl8a139',
+                        nodelist="frl8a140",
                     ),
-                )
+                ),
             ],
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        if self.base_model == 'starcoder':
+        if self.base_model == "starcoder":
             base_model_path = "/data/aigc/public/starcoder-16bit"
-        elif self.base_model == 'gpt2':
+        elif self.base_model == "gpt2":
             base_model_path = "/lustre/fw/pretrained/gpt2-large/"
         else:
             raise NotImplementedError()
-        sft_model_path = "/data/aigc/llm/checkpoints/fw/senti-sft-pos-s42/run20231031/default@pp_00-mp_00-dp_00/epoch8step0/"
-        rw_model_path = "/data/aigc/llm/checkpoints/fw/flash-rw-paired-s42/run20231101/default@pp_00-mp_00-dp_00/epoch0step39/"
+        sft_model_path = "/lustre/aigc/llm/checkpoints/fw/senti-sft-pos-s42/run20231031/default@pp_00-mp_00-dp_00/epoch8step0/"
+        rw_model_path = "/lustre/aigc/llm/checkpoints/fw/flash-rw-paired-s42/run20231101/default@pp_00-mp_00-dp_00/epoch0step39/"
 
         rw_output_scaling = 1.0
         rw_output_bias = 0.0
@@ -163,7 +172,7 @@ class PackedPPOExperiment(Experiment):
         max_answer_len = 512 - max_prompt_len
 
         dataset = Dataset(
-            'prompt',
+            "prompt",
             args=dict(
                 dataset_path=self.train_dataset_path,
                 max_prompt_len=max_prompt_len,
@@ -171,7 +180,7 @@ class PackedPPOExperiment(Experiment):
             ),
         )
         dataloader = DataLoader(
-            'default',
+            "default",
             args=dict(
                 shuffle=True,
                 drop_last=True,
@@ -210,7 +219,7 @@ class PackedPPOExperiment(Experiment):
             "flash_mqat_critic",
             args=dict(
                 model_path=rw_model_path,
-                from_type='self',
+                from_type="self",
                 tokenizer_path=base_model_path,
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
@@ -218,32 +227,32 @@ class PackedPPOExperiment(Experiment):
         )
 
         actor_backend = ModelBackend(
-            'ds_train',
+            "ds_train",
             args=dict(
-                optimizer_name='adam',
+                optimizer_name="adam",
                 optimizer_config=dict(
                     lr=9.65e-6,
                     weight_decay=0.0,
                     eps=1e-5,
                     betas=(0.9, 0.95),
                 ),
-                lr_scheduler_type='linear',
+                lr_scheduler_type="linear",
                 warmup_steps_proportion=0.075,
                 min_lr_ratio=0.0,
                 zero_stage=2,
             ),
         )
         critic_backend = ModelBackend(
-            'ds_train',
+            "ds_train",
             args=dict(
-                optimizer_name='adam',
+                optimizer_name="adam",
                 optimizer_config=dict(
                     lr=5e-6,
                     weight_decay=0.0,
                     eps=1e-5,
                     betas=(0.9, 0.95),
                 ),
-                lr_scheduler_type='linear',
+                lr_scheduler_type="linear",
                 warmup_steps_proportion=0.075,
                 min_lr_ratio=0.0,
                 zero_stage=2,
@@ -252,7 +261,7 @@ class PackedPPOExperiment(Experiment):
                 enable_fp16=True,
             ),
         )
-        ref_backend = rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=True))
+        ref_backend = rw_backend = ModelBackend("ds_inference", args=dict(enable_fp16=True))
 
         ppo_kwargs = dict(
             n_minibatches=8,
@@ -265,28 +274,29 @@ class PackedPPOExperiment(Experiment):
             adaptive_kl_ctl=False,
         )
         actor_interface = ModelInterface(
-            'flash_actor',
+            "flash_actor",
             args={
                 **copy.deepcopy(ppo_kwargs),
                 "generation_config": generation_kwargs,
                 "early_stop_imp_ratio": 5.0,
+                # "force_no_logits_mask": True,
             },
         )
         ref_interface = copy.deepcopy(actor_interface)
-        ref_interface.args['enable_save'] = False
+        ref_interface.args["enable_save"] = False
         critic_interface = ModelInterface(
-            'flash_critic',
+            "flash_critic",
             args=copy.deepcopy(ppo_kwargs),
         )
-        rw_interface = ModelInterface('flash_paired_rw', args=dict(enable_save=False))
+        rw_interface = ModelInterface("flash_paired_rw", args=dict(enable_save=False))
 
-        model_worker = [
+        model_worker = ([
             ModelWorker(
                 seed=self.seed,
                 model=actor_model,
                 backend=actor_backend,
                 interface=actor_interface,
-                model_name='actor',
+                model_name="actor",
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_actors),
             ) for i in range(self.n_actors)
@@ -296,7 +306,7 @@ class PackedPPOExperiment(Experiment):
                 model=critic_model,
                 backend=critic_backend,
                 interface=critic_interface,
-                model_name='critic',
+                model_name="critic",
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_critics),
             ) for i in range(self.n_critics)
@@ -306,7 +316,7 @@ class PackedPPOExperiment(Experiment):
                 model=rw_model,
                 backend=rw_backend,
                 interface=rw_interface,
-                model_name='reward',
+                model_name="reward",
                 dp_rank=0,
                 topo=PipeModelDataParallelTopology(1, 1, 1),
             )
@@ -316,15 +326,15 @@ class PackedPPOExperiment(Experiment):
                 model=ref_model,
                 backend=ref_backend,
                 interface=ref_interface,
-                model_name='ref',
+                model_name="ref",
                 dp_rank=0,
                 topo=PipeModelDataParallelTopology(1, 1, 1),
             )
-        ]
+        ])
 
         return ExperimentConfig(
             total_train_epochs=4,
-            save_frequency_epochs=1,
+            save_frequency_epochs=None,
             save_frequency_steps=5,
             save_frequency_seconds=None,
             model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],

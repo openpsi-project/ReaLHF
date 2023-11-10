@@ -11,13 +11,13 @@ rollout = ModelRPC(
     "actor",
     ModelInterfaceType.GENERATE,
     input_data=["prompts", "prompt_att_mask"],
-    output_data=["seq", "logp", "attention_mask", 'logits_ignoring_mask'],
+    output_data=["seq", "logp", "attention_mask", "logits_ignoring_mask"],
 )
 inf_reward = ModelRPC(
     "reward",
     ModelInterfaceType.INFERENCE,
     input_data=["seq", "attention_mask", "prompts"],
-    input_key_remap={'seq': "input_ids"},
+    input_key_remap={"seq": "input_ids"},
     output_data=["scores"],
     output_key_remap={"scores": "rewards"},
 )
@@ -25,8 +25,8 @@ inf_reward = ModelRPC(
 inf_ref_logits = ModelRPC(
     "ref",
     ModelInterfaceType.INFERENCE,
-    input_data=["seq", "attention_mask", 'logits_ignoring_mask'],
-    input_key_remap={'seq': "input_ids"},
+    input_data=["seq", "attention_mask", "logits_ignoring_mask"],
+    input_key_remap={"seq": "input_ids"},
     output_data=["logp"],
     output_key_remap={"logp": "ref_logp"},
 )
@@ -35,7 +35,7 @@ inf_values = ModelRPC(
     "critic",
     ModelInterfaceType.INFERENCE,
     input_data=["seq", "attention_mask", "prompts"],
-    input_key_remap={'seq': "input_ids"},
+    input_key_remap={"seq": "input_ids"},
     output_data=["scores"],
     output_key_remap={"scores": "values"},
 )
@@ -43,7 +43,7 @@ inf_values = ModelRPC(
 train_actor = ModelRPC(
     "actor",
     ModelInterfaceType.TRAIN_STEP,
-    input_key_remap={'seq': "input_ids"},
+    input_key_remap={"seq": "input_ids"},
     input_data=[
         "seq",
         "attention_mask",
@@ -52,14 +52,14 @@ train_actor = ModelRPC(
         "ref_logp",
         "values",
         "prompts",
-        'logits_ignoring_mask',
+        "logits_ignoring_mask",
     ],
 )
 
 train_critic = ModelRPC(
     "critic",
     ModelInterfaceType.TRAIN_STEP,
-    input_key_remap={'seq': "input_ids"},
+    input_key_remap={"seq": "input_ids"},
     input_data=[
         "seq",
         "attention_mask",
@@ -113,20 +113,21 @@ class WpsRLHFExperiment(Experiment):
                 scheduling=Scheduling.model_worker_default(
                     cpu=4,
                     gpu=1,
-                    gpu_type='geforce',
+                    gpu_type="geforce",
                     mem=60000,
-                    nodelist='frl8g134',
+                    nodelist="frl8g134",
                 ),
             ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
         if self.benchmark_only:
-            actor_path = f"{cluster_spec.fileroot}/checkpoints/1l-starcoder/"
+            actor_path = f"/lustre/meizy/models/starcoder_4l"
             rw_lora_head_path = None
         else:
             actor_path = f"{cluster_spec.fileroot}/checkpoints/starcoder/"
-            rw_lora_head_path = f"{cluster_spec.fileroot}/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
+            rw_lora_head_path = (
+                f"{cluster_spec.fileroot}/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/")
 
         self.lora_dim = 32
         self.lora_scaling = 32.0
@@ -140,14 +141,15 @@ class WpsRLHFExperiment(Experiment):
         max_answer_len = 512 - max_prompt_len
 
         dataset = Dataset(
-            'prompt',
+            "prompt",
             args=dict(
-                dataset_path=f"/lustre/fw/datasets/wps-prompts/train-small.jsonl",
+                # FIXME: this is an incorrect dataset
+                dataset_path=f"/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl",
                 max_prompt_len=max_prompt_len,
             ),
         )
         dataloader = DataLoader(
-            'default',
+            "default",
             args=dict(
                 shuffle=True,
                 drop_last=True,
@@ -185,7 +187,7 @@ class WpsRLHFExperiment(Experiment):
             ),
             wrappers=[
                 ModelWrapper(
-                    'lora',
+                    "lora",
                     args=dict(
                         lora_module_kwargs=dict(
                             lora_dim=self.lora_dim,
@@ -195,11 +197,13 @@ class WpsRLHFExperiment(Experiment):
                             #     threshold=6.0,
                             # ),
                         ),
-                        lora_keys_to_replace='attn',
-                    ))
-            ])
+                        lora_keys_to_replace="attn",
+                    ),
+                )
+            ],
+        )
         ref_model = Model(
-            'causal_lm',
+            "causal_lm",
             args=dict(
                 model_name_or_path=actor_path,
                 init_from_scratch=False,
@@ -221,7 +225,7 @@ class WpsRLHFExperiment(Experiment):
             ),
             wrappers=[
                 ModelWrapper(
-                    'lora',
+                    "lora",
                     args=dict(
                         lora_module_kwargs=dict(
                             lora_dim=self.lora_dim,
@@ -231,42 +235,44 @@ class WpsRLHFExperiment(Experiment):
                             #     threshold=6.0,
                             # ),
                         ),
-                        lora_keys_to_replace='attn',
+                        lora_keys_to_replace="attn",
                         load_lora_path=os.path.join(rw_lora_head_path, "lora.bin")
                         if not self.benchmark_only else None,
-                        lora_op_after_creation='squash',
-                    ))
-            ])
+                        lora_op_after_creation="squash",
+                    ),
+                )
+            ],
+        )
         critic_model = copy.deepcopy(rw_model)
-        critic_model.wrappers[0].args['lora_op_after_creation'] = None
+        critic_model.wrappers[0].args["lora_op_after_creation"] = None
 
         actor_backend = ModelBackend(
-            'ds_train',
+            "ds_train",
             args=dict(
-                optimizer_name='adam',
+                optimizer_name="adam",
                 optimizer_config=dict(
                     lr=2.5e-4,
                     weight_decay=0.0,
                     eps=1e-5,
                     betas=(0.9, 0.95),
                 ),
-                lr_scheduler_type='linear',
+                lr_scheduler_type="linear",
                 warmup_steps_proportion=0.075,
                 min_lr_ratio=0.0,
                 zero_stage=2,
             ),
         )
         critic_backend = ModelBackend(
-            'ds_train',
+            "ds_train",
             args=dict(
-                optimizer_name='adam',
+                optimizer_name="adam",
                 optimizer_config=dict(
                     lr=2.5e-4,
                     weight_decay=0.0,
                     eps=1e-5,
                     betas=(0.9, 0.95),
                 ),
-                lr_scheduler_type='linear',
+                lr_scheduler_type="linear",
                 warmup_steps_proportion=0.075,
                 min_lr_ratio=0.0,
                 zero_stage=2,
@@ -274,7 +280,7 @@ class WpsRLHFExperiment(Experiment):
                 offload_optimizer_state=False,
             ),
         )
-        ref_backend = rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=False))
+        ref_backend = rw_backend = ModelBackend("ds_inference", args=dict(enable_fp16=False))
 
         ppo_kwargs = dict(
             ppo_epochs=1,
@@ -287,23 +293,23 @@ class WpsRLHFExperiment(Experiment):
             max_reward_clip=20.0,
         )
         actor_interface = ref_interface = ModelInterface(
-            'wps_actor',
+            "wps_actor",
             args=copy.deepcopy(ppo_kwargs),
         )
         critic_interface = ModelInterface(
-            'wps_critic',
+            "wps_critic",
             args=copy.deepcopy(ppo_kwargs),
         )
         # critic_interface.args['mini_batch_size'] = mini_batch_size_per_device * self.n_actors // self.n_critics
-        rw_interface = ModelInterface('wps_reward_unpaired')
+        rw_interface = ModelInterface("wps_reward_unpaired")
 
-        model_worker = [
+        model_worker = ([
             ModelWorker(
                 seed=self.seed,
                 model=actor_model,
                 backend=actor_backend,
                 interface=actor_interface,
-                model_name='actor',
+                model_name="actor",
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_actors),
             ) for i in range(self.n_actors)
@@ -313,7 +319,7 @@ class WpsRLHFExperiment(Experiment):
                 model=rw_model,
                 backend=rw_backend,
                 interface=rw_interface,
-                model_name='reward',
+                model_name="reward",
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_rewards),
             ) for i in range(self.n_rewards)
@@ -323,7 +329,7 @@ class WpsRLHFExperiment(Experiment):
                 model=ref_model,
                 backend=ref_backend,
                 interface=ref_interface,
-                model_name='ref',
+                model_name="ref",
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_refs),
             ) for i in range(self.n_refs)
@@ -333,11 +339,11 @@ class WpsRLHFExperiment(Experiment):
                 model=critic_model,
                 backend=critic_backend,
                 interface=critic_interface,
-                model_name='critic',
+                model_name="critic",
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_critics),
             ) for i in range(self.n_critics)
-        ]
+        ])
 
         return ExperimentConfig(
             total_train_epochs=8 if not self.benchmark_only else 1,

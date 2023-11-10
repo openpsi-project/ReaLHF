@@ -14,10 +14,9 @@ RUN pip3 install -U pip
 # RUN pip3 config set global.index-url https://mirrors.aliyun.com/pypi/simple/
 
 RUN pip3 install torch --index-url https://download.pytorch.org/whl/cpu
-RUN pip3 install -U ray[default,serve,data]
-RUN pip3 install -U transformers huggingface_hub datasets accelerate
-RUN pip3 install -U deepspeed
+RUN pip3 install -U ray[default,serve,data] -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip3 install -U transformers huggingface_hub datasets accelerate bitsandbytes -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip3 install -U deepspeed -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy h5py ninja packaging tensorboardx sentencepiece numba viztracer[full]
-RUN pip3 install bitsandbytes zmq
+RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy h5py ninja packaging tensorboardx sentencepiece numba viztracer[full] pyzmq -i https://pypi.tuna.tsinghua.edu.cn/simple
 

@@ -446,6 +446,8 @@ class Worker:
         self.config = None
         self.__is_configured = False
 
+        self.__tracer_launched = False
+
         self._server = server
         if server is not None:
             server.register_handler("configure", self.configure)
@@ -523,7 +525,7 @@ class Worker:
         os.makedirs(os.path.dirname(self._tracer_output_file), exist_ok=True)
         self.__tracer = base.monitor.get_tracer(
             tracer_entries=int(2e6),
-            max_stack_depth=10,
+            # max_stack_depth=10,
             ignore_c_function=False,
             ignore_frozen=True,
             log_async=True,
@@ -532,7 +534,6 @@ class Worker:
         )
         self.__tracer_save_freqctrl = base.timeutil.FrequencyControl(
             frequency_seconds=TRACER_SAVE_INTERVAL_SECONDS)
-        self.__tracer_launched = False
 
         self.__is_configured = True
         self.logger.info("Configured successfully")
@@ -577,11 +578,11 @@ class Worker:
                 if not self.__running:
                     time.sleep(0.05)
                     continue
+                if not self.__is_configured:
+                    raise RuntimeError("Worker is not configured")
                 if not self.__tracer_launched:
                     self.__tracer.start()
                     self.__tracer_launched = True
-                if not self.__is_configured:
-                    raise RuntimeError("Worker is not configured")
                 start_time = time.monotonic_ns()
                 r = self._poll()
                 poll_time = (time.monotonic_ns() - start_time) / 1e9
