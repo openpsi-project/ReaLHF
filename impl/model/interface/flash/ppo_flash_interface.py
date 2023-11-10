@@ -183,8 +183,7 @@ class PackedActorInterface(api.model.ModelInterface):
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
 
-        loss_mask = (1 - prompt_mask.float()) * (packed_input_ids != tokenizer.pad_token_id).logical_and(
-            packed_input_ids != tokenizer.eos_token_id).float()
+        loss_mask = 1 - prompt_mask.float()
         shift_one_indices = torch.cat([
             torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
             for i in range(cu_seqlens.shape[0] - 1)
@@ -350,12 +349,10 @@ class PackedCriticInterface(api.model.ModelInterface):
                                            cu_seqlens=cu_seqlens,
                                            max_seqlen=max_seqlen).float()
         seq_no_eos_mask = data['seq_no_eos_mask']
-        offset = 0
         for i in range(seq_no_eos_mask.shape[0]):
             if not seq_no_eos_mask[i]:
                 # Set value at the EOS token to be zero.
-                scores[offset + input_lens[i] - 1] = 0.0
-            offset += input_lens[i]
+                scores[cu_seqlens[i+1] - 1] = 0.0
         return from_dict(dict(scores=scores.cpu()))
 
     def _ppo_critic_step(
@@ -378,8 +375,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
 
-        loss_mask = (1 - prompt_mask.float()) * (packed_input_ids != tokenizer.pad_token_id).logical_and(
-            packed_input_ids != tokenizer.eos_token_id).float()
+        loss_mask = 1 - prompt_mask.float()
         shift_one_indices = torch.cat([
             torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
             for i in range(cu_seqlens.shape[0] - 1)

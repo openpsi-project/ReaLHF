@@ -15,7 +15,7 @@ rollout = ModelRPC(
         "packed_seq",
         "cu_seqlens",
         "packed_logprobs",
-        # "packed_logits_mask",
+        "packed_logits_mask",
         "prompt_mask",
     ],
 )
@@ -35,7 +35,7 @@ inf_ref_logits = ModelRPC(
     input_data=[
         "packed_seq",
         "cu_seqlens",
-        # "packed_logits_mask",
+        "packed_logits_mask",
     ],
     output_data=["logprobs"],
     output_key_remap={"logprobs": "packed_ref_logprobs"},
@@ -63,7 +63,7 @@ train_actor = ModelRPC(
         "values",
         "prompt_mask",
         "seq_no_eos_mask",
-        # "packed_logits_mask",
+        "packed_logits_mask",
     ],
     log_return_value=True,
     dp_broker_type="packed",
@@ -129,7 +129,7 @@ class PackedPPOExperiment(Experiment):
                         cpu=4,
                         gpu=1,
                         mem=60000,
-                        nodelist="frl8a140",
+                        nodelist="frl8a139",
                     ),
                 ),
                 TasksGroup(
@@ -138,7 +138,7 @@ class PackedPPOExperiment(Experiment):
                         cpu=4,
                         gpu=1,
                         mem=60000,
-                        nodelist="frl8a139",
+                        nodelist="frl8a140",
                     ),
                 ),
                 TasksGroup(
@@ -147,7 +147,7 @@ class PackedPPOExperiment(Experiment):
                         cpu=4,
                         gpu=0.5,
                         mem=30000,
-                        nodelist="frl8a139",
+                        nodelist="frl8a140",
                     ),
                 ),
             ],
@@ -160,8 +160,8 @@ class PackedPPOExperiment(Experiment):
             base_model_path = "/lustre/fw/pretrained/gpt2-large/"
         else:
             raise NotImplementedError()
-        sft_model_path = "/data/aigc/llm/checkpoints/fw/senti-sft-pos-s42/run20231031/default@pp_00-mp_00-dp_00/epoch8step0/"
-        rw_model_path = "/data/aigc/llm/checkpoints/fw/flash-rw-paired-s42/run20231101/default@pp_00-mp_00-dp_00/epoch0step39/"
+        sft_model_path = "/lustre/aigc/llm/checkpoints/fw/senti-sft-pos-s42/run20231031/default@pp_00-mp_00-dp_00/epoch8step0/"
+        rw_model_path = "/lustre/aigc/llm/checkpoints/fw/flash-rw-paired-s42/run20231101/default@pp_00-mp_00-dp_00/epoch0step39/"
 
         rw_output_scaling = 1.0
         rw_output_bias = 0.0
@@ -279,7 +279,7 @@ class PackedPPOExperiment(Experiment):
                 **copy.deepcopy(ppo_kwargs),
                 "generation_config": generation_kwargs,
                 "early_stop_imp_ratio": 5.0,
-                "force_no_logits_mask": True,
+                # "force_no_logits_mask": True,
             },
         )
         ref_interface = copy.deepcopy(actor_interface)
@@ -341,7 +341,7 @@ class PackedPPOExperiment(Experiment):
 
         return ExperimentConfig(
             total_train_epochs=4,
-            save_frequency_epochs=1,
+            save_frequency_epochs=None,
             save_frequency_steps=5,
             save_frequency_seconds=None,
             model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
