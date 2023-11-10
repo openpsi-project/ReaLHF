@@ -6,7 +6,7 @@ import time
 import zmq
 import torch
 import numpy as np
-from system.request_reply_stream import NameResolvingReplyServer, NameResolvingRequestClient, Request, Reply
+from system.request_reply_stream import NameResolvingRequstReplyStream, Payload
 import base.name_resolve
 import base.names as names
 import base.namedarray
@@ -24,6 +24,8 @@ import base.timeutil
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("asyncio minimal")
 
+use_full_logits_mask = False
+
 serialization_method = "pickle_compress"
 exp_name = "asyncio-minimal"
 trial_name = "test"
@@ -31,25 +33,26 @@ trial_name = "test"
 base.name_resolve.clear_subtree(names.trial_root(exp_name, trial_name))
 
 
-def generate(data):
-    time.sleep(4)
-    return {
-        "seq_no_eos_mask": torch.randint(0, 2, (10,)),
-        "packed_seq": torch.randint(0, 60000, (10, 512), dtype=torch.long),
-        "cu_seqlens": torch.randint(0, 2, (11,)),
-        "packed_logprobs": torch.randn(10, 512),
-        "packed_logits_mask": torch.randint(0, 2, (10, 512, 60000), dtype=torch.bool),
-    }
+class ModelInterface:
+    def generate(data):
+        time.sleep(4)
+        return {
+            "seq_no_eos_mask": torch.randint(0, 2, (10,)),
+            "packed_seq": torch.randint(0, 60000, (10, 512), dtype=torch.long),
+            "cu_seqlens": torch.randint(0, 2, (11,)),
+            "packed_logprobs": torch.randn(10, 512),
+            "packed_logits_mask": torch.randint(0, 2, (10, 512, 60000), dtype=torch.bool)
+            if use_full_logits_mask
+            else torch.randint(0, 2, (10, 512), dtype=torch.bool),
+        }
 
+    def inference(data):
+        time.sleep(0.2)
+        return dict(logprobs=torch.randn(10, 512), scores=torch.randn(10, 512))
 
-def inference(data):
-    time.sleep(0.2)
-    return dict(logprobs=torch.randn(10, 512), scores=torch.randn(10, 512))
-
-
-def train_step(data):
-    time.sleep(2)
-    return dict()
+    def train_step(data):
+        time.sleep(2)
+        return dict()
 
 
 rollout = ModelRPC(
@@ -127,34 +130,40 @@ train_critic = ModelRPC(
 
 
 def model_worker(model_type):
-    stream = NameResolvingReplyServer(exp_name, trial_name, model_type, serialization_method)
-
     tracer = viztracer.VizTracer(
         tracer_entries=int(2e6),
-        max_stack_depth=10,
+        # max_stack_depth=10,
         ignore_frozen=True,
         min_duration=500,
         output_file=f"{model_type}.json",
     )
     tracer.start()
+    stream = NameResolvingRequstReplyStream(
+        experiment_name=exp_name,
+        trial_name=trial_name,
+        push_stream_name=model_type,
+        pull_stream_name=f"master2{model_type}",
+        serialization_method=serialization_method,
+    )
+
     ctl = base.timeutil.FrequencyControl(frequency_seconds=10)
     while True:
         try:
-            req = stream.poll_request()
+            req = stream.poll(block=False)
         except request_reply_stream.NoMessage:
             time.sleep(0.002)
             continue
         handle_name = req.handle_name
         if handle_name == "generate":
-            res = generate(req.data)
+            res = ModelInterface.generate(req.data)
         elif handle_name == "inference":
-            res = inference(req.data)
+            res = ModelInterface.inference(req.data)
         elif handle_name == "train_step":
-            res = train_step(req.data)
+            res = ModelInterface.train_step(req.data)
         else:
             raise NotImplementedError()
-        rep = Reply(base.namedarray.from_dict(res))
-        stream.post_reply(rep)
+        rep = Payload(request_id=req.request_id, handle_name=handle_name, data=res)
+        stream.post(rep)
         if ctl.check():
             tracer.save()
 
@@ -164,11 +173,11 @@ async def model_rpc_func(
     rpc_futures: Dict[str, asyncio.Future],
     parent_rpc_names: List[str],
     data_registry: Dict[str, torch.Tensor],
-    stream: request_reply_stream.RequestClient,
+    stream: request_reply_stream.RequestReplyStream,
 ):
-    logger.info(f"rpc {rpc_config.name} running")
     for parent in parent_rpc_names:
         await rpc_futures[parent]
+    logger.info(f"rpc {rpc_config.name} running")
 
     data = {}
     for k in rpc_config.input_data:
@@ -178,14 +187,17 @@ async def model_rpc_func(
             data[rpc_config.input_key_remap[k]] = data_registry[k]
     data = namedarray.from_dict(data)
 
-    stream.post_request(Request(rpc_config.interface_type.value, data))
+    req = Payload(handle_name=rpc_config.interface_type.value, data=data)
+    stream.post(req)
+    logger.debug(f"rpc {rpc_config.name} posted to stream")
     while True:
         try:
-            res = stream.poll_reply()
+            res = stream.poll()
             break
         except request_reply_stream.NoMessage:
             await asyncio.sleep(0.01)
 
+    assert res.request_id == req.request_id
     res = res.data
     for k in rpc_config.output_data:
         if k in rpc_config.output_key_remap:
@@ -200,7 +212,7 @@ async def model_rpc_func(
 def main():
     tracer = viztracer.VizTracer(
         tracer_entries=int(2e6),
-        max_stack_depth=10,
+        # max_stack_depth=10,
         ignore_frozen=True,
         min_duration=500,
         output_file="master.json",
@@ -212,14 +224,21 @@ def main():
     data_registry = {}
 
     streams = {
-        model_type: NameResolvingRequestClient(exp_name, trial_name, model_type, serialization_method)
+        model_type: NameResolvingRequstReplyStream(
+            experiment_name=exp_name,
+            trial_name=trial_name,
+            push_stream_name=f"master2{model_type}",
+            pull_stream_name=model_type,
+            serialization_method=serialization_method,
+        )
         for model_type in ["actor", "critic", "ref", "reward"]
     }
 
     event_loop = asyncio.get_event_loop()
     asyncio.set_event_loop(event_loop)
 
-    for i in range(3):
+    for i in range(5):
+        tracer.log_event(f"round{i+1}")
         logger.info(f"################ Round {i+1} running ################")
         data_registry["prompts"] = torch.randint(0, 60000, (10, 256), dtype=torch.long)
         data_registry["prompt_att_mask"] = torch.randint(0, 2, (10, 256), dtype=torch.bool)
@@ -248,5 +267,5 @@ if __name__ == "__main__":
     main()
     for p in procs:
         os.system(f"kill -9 {p.pid}")
-    os.system("viztracer --combine actor.json critic.json ref.json reward.json master.json -o result.json")
-    os.system("rm actor.json critic.json ref.json reward.json master.json")
+    # os.system("viztracer --combine actor.json critic.json ref.json reward.json master.json -o result.json")
+    # os.system("rm actor.json critic.json ref.json reward.json master.json")

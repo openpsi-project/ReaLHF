@@ -160,8 +160,9 @@ class ModelBackend:
 
 @dataclasses.dataclass
 class RequestReplyStream:
-    stream_name: str
-    serialization_method: str = 'raw_bytes'
+    push_stream_name: str
+    pull_stream_name: str
+    serialization_method: str = 'raw_compress'
 
 
 @dataclasses.dataclass
@@ -286,13 +287,13 @@ class ExperimentConfig:
             for mw in mws:
                 # Following the naming convention of deepspeed. Inner sep is '_' and outer sep is '-'.
                 model_id = f"{mw.model_name}@pp_{mw.pp_rank:02d}-mp_{mw.mp_rank:02d}-dp_{mw.dp_rank:02d}"
-                s = RequestReplyStream(model_id)
-                mw.stream = s
-                model_streams[model_id] = s
+                mw.stream = RequestReplyStream(push_stream_name=model_id, pull_stream_name=f"master2{model_id}")
+                model_streams[model_id] = RequestReplyStream(pull_stream_name=model_id, push_stream_name=f"master2{model_id}")
 
+        data_streams = []
         for i, d in enumerate(self.data_worker):
-            d.stream = RequestReplyStream(f"data_{i}")
-        data_streams = [d.stream for d in self.data_worker]
+            d.stream = RequestReplyStream(push_stream_name=f"data_{i}", pull_stream_name=f"master2data_{i}")
+            data_streams.append(RequestReplyStream(pull_stream_name=f"data_{i}", push_stream_name=f"master2data_{i}"))
 
         for w in itertools.chain(self.model_worker, self.data_worker):
             assert w.stream is not None

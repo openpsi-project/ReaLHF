@@ -30,24 +30,23 @@ class ExperimentComplete(Exception):
 
 
 def request_all(
-    streams: List[request_reply_stream.RequestClient],
+    streams: List[request_reply_stream.RequestReplyStream],
     handle_type: str,
     datas: List[namedarray.NamedArray],
 ):
     """Send request of `handle_type` to multiple streams. len(streams)==len(datas)"""
-    requests = [request_reply_stream.Request(handle_type, data) for data in datas]
+    requests = [request_reply_stream.Payload(handle_name=handle_type, data=data) for data in datas]
     logger.info(f"master worker #request_all# *end* time ${time.time_ns()}$")
     tik = time.perf_counter()
     for s, r in zip(streams, requests):
-        s.post_request(r)
+        s.post(r)
     t = time.perf_counter() - tik
-    logger.debug(f'Request "{handle_type}" time in total: '
-                 f"{t:.4f}s, {t / len(requests):.4f}s per request")
+    logger.debug(f'Request "{handle_type}" time in total: ' f"{t:.4f}s, {t / len(requests):.4f}s per request")
 
 
-def gather_all_replies(streams: List[request_reply_stream.RequestClient]) -> List[namedarray.NamedArray]:
+def gather_all_replies(streams: List[request_reply_stream.RequestReplyStream]) -> List[namedarray.NamedArray]:
     """Collect responses from multiple streams. Blocking method."""
-    responses = [s.poll_reply(block=True).data for s in streams]
+    responses = [s.poll(block=True).data for s in streams]
     logger.info(f"master worker #gather_all_replies# *end* time ${time.time_ns()}$")
     return responses
 
@@ -55,23 +54,23 @@ def gather_all_replies(streams: List[request_reply_stream.RequestClient]) -> Lis
 async def parallel_rpc(
     rpc_handle_name: str,
     data: namedarray.NamedArray,
-    streams: List[request_reply_stream.RequestClient],
+    streams: List[request_reply_stream.RequestReplyStream],
 ):
     for stream in streams:
         # NOTE: Since post_request change req.data in-place, we need to construct a new request for each stream.
-        req = request_reply_stream.Request(rpc_handle_name, data)
-        stream.post_request(req)
-    all_res = []
+        req = request_reply_stream.Payload(handle_name=rpc_handle_name, data=data)
+        stream.post(req)
+    all_res: List[request_reply_stream.Payload] = []
     for stream in streams:
         while True:
             try:
-                res = stream.poll_reply()
+                res = stream.poll()
                 break
             except request_reply_stream.NoMessage:
                 await asyncio.sleep(0.01)
         all_res.append(res)
 
-    data = [res.data for res in all_res]
+    data = [x.data for x in all_res]
     if len(data) == sum([bool(x) for x in data]):
         assert all([x == data[0] for x in data]), data
         data = data[0]
@@ -89,7 +88,7 @@ async def model_rpc_func(
     rpc_futures: Dict[str, asyncio.Future],
     parent_rpc_names: List[str],
     data_registry: Dict[str, torch.Tensor],
-    streams: List[List[request_reply_stream.RequestClient]],
+    streams: List[List[request_reply_stream.RequestReplyStream]],
 ):
     num_dp = len(streams)
 
@@ -152,14 +151,6 @@ class MasterWorker(worker_base.Worker):
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
 
-        # Streams and topos.
-        self.__model_streams: Dict[str, List[request_reply_stream.NameResolvingRequestClient]] = {
-            k: request_reply_stream.make_request_client(config.worker_info, v)
-            for k, v in config.model_streams.items()
-        }
-        self.__data_streams: List[request_reply_stream.NameResolvingRequestClient] = [
-            request_reply_stream.make_request_client(config.worker_info, s) for s in config.data_streams
-        ]
         self.__model_topos: Dict[str, topology.PipeModelDataParallelTopology] = config.model_topos
 
         # Build execution graph and initialize concurrency utilities.
@@ -172,17 +163,22 @@ class MasterWorker(worker_base.Worker):
         # Save and eval control.
         self.__total_train_epochs = config.total_train_epochs
         self.__save_step_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_seconds=config.save_frequency_seconds, frequency_steps=config.save_frequency_steps)
+            frequency_seconds=config.save_frequency_seconds, frequency_steps=config.save_frequency_steps
+        )
         self.__save_epoch_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_steps=config.save_frequency_epochs)
+            frequency_steps=config.save_frequency_epochs
+        )
 
         self.__eval_step_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_seconds=config.eval_frequency_seconds, frequency_steps=config.eval_frequency_steps)
+            frequency_seconds=config.eval_frequency_seconds, frequency_steps=config.eval_frequency_steps
+        )
         self.__eval_epoch_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_steps=config.eval_frequency_epochs)
+            frequency_steps=config.eval_frequency_epochs
+        )
 
-        self.MODEL_SAVE_ROOT = os.path.join(self.MODEL_SAVE_ROOT, config.worker_info.experiment_name,
-                                            config.worker_info.trial_name)
+        self.MODEL_SAVE_ROOT = os.path.join(
+            self.MODEL_SAVE_ROOT, config.worker_info.experiment_name, config.worker_info.trial_name
+        )
 
         # Used only for benchmark
         self.__benchmark_steps = config.benchmark_steps
@@ -191,22 +187,37 @@ class MasterWorker(worker_base.Worker):
 
     def _poll(self):
         if not self.__initialized:
+            self.__model_streams: Dict[str, List[request_reply_stream.NameResolvingRequstReplyStream]] = {
+                k: request_reply_stream.make_stream(self.config.worker_info, v)
+                for k, v in self.config.model_streams.items()
+            }
+            self.__data_streams: List[request_reply_stream.NameResolvingRequstReplyStream] = [
+                request_reply_stream.make_stream(self.config.worker_info, s) for s in self.config.data_streams
+            ]
             # Request training specification from data workers, e.g. batch size and total train steps.
             request_all(self.__data_streams, "spec", [None for _ in self.__data_streams])
             ft_specs: List[model_api.FinetuneSpec] = gather_all_replies(self.__data_streams)
             if len(set(x.steps_per_epoch for x in ft_specs)) != 1:
-                raise RuntimeError(f"steps_per_epoch not equal among data workers:"
-                                   f" {list(x.steps_per_epoch for x in ft_specs)}. "
-                                   "Consider launching less data workers.")
+                raise RuntimeError(
+                    f"steps_per_epoch not equal among data workers:"
+                    f" {list(x.steps_per_epoch for x in ft_specs)}. "
+                    "Consider launching less data workers."
+                )
             ft_spec = ft_specs[0]
             ft_spec.total_train_epochs = self.config.total_train_epochs
             ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
 
             batch_size = len(self.__data_streams) * ft_spec.batch_size_per_device
-            self.logger.info("\n\n" + "=" * 40 + f"\nTotal train epochs: {ft_spec.total_train_epochs}" +
-                             f"\nTotal train steps: {ft_spec.total_train_steps}" +
-                             f"\nSteps per epoch: {ft_spec.steps_per_epoch}" +
-                             f"\nEffective batch size: {batch_size}\n" + "=" * 40 + "\n")
+            self.logger.info(
+                "\n\n"
+                + "=" * 40
+                + f"\nTotal train epochs: {ft_spec.total_train_epochs}"
+                + f"\nTotal train steps: {ft_spec.total_train_steps}"
+                + f"\nSteps per epoch: {ft_spec.steps_per_epoch}"
+                + f"\nEffective batch size: {batch_size}\n"
+                + "=" * 40
+                + "\n"
+            )
             logger.info(f"ft_spec = {ft_spec}")
 
             model_ft_specs = []
@@ -254,7 +265,8 @@ class MasterWorker(worker_base.Worker):
             request_all(all_model_streams, "evaluate", [None for _ in all_model_streams])
             eval_stats = dataparallel.ParallelDataBroker.gather_from(gather_all_replies(all_model_streams))
             self.logger.info(
-                f"Evaluation results at epoch {self._epoch + 1} step {self._epoch_step + 1}: {eval_stats}")
+                f"Evaluation results at epoch {self._epoch + 1} step {self._epoch_step + 1}: {eval_stats}"
+            )
 
         # Save if necessary.
         step_should_save = self.__save_step_freq_ctl.check()
@@ -274,8 +286,7 @@ class MasterWorker(worker_base.Worker):
         tasks = []
         for i, rpc in enumerate(self.__model_rpcs):
             concerned_streams = {
-                k: v
-                for k, v in self.__model_streams.items() if k.startswith(rpc.model_name)
+                k: v for k, v in self.__model_streams.items() if k.startswith(rpc.model_name)
             }
             topo = self.__model_topos[rpc.model_name]
             reorg_streams = []
@@ -287,7 +298,8 @@ class MasterWorker(worker_base.Worker):
                 reorg_streams.append(dp_i_streams)
 
             task = self.__event_loop.create_task(
-                model_rpc_func(rpc, futures, self.__rpc_parents[i], self._data_registry, reorg_streams))
+                model_rpc_func(rpc, futures, self.__rpc_parents[i], self._data_registry, reorg_streams)
+            )
             tasks.append(task)
 
         self.__event_loop.run_until_complete(asyncio.gather(*tasks, *futures.values()))

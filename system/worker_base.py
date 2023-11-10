@@ -28,7 +28,6 @@ TRACER_SAVE_INTERVAL_SECONDS = 60
 
 
 class WorkerException(Exception):
-
     def __init__(self, worker_name, worker_status, scenario):
         super(WorkerException, self).__init__(f"Worker {worker_name} is {worker_status} while {scenario}")
         self.worker_name = worker_name
@@ -57,7 +56,6 @@ class NoRequstForWorker(Exception):
 
 
 class WorkerServerTaskQueue:
-
     def try_get_request(self) -> Tuple[str, Dict[str, Any]]:
         raise NotImplementedError()
 
@@ -176,18 +174,13 @@ class WorkerServer:
 
 
 class WorkerControlPanelRequester:
-
     class Future:
-
         def result(self, timeout=None):
             raise NotImplementedError()
 
-    def async_request(self,
-                      worker_name: str,
-                      address: str,
-                      command: str,
-                      wait_for_response: bool = True,
-                      **kwargs) -> Future:
+    def async_request(
+        self, worker_name: str, address: str, command: str, wait_for_response: bool = True, **kwargs
+    ) -> Future:
         raise NotImplementedError()
 
 
@@ -285,9 +278,9 @@ class WorkerControlPanel:
                 if timeout is not None:
                     timeout = max(0, deadline - time.monotonic())
                 self.__logger.info(f"Connecting to worker {name}, timeout {timeout}")
-                server_address = base.name_resolve.wait(base.names.worker(self.__experiment_name,
-                                                                          self.__trial_name, name),
-                                                        timeout=timeout)
+                server_address = base.name_resolve.wait(
+                    base.names.worker(self.__experiment_name, self.__trial_name, name), timeout=timeout
+                )
                 self.__logger.info(f"Connecting to worker {name} done")
             except TimeoutError as e:
                 if raises_timeout_error:
@@ -305,7 +298,7 @@ class WorkerControlPanel:
             Names of successfully connected workers.
         """
         name_root = base.names.worker_root(self.__experiment_name, self.__trial_name)
-        worker_names = [r[len(name_root):] for r in base.name_resolve.find_subtree(name_root)]
+        worker_names = [r[len(name_root) :] for r in base.name_resolve.find_subtree(name_root)]
         return self.connect(worker_names, timeout=0, raises_timeout_error=True)
 
     def request(self, worker_name: str, command, **kwargs) -> Any:
@@ -357,8 +350,8 @@ class WorkerControlPanel:
         deadline = time.monotonic() + (timeout or 0)
         for j in range(0, len(selected), _MAX_SOCKET_CONCURRENCY):
             sub_rs: List[WorkerControlPanel.Response] = []
-            sub_selected = selected[j:j + _MAX_SOCKET_CONCURRENCY]
-            sub_worker_kwargs = worker_kwargs[j:j + _MAX_SOCKET_CONCURRENCY]
+            sub_selected = selected[j : j + _MAX_SOCKET_CONCURRENCY]
+            sub_worker_kwargs = worker_kwargs[j : j + _MAX_SOCKET_CONCURRENCY]
             for name, kwargs in zip(sub_selected, sub_worker_kwargs):
                 address = self.__worker_addresses[name]
                 result_fut = self.__requester.async_request(name, address, command, wait_response, **kwargs)
@@ -446,6 +439,8 @@ class Worker:
         self.config = None
         self.__is_configured = False
 
+        self.__tracer_launched = False
+
         self._server = server
         if server is not None:
             server.register_handler("configure", self.configure)
@@ -502,15 +497,18 @@ class Worker:
         self.logger = logging.getLogger(r.worker_type + "-worker")
         if r.host_key is not None:
             self.__host_key(
-                base.names.worker_key(experiment_name=r.experiment_name,
-                                      trial_name=r.trial_name,
-                                      key=r.host_key))
+                base.names.worker_key(
+                    experiment_name=r.experiment_name, trial_name=r.trial_name, key=r.host_key
+                )
+            )
         if r.watch_keys is not None:
             keys = [r.watch_keys] if isinstance(r.watch_keys, str) else r.watch_keys
-            self.__watch_keys([
-                base.names.worker_key(experiment_name=r.experiment_name, trial_name=r.trial_name, key=k)
-                for k in keys
-            ])
+            self.__watch_keys(
+                [
+                    base.names.worker_key(experiment_name=r.experiment_name, trial_name=r.trial_name, key=k)
+                    for k in keys
+                ]
+            )
 
         self._tracer_output_file = os.path.join(
             base.cluster.spec.fileroot,
@@ -531,8 +529,8 @@ class Worker:
             output_file=self._tracer_output_file,
         )
         self.__tracer_save_freqctrl = base.timeutil.FrequencyControl(
-            frequency_seconds=TRACER_SAVE_INTERVAL_SECONDS)
-        self.__tracer_launched = False
+            frequency_seconds=TRACER_SAVE_INTERVAL_SECONDS
+        )
 
         self.__is_configured = True
         self.logger.info("Configured successfully")
@@ -563,9 +561,9 @@ class Worker:
     def interrupt(self):
         self.logger.info("Worker interrupted by remote control.")
         self.__set_status(WorkerServerStatus.INTERRUPTED)
-        raise WorkerException(worker_name="worker",
-                              worker_status=WorkerServerStatus.INTERRUPTED,
-                              scenario="running")
+        raise WorkerException(
+            worker_name="worker", worker_status=WorkerServerStatus.INTERRUPTED, scenario="running"
+        )
 
     def run(self):
         self._start_time_ns = time.monotonic_ns()
@@ -577,11 +575,11 @@ class Worker:
                 if not self.__running:
                     time.sleep(0.05)
                     continue
+                if not self.__is_configured:
+                    raise RuntimeError("Worker is not configured")
                 if not self.__tracer_launched:
                     self.__tracer.start()
                     self.__tracer_launched = True
-                if not self.__is_configured:
-                    raise RuntimeError("Worker is not configured")
                 start_time = time.monotonic_ns()
                 r = self._poll()
                 poll_time = (time.monotonic_ns() - start_time) / 1e9
@@ -625,12 +623,9 @@ class MappingThread:
     A mapping thread gets from up_stream_queue, process data, and puts to down_stream_queue.
     """
 
-    def __init__(self,
-                 map_fn,
-                 interrupt_flag,
-                 upstream_queue,
-                 downstream_queue: queue.Queue = None,
-                 cuda_device=None):
+    def __init__(
+        self, map_fn, interrupt_flag, upstream_queue, downstream_queue: queue.Queue = None, cuda_device=None
+    ):
         """Init method of MappingThread for Policy Workers.
 
         Args:
