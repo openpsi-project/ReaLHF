@@ -74,6 +74,7 @@ train_critic = ModelRPC(
 
 
 class WpsRLHFExperiment(Experiment):
+
     def __init__(self, n_actors=1, n_critics=1, n_rewards=1, n_refs=1, seed=1, benchmark_only=False):
         if benchmark_only:
             n_actors = n_critics = n_rewards = n_refs = 1
@@ -126,8 +127,7 @@ class WpsRLHFExperiment(Experiment):
         else:
             actor_path = f"{cluster_spec.fileroot}/checkpoints/starcoder/"
             rw_lora_head_path = (
-                f"{cluster_spec.fileroot}/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/"
-            )
+                f"{cluster_spec.fileroot}/checkpoints/fw/wps-rw-pl-s1/20230822-3/default/epoch0step0/")
 
         self.lora_dim = 32
         self.lora_scaling = 32.0
@@ -162,8 +162,7 @@ class WpsRLHFExperiment(Experiment):
                 datasets=[dataset],
                 dataloader=dataloader,
                 seed=self.seed,
-            )
-            for i in range(self.n_data_workers)
+            ) for i in range(self.n_data_workers)
         ]
 
         generation_kwargs = dict(
@@ -222,8 +221,7 @@ class WpsRLHFExperiment(Experiment):
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
                 load_v_head_path=os.path.join(rw_lora_head_path, "rw_v_head.bin")
-                if not self.benchmark_only
-                else None,
+                if not self.benchmark_only else None,
             ),
             wrappers=[
                 ModelWrapper(
@@ -239,8 +237,7 @@ class WpsRLHFExperiment(Experiment):
                         ),
                         lora_keys_to_replace="attn",
                         load_lora_path=os.path.join(rw_lora_head_path, "lora.bin")
-                        if not self.benchmark_only
-                        else None,
+                        if not self.benchmark_only else None,
                         lora_op_after_creation="squash",
                     ),
                 )
@@ -306,56 +303,47 @@ class WpsRLHFExperiment(Experiment):
         # critic_interface.args['mini_batch_size'] = mini_batch_size_per_device * self.n_actors // self.n_critics
         rw_interface = ModelInterface("wps_reward_unpaired")
 
-        model_worker = (
-            [
-                ModelWorker(
-                    seed=self.seed,
-                    model=actor_model,
-                    backend=actor_backend,
-                    interface=actor_interface,
-                    model_name="actor",
-                    dp_rank=i,
-                    topo=PipeModelDataParallelTopology(1, 1, self.n_actors),
-                )
-                for i in range(self.n_actors)
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    model=rw_model,
-                    backend=rw_backend,
-                    interface=rw_interface,
-                    model_name="reward",
-                    dp_rank=i,
-                    topo=PipeModelDataParallelTopology(1, 1, self.n_rewards),
-                )
-                for i in range(self.n_rewards)
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    model=ref_model,
-                    backend=ref_backend,
-                    interface=ref_interface,
-                    model_name="ref",
-                    dp_rank=i,
-                    topo=PipeModelDataParallelTopology(1, 1, self.n_refs),
-                )
-                for i in range(self.n_refs)
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    model=critic_model,
-                    backend=critic_backend,
-                    interface=critic_interface,
-                    model_name="critic",
-                    dp_rank=i,
-                    topo=PipeModelDataParallelTopology(1, 1, self.n_critics),
-                )
-                for i in range(self.n_critics)
-            ]
-        )
+        model_worker = ([
+            ModelWorker(
+                seed=self.seed,
+                model=actor_model,
+                backend=actor_backend,
+                interface=actor_interface,
+                model_name="actor",
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_actors),
+            ) for i in range(self.n_actors)
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=rw_model,
+                backend=rw_backend,
+                interface=rw_interface,
+                model_name="reward",
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_rewards),
+            ) for i in range(self.n_rewards)
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=ref_model,
+                backend=ref_backend,
+                interface=ref_interface,
+                model_name="ref",
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_refs),
+            ) for i in range(self.n_refs)
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=critic_model,
+                backend=critic_backend,
+                interface=critic_interface,
+                model_name="critic",
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_critics),
+            ) for i in range(self.n_critics)
+        ])
 
         return ExperimentConfig(
             total_train_epochs=8 if not self.benchmark_only else 1,

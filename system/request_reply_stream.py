@@ -1,19 +1,19 @@
 # Request-reply stream between model workers and the master worker.
 # The stream is composed of a pair of ZMQ sockets, one PUSH and one PULL, for asynchronous communication,
 # i.e., the model worker can buffer requests from the master and execute them in any order under the hood.
-from typing import Union, Optional, Dict
+from typing import Dict, Optional, Union
 import dataclasses
 import logging
 import pickle
 import socket
 import time
+import uuid
 
 import torch
 import zmq
-import uuid
 
-import api.dfg
 import api.config
+import api.dfg
 import base.name_resolve as name_resolve
 import base.namedarray as namedarray
 import base.names as names
@@ -47,6 +47,7 @@ class RequestReplyStream:
 
 
 class IpRequestReplyStream(RequestReplyStream):
+
     def __init__(self, server_address: str, serialization_method: str):
         self._context = zmq.Context(io_threads=ZMQ_IO_THREADS)
         self._send_socket = self._context.socket(zmq.PUSH)
@@ -72,21 +73,17 @@ class IpRequestReplyStream(RequestReplyStream):
         else:
             payload.data = [pickle.dumps(payload.data)]
             encoding = b"00"
-        self._send_socket.send_multipart(
-            [
-                pickle.dumps(tik),
-                payload.handle_name.encode("ascii"),
-                payload.request_id.encode("ascii"),
-                encoding,
-            ]
-            + payload.data
-        )
+        self._send_socket.send_multipart([
+            pickle.dumps(tik),
+            payload.handle_name.encode("ascii"),
+            payload.request_id.encode("ascii"),
+            encoding,
+        ] + payload.data)
 
     def poll(self, block: bool = False) -> Payload:
         try:
             time_bytes, handle_name, request_id, encoding, *data = self._recv_socket.recv_multipart(
-                flags=0 if block else zmq.NOBLOCK
-            )
+                flags=0 if block else zmq.NOBLOCK)
         except zmq.ZMQError:
             raise NoMessage()
 
@@ -106,6 +103,7 @@ class IpRequestReplyStream(RequestReplyStream):
 
 
 class NameResolvingRequstReplyStream(IpRequestReplyStream):
+
     def __init__(
         self,
         experiment_name: str,

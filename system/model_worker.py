@@ -24,6 +24,7 @@ import impl.dataset  # isort:skip
 
 
 class ModelWorker(worker_base.Worker):
+
     def __init__(self, server=None):
         super().__init__(server)
         self.config = None
@@ -53,14 +54,12 @@ class ModelWorker(worker_base.Worker):
         seeding.set_random_seed(cfg.seed)
 
         # Reveal DDP identity of this worker to world.
-        gpu_utils.reveal_ddp_identity(
-            self.__experiment_name, self.__trial_name, self.model_name, self.__worker_index
-        )
+        gpu_utils.reveal_ddp_identity(self.__experiment_name, self.__trial_name, self.model_name,
+                                      self.__worker_index)
         self.__ddp_env_resolved = False
 
         self.__clear_cache_frequency = base.timeutil.FrequencyControl(
-            frequency_steps=self.config.cuda_cache_clear_freq
-        )
+            frequency_steps=self.config.cuda_cache_clear_freq)
 
         r = self.config.worker_info
         r.model_name = cfg.model_name
@@ -71,13 +70,11 @@ class ModelWorker(worker_base.Worker):
         self.__stream = request_reply_stream.make_stream(self.config.worker_info, self.config.stream)
 
         self.__world_size, self.__ddp_rank, local_gpu_id = gpu_utils.setup_ddp(
-            self.__experiment_name, self.__trial_name, self.model_name, self.__worker_index
-        )
+            self.__experiment_name, self.__trial_name, self.model_name, self.__worker_index)
 
         self.logger.info(
             f"SetUp Information - Model worker index {self.__worker_index}"
-            f' type "{self.config.model_name}" located at {socket.gethostname()} GPU {local_gpu_id}.'
-        )
+            f' type "{self.config.model_name}" located at {socket.gethostname()} GPU {local_gpu_id}.')
 
         if self.config.backend.type_ in ["ds_train", "ds_inference"]:
             self.logger.info("deepspeed init distributed on model worker")
@@ -102,11 +99,9 @@ class ModelWorker(worker_base.Worker):
                     self.__model.tokenizer,
                     self.config.worker_info.experiment_name,
                     self.config.worker_info.trial_name,
-                    cache_root=(
-                        None if not self.config.use_dataset_cache else self.config.dataset_cahce_root
-                    ),
-                )
-                for d in self.config.eval_datasets
+                    cache_root=(None
+                                if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
+                ) for d in self.config.eval_datasets
             ]
             if len(eval_datasets) > 1:
                 eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
@@ -158,14 +153,12 @@ class ModelWorker(worker_base.Worker):
             raise e
 
         if self.is_master:
-            self.logger.info(
-                f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
-                f" in ${time.perf_counter() - tik:.4f}$s"
-            )
+            self.logger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
+                             f" in ${time.perf_counter() - tik:.4f}$s")
 
-        reply = request_reply_stream.Payload(
-            request_id=request.request_id, handle_name=request.handle_name, data=res
-        )
+        reply = request_reply_stream.Payload(request_id=request.request_id,
+                                             handle_name=request.handle_name,
+                                             data=res)
         self.__stream.post(reply)
 
         if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
@@ -181,15 +174,11 @@ class ModelWorker(worker_base.Worker):
         # logging gpu/cpu stats
         # self.print_monitor_info()
         tik = time.perf_counter()
-        self.logger.info(
-            (
-                "Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
-                    self.model_name,
-                    round(get_accelerator().memory_allocated() / 1024**3, 2),
-                    round(get_accelerator().max_memory_allocated() / 1024**3, 2),
-                )
-            )
-        )
+        self.logger.info(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
+            self.model_name,
+            round(get_accelerator().memory_allocated() / 1024**3, 2),
+            round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+        )))
         self.logger.info(f"monitoring overhead {time.perf_counter()-tik}s")
 
         sample_count = request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 0

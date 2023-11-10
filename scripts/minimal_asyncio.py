@@ -1,25 +1,27 @@
+from typing import Dict, List
 import asyncio
-import multiprocessing as mp
 import concurrent.futures
-import viztracer
+import logging
+import multiprocessing as mp
+import os
 import time
-import zmq
-import torch
+
 import numpy as np
+import torch
+import viztracer
+import zmq
+
+from api.dfg import ModelInterfaceType, ModelRPC
 from system.request_reply_stream import NameResolvingRequstReplyStream, Payload
+import api.dfg
+import api.model
+import base.dataparallel as dataparallel
 import base.name_resolve
-import base.names as names
 import base.namedarray
 import base.namedarray as namedarray
-import system.request_reply_stream as request_reply_stream
-import api.model
-import api.dfg
-from typing import Dict, List
-import logging
-import base.dataparallel as dataparallel
-import os
-from api.dfg import ModelInterfaceType, ModelRPC
+import base.names as names
 import base.timeutil
+import system.request_reply_stream as request_reply_stream
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("asyncio minimal")
@@ -34,6 +36,7 @@ base.name_resolve.clear_subtree(names.trial_root(exp_name, trial_name))
 
 
 class ModelInterface:
+
     def generate(data):
         time.sleep(4)
         return {
@@ -42,8 +45,7 @@ class ModelInterface:
             "cu_seqlens": torch.randint(0, 2, (11,)),
             "packed_logprobs": torch.randn(10, 512),
             "packed_logits_mask": torch.randint(0, 2, (10, 512, 60000), dtype=torch.bool)
-            if use_full_logits_mask
-            else torch.randint(0, 2, (10, 512), dtype=torch.bool),
+            if use_full_logits_mask else torch.randint(0, 2, (10, 512), dtype=torch.bool),
         }
 
     def inference(data):

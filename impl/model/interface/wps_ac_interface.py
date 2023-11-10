@@ -213,8 +213,7 @@ class WPSActorInterface(api.model.ModelInterface):
             seq = torch.nn.functional.pad(seq, pad=(0, pad_length), mode='constant', value=pad_token_id)
         # NOTE
         attention_mask = torch.logical_and(seq.not_equal(pad_token_id), (seq.not_equal(eos_token_id))).long()
-        eos_indices = attention_mask.shape[1] - torch.argmax(
-                (attention_mask.flip(1) != 0).float(), dim=1)
+        eos_indices = attention_mask.shape[1] - torch.argmax((attention_mask.flip(1) != 0).float(), dim=1)
         eos_indices.clip_(max=attention_mask.shape[1] - 1)
         batch_indices = torch.arange(attention_mask.shape[0], device=model.device, dtype=torch.long)
         attention_mask[batch_indices, eos_indices] = 1
@@ -230,12 +229,14 @@ class WPSActorInterface(api.model.ModelInterface):
         # NOTE
         if module.generation_config.min_new_tokens is not None and module.generation_config.min_new_tokens > 0:
             prompt_padded_len = data.prompts.shape[1]
-            logits[:, prompt_padded_len - 1:prompt_padded_len-1+module.generation_config.min_new_tokens, eos_token_id] = torch.finfo(torch.float32).min
+            logits[:, prompt_padded_len - 1:prompt_padded_len - 1 + module.generation_config.min_new_tokens,
+                   eos_token_id] = torch.finfo(torch.float32).min
         else:  # use min_length instead
             for i in range(bs):
                 prompt_len = prompt_lens[i]
                 if module.generation_config.min_length > prompt_len:
-                    logits[i, prompt_len-1:module.generation_config.min_length-1, eos_token_id] = torch.finfo(torch.float32).min
+                    logits[i, prompt_len - 1:module.generation_config.min_length - 1,
+                           eos_token_id] = torch.finfo(torch.float32).min
         logits_ignoring_mask = logits == torch.finfo(logits.dtype).min
         logp = gather_shifted_log_probs(logits, seq)
 

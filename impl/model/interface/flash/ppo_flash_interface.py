@@ -44,7 +44,7 @@ class PackedActorInterface(api.model.ModelInterface):
     adaptive_kl_horizon: Optional[float] = 10000
 
     enable_save: bool = True
-    
+
     force_no_logits_mask: bool = False
 
     def __post_init__(self):
@@ -352,7 +352,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         for i in range(seq_no_eos_mask.shape[0]):
             if not seq_no_eos_mask[i]:
                 # Set value at the EOS token to be zero.
-                scores[cu_seqlens[i+1] - 1] = 0.0
+                scores[cu_seqlens[i + 1] - 1] = 0.0
         return from_dict(dict(scores=scores.cpu()))
 
     def _ppo_critic_step(

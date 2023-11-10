@@ -88,6 +88,7 @@ train_critic = ModelRPC(
 
 
 class PackedPPOExperiment(Experiment):
+
     def __init__(
         self,
         n_actors=1,
@@ -192,8 +193,7 @@ class PackedPPOExperiment(Experiment):
                 datasets=[dataset],
                 dataloader=dataloader,
                 seed=self.seed,
-            )
-            for i in range(self.n_data_workers)
+            ) for i in range(self.n_data_workers)
         ]
 
         generation_kwargs = dict(
@@ -290,54 +290,47 @@ class PackedPPOExperiment(Experiment):
         )
         rw_interface = ModelInterface("flash_paired_rw", args=dict(enable_save=False))
 
-        model_worker = (
-            [
-                ModelWorker(
-                    seed=self.seed,
-                    model=actor_model,
-                    backend=actor_backend,
-                    interface=actor_interface,
-                    model_name="actor",
-                    dp_rank=i,
-                    topo=PipeModelDataParallelTopology(1, 1, self.n_actors),
-                )
-                for i in range(self.n_actors)
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    model=critic_model,
-                    backend=critic_backend,
-                    interface=critic_interface,
-                    model_name="critic",
-                    dp_rank=i,
-                    topo=PipeModelDataParallelTopology(1, 1, self.n_critics),
-                )
-                for i in range(self.n_critics)
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    model=rw_model,
-                    backend=rw_backend,
-                    interface=rw_interface,
-                    model_name="reward",
-                    dp_rank=0,
-                    topo=PipeModelDataParallelTopology(1, 1, 1),
-                )
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    model=ref_model,
-                    backend=ref_backend,
-                    interface=ref_interface,
-                    model_name="ref",
-                    dp_rank=0,
-                    topo=PipeModelDataParallelTopology(1, 1, 1),
-                )
-            ]
-        )
+        model_worker = ([
+            ModelWorker(
+                seed=self.seed,
+                model=actor_model,
+                backend=actor_backend,
+                interface=actor_interface,
+                model_name="actor",
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_actors),
+            ) for i in range(self.n_actors)
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=critic_model,
+                backend=critic_backend,
+                interface=critic_interface,
+                model_name="critic",
+                dp_rank=i,
+                topo=PipeModelDataParallelTopology(1, 1, self.n_critics),
+            ) for i in range(self.n_critics)
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=rw_model,
+                backend=rw_backend,
+                interface=rw_interface,
+                model_name="reward",
+                dp_rank=0,
+                topo=PipeModelDataParallelTopology(1, 1, 1),
+            )
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=ref_model,
+                backend=ref_backend,
+                interface=ref_interface,
+                model_name="ref",
+                dp_rank=0,
+                topo=PipeModelDataParallelTopology(1, 1, 1),
+            )
+        ])
 
         return ExperimentConfig(
             total_train_epochs=4,
