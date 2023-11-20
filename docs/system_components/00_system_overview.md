@@ -28,7 +28,6 @@
 
 # Limitations
 
-+ 没有实现tensor/pipeline parallism；
++ 没有实现tensor parallism；
 + 每次master worker的RPC会把存在本地的数据发出去，并将生成的数据收回来存在本地，有固定的communication cost；
-+ master worker的configuration写的不完善；
 + ...

@@ -8,7 +8,7 @@
 + "initialize": 实现在`api.model.ModelBackend`中，初始化模型的后端框架，目前用的是DeepSpeed。需要利用RPC进行初始化的原因是，master worker需要传过来一些global information例如需要训练的epoch数量、每个epoch的step数量等等，这些信息对于后端初始化是有用的。每个模型都必须实现。
 + "save": 实现在`api.model.ModelInterface`中，保存模型参数，不返回结果。可以不实现，不实现的模型在处理这个RPC时什么都不做。
 + "inference": 实现在`api.model.ModelInterface`中，进行模型推理并返回推理结果。
-+ "train": 实现在`api.model.ModelInterface`中，给定数据进行训练，可以是一次gradient step也可以是将大batch分解为minibatch后的多个gradient step。
++ "train_step": 实现在`api.model.ModelInterface`中，给定数据进行训练，可以是一次gradient step也可以是将大batch分解为minibatch后的多个gradient step。
 + "genearte": 实现在`api.model.ModelInterface`中，给定prompt进行多次推理生成回复。
 + "evaluate": 实现在`api.model.ModelInterface`中，给定模型和数据集进行evaluation。如果调用这个API，必须在模型configuration中传入eval datasets和eval dataloader。
 
