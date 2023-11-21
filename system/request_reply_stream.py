@@ -122,8 +122,15 @@ class NameResolvingRequstReplyStream(IpRequestReplyStream):
         name = names.request_reply_stream(experiment_name, trial_name, push_stream_name)
         name_resolve.add(name=name, value=address)
 
+        logger.info(f"add {push_stream_name}")
+
         name = names.request_reply_stream(experiment_name, trial_name, pull_stream_name)
-        server_address = name_resolve.wait(name, timeout=30)
+
+        try:
+            server_address = name_resolve.wait(name, timeout=60)
+        except TimeoutError as e:
+            logger.error(f"Timeout waiting for {pull_stream_name}")
+            raise e
 
         self._recv_socket = self._context.socket(zmq.PULL)
         self._recv_socket.connect(f"tcp://{server_address}")

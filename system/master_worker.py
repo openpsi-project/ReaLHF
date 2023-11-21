@@ -175,6 +175,7 @@ class MasterWorker(worker_base.Worker):
 
         self.MODEL_SAVE_ROOT = os.path.join(self.MODEL_SAVE_ROOT, config.worker_info.experiment_name,
                                             config.worker_info.trial_name)
+        os.makedirs(self.MODEL_SAVE_ROOT, exist_ok=True)
 
         # Used only for benchmark
         self.__benchmark_steps = config.benchmark_steps
@@ -260,7 +261,8 @@ class MasterWorker(worker_base.Worker):
         if epoch_should_save or step_should_save:
             dp0streams = {k: v for k, v in self.__model_streams.items() if "dp_00" in k.split("@")[1]}
             assert len(dp0streams) > 0
-            model_save_dirs = [os.path.join(self.MODEL_SAVE_ROOT, k) for k in dp0streams]
+            # model_save_dirs = [os.path.join(self.MODEL_SAVE_ROOT, k) for k in dp0streams]
+            model_save_dirs = [self.MODEL_SAVE_ROOT for _ in dp0streams]
             request_all(list(dp0streams.values()), "save", model_save_dirs)
             gather_all_replies(list(dp0streams.values()))
 

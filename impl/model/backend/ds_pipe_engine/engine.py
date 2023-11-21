@@ -221,6 +221,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.kv_cache_reserved = []
         self._loss_inputs = []
         self._input_cache = []
+        self.stats = []
         self.pipe_cache_data = {
             i: [PipeCacheData() for _ in range(self.num_layers)]
             for i in range(self.num_micro_batches)
@@ -238,6 +239,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             i: [PipeCacheData() for _ in range(self.num_layers)]
             for i in range(self.num_micro_batches)
         }
+        self.stats = []
         self.unfinished_sequences = {
             i: torch.ones(self.batch_lengths[i], dtype=torch.long, device=self.device)
             for i in range(self.num_micro_batches)
@@ -341,7 +343,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             cu_seqlens = b[0].cu_seqlens
             batch_lengths.append(cu_seqlens.shape[0] - 1)
         # batch_lengths = [b[1][0].input_ids.shape[0] for b in batches]
-        logger.debug("self._prepare_input:: batch_lengths: {}".format(batch_lengths))
+        # logger.debug("self._prepare_input:: batch_lengths: {}".format(batch_lengths))
         self.batch_lengths = batch_lengths
         return iter(batches)
 
@@ -377,7 +379,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # Reset any buffers that may have been populated during the forward passes.
         # ds_checkpointing.reset()
         if len(output) > 0:
-            logits = [PipeTransferData.from_tuple(o).pp_input for o in output]
+            logits = [o.pp_input for o in output]
             # logits = [TransformerData.from_tuple(o).logits for o in output]
             # loss = torch.cat(raw_input_ids, dim=0)
             return DuckModelOutput(logits=torch.cat(logits, dim=0))
@@ -452,7 +454,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 all_gen_tokens.append(gen_tokens)
                 all_log_probs.append(log_probs)
                 all_logits_mask.append(logits_mask)
-                logger.debug(f"microbatch {i}: {gen_tokens} {log_probs} {logits_mask}")
+                if torch.is_tensor(gen_tokens) and torch.is_tensor(log_probs) and \
+                    torch.is_tensor(logits_mask):
+                    logger.info(f"microbatch {i}: {gen_tokens.shape} {log_probs.shape} {logits_mask.shape}")
             gen_tokens = torch.cat(all_gen_tokens, dim=0)
             log_probs = torch.cat(all_log_probs, dim=0)
             if all([m is None for m in all_logits_mask]):
@@ -525,8 +529,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # Scale loss, average among DP ranks, and bcast loss to the rest of my DP group
         if self.is_last_stage():
             loss = self._scale_loss_by_gas(self.total_loss)
-            logger.debug("self._aggregate_total_loss:: total_loss: {}, loss: {}, gas: {}".format(
-                self.total_loss, loss, self.gradient_accumulation_steps()))
+            # logger.debug("self._aggregate_total_loss:: total_loss: {}, loss: {}, gas: {}".format(
+            #     self.total_loss, loss, self.gradient_accumulation_steps()))
             self.dp_group_loss = loss.clone().detach()
 
             ## Average loss across all data-parallel groups
@@ -610,9 +614,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # TODO: this is only a temp solution to get the pipeline running, fix afterwards
         inputs += data_list_to_tensor_tuple(ys)
 
-        if not self.generate_mode:
-            for i, y in enumerate(ys):
-                logger.info(f"rank {self.global_rank} layer {i} k_cache {y.k_cache}")
+        # if not self.generate_mode:
+        #     for i, y in enumerate(ys):
+        #         logger.info(f"rank {self.global_rank} layer {i} k_cache {y.k_cache}")
         self._zero_grads(inputs)
 
         x, ys = super().forward(inputs)
@@ -657,9 +661,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     y.v_cache = v_cache
                     y.cache_seqlens = input_lens.clone().to(dtype=torch.int32)
 
-                for i, y in enumerate(ys):
-                    logger.debug("in _exec_forward_pass():: rank {} mbid {} in reserve ys[{}] cache_seqlens: {}, cu_seqlens: {}, input_lens: {}"\
-                                 .format(self.global_rank, micro_batch_id, i, y.cache_seqlens, x.cu_seqlens, input_lens))
+                # for i, y in enumerate(ys):
+                #     logger.debug("in _exec_forward_pass():: rank {} mbid {} in reserve ys[{}] cache_seqlens: {}, cu_seqlens: {}, input_lens: {}"\
+                #                  .format(self.global_rank, micro_batch_id, i, y.cache_seqlens, x.cu_seqlens, input_lens))
                 self.kv_cache_reserved.append(micro_batch_id)
             else:
                 # else, only increase cache_seqlens
@@ -1128,15 +1132,15 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 terminate_tensor = torch.tensor(0, dtype=torch.int32, device=self.device)
                 if terminate_condition():
                     terminate_tensor = torch.tensor(1, dtype=torch.int32, device=self.device)
-                    logger.debug(f"rank {self.global_rank} reach terminate condition")
+                    logger.info(f"rank {self.global_rank} reach terminate condition")
                 dist.all_reduce(terminate_tensor)
-                logger.debug(f"rank {self.global_rank} terminate_tensor {terminate_tensor}")
+                logger.info(f"rank {self.global_rank} terminate_tensor {terminate_tensor}")
                 if terminate_tensor.item() > 0:
-                    logger.debug(f"{self.global_rank} terminate")
+                    logger.info(f"{self.global_rank} terminate")
                     break
             # For each instruction in the step
             step_id, micro_batch_id, step_cmds = step_cmds
-            logger.debug(
+            logger.info(
                 f"rank {self.global_rank} step {self.step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
             )
             for cmd in step_cmds:

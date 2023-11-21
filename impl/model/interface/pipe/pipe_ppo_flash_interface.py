@@ -124,6 +124,8 @@ class PipePackedActorInterface(api.model.ModelInterface):
     adaptive_kl_target: Optional[float] = 6
     adaptive_kl_horizon: Optional[float] = 10000
 
+    force_no_logits_mask: bool = False
+
     def __post_init__(self):
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
@@ -182,14 +184,14 @@ class PipePackedActorInterface(api.model.ModelInterface):
             # Prompts are left-padded. Besides, prompt_log_probs is one-step shorter than prompts.
             prompts_list.append(prompts[i, prompt_max_len - prompt_len:])
             prompt_log_probs_list.append(logprobs.new_zeros(prompt_len - 1))
-            if logits_mask is not None:
+            if logits_mask is not None and not self.force_no_logits_mask:
                 # logits mask is NOT one-step shorter because it directly operates on logits outputed by the model.
                 prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len, logits_mask.shape[-1])))
 
             # Generated tokens are right-padded.
             gen_tokens_list.append(gen_tokens[i, :gen_len])
             gen_log_probs_list.append(logprobs[i, :gen_len])
-            if logits_mask is not None:
+            if logits_mask is not None and not self.force_no_logits_mask:
                 gen_logits_mask_list.append(logits_mask[i, :gen_len])
 
         # For complete sequences, EOS token is included. Otherwise the sequence may end with arbitrary token.
@@ -204,7 +206,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
         assert packed_seq.shape[0] == packed_logprobs.shape[0] + bs, (packed_seq.shape, packed_logprobs.shape,
                                                                       bs)
         packed_logits_mask = None
-        if gen_logits_mask_list:
+        if not self.force_no_logits_mask and gen_logits_mask_list:
             packed_logits_mask = torch.cat(
                 list(itertools.chain.from_iterable(zip(prompt_logits_mask_list, gen_logits_mask_list))))
 
@@ -219,7 +221,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
             packed_seq=packed_seq,
             cu_seqlens=cu_seqlens,
             packed_logprobs=packed_logprobs.float(),
-            packed_logits_mask=packed_logits_mask,
+            packed_logits_mask=packed_logits_mask if not self.force_no_logits_mask else None,
             prompt_mask=prompt_mask,
         )
         return recursive_apply(from_dict(res), lambda x: x.cpu())

@@ -29,6 +29,7 @@ def make_causal_flash_mqat_pipe_module(
                                 config.n_positions,
                                 config.hidden_dim,
                                 config.embd_pdrop,
+                                config.fixed_abs_position_ids,
                                 dtype=dtype,
                                 device=device)
 
@@ -138,6 +139,8 @@ def make_flash_mqat_pipe_model(
     from_type: str = 'starcoder',
     tokenizer_path: Optional[str] = None,
     load_from_full_ckpt: Optional[bool] = False,
+    ckpt_path: Optional[str] = None,
+    # used to load from ckpt stored in a different path from original model with huggingface config and tokenizers
 ):
     if tokenizer_path is None:
         tokenizer_path = model_path
@@ -151,6 +154,8 @@ def make_flash_mqat_pipe_model(
                                                                            device)
         process_memory_mb("after_make_pipe_module")
         # logger.info("module initialized")
+        if ckpt_path:
+            model_path = ckpt_path
         module = load_starcoder_flash_mqat_pipe(module,
                                                 layer_key_mappings,
                                                 load_from_full_ckpt,

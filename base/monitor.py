@@ -12,6 +12,8 @@ import viztracer
 
 logger = logging.getLogger("benchmarkutils")
 
+IF_MARK = False
+
 
 def process_memory_mb(name):
     process = psutil.Process()
@@ -34,15 +36,18 @@ def mock_time_mark_ms(name, identifier, t, step):
 
 
 def time_mark(name, identifier, step=0):
-    logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns())}$ ns step &{step}&")
+    if IF_MARK:
+        logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns())}$ ns step &{step}&")
 
 
 def time_mark_ms(name, identifier, step=0):
-    logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e6)}$ ms step &{step}&")
+    if IF_MARK:
+        logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e6)}$ ms step &{step}&")
 
 
 def time_mark_s(name, identifier, step=0):
-    logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e9)}$ s step &{step}&")
+    if IF_MARK:
+        logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e9)}$ s step &{step}&")
 
 
 def parse_time_mark_in_line(line, name, step_range=None):

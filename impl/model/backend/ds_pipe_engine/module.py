@@ -550,7 +550,7 @@ class PipelineModule(nn.Module):
             shard = {}
             for j in range(start, start + size):
                 shard[keys[j]] = self.state_dict()[keys[j]]
-                print(f"shard {i} key {keys[j]}")
+                # print(f"shard {i} key {keys[j]}")
             start += size
             save_fn = f"pytorch_model-pp-{self.stage_id:02d}-mp-00-s-{i:02d}.bin"
             save_abs_fn = os.path.join(save_dir, save_fn)
