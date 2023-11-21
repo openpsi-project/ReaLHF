@@ -1,3 +1,4 @@
+import asyncio
 import gc
 import socket
 import time
@@ -21,6 +22,7 @@ import system.worker_base as worker_base
 # Register all implemented datasets and models.
 import impl.model  # isort:skip
 import impl.dataset  # isort:skip
+
 
 
 class ModelWorker(worker_base.Worker):
@@ -111,6 +113,16 @@ class ModelWorker(worker_base.Worker):
         else:
             eval_dataloader = None
         self.__eval_dataloader = eval_dataloader
+
+        self.futures = []
+
+    async def __poll_and_handle_request(self):
+        while True:
+            try:
+                request: request_reply_stream.Request = self.__stream.poll_request()
+                break
+            except:
+                await asyncio.sleep(0.01)
 
     def _poll(self):
         if not self.__ddp_env_resolved:

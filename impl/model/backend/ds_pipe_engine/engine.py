@@ -27,7 +27,6 @@ from .module import PipelineError, PipelineModule
 from base.dataparallel import PackedParallelDataBroker
 from base.monitor import gpu_memory_mb, time_mark
 from base.namedarray import NamedArray
-from base.tensor_utils import get_shape, print_data_shapes, TensorBuffer
 from impl.model.nn.flash_mqat import GenerationConfig, genstep
 from impl.model.utils.data import (data_list_to_tensor_tuple, DuckGenerationOutput, DuckModelOutput,
                                    PipeCacheData, PipeTransferData, tensor_tuple_to_data_list)
@@ -62,6 +61,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def __init__(self, num_micro_batches=None, *super_args, **super_kwargs):
         super().__init__(*super_args, **super_kwargs)
         assert isinstance(self.module, PipelineModule), "model must base PipelineModule"
+        self.pipeline_parallelism = True  # deepspeed engine config
 
         assert self.zero_optimization_stage(
         ) < 2, "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
@@ -562,14 +562,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         inputs = self.pipe_buffers['inputs'][src_buffer_id]
 
         x = tensor_tuple_to_data_list(inputs)[0]
-        print_data_shapes("before_forward", self.global_rank, micro_batch_id, x, ys)
         # TODO: this is only a temp solution to get the pipeline running, fix afterwards
 
         inputs += data_list_to_tensor_tuple(ys)
         self._zero_grads(inputs)
 
         x, ys = super().forward(inputs)
-        print_data_shapes("after_forward", self.global_rank, micro_batch_id, x, ys)
 
         self.pipe_cache_data[micro_batch_id] = ys
         self.pipe_buffers['outputs'][dst_buffer_id] = data_list_to_tensor_tuple([x])
@@ -635,7 +633,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 self.gen_logits_mask_ph[micro_batch_id].append(logits_mask)
                 self.next_tokens_to_send = next_tokens
 
-            print_data_shapes("after_gen_process", self.global_rank, micro_batch_id, x, ys)
         else:
             if self.is_last_stage():
                 if self._compute_loss:  # 1f1b only
@@ -913,9 +910,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     assert buffer.grad is None
                     continue
                 assert buffer.grad is not None, f"buffer {idx} does not have a grad, tensor: {buffer}"
-                logger.debug(
-                    f"rank {self.global_rank} mbid {buffer_id} buffer {idx} grad shape: {get_shape(buffer.grad)}"
-                )
                 p2p.send(buffer.grad, self.prev_stage)
 
         # We can free up the input buffer now

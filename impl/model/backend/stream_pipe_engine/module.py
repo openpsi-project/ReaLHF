@@ -20,8 +20,7 @@ import torch.nn as nn
 
 from base.monitor import process_memory_mb, time_mark
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid
-from impl.model.utils.data import (data_list_to_tensor_tuple, PipeCacheData, PipeTransferData,
-                                   tensor_tuple_to_data_list)
+from impl.model.utils.data import PipeCacheData, PipeTransferData
 
 
 class PipelineError(Exception):
@@ -137,6 +136,7 @@ class PipelineModule(nn.Module):
                  seed_fn=None,
                  base_seed=1234,
                  partition_method='parameters',
+                 config=None,
                  activation_checkpoint_interval=0,
                  activation_checkpoint_func=checkpointing.checkpoint,
                  checkpointable_layers=None):
@@ -213,6 +213,12 @@ class PipelineModule(nn.Module):
 
         # for saving checkpoints
         self.num_checkpoint_shards = 1
+
+        self.config = config  # get underlying config
+
+    @property
+    def get_config(self):
+        return self.config
 
     def _build(self):
         specs = self._layer_specs
@@ -314,13 +320,9 @@ class PipelineModule(nn.Module):
         """
         return len(self.forward_funcs)
 
-    def forward(self, forward_input_tuple: Tuple):
-        time_mark("module_forward_start", self.global_rank)
-        inputs = tensor_tuple_to_data_list(forward_input_tuple)
-        x: PipeTransferData = inputs[0]
-        ys: List[PipeCacheData] = inputs[1:]
+    def forward(self, x: PipeTransferData, ys: List[PipeCacheData]):
         local_micro_offset = self.micro_offset + 1
-        time_mark("module_forward_end", self.global_rank)
+
         for idx, (layer, y) in enumerate(zip(self.forward_funcs, ys)):
             time_mark(f"layer_{idx}_start", dist.get_rank())
             self.curr_layer = idx + self._local_start

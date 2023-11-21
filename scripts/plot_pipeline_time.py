@@ -57,24 +57,24 @@ def plot_rlhf():
 
 
 def plot_debug_pipeline():
-    file_name = "/home/meizy/logs/pipe_mqat.log"
+    file_name = "/home/meizy/logs/new_train_time.log"
     identifiers = [str(i) for i in range(4)]
-    fn = "/workspace/scripts/figs/pipe_mqat_debug.png"
+    fn = "/workspace/scripts/figs/new_train_time.png"
     start_keys = [
         "LoadMicroBatch_start", "RecvActivation_start", "SendActivation_start", "RecvGrad_start",
         "RecvGrad_end", "ForwardPass_start", "BackwardPass_start", "LoadNextTokens_start",
-        "SendNextTokens_start", "RecvNextTokens_start", "OptimizerStep_start"
+        "SendNextTokens_start", "RecvNextTokens_start", "OptimizerStep_start", "Prepare_start"
     ]
     end_keys = [
         "LoadMicroBatch_end", "RecvActivation_end", "SendActivation_end", "RecvGrad_start", "RecvGrad_end",
         "ForwardPass_end", "BackwardPass_end", "LoadNextTokens_end", "SendNextTokens_end",
-        "RecvNextTokens_end", "OptimizerStep_end"
+        "RecvNextTokens_end", "OptimizerStep_end", "Prepare_end"
     ]
     summary_time_points(file_name=file_name,
                         start_keys=start_keys,
                         end_keys=end_keys,
                         identifiers=identifiers,
-                        step_range=None,
+                        step_range=(1, 2),
                         save_fig_path=fn,
                         figsize=(20, 4))
 

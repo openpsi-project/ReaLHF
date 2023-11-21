@@ -73,7 +73,8 @@ def make_causal_flash_mqat_pipe_module(
     def compute_loss(output, label):
         return output.loss
 
-    return PipelineModule(layers=layer_specs, loss_fn=compute_loss, topology=topology), layer_key_mappings
+    return PipelineModule(layers=layer_specs, loss_fn=compute_loss, topology=topology,
+                          config=config), layer_key_mappings
 
 
 def make_starcoder_flash_mqat_pipe_module(

@@ -26,7 +26,7 @@ NUM_DP = 1
 WORLD_SIZE = NUM_PP * NUM_DP
 BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
 PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_{NUM_PP}pp_1s"
-BATCH_SIZE = 8
+BATCH_SIZE = 32
 MIN_NEW_TOKENS = 30
 MAX_NEW_TOKENS = 30
 
@@ -34,13 +34,13 @@ BARRIER = mp.Barrier(WORLD_SIZE)
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
 # for plotting
-# logging.basicConfig(filename="/home/meizy/logs/generate_times.log",
-#                     filemode="w",
-#                     format=LOG_FORMAT,
-#                     datefmt=DATE_FORMAT,
-#                     level="DEBUG")
+logging.basicConfig(filename="/home/meizy/logs/new_train_time.log",
+                    filemode="w",
+                    format=LOG_FORMAT,
+                    datefmt=DATE_FORMAT,
+                    level="DEBUG")
 
-logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
+# logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
 
 logger = logging.getLogger("pipe_mqat_test")
 
@@ -201,6 +201,7 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
 
 
 def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     device, model, backend, interface = init_handles(rank)
     data = init_data(rank, model, device, seed=123)
     # st = time.monotonic()
@@ -331,4 +332,4 @@ class PipeFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testGenerateAccordance")
+    unittest.main(defaultTest="PipeFlashMQATTest.testTrainBatch")

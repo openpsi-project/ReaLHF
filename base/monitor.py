@@ -8,7 +8,7 @@ import numpy as np
 import psutil
 
 logger = logging.getLogger("benchmarkutils")
-IF_MARK = False
+IF_MARK = True
 
 
 def process_memory_mb(name):

@@ -13,10 +13,23 @@ from deepspeed.git_version_info import torch_info
 from packaging.version import Version
 import torch
 
+from impl.model.backend.stream_pipe_engine.tensor_utils import TensorBuffer
+from impl.model.utils.data import PipeTransferData
+
 _groups = None
 _grid = None
 
 _async = []
+
+ID_TO_DTYPE = [
+    torch.float32, torch.float64, torch.complex64, torch.complex128, torch.float16, torch.bfloat16,
+    torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.bool
+]
+DTYPE_TO_ID = {dtype: id_ for id_, dtype in enumerate(ID_TO_DTYPE)}
+
+
+def _tensor_bytes(tensor):
+    return tensor.numel() * tensor.element_size()
 
 
 def can_send_recv() -> bool:
@@ -183,3 +196,76 @@ def _get_send_recv_group(src_stage, dest_stage):
     group_id = _grid.stage_to_global(stage_id=stage_id)
 
     return _groups[group_id]
+
+
+def send_tensor_tuple_meta(tensor_tuple, recv_stage):
+    """ Communicate metadata about upcoming p2p transfers.
+
+    Metadata is communicated in this order:
+        * num_tensors in tuple
+        foreach tensor in tensor_tuple:
+            * ndims
+            * shape
+    """
+    count_tensor = torch.LongTensor(data=[len(tensor_tuple)]).cuda()
+    send(count_tensor, recv_stage)
+    for idx, tensor in enumerate(tensor_tuple):
+        if isinstance(tensor, torch.Tensor):
+            send_shape = torch.LongTensor(data=tensor.size()).cuda()
+            send_ndims = torch.LongTensor(data=[len(tensor.size())]).cuda()
+            send_dtype = torch.LongTensor(data=[DTYPE_TO_ID[tensor.dtype]]).cuda()
+            send(send_dtype, recv_stage)
+            send(send_ndims, recv_stage)
+            send(send_shape, recv_stage)
+        elif tensor is None:
+            send_dtype = torch.LongTensor(data=[-1]).cuda()
+            send(send_dtype, recv_stage)
+
+
+def recv_tensor_tuple_meta(send_stage):
+    """Receive metadata about upcoming p2p transfers and return allocated buffers.
+
+    Metadata is communicated in this order:
+        * num_tensors in tensor_tuple
+        foreach tensor in buffer:
+            * ndims
+            * shape
+
+    Returns:
+        Allocated buffer for receiving from send_stage.
+    """
+    count_tensor = torch.LongTensor(data=[0]).cuda()
+    recv(count_tensor, send_stage)
+    num_tensors = count_tensor.item()
+    recv_shapes_and_dtypes = []
+    for idx in range(num_tensors):
+        recv_dtype = torch.LongTensor(data=[0]).cuda()
+        recv(recv_dtype, send_stage)
+        if recv_dtype.item() == -1:
+            recv_shapes_and_dtypes.append((None, None))
+        else:
+            recv_dtype = ID_TO_DTYPE[recv_dtype.item()]
+            recv_ndims = torch.LongTensor(data=[0]).cuda()
+            recv(recv_ndims, send_stage)
+            recv_ndims = recv_ndims.item()
+            recv_shape = torch.LongTensor([1] * recv_ndims).cuda()
+            recv(recv_shape, send_stage)
+            recv_shapes_and_dtypes.append((recv_shape.tolist(), recv_dtype))
+
+    buffers = allocate_buffers(recv_shapes_and_dtypes)
+    buffers = tuple(buffers)
+    return buffers
+
+
+def allocate_buffers(shapes_and_dtypes, requires_grad=False):
+    buffer = []
+    for shape, dtype in shapes_and_dtypes:
+        if shape is None:
+            buffer.append(None)
+        else:
+            buffer.append(
+                torch.zeros(shape,
+                            dtype=dtype,
+                            requires_grad=requires_grad,
+                            device=torch.cuda.current_device()))
+    return buffer
