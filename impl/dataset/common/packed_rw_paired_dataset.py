@@ -17,6 +17,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
         util: api.data.DatasetUtility,
         max_length: int,
         n_tokens_per_batch: int,
+        min_seq_pairs_per_batch: int = 1,
         max_pairs_per_prompt: Optional[int] = None,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
@@ -35,6 +36,11 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
         """
         self.util = util
         tokenizer = self.util.tokenizer
+
+        if min_seq_pairs_per_batch is None:
+            min_seq_pairs_per_batch = 0
+        self.min_seq_pairs_per_batch = min_seq_pairs_per_batch
+        self.max_length = max_length
 
         self.rng = np.random.RandomState(seed=util.seed)
 
@@ -135,6 +141,22 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
                    for seq in self.group_posneg_seqlens), max(self.group_posneg_seqlens)
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.group_posneg_seqlens),
                                                         self.n_tokens_per_batch)
+        self.__batch_indices = list(
+            filter(lambda x: sum([self.group_sizes[j] for j in x]) >= self.min_seq_pairs_per_batch,
+                   self.__batch_indices))
+        tokens_in_batches = sum(
+            [sum([self.group_posneg_seqlens[j] for j in x]) for x in self.__batch_indices])
+        tokens_in_dataset = sum(self.group_posneg_seqlens)
+        if tokens_in_batches < 0.5 * tokens_in_dataset:
+            raise ValueError(
+                f"After dynamic batch allocation, #tokens contained in batches ({tokens_in_batches}) "
+                f"is less than half of the original dataset ({tokens_in_dataset}) because "
+                f"min_seq_pairs_per_batch ({self.min_seq_pairs_per_batch}) is too large or max_length ({self.max_length}) is too large. "
+                "There are not enough sequences to be dispatched to model workers in allocated batches. "
+                f"Please lower max_length ({self.max_length}) or increase n_tokens_per_batch ({self.n_tokens_per_batch}). "
+                f"Current group sizes per batch: {[sum([self.group_sizes[j] for j in x]) for x in self.__batch_indices]}, "
+                f"current #tokens per batch: {[sum([self.group_posneg_seqlens[j] for j in x]) for x in self.__batch_indices]}. "
+            )
         self.rng.shuffle(self.__batch_indices)
 
     def _shuffle(self):
@@ -172,12 +194,15 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
 
             packed_input_ids = torch.cat(
                 [torch.tensor(p) for p in itertools.chain.from_iterable(zip(pos_answers, neg_answers))])
-            group_factor = torch.tensor([1 / g for _ in range(g) for g in group_sizes], dtype=torch.float32)
+            group_factor = torch.tensor(list(
+                itertools.chain.from_iterable([[1 / g for _ in range(g)] for g in group_sizes])),
+                                        dtype=torch.float32)
             prompt_lens = torch.tensor(list(
                 itertools.chain.from_iterable([[x for _ in range(g)]
                                                for x, g in zip(prompt_lens, group_sizes)])),
                                        dtype=torch.int32)
 
+            assert len(seqlens) >= self.min_seq_pairs_per_batch
             assert prompt_lens.shape[0] == len(seqlens), (prompt_lens.shape[0], len(seqlens), len(indices))
             assert packed_input_ids.shape[0] == sum(pair_seqlens) == sum(seqlens), (packed_input_ids.shape[0],
                                                                                     sum(pair_seqlens),
@@ -192,6 +217,22 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
         self._shuffle()
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.group_posneg_seqlens),
                                                         self.n_tokens_per_batch)
+        self.__batch_indices = list(
+            filter(lambda x: sum([self.group_sizes[j] for j in x]) >= self.min_seq_pairs_per_batch,
+                   self.__batch_indices))
+        tokens_in_batches = sum(
+            [sum([self.group_posneg_seqlens[j] for j in x]) for x in self.__batch_indices])
+        tokens_in_dataset = sum(self.group_posneg_seqlens)
+        if tokens_in_batches < 0.5 * tokens_in_dataset:
+            raise ValueError(
+                f"After dynamic batch allocation, #tokens contained in batches ({tokens_in_batches}) "
+                f"is less than half of the original dataset ({tokens_in_dataset}) because "
+                f"min_seq_pairs_per_batch ({self.min_seq_pairs_per_batch}) is too large or max_length ({self.max_length}) is too large. "
+                "There are not enough sequences to be dispatched to model workers in allocated batches. "
+                f"Please lower max_length ({self.max_length}) or increase n_tokens_per_batch ({self.n_tokens_per_batch}). "
+                f"Current group sizes per batch: {[sum([self.group_sizes[j] for j in x]) for x in self.__batch_indices]}, "
+                f"current #tokens per batch: {[sum([self.group_posneg_seqlens[j] for j in x]) for x in self.__batch_indices]}. "
+            )
         self.rng.shuffle(self.__batch_indices)
 
 
@@ -213,18 +254,20 @@ else:
 
     util = api.data.DatasetUtility(tokenizer=tokenizer, ddp_rank=ddp_rank, world_size=world_size, seed=seed)
 
+    n_dp = 32
     dataset = RewardModelingPackedPairedDataset(
         util,
-        max_length=1024,
-        n_tokens_per_batch=16384,
+        max_length=2048,
+        min_seq_pairs_per_batch=n_dp,
+        n_tokens_per_batch=40960,
         dataset_path="/lustre/fw/datasets/imdb/rl/rm_paired-valid.jsonl",
         max_pairs_per_prompt=10,
     )
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=None)
-    for _ in range(5):
+    for _ in range(10):
         print("dataset iteration")
         for x in dataloader:
-            datas = PackedParallelDataBroker.scatter_to(from_dict(x), 8)
+            datas = PackedParallelDataBroker.scatter_to(from_dict(x), n_dp)
             for data in datas:
                 assert len(
                     data['pair_input_lens']) == len(data['input_lens']) * 2 == len(data['group_factor']) * 2
