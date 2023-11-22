@@ -48,7 +48,7 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    nodelist="QH-com13",
+                    nodelist="QH-com08",
                     mem=100000,
                 ),
             ),
