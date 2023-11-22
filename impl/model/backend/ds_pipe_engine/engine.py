@@ -339,7 +339,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         batches = [input_to_pipe_model_input(x) for x in splitted]
         batch_lengths = []
-        for b in batches:
+        for i, b in enumerate(batches):
             cu_seqlens = b[0].cu_seqlens
             batch_lengths.append(cu_seqlens.shape[0] - 1)
         # batch_lengths = [b[1][0].input_ids.shape[0] for b in batches]
@@ -392,6 +392,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if not torch._C.is_grad_enabled():
             raise RuntimeError(f'train_batch() requires gradients enabled. Use eval_batch() instead.')
 
+        # print(f"in train_batch packed_input_ids shape {packed_input_ids.shape}")
         data_iter = self._prepare_input(packed_input_ids, cu_seqlens)
         self.set_loss_fn(loss_fn)
         self._prepare_loss_input(**loss_fn_kwargs)
@@ -440,6 +441,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             all_gen_tokens = []
             all_log_probs = []
             all_logits_mask = []
+            vocab_size = -1
             for i in range(self.num_micro_batches):
                 gen_tokens = torch.stack(self.gen_token_ph[i], -1)
                 log_probs = torch.stack(self.gen_logprob_ph[i], -1)
@@ -456,7 +458,34 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 all_logits_mask.append(logits_mask)
                 if torch.is_tensor(gen_tokens) and torch.is_tensor(log_probs) and \
                     torch.is_tensor(logits_mask):
-                    logger.info(f"microbatch {i}: {gen_tokens.shape} {log_probs.shape} {logits_mask.shape}")
+                    vocab_size = logits_mask.shape[-1]
+                    logger.info(
+                        f"generation on microbatch {i}: {gen_tokens.shape} {log_probs.shape} {logits_mask.shape}"
+                    )
+
+            # if sequence is terminated, there might be situations where tensors in all_gen_tokens have difference shapes
+            gen_tokens_lengths = [t.shape[-1] for t in all_gen_tokens]
+            max_gen_tokens_length = max(gen_tokens_lengths)
+            for i in range(len(all_gen_tokens)):
+                assert all_gen_tokens[i].shape == log_probs[i].shape
+                if all_gen_tokens[i].shape[-1] < max_gen_tokens_length:
+                    device = all_gen_tokens[i].device
+                    # if t.shape[-1] < max_gen_tokens_length, pad it with zeros
+                    pad_shape = all_gen_tokens[i].shape[:-1] + (max_gen_tokens_length -
+                                                                all_gen_tokens[i].shape[-1],)
+                    all_gen_tokens[i] = torch.cat([
+                        all_gen_tokens[i],
+                        torch.full(pad_shape, self.tokenizer.pad_token_id, device=device)
+                    ],
+                                                  dim=1)
+                    # hack for log_probs and logits_mask, check if correct
+                    all_log_probs[i] = torch.cat(
+                        [all_log_probs[i], torch.zeros(pad_shape, device=device)], dim=1)
+                    if all_logits_mask[i] is not None:
+                        all_logits_mask[i] = torch.cat(
+                            [all_logits_mask[i],
+                             torch.ones((*pad_shape, vocab_size), device=device)], dim=1)
+
             gen_tokens = torch.cat(all_gen_tokens, dim=0)
             log_probs = torch.cat(all_log_probs, dim=0)
             if all([m is None for m in all_logits_mask]):
@@ -1134,13 +1163,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     terminate_tensor = torch.tensor(1, dtype=torch.int32, device=self.device)
                     logger.info(f"rank {self.global_rank} reach terminate condition")
                 dist.all_reduce(terminate_tensor)
-                logger.info(f"rank {self.global_rank} terminate_tensor {terminate_tensor}")
                 if terminate_tensor.item() > 0:
                     logger.info(f"{self.global_rank} terminate")
                     break
             # For each instruction in the step
             step_id, micro_batch_id, step_cmds = step_cmds
-            logger.info(
+            logger.debug(
                 f"rank {self.global_rank} step {self.step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
             )
             for cmd in step_cmds:

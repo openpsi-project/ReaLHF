@@ -137,7 +137,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
         self.kl_ctl = None
 
     def save(self, model: api.model.Model, save_dir: str):
-        pass
+        model.module.save(save_dir)
 
     @torch.inference_mode()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
@@ -278,6 +278,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
             logits_mask=data['packed_logits_mask'],
         )
 
+        # print(f"in train_step() packed_seq shape data['packed_seq'].shape: {data['packed_seq'].shape}")
         train_stats = module.train_batch(
             packed_input_ids=data['packed_seq'],
             cu_seqlens=data['cu_seqlens'],
@@ -291,7 +292,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
             module.tput_timer.update_epoch_count()
 
         # train_stats: Dict[str, torch.Tensor] = dict(**train_stats)
-        logger.info(f"train stats length {len(train_stats)}")
+        # logger.info(f"train stats length {len(train_stats)}")
         for stats in train_stats:
             for k, v in stats.items():
                 if torch.is_tensor(v):
