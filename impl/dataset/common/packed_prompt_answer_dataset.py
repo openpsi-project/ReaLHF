@@ -18,6 +18,7 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
         self,
         util: api.data.DatasetUtility,
         n_tokens_per_batch: int,
+        min_seqs_per_batch: int = 1,
         max_length: Optional[int] = None,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
@@ -113,6 +114,7 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
 
         self.seqlens = seqlens
         self.prompt_lengths = prompt_lengths
+        self.min_seqs_per_batch = min_seqs_per_batch
         self.seqs = seqs
         self.prompts = prompts
         self.prompt_masks = prompt_masks
@@ -131,6 +133,19 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
         self._shuffle()
         assert all(seq <= self.n_tokens_per_batch for seq in self.seqlens)
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.seqlens), self.n_tokens_per_batch)
+        self.__batch_indices = list(filter(lambda x: len(x) >= self.min_seqs_per_batch, self.__batch_indices))
+        tokens_in_batches = sum([sum([self.seqlens[i] for i in indices]) for indices in self.__batch_indices])
+        tokens_in_dataset = sum(self.seqlens)
+        if tokens_in_batches < 0.5 * tokens_in_dataset:
+            raise ValueError(
+                f"After dynamic batch allocation, #tokens contained in batches ({tokens_in_batches}) "
+                f"is less than half of the original dataset ({tokens_in_dataset}) because "
+                f"min_seqs_per_batch ({self.min_seqs_per_batch}) is too large or max_length ({self.max_length}) is too large. "
+                "There are not enough sequences to be dispatched to model workers in allocated batches. "
+                f"Please lower max_length ({self.max_length}) or increase n_tokens_per_batch ({self.n_tokens_per_batch}). "
+                f"Current #seqs per batch: {[len(x) for x in self.__batch_indices]}, "
+                f"current #tokens per batch: {[sum([self.seqlens[i] for i in indices]) for indices in self.__batch_indices]}. "
+            )
         self.rng.shuffle(self.__batch_indices)
 
     def _shuffle(self):
@@ -172,7 +187,51 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
             )
         self._shuffle()
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.seqlens), self.n_tokens_per_batch)
+        self.__batch_indices = list(filter(lambda x: len(x) >= self.min_seqs_per_batch, self.__batch_indices))
+        tokens_in_batches = sum([sum([self.seqlens[i] for i in indices]) for indices in self.__batch_indices])
+        tokens_in_dataset = sum(self.seqlens)
+        if tokens_in_batches < 0.5 * tokens_in_dataset:
+            raise ValueError(
+                f"After dynamic batch allocation, #tokens contained in batches ({tokens_in_batches}) "
+                f"is less than half of the original dataset ({tokens_in_dataset}) because "
+                f"min_seqs_per_batch ({self.min_seqs_per_batch}) is too large or max_length ({self.max_length}) is too large. "
+                "There are not enough sequences to be dispatched to model workers in allocated batches. "
+                f"Please lower max_length ({self.max_length}) or increase n_tokens_per_batch ({self.n_tokens_per_batch}). "
+                f"Current #seqs per batch: {[len(x) for x in self.__batch_indices]}, "
+                f"current #tokens per batch: {[sum([self.seqlens[i] for i in indices]) for indices in self.__batch_indices]}. "
+            )
         self.rng.shuffle(self.__batch_indices)
 
 
-api.data.register_dataset("packed_prompt_answer", PackedPromptAnswerDataset)
+if __name__ != "__main__":
+    api.data.register_dataset("packed_prompt_answer", PackedPromptAnswerDataset)
+else:
+    import transformers
+
+    from base.dataparallel import PackedParallelDataBroker
+    from base.namedarray import from_dict
+
+    def have_common_prefix_at_least(a, b, n):
+        return (a[:n] == b[:n]).all()
+
+    tokenizer = transformers.AutoTokenizer.from_pretrained("/lustre/fw/pretrained/gpt2-large")
+    ddp_rank = 0
+    world_size = 1
+    seed = 1
+
+    util = api.data.DatasetUtility(tokenizer=tokenizer, ddp_rank=ddp_rank, world_size=world_size, seed=seed)
+
+    n_dp = 100
+    dataset = PackedPromptAnswerDataset(
+        util,
+        max_length=10240,
+        min_seqs_per_batch=n_dp,
+        n_tokens_per_batch=40960,
+        dataset_path="/lustre/fw/datasets/imdb/rl/sft_pos-train.jsonl",
+    )
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=None)
+    for _ in range(10):
+        print("dataset iteration")
+        for x in dataloader:
+            datas = PackedParallelDataBroker.scatter_to(from_dict(x), n_dp)
+            continue

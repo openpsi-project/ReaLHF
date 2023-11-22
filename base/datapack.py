@@ -183,7 +183,7 @@ def _min_abs_diff_partition(arr: np.ndarray, k: int) -> List[Tuple[int]]:
     partitions = []
     i, j = n, k
     while j > 1:
-        for x in range(i):
+        for x in range(i - 1, -1, -1):
             if dp[i][j] == max(dp[x][j - 1], prefix_sum[i] - prefix_sum[x]):
                 partitions.append((x, i))
                 i = x
@@ -196,18 +196,26 @@ def _min_abs_diff_partition(arr: np.ndarray, k: int) -> List[Tuple[int]]:
 
 
 def min_abs_diff_partition(arr: Union[np.ndarray, List], k: int) -> List[Tuple[int]]:
+    err_hint = " Errors should not be reported in this function. It is probably a bug in the dataset code."
+
     if isinstance(arr, list):
         arr = np.array(arr)
     if len(arr.shape) > 1:
-        raise ValueError(f"The array to be partitioned must be 1D. ({arr})")
+        raise ValueError(f"The array to be partitioned must be 1D. ({arr})" + err_hint)
     if len(arr) < k:
-        raise ValueError(f"The array to be partitioned must have length >= k. (array {arr}, k={k})")
+        raise ValueError(f"The array to be partitioned must have length >= k. (array {arr}, k={k})" +
+                         err_hint)
     partitions = _min_abs_diff_partition(arr, k)
     last_end = 0
+
+    err_type = None
+    err_msg = f"Lengths to be partitioned: {arr}, k={k}, current partition result {partitions}."
     for start, end in partitions:
         if start != last_end:
-            raise ValueError(f"Partition {start}-{end} is not contiguous.")
+            err_type = "not contiguous"
         if end <= start:
-            raise ValueError(f"Partition {start}-{end} is empty.")
+            err_type = "empty"
+        if err_type:
+            raise ValueError(f"Partition {start}-{end} is {err_type}. " + err_msg + err_hint)
         last_end = end
     return partitions
