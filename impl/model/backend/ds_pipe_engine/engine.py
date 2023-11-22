@@ -60,6 +60,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def __init__(self, num_micro_batches=None, *super_args, **super_kwargs):
         super().__init__(*super_args, **super_kwargs)
         assert isinstance(self.module, PipelineModule), "model must base PipelineModule"
+        self.pipeline_parallelism = True  # deepspeed engine config
 
         assert self.zero_optimization_stage(
         ) < 2, "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
@@ -315,7 +316,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             self.pipe_buffers[key].extend([None] * num_added)
         self.num_pipe_buffers = num_buffers
 
-    def _prepare_input(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor):
+    def _prepare_input(self,
+                       packed_input_ids: torch.Tensor,
+                       cu_seqlens: torch.Tensor,
+                       generate_mode: bool = False):
         """ Prepare input for train or inference
         split all input tensors into micro batches for pipeline parallel
 
@@ -328,8 +332,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._input_cache = splitted
 
         def input_to_pipe_model_input(input: NamedArray):
+            max_seqlen = torch.tensor(int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1])))
+            store_kvcache = torch.tensor(1) if generate_mode else torch.tensor(0)
             max_seqlen = int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))
-            x = PipeTransferData(cu_seqlens=input.cu_seqlens, max_seqlen=max_seqlen)
+            x = PipeTransferData(cu_seqlens=input.cu_seqlens,
+                                 max_seqlen=max_seqlen,
+                                 store_kvcache=store_kvcache)
             if self.is_first_stage():
                 ys = [PipeCacheData(input_ids=input.packed_input_ids)
                       ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
@@ -418,7 +426,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
         self._compute_loss = False
-        data_iter = self._prepare_input(packed_input_ids, cu_seqlens)
+        data_iter = self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=True)
         self._generate_mode(tokenizer=tokenizer, gconfig=gconfig)
         self.set_dataiterator(data_iter)
 
@@ -968,7 +976,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         assert micro_batch_id >= 0
         assert self.is_first_stage(), "_exec_load_next_tokens() should be only executed on the first stage"
         assert buffer_id in self.next_tokens_cache, f"next tokens cache of micro batch id {buffer_id} is empty"
-        x = PipeTransferData()
+        x = PipeTransferData(store_kvcache=torch.tensor(1).cuda())
         ys = self.pipe_cache_data[micro_batch_id]
         ys[0].input_ids = self.next_tokens_cache[micro_batch_id].unsqueeze(-1)
         ys[0].position_ids = None

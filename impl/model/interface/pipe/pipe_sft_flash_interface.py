@@ -9,6 +9,7 @@ import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.backend.stream_pipe_engine import StreamPipeEngine
 from impl.model.nn.flash_mqat import GenerationConfig
 from impl.model.utils.data import gather_packed_shifted_log_probs, PipeCacheData, PipeTransferData
 from impl.model.utils.save import save_hf_or_lora_model
@@ -28,7 +29,7 @@ def compute_packed_sft_loss(logits: torch.Tensor, packed_input_ids: torch.Tensor
     ])
     loss_mask = loss_mask[shift_one_indices]
     loss = -(logprobs * loss_mask).sum() / loss_mask.sum()
-    return loss, {"loss": loss}
+    return loss, {"loss": loss.detach().cpu()}
 
 
 class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):

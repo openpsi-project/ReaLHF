@@ -7,7 +7,7 @@ import deepspeed
 import torch
 import torch.utils.data
 
-from base.monitor import time_mark_ms
+from base.monitor import time_mark
 import api.config as config
 import api.data
 import api.model
@@ -133,17 +133,17 @@ class ModelWorker(worker_base.Worker):
             elif request.handle_name == "save":
                 res = self.__interface.save(self.__model, request.data)  # -> None
             elif request.handle_name == "inference":
-                time_mark_ms(f"{self.model_name}_inference_start", worker_identifier)
+                time_mark(f"{self.model_name}_inference_start", worker_identifier)
                 res = self.__interface.inference(self.__model, request.data)  # -> NamedArray
-                time_mark_ms(f"{self.model_name}_inference_end", worker_identifier)
+                time_mark(f"{self.model_name}_inference_end", worker_identifier)
             elif request.handle_name == "train_step":
-                time_mark_ms(f"{self.model_name}_train_start", worker_identifier)
+                time_mark(f"{self.model_name}_train_start", worker_identifier)
                 res = self.__interface.train_step(self.__model, request.data)  # -> Dict
-                time_mark_ms(f"{self.model_name}_train_end", worker_identifier)
+                time_mark(f"{self.model_name}_train_end", worker_identifier)
             elif request.handle_name == "generate":
-                time_mark_ms(f"{self.model_name}_generate_start", worker_identifier)
+                time_mark(f"{self.model_name}_generate_start", worker_identifier)
                 res = self.__interface.generate(self.__model, request.data)  # -> NamedArray
-                time_mark_ms(f"{self.model_name}_generate_end", worker_identifier)
+                time_mark(f"{self.model_name}_generate_end", worker_identifier)
             elif request.handle_name == "evaluate":
                 res = self.__interface.evaluate(self.__model, self.__eval_dataloader)  # -> Dict
             else:
