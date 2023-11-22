@@ -13,12 +13,10 @@ from base.monitor import process_memory_mb
 from impl.model.backend.ds_pipe_engine import LayerSpec
 from impl.model.nn.flash_mqat import *
 
-# FULL_MODEL_DIR = "/lustre/meizy/backup_zy/model_saves/four_layers_starcoder"
-FULL_MODEL_DIR = "/lustre/meizy/models/starcoder_4l"
-# PIPE_MODEL_DIR = "/lustre/meizy/base_models/pipe_4l_starcoder"
+FULL_MODEL_DIR = "/lustre/fw/pretrained/starcoder"
 NUM_PIPE_STAGES = 4
-NUM_SHARDS = 1
-PIPE_MODEL_DIR = f"/lustre/meizy/models/pipe_starcoder_4l_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
+NUM_SHARDS = 3
+PIPE_MODEL_DIR = f"/lustre/meizy/models/pipe_pretrained/starcoder_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
 TEST_EXPR_NAME = "test"
 TEST_TRIAL_NAME = "test"
 TEST_MODEL_NAME = "default"
@@ -54,6 +52,7 @@ def layer_specs_and_key_mappings(config: FlashMQATConfig):
                                 config.n_positions,
                                 config.hidden_dim,
                                 config.embd_pdrop,
+                                config.fixed_abs_position_ids,
                                 dtype=None,
                                 device=None)
 

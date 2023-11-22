@@ -14,70 +14,66 @@ rollout = ModelRPC(
         "seq_no_eos_mask", 'packed_seq', 'cu_seqlens', 'packed_logprobs', 'packed_logits_mask', 'prompt_mask'
     ],
 )
-inf_reward = ModelRPC(
-    "reward",
-    ModelInterfaceType.INFERENCE,
-    input_data=["packed_seq", "cu_seqlens"],
-    input_key_remap={'packed_seq': "packed_input_ids"},
-    output_data=["scores"],
-    output_key_remap={"scores": "rewards"},
-)
 
-inf_ref_logits = ModelRPC(
-    "ref",
-    ModelInterfaceType.INFERENCE,
-    input_data=["packed_seq", "cu_seqlens", "packed_logits_mask"],
-    output_data=["logprobs"],
-    output_key_remap={"logprobs": "packed_ref_logprobs"},
-)
+inf_reward = ModelRPC("reward",
+                      ModelInterfaceType.INFERENCE,
+                      input_data=["packed_seq", "cu_seqlens"],
+                      input_key_remap={'packed_seq': "packed_input_ids"},
+                      output_data=["scores"],
+                      output_key_remap={"scores": "rewards"},
+                      dp_broker_type="packed")
 
-inf_values = ModelRPC(
-    "critic",
-    ModelInterfaceType.INFERENCE,
-    input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
-    output_data=["scores"],
-    output_key_remap={"scores": "values"},
-)
+inf_ref_logits = ModelRPC("ref",
+                          ModelInterfaceType.INFERENCE,
+                          input_data=["packed_seq", "cu_seqlens", "packed_logits_mask"],
+                          output_data=["logprobs"],
+                          output_key_remap={"logprobs": "packed_ref_logprobs"},
+                          dp_broker_type="packed")
 
-train_actor = ModelRPC(
-    "actor",
-    ModelInterfaceType.TRAIN_STEP,
-    input_data=[
-        "packed_seq",
-        "cu_seqlens",
-        "packed_logprobs",
-        "packed_ref_logprobs",
-        "rewards",
-        "values",
-        "prompt_mask",
-        "seq_no_eos_mask",
-        'packed_logits_mask',
-    ],
-)
+inf_values = ModelRPC("critic",
+                      ModelInterfaceType.INFERENCE,
+                      input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
+                      output_data=["scores"],
+                      output_key_remap={"scores": "values"},
+                      dp_broker_type="packed")
 
-train_critic = ModelRPC(
-    "critic",
-    ModelInterfaceType.TRAIN_STEP,
-    input_data=[
-        "packed_seq",
-        "cu_seqlens",
-        "packed_logprobs",
-        "packed_ref_logprobs",
-        "rewards",
-        "values",
-        "prompt_mask",
-        "seq_no_eos_mask",
-    ],
-)
+train_actor = ModelRPC("actor",
+                       ModelInterfaceType.TRAIN_STEP,
+                       input_data=[
+                           "packed_seq",
+                           "cu_seqlens",
+                           "packed_logprobs",
+                           "packed_ref_logprobs",
+                           "rewards",
+                           "values",
+                           "prompt_mask",
+                           "seq_no_eos_mask",
+                           'packed_logits_mask',
+                       ],
+                       dp_broker_type="packed")
+
+train_critic = ModelRPC("critic",
+                        ModelInterfaceType.TRAIN_STEP,
+                        input_data=[
+                            "packed_seq",
+                            "cu_seqlens",
+                            "packed_logprobs",
+                            "packed_ref_logprobs",
+                            "rewards",
+                            "values",
+                            "prompt_mask",
+                            "seq_no_eos_mask",
+                        ],
+                        dp_broker_type="packed")
 
 
 class PipeWpsfFlashPPOExperiment(Experiment):
 
     def __init__(self,
-                 n_actors=4,
+                 n_actors=8,
                  n_critics=1,
                  n_rewards=1,
-                 n_refs=1,
+                 n_refs=2,
                  seed=1,
                  num_actor_pipeline_stages=4,
                  benchmark_only=False):
@@ -99,47 +95,59 @@ class PipeWpsfFlashPPOExperiment(Experiment):
         self.seed = seed
 
     def scheduling_setup(self) -> ExperimentScheduling:
-        return ExperimentScheduling(
-            data_worker=TasksGroup(
-                count=self.n_data_workers,
-                scheduling=Scheduling.data_worker_default(
-                    cpu=2,
-                    mem=10000,
-                ),
+        return ExperimentScheduling(data_worker=TasksGroup(
+            count=self.n_data_workers,
+            scheduling=Scheduling.data_worker_default(
+                cpu=2,
+                mem=10000,
             ),
-            master_worker=TasksGroup(
-                count=1,
-                scheduling=Scheduling.master_worker_default(
-                    cpu=4,
-                    mem=10000,
-                ),
-            ),
-            model_worker=TasksGroup(
-                count=self.n_total,
-                scheduling=Scheduling.model_worker_default(
-                    cpu=4,
-                    gpu=1,
-                    gpu_type='tesla',
-                    mem=100000,
-                    nodelist='QH-com08',
-                ),
-            ),
-        )
+        ),
+                                    master_worker=TasksGroup(
+                                        count=1,
+                                        scheduling=Scheduling.master_worker_default(
+                                            cpu=4,
+                                            mem=10000,
+                                        ),
+                                    ),
+                                    model_worker=[
+                                        TasksGroup(
+                                            count=self.n_actors,
+                                            scheduling=Scheduling.model_worker_default(
+                                                cpu=4,
+                                                gpu=1,
+                                                gpu_type='tesla',
+                                                mem=100000,
+                                                nodelist='QH-com08',
+                                            ),
+                                        ),
+                                        TasksGroup(
+                                            count=self.n_critics + self.n_rewards + self.n_refs,
+                                            scheduling=Scheduling.model_worker_default(
+                                                cpu=4,
+                                                gpu=1,
+                                                gpu_type='tesla',
+                                                mem=100000,
+                                                nodelist='QH-com09',
+                                            ),
+                                        )
+                                    ])
 
     def initial_setup(self) -> ExperimentConfig:
-        actor_path = "/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
-        ref_path = "/lustre/meizy/models/starcoder_4l"
-        critic_path = ref_path
+        actor_path = "/lustre/meizy/models/pipe_pretrained/starcoder_4pp_3s"
+        ref_path = "/lustre/fw/pretrained/starcoder"
+        # actor_path = "/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
+        # ref_path = "/lustre/meizy/models/starcoder_4l"
+        critic_path = "/lustre/meizy/models/starcoder_4l"  # a 4 layer starcoder model only for testing purpose
 
-        rw_lora_head_path = None
+        # rw_lora_head_path = None
 
-        self.lora_dim = 32
-        self.lora_scaling = 32.0
+        # self.lora_dim = 32
+        # self.lora_scaling = 32.0
 
         rw_output_scaling = 0.1
         rw_output_bias = 0.0
 
-        batch_size_per_device = 8
+        batch_size_per_device = 2
         max_prompt_len = 2048
         max_answer_len = 2048
 
@@ -148,6 +156,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             args=dict(
                 dataset_path="/lustre/meizy/data/wps-formula-rw/dataset_train.jsonl",
                 max_prompt_len=max_prompt_len,
+                pad_to_max_length=True,
             ),
         )
         dataloader = DataLoader(
@@ -253,7 +262,8 @@ class PipeWpsfFlashPPOExperiment(Experiment):
         actor_interface = ref_interface = ModelInterface(
             'pipe_flash_actor',
             args={
-                **copy.deepcopy(ppo_kwargs), "generation_config": generation_kwargs
+                **copy.deepcopy(ppo_kwargs), "generation_config": generation_kwargs,
+                "force_no_logits_mask": True
             },
         )
         critic_interface = ModelInterface(
@@ -277,7 +287,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
                 pp_rank=coord.pipe,
                 mp_rank=coord.model,
                 cuda_cache_cleanliness=True,
-                cuda_cache_clear_freq=10,
+                cuda_cache_clear_freq=1,
             )
             model_worker.append(mw)
 
@@ -300,6 +310,8 @@ class PipeWpsfFlashPPOExperiment(Experiment):
                 model_name='ref',
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_refs),
+                cuda_cache_cleanliness=True,
+                cuda_cache_clear_freq=1,
             ) for i in range(self.n_refs)
         ] + [
             ModelWorker(
@@ -310,6 +322,8 @@ class PipeWpsfFlashPPOExperiment(Experiment):
                 model_name='critic',
                 dp_rank=i,
                 topo=PipeModelDataParallelTopology(1, 1, self.n_critics),
+                cuda_cache_cleanliness=True,
+                cuda_cache_clear_freq=1,
             ) for i in range(self.n_critics)
         ]
 
@@ -320,7 +334,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
             data_worker=data_worker,
             model_worker=model_worker,
-        )
+            benchmark_steps=20)
 
 
 register_experiment("wpsf-flash-ppo-pipe", PipeWpsfFlashPPOExperiment)

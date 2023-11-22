@@ -1,3 +1,4 @@
+from statistics import mean
 from typing import Dict, List, Optional
 import logging
 
@@ -18,14 +19,16 @@ logger = logging.getLogger("pipe_flash_sft")
 
 
 def compute_packed_sft_loss(logits: torch.Tensor, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor,
-                            loss_mask: torch.Tensor) -> torch.Tensor:
+                            prompt_mask: torch.Tensor, **kwargs) -> torch.Tensor:
+    loss_mask = 1 - prompt_mask.float()
     logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
     shift_one_indices = torch.cat([
         torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
         for i in range(cu_seqlens.shape[0] - 1)
     ])
     loss_mask = loss_mask[shift_one_indices]
-    return -(logprobs * loss_mask).sum() / loss_mask.sum()
+    loss = -(logprobs * loss_mask).sum() / loss_mask.sum()
+    return loss, {"loss": loss}
 
 
 class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
@@ -41,20 +44,29 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
         module: DeepSpeedPipelineEngine = model.module
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
-        module.eval()
+        module.train()
 
-        module.set_loss_fn(compute_packed_sft_loss)
+        loss_fn_kwargs = dict(
+            prompt_mask=prompt_mask,
+            input_lens=cu_seqlens[1:] - cu_seqlens[:-1],
+        )
 
-        agg_loss = module.train_batch(packed_input_ids=packed_input_ids,
-                                      cu_seqlens=cu_seqlens,
-                                      prompt_mask=prompt_mask)
-        # agg_loss = average loss of data parallel batches
+        stats = module.train_batch(packed_input_ids=packed_input_ids,
+                                   cu_seqlens=cu_seqlens,
+                                   loss_fn=compute_packed_sft_loss,
+                                   **loss_fn_kwargs)
 
         cur_epoch = model.version.epoch
         model.inc_version()
         if model.version.epoch > cur_epoch:
             module.tput_timer.update_epoch_count()
-        return dict(loss=agg_loss.detach().item())
+
+        # agg_loss = average loss of data parallel batches
+        if len(stats) > 0:
+            agg_loss = mean([s["loss"].detach().item() for s in stats])
+            return dict(loss=agg_loss)
+        else:
+            return dict()
 
     @torch.inference_mode()  # one time evaluate
     def inference(self, model_: api.model.Model, data: NamedArray) -> Dict:
@@ -79,7 +91,7 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
         if fwd_output is not None:
             logits = fwd_output.logits.float()
 
-            loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask.float())
+            loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
 
             losses += (1 - prompt_mask.float()).sum() * loss.float()
             n_tokens += (1 - prompt_mask.float()).sum()
@@ -110,13 +122,12 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
             prompt_mask: torch.BoolTensor = data['prompt_mask'].squeeze()  # shape [tot_seqlen]
             max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
-            fwd_output = module(packed_input_ids=packed_input_ids,
-                                cu_seqlens=cu_seqlens,
-                                prompt_mask=prompt_mask)
+            fwd_output = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
 
             if fwd_output is not None:
                 logits = fwd_output.logits.float()
-                loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask.float())
+                loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens,
+                                                  1 - prompt_mask.float())
 
                 losses += (1 - prompt_mask.float()).sum() * loss.float()
                 n_tokens += (1 - prompt_mask.float()).sum()

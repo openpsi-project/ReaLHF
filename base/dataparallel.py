@@ -94,7 +94,9 @@ class PackedParallelDataBroker(ParallelDataBroker):
                 # packed_logprobs has shape [tot_seqlen - bs] (each sequence is one-step shorter) and should be splitted
                 # according to short-1 cumulative lengths, seq_no_eos_mask has shape [bs] and performs similar as input_lens, ...
                 # so we must enumerate each possible key and deal with them separately, etc.
-                if k == 'input_lens':
+                if v is None:
+                    sp[k] = None
+                elif k == 'input_lens':
                     sp[k] = input_lens[i]
                 elif k == 'cu_seqlens':
                     sp[k] = cu_seqlens[i]
