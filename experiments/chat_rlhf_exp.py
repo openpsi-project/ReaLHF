@@ -1,7 +1,5 @@
 import os
 
-import torch
-
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 import base.topology as topology
@@ -20,7 +18,7 @@ inf_reward = ModelRPC(
     "reward",
     ModelInterfaceType.INFERENCE,
     input_data=["seq", "attention_mask", "prompts"],
-    input_key_remap={'seq': "input_ids"},
+    input_key_remap={"seq": "input_ids"},
     output_data=["scores"],
     output_key_remap={"scores": "rewards"},
 )
@@ -29,7 +27,7 @@ inf_ref_logits = ModelRPC(
     "ref",
     ModelInterfaceType.INFERENCE,
     input_data=["seq", "attention_mask"],
-    input_key_remap={'seq': "input_ids"},
+    input_key_remap={"seq": "input_ids"},
     output_data=["logp"],
     output_key_remap={"logp": "ref_logp"},
 )
@@ -38,7 +36,7 @@ inf_values = ModelRPC(
     "critic",
     ModelInterfaceType.INFERENCE,
     input_data=["seq", "attention_mask", "prompts"],
-    input_key_remap={'seq': "input_ids"},
+    input_key_remap={"seq": "input_ids"},
     output_data=["scores"],
     output_key_remap={"scores": "values"},
 )
@@ -46,7 +44,7 @@ inf_values = ModelRPC(
 train_actor = ModelRPC(
     "actor",
     ModelInterfaceType.TRAIN_STEP,
-    input_key_remap={'seq': "input_ids"},
+    input_key_remap={"seq": "input_ids"},
     input_data=[
         "seq",
         "attention_mask",
@@ -61,7 +59,7 @@ train_actor = ModelRPC(
 train_critic = ModelRPC(
     "critic",
     ModelInterfaceType.TRAIN_STEP,
-    input_key_remap={'seq': "input_ids"},
+    input_key_remap={"seq": "input_ids"},
     input_data=[
         "seq",
         "attention_mask",
@@ -133,7 +131,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                     scheduling=Scheduling.model_worker_default(
                         cpu=4,
                         gpu=last_gpu_per_type,
-                        gpu_type='tesla',
+                        gpu_type="tesla",
                         mem=int(60000 * last_gpu_per_type),
                         # nodelist='YL-com02',
                         node_type="a100",
@@ -152,9 +150,9 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             scheduling=Scheduling.model_worker_default(
                 cpu=4,
                 gpu=last_gpu_per_type,
-                gpu_type='tesla',
+                gpu_type="tesla",
                 mem=100000,
-                nodelist='QH-com04',
+                nodelist="QH-com04",
                 deadline=EXPR_DEADLINE,
                 time_limit=EXPR_TIME_LIMIT,
             ),
@@ -195,9 +193,12 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                     time_limit=EXPR_TIME_LIMIT,
                 ),
             ),
-            model_worker=self.model_worker_task_groups)
+            model_worker=self.model_worker_task_groups,
+        )
 
     def initial_setup(self) -> ExperimentConfig:
+        import torch
+
         # model_dir = "/lustre/meizy/base_models/cfgonly"
         model_dir = "/lustre/meizy/models"
         data_path = "/lustre/meizy/data/rlhf/data.jsonl"
@@ -219,14 +220,14 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         max_answer_len = self.config.max_answer_length
 
         dataset = Dataset(
-            'prompt',
+            "prompt",
             args=dict(
                 dataset_path=data_path,
                 max_prompt_len=max_prompt_len,
             ),
         )
         dataloader = DataLoader(
-            'default',
+            "default",
             args=dict(
                 shuffle=True,
                 drop_last=True,
@@ -264,7 +265,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             ),
         )
         ref_model = Model(
-            'causal_lm',
+            "causal_lm",
             args=dict(
                 model_name_or_path=actor_path,
                 init_from_scratch=self.init_from_scratch,
@@ -289,7 +290,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
         # critic_model.args['lora_op_after_creation'] = None
 
         actor_backend = ModelBackend(
-            'ds_train',
+            "ds_train",
             args=dict(
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
@@ -302,7 +303,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             ),
         )
         critic_backend = ModelBackend(
-            'ds_train',
+            "ds_train",
             args=dict(
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
@@ -314,14 +315,22 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 gradient_checkpointing=False,
             ),
         )
-        ref_backend = ModelBackend('ds_inference',
-                                   args=dict(enable_fp16=True,
-                                             zero_stage=3 if self.config.offload_ref else 0,
-                                             offload=self.config.offload_ref))
-        rw_backend = ModelBackend('ds_inference',
-                                  args=dict(enable_fp16=True,
-                                            zero_stage=3 if self.config.offload_reward else 0,
-                                            offload=self.config.offload_reward))
+        ref_backend = ModelBackend(
+            "ds_inference",
+            args=dict(
+                enable_fp16=True,
+                zero_stage=3 if self.config.offload_ref else 0,
+                offload=self.config.offload_ref,
+            ),
+        )
+        rw_backend = ModelBackend(
+            "ds_inference",
+            args=dict(
+                enable_fp16=True,
+                zero_stage=3 if self.config.offload_reward else 0,
+                offload=self.config.offload_reward,
+            ),
+        )
 
         ppo_kwargs = dict(
             ppo_epochs=1,
@@ -334,23 +343,23 @@ class ChatRLHFBenchmarkExperiment(Experiment):
             max_reward_clip=20.0,
         )
         actor_interface = ref_interface = ModelInterface(
-            'chat_actor',
+            "chat_actor",
             args=copy.deepcopy(ppo_kwargs),
         )
         critic_interface = ModelInterface(
-            'chat_critic',
+            "chat_critic",
             args=copy.deepcopy(ppo_kwargs),
         )
         # critic_interface.args['mini_batch_size'] = mini_batch_size_per_device * self.n_actors // self.n_critics
-        rw_interface = ModelInterface('chat_reward')
+        rw_interface = ModelInterface("chat_reward")
 
-        model_worker = [
+        model_worker = ([
             ModelWorker(
                 seed=self.seed,
                 model=actor_model,
                 backend=actor_backend,
                 interface=actor_interface,
-                model_name='actor',
+                model_name="actor",
                 dp_rank=i,
                 topo=topology.PipeModelDataParallelTopology(1, 1, self.n_actors),
             ) for i in range(self.n_actors)
@@ -360,7 +369,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 model=critic_model,
                 backend=critic_backend,
                 interface=critic_interface,
-                model_name='critic',
+                model_name="critic",
                 dp_rank=i,
                 topo=topology.PipeModelDataParallelTopology(1, 1, self.n_critics),
             ) for i in range(self.n_critics)
@@ -370,7 +379,7 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 model=rw_model,
                 backend=rw_backend,
                 interface=rw_interface,
-                model_name='reward',
+                model_name="reward",
                 dp_rank=i,
                 topo=topology.PipeModelDataParallelTopology(1, 1, self.n_rewards),
             ) for i in range(self.n_rewards)
@@ -380,11 +389,11 @@ class ChatRLHFBenchmarkExperiment(Experiment):
                 model=ref_model,
                 backend=ref_backend,
                 interface=ref_interface,
-                model_name='ref',
+                model_name="ref",
                 dp_rank=i,
                 topo=topology.PipeModelDataParallelTopology(1, 1, self.n_refs),
             ) for i in range(self.n_refs)
-        ]
+        ])
 
         return ExperimentConfig(
             total_train_epochs=8,

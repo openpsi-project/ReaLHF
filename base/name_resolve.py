@@ -11,10 +11,6 @@ import threading
 import time
 import uuid
 
-from redis.backoff import ExponentialBackoff
-from redis.retry import Retry
-import redis
-
 from base.cluster import spec as cluster_spec
 import base.logging as logging
 import base.security
@@ -82,8 +78,7 @@ class NameRecordRepository:
         return sub_name
 
     def delete(self, name):
-        """Deletes an existing record.
-        """
+        """Deletes an existing record."""
         raise NotImplementedError()
 
     def clear_subtree(self, name_root):
@@ -93,8 +88,7 @@ class NameRecordRepository:
         raise NotImplementedError()
 
     def get(self, name):
-        """Returns the value of the key. Raises NameEntryNotFoundError if not found.
-        """
+        """Returns the value of the key. Raises NameEntryNotFoundError if not found."""
         raise NotImplementedError()
 
     def get_subtree(self, name_root):
@@ -104,8 +98,7 @@ class NameRecordRepository:
         raise NotImplementedError()
 
     def find_subtree(self, name_root):
-        """Returns all KEYS whose names start with the path root name_root.
-        """
+        """Returns all KEYS whose names start with the path root name_root."""
         raise NotImplementedError()
 
     def wait(self, name, timeout=None, poll_frequency=1):
@@ -121,18 +114,16 @@ class NameRecordRepository:
             except NameEntryNotFoundError:
                 pass
             if timeout is None or timeout > 0:
-                time.sleep(poll_frequency + random.random() * .1)  # To reduce concurrency.
+                time.sleep(poll_frequency + random.random() * 0.1)  # To reduce concurrency.
             if timeout is not None and time.monotonic() - start > timeout:
                 raise TimeoutError(f"Timeout waiting for key '{name}' ({self.__class__.__name__})")
 
     def reset(self):
-        """Deletes all entries added via this repository instance's add(delete_on_exit=True).
-        """
+        """Deletes all entries added via this repository instance's add(delete_on_exit=True)."""
         raise NotImplementedError()
 
     def watch_names(self, names: List, call_back: Callable, poll_frequency=15, wait_timeout=300):
-        """Watch a name, execute call_back when key is deleted.
-        """
+        """Watch a name, execute call_back when key is deleted."""
         if isinstance(names, str):
             names = [names]
 
@@ -148,9 +139,11 @@ class NameRecordRepository:
                 call_back()
 
         for name in names:
-            t = threading.Thread(target=self._watch_thread_run,
-                                 args=(name, wrap_call_back, poll_frequency, wait_timeout),
-                                 daemon=True)
+            t = threading.Thread(
+                target=self._watch_thread_run,
+                args=(name, wrap_call_back, poll_frequency, wait_timeout),
+                daemon=True,
+            )
             t.start()
 
     def _watch_thread_run(self, name, call_back, poll_frequency, wait_timeout):
@@ -330,14 +323,20 @@ class RedisNameRecordRepository(NameRecordRepository):
         keeper: Optional[base.timeutil.FrequencyControl] = None
 
     def __init__(self, **kwargs):
+        from redis.backoff import ExponentialBackoff
+        from redis.retry import Retry
+        import redis
+
         super().__init__()
         self.__lock = threading.Lock()
-        self.__redis = redis.Redis(host=RedisNameRecordRepository.REDIS_HOST,
-                                   password=RedisNameRecordRepository.REDIS_PASSWORD,
-                                   db=RedisNameRecordRepository.REDIS_DB,
-                                   socket_timeout=60,
-                                   retry_on_timeout=True,
-                                   retry=Retry(ExponentialBackoff(180, 60), 3))
+        self.__redis = redis.Redis(
+            host=RedisNameRecordRepository.REDIS_HOST,
+            password=RedisNameRecordRepository.REDIS_PASSWORD,
+            db=RedisNameRecordRepository.REDIS_DB,
+            socket_timeout=60,
+            retry_on_timeout=True,
+            retry=Retry(ExponentialBackoff(180, 60), 3),
+        )
         self.__entries = {}
         self.__keepalive_running = True
         self.__keepalive_thread = threading.Thread(target=self.__keepalive_thread_run, daemon=True)
@@ -365,7 +364,8 @@ class RedisNameRecordRepository(NameRecordRepository):
             self.__entries[name] = self._Entry(
                 value=value,
                 keepalive_ttl=keepalive_ttl,
-                keeper=base.timeutil.FrequencyControl(frequency_seconds=keepalive_ttl / 1000 / 3))
+                keeper=base.timeutil.FrequencyControl(frequency_seconds=keepalive_ttl / 1000 / 3),
+            )
 
     def delete(self, name):
         with self.__lock:

@@ -1,7 +1,5 @@
 import functools
 
-import torch
-
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.cluster import spec as cluster_spec
@@ -121,6 +119,7 @@ class WpsRLHFExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
+        import torch
         if self.benchmark_only:
             actor_path = f"/lustre/meizy/models/starcoder_4l"
             rw_lora_head_path = None

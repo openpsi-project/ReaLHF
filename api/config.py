@@ -9,15 +9,13 @@ import math
 import os
 import sys
 
-import yaml
-
 from base.cluster import spec as cluster_spec
 import api.dfg
 import base.topology
 
 PYTORCH_KERNEL_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/kernels"
 TRITON_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/triton"
-DATASET_CACHE_PATH = f'{cluster_spec.fileroot}/.cache/{getpass.getuser()}/datasets'
+DATASET_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/datasets"
 TORCH_EXTENSIONS_DIR = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/extensions"
 
 _LLM_ENVVARS = {
@@ -31,7 +29,7 @@ _LLM_ENVVARS = {
     # "CUDA_LAUNCH_BLOCKING": "1",
     # "TORCH_USE_CUDA_DSA": "1",
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
-    "PYTHONUSERBASE": "/nonsense"
+    "PYTHONUSERBASE": "/nonsense",
 }
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
@@ -92,6 +90,7 @@ class WorkerInformation:
     """The basic information of an worker. To improve config readability, the experiment starter will fill the
     fields, instead of letting the users do so in experiment configs.
     """
+
     experiment_name: str = ""
     trial_name: str = ""  # Name of the trial of the experiment; e.g. "{USER}-0".
     model_name: str = ""
@@ -111,8 +110,7 @@ class WorkerInformation:
     log_wandb: Optional[bool] = None
 
     def system_setup(self, experiment_name, trial_name, worker_type, worker_index, worker_count, model_name):
-        """Setup system related worker information, while leaving the rest untouched.
-        """
+        """Setup system related worker information, while leaving the rest untouched."""
         self.experiment_name = experiment_name
         self.trial_name = trial_name
         self.worker_type = worker_type
@@ -162,7 +160,7 @@ class ModelBackend:
 class RequestReplyStream:
     push_stream_name: str
     pull_stream_name: str
-    serialization_method: str = 'raw_compress'
+    serialization_method: str = "raw_compress"
 
 
 @dataclasses.dataclass
@@ -193,7 +191,7 @@ class ModelWorker:
     worker_info: Optional[WorkerInformation] = None
 
     def __post_init__(self):
-        assert '@' not in self.model_name
+        assert "@" not in self.model_name
 
 
 @dataclasses.dataclass
@@ -286,7 +284,7 @@ class ExperimentConfig:
             # Set stream for model workers.
             for mw in mws:
                 # Following the naming convention of deepspeed. Inner sep is '_' and outer sep is '-'.
-                model_id = f"{mw.model_name}@pp_{mw.pp_rank:02d}-mp_{mw.mp_rank:02d}-dp_{mw.dp_rank:02d}"
+                model_id = (f"{mw.model_name}@pp_{mw.pp_rank:02d}-mp_{mw.mp_rank:02d}-dp_{mw.dp_rank:02d}")
                 mw.stream = RequestReplyStream(push_stream_name=model_id,
                                                pull_stream_name=f"master2{model_id}")
                 model_streams[model_id] = RequestReplyStream(pull_stream_name=model_id,
@@ -326,11 +324,13 @@ class ExperimentConfig:
             ("data_worker", self.data_worker),
         ]:
             for i, worker in enumerate(workers):
-                system_worker_info = dict(experiment_name=experiment_name,
-                                          trial_name=trial_name,
-                                          worker_type=worker_type,
-                                          worker_index=i,
-                                          worker_count=len(workers))
+                system_worker_info = dict(
+                    experiment_name=experiment_name,
+                    trial_name=trial_name,
+                    worker_type=worker_type,
+                    worker_index=i,
+                    worker_count=len(workers),
+                )
                 if worker.worker_info is not None:
                     worker.worker_info.system_setup(**system_worker_info)
                 else:
@@ -338,8 +338,7 @@ class ExperimentConfig:
 
 
 class Experiment:
-    """Base class for defining the procedure of an experiment.
-    """
+    """Base class for defining the procedure of an experiment."""
 
     def scheduling_setup(self) -> ExperimentScheduling:
         """Returns the Scheduling of all workers."""
@@ -351,11 +350,15 @@ class Experiment:
 
 
 def dump_config_to_yaml(config, file):
+    import yaml
+
     with open(file, "w") as f:
         yaml.dump(dataclass_to_dict(config), f)
 
 
 def load_config_from_yaml(file):
+    import yaml
+
     with open(file, "r") as f:
         return config_to_dataclass(yaml.safe_load(f))
 
@@ -374,7 +377,8 @@ def dataclass_to_dict(dc):
         dc = dict(
             config_class=root_name,
             config_value={k.name: dataclass_to_dict(getattr(dc, k.name))
-                          for k in dataclasses.fields(dc)})
+                          for k in dataclasses.fields(dc)},
+        )
     else:
         raise f"{dc} of type {type(dc)} cannot be parse to dict."
     return dc
