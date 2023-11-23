@@ -2,7 +2,6 @@ from typing import Callable, Dict, List, Literal, Optional, Union
 import collections
 import dataclasses
 import functools
-import logging
 import math
 import os
 import re
@@ -20,6 +19,7 @@ from impl.model.utils.data import get_eos_indices, masked_normalization
 from impl.model.utils.save import save_hf_or_lora_model
 import api.huggingface
 import api.model
+import base.logging as logging
 
 logger = logging.getLogger("Chat Interface")
 

@@ -1,5 +1,4 @@
 from typing import Any, Dict, Optional, Type
-import logging
 import math
 import os
 import time
@@ -7,7 +6,9 @@ import time
 import torch
 import transformers
 
-logger = logging.getLogger("HuggingFace Model")
+import base.logging as logging
+
+logger = logging.getLogger("HuggingFace Model", "benchmark")
 
 
 def load_hf_tokenizer(model_name_or_path: str,

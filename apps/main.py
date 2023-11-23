@@ -1,21 +1,21 @@
 from typing import Dict, List, Optional
 import argparse
 import getpass
-import logging
 import os
 import re
-import time
 
-from base.constants import DATE_FORMAT, LOG_FORMAT
 import api.config as config_package
+import base.logging as logging
 import experiments
 import scheduler.client
 import system
 
-logger = logging.getLogger("main")
+logger = logging.getLogger("main", "system")
 
 CONTROLLER_TIME_LIMIT = None
-TRACE_TIMEOUT = 300  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
+TRACE_TIMEOUT = (
+    300  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
+)
 
 
 def scheduler_mode(mode: str) -> str:
@@ -215,11 +215,13 @@ def main():
 
     subparser = subparsers.add_parser("start", help="starts an experiment")
     subparser.add_argument("--experiment_name", "-e", type=str, required=True, help="name of the experiment")
-    subparser.add_argument("--trial_name",
-                           "-f",
-                           type=str,
-                           default=None,
-                           help="trial name; by default uses '<USER>-test'")
+    subparser.add_argument(
+        "--trial_name",
+        "-f",
+        type=str,
+        default=None,
+        help="trial name; by default uses '<USER>-test'",
+    )
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
     subparser.add_argument("--wandb_mode",
@@ -263,7 +265,6 @@ def main():
     subparser.set_defaults(func=main_find_config)
 
     args = parser.parse_args()
-    logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level=getattr(args, "LOGLEVEL", "INFO"))
     args.func(args)
 
 

@@ -3,7 +3,6 @@
 # i.e., the model worker can buffer requests from the master and execute them in any order under the hood.
 from typing import Dict, Optional, Union
 import dataclasses
-import logging
 import pickle
 import socket
 import time
@@ -14,6 +13,7 @@ import zmq
 
 import api.config
 import api.dfg
+import base.logging as logging
 import base.name_resolve as name_resolve
 import base.namedarray as namedarray
 import base.names as names
@@ -122,7 +122,7 @@ class NameResolvingRequstReplyStream(IpRequestReplyStream):
         name = names.request_reply_stream(experiment_name, trial_name, push_stream_name)
         name_resolve.add(name=name, value=address)
 
-        logger.info(f"add {push_stream_name}")
+        logger.info(f"Added push stream {push_stream_name}.")
 
         name = names.request_reply_stream(experiment_name, trial_name, pull_stream_name)
 

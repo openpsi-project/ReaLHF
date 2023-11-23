@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import dataclasses
 import enum
 import getpass
-import logging
 import os
 import queue
 import re
@@ -13,6 +12,7 @@ import time
 from api import config as config_pkg
 from base.gpu_utils import set_cuda_device
 import base.cluster
+import base.logging as logging
 import base.monitor
 import base.name_resolve
 import base.names
@@ -501,7 +501,7 @@ class Worker:
         self.__worker_info = r
         self.__worker_type = r.worker_type
         self.__worker_index = r.worker_index
-        self.logger = logging.getLogger(r.worker_type + "-worker")
+        self.logger = logging.getLogger(r.worker_type + "-worker", 'colored')
         if r.host_key is not None:
             self.__host_key(
                 base.names.worker_key(experiment_name=r.experiment_name,

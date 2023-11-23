@@ -1,6 +1,5 @@
 from statistics import mean
 from typing import Dict, List, Optional
-import logging
 
 import deepspeed
 import torch
@@ -14,6 +13,7 @@ from impl.model.utils.data import gather_packed_shifted_log_probs, PipeCacheData
 from impl.model.utils.save import save_hf_or_lora_model
 import api.data
 import api.model
+import base.logging as logging
 
 logger = logging.getLogger("pipe_flash_sft")
 

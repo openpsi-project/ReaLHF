@@ -12,6 +12,7 @@ import api.config as config
 import api.data
 import api.model
 import base.gpu_utils as gpu_utils
+import base.logging as logging
 import base.namedarray as namedarray
 import base.seeding as seeding
 import base.timeutil
@@ -21,6 +22,8 @@ import system.worker_base as worker_base
 # Register all implemented datasets and models.
 import impl.model  # isort:skip
 import impl.dataset  # isort:skip
+
+logger = logging.getLogger("Model Worker", "colored")
 
 
 class ModelWorker(worker_base.Worker):
@@ -72,9 +75,8 @@ class ModelWorker(worker_base.Worker):
         self.__world_size, self.__ddp_rank, local_gpu_id = gpu_utils.setup_ddp(
             self.__experiment_name, self.__trial_name, self.model_name, self.__worker_index)
 
-        self.logger.info(
-            f"SetUp Information - Model worker index {self.__worker_index}"
-            f' type "{self.config.model_name}" located at {socket.gethostname()} GPU {local_gpu_id}.')
+        logger.info(f"SetUp Information - Model worker index {self.__worker_index}"
+                    f' type "{self.config.model_name}" located at {socket.gethostname()} GPU {local_gpu_id}.')
 
         if self.config.backend.type_ in ["ds_train", "ds_inference"]:
             self.logger.info("deepspeed init distributed on model worker")
@@ -124,7 +126,7 @@ class ModelWorker(worker_base.Worker):
 
         tik = time.perf_counter()
         if self.is_master:
-            self.logger.info(f"Model worker {self.model_name} received request {request.handle_name}.")
+            logger.info(f"Model worker {self.model_name} received request {request.handle_name}.")
         try:
             worker_identifier = f"{self.model_name}_{self.__ddp_rank}"
             if request.handle_name == "initialize":
@@ -153,8 +155,9 @@ class ModelWorker(worker_base.Worker):
             raise e
 
         if self.is_master:
-            self.logger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
-                             f" in ${time.perf_counter() - tik:.4f}$s")
+            logging.getLogger("benchmark").debug(
+                f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
+                f" in ${time.perf_counter() - tik:.4f}$s")
 
         reply = request_reply_stream.Payload(request_id=request.request_id,
                                              handle_name=request.handle_name,
@@ -169,17 +172,19 @@ class ModelWorker(worker_base.Worker):
             gc.collect()
             et = time.monotonic()
             if self.is_master:
-                self.logger.info(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
+                logging.getLogger("benchmark").debug(
+                    f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
 
         # logging gpu/cpu stats
         # self.print_monitor_info()
         tik = time.perf_counter()
-        self.logger.info(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
-            self.model_name,
-            round(get_accelerator().memory_allocated() / 1024**3, 2),
-            round(get_accelerator().max_memory_allocated() / 1024**3, 2),
-        )))
-        self.logger.info(f"monitoring overhead {time.perf_counter()-tik}s")
+        logging.getLogger("benchmark").debug(
+            ("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
+                self.model_name,
+                round(get_accelerator().memory_allocated() / 1024**3, 2),
+                round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+            )))
+        logging.getLogger("benchmark").debug(f"monitoring overhead {time.perf_counter()-tik}s")
 
-        sample_count = request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 0
+        sample_count = (request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 0)
         return worker_base.PollResult(sample_count=sample_count, batch_count=1)

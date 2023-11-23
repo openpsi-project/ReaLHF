@@ -2,7 +2,6 @@ from typing import Dict, Optional
 import collections
 import dataclasses
 import itertools
-import logging
 import random
 
 import deepspeed
@@ -16,6 +15,7 @@ from impl.model.utils.data import build_packed_inputs, gather_packed_shifted_log
 from impl.model.utils.save import save_hf_or_lora_model
 import api.huggingface
 import api.model
+import base.logging as logging
 import impl.model.nn.flash_mqat as flash_mqat
 import impl.model.utils.ppo_functional as ppo_functional
 

@@ -1,10 +1,11 @@
 from typing import Optional, Union
-import logging
 
 import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+
+import base.logging as logging
 
 logger = logging.getLogger("Modules")
 

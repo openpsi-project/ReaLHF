@@ -6,7 +6,6 @@
 from types import MethodType
 from typing import Callable, List, Optional, Tuple, Union
 import dataclasses
-import logging
 import time
 
 from deepspeed import comm as dist
@@ -29,6 +28,7 @@ from base.namedarray import NamedArray
 from impl.model.nn.flash_mqat import GenerationConfig, genstep
 from impl.model.utils.data import (data_list_to_tensor_tuple, DuckGenerationOutput, DuckModelOutput,
                                    PipeCacheData, PipeTransferData, tensor_tuple_to_data_list)
+import base.logging as logging
 
 TARGET_ID = -2
 LOG_STAGE = -2

@@ -1,7 +1,6 @@
 from typing import Any, Dict, List, Literal, Optional, Union
 import dataclasses
 import gc
-import logging
 
 from torch import nn
 import bitsandbytes as bnb
@@ -13,6 +12,7 @@ import torch.nn.functional as F
 import api.config
 import api.huggingface
 import api.model
+import base.logging as logging
 
 logger = logging.getLogger("LoRA")
 

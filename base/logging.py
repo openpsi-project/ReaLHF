@@ -1,0 +1,160 @@
+from typing import Literal, Optional
+import logging.config
+import os
+
+import colorlog
+
+LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
+DATE_FORMAT = "%Y%m%d-%H:%M:%S"
+LOGLEVEL = os.environ.get("LOGLEVEL") or "INFO"
+
+# The available color names are black, red, green, yellow, blue, purple, cyan and white
+log_config = {
+    "version": 1,
+    "formatters": {
+        "plain": {
+            "format": LOG_FORMAT,
+            "datefmt": DATE_FORMAT,
+        },
+        "colored": {
+            "()": colorlog.ColoredFormatter,
+            "format": "%(log_color)s" + LOG_FORMAT,
+            "datefmt": DATE_FORMAT,
+            "log_colors": {
+                "DEBUG": "blue",
+                "INFO": "light_purple",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "bold_white,bg_red",
+            },
+        },
+        "colored_system": {
+            "()": colorlog.ColoredFormatter,
+            "format": "%(log_color)s" + LOG_FORMAT,
+            "datefmt": DATE_FORMAT,
+            "log_colors": {
+                "DEBUG": "blue",
+                "INFO": "light_green",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "bold_white,bg_red",
+            },
+        },
+        "colored_benchmark": {
+            "()": colorlog.ColoredFormatter,
+            "format": "%(log_color)s" + LOG_FORMAT,
+            "datefmt": DATE_FORMAT,
+            "log_colors": {
+                "DEBUG": "light_black",
+                "INFO": "light_cyan",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "bold_white,bg_red",
+            },
+        },
+    },
+    "handlers": {
+        "plainHandler": {
+            "class": "logging.StreamHandler",
+            "level": LOGLEVEL,
+            "formatter": "plain",
+            "stream": "ext://sys.stdout",
+        },
+        "benchmarkHandler": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "colored_benchmark",
+            "stream": "ext://sys.stdout",
+        },
+        "systemHandler": {
+            "class": "logging.StreamHandler",
+            "level": "INFO",
+            "formatter": "colored_system",
+            "stream": "ext://sys.stdout",
+        },
+        "coloredHandler": {
+            "class": "logging.StreamHandler",
+            "level": LOGLEVEL,
+            "formatter": "colored",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "loggers": {
+        "plain": {
+            "handlers": ["plainHandler"],
+            "level": LOGLEVEL,
+        },
+        "benchmark": {
+            "handlers": ["benchmarkHandler"],
+            "level": "DEBUG",
+        },
+        "colored": {
+            "handlers": ["coloredHandler"],
+            "level": LOGLEVEL,
+        },
+        "system": {
+            "handlers": ["systemHandler"],
+            "level": LOGLEVEL,
+        },
+    },
+}
+
+
+def getLogger(
+    name: Optional[str] = None,
+    type_: Optional[Literal["plain", "benchmark", "colored", "system"]] = None,
+):
+    logging.config.dictConfig(log_config)
+    if name is None:
+        name = "plain"
+    if type_ is None:
+        type_ = "plain"
+    if name not in log_config["loggers"]:
+        log_config["loggers"][name] = {
+            "handlers": [f"{type_}Handler"],
+            "level": "INFO",
+        }
+        logging.config.dictConfig(log_config)
+    return logging.getLogger(name)
+
+
+if __name__ == "__main__":
+    # The following serves as a color visualization test.
+    # The available color names are black, red, green, yellow, blue, purple, cyan and white
+    log_config = {
+        "version": 1,
+        "formatters": {
+            "colored": {
+                "()": colorlog.ColoredFormatter,
+                "format": "%(log_color)s" + LOG_FORMAT,
+                "datefmt": DATE_FORMAT,
+                "log_colors": {
+                    "DEBUG": "purple",
+                    "INFO": "light_purple",
+                    "WARNING": "yellow",
+                    "ERROR": "red",
+                    "CRITICAL": "bold_white,bg_red",
+                },
+            },
+        },
+        "handlers": {
+            "coloredHandler": {
+                "class": "logging.StreamHandler",
+                "level": "DEBUG",
+                "formatter": "colored",
+                "stream": "ext://sys.stdout",
+            },
+        },
+        "loggers": {
+            "": {
+                "handlers": ["coloredHandler"],
+                "level": "DEBUG",
+            },
+        },
+    }
+    logging.config.dictConfig(log_config)
+    logging.debug("This is a debug message")
+    logging.info("This is an info message")
+    logging.warning("This is a warning message")
+    logging.error("This is an error message")
+    logging.critical("This is a critical message")

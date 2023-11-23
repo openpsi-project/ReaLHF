@@ -20,11 +20,13 @@ RUN pip3 install -U deepspeed -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy h5py ninja packaging tensorboardx sentencepiece numba viztracer[full] pyzmq -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-COPY flash_attn-2.3.3+cu122torch2.1cxx11abiTRUE-cp310-cp310-linux_x86_64.whl /flash_attn-2.3.3+cu122torch2.1cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
-RUN pip3 install /flash_attn-2.3.3+cu122torch2.1cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
-
 ENV PATH="${PATH}:/opt/hpcx/ompi/bin:/opt/hpcx/ucx/bin"
 ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
+
+COPY flash_attn-2.3.4-cp310-cp310-linux_x86_64.whl /flash_attn-2.3.4-cp310-cp310-linux_x86_64.whl
+RUN pip3 uninstall flash_attn -y && pip3 install /flash_attn-2.3.4-cp310-cp310-linux_x86_64.whl
+
+RUN pip3 install colorlog colorama -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # install zmq with pgm
 # COPY ./zeromq-4.3.4.tar.gz /

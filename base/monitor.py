@@ -1,7 +1,6 @@
 from collections import defaultdict
 from statistics import mean
 from typing import List, Optional, Union
-import logging
 import os
 import time
 
@@ -10,7 +9,9 @@ import numpy as np
 import psutil
 import viztracer
 
-logger = logging.getLogger("benchmarkutils")
+import base.logging as logging
+
+logger = logging.getLogger("benchmark")
 
 IF_MARK = False
 
@@ -20,34 +21,34 @@ def process_memory_mb(name):
     memory_info = process.memory_info()
     memory_usage_mb = memory_info.rss / 1024**2
     pid = process.pid
-    logger.info(f"Process PID {pid} memory usage @{name}: {memory_usage_mb}.")
+    logger.debug(f"Process PID {pid} memory usage @{name}: {memory_usage_mb}.")
 
 
 def gpu_memory_mb(name):
     import torch.distributed as dist
 
-    logger.info(
+    logger.debug(
         f"{name} GPU rank {dist.get_rank()}: memory usage: {round(get_accelerator().memory_allocated() / 1024**2, 2)}MB, "
         f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB")
 
 
 def mock_time_mark_ms(name, identifier, t, step):
-    logger.info(f"*{name}* #{identifier}#  ${t}$ ms step &{step}&")
+    logger.debug(f"*{name}* #{identifier}#  ${t}$ ms step &{step}&")
 
 
 def time_mark(name, identifier, step=0):
     if IF_MARK:
-        logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns())}$ ns step &{step}&")
+        logger.debug(f"*{name}* #{identifier}#  ${int(time.time_ns())}$ ns step &{step}&")
 
 
 def time_mark_ms(name, identifier, step=0):
     if IF_MARK:
-        logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e6)}$ ms step &{step}&")
+        logger.debug(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e6)}$ ms step &{step}&")
 
 
 def time_mark_s(name, identifier, step=0):
     if IF_MARK:
-        logger.info(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e9)}$ s step &{step}&")
+        logger.debug(f"*{name}* #{identifier}#  ${int(time.time_ns()/10e9)}$ s step &{step}&")
 
 
 def parse_time_mark_in_line(line, name, step_range=None):
@@ -185,11 +186,13 @@ def summary_time_points(
 
                 # print(f"id={identifier} start_key={start_key} left={stp%1000} width={etp-stp}")
                 # print((etp-stp)//1e6)
-                ax.barh(y=id_index,
-                        width=etp - stp,
-                        left=stp,
-                        color=MATPLOTLIB_COLORS[start_key_idx],
-                        label=label)
+                ax.barh(
+                    y=id_index,
+                    width=etp - stp,
+                    left=stp,
+                    color=MATPLOTLIB_COLORS[start_key_idx],
+                    label=label,
+                )
 
         infos[identifier] = (time_sum, time_list)
 

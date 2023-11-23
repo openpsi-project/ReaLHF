@@ -2,7 +2,6 @@
 from typing import Callable, List, Optional
 import dataclasses
 import getpass
-import logging
 import os
 import queue
 import random
@@ -17,6 +16,7 @@ from redis.retry import Retry
 import redis
 
 from base.cluster import spec as cluster_spec
+import base.logging as logging
 import base.security
 import base.timeutil
 

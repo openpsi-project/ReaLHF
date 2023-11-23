@@ -1,5 +1,4 @@
 from typing import Dict, List, Optional, Tuple, Union
-import logging
 import os
 
 import torch
@@ -12,6 +11,7 @@ from impl.model.backend.ds_pipe_engine import (LayerSpec, PipeDataParallelTopolo
 from impl.model.nn.flash_mqat import *
 import api.huggingface
 import api.model
+import base.logging as logging
 
 logger = logging.getLogger("pipe_nn")
 

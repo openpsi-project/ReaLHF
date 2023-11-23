@@ -1,14 +1,12 @@
 from typing import Type
 import importlib
-import logging
 import os
 import traceback
 
-from base.constants import DATE_FORMAT, LOG_FORMAT
 import api.config
+import base.logging as logging
 
-logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level=os.environ.get("LOGLEVEL", "INFO"))
-logger = logging.getLogger("system base")
+logger = logging.getLogger("system")
 
 # NOTE: Workers are configured in the following order.
 # Take special care when adding a new worker type.

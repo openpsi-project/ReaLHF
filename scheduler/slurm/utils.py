@@ -4,7 +4,6 @@ from typing import Callable, Dict, List, Literal, Optional, Union
 import dataclasses
 import datetime
 import getpass
-import logging
 import math
 import os
 import shutil
@@ -14,6 +13,7 @@ import subprocess
 from base.cluster import spec as cluster_spec
 from scheduler.client import JobException, JobInfo, JobState
 import base.cluster
+import base.logging as logging
 
 logger = logging.getLogger("scheduler.slurm.utils")
 

@@ -1,8 +1,8 @@
 from typing import Dict
 import dataclasses
-import logging
 import os
 
+import colorama
 import deepspeed
 import torch
 import tqdm
@@ -10,8 +10,9 @@ import tqdm
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.utils.save import save_hf_or_lora_model
 import api.model
+import base.logging as logging
 
-logger = logging.getLogger("Packed Reward Modeling Interface")
+logger = logging.getLogger("Packed Reward Modeling Interface", "benchmark")
 
 
 @dataclasses.dataclass
@@ -43,7 +44,9 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
                                                 clean_up_tokenization_spaces=False,
                                                 skip_special_tokens=True)
         for seq_str, score in zip(seq_strs, chosen_end_scores):
-            logger.info(f"reward is {score.item()}, sequence is: {seq_str}")
+            logger.info(
+                f"reward is {colorama.Fore.RED}{score.item()}{colorama.Style.RESET_ALL}, sequence is: {colorama.Fore.YELLOW + colorama.Style.DIM}{seq_str}{colorama.Style.RESET_ALL}"
+            )
         #####################################################
 
         return from_dict(dict(scores=chosen_end_scores.cpu()))

@@ -1,11 +1,7 @@
 from collections import defaultdict
 from typing import Dict, List, Literal, Optional, Tuple
 import fcntl
-import logging
-import math
-import os
 import re
-import shutil
 import subprocess
 import time
 
@@ -13,6 +9,7 @@ from base.cluster import spec as cluster_spec
 from scheduler.client import JobException, JobInfo, JobState, SchedulerClient
 from scheduler.slurm.utils import (allocate_resources, SlurmLaunchInfo, SlurmResource,
                                    SlurmResourceNotEnoughException)
+import base.logging as logging
 
 logger = logging.getLogger("Slurm scheduler")
 

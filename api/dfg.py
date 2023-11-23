@@ -1,9 +1,10 @@
 from typing import Dict, List, Optional, Tuple
 import dataclasses
 import enum
-import logging
 
-logger = logging.getLogger("DataFlowGraph")
+import base.logging as logging
+
+logger = logging.getLogger("DataFlowGraph", "benchmark")
 
 
 class ModelInterfaceType(enum.Enum):

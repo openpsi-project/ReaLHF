@@ -1,13 +1,13 @@
 from typing import Callable, Dict, List, Optional, Tuple
 import itertools
 import json
-import logging
 
 import numpy as np
 import torch.utils.data
 
 from base.datapack import ffd_with_result_unsorted, min_abs_diff_partition
 import api.data
+import base.logging as logging
 
 logger = logging.getLogger("Packed Prompt Dataset")
 

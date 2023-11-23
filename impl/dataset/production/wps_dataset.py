@@ -1,5 +1,4 @@
 import json
-import logging
 
 import numpy as np
 import torch
@@ -7,6 +6,7 @@ import torch.utils.data
 
 import api.data
 import api.huggingface
+import base.logging as logging
 
 logger = logging.getLogger("WPS Excel Dataset")
 

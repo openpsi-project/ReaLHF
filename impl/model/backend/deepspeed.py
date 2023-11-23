@@ -1,7 +1,6 @@
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import dataclasses
 import functools
-import logging
 import math
 
 import deepspeed
@@ -10,6 +9,7 @@ import torch
 from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
 import api.model
 import base.deepspeed_utils as deepspeed_utils
+import base.logging as logging
 
 logger = logging.getLogger("DeepSpeed Backend")
 

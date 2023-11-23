@@ -2,7 +2,6 @@ from typing import Callable, Dict, List, Literal, Optional, Union
 import collections
 import dataclasses
 import functools
-import logging
 import math
 import os
 import re
@@ -19,6 +18,7 @@ from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.save import save_hf_or_lora_model
 import api.huggingface
 import api.model
+import base.logging as logging
 import impl.model.utils.ppo_functional as ppo_functional
 
 logger = logging.getLogger("WPS Actor Critic")
