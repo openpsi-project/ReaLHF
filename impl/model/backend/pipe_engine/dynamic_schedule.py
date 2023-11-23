@@ -3,7 +3,7 @@ from collections import defaultdict
 from enum import IntEnum
 import copy
 
-from impl.model.backend.stream_pipe_engine.instruction import *
+from impl.model.backend.pipe_engine.instruction import *
 
 
 class PipeSchedule(ABC):

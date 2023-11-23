@@ -97,7 +97,7 @@ def make_pipe_backend():
 
 def make_pipe_model(model_path, device):
     # from impl.model.backend.ds_pipe_engine import PipeDataParallelTopology
-    from impl.model.backend.stream_pipe_engine import PipeDataParallelTopology
+    from base.topology import PipeDataParallelTopology
     import api.model
     topology = PipeDataParallelTopology(num_pp=NUM_PP, num_dp=NUM_DP)
     model_config = config_package.Model(type_="starcoder_flash_mqat_stream_pipe",
@@ -220,11 +220,12 @@ def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,
     #              profile_memory=True) as prof:
     st = time.monotonic()
-    outputs = interface.train_step(model, data)
+    avg_losses, stats = interface.train_step(model, data)
     t1 = time.monotonic() - st
     # print("second train_step", prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
 
-    logger.info(f"{rank} {outputs} t0 {t0} t1 {t1}")
+    logger.info(f"{rank} {avg_losses} t0 {t0} t1 {t1}")
+    logger.info(f"stats {stats}")
 
 
 class PipeFlashMQATTest(unittest.TestCase):

@@ -1,8 +1,4 @@
-# Copyright (c) Microsoft Corporation.
-# SPDX-License-Identifier: Apache-2.0
-
-# DeepSpeed Team
-
+# static pipeline schedule from deepspeed engine
 from abc import ABC, abstractmethod
 
 from deepspeed.runtime.utils import call_to_str

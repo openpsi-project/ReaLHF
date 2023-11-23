@@ -8,8 +8,7 @@ import torch.utils.data
 import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
-from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
-from impl.model.backend.stream_pipe_engine import StreamPipeEngine
+from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.nn.flash_mqat import GenerationConfig
 from impl.model.utils.data import gather_packed_shifted_log_probs, PipeCacheData, PipeTransferData
 from impl.model.utils.save import save_hf_or_lora_model

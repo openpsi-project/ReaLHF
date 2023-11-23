@@ -7,8 +7,7 @@ import math
 import deepspeed
 import torch
 
-from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
-from impl.model.backend.stream_pipe_engine import StreamPipeEngine
+from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
 import api.model
 import base.deepspeed_utils as deepspeed_utils
 

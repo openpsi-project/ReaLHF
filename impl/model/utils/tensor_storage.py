@@ -1,11 +1,11 @@
 from collections import defaultdict
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 import logging
 
 import torch
 
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-import impl.model.backend.stream_pipe_engine.p2p as p2p
+import impl.model.utils.p2p as p2p
 
 logger = logging.getLogger("tensor_utils")
 
@@ -31,8 +31,9 @@ class TensorBuffer:
         self.tensors = defaultdict(dict)
         self.others = defaultdict(dict)
 
-    def put_non_tensor(self, name: str, mbid: int, tensor_tuple: Any):
-        self.others[name][mbid] = tensor_tuple
+    def put_non_tensor(self, name: str, mbid: int, x: Any):
+        """put anything except for tensor"""
+        self.others[name][mbid] = x
 
     def get_non_tensor(self, name: str, mbid: int, remove: bool = False):
         if remove:
@@ -57,6 +58,25 @@ class TensorBuffer:
             return self.tensors[name].pop(mbid)
         else:
             return self.tensors[name][mbid]
+
+    def remove(self, name: str, mbid: Optional[int] = None, check_exists: bool = True):
+        try:
+            if mbid is None:
+                del self.tensors[name]
+            else:
+                self.tensors[name].pop(mbid)
+        except KeyError:
+            if not check_exists:
+                return
+            raise KeyError(f"TensorBuffer.remove: key {name} mbid {mbid} not found")
+
+    def get_as_list(self, name: str) -> List:
+        # return stored entries for all micro batches under a name as a list
+        res_dict = self.tensors[name]
+        res_list = list()
+        for mbid in sorted(res_dict.keys()):
+            res_list.append(res_dict[mbid])
+        return res_list
 
     def clear(self):
         self.tensors = defaultdict(dict)

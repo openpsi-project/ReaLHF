@@ -18,12 +18,12 @@ import torch
 from base.dataparallel import PackedParallelDataBroker
 from base.monitor import gpu_memory_mb, time_mark
 from base.namedarray import NamedArray
-from impl.model.backend.stream_pipe_engine.module import PipelineError, PipelineModule
-from impl.model.backend.stream_pipe_engine.tensor_utils import (recv_grad, recv_pipe_transfer_data, send_grad,
-                                                                send_pipe_transfer_data, TensorBuffer)
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-import impl.model.backend.stream_pipe_engine.p2p as p2p
-import impl.model.backend.stream_pipe_engine.schedule as schedule
+from impl.model.utils.pipeline_module import PipelineError, PipelineModule
+from impl.model.utils.tensor_storage import (recv_grad, recv_pipe_transfer_data, send_grad,
+                                             send_pipe_transfer_data, TensorBuffer)
+import impl.model.backend.pipe_engine.dynamic_schedule as schedule
+import impl.model.utils.p2p as p2p
 
 logger = logging.getLogger("StreamPipeEngine")
 
@@ -34,6 +34,7 @@ def is_even(number):
 
 class StreamPipeEngine(DeepSpeedEngine):
     """ A training engine hybrid pipeline, data, and model parallel training.
+    Not finsihed implementation!!!
 
     This engine is created by ``deepspeed.initialize()`` when a :class:`PipelineModule`
     is provided.
@@ -123,7 +124,7 @@ class StreamPipeEngine(DeepSpeedEngine):
         if self.is_pipe_parallel:
             p2p.init_process_groups(self.grid)
 
-        #stores the loss for the current micro batch being processed
+        # stores the loss for the current micro batch being processed
         self.loss = torch.tensor(0.0).to(self.device)
         # stats for microbatches in this batch
         self.stats = []

@@ -1,4 +1,8 @@
-# Pipeline module from deepspeed pipeline engine
+# Copyright (c) Microsoft Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+# DeepSpeed Team
+
 from functools import partial
 from typing import List, Tuple
 import glob
@@ -16,8 +20,8 @@ import torch.nn as nn
 
 from base.monitor import process_memory_mb, time_mark
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid
-from impl.model.utils.data import (data_list_to_tensor_tuple, PipeCacheData, PipeTransferData,
-                                   tensor_tuple_to_data_list)
+from impl.model.utils.data import PipeCacheData, PipeTransferData
+import base.constants
 
 
 class PipelineError(Exception):
@@ -133,6 +137,7 @@ class PipelineModule(nn.Module):
                  seed_fn=None,
                  base_seed=1234,
                  partition_method='parameters',
+                 config=None,
                  activation_checkpoint_interval=0,
                  activation_checkpoint_func=checkpointing.checkpoint,
                  checkpointable_layers=None):
@@ -180,6 +185,7 @@ class PipelineModule(nn.Module):
 
         # Construct communicators for pipeline topology
         self._grid = PipelineParallelGrid(process_group=self.world_group, topology=self._topo)
+        base.constants.set_grid(self._grid)
 
         self.stage_id = self._topo.get_coord(self.global_rank).pipe
         print(f"rank {torch.distributed.get_rank()} pipeline stage ID: {self.stage_id}")
@@ -209,6 +215,12 @@ class PipelineModule(nn.Module):
 
         # for saving checkpoints
         self.num_checkpoint_shards = 1
+
+        self.config = config  # get underlying config
+
+    @property
+    def get_config(self):
+        return self.config
 
     def _build(self):
         specs = self._layer_specs
@@ -310,13 +322,9 @@ class PipelineModule(nn.Module):
         """
         return len(self.forward_funcs)
 
-    def forward(self, forward_input_tuple: Tuple):
-        time_mark("module_forward_start", self.global_rank)
-        inputs = tensor_tuple_to_data_list(forward_input_tuple)
-        x: PipeTransferData = inputs[0]
-        ys: List[PipeCacheData] = inputs[1:]
+    def forward(self, x: PipeTransferData, ys: List[PipeCacheData]):
         local_micro_offset = self.micro_offset + 1
-        time_mark("module_forward_end", self.global_rank)
+
         for idx, (layer, y) in enumerate(zip(self.forward_funcs, ys)):
             time_mark(f"layer_{idx}_start", dist.get_rank())
             self.curr_layer = idx + self._local_start
@@ -546,7 +554,7 @@ class PipelineModule(nn.Module):
             shard = {}
             for j in range(start, start + size):
                 shard[keys[j]] = self.state_dict()[keys[j]]
-                # print(f"shard {i} key {keys[j]}")
+                print(f"shard {i} key {keys[j]}")
             start += size
             save_fn = f"pytorch_model-pp-{self.stage_id:02d}-mp-00-s-{i:02d}.bin"
             save_abs_fn = os.path.join(save_dir, save_fn)
