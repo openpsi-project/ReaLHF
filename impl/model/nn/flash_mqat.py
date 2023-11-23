@@ -23,7 +23,9 @@ import api.model
 import base.logging as logging
 
 try:
-    from flash_attn import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache
+    from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
+                            flash_attn_with_kvcache)
+    from flash_attn.bert_padding import index_first_axis
 except ModuleNotFoundError:
     pass
 
@@ -242,7 +244,7 @@ class CausalSelfAttentionLayer(nn.Module):
                 v=v,
                 cache_seqlens=cache_seqlens,
                 softmax_scale=scale_factor,
-                causal=False,
+                causal=False,  # True or False doesn't matter because seqlen=1
                 num_splits=1,
             )
         elif k_cache is not None and len(qkv.shape) == 2:
@@ -250,30 +252,16 @@ class CausalSelfAttentionLayer(nn.Module):
             q = q.view(q.shape[0], self.nq, self.d)
             v = v.view(v.shape[0], self.nkv, self.d)
             k = k.view(k.shape[0], self.nkv, self.d)
-            # FIXME: The following code is crazily slow. We should implement them as a customized kernel?
-            qlens = cu_seqlens[1:] - cu_seqlens[:-1]
-            offset = 0
-            new_k, new_v = [], []
-            for i, (qlen, cache_len) in enumerate(zip(qlens, cache_seqlens)):
-                new_k += [k_cache[i, :cache_len], k[offset:offset + qlen]]
-                new_v += [v_cache[i, :cache_len], v[offset:offset + qlen]]
-                with torch.no_grad():
-                    k_cache[i, cache_len:cache_len + qlen] = k[offset:offset + qlen].detach()
-                    v_cache[i, cache_len:cache_len + qlen] = v[offset:offset + qlen].detach()
-                offset += qlen
-            k, v = torch.cat(new_k), torch.cat(new_v)
-            kv_seqlens = qlens + cache_seqlens
-            max_kv_seqlen = int(kv_seqlens.max())
-            kv_cu_seqlens = torch.cat([kv_seqlens.new_zeros(1), kv_seqlens.cumsum(0)])
-            hidden_states = flash_attn_varlen_func(
-                q,
-                k,
-                v,
-                cu_seqlens_q=cu_seqlens.int(),
-                cu_seqlens_k=kv_cu_seqlens.int(),
+            hidden_states = flash_attn_varlen_func_with_kvcache(
+                q=q,
+                cu_seqlens_q=cu_seqlens,
                 max_seqlen_q=int(max_seqlen),
-                max_seqlen_k=int(max_kv_seqlen),
-                dropout_p=0.0,
+                k_cache=k_cache,
+                v_cache=v_cache,
+                cache_seqlens=cache_seqlens,
+                k=k,
+                v=v,
+                cu_seqlens_k=cu_seqlens,
                 softmax_scale=scale_factor,
                 causal=True,
             )
@@ -793,8 +781,16 @@ class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
         cache_seqlens: Optional[torch.Tensor] = None,
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
     ) -> DuckGenerationOutput:
-        seq, scores, mask, _, _ = generate(self.net, tokenizer, input_ids, attention_mask, k_caches, v_caches,
-                                           cache_seqlens, gconfig)
+        seq, scores, mask, _, _ = generate(
+            self.net,
+            tokenizer,
+            input_ids,
+            attention_mask,
+            k_caches,
+            v_caches,
+            cache_seqlens,
+            gconfig,
+        )
         return DuckGenerationOutput(seq, scores, mask)
 
     @classmethod
@@ -1170,7 +1166,7 @@ def generate(
         raise ValueError("k_cache, v_cache, cache_seqlens must be all None or all not None")
     if gconfig.num_samples > 1 and k_caches is None:
         input_ids = input_ids.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
-        attention_mask = attention_mask.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
+        attention_mask = (attention_mask.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1))
     elif k_caches is not None:
         for k_cache, v_cache in zip(k_caches, v_caches):
             assert (k_cache.shape[0] == v_cache.shape[0] == input_ids.shape[0] == attention_mask.shape[0] ==
@@ -1390,6 +1386,18 @@ def vanilla_cpu_generate(
     return gen_tokens, log_probs, logits_mask
 
 
+def _get_unpad_data(attention_mask):
+    seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
+    indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
+    max_seqlen_in_batch = seqlens_in_batch.max().item()
+    cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0))
+    return (
+        indices,
+        cu_seqlens,
+        max_seqlen_in_batch,
+    )
+
+
 class InflightBatchingGenerator:
 
     def __init__(
@@ -1411,30 +1419,52 @@ class InflightBatchingGenerator:
 
         self.gconfig = gconfig
         self.batch_size = batch_size
+        self.max_prompt_len = max_prompt_len
 
         kvcache_seqlen = max(max_prompt_len + gconfig.max_new_tokens,
                              mconfig.hidden_dim // mconfig.head_dim + 10)
         _p = next(self.model.parameters())
         dtype, device = _p.dtype, _p.device
 
-        # internel state/input buffers
-        self.k_caches = torch.zeros(
-            (self.mconfig.n_layers, batch_size, kvcache_seqlen, mconfig.n_kv_heads, mconfig.head_dim),
-            dtype=dtype,
-            device=device,
-        )
-        self.v_caches = torch.zeros_like(self.k_caches)
+        # Cache
+        self.k_caches = [
+            torch.zeros(
+                (
+                    batch_size,
+                    kvcache_seqlen,
+                    mconfig.n_kv_heads,
+                    mconfig.head_dim,
+                ),
+                dtype=dtype,
+                device=device,
+            ) for _ in range(self.mconfig.n_layers)
+        ]
+        self.v_caches = [
+            torch.zeros(
+                (
+                    batch_size,
+                    kvcache_seqlen,
+                    mconfig.n_kv_heads,
+                    mconfig.head_dim,
+                ),
+                dtype=dtype,
+                device=device,
+            ) for _ in range(self.mconfig.n_layers)
+        ]
         self.cache_seqlens = torch.zeros((batch_size,), dtype=torch.int32, device=device)
-        # generate_idx and cache_seqlens differ at a prompt_len
-        self.generate_idx = torch.zeros((batch_size,), dtype=torch.int32, device=device)
-        self.input_buf = torch.zeros((batch_size, 1), dtype=torch.long, device=device)
+
+        # Input buffers
+        self.input_buf = torch.zeros((batch_size, max_prompt_len), dtype=torch.long, device=device)
+        self.input_buf_lens = torch.zeros((batch_size,), dtype=torch.int32, device=device)
+
+        # Save prompts for output
         self.prompt_tokens = [None for _ in range(batch_size)]
+
+        # Generation state
+        self.generate_idx = torch.zeros((batch_size,), dtype=torch.int32, device=device)
         self.unfinished_sequences = torch.zeros((batch_size,), dtype=torch.float32, device=device)
 
-        self.ys = ([PipeCacheData(
-            cache_seqlens=self.cache_seqlens,
-            input_ids=self.input_buf,
-        )] + [
+        self.ys = ([PipeCacheData(cache_seqlens=self.cache_seqlens,)] + [
             PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens)
             for k, v in zip(self.k_caches, self.v_caches)
         ] + [PipeCacheData()])
@@ -1446,7 +1476,7 @@ class InflightBatchingGenerator:
 
     def _get_non_eos_logits(self) -> torch.FloatTensor:
         self.ys[0].position_ids = None
-        self.ys[0].input_ids = self.input_buf
+        self.ys[0].input_ids = self.input_buf[:, :1]
         logits = self.model(PipeTransferData(), self.ys).pp_output.squeeze(dim=1)
 
         self.cache_seqlens += 1
@@ -1481,11 +1511,15 @@ class InflightBatchingGenerator:
                 except queue.Full as e:
                     raise RuntimeError("Output queue is full. Please set a larger queue size.") from e
 
-            self.k_caches[:, i] = 0
-            self.v_caches[:, i] = 0
-            self.input_buf[i] = self.tokenizer.pad_token_id
-            self.prompt_tokens[i] = None
+            # clear cache
             self.cache_seqlens[i] = 0
+
+            # clear input buffers and prompts
+            self.input_buf[i] = 0
+            self.input_buf_lens[i] = 0
+            self.prompt_tokens[i] = None
+
+            # clear generation state
             self.generate_idx[i] = 0
             self.unfinished_sequences[i] = 1
 
@@ -1494,29 +1528,29 @@ class InflightBatchingGenerator:
             self.output_logprob_buf[i] = []
 
         # build packed input ids with variable lengths for the next-step inference
-        packed_input_ids = []
         for i in range(self.batch_size):
             if i in finish_indices:
                 try:
                     prompt = self.inqueue.get_nowait()
                     self.prompt_tokens[i] = prompt
-                    packed_input_ids.append(prompt)
+                    self.input_buf[i, :prompt.shape[0]] = prompt
+                    self.input_buf_lens[i] = prompt.shape[0]
                 except queue.Empty as e:
                     raise RuntimeError("Input queue is empty. This should not happen.") from e
-            else:
-                packed_input_ids.append(self.input_buf[i])
-        seqlens = [x.shape[0] for x in packed_input_ids]
-        packed_input_ids = torch.cat(packed_input_ids)
-        max_seqlen = int(max(seqlens))
-        input_lens = torch.tensor(seqlens, device=packed_input_ids.device)
-        cu_seqlens = torch.cat([input_lens.new_zeros(1),
-                                input_lens.cumsum(0)]).to(device=packed_input_ids.device, dtype=torch.int32)
+
+        input_lens = self.input_buf_lens
+        valid_input_mask = torch.arange(self.max_prompt_len, device=self.input_buf.device,
+                                        dtype=torch.int32).unsqueeze(0) < input_lens.unsqueeze(-1)
+        indices = torch.nonzero(valid_input_mask.flatten(), as_tuple=False).flatten()
+        packed_input_ids = self.input_buf.flatten()[indices]
+        max_seqlen = int(max(input_lens))
+        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0), value=0).int()
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
         self.ys[0].position_ids = None
         self.ys[0].input_ids = packed_input_ids
         logits = self.model(x, self.ys).pp_output
-        logits = logits[cu_seqlens[1:] - 1]
+        logits = index_first_axis(logits, (cu_seqlens[1:] - 1).long())
 
         self.cache_seqlens += input_lens
 
