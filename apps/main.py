@@ -6,6 +6,8 @@ import re
 
 import api.config as config_package
 import base.logging as logging
+import base.name_resolve
+import base.names
 import experiments
 import scheduler.client
 import system
@@ -121,10 +123,9 @@ def main_start(args):
             logger.warning(f"Resetting name resolving repo failed.")
             raise e
     else:
-        from apps.remote import main_reset_name_resolve
-
         try:
-            main_reset_name_resolve(args)
+            base.name_resolve.clear_subtree(
+                base.names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name))
         except Exception as e:
             logger.warning(f"Resetting name resolving repo failed.")
             raise e

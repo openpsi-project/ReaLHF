@@ -23,11 +23,10 @@ import base.topology as topology
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
-logger = logging.getLogger("master worker")
+logger = logging.getLogger("master worker", "system")
 
 
 class ExperimentComplete(Exception):
-    colorama.init(autoreset=True)
 
     def __init__(self, message):
         disclaimer = (colorama.Fore.GREEN + "\033[1m" +

@@ -1,7 +1,5 @@
 import functools
 
-import torch
-
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology

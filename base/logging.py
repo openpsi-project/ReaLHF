@@ -8,6 +8,7 @@ LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
 LOGLEVEL = os.environ.get("LOGLEVEL") or "INFO"
 
+# NOTE: To use colorlog we should not call colorama.init() anywhere.
 # The available color names are black, red, green, yellow, blue, purple, cyan and white
 log_config = {
     "version": 1,
@@ -109,12 +110,12 @@ def getLogger(
         name = "plain"
     if type_ is None:
         type_ = "plain"
+    assert type_ in ["plain", "benchmark", "colored", "system"]
     if name not in log_config["loggers"]:
         log_config["loggers"][name] = {
             "handlers": [f"{type_}Handler"],
-            "level": "INFO",
+            "level": LOGLEVEL,
         }
-        logging.config.dictConfig(log_config)
     return logging.getLogger(name)
 
 

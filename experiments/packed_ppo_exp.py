@@ -1,7 +1,5 @@
 import functools
 
-import torch
-
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
@@ -130,7 +128,6 @@ class PackedPPOExperiment(Experiment):
                         cpu=4,
                         gpu=1,
                         mem=60000,
-                        nodelist="frl8a139",
                     ),
                 ),
                 TasksGroup(
@@ -139,7 +136,6 @@ class PackedPPOExperiment(Experiment):
                         cpu=4,
                         gpu=1,
                         mem=60000,
-                        nodelist="frl8a140",
                     ),
                 ),
                 TasksGroup(
@@ -148,7 +144,6 @@ class PackedPPOExperiment(Experiment):
                         cpu=4,
                         gpu=0.5,
                         mem=30000,
-                        nodelist="frl8a140",
                     ),
                 ),
             ],
