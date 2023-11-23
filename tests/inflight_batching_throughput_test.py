@@ -1,14 +1,17 @@
-import unittest
 import json
-import impl.model.nn.flash_mqat as flash_mqat
+import queue
+import time
+import unittest
+
 import torch
 import transformers
-import time
-import queue
 import viztracer
+
+import impl.model.nn.flash_mqat as flash_mqat
 
 
 class InflightBatchingThroughputTest(unittest.TestCase):
+
     def setUp(self):
         self.bs = 4
         self.n_prompts = 16
@@ -16,16 +19,16 @@ class InflightBatchingThroughputTest(unittest.TestCase):
 
         self.device = "cuda"
         model_path = "/lustre/fw/pretrained/gpt2"
-        self.model = flash_mqat.FlashMQATForCausalLM.from_gpt2(
-            model_path=model_path, dtype=torch.float16, device=self.device
-        )
+        self.model = flash_mqat.FlashMQATForCausalLM.from_gpt2(model_path=model_path,
+                                                               dtype=torch.float16,
+                                                               device=self.device)
         self.model.eval()
 
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
         with open("/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl", "r") as f:
-            self.prompts_str = [json.loads(line)["prompt"] for line in f][: self.n_prompts]
+            self.prompts_str = [json.loads(line)["prompt"] for line in f][:self.n_prompts]
 
         self.max_prompt_len = 10
 
@@ -71,11 +74,8 @@ class InflightBatchingThroughputTest(unittest.TestCase):
         n_tokens = 0
         for a in answers:
             seqlens = (
-                (a != self.tokenizer.eos_token_id)
-                .logical_and(a != self.tokenizer.pad_token_id)
-                .sum(1)
-                + 1
-            ).clip(max=self.gconfig.max_new_tokens)
+                (a != self.tokenizer.eos_token_id).logical_and(a != self.tokenizer.pad_token_id).sum(1) +
+                1).clip(max=self.gconfig.max_new_tokens)
             n_tokens += seqlens.sum()
         print(f"Default generate {n_tokens} in {t1:.3f}s, Throughput: {n_tokens/t1} tokens/s")
 
@@ -90,8 +90,7 @@ class InflightBatchingThroughputTest(unittest.TestCase):
                         self.nonpad_prompt_encodings["input_ids"][i],
                         device=self.device,
                         dtype=torch.long,
-                    )
-                )
+                    ))
         generator = flash_mqat.InflightBatchingGenerator(
             inqueue,
             outqueue,
