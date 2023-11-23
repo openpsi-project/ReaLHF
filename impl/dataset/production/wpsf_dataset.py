@@ -1,13 +1,13 @@
 from typing import Dict, List, Optional, Tuple
 import itertools
 import json
-import logging
 
 import numpy as np
 import torch.utils.data
 
 from base.datapack import ffd_with_result_unsorted
 import api.data
+import base.logging as logging
 
 logger = logging.getLogger("WPSFormulaPackedDataset")
 

@@ -2,7 +2,6 @@ from typing import Dict, Iterable, List, Optional, Union
 import dataclasses
 import functools
 import inspect
-import logging
 import os
 import time
 
@@ -13,6 +12,7 @@ import transformers
 from base.cluster import spec as cluster_spec
 import api.config
 import api.huggingface
+import base.logging as logging
 
 logger = logging.getLogger("api.data")
 

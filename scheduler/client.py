@@ -1,9 +1,6 @@
 from typing import List, Optional
 import dataclasses
 import enum
-import logging
-
-logger = logging.getLogger("scheduler")
 
 
 class JobState(enum.Enum):

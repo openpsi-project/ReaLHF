@@ -1,12 +1,12 @@
 from typing import Callable, Dict, List, Optional
 import json
-import logging
 
 import torch
 import torch.utils.data
 
 import api.data
 import api.huggingface
+import base.logging as logging
 
 logger = logging.getLogger("Prompt Dataset")
 

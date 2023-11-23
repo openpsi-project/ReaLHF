@@ -1,5 +1,3 @@
-import logging
-
 import torch.utils.data
 
 import api.config as config_pkg
@@ -9,8 +7,6 @@ import base.seeding as seeding
 import impl.dataset
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
-
-logger = logging.getLogger("Data Worker")
 
 DATA_WORKER_NAME = "_data_worker"
 

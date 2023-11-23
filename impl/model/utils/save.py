@@ -1,13 +1,13 @@
 from typing import Tuple
 import dataclasses
 import json
-import logging
 import os
 
 import torch
 import transformers
 
 import api.model
+import base.logging as logging
 
 logger = logging.getLogger("Model Save")
 

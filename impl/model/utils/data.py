@@ -1,6 +1,5 @@
 from typing import List, Optional, Tuple, Type, Union
 import dataclasses
-import logging
 
 import numpy as np
 import torch
@@ -8,6 +7,7 @@ import torch.distributed as dist
 import transformers
 
 from base.monitor import time_mark
+import base.logging as logging
 
 logger = logging.getLogger("Data Manipulation")
 

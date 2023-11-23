@@ -1,5 +1,4 @@
 from typing import Any, Dict, List, Optional, Union
-import logging
 import os
 
 import torch
@@ -8,6 +7,7 @@ import transformers
 
 import api.huggingface
 import api.model
+import base.logging as logging
 
 logger = logging.getLogger("Reward Model")
 

@@ -1,6 +1,5 @@
 from collections import defaultdict
 from typing import Dict, List, Optional
-import logging
 import os
 import re
 import subprocess
@@ -8,6 +7,7 @@ import subprocess
 import psutil
 
 from scheduler.client import JobInfo, JobState, SchedulerClient, SchedulerError
+import base.logging as logging
 
 logger = logging.getLogger("Local Scheduler")
 

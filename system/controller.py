@@ -6,7 +6,6 @@ import dataclasses
 import enum
 import getpass
 import json
-import logging
 import os
 import time
 import traceback
@@ -18,6 +17,7 @@ from base.cluster import spec as cluster_spec
 from system import load_worker, WORKER_TYPES
 from system.worker_base import WorkerServerStatus as Wss
 import api.config
+import base.logging as logging
 import base.name_resolve
 import base.names as names
 import system.worker_base

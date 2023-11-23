@@ -1,7 +1,6 @@
 from typing import Any, Callable, Dict, Optional, Union
 import abc
 import dataclasses
-import logging
 
 import deepspeed
 import torch
@@ -11,6 +10,7 @@ import transformers
 from base.namedarray import NamedArray
 import api.config
 import api.huggingface
+import base.logging as logging
 
 logger = logging.getLogger("model")
 

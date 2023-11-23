@@ -1,5 +1,4 @@
 import argparse
-import logging
 import multiprocessing
 import os
 import re
@@ -8,9 +7,10 @@ import subprocess
 
 import torch
 
+import base.logging as logging
+
 multiprocessing.set_start_method("spawn", force=True)
 
-from base.constants import DATE_FORMAT, LOG_FORMAT
 import base.gpu_utils
 import base.name_resolve
 import base.names
@@ -174,8 +174,6 @@ def main_ray(args):
 
 
 def main():
-    logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level=os.environ.get("LOGLEVEL", "INFO"))
-
     parser = argparse.ArgumentParser(prog="marl")
     subparsers = parser.add_subparsers(dest="cmd", help="sub-command help")
     subparsers.required = True

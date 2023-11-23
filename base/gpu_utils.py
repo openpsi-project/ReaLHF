@@ -1,5 +1,4 @@
 import itertools
-import logging
 import os
 import platform
 import socket
@@ -7,11 +6,12 @@ import time
 
 import torch
 
+import base.logging as logging
 import base.name_resolve as name_resolve
 import base.names as names
 import base.network as network
 
-logger = logging.getLogger("System-GPU")
+logger = logging.getLogger("System-GPU", "system")
 
 GPU_DEVICES_ISOLATED = False
 
