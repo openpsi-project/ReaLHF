@@ -16,7 +16,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         cls.bs = bs = 4
         cls.device = device = "cuda"
 
-        sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
+        sc_cfg = transformers.AutoConfig.from_pretrained("/lustre/meizy/models/starcoder_4l/")
         sc_cfg.n_layer = 1
         sc_cfg.n_embd = 1024
         sc_cfg.n_head = 8
@@ -24,7 +24,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         sc_cfg.n_positions = 512
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
+            "/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(
@@ -273,7 +273,7 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         cls.device = device = "cpu"
         cls.dtype = dtype = torch.float32
 
-        sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
+        sc_cfg = transformers.AutoConfig.from_pretrained("/lustre/meizy/models/starcoder_4l/")
         sc_cfg.n_layer = 2
         sc_cfg.n_embd = 1024
         sc_cfg.n_head = 8
@@ -281,7 +281,7 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         sc_cfg.n_positions = 512
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
+            "/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(
@@ -477,7 +477,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         cls.device = device = "cpu"
         cls.dtype = dtype = torch.float32
 
-        sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
+        sc_cfg = transformers.AutoConfig.from_pretrained("/lustre/meizy/models/starcoder_4l/")
         sc_cfg.n_layer = 1
         sc_cfg.n_embd = 1024
         sc_cfg.n_head = 8
@@ -485,7 +485,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         sc_cfg.n_positions = 512
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
+            "/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
@@ -565,7 +565,7 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
         cls.device = device = "cuda"
         cls.dtype = dtype = torch.float16
 
-        sc_cfg = transformers.AutoConfig.from_pretrained("/data/aigc/llm/checkpoints/4l-starcoder/")
+        sc_cfg = transformers.AutoConfig.from_pretrained("/lustre/meizy/models/starcoder_4l/")
         sc_cfg.n_layer = 16
         sc_cfg.n_embd = 1024
         sc_cfg.n_head = 8
@@ -573,7 +573,7 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
         sc_cfg.n_positions = 512
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/hddlustre/llm/public/checkpoints/pretrained/starcoder/")
+            "/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
