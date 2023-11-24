@@ -313,53 +313,6 @@ def mask_eos_token(
     return logits
 
 
-def build_packed_inputs(input_ids: torch.LongTensor,
-                        attention_mask: torch.BoolTensor) -> Tuple[torch.LongTensor, torch.IntTensor, int]:
-    # TODO: remove this function, use flash_attn padding
-    bs, prompt_padded_len = input_ids.shape[:2]
-    device = input_ids.device
-    assert attention_mask.shape == input_ids.shape
-    packed_input_ids = []
-    input_lens = []
-    for i in range(bs):
-        if attention_mask is not None:
-            start_idx = attention_mask[i].nonzero()[0][0]
-            end_idx = prompt_padded_len - attention_mask[i].flip(0).nonzero()[0][0]
-        else:
-            start_idx, end_idx = 0, prompt_padded_len
-        input_lens.append(end_idx - start_idx)
-        packed_input_ids.append(input_ids[i, start_idx:end_idx])
-    max_seq_len = int(max(input_lens))
-    input_lens = torch.tensor(input_lens, dtype=torch.int, device=device)
-    packed_input_ids = torch.cat(packed_input_ids, dim=0)
-    cu_seqlens = torch.cat([torch.tensor([0], device=device), input_lens.cumsum(-1)]).int()
-    return packed_input_ids, cu_seqlens, max_seq_len
-
-
-def unpack_tensor(packed_x: torch.Tensor,
-                  cu_seqlens: torch.IntTensor,
-                  padding_side: Optional[str] = None) -> Union[torch.Tensor, List[torch.Tensor]]:
-    # TODO: remove this function, use flash_attn padding
-    seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
-    bs = cu_seqlens.shape[0] - 1
-    max_seqlen = int(max(seqlens))
-    if padding_side:
-        unpacked_x = torch.zeros((bs, max_seqlen, *packed_x.shape[1:]),
-                                 dtype=packed_x.dtype,
-                                 device=packed_x.device)
-    else:
-        unpacked_x = []
-    for i in range(bs):
-        seg = packed_x[cu_seqlens[i]:cu_seqlens[i + 1]]
-        if padding_side == "right":
-            unpacked_x[i, :seqlens[i]] = seg
-        elif padding_side == "left":
-            unpacked_x[i, max_seqlen - seqlens[i]:] = seg
-        else:
-            unpacked_x.append(seg)
-    return unpacked_x
-
-
 def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.FloatTensor:
     """Gather log probs of shifted labels from logits.
 

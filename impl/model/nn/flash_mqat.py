@@ -12,9 +12,8 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
-from impl.model.utils.data import (build_packed_inputs, DuckGenerationOutput, DuckModelOutput, mask_eos_token,
-                                   PipeCacheData, PipeTransferData, repeat_kv, unpack_tensor,
-                                   upcast_masked_softmax, upcast_softmax)
+from impl.model.utils.data import (DuckGenerationOutput, DuckModelOutput, mask_eos_token, PipeCacheData,
+                                   PipeTransferData, repeat_kv, upcast_masked_softmax, upcast_softmax)
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
 import api.huggingface
@@ -1059,7 +1058,8 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         build_packed = False
         if packed_input_ids is None and attention_mask is not None:
             build_packed = True
-            packed_input_ids, cu_seqlens, max_seqlen = build_packed_inputs(input_ids, attention_mask)
+            packed_input_ids, indices, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+            batch_size, seqlen = input_ids
         if packed_input_ids is not None:
             x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
             ys = [PipeCacheData(input_ids=packed_input_ids)
@@ -1069,7 +1069,7 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
             ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(self.config.n_layers)]
         hidden_states = self.net(x, ys).pp_output
         if build_packed:
-            hidden_states = unpack_tensor(hidden_states, cu_seqlens, max_seqlen)
+            hidden_states = pad_input(hidden_states, indices, batch_size, seqlen)
         return (self.head(hidden_states).squeeze() - self.output_bias) * self.output_scaling
 
     @classmethod
@@ -1359,7 +1359,7 @@ def generate(
         # Generate from scratch.
         # Input_ids may have different lengths, we should first pack them into a large batch
         # to use varlen flash attention, then record kv caches for the following inferences.
-        packed_input_ids, cu_seqlens, max_seq_len = build_packed_inputs(input_ids, attention_mask)
+        packed_input_ids, _, cu_seqlens, max_seq_len = unpad_input(input_ids, attention_mask)
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seq_len, store_kv_cache=True)
@@ -1464,7 +1464,7 @@ def vanilla_packed_generate(
 
     # The main loop.
     while not terminate:
-        packed_input_ids, cu_seqlens, max_seq_len = build_packed_inputs(input_ids, attention_mask)
+        packed_input_ids, _, cu_seqlens, max_seq_len = unpad_input(input_ids, attention_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seq_len)
         # one embedding layer, n_layers transformer block, one output layer
         ys = [PipeCacheData(input_ids=packed_input_ids)
