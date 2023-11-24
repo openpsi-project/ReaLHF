@@ -18,15 +18,19 @@ RUN pip3 install -U ray[default,serve,data] -i https://pypi.tuna.tsinghua.edu.cn
 RUN pip3 install -U transformers huggingface_hub datasets accelerate bitsandbytes -i https://pypi.tuna.tsinghua.edu.cn/simple
 RUN pip3 install -U deepspeed -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy h5py ninja packaging tensorboardx sentencepiece numba viztracer[full] pyzmq -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy h5py \
+    ninja packaging tensorboardx sentencepiece numba viztracer[full] pyzmq colorlog colorama \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple
+
 
 ENV PATH="${PATH}:/opt/hpcx/ompi/bin:/opt/hpcx/ucx/bin"
 ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 
+# Add an ARG to force a rebuild of the image from this point.
+ARG INCUBATOR_VER=unknown
+RUN pip3 install -U transformers -i https://pypi.tuna.tsinghua.edu.cn/simple
 COPY flash_attn-2.3.4-cp310-cp310-linux_x86_64.whl /flash_attn-2.3.4-cp310-cp310-linux_x86_64.whl
 RUN pip3 uninstall flash_attn -y && pip3 install /flash_attn-2.3.4-cp310-cp310-linux_x86_64.whl
-
-RUN pip3 install colorlog colorama -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # install zmq with pgm
 # COPY ./zeromq-4.3.4.tar.gz /
@@ -43,4 +47,4 @@ RUN pip3 install colorlog colorama -i https://pypi.tuna.tsinghua.edu.cn/simple
 # COPY ./flash-attention /tools/flash-attention
 # RUN pip3 install -e /tools/TransformerEngine
 # COPY ./transformers /tools/transformers
-# RUN pip3 install -e /tools/transformers
+# RUN pip3 install -e /tools/transformers -i https://pypi.tuna.tsinghua.edu.cn/simple
