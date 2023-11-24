@@ -23,8 +23,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/lustre/meizy/models/starcoder_4l/")
+        cls.tokenizer = api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(
@@ -280,8 +279,7 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/lustre/meizy/models/starcoder_4l/")
+        cls.tokenizer = api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(
@@ -484,8 +482,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/lustre/meizy/models/starcoder_4l/")
+        cls.tokenizer = api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
@@ -572,8 +569,7 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/lustre/meizy/models/starcoder_4l/")
+        cls.tokenizer = api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(

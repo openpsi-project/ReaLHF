@@ -33,7 +33,8 @@ if __name__ == "__main__":
     for _ in range(args.retry):
         cmd = f"docker build -t {target_img} -f docker/Dockerfile"
         if args.gpu:
-            cmd += f" --build-arg base_image=nvcr.io/nvidia/pytorch:{args.tv}-py3"
+            cmd += (f" --build-arg base_image=nvcr.io/nvidia/pytorch:{args.tv}-py3 "
+                    f"--build-arg INCUBATOR_VER={time.time()}")
         else:
             cmd += f".cpu --build-arg base_image=ubuntu:22.04"
         if args.rebuild:

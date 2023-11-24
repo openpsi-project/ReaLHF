@@ -214,6 +214,7 @@ class PipeTransferData(TensorDataclassToTupleInterface):
     # The followings are "configuration"-like data that should be passed across all stages.
     cu_seqlens: torch.Tensor = None
     max_seqlen: int = None
+    store_kv_cache: bool = False
 
     # Only used for debugging
     attention_mask: torch.Tensor = None
