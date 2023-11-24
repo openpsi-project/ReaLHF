@@ -47,4 +47,4 @@ RUN pip3 uninstall flash_attn -y && pip3 install /flash_attn-2.3.4-cp310-cp310-l
 # COPY ./flash-attention /tools/flash-attention
 # RUN pip3 install -e /tools/TransformerEngine
 # COPY ./transformers /tools/transformers
-# RUN pip3 install -e /tools/transformers
+# RUN pip3 install -e /tools/transformers -i https://pypi.tuna.tsinghua.edu.cn/simple

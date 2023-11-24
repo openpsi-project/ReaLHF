@@ -315,6 +315,7 @@ def mask_eos_token(
 
 def build_packed_inputs(input_ids: torch.LongTensor,
                         attention_mask: torch.BoolTensor) -> Tuple[torch.LongTensor, torch.IntTensor, int]:
+    # TODO: remove this function, use flash_attn padding
     bs, prompt_padded_len = input_ids.shape[:2]
     device = input_ids.device
     assert attention_mask.shape == input_ids.shape
@@ -338,6 +339,7 @@ def build_packed_inputs(input_ids: torch.LongTensor,
 def unpack_tensor(packed_x: torch.Tensor,
                   cu_seqlens: torch.IntTensor,
                   padding_side: Optional[str] = None) -> Union[torch.Tensor, List[torch.Tensor]]:
+    # TODO: remove this function, use flash_attn padding
     seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
     bs = cu_seqlens.shape[0] - 1
     max_seqlen = int(max(seqlens))

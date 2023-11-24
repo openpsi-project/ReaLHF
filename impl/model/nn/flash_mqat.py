@@ -12,10 +12,18 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
-from impl.model.utils.data import (build_packed_inputs, DuckGenerationOutput, DuckModelOutput, mask_eos_token,
-                                   PipeCacheData, PipeTransferData, repeat_kv,
-                                   TensorDataclassToTupleInterface, unpack_tensor, upcast_masked_softmax,
-                                   upcast_softmax)
+from impl.model.utils.data import (
+    build_packed_inputs,
+    DuckGenerationOutput,
+    DuckModelOutput,
+    mask_eos_token,
+    PipeCacheData,
+    PipeTransferData,
+    repeat_kv,
+    unpack_tensor,
+    upcast_masked_softmax,
+    upcast_softmax,
+)
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
 import api.huggingface
@@ -23,9 +31,13 @@ import api.model
 import base.logging as logging
 
 try:
-    from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
-                            flash_attn_with_kvcache)
-    from flash_attn.bert_padding import index_first_axis
+    from flash_attn import (
+        flash_attn_func,
+        flash_attn_varlen_func,
+        flash_attn_varlen_func_with_kvcache,
+        flash_attn_with_kvcache,
+    )
+    from flash_attn.bert_padding import index_first_axis, unpad_input, pad_input
     from flash_attn.layers.rotary import RotaryEmbedding
 except ModuleNotFoundError:
     pass
@@ -130,10 +142,9 @@ def torch_attn_func(
         scores = upcast_masked_softmax(
             scores,
             mask,
-            mask_value=torch.full([],
-                                  torch.finfo(torch.float32).min,
-                                  device=scores.device,
-                                  dtype=torch.float32),
+            mask_value=torch.full(
+                [], torch.finfo(torch.float32).min, device=scores.device, dtype=torch.float32
+            ),
             scale=upcast_unscale,
             softmax_dtype=torch.float32,
         )
@@ -147,7 +158,6 @@ def torch_attn_func(
 
 
 class CausalSelfAttentionLayer(nn.Module):
-
     def __init__(
         self,
         hidden_dim: int,
@@ -354,7 +364,6 @@ class CausalSelfAttentionLayer(nn.Module):
 
 
 class FlashMQATBlock(nn.Module):
-
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -366,6 +375,7 @@ class FlashMQATBlock(nn.Module):
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
+        self.layer_index = layer_index
         self.attn = CausalSelfAttentionLayer(
             hidden_dim=config.hidden_dim,
             n_kv_heads=config.n_kv_heads,
@@ -410,10 +420,9 @@ class FlashMQATBlock(nn.Module):
                 layer_norm_fn = nn.LayerNorm
             elif config.layer_norm_type == "rms":
                 layer_norm_fn = LlamaRMSNorm
-            self.ln_f = layer_norm_fn(config.hidden_dim,
-                                      eps=config.layer_norm_epsilon,
-                                      dtype=dtype,
-                                      device=device)
+            self.ln_f = layer_norm_fn(
+                config.hidden_dim, eps=config.layer_norm_epsilon, dtype=dtype, device=device
+            )
 
         self.ckpt_attn = ckpt_attn
         self.ckpt_mlp = ckpt_mlp
@@ -466,7 +475,6 @@ class FlashMQATBlock(nn.Module):
 
 
 class VocabPositionEmbedding(nn.Module):
-
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -484,7 +492,8 @@ class VocabPositionEmbedding(nn.Module):
         self.embed_drop = nn.Dropout(config.embd_pdrop)
 
         self.self_attention_mask = torch.tril(
-            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device))
+            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device)
+        )
         self.fixed_abs_position_ids = config.fixed_abs_position_ids
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
@@ -516,13 +525,16 @@ class VocabPositionEmbedding(nn.Module):
             lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             if y.cache_seqlens is None:
                 y.position_ids = torch.cat(
-                    [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
+                    [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths]
+                )
                 assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
             else:
-                y.position_ids = torch.cat([
-                    torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) + cache_len
-                    for l, cache_len in zip(lengths, y.cache_seqlens)
-                ])
+                y.position_ids = torch.cat(
+                    [
+                        torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) + cache_len
+                        for l, cache_len in zip(lengths, y.cache_seqlens)
+                    ]
+                )
             if x.max_seqlen > self.n_positions:
                 raise ValueError(f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions}).")
             assert y.position_ids.shape == y.input_ids.shape, (
@@ -536,16 +548,17 @@ class VocabPositionEmbedding(nn.Module):
             # For debugging only.
             attention_mask = x.attention_mask
             if self.fixed_abs_position_ids:
-                y.position_ids = torch.arange(y.input_ids.shape[-1],
-                                              dtype=torch.long,
-                                              device=y.input_ids.device).unsqueeze(0)
+                y.position_ids = torch.arange(
+                    y.input_ids.shape[-1], dtype=torch.long, device=y.input_ids.device
+                ).unsqueeze(0)
             else:
                 y.position_ids = attention_mask.long().cumsum(-1) - 1
                 y.position_ids.masked_fill_(attention_mask == 0, 1)
             seqlen = y.input_ids.shape[-1]
             self_attention_mask = self.self_attention_mask[None, :seqlen, :seqlen]
             self_attention_mask = self_attention_mask * attention_mask.view(batch_size, 1, -1).to(
-                dtype=torch.bool, device=self_attention_mask.device)
+                dtype=torch.bool, device=self_attention_mask.device
+            )
             x.attention_mask = self_attention_mask.unsqueeze(1)
 
         inputs_embeds = self.wte(y.input_ids)
@@ -556,7 +569,6 @@ class VocabPositionEmbedding(nn.Module):
 
 
 class FlashMQATBase(nn.Module):
-
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -572,17 +584,20 @@ class FlashMQATBase(nn.Module):
             dtype=dtype,
             device=device,
         )
-        self.h = nn.ModuleList([
-            FlashMQATBlock(
-                config,
-                layer_index=i,
-                output_layernorm=(i == config.n_layers - 1),
-                ckpt_attn=(i > 0 and config.ckpt_attn),
-                ckpt_mlp=(i > 0 and config.ckpt_mlp),
-                dtype=dtype,
-                device=device,
-            ) for i in range(config.n_layers)
-        ])
+        self.h = nn.ModuleList(
+            [
+                FlashMQATBlock(
+                    config,
+                    layer_index=i,
+                    output_layernorm=(i == config.n_layers - 1),
+                    ckpt_attn=(i > 0 and config.ckpt_attn),
+                    ckpt_mlp=(i > 0 and config.ckpt_mlp),
+                    dtype=dtype,
+                    device=device,
+                )
+                for i in range(config.n_layers)
+            ]
+        )
 
     def to_layers(self) -> List[nn.Module]:
         return [self.embedding_layer] + list(self.h)
@@ -602,14 +617,12 @@ class FlashMQATBase(nn.Module):
 
 
 class LanguageModelHead(nn.Linear):
-
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
         x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
         return x
 
 
 class FlashMQATForCausalLM(nn.Module):
-
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -653,8 +666,9 @@ class FlashMQATForCausalLM(nn.Module):
     ):
         if from_model is None:
             assert model_path is not None
-            starcoder_config = transformers.AutoConfig.from_pretrained(os.path.join(
-                model_path, "config.json"))
+            starcoder_config = transformers.AutoConfig.from_pretrained(
+                os.path.join(model_path, "config.json")
+            )
         else:
             starcoder_config = from_model.config
         config = FlashMQATConfig(
@@ -683,9 +697,11 @@ class FlashMQATForCausalLM(nn.Module):
                     assert os.path.exists(os.path.join(model_path, filename))
                     state_dict.update(torch.load(os.path.join(model_path, filename)))
             else:
-                logger.warning("No pytorch_model.bin or pytorch_model.bin.index.json found, "
-                               "using huggingface model initialization. "
-                               "This will probably cause (CPU) OOM.")
+                logger.warning(
+                    "No pytorch_model.bin or pytorch_model.bin.index.json found, "
+                    "using huggingface model initialization. "
+                    "This will probably cause (CPU) OOM."
+                )
                 state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
         else:
             state_dict = from_model.state_dict()
@@ -728,7 +744,8 @@ class FlashMQATForCausalLM(nn.Module):
         if from_model is None:
             assert model_path is not None
             gpt2config: transformers.GPT2Config = transformers.AutoConfig.from_pretrained(
-                os.path.join(model_path, "config.json"))
+                os.path.join(model_path, "config.json")
+            )
             # GPT2 is not that large, so this will not cause OOM
             from_model = transformers.AutoModelForCausalLM.from_pretrained(model_path)
         else:
@@ -834,9 +851,11 @@ class FlashMQATForCausalLM(nn.Module):
                     assert os.path.exists(os.path.join(model_path, filename))
                     state_dict.update(torch.load(os.path.join(model_path, filename)))
             else:
-                logger.warning("No pytorch_model.bin or pytorch_model.bin.index.json found, "
-                               "using huggingface model initialization. "
-                               "This will probably cause (CPU) OOM.")
+                logger.warning(
+                    "No pytorch_model.bin or pytorch_model.bin.index.json found, "
+                    "using huggingface model initialization. "
+                    "This will probably cause (CPU) OOM."
+                )
                 state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
         else:
             state_dict = from_model.state_dict()
@@ -908,7 +927,6 @@ class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
         self,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        padding_side: Optional[str] = None,
         packed_input_ids: Optional[torch.Tensor] = None,
         cu_seqlens: Optional[torch.Tensor] = None,
         max_seqlen: Optional[int] = None,
@@ -916,19 +934,22 @@ class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
         assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)
         build_packed = False
         if packed_input_ids is None and attention_mask is not None:
+            batch_size, seqlen = input_ids.shape
+            packed_input_ids, indices, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
             build_packed = True
-            packed_input_ids, cu_seqlens, max_seqlen = build_packed_inputs(input_ids, attention_mask)
         if packed_input_ids is not None:
             x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            ys = [PipeCacheData(input_ids=packed_input_ids)
-                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+            ys = [PipeCacheData(input_ids=packed_input_ids)] + [
+                PipeCacheData() for _ in range(self.config.n_layers + 1)
+            ]
         else:
             x = PipeTransferData()
-            ys = [PipeCacheData(input_ids=input_ids)
-                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+            ys = [PipeCacheData(input_ids=input_ids)] + [
+                PipeCacheData() for _ in range(self.config.n_layers + 1)
+            ]
         logits = self.net(x, ys).pp_output
         if build_packed:
-            logits = unpack_tensor(logits, cu_seqlens, padding_side=padding_side)
+            logits = pad_input(logits, indices, batch_size, seqlen)
         return DuckModelOutput(logits=logits)
 
     def generate(
@@ -974,6 +995,16 @@ class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
         return cls(FlashMQATForCausalLM.from_gpt2(from_model, model_path, dtype, device))
 
     @classmethod
+    def from_llama(
+        cls,
+        from_model: Optional[transformers.PreTrainedModel] = None,
+        model_path: Optional[str] = None,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        return cls(FlashMQATForCausalLM.from_llama(from_model, model_path, dtype, device))
+
+    @classmethod
     def from_pretrained(
         cls,
         model_path: str,
@@ -997,25 +1028,18 @@ def make_flash_mqat_clm_hf(
     from_type: str = "starcoder",
     tokenizer_path: Optional[str] = None,
 ):
-    if from_type == "starcoder":
-        module = HuggingfaceLikeFlashMQATForCausalLM.from_starcoder(model_path=model_path,
-                                                                    dtype=dtype,
-                                                                    device=device)
-        tokenizer = api.huggingface.load_hf_tokenizer(model_path)
-    elif from_type == "self":
-        module = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(model_path=model_path,
-                                                                     dtype=dtype,
-                                                                     device=device)
+    if from_type == "self":
+        module = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(
+            model_path=model_path, dtype=dtype, device=device
+        )
         if tokenizer_path is None:
             raise ValueError("tokenizer_path must be provided when from_type is 'self'.")
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
-    elif from_type == "gpt2":
-        module = HuggingfaceLikeFlashMQATForCausalLM.from_gpt2(model_path=model_path,
-                                                               dtype=dtype,
-                                                               device=device)
-        tokenizer = api.huggingface.load_hf_tokenizer(model_path)
     else:
-        raise NotImplementedError()
+        module = getattr(HuggingfaceLikeFlashMQATForCausalLM, f"from_{from_type}")(
+            model_path=model_path, dtype=dtype, device=device
+        )
+        tokenizer = api.huggingface.load_hf_tokenizer(model_path)
     return api.model.Model(name, module, tokenizer, device)
 
 
@@ -1023,15 +1047,12 @@ api.model.register_model("flash_mqat_clm_hf", make_flash_mqat_clm_hf)
 
 
 class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
-
     def __init__(self, net: FlashMQATBase, output_scaling: float = 1.0, output_bias: float = 0.0):
         super().__init__()
         self.net = net
-        self.head = nn.Linear(net.config.hidden_dim,
-                              1,
-                              bias=False,
-                              dtype=self.net.dtype,
-                              device=self.net.device)
+        self.head = nn.Linear(
+            net.config.hidden_dim, 1, bias=False, dtype=self.net.dtype, device=self.net.device
+        )
         self.output_scaling = output_scaling
         self.output_bias = output_bias
 
@@ -1059,8 +1080,9 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
             packed_input_ids, cu_seqlens, max_seqlen = build_packed_inputs(input_ids, attention_mask)
         if packed_input_ids is not None:
             x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            ys = [PipeCacheData(input_ids=packed_input_ids)
-                  ] + [PipeCacheData() for _ in range(self.config.n_layers)]
+            ys = [PipeCacheData(input_ids=packed_input_ids)] + [
+                PipeCacheData() for _ in range(self.config.n_layers)
+            ]
         else:
             x = PipeTransferData()
             ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(self.config.n_layers)]
@@ -1079,9 +1101,9 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         output_scaling: float = 1.0,
         output_bias: float = 0.0,
     ):
-        from_model = HuggingfaceLikeFlashMQATForCausalLM.from_starcoder(model_path=model_path,
-                                                                        dtype=dtype,
-                                                                        device=device)
+        from_model = HuggingfaceLikeFlashMQATForCausalLM.from_starcoder(
+            model_path=model_path, dtype=dtype, device=device
+        )
         model = cls(from_model.net.transformer, output_bias=output_bias, output_scaling=output_scaling)
         if v_head_path is not None:
             model.head.load_state_dict(torch.load(v_head_path))
@@ -1097,9 +1119,27 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
         output_scaling: float = 1.0,
         output_bias: float = 0.0,
     ):
-        from_model = HuggingfaceLikeFlashMQATForCausalLM.from_gpt2(model_path=model_path,
-                                                                   dtype=dtype,
-                                                                   device=device)
+        from_model = HuggingfaceLikeFlashMQATForCausalLM.from_gpt2(
+            model_path=model_path, dtype=dtype, device=device
+        )
+        model = cls(from_model.net.transformer, output_bias=output_bias, output_scaling=output_scaling)
+        if v_head_path is not None:
+            model.head.load_state_dict(torch.load(v_head_path))
+        return model
+
+    @classmethod
+    def from_llama(
+        cls,
+        model_path: Optional[str] = None,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+        v_head_path: Optional[str] = None,
+        output_scaling: float = 1.0,
+        output_bias: float = 0.0,
+    ):
+        from_model = HuggingfaceLikeFlashMQATForCausalLM.from_llama(
+            model_path=model_path, dtype=dtype, device=device
+        )
         model = cls(from_model.net.transformer, output_bias=output_bias, output_scaling=output_scaling)
         if v_head_path is not None:
             model.head.load_state_dict(torch.load(v_head_path))
@@ -1159,24 +1199,6 @@ def make_flash_mqat_critic(
             output_scaling=output_scaling,
             output_bias=output_bias,
         )
-    elif from_type == "starcoder":
-        module = DeepSpeedChatLikeFlashMQATCriticModel.from_starcoder(
-            model_path=model_path,
-            dtype=dtype,
-            device=device,
-            v_head_path=v_head_path,
-            output_scaling=output_scaling,
-            output_bias=output_bias,
-        )
-    elif from_type == "gpt2":
-        module = DeepSpeedChatLikeFlashMQATCriticModel.from_gpt2(
-            model_path=model_path,
-            dtype=dtype,
-            device=device,
-            v_head_path=v_head_path,
-            output_scaling=output_scaling,
-            output_bias=output_bias,
-        )
     elif from_type == "self":
         module = DeepSpeedChatLikeFlashMQATCriticModel.from_pretrained(
             model_path=model_path,
@@ -1186,7 +1208,14 @@ def make_flash_mqat_critic(
             output_bias=output_bias,
         )
     else:
-        raise NotImplementedError()
+        module = getattr(DeepSpeedChatLikeFlashMQATCriticModel, f"from_{from_type}")(
+            model_path=model_path,
+            dtype=dtype,
+            device=device,
+            v_head_path=v_head_path,
+            output_scaling=output_scaling,
+            output_bias=output_bias,
+        )
     tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
     return api.model.Model(name, module, tokenizer, device)
 
@@ -1234,8 +1263,9 @@ def genstep(
             _vocab_indices = _batch_indices.new_zeros((1, next_token_logits.shape[1]))
             if tokenizer.eos_token_id is not None:
                 _vocab_indices[:, tokenizer.eos_token_id] = 1
-            next_token_logits.masked_fill_(_batch_indices * _vocab_indices,
-                                           torch.finfo(next_token_logits.dtype).min)
+            next_token_logits.masked_fill_(
+                _batch_indices * _vocab_indices, torch.finfo(next_token_logits.dtype).min
+            )
 
     if not gconfig.greedy:
         next_token_logits /= gconfig.temperature
@@ -1320,17 +1350,21 @@ def generate(
                 Shape [#tot_prompt_tokens * num_samples].
     """
     if attention_mask is None:
-        attention_mask = torch.logical_and(input_ids != tokenizer.pad_token_id, input_ids
-                                           != tokenizer.eos_token_id)
+        attention_mask = torch.ones_like(input_ids)
     if (k_caches is None) != (v_caches is None) or (k_caches is None) != (cache_seqlens is None):
         raise ValueError("k_cache, v_cache, cache_seqlens must be all None or all not None")
     if gconfig.num_samples > 1 and k_caches is None:
         input_ids = input_ids.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
-        attention_mask = (attention_mask.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1))
+        attention_mask = attention_mask.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
     elif k_caches is not None:
         for k_cache, v_cache in zip(k_caches, v_caches):
-            assert (k_cache.shape[0] == v_cache.shape[0] == input_ids.shape[0] == attention_mask.shape[0] ==
-                    cache_seqlens.shape[0])
+            assert (
+                k_cache.shape[0]
+                == v_cache.shape[0]
+                == input_ids.shape[0]
+                == attention_mask.shape[0]
+                == cache_seqlens.shape[0]
+            )
 
     device = input_ids.device
     mconfig: FlashMQATConfig = model.config
@@ -1355,26 +1389,28 @@ def generate(
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seq_len, store_kv_cache=True)
         # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(input_ids=packed_input_ids)
-              ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
+        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
+            PipeCacheData() for _ in range(mconfig.n_layers + 1)
+        ]
         # Model forward will set k/v cache in PipeCacheData.
         prompt_logits = model(x, ys).pp_output
         logits = prompt_logits[cu_seqlens[1:] - 1]
         cache_seqlens = input_lens
         for y in ys[1:-1]:
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
-            kvcache_seqlen = max(max_seq_len + gconfig.max_new_tokens,
-                                 mconfig.hidden_dim // mconfig.head_dim + 10)
+            kvcache_seqlen = max(
+                max_seq_len + gconfig.max_new_tokens, mconfig.hidden_dim // mconfig.head_dim + 10
+            )
             # fix of a flash attention bug
-            k_cache = torch.zeros((bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-                                  dtype=y.k_cache.dtype,
-                                  device=device)
-            v_cache = torch.zeros((bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-                                  dtype=y.v_cache.dtype,
-                                  device=device)
+            k_cache = torch.zeros(
+                (bs, kvcache_seqlen, *y.k_cache.shape[1:]), dtype=y.k_cache.dtype, device=device
+            )
+            v_cache = torch.zeros(
+                (bs, kvcache_seqlen, *y.v_cache.shape[1:]), dtype=y.v_cache.dtype, device=device
+            )
             for i in range(bs):
-                k_cache[i, :input_lens[i]] = y.k_cache[cu_seqlens[i]:cu_seqlens[i + 1]]
-                v_cache[i, :input_lens[i]] = y.v_cache[cu_seqlens[i]:cu_seqlens[i + 1]]
+                k_cache[i, : input_lens[i]] = y.k_cache[cu_seqlens[i] : cu_seqlens[i + 1]]
+                v_cache[i, : input_lens[i]] = y.v_cache[cu_seqlens[i] : cu_seqlens[i + 1]]
             y.k_cache = k_cache
             y.v_cache = v_cache
             y.cache_seqlens = cache_seqlens
@@ -1383,7 +1419,8 @@ def generate(
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+        )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -1400,10 +1437,14 @@ def generate(
             if v_caches[i].shape[1] < max_seq_len:
                 v_caches[i] = nn.functional.pad(v_caches[i], pad)
         x = PipeTransferData()
-        ys = ([PipeCacheData(cache_seqlens=cache_seqlens)] + [
-            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens)
-            for k, v in zip(k_caches, v_caches)
-        ] + [PipeCacheData()])
+        ys = (
+            [PipeCacheData(cache_seqlens=cache_seqlens)]
+            + [
+                PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens)
+                for k, v in zip(k_caches, v_caches)
+            ]
+            + [PipeCacheData()]
+        )
         next_tokens = input_ids[:, -1]
 
     # The main loop.
@@ -1416,7 +1457,8 @@ def generate(
         cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
 
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+        )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -1458,15 +1500,17 @@ def vanilla_packed_generate(
         packed_input_ids, cu_seqlens, max_seq_len = build_packed_inputs(input_ids, attention_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seq_len)
         # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(input_ids=packed_input_ids)
-              ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
+        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
+            PipeCacheData() for _ in range(mconfig.n_layers + 1)
+        ]
         # Model forward will set k/v cache in PipeCacheData.
         logits = model(x, ys).pp_output
         logits = logits[cu_seqlens[1:] - 1]
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+        )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -1521,7 +1565,8 @@ def vanilla_cpu_generate(
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+        )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -1559,7 +1604,6 @@ def _get_unpad_data(attention_mask):
 
 
 class InflightBatchingGenerator:
-
     def __init__(
         self,
         inqueue: queue.Queue,
@@ -1581,8 +1625,9 @@ class InflightBatchingGenerator:
         self.batch_size = batch_size
         self.max_prompt_len = max_prompt_len
 
-        kvcache_seqlen = max(max_prompt_len + gconfig.max_new_tokens,
-                             mconfig.hidden_dim // mconfig.head_dim + 10)
+        kvcache_seqlen = max(
+            max_prompt_len + gconfig.max_new_tokens, mconfig.hidden_dim // mconfig.head_dim + 10
+        )
         _p = next(self.model.parameters())
         dtype, device = _p.dtype, _p.device
 
@@ -1597,7 +1642,8 @@ class InflightBatchingGenerator:
                 ),
                 dtype=dtype,
                 device=device,
-            ) for _ in range(self.mconfig.n_layers)
+            )
+            for _ in range(self.mconfig.n_layers)
         ]
         self.v_caches = [
             torch.zeros(
@@ -1609,7 +1655,8 @@ class InflightBatchingGenerator:
                 ),
                 dtype=dtype,
                 device=device,
-            ) for _ in range(self.mconfig.n_layers)
+            )
+            for _ in range(self.mconfig.n_layers)
         ]
         self.cache_seqlens = torch.zeros((batch_size,), dtype=torch.int32, device=device)
 
@@ -1624,10 +1671,18 @@ class InflightBatchingGenerator:
         self.generate_idx = torch.zeros((batch_size,), dtype=torch.int32, device=device)
         self.unfinished_sequences = torch.zeros((batch_size,), dtype=torch.float32, device=device)
 
-        self.ys = ([PipeCacheData(cache_seqlens=self.cache_seqlens,)] + [
-            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens)
-            for k, v in zip(self.k_caches, self.v_caches)
-        ] + [PipeCacheData()])
+        self.ys = (
+            [
+                PipeCacheData(
+                    cache_seqlens=self.cache_seqlens,
+                )
+            ]
+            + [
+                PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens)
+                for k, v in zip(self.k_caches, self.v_caches)
+            ]
+            + [PipeCacheData()]
+        )
 
         # output buffers
         self.output_tokens_buf = [[] for _ in range(batch_size)]
@@ -1693,14 +1748,15 @@ class InflightBatchingGenerator:
                 try:
                     prompt = self.inqueue.get_nowait()
                     self.prompt_tokens[i] = prompt
-                    self.input_buf[i, :prompt.shape[0]] = prompt
+                    self.input_buf[i, : prompt.shape[0]] = prompt
                     self.input_buf_lens[i] = prompt.shape[0]
                 except queue.Empty as e:
                     raise RuntimeError("Input queue is empty. This should not happen.") from e
 
         input_lens = self.input_buf_lens
-        valid_input_mask = torch.arange(self.max_prompt_len, device=self.input_buf.device,
-                                        dtype=torch.int32).unsqueeze(0) < input_lens.unsqueeze(-1)
+        valid_input_mask = torch.arange(
+            self.max_prompt_len, device=self.input_buf.device, dtype=torch.int32
+        ).unsqueeze(0) < input_lens.unsqueeze(-1)
         indices = torch.nonzero(valid_input_mask.flatten(), as_tuple=False).flatten()
         packed_input_ids = self.input_buf.flatten()[indices]
         max_seqlen = int(max(input_lens))
@@ -1723,7 +1779,8 @@ class InflightBatchingGenerator:
             logits = self._get_non_eos_logits()
 
         next_tokens, logprob, logits_mask, _, self.unfinished_sequences = genstep(
-            logits, self.tokenizer, self.unfinished_sequences, self.generate_idx, self.gconfig)
+            logits, self.tokenizer, self.unfinished_sequences, self.generate_idx, self.gconfig
+        )
 
         for i in range(self.batch_size):
             self.output_tokens_buf[i].append(next_tokens[i].long())
