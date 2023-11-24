@@ -1103,7 +1103,13 @@ def genstep(
     if tokenizer.eos_token_id is not None:
         if tokenizer.pad_token_id is None:
             raise ValueError("If `eos_token_id` is defined, make sure that `pad_token_id` is defined.")
-        next_tokens = next_tokens * unfinished_sequences + tokenizer.pad_token_id * (1 - unfinished_sequences)
+        try:
+            next_tokens = next_tokens * unfinished_sequences + tokenizer.pad_token_id * (1 -
+                                                                                         unfinished_sequences)
+        except RuntimeError:
+            raise RuntimeError(
+                f"next_tokens shape {next_tokens.shape} unfinished_sequence shape {unfinished_sequences.shape} "
+                f"pad_token_id {tokenizer.pad_token_id} eos_token_id {tokenizer.eos_token_id}")
     unfinished_sequences = next_tokens.ne(tokenizer.eos_token_id).long() * unfinished_sequences
 
     # terminate check

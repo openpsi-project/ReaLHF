@@ -59,7 +59,7 @@ class TensorBuffer:
         else:
             return self.tensors[name][mbid]
 
-    def remove(self, name: str, mbid: Optional[int] = None, check_exists: bool = True):
+    def remove(self, name: str, mbid: Optional[int] = None, check_exists: bool = False):
         try:
             if mbid is None:
                 del self.tensors[name]
@@ -70,42 +70,22 @@ class TensorBuffer:
                 return
             raise KeyError(f"TensorBuffer.remove: key {name} mbid {mbid} not found")
 
-    def get_as_list(self, name: str) -> List:
-        # return stored entries for all micro batches under a name as a list
-        res_dict = self.tensors[name]
-        res_list = list()
-        for mbid in sorted(res_dict.keys()):
-            res_list.append(res_dict[mbid])
-        return res_list
+    def check_name(self, name: str):
+        return name in self.tensors or name in self.others
+
+    def check_tensor_mbid(self, name: str, mbid: int):
+        if name not in self.tensors:
+            return False
+        return mbid in self.tensors[name]
+
+    def check_others_mbid(self, name: str, mbid: int):
+        if name not in self.others:
+            return False
+        return mbid in self.others[name]
 
     def clear(self):
         self.tensors = defaultdict(dict)
         self.tensor_tuples = defaultdict(dict)
-
-
-def send_pipe_transfer_data(x: PipeTransferData, dst_stage: int):
-    p2p.send(x.pp_input, dst_stage)
-    # XXX: sending all tensors in pipe transfer data introduce big communication overheads
-    # always only send the activation
-    # tensor_tuple = (x.pp_output, x.cu_seqlens, x.max_seqlen,
-    #                 x.store_kvcache, x.attention_mask)
-    # p2p.send_tensor_tuple_meta(tensor_tuple, dst_stage)
-    # for t in tensor_tuple:
-    #     if t is not None:
-    #         p2p.send(t, dst_stage)
-
-
-def recv_pipe_transfer_data(buf: torch.Tensor, src_stage: int, others):
-    # "others" is a dict contain other informations required for reconstructing PipeTransferData
-    p2p.recv(buf, src_stage)
-    # keys = ["pp_output", "cu_seqlens", "max_seqlen", "store_kvcache", "attention_mask"]
-    # tensor_tuple = p2p.recv_tensor_tuple_meta(src_stage)
-    # others = dict()
-    # for k, t in zip(keys, tensor_tuple):
-    #     if t is not None:
-    #         p2p.recv(t, src_stage)
-    #     others[k] = t
-    return PipeTransferData(pp_input=buf, **others)
 
 
 def send_grad(grad: torch.Tensor, dst_stage: int):

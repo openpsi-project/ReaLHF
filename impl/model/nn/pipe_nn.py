@@ -7,9 +7,9 @@ import torch.nn as nn
 import transformers
 
 from base.monitor import process_memory_mb
-from impl.model.backend.ds_pipe_engine import (LayerSpec, PipeDataParallelTopology, PipelineModule,
-                                               ProcessTopology)
+from base.topology import PipeDataParallelTopology
 from impl.model.nn.flash_mqat import *
+from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
 
@@ -74,7 +74,8 @@ def make_causal_flash_mqat_pipe_module(
     def compute_loss(output, label):
         return output.loss
 
-    return PipelineModule(layers=layer_specs, loss_fn=compute_loss, topology=topology), layer_key_mappings
+    return PipelineModule(layers=layer_specs, config=config, loss_fn=compute_loss,
+                          topology=topology), layer_key_mappings
 
 
 def make_starcoder_flash_mqat_pipe_module(

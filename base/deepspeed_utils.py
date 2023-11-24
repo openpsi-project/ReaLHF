@@ -7,8 +7,7 @@ from deepspeed.runtime.engine import DeepSpeedEngine, DeepSpeedOptimizerCallable
 import deepspeed
 import torch
 
-from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
-from impl.model.backend.stream_pipe_engine import StreamPipeEngine
+from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
 
 DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU = 32  # A place-holder for inference.
 

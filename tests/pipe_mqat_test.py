@@ -34,20 +34,21 @@ BARRIER = mp.Barrier(WORLD_SIZE)
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
 # for plotting
-logging.basicConfig(filename="/home/meizy/logs/new_train_time.log",
-                    filemode="w",
-                    format=LOG_FORMAT,
-                    datefmt=DATE_FORMAT,
-                    level="DEBUG")
+# logging.basicConfig(filename="/home/meizy/logs/new_train_time.log",
+#                     filemode="w",
+#                     format=LOG_FORMAT,
+#                     datefmt=DATE_FORMAT,
+#                     level="DEBUG")
 
-# logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
+logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
 
 logger = logging.getLogger("pipe_mqat_test")
 
 
 def setup_gpu(rank):
     os.environ["DLLM_MODE"] = "LOCAL"
-    # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
     BARRIER.wait()
     base.gpu_utils.isolate_cuda_device(MODEL_TYPE, rank, WORLD_SIZE, EXPR_NAME, TRIAL_NAME)
     BARRIER.wait()
@@ -91,7 +92,7 @@ def make_pipe_backend():
                                               warmup_steps_proportion=0.0,
                                               min_lr_ratio=0.0,
                                               zero_stage=1,
-                                              engine_type="stream_pipe",
+                                              engine_type="pipe",
                                               num_pipeline_stages=NUM_PP)))
 
 
@@ -99,8 +100,9 @@ def make_pipe_model(model_path, device):
     # from impl.model.backend.ds_pipe_engine import PipeDataParallelTopology
     from base.topology import PipeDataParallelTopology
     import api.model
+    import impl.model
     topology = PipeDataParallelTopology(num_pp=NUM_PP, num_dp=NUM_DP)
-    model_config = config_package.Model(type_="starcoder_flash_mqat_stream_pipe",
+    model_config = config_package.Model(type_="starcoder_flash_mqat_pipe",
                                         args=dict(
                                             model_path=model_path,
                                             num_pp=NUM_PP,
@@ -210,7 +212,7 @@ def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,
     #              profile_memory=True) as prof:
     st = time.monotonic()
-    outputs = interface.train_step(model, data)
+    d = interface.train_step(model, data)
     t0 = time.monotonic() - st
     # print("first train_step", prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
 
@@ -220,12 +222,12 @@ def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,
     #              profile_memory=True) as prof:
     st = time.monotonic()
-    avg_losses, stats = interface.train_step(model, data)
+    d = interface.train_step(model, data)
     t1 = time.monotonic() - st
     # print("second train_step", prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
 
-    logger.info(f"{rank} {avg_losses} t0 {t0} t1 {t1}")
-    logger.info(f"stats {stats}")
+    if len(d) > 0:
+        logger.info(f"{rank} {d['losses']} t0 {t0} t1 {t1}")
 
 
 class PipeFlashMQATTest(unittest.TestCase):
@@ -333,4 +335,4 @@ class PipeFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testTrainBatch")
+    unittest.main(defaultTest="PipeFlashMQATTest.testGenerate")

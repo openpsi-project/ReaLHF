@@ -51,10 +51,10 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
             input_lens=cu_seqlens[1:] - cu_seqlens[:-1],
         )
 
-        stats = module.train_batch(packed_input_ids=packed_input_ids,
-                                   cu_seqlens=cu_seqlens,
-                                   loss_fn=compute_packed_sft_loss,
-                                   **loss_fn_kwargs)
+        r = module.train_batch(packed_input_ids=packed_input_ids,
+                               cu_seqlens=cu_seqlens,
+                               loss_fn=compute_packed_sft_loss,
+                               **loss_fn_kwargs)
 
         cur_epoch = model.version.epoch
         model.inc_version()
@@ -62,9 +62,9 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
             module.tput_timer.update_epoch_count()
 
         # agg_loss = average loss of data parallel batches
-        if len(stats) > 0:
-            agg_loss = mean([s["loss"].detach().item() for s in stats])
-            return dict(loss=agg_loss)
+        if r is not None:
+            avg_loss, stats = r
+            return dict(losses=avg_loss)
         else:
             return dict()
 

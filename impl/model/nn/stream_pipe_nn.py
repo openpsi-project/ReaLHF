@@ -7,9 +7,9 @@ import torch.nn as nn
 import transformers
 
 from base.monitor import process_memory_mb
-from impl.model.backend.stream_pipe_engine import (LayerSpec, PipeDataParallelTopology, PipelineModule,
-                                                   ProcessTopology)
+from base.topology import PipeDataParallelTopology
 from impl.model.nn.flash_mqat import *
+from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
 

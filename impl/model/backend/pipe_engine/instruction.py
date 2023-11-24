@@ -57,13 +57,6 @@ class ReduceGrads(PipeInstruction):
     pass
 
 
-# IO
-class LoadMicroBatch(PipeInstruction):
-    """Load a micro-batch into a buffer.
-    """
-    pass
-
-
 # Compute
 class ForwardPass(PipeInstruction):
     """Compute a forward pass.
@@ -116,14 +109,7 @@ class RecvNextTokens(PipeInstruction):
     pass
 
 
-class LoadNextTokens(PipeInstruction):
-    """ In GenerateSchedule, load next tokens of this microbatch. Only available in the first stage.
-    """
-    pass
-
-
 class InstructionType(IntEnum):
-    LOAD_MICRO_BATCH = 0
     FORWARD_PASS = 1
     BACKWARD_PASS = 2
     SEND_ACTIVATION = 3
@@ -134,11 +120,9 @@ class InstructionType(IntEnum):
     OPTIMIZER_STEP = 8
     SEND_NEXT_TOKENS = 9
     RECV_NEXT_TOKENS = 10
-    LOAD_NEXT_TOKENS = 11
 
 
 INSTRUCTION_TYPE_TO_CLASS = {
-    InstructionType.LOAD_MICRO_BATCH: LoadMicroBatch,
     InstructionType.FORWARD_PASS: ForwardPass,
     InstructionType.BACKWARD_PASS: BackwardPass,
     InstructionType.SEND_ACTIVATION: SendActivation,
@@ -149,7 +133,6 @@ INSTRUCTION_TYPE_TO_CLASS = {
     InstructionType.OPTIMIZER_STEP: OptimizerStep,
     InstructionType.SEND_NEXT_TOKENS: SendNextTokens,
     InstructionType.RECV_NEXT_TOKENS: RecvNextTokens,
-    InstructionType.LOAD_NEXT_TOKENS: LoadNextTokens,
 }
 
 INSTRUCTION_CLASS_TO_TYPE = {v: k for k, v in INSTRUCTION_TYPE_TO_CLASS.items()}
