@@ -4,6 +4,7 @@ import dataclasses
 import itertools
 import random
 
+from flash_attn.bert_padding import unpad_input
 import deepspeed
 import torch
 import tqdm
@@ -11,7 +12,7 @@ import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
-from impl.model.utils.data import build_packed_inputs, gather_packed_shifted_log_probs
+from impl.model.utils.data import gather_packed_shifted_log_probs
 from impl.model.utils.save import save_hf_or_lora_model
 import api.huggingface
 import api.model
@@ -151,7 +152,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
         prompt_att_mask: torch.BoolTensor = data['prompt_att_mask']
         bs, prompt_max_len = prompts.shape[:2]
 
-        packed_input_ids, cu_seqlens, _ = build_packed_inputs(prompts, prompt_att_mask)
+        packed_input_ids, _, cu_seqlens, _ = unpad_input(prompts, prompt_att_mask)
 
         res = module.generate(
             tokenizer=model.tokenizer,

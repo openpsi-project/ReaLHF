@@ -24,6 +24,7 @@ def get_activation_fn(activation_function: str) -> Callable:
 
 
 class LayerNormLinear(nn.Module):
+
     def __init__(
         self,
         input_dim: int,
@@ -49,6 +50,7 @@ class LayerNormLinear(nn.Module):
 
 
 class LayerNormMLP(nn.Module):
+
     def __init__(
         self,
         hidden_dim: int,
@@ -78,6 +80,7 @@ class LayerNormMLP(nn.Module):
 
 
 class LlamaLayerNormMLP(nn.Module):
+
     def __init__(
         self,
         hidden_dim: int,
@@ -93,15 +96,21 @@ class LlamaLayerNormMLP(nn.Module):
         self.hidden_size = hidden_dim
         self.intermediate_size = intermediate_dim
         self.ln = LlamaRMSNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.gate_proj = nn.Linear(
-            self.hidden_size, self.intermediate_size, bias=False, dtype=dtype, device=device
-        )
-        self.up_proj = nn.Linear(
-            self.hidden_size, self.intermediate_size, bias=False, dtype=dtype, device=device
-        )
-        self.down_proj = nn.Linear(
-            self.intermediate_size, self.hidden_size, bias=False, dtype=dtype, device=device
-        )
+        self.gate_proj = nn.Linear(self.hidden_size,
+                                   self.intermediate_size,
+                                   bias=False,
+                                   dtype=dtype,
+                                   device=device)
+        self.up_proj = nn.Linear(self.hidden_size,
+                                 self.intermediate_size,
+                                 bias=False,
+                                 dtype=dtype,
+                                 device=device)
+        self.down_proj = nn.Linear(self.intermediate_size,
+                                   self.hidden_size,
+                                   bias=False,
+                                   dtype=dtype,
+                                   device=device)
         self.act_fn = get_activation_fn(activation_function)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -110,6 +119,7 @@ class LlamaLayerNormMLP(nn.Module):
 
 
 class LlamaRMSNorm(nn.Module):
+
     def __init__(
         self,
         hidden_size: int,
@@ -133,6 +143,7 @@ class LlamaRMSNorm(nn.Module):
 
 
 class ExponentialRunningMeanStd(nn.Module):
+
     def __init__(self, input_shape, beta=0.999, epsilon=1e-5, high_precision=True):
         super().__init__()
         self.__beta = beta
@@ -159,14 +170,13 @@ class ExponentialRunningMeanStd(nn.Module):
 
     def __check(self, x, mask):
         assert isinstance(x, torch.Tensor)
-        trailing_shape = x.shape[-len(self.__input_shape) :]
+        trailing_shape = x.shape[-len(self.__input_shape):]
         assert trailing_shape == self.__input_shape, (
             "Trailing shape of input tensor"
-            f"{x.shape} does not equal to configured input shape {self.__input_shape}"
-        )
+            f"{x.shape} does not equal to configured input shape {self.__input_shape}")
         if mask is not None:
             assert mask.shape == (
-                *x.shape[: -len(self.__input_shape)],
+                *x.shape[:-len(self.__input_shape)],
                 *((1,) * len(self.__input_shape)),
             ), (mask.shape, x.shape)
 
@@ -178,9 +188,9 @@ class ExponentialRunningMeanStd(nn.Module):
             mask = mask.to(self.__dtype)
         norm_dims = tuple(range(len(x.shape) - len(self.__input_shape)))
         if mask is None:
-            factor = torch.tensor(
-                np.prod(x.shape[: -len(self.__input_shape)]), dtype=self.__dtype, device=x.device
-            )
+            factor = torch.tensor(np.prod(x.shape[:-len(self.__input_shape)]),
+                                  dtype=self.__dtype,
+                                  device=x.device)
         else:
             x = x * mask
             factor = mask.sum()
@@ -221,6 +231,7 @@ class ExponentialRunningMeanStd(nn.Module):
 
 
 class MovingAverageRunningMeanStd(nn.Module):
+
     def __init__(self, input_shape, high_precision=True):
         super().__init__()
         self.__input_shape = input_shape
@@ -245,14 +256,13 @@ class MovingAverageRunningMeanStd(nn.Module):
 
     def __check(self, x, mask):
         assert isinstance(x, torch.Tensor)
-        trailing_shape = x.shape[-len(self.__input_shape) :]
+        trailing_shape = x.shape[-len(self.__input_shape):]
         assert trailing_shape == self.__input_shape, (
             "Trailing shape of input tensor"
-            f"{x.shape} does not equal to configured input shape {self.__input_shape}"
-        )
+            f"{x.shape} does not equal to configured input shape {self.__input_shape}")
         if mask is not None:
             assert mask.shape == (
-                *x.shape[: -len(self.__input_shape)],
+                *x.shape[:-len(self.__input_shape)],
                 *((1,) * len(self.__input_shape)),
             ), (mask.shape, x.shape)
 
@@ -264,9 +274,9 @@ class MovingAverageRunningMeanStd(nn.Module):
             mask = mask.to(self.__dtype)
         norm_dims = tuple(range(len(x.shape) - len(self.__input_shape)))
         if mask is None:
-            factor = torch.tensor(
-                np.prod(x.shape[: -len(self.__input_shape)]), dtype=self.__dtype, device=x.device
-            )
+            factor = torch.tensor(np.prod(x.shape[:-len(self.__input_shape)]),
+                                  dtype=self.__dtype,
+                                  device=x.device)
         else:
             x = x * mask
             factor = mask.sum()
@@ -278,12 +288,10 @@ class MovingAverageRunningMeanStd(nn.Module):
             dist.all_reduce(x_sum, op=dist.ReduceOp.SUM)
             dist.all_reduce(x_sum_sq, op=dist.ReduceOp.SUM)
 
-        self.__mean.data[:] = (self.__accum_denominator * self.__mean.data[:] + x_sum) / (
-            self.__accum_denominator + factor
-        )
-        self.__mean_sq.data[:] = (self.__accum_denominator * self.__mean_sq.data[:] + x_sum_sq) / (
-            self.__accum_denominator + factor
-        )
+        self.__mean.data[:] = (self.__accum_denominator * self.__mean.data[:] +
+                               x_sum) / (self.__accum_denominator + factor)
+        self.__mean_sq.data[:] = (self.__accum_denominator * self.__mean_sq.data[:] +
+                                  x_sum_sq) / (self.__accum_denominator + factor)
         self.__accum_denominator += factor
 
     @torch.no_grad()
