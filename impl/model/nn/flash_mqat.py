@@ -28,8 +28,6 @@ except ModuleNotFoundError:
     pass
 import logging
 
-logger = logging.getLogger("flash_mqat.py")
-
 logger = logging.getLogger("FlashMQAT")
 
 

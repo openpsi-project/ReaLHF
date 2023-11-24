@@ -556,7 +556,8 @@ class PipelineModule(nn.Module):
                 shard[keys[j]] = self.state_dict()[keys[j]]
                 print(f"shard {i} key {keys[j]}")
             start += size
-            save_fn = f"pytorch_model-pp-{self.stage_id:02d}-mp-00-s-{i:02d}.bin"
+            tp_rank = self._grid.get_tensor_parallel_rank()
+            save_fn = f"pytorch_model-pp-{self.stage_id:02d}-tp-{tp_rank}-s-{i:02d}.bin"
             save_abs_fn = os.path.join(save_dir, save_fn)
             torch.save(shard, save_abs_fn)
 
@@ -568,10 +569,14 @@ class PipelineModule(nn.Module):
             for file in os.listdir(load_dir):
                 if file.endswith(".bin"):
                     # filename format should be:
-                    # pytorch_model-pp-{pp_index:02d}-mo-{mp_index:02d}-s-{shard_index:02d}
+                    # pytorch_model-pp-{pp_index:02d}-tp-{tp_index:02d}-s-{shard_index:02d}
                     pp_stage = int(file.split("-")[2])
                     if pp_stage == self.stage_id:
                         fn_to_load.append(file)
+                    if self._grid.get_tensor_parallel_world_size() > 1:
+                        tp_stage = int(file.split("-")[4])
+                        if tp_stage == self._grid.get_tensor_parallel_rank():
+                            fn_to_load.append(file)
             for fn in fn_to_load:
                 shard = torch.load(os.path.join(load_dir, fn))
                 self.load_state_dict(shard, strict=False)
@@ -579,6 +584,7 @@ class PipelineModule(nn.Module):
                 n_shards += 1
                 process_memory_mb(f"after_load_shard_{n_shards}")
         else:
+            assert self._grid.get_tensor_parallel_world_size() == 1
             single_file_path = os.path.join(load_dir, "pytorch_model.bin")
             if os.path.exists(single_file_path):
                 shard = torch.load(single_file_path)

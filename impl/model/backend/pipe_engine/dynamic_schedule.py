@@ -130,13 +130,14 @@ class Train1F1BSchedule(PipeSchedule):
             forward_deps = []
             send_deps = []
             if stage_id == 0:
-                load_deps = [LoadMicroBatch(stage_id=0, micro_batch_id=micro_batch_id - 1)]
-                if not self._is_first_half(micro_batch_id):
-                    # in second half of the micro batches, forward microbatch `m`` only if
-                    # microbatch `m-self.num_stages` backward is finished
-                    load_deps.append(BackwardPass(stage_id=0,
-                                                  micro_batch_id=micro_batch_id - self.num_stages))
-                cmds.append(LoadMicroBatch(stage_id=stage_id, micro_batch_id=micro_batch_id, deps=load_deps))
+                pass
+                # load_deps = [LoadMicroBatch(stage_id=0, micro_batch_id=micro_batch_id - 1)]
+                # if not self._is_first_half(micro_batch_id):
+                #     # in second half of the micro batches, forward microbatch `m`` only if
+                #     # microbatch `m-self.num_stages` backward is finished
+                #     load_deps.append(BackwardPass(stage_id=0,
+                #                                   micro_batch_id=micro_batch_id - self.num_stages))
+                # cmds.append(LoadMicroBatch(stage_id=stage_id, micro_batch_id=micro_batch_id, deps=load_deps))
             else:
                 recv_deps = [ForwardPass(stage_id=stage_id - 1, micro_batch_id=micro_batch_id)]
                 cmds.append(RecvActivation(stage_id=stage_id, micro_batch_id=micro_batch_id, deps=recv_deps))
