@@ -14,10 +14,9 @@ import torch.utils.checkpoint
 import transformers
 
 from impl.model.nn.flash_mqat import FlashMQATConfig
-from impl.model.utils.data import (build_packed_inputs, DuckGenerationOutput, DuckModelOutput, mask_eos_token,
-                                   PipeCacheData, PipeTransferData, repeat_kv,
-                                   TensorDataclassToTupleInterface, unpack_tensor, upcast_masked_softmax,
-                                   upcast_softmax)
+from impl.model.utils.data import (DuckGenerationOutput, DuckModelOutput, mask_eos_token, PipeCacheData,
+                                   PipeTransferData, repeat_kv, TensorDataclassToTupleInterface,
+                                   upcast_masked_softmax, upcast_softmax)
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP
 import api.huggingface

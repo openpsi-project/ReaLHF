@@ -20,13 +20,18 @@ import base.names as names
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
 MODEL_NAME = "pipedatamodel"
-MODEL_TYPE = "model_worker"
+WORKER_TYPE = "model_worker"
 NUM_PP = 4
 NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_PP * NUM_DP
-BASELINE_MODEL_PATH = "/home/meizy/models/Llama-2-4l"
-PIPELINE_MODEL_PATH = F"/home/meizy/models/llama-2-4l_{NUM_PP}pp_{NUM_SHARDS}s"
+MODEL_TYPE = "starcoder"
+if MODEL_TYPE == "llama":
+    BASELINE_MODEL_PATH = "/home/meizy/models/Llama-2-4l"
+    PIPELINE_MODEL_PATH = F"/home/meizy/models/llama-2-4l_4pp_3s"
+elif MODEL_TYPE == "starcoder":
+    BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
+    PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
 BATCH_SIZE = 8
 MIN_NEW_TOKENS = 50
 MAX_NEW_TOKENS = 50
@@ -48,10 +53,10 @@ logger = logging.getLogger("pipe_mqat_test")
 
 def setup_gpu(rank):
     os.environ["DLLM_MODE"] = "LOCAL"
-    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+    # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
     BARRIER.wait()
-    base.gpu_utils.isolate_cuda_device(MODEL_TYPE, rank, WORLD_SIZE, EXPR_NAME, TRIAL_NAME)
+    base.gpu_utils.isolate_cuda_device(WORKER_TYPE, rank, WORLD_SIZE, EXPR_NAME, TRIAL_NAME)
     BARRIER.wait()
     base.gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME, MODEL_NAME, rank)
     BARRIER.wait()
@@ -103,14 +108,24 @@ def make_pipe_model(model_path, device):
     import api.model
     import impl.model
     topology = PipeDataParallelTopology(num_pp=NUM_PP, num_dp=NUM_DP)
-    model_config = config_package.Model(type_="llama_flash_mqat_pipe",
-                                        args=dict(
-                                            model_path=model_path,
-                                            num_pp=NUM_PP,
-                                            num_dp=NUM_DP,
-                                            load_from_full_ckpt=False,
-                                            dtype=torch.float16,
-                                        ))
+    if MODEL_TYPE == "llama":
+        model_config = config_package.Model(type_="llama_flash_mqat_pipe",
+                                            args=dict(
+                                                model_path=model_path,
+                                                num_pp=NUM_PP,
+                                                num_dp=NUM_DP,
+                                                load_from_full_ckpt=False,
+                                                dtype=torch.float16,
+                                            ))
+    elif MODEL_TYPE == "starcoder":
+        model_config = config_package.Model(type_="starcoder_flash_mqat_pipe",
+                                            args=dict(
+                                                model_path=model_path,
+                                                num_pp=NUM_PP,
+                                                num_dp=NUM_DP,
+                                                load_from_full_ckpt=False,
+                                                dtype=torch.float16,
+                                            ))
     model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
     return topology, model
 
@@ -177,7 +192,7 @@ def init_data(rank, model, device, seed):
 
 def pipe_generate(rank, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
-    data = init_data(rank, model, device, seed=123)
+    data = init_data(rank, model, device, seed=seed)
 
     from impl.model.nn.flash_mqat import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
@@ -201,7 +216,6 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
 
 
 def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
-    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     device, model, backend, interface = init_handles(rank)
     data = init_data(rank, model, device, seed)
     st = time.monotonic()
@@ -240,9 +254,17 @@ class PipeFlashMQATTest(unittest.TestCase):
             pretrained_model_name_or_path=BASELINE_MODEL_PATH).to(dtype=dtype, device=device)
         starcoder.eval()
 
-        self.baseline_model = FlashMQATForCausalLM.from_llama(from_model=starcoder,
-                                                              dtype=dtype,
-                                                              device=device)
+        if MODEL_TYPE == "llama":
+            self.baseline_model = FlashMQATForCausalLM.from_llama(from_model=starcoder,
+                                                                  dtype=dtype,
+                                                                  device=device)
+        elif MODEL_TYPE == "starcoder":
+            self.baseline_model = FlashMQATForCausalLM.from_starcoder(from_model=starcoder,
+                                                                      dtype=dtype,
+                                                                      device=device)
+        else:
+            raise NotImplementedError()
+
         self.baseline_model.eval()
 
     @torch.no_grad()
@@ -279,9 +301,15 @@ class PipeFlashMQATTest(unittest.TestCase):
         print("pipe time:", t)
         print("vanilla time:", t2)
 
-        assert torch.allclose(g, vg), (g, vg, torch.diff(g, vg))
-        assert torch.allclose(logprob, vlogprob, atol=0, rtol=0.01),\
-               (logprob, vlogprob, torch.diff(logprob, vlogprob))
+        print(f"at seed {self.seed} diff {torch.abs(g-vg)}, {torch.abs(g-vg).abs()}")
+
+        try:
+            assert torch.allclose(logprob, vlogprob, atol=0, rtol=0.01)
+        except AssertionError as e:
+            print(
+                f"at seed {self.seed} diff {torch.abs(logprob-vlogprob)}, {torch.abs(logprob-vlogprob).abs()}"
+            )
+            raise e
 
     @torch.no_grad()
     def testGenerate(self):

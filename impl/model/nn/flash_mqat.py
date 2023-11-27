@@ -880,6 +880,7 @@ class FlashMQATForCausalLM(nn.Module):
         device: Optional[Union[str, torch.device]] = None,
     ):
         with open(os.path.join(model_path, "config.json"), "r") as f:
+            # TODO: load will get unexpected keys and values for FlashMQATConfig
             config = FlashMQATConfig(**json.load(f))
         state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
         model = cls(config, dtype, device)
@@ -1388,7 +1389,7 @@ def generate(
             y.k_cache = k_cache
             y.v_cache = v_cache
             y.cache_seqlens = cache_seqlens
-        x = PipeTransferData(store_kvcache=torch.tensor(1))
+        x = PipeTransferData(store_kv_cache=torch.tensor(1))
         ys[0].cache_seqlens = cache_seqlens
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.

@@ -158,14 +158,14 @@ def init_handles(rank):
 
 
 def init_data(rank, model, device, seed):
-    from impl.model.utils.data import build_packed_inputs
+    from flash_attn.bert_padding import pad_input, unpad_input
     input_ids, attention_mask = make_batch(model.tokenizer,
                                            device,
                                            BATCH_SIZE,
                                            rank % NUM_DP,
                                            NUM_DP,
                                            seed=seed)
-    packed_input_ids, cu_seqlens, max_seqlen = build_packed_inputs(input_ids, attention_mask)
+    packed_input_ids, cu_seqlens, max_seqlen = pad_input(input_ids, attention_mask)
     prompt_mask = torch.zeros_like(packed_input_ids)
     data = NamedArray(
         packed_input_ids=packed_input_ids,

@@ -83,7 +83,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.is_pipe_parallel = self.grid.pipe_parallel_size > 1
         assert self.is_pipe_parallel, "Must use pipeline parallelism with PipelineModule"
         self.is_data_parallel = self.grid.data_parallel_size > 1
-        self.is_model_parallel = self.grid.model_parallel_size > 1
+        self.is_model_parallel = self.grid.tensor_parallel_size > 1
 
         self.prev_stage = (self.stage_id - 1) % self.num_stages
         self.next_stage = (self.stage_id + 1) % self.num_stages
@@ -182,12 +182,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         def input_to_pipe_model_input(input: NamedArray):
             max_seqlen = torch.tensor(int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))).cuda()
-            store_kvcache = torch.tensor(1).cuda() if generate_mode else torch.tensor(0).cuda()
+            store_kv_cache = torch.tensor(1).cuda() if generate_mode else torch.tensor(0).cuda()
 
             cu_seqlens = input.cu_seqlens.to(self.device)
             packed_input_ids = input.packed_input_ids.to(self.device)
 
-            x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kvcache=store_kvcache)
+            x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=store_kv_cache)
             if self.is_first_stage():
                 ys = [PipeCacheData(input_ids=packed_input_ids)
                       ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
@@ -217,7 +217,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 self.tensor_buffer.alloc("grad", mbid, activation_shape, dtype, self.device)
             others_cache = dict(cu_seqlens=batch[0].cu_seqlens,
                                 max_seqlen=batch[0].max_seqlen,
-                                store_kvcache=batch[0].store_kvcache)
+                                store_kv_cache=batch[0].store_kv_cache)
             self.tensor_buffer.put_non_tensor("pipe_transfer_infos", mbid, others_cache)
 
     def _prepare_loss_input(self, **loss_kwargs):
@@ -682,7 +682,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         p2p.recv(recv_buf, self.prev_stage)
         recvd = recv_buf.clone().detach()
         # self.tensor_buffer.put("next_tokens_cache", micro_batch_id, recvd)
-        x = PipeTransferData(store_kvcache=torch.tensor(1).cuda())
+        x = PipeTransferData(store_kv_cache=torch.tensor(1).cuda())
         self.tensor_buffer.put_non_tensor("batch_input_x", micro_batch_id, x)
         ys = self.tensor_buffer.get_non_tensor("batch_input_ys", micro_batch_id, remove=False)
         ys[0].input_ids = recvd.unsqueeze(-1)
