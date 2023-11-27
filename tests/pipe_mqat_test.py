@@ -23,9 +23,10 @@ MODEL_NAME = "pipedatamodel"
 MODEL_TYPE = "model_worker"
 NUM_PP = 4
 NUM_DP = 1
+NUM_SHARDS = 3
 WORLD_SIZE = NUM_PP * NUM_DP
-BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
-PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_{NUM_PP}pp_1s"
+BASELINE_MODEL_PATH = "/home/meizy/models/Llama-2-4l"
+PIPELINE_MODEL_PATH = F"/home/meizy/models/llama-2-4l_{NUM_PP}pp_{NUM_SHARDS}s"
 BATCH_SIZE = 8
 MIN_NEW_TOKENS = 50
 MAX_NEW_TOKENS = 50
@@ -34,12 +35,12 @@ BARRIER = mp.Barrier(WORLD_SIZE)
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
 # for plotting
-logging.basicConfig(filename="/home/meizy/logs/pipe_mqat.log",
-                    filemode="w",
-                    format=LOG_FORMAT,
-                    datefmt=DATE_FORMAT,
-                    level="DEBUG")
-# logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="DEBUG")
+# logging.basicConfig(filename="/home/meizy/logs/pipe_mqat.log",
+#                     filemode="w",
+#                     format=LOG_FORMAT,
+#                     datefmt=DATE_FORMAT,
+#                     level="DEBUG")
+logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="DEBUG")
 
 logger = logging.getLogger("pipe_mqat_test")
 
@@ -98,7 +99,7 @@ def make_pipe_model(model_path, device):
     from impl.model.backend.ds_pipe_engine import PipeDataParallelTopology
     import api.model
     topology = PipeDataParallelTopology(num_pp=NUM_PP, num_dp=NUM_DP)
-    model_config = config_package.Model(type_="starcoder_flash_mqat_pipe",
+    model_config = config_package.Model(type_="llama_flash_mqat_pipe",
                                         args=dict(
                                             model_path=model_path,
                                             num_pp=NUM_PP,
@@ -153,14 +154,14 @@ def init_handles(rank):
 
 
 def init_data(rank, model, device, seed):
-    from impl.model.utils.data import build_packed_inputs
+    from flash_attn.bert_padding import pad_input, unpad_input
     input_ids, attention_mask = make_batch(model.tokenizer,
                                            device,
                                            BATCH_SIZE,
                                            rank % NUM_DP,
                                            NUM_DP,
                                            seed=seed)
-    packed_input_ids, cu_seqlens, max_seqlen = build_packed_inputs(input_ids, attention_mask)
+    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
     prompt_mask = torch.zeros_like(packed_input_ids)
     data = NamedArray(
         packed_input_ids=packed_input_ids,
@@ -179,6 +180,10 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
     st = time.monotonic()
     outputs = interface.generate(model, data, gconfig=gconfig)
     t = time.monotonic() - st
+
+    st = time.monotonic()
+    outputs = interface.generate(model, data, gconfig=gconfig)
+    t = time.monotonic() - st
     # logger.info(input_ids)
     if len(outputs) > 0 and res_queue is not None:
         # logger.info(input_ids)
@@ -193,8 +198,15 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
 def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
     data = init_data(rank, model, device, seed)
+    st = time.monotonic()
     outputs = interface.train_step(model, data)
-    logger.info(f"{rank} {outputs}")
+    t = time.monotonic() - st
+
+    st = time.monotonic()
+    outputs = interface.train_step(model, data)
+    t1 = time.monotonic() - st
+    logger.info(f"{rank} {outputs} timecost {t} {t1}")
+    print(f"{rank} {outputs} timecost {t} {t1}")
 
 
 class PipeFlashMQATTest(unittest.TestCase):
@@ -214,17 +226,17 @@ class PipeFlashMQATTest(unittest.TestCase):
         self.device = device = 'cuda'
         self.dtype = dtype = torch.float16
 
-        self.tokenizer = api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l")
+        self.tokenizer = api.huggingface.load_hf_tokenizer(BASELINE_MODEL_PATH)
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.tokenizer.padding_side = "left"
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
-            pretrained_model_name_or_path="/lustre/meizy/models/starcoder_4l").to(dtype=dtype, device=device)
+            pretrained_model_name_or_path=BASELINE_MODEL_PATH).to(dtype=dtype, device=device)
         starcoder.eval()
 
-        self.baseline_model = FlashMQATForCausalLM.from_starcoder(from_model=starcoder,
-                                                                  dtype=dtype,
-                                                                  device=device)
+        self.baseline_model = FlashMQATForCausalLM.from_llama(from_model=starcoder,
+                                                              dtype=dtype,
+                                                              device=device)
         self.baseline_model.eval()
 
     @torch.no_grad()
@@ -252,17 +264,18 @@ class PipeFlashMQATTest(unittest.TestCase):
         prompt, prompt_att_mask = make_batch(self.tokenizer, self.device, BATCH_SIZE, 0, 1, seed=self.seed)
 
         s2 = time.monotonic()
-        vg, vlogprob, vmask, _ = generate(model=self.baseline_model,
-                                          tokenizer=self.tokenizer,
-                                          input_ids=prompt,
-                                          attention_mask=prompt_att_mask,
-                                          gconfig=self.gconfig)
+        vg, vlogprob, vmask, *_ = generate(model=self.baseline_model,
+                                           tokenizer=self.tokenizer,
+                                           input_ids=prompt,
+                                           attention_mask=prompt_att_mask,
+                                           gconfig=self.gconfig)
         t2 = time.monotonic() - s2
         print("pipe time:", t)
         print("vanilla time:", t2)
 
-        assert torch.allclose(g, vg), (g, vg)
-        assert torch.allclose(logprob, vlogprob, atol=0, rtol=0.01), (logprob, vlogprob)
+        assert torch.allclose(g, vg), (g, vg, torch.diff(g, vg))
+        assert torch.allclose(logprob, vlogprob, atol=0, rtol=0.01),\
+               (logprob, vlogprob, torch.diff(logprob, vlogprob))
 
     @torch.no_grad()
     def testGenerate(self):
@@ -302,4 +315,4 @@ class PipeFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testGenerate")
+    unittest.main(defaultTest="PipeFlashMQATTest.testGenerateAccordance")

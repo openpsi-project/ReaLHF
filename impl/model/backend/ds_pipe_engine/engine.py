@@ -315,7 +315,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             self.pipe_buffers[key].extend([None] * num_added)
         self.num_pipe_buffers = num_buffers
 
-    def _prepare_input(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor):
+    def _prepare_input(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, generate_mode=False):
         """ Prepare input for train or inference
         split all input tensors into micro batches for pipeline parallel
 
@@ -329,7 +329,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         def input_to_pipe_model_input(input: NamedArray):
             max_seqlen = int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))
-            x = PipeTransferData(cu_seqlens=input.cu_seqlens, max_seqlen=max_seqlen)
+            x = PipeTransferData(cu_seqlens=input.cu_seqlens,
+                                 max_seqlen=max_seqlen,
+                                 store_kv_cache=generate_mode)
             if self.is_first_stage():
                 ys = [PipeCacheData(input_ids=input.packed_input_ids)
                       ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
@@ -418,7 +420,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
         self._compute_loss = False
-        data_iter = self._prepare_input(packed_input_ids, cu_seqlens)
+        data_iter = self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=True)
         self._generate_mode(tokenizer=tokenizer, gconfig=gconfig)
         self.set_dataiterator(data_iter)
 
@@ -467,7 +469,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             gen_tokens_lengths = [t.shape[-1] for t in all_gen_tokens]
             max_gen_tokens_length = max(gen_tokens_lengths)
             for i in range(len(all_gen_tokens)):
-                assert all_gen_tokens[i].shape == log_probs[i].shape
+                assert all_gen_tokens[i].shape == all_log_probs[i].shape
                 if all_gen_tokens[i].shape[-1] < max_gen_tokens_length:
                     device = all_gen_tokens[i].device
                     # if t.shape[-1] < max_gen_tokens_length, pad it with zeros
@@ -673,7 +675,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
                 bs = len(input_lens)
                 for y in ys:
-                    assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
+                    assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None, \
+                           f"y.k_cache={y.k_cache} y.v_cache={y.v_cache} y.cache_seqlens={y.cache_seqlens}"
                     kvcache_seqlen = max(max_seq_len + self.gconfig.max_new_tokens, 256)
                     k_cache = torch.zeros((bs, kvcache_seqlen, *y.k_cache.shape[1:]),
                                           dtype=y.k_cache.dtype,
@@ -968,7 +971,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         assert micro_batch_id >= 0
         assert self.is_first_stage(), "_exec_load_next_tokens() should be only executed on the first stage"
         assert buffer_id in self.next_tokens_cache, f"next tokens cache of micro batch id {buffer_id} is empty"
-        x = PipeTransferData()
+        x = PipeTransferData(store_kv_cache=True)
         ys = self.pipe_cache_data[micro_batch_id]
         ys[0].input_ids = self.next_tokens_cache[micro_batch_id].unsqueeze(-1)
         ys[0].position_ids = None

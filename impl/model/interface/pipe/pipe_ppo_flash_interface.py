@@ -4,7 +4,11 @@ import dataclasses
 import itertools
 import random
 
-from flash_attn.bert_padding import unpad_input
+try:
+    from flash_attn.bert_padding import unpad_input
+except ModuleNotFoundError:
+    pass
+
 import deepspeed
 import torch
 import tqdm

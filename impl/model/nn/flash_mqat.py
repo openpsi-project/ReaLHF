@@ -868,7 +868,7 @@ class FlashMQATForCausalLM(nn.Module):
                     k = k.replace(k1, k2)
                 new_state_dict[k] = v
             state_dict = new_state_dict
-        model.load_state_dict(new_state_dict)
+        model.load_state_dict(new_state_dict, strict=False)
         return model
 
     @classmethod

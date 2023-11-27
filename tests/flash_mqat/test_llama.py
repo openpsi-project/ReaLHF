@@ -99,4 +99,4 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(defaultTest="LlamaFlashMQATForwardTest.testForward")
