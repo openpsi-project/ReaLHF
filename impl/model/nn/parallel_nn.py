@@ -7,7 +7,7 @@ import torch.nn as nn
 import transformers
 
 from base.monitor import process_memory_mb
-from base.topology import PipeTensorDataParallelTopology
+from base.topology import PipeModelDataParallelTopology
 from impl.model.nn.tp_flash_mqat import *
 from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
@@ -18,7 +18,7 @@ logger = logging.getLogger("3d_parallel_nn")
 
 def make_causal_flash_mqat_3d_module(
     config: FlashMQATConfig,
-    topology: PipeTensorDataParallelTopology,
+    topology: PipeModelDataParallelTopology,
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
 ):
@@ -64,7 +64,7 @@ def make_causal_flash_mqat_3d_module(
 
 def make_starcoder_flash_mqat_3d_module(
     model_path: str,
-    topology: PipeTensorDataParallelTopology,
+    topology: PipeModelDataParallelTopology,
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
 ):
@@ -109,7 +109,7 @@ def make_flash_mqat_3d_model(
         tokenizer = api.huggingface.load_hf_tokenizer(model_path)
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token_id = tokenizer.eos_token_id
-        topology = PipeTensorDataParallelTopology(num_pp=num_pp, num_dp=num_dp, num_tp=num_tp)
+        topology = PipeModelDataParallelTopology(num_pp=num_pp, num_dp=num_dp, num_tp=num_tp)
         module, _ = make_starcoder_flash_mqat_3d_module(model_path, topology, dtype, device)
         if ckpt_path:
             model_path = ckpt_path

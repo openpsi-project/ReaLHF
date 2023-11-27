@@ -261,7 +261,7 @@ class PipeDataParallelTopology(ProcessTopology):
         super().__init__(axes=['pipe', 'data'], dims=[num_pp, num_dp])
 
 
-class PipeTensorDataParallelTopology(ProcessTopology):
+class PipeModelDataParallelTopology(ProcessTopology):
     """ A topology for hybrid pipeline, model, and data parallelism. """
 
     def __init__(self, num_pp, num_tp, num_dp):
@@ -463,6 +463,15 @@ class PipelineParallelGrid:
 
     def get_tensor_parallel_group(self):
         return self.ds_model_proc_group
+
+    def get_model_parallel_rank(self):
+        return self.get_tensor_parallel_rank()
+
+    def get_model_parallel_world_size(self):
+        return self.get_tensor_parallel_world_size()
+
+    def get_model_parallel_group(self):
+        return self.get_tensor_parallel_group()
 
     # For Megatron-style tensor slicing
     def get_slice_parallel_rank(self):

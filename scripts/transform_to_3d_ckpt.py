@@ -19,7 +19,7 @@ FULL_MODEL_DIR = "/lustre/meizy/models/starcoder_4l"
 NUM_PIPE_STAGES = 4
 NUM_TP = 2
 NUM_SHARDS = 1
-PIPE_MODEL_DIR = f"/lustre/meizy/models/3d/starcoder_4l_{NUM_PIPE_STAGES}pp_{NUM_TP}tp_{NUM_SHARDS}s"
+PIPE_MODEL_DIR = f"/home/meizy/models/3d/starcoder_4l_{NUM_PIPE_STAGES}pp_{NUM_TP}tp_{NUM_SHARDS}s"
 TEST_EXPR_NAME = "test"
 TEST_TRIAL_NAME = "test"
 TEST_MODEL_NAME = "default"
@@ -33,8 +33,11 @@ MODEL_CONFIG_FILES = [
 class TransformKeyMapping:
     before_key: str
     after_keys: List[str]
-    before_shape: Tuple
-    after_shapes: List[Tuple]
+    before_shape: Optional[Tuple] = None
+    partition_dim: int = 0
+    after_starts: List[int] = 0
+    after_ends: List[int] = 0
+    num_partitions: Union[List[int], int] = NUM_TP
 
 
 def flash_mqat_config(model_path: str):
@@ -97,90 +100,99 @@ def layer_specs_and_transform_mappings(config: FlashMQATConfig):
             before_key="transformer.wte.weight",
             after_keys=["0.wte.weight"],
             before_shape=(config.vocab_size, config.hidden_dim),
-            after_shapes=[(config.vocab_size // NUM_TP, config.hidden_dim)],
+            partition_dim=0,
+            after_starts=[0],
+            after_ends=[config.vocab_size],
+            num_partitions=NUM_TP,
         ))
     mappings.append(
         TransformKeyMapping(
             before_key="transformer.wpe.weight",
             after_keys=["0.wpe.weight"],
             before_shape=(config.n_positions, config.hidden_dim),
-            after_shapes=[(config.n_positions // NUM_TP, config.hidden_dim)],
+            partition_dim=0,
+            after_starts=[0],
+            after_ends=[config.n_positions],
         ))
 
     n_heads = config.hidden_dim // config.head_dim
     for i in range(config.n_layers):
         mappings.append(
-            TransformKeyMapping(before_key=f"transformer.h.{i}.attn.c_attn.weight",
-                                after_keys=[f"{i+1}.attn.q_attn.weight", f"{i+1}.attn.kv_attn.weight"],
-                                before_shape=(config.head_dim * (n_heads + 2 * config.n_kv_heads),
-                                              config.hidden_dim),
-                                after_shapes=[
-                                    (config.head_dim * n_heads // NUM_TP, config.hidden_dim),
-                                    (2 * config.head_dim * config.n_kv_heads, config.hidden_dim),
-                                ]))
+            TransformKeyMapping(
+                before_key=f"transformer.h.{i}.attn.c_attn.weight",
+                after_keys=[f"{i+1}.attn.q_attn.weight", f"{i+1}.attn.kv_attn.weight"],
+                before_shape=(config.head_dim * (n_heads + 2 * config.n_kv_heads), config.hidden_dim),
+                partition_dim=0,
+                after_starts=[0, config.head_dim * n_heads],
+                after_ends=[config.head_dim * n_heads, config.head_dim * (n_heads + 2 * config.n_kv_heads)],
+                num_partitions=[NUM_TP, 1]),)
         mappings.append(
-            TransformKeyMapping(before_key=f"transformer.h.{i}.attn.c_attn.bias",
-                                after_keys=[f"{i+1}.attn.q_attn.bias", f"{i+1}.attn.kv_attn.bias"],
-                                before_shape=(config.head_dim * (n_heads + 2 * config.n_kv_heads),),
-                                after_shapes=[
-                                    (config.head_dim * n_heads // NUM_TP,),
-                                    (2 * config.head_dim * config.n_kv_heads,),
-                                ]))
+            TransformKeyMapping(
+                before_key=f"transformer.h.{i}.attn.c_attn.bias",
+                after_keys=[f"{i+1}.attn.q_attn.bias", f"{i+1}.attn.kv_attn.bias"],
+                before_shape=(config.head_dim * (n_heads + 2 * config.n_kv_heads),),
+                partition_dim=0,
+                after_starts=[0, config.head_dim * n_heads],
+                after_ends=[config.head_dim * n_heads, config.head_dim * (n_heads + 2 * config.n_kv_heads)],
+                num_partitions=[NUM_TP, 1]),)
         mappings.append(
             TransformKeyMapping(
                 before_key=f"transformer.h.{i}.attn.c_proj.weight",
                 after_keys=[f"{i+1}.attn.c_proj.weight"],
                 before_shape=(config.hidden_dim, config.hidden_dim),
-                after_shapes=[(config.hidden_dim, config.hidden_dim // NUM_TP)],
+                partition_dim=1,
+                after_starts=[0],
+                after_ends=[config.hidden_dim],
             ))
         mappings.append(
-            TransformKeyMapping(
-                before_key=f"transformer.h.{i}.attn.c_proj.bias",
-                after_keys=[f"{i+1}.attn.c_proj.bias"],
-                before_shape=(config.hidden_dim,),
-                after_shapes=[(config.hidden_dim,)],
-            ))
+            TransformKeyMapping(before_key=f"transformer.h.{i}.attn.c_proj.bias",
+                                after_keys=[f"{i+1}.attn.c_proj.bias"],
+                                partition_dim=0,
+                                after_starts=[0],
+                                after_ends=[config.hidden_dim],
+                                num_partitions=1))
         mappings.append(
             TransformKeyMapping(
                 before_key=f"transformer.h.{i}.ln_1.",
                 after_keys=[f"{i+1}.attn.ln."],
                 before_shape=None,
-                after_shapes=[None],
             ))
         mappings.append(
             TransformKeyMapping(
                 before_key=f"transformer.h.{i}.mlp.c_fc.weight",
                 after_keys=[f"{i+1}.mlp.c_fc.weight"],
                 before_shape=(config.intermediate_dim, config.hidden_dim),
-                after_shapes=[(config.intermediate_dim // NUM_TP, config.hidden_dim)],
+                partition_dim=0,
+                after_starts=[0],
+                after_ends=[config.intermediate_dim],
             ))
         mappings.append(
             TransformKeyMapping(
                 before_key=f"transformer.h.{i}.mlp.c_fc.bias",
                 after_keys=[f"{i+1}.mlp.c_fc.bias"],
                 before_shape=(config.intermediate_dim,),
-                after_shapes=[(config.intermediate_dim // NUM_TP,)],
+                partition_dim=0,
+                after_starts=[0],
+                after_ends=[config.intermediate_dim],
             ))
         mappings.append(
             TransformKeyMapping(
                 before_key=f"transformer.h.{i}.mlp.c_proj.weight",
                 after_keys=[f"{i+1}.mlp.c_proj.weight"],
                 before_shape=(config.hidden_dim, config.intermediate_dim),
-                after_shapes=[(config.hidden_dim, config.intermediate_dim // NUM_TP)],
+                partition_dim=1,
+                after_starts=[0],
+                after_ends=[config.intermediate_dim],
             ))
         mappings.append(
-            TransformKeyMapping(
-                before_key=f"transformer.h.{i}.mlp.c_proj.bias",
-                after_keys=[f"{i+1}.mlp.c_proj.bias"],
-                before_shape=(config.hidden_dim,),
-                after_shapes=[(config.hidden_dim,)],
-            ))
+            TransformKeyMapping(before_key=f"transformer.h.{i}.mlp.c_proj.bias",
+                                after_keys=[f"{i+1}.mlp.c_proj.bias"],
+                                before_shape=None))
         mappings.append(
             TransformKeyMapping(
                 before_key=f"transformer.h.{i}.ln_2.",
                 after_keys=[f"{i+1}.mlp.ln."],
                 before_shape=None,
-                after_shapes=[None],
             ))
         if i == config.n_layers - 1:
             mappings.append(
@@ -188,14 +200,12 @@ def layer_specs_and_transform_mappings(config: FlashMQATConfig):
                     before_key=f"transformer.ln_f.",
                     after_keys=[f"{i+1}.ln_f."],
                     before_shape=None,
-                    after_shapes=[None],
                 ))
     mappings.append(
         TransformKeyMapping(
             before_key="lm_head.",
             after_keys=[f"{config.n_layers+1}."],
             before_shape=None,
-            after_shapes=[None],
         ))
 
     return layer_specs, mappings
@@ -248,24 +258,20 @@ def partition_layers(layer_specs, num_stages, method="uniform"):
     return stage_to_layer_idx
 
 
-def partition_tensor(tensor: torch.Tensor, before_shape: Tuple[int], after_shape: Tuple[int]):
+def partition_tensor(tensor: torch.Tensor, before_shape: Tuple[int], partition_dim: int, num_partitions: int,
+                     after_start: int, after_end: int):
     assert tensor.shape == before_shape
-    # partition a tensor of before_shape into a list of tensors of after_shape
-    before_dim = len(before_shape)
-    after_dim = len(after_shape)
-    assert before_dim == after_dim
-    assert all([before_shape[i] % after_shape[i] == 0 for i in range(before_dim)])
-    partition_size = [before_shape[i] // after_shape[i] for i in range(before_dim)]
-    # only one dimension is to be partitioned
-    num_partitions, partition_dim = None, None
-    for k, p in enumerate(partition_size):
-        if p > 1:
-            num_partitions = p
-            partition_dim = k
-            break
-    assert num_partitions is not None
-    partitions = torch.split(tensor, num_partitions, dim=partition_dim)
-    assert num_partitions == NUM_TP
+    selected = torch.index_select(tensor, partition_dim, torch.tensor(list(range(after_start, after_end))))
+    # print(selected.shape, num_partitions, after_start, after_end)
+    if num_partitions > 1:
+        # partition a tensor of before_shape into a list of tensors of after_shape
+        partitions = list(
+            torch.split(selected, (after_end - after_start) // num_partitions, dim=partition_dim))
+    elif num_partitions == 1:
+        partitions = [selected]
+    else:
+        raise ValueError(f"num_partitions={num_partitions} should be >= 1")
+    # print(len(partitions))
     return partitions
 
 
@@ -274,17 +280,31 @@ def update_state_dict(state_dict, mappings: List[TransformKeyMapping]):
     for k, v in state_dict.items():
         k: str
         v: torch.Tensor
+        logger.info(f"processing key {k} v shape {v.shape}")
         for m in mappings:
             if k.startswith(m.before_key) and m.before_shape is None:
                 assert len(m.after_keys) == 1
                 new_state_dict[m.after_keys[0]] = v
                 break
             elif k == m.before_key:
-                for after_key, after_shape in zip(m.after_keys, m.after_shapes):
-                    new_state_dict[after_key] = partition_tensor(v, m.before_shape, after_shape)
+                assert m.before_shape == v.shape, \
+                       f"k={k}, m.before_shape={m.before_shape}, v.shape={v.shape}"
+                if not isinstance(m.num_partitions, list):
+                    m.num_partitions = [m.num_partitions] * len(m.after_keys)
+                for after_key, after_start, after_end, n_partitions \
+                      in zip(m.after_keys, m.after_starts, m.after_ends, m.num_partitions):
+                    partitioned = partition_tensor(v, m.before_shape, m.partition_dim, n_partitions,
+                                                   after_start, after_end)
+                    print(
+                        f"after_key {after_key} n_partitions {n_partitions} partitioned length {len(partitioned)}"
+                    )
+                    if len(partitioned) == 1:
+                        partitioned = partitioned[0]
+                    new_state_dict[after_key] = partitioned
+                    # print(f"{after_key} partitioned shapes {[p.shape for p in partitioned]}")
                 break
-            else:
-                new_state_dict[k] = v
+        else:
+            new_state_dict[k] = v
     return new_state_dict
 
 
@@ -309,9 +329,9 @@ def save_state_dict(state_dict, stage_index, shard_index, model_dir):
         torch.save(
             state_dict_of_rank,
             os.path.join(model_dir,
-                         f"pytorch_model-pp-{stage_index:02d}-tp-{tp_rank}-s-{shard_index:02d}.bin"))
+                         f"pytorch_model-pp-{stage_index:02d}-tp-{tp_rank:02d}-s-{shard_index:02d}.bin"))
         print(f"saved {state_dict.keys()} to "
-              f"{model_dir}/pytorch_model-pp-{stage_index:02d}-tp-{tp_rank}-s-{shard_index:02d}.bin")
+              f"{model_dir}/pytorch_model-pp-{stage_index:02d}-tp-{tp_rank:02d}-s-{shard_index:02d}.bin")
 
 
 def copy_configs(src_model_dir, dst_model_dir):

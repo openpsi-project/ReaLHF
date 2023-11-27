@@ -22,6 +22,10 @@ try:
 except ImportError:
     _grad_accum_fusion_available = False
 
+import logging
+
+logger = logging.getLogger("tensor_parallel.modules")
+
 
 class ParallelEmbedding(torch.nn.Module):
     """Embedding parallelized in the vocabulary dimension.
@@ -57,7 +61,7 @@ class ParallelEmbedding(torch.nn.Module):
         self.scale_grad_by_freq = False
         self.sparse = False
         self._weight = None
-        self.tensor_model_parallel_size = tensor_parallel_world_size()()
+        self.tensor_model_parallel_size = tensor_parallel_world_size()
         # Divide the weight matrix along the vocaburaly dimension.
         self.vocab_start_index, self.vocab_end_index = \
             VocabUtility.vocab_range_from_global_vocab_size(
@@ -66,6 +70,9 @@ class ParallelEmbedding(torch.nn.Module):
         self.num_embeddings_per_partition = self.vocab_end_index - \
             self.vocab_start_index
 
+        logger.info(
+            f"ParallelEmbedding: num_embeddings={num_embeddings}, per_partition={self.num_embeddings_per_partition}, embedding_dim={embedding_dim},"
+            f"tp_rank={tensor_parallel_rank()},tp_world_size={tensor_parallel_world_size()}")
         # Allocate weights and initialize.
         self.weight = Parameter(
             torch.empty(self.num_embeddings_per_partition, self.embedding_dim, device=device, dtype=dtype))
@@ -364,6 +371,9 @@ class ColumnParallelLinear(torch.nn.Module):
         # Note: torch.nn.functional.linear performs XA^T + b and as a result
         # we allocate the transpose.
         # Initialize weight.
+        logger.info(
+            f"ColumnLinear: input_size={input_size}, output_size={output_size}, output_size_per_partition={self.output_size_per_partition}"
+        )
         self.weight = Parameter(
             torch.empty(self.output_size_per_partition, self.input_size, device=device, dtype=dtype))
         if perform_initialization:
