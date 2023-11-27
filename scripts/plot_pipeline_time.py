@@ -57,51 +57,26 @@ def plot_rlhf():
 
 
 def plot_debug_pipeline():
-    file_name = "/home/meizy/logs/pipe_mqat.log"
+    file_name = "/home/meizy/logs/new_train_time.log"
     identifiers = [str(i) for i in range(4)]
-    fn = "/workspace/scripts/figs/data_load.png"
-    # start_keys = [
-    #     "forward_prepare_start", "outer_module_forward_start", "post_process_start", "reserve_kv_cache_start",
-    #     "postprocess_cache_start", "genstep_start"
-    # ]
-    # end_keys = [
-    #     "forward_prepare_end", "outer_module_forward_end", "post_process_end", "reserve_kv_cache_end",
-    #     "postprocess_cache_end", "genstep_end"
-    # ]
-    # start_keys = [
-    #     "LoadMicroBatch_start", "ForwardPass_start", "LoadNextTokens_start", "SendNextTokens_start",
-    #     "RecvNextTokens_start", "RecvActivation_start", "SendActivation_start"
-    # ]
-    # end_keys = [
-    #     "LoadMicroBatch_end", "ForwardPass_end", "LoadNextTokens_end", "SendNextTokens_end",
-    #     "RecvNextTokens_end", "RecvActivation_end", "SendActivation_end"
-    # ]
-    # start_keys = [
-    #     "pipe_cache_load_start", "input_tuple_clone_start", "tensor_to_tuple_start", "tuple_to_tensor_start",
-    #     "layer_0_start", "layer_1_start", "layer_2_start"
-    # ]
-    # end_keys = [
-    #     "pipe_cache_load_end", "input_tuple_clone_end", "tensor_to_tuple_end", "tuple_to_tensor_end",
-    #     "layer_0_end", "layer_1_end", "layer_2_end"
-    # ]
-    start_keys = ["tensor_to_tuple_start", "tuple_to_tensor_start"]
-    end_keys = ["tensor_to_tuple_end", "tuple_to_tensor_end"]
-    # start_keys = ["to_tensor_start", "from_tensor_start"]
-    # end_keys = ["to_tensor_end", "from_tensor_end"]
-    # start_keys = [
-    #     f"load_next_tokens_{i}_start" for i in range(1, 5)
-    # ]
-    # end_keys = [
-    #     f"load_next_tokens_{i}_end" for i in range(1, 5)
-    # ]
-    summary_time_points(
-        file_name=file_name,
-        start_keys=start_keys,
-        end_keys=end_keys,
-        identifiers=identifiers,
-        step_range=(0, 1000),
-        save_fig_path=fn,
-    )
+    fn = "/workspace/scripts/figs/new_train_time.png"
+    start_keys = [
+        "LoadMicroBatch_start", "RecvActivation_start", "SendActivation_start", "RecvGrad_start",
+        "RecvGrad_end", "ForwardPass_start", "BackwardPass_start", "LoadNextTokens_start",
+        "SendNextTokens_start", "RecvNextTokens_start", "OptimizerStep_start", "Prepare_start"
+    ]
+    end_keys = [
+        "LoadMicroBatch_end", "RecvActivation_end", "SendActivation_end", "RecvGrad_start", "RecvGrad_end",
+        "ForwardPass_end", "BackwardPass_end", "LoadNextTokens_end", "SendNextTokens_end",
+        "RecvNextTokens_end", "OptimizerStep_end", "Prepare_end"
+    ]
+    summary_time_points(file_name=file_name,
+                        start_keys=start_keys,
+                        end_keys=end_keys,
+                        identifiers=identifiers,
+                        step_range=(1, 2),
+                        save_fig_path=fn,
+                        figsize=(20, 4))
 
 
 def plot_pipeline_rlhf():
@@ -112,12 +87,12 @@ def plot_pipeline_rlhf():
     start_keys = [
         "LoadMicroBatch_start", "RecvActivation_start", "SendActivation_start", "RecvGrad_start",
         "RecvGrad_end", "ForwardPass_start", "BackwardPass_start", "LoadNextTokens_start",
-        "SendNextTokens_start", "RecvNextTokens_start"
+        "SendNextTokens_start", "RecvNextTokens_start", "OptimizerStep_start"
     ]
     end_keys = [
         "LoadMicroBatch_end", "RecvActivation_end", "SendActivation_end", "RecvGrad_start", "RecvGrad_end",
         "ForwardPass_end", "BackwardPass_end", "LoadNextTokens_end", "SendNextTokens_end",
-        "RecvNextTokens_end"
+        "RecvNextTokens_end", "OptimizerStep_end"
     ]
     summary_time_points(file_name=file_name,
                         start_keys=start_keys,
@@ -129,5 +104,5 @@ def plot_pipeline_rlhf():
 
 
 if __name__ == "__main__":
-    # plot_debug_pipeline()
-    plot_pipeline_rlhf()
+    plot_debug_pipeline()
+    # plot_pipeline_rlhf()

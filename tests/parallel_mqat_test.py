@@ -19,17 +19,17 @@ import base.names as names
 
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
-MODEL_NAME = "pipedatamodel"
+MODEL_NAME = "ptdmodel"
 MODEL_TYPE = "model_worker"
 NUM_PP = 4
+NUM_TP = 2
 NUM_DP = 1
-NUM_SHARDS = 3
-WORLD_SIZE = NUM_PP * NUM_DP
-BASELINE_MODEL_PATH = "/home/meizy/models/Llama-2-4l"
-PIPELINE_MODEL_PATH = F"/home/meizy/models/llama-2-4l_{NUM_PP}pp_{NUM_SHARDS}s"
-BATCH_SIZE = 8
-MIN_NEW_TOKENS = 50
-MAX_NEW_TOKENS = 50
+WORLD_SIZE = NUM_PP * NUM_DP * NUM_TP
+BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
+PIPELINE_MODEL_PATH = F"/home/meizy/models/3d/starcoder_4l_{NUM_PP}pp_{NUM_TP}tp_1s"
+BATCH_SIZE = 32
+MIN_NEW_TOKENS = 30
+MAX_NEW_TOKENS = 30
 
 BARRIER = mp.Barrier(WORLD_SIZE)
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
@@ -99,16 +99,16 @@ def make_pipe_backend():
 
 def make_pipe_model(model_path, device):
     # from impl.model.backend.ds_pipe_engine import PipeDataParallelTopology
-    from base.topology import PipeDataParallelTopology
+    from base.topology import PipeModelDataParallelTopology
     import api.model
     import impl.model
-    topology = PipeDataParallelTopology(num_pp=NUM_PP, num_dp=NUM_DP)
-    model_config = config_package.Model(type_="llama_flash_mqat_pipe",
+    topology = PipeModelDataParallelTopology(num_pp=NUM_PP, num_dp=NUM_DP, num_tp=NUM_TP)
+    model_config = config_package.Model(type_="starcoder_flash_mqat_3d",
                                         args=dict(
                                             model_path=model_path,
                                             num_pp=NUM_PP,
                                             num_dp=NUM_DP,
-                                            load_from_full_ckpt=False,
+                                            num_tp=NUM_TP,
                                             dtype=torch.float16,
                                         ))
     model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
@@ -158,14 +158,14 @@ def init_handles(rank):
 
 
 def init_data(rank, model, device, seed):
-    from flash_attn.bert_padding import pad_input, unpad_input
+    from impl.model.utils.data import build_packed_inputs
     input_ids, attention_mask = make_batch(model.tokenizer,
                                            device,
                                            BATCH_SIZE,
                                            rank % NUM_DP,
                                            NUM_DP,
                                            seed=seed)
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+    packed_input_ids, cu_seqlens, max_seqlen = build_packed_inputs(input_ids, attention_mask)
     prompt_mask = torch.zeros_like(packed_input_ids)
     data = NamedArray(
         packed_input_ids=packed_input_ids,
@@ -184,11 +184,14 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
     # first generate
     st = time.monotonic()
     outputs = interface.generate(model, data, gconfig=gconfig)
-    t = time.monotonic() - st
+    t0 = time.monotonic() - st
 
+    data = init_data(rank, model, device, seed=seed)
     st = time.monotonic()
     outputs = interface.generate(model, data, gconfig=gconfig)
-    t = time.monotonic() - st
+    t1 = time.monotonic() - st
+
+    logger.info(f"generate time rank {rank} t0 {t0} t1 {t1}")
     # logger.info(input_ids)
     if len(outputs) > 0 and res_queue is not None:
         # logger.info(input_ids)
@@ -196,23 +199,36 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
         # logger.info(outputs["log_probs"])
         res_queue.put(outputs["gen_tokens"])
         res_queue.put(outputs["log_probs"])
-        res_queue.put(t)
+        res_queue.put(t1)
         time.sleep(1)  # wait for queue get, otherwise invalid tensor handle
 
 
 def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
     os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     device, model, backend, interface = init_handles(rank)
-    data = init_data(rank, model, device, seed)
-    st = time.monotonic()
-    outputs = interface.train_step(model, data)
-    t = time.monotonic() - st
+    data = init_data(rank, model, device, seed=123)
+    # st = time.monotonic()
 
+    # first run
+    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,
+    #              profile_memory=True) as prof:
     st = time.monotonic()
-    outputs = interface.train_step(model, data)
+    d = interface.train_step(model, data)
+    t0 = time.monotonic() - st
+    # print("first train_step", prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+
+    data = init_data(rank, model, device, seed=234)
+    # st = time.monotonic()
+
+    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,
+    #              profile_memory=True) as prof:
+    st = time.monotonic()
+    d = interface.train_step(model, data)
     t1 = time.monotonic() - st
-    logger.info(f"{rank} {outputs} timecost {t} {t1}")
-    print(f"{rank} {outputs} timecost {t} {t1}")
+    # print("second train_step", prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+
+    if len(d) > 0:
+        logger.info(f"{rank} {d['losses']} t0 {t0} t1 {t1}")
 
 
 class PipeFlashMQATTest(unittest.TestCase):
@@ -232,17 +248,17 @@ class PipeFlashMQATTest(unittest.TestCase):
         self.device = device = 'cuda'
         self.dtype = dtype = torch.float16
 
-        self.tokenizer = api.huggingface.load_hf_tokenizer(BASELINE_MODEL_PATH)
+        self.tokenizer = api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l")
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.tokenizer.padding_side = "left"
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
-            pretrained_model_name_or_path=BASELINE_MODEL_PATH).to(dtype=dtype, device=device)
+            pretrained_model_name_or_path="/lustre/meizy/models/starcoder_4l").to(dtype=dtype, device=device)
         starcoder.eval()
 
-        self.baseline_model = FlashMQATForCausalLM.from_llama(from_model=starcoder,
-                                                              dtype=dtype,
-                                                              device=device)
+        self.baseline_model = FlashMQATForCausalLM.from_starcoder(from_model=starcoder,
+                                                                  dtype=dtype,
+                                                                  device=device)
         self.baseline_model.eval()
 
     @torch.no_grad()
@@ -279,9 +295,8 @@ class PipeFlashMQATTest(unittest.TestCase):
         print("pipe time:", t)
         print("vanilla time:", t2)
 
-        assert torch.allclose(g, vg), (g, vg, torch.diff(g, vg))
-        assert torch.allclose(logprob, vlogprob, atol=0, rtol=0.01),\
-               (logprob, vlogprob, torch.diff(logprob, vlogprob))
+        assert torch.allclose(g, vg), (g, vg)
+        assert torch.allclose(logprob, vlogprob, atol=0, rtol=0.01), (logprob, vlogprob)
 
     @torch.no_grad()
     def testGenerate(self):
@@ -321,4 +336,4 @@ class PipeFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testGenerateAccordance")
+    unittest.main(defaultTest="PipeFlashMQATTest.testTrainBatch")

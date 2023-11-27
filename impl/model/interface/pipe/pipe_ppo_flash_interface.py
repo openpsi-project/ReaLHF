@@ -15,9 +15,8 @@ import tqdm
 import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
-from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
 from impl.model.utils.data import gather_packed_shifted_log_probs
-from impl.model.utils.save import save_hf_or_lora_model
 import api.huggingface
 import api.model
 import base.logging as logging
@@ -147,7 +146,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
     @torch.inference_mode()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
-        assert isinstance(module, DeepSpeedPipelineEngine)
+        assert isinstance(module, DeepSpeedPipelineEngine) or isinstance(module, StreamPipeEngine)
 
         module.eval()
 
@@ -256,7 +255,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
     def train_step(self, model: api.model.Model, data: NamedArray) -> Dict:
         module = model.module
         tokenizer = model.tokenizer
-        assert isinstance(module, DeepSpeedPipelineEngine)
+        assert isinstance(module, DeepSpeedPipelineEngine) or isinstance(module, StreamPipeEngine)
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))

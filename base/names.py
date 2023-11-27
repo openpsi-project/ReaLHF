@@ -86,3 +86,7 @@ def ray_cluster(experiment_name, trial_name, name):
 
 def model_controller(experiment_name, trial_name, model_name):
     return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/model_controller/{model_name}"
+
+
+def stream_pipe_engine_schedule(experiment_name, trial_name, model_name, dp_rank, mp_rank):
+    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/stream_pipe_engine_schedule/{model_name}/{dp_rank}/{mp_rank}"

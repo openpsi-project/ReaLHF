@@ -27,6 +27,7 @@ try:
     from flash_attn.layers.rotary import RotaryEmbedding
 except ModuleNotFoundError:
     pass
+import logging
 
 logger = logging.getLogger("FlashMQAT")
 
@@ -1387,7 +1388,7 @@ def generate(
             y.k_cache = k_cache
             y.v_cache = v_cache
             y.cache_seqlens = cache_seqlens
-        x = PipeTransferData()
+        x = PipeTransferData(store_kvcache=torch.tensor(1))
         ys[0].cache_seqlens = cache_seqlens
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
@@ -1408,11 +1409,11 @@ def generate(
                 k_caches[i] = nn.functional.pad(k_caches[i], pad)
             if v_caches[i].shape[1] < max_seq_len:
                 v_caches[i] = nn.functional.pad(v_caches[i], pad)
-        x = PipeTransferData()
-        ys = ([PipeCacheData(cache_seqlens=cache_seqlens)] + [
+        x = PipeTransferData(store_kvcache=torch.tensor(1))
+        ys = [PipeCacheData(cache_seqlens=cache_seqlens)] + [
             PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens)
             for k, v in zip(k_caches, v_caches)
-        ] + [PipeCacheData()])
+        ] + [PipeCacheData()]
         next_tokens = input_ids[:, -1]
 
     # The main loop.

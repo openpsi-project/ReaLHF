@@ -7,7 +7,7 @@ import torch.utils.data
 import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
-from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.nn.flash_mqat import GenerationConfig
 from impl.model.utils.data import gather_packed_shifted_log_probs, PipeCacheData, PipeTransferData
 from impl.model.utils.save import save_hf_or_lora_model
@@ -28,7 +28,7 @@ def compute_packed_sft_loss(logits: torch.Tensor, packed_input_ids: torch.Tensor
     ])
     loss_mask = loss_mask[shift_one_indices]
     loss = -(logprobs * loss_mask).sum() / loss_mask.sum()
-    return loss, {"loss": loss}
+    return loss, {"loss": loss.detach().cpu()}
 
 
 class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
@@ -51,10 +51,10 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
             input_lens=cu_seqlens[1:] - cu_seqlens[:-1],
         )
 
-        stats = module.train_batch(packed_input_ids=packed_input_ids,
-                                   cu_seqlens=cu_seqlens,
-                                   loss_fn=compute_packed_sft_loss,
-                                   **loss_fn_kwargs)
+        r = module.train_batch(packed_input_ids=packed_input_ids,
+                               cu_seqlens=cu_seqlens,
+                               loss_fn=compute_packed_sft_loss,
+                               **loss_fn_kwargs)
 
         cur_epoch = model.version.epoch
         model.inc_version()
@@ -62,9 +62,9 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
             module.tput_timer.update_epoch_count()
 
         # agg_loss = average loss of data parallel batches
-        if len(stats) > 0:
-            agg_loss = mean([s["loss"].detach().item() for s in stats])
-            return dict(loss=agg_loss)
+        if r is not None:
+            avg_loss, stats = r
+            return dict(losses=avg_loss)
         else:
             return dict()
 
