@@ -8,6 +8,7 @@ from typing import Callable, List, Optional, Tuple, Union
 import dataclasses
 
 from deepspeed import comm as dist
+from deepspeed.runtime.bf16_optimizer import BF16_Optimizer
 from deepspeed.runtime.engine import DeepSpeedEngine, MEMORY_OPT_ALLREDUCE_SIZE
 from deepspeed.runtime.zero.config import ZeroStageEnum
 import torch
@@ -55,6 +56,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.enable_backward_allreduce = False
         # see method is_gradient_accumulation_boundary()
         self._force_grad_boundary = False
+        self.using_bf16_optimizer = type(self.optimizer) == BF16_Optimizer
 
         # configs for data shape
         self.config = self.module.config  # FlashMQATConfig in PipelineModule
@@ -506,7 +508,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def _exec_reduce_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
         self._force_grad_boundary = True
-        if self.bfloat16_enabled():
+        if self.using_bf16_optimizer:
             if self.zero_optimization_stage() < ZeroStageEnum.gradients:
                 self._bf16_reduce_grads()
             else:
@@ -527,8 +529,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # self.last_kv_cache = [(y.k_cache.clone().detach(), y.v_cache.clone().detach())
         #                        if y.k_cache is not None else (None, None) for y in ys]
 
-        self._zero_grads(x)
-        self._zero_grads(ys)
+        # self._zero_grads(x)
+        # self._zero_grads(ys)
         # base.consistency.set_micro_batch_id(micro_batch_id)
 
         x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
@@ -652,14 +654,23 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             super().backward(loss)
             return
 
-        if self.bfloat16_enabled() and not self.is_last_stage():
+        if self.using_bf16_optimizer and not self.is_last_stage():
             # manually call because we don't call optimizer.backward()
+            # print("clear lp grads")
             self.optimizer.clear_lp_grads()
 
         grad = self.tensor_buffer.get("grad", micro_batch_id, remove=True)
         output_x = self.tensor_buffer.get("batch_output_x", micro_batch_id, remove=True)
         output_tensor = output_x.pp_input
         torch.autograd.backward(tensors=output_tensor, grad_tensors=grad)
+
+        # for name, param in self.module.named_parameters():
+        #     print(f"{name} grad: {param.grad}")
+
+        if self.using_bf16_optimizer and not self.is_last_stage():
+            # manually call because we don't call optimizer.backward()
+            # print("update hp grads")
+            self.optimizer.update_hp_grads(clear_lp_grads=False)
 
     def _exec_send_activations(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert not self.is_last_stage()
@@ -722,7 +733,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def _exec_optimizer_step(self, stage_id: int, micro_batch_id: int, step_id: int):
         self._force_grad_boundary = True
-        self._take_model_step(lr_kwargs={'epoch': self.version_steps})
+        # self._take_model_step(lr_kwargs={'epoch': self.version_steps})
+        # super().step(lr_kwargs={'epoch': self.version_steps})
+        super().step()
         self._force_grad_boundary = False
 
     def _zero_grads(self, inputs):
@@ -781,16 +794,14 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 terminate_tensor = torch.tensor(0, dtype=torch.int32, device=self.device)
                 if terminate_condition():
                     terminate_tensor = torch.tensor(1, dtype=torch.int32, device=self.device)
-                    logger.debug(f"rank {self.global_rank} reach terminate condition")
                 dist.all_reduce(terminate_tensor)
                 if terminate_tensor.item() > 0:
-                    logger.debug(f"{self.global_rank} terminate")
                     break
             # For each instruction in the step
             step_id, micro_batch_id, step_cmds = step_cmds
-            logger.debug(
-                f"rank {self.global_rank} step {self.step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
-            )
+            # logger.debug(
+            #     f"rank {self.global_rank} step {self.step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
+            # )
             for cmd in step_cmds:
                 logger.debug(f"rank {self.global_rank} exec cmd: {cmd}")
                 if type(cmd) not in self._INSTRUCTION_MAP:
