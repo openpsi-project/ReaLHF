@@ -1,22 +1,20 @@
 from typing import Dict, Optional
-import collections
 import dataclasses
 import itertools
-import random
 
 try:
     from flash_attn.bert_padding import unpad_input
 except ModuleNotFoundError:
     pass
 
-import deepspeed
+import os
+
 import torch
-import tqdm
-import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
 from impl.model.utils.data import gather_packed_shifted_log_probs
+from impl.model.utils.save import save_pipeline_model
 import api.huggingface
 import api.model
 import base.logging as logging
@@ -141,9 +139,11 @@ class PipePackedActorInterface(api.model.ModelInterface):
         self.kl_ctl = None
 
     def save(self, model: api.model.Model, save_dir: str):
-        model.module.save(save_dir)
+        # os.makedirs(save_dir, exist_ok=True)
+        # model.module.save(save_dir)
+        save_pipeline_model(model, save_dir)
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         assert isinstance(module, DeepSpeedPipelineEngine) or isinstance(module, StreamPipeEngine)
@@ -230,7 +230,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
         )
         return recursive_apply(from_dict(res), lambda x: x.cpu())
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
@@ -282,8 +282,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
             logits_mask=data['packed_logits_mask'],
         )
 
-        # print(f"in train_step() packed_seq shape data['packed_seq'].shape: {data['packed_seq'].shape}")
-        train_stats = module.train_batch(
+        r = module.train_batch(
             packed_input_ids=data['packed_seq'],
             cu_seqlens=data['cu_seqlens'],
             loss_fn=_ppo_actor_step,
@@ -295,20 +294,11 @@ class PipePackedActorInterface(api.model.ModelInterface):
         if model.version.epoch > cur_epoch:
             module.tput_timer.update_epoch_count()
 
-        # train_stats: Dict[str, torch.Tensor] = dict(**train_stats)
-        # logger.info(f"train stats length {len(train_stats)}")
-        for stats in train_stats:
-            for k, v in stats.items():
-                if torch.is_tensor(v):
-                    logger.info(f"train stats {k} of shape {v.shape}: {v}")
-                else:
-                    logger.info(f"train stats {k} of type {type(v)}: {v}")
-
-        # for k, v in train_stats.items():
-        #     v = v.detach()
-        #     train_stats[k] = api.huggingface.get_all_reduce_mean(v).item()
-
-        return {}
+        if r is None:
+            return dict()
+        else:
+            avg_loss, train_stats = r
+            return {"loss": avg_loss}
 
 
 api.model.register_interface('pipe_flash_actor', PipePackedActorInterface)

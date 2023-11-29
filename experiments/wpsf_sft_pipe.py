@@ -16,7 +16,12 @@ sft = ModelRPC(
 
 class WpsFormulaSFTPipelineExperiment(Experiment):
 
-    def __init__(self, n_models=8, num_pipeline_stages=4, seed=1, total_train_epochs=4):
+    def __init__(self,
+                 n_models=8,
+                 num_pipeline_stages=4,
+                 seed=1,
+                 total_train_epochs=4,
+                 model_type="starcoder"):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -31,6 +36,7 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
         self.seed = seed
 
         self.total_train_epochs = total_train_epochs
+        self.model_type = model_type
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -48,18 +54,23 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    nodelist="QH-com08",
+                    nodelist="QH-com13",
                     mem=100000,
                 ),
             ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = "/lustre/meizy/models/pipe_pretrained/starcoder_4pp_3s"
+        if self.model_type == "starcoder":
+            model_path = "/lustre/meizy/models/pipe_pretrained/starcoder_4pp_3s"
+        elif self.model_type == "llama":
+            model_path = "/home/meizy/models/llama-2-13b_4pp_3s"
+        else:
+            raise NotImplementedError("Currently pipeline model only support starcoder and llama")
         # if need to use ckpt saved in previous experiments, set ckpt_path
         ckpt_path = None
         train_batch_size_per_device = 8
-        eval_batch_size_per_device = 8
+        eval_batch_size_per_device = 16
         max_seq_len = 2048
 
         dataset = Dataset(
@@ -103,7 +114,8 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
                       num_pipeline_stages=self.num_pipeline_stages),
         )
 
-        model = Model("starcoder_flash_mqat_pipe",
+        model_class_type = "starcoder_flash_mqat_pipe" if self.model_type == "starcoder" else "llama_flash_mqat_pipe"
+        model = Model(model_class_type,
                       args=dict(
                           model_path=model_path,
                           num_pp=self.num_pipeline_stages,
@@ -138,19 +150,23 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
-            save_frequency_steps=10,
+            save_frequency_steps=None,
             save_frequency_epochs=1,
             save_frequency_seconds=None,
             eval_frequency_epochs=1,
             model_rpcs=[sft],
             data_worker=data_worker,
             model_worker=model_worker,
-            benchmark_steps=15,
+            benchmark_steps=30,
         )
         return cfg
 
 
 seeds = range(1, 6)
 for s in seeds:
-    exp_name = f"wpsf-sft-flash-pipe-s{s}"
-    register_experiment(exp_name, functools.partial(WpsFormulaSFTPipelineExperiment, seed=s))
+    exp_name = f"wpsf-sft-flash-pipe-starcoder-s{s}"
+    register_experiment(exp_name,
+                        functools.partial(WpsFormulaSFTPipelineExperiment, seed=s, model_type="starcoder"))
+    exp_name = f"wpsf-sft-flash-pipe-llama-s{s}"
+    register_experiment(exp_name,
+                        functools.partial(WpsFormulaSFTPipelineExperiment, seed=s, model_type="llama"))

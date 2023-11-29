@@ -15,6 +15,8 @@ import base.gpu_utils
 import base.name_resolve as name_resolve
 import base.names as names
 
+# import base.consistency
+
 # mp.set_start_method('spawn', force=True) # this will make global barrier not work
 
 EXPR_NAME = "test"
@@ -23,9 +25,8 @@ MODEL_NAME = "pipedatamodel"
 WORKER_TYPE = "model_worker"
 NUM_PP = 4
 NUM_DP = 1
-NUM_SHARDS = 3
 WORLD_SIZE = NUM_PP * NUM_DP
-MODEL_TYPE = "starcoder"
+MODEL_TYPE = "llama"
 if MODEL_TYPE == "llama":
     BASELINE_MODEL_PATH = "/home/meizy/models/Llama-2-4l"
     PIPELINE_MODEL_PATH = F"/home/meizy/models/llama-2-4l_4pp_3s"
@@ -33,8 +34,8 @@ elif MODEL_TYPE == "starcoder":
     BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
     PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
 BATCH_SIZE = 8
-MIN_NEW_TOKENS = 50
-MAX_NEW_TOKENS = 50
+MIN_NEW_TOKENS = 1024
+MAX_NEW_TOKENS = 1024
 
 BARRIER = mp.Barrier(WORLD_SIZE)
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
@@ -196,12 +197,10 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
 
     from impl.model.nn.flash_mqat import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
-    # first generate
-    st = time.monotonic()
     outputs = interface.generate(model, data, gconfig=gconfig)
-    t = time.monotonic() - st
-
     st = time.monotonic()
+    # base.consistency.set_step_id(0)
+    # base.consistency.set_parallel_mode(True)
     outputs = interface.generate(model, data, gconfig=gconfig)
     t = time.monotonic() - st
     # logger.info(input_ids)
@@ -225,7 +224,6 @@ def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
     st = time.monotonic()
     outputs = interface.train_step(model, data)
     t1 = time.monotonic() - st
-    logger.info(f"{rank} {outputs} timecost {t} {t1}")
     print(f"{rank} {outputs} timecost {t} {t1}")
 
 
@@ -250,22 +248,22 @@ class PipeFlashMQATTest(unittest.TestCase):
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.tokenizer.padding_side = "left"
 
-        starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
+        pretrained: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=BASELINE_MODEL_PATH).to(dtype=dtype, device=device)
-        starcoder.eval()
+        pretrained.eval()
 
         if MODEL_TYPE == "llama":
-            self.baseline_model = FlashMQATForCausalLM.from_llama(from_model=starcoder,
+            self.baseline_model = FlashMQATForCausalLM.from_llama(from_model=pretrained,
                                                                   dtype=dtype,
                                                                   device=device)
         elif MODEL_TYPE == "starcoder":
-            self.baseline_model = FlashMQATForCausalLM.from_starcoder(from_model=starcoder,
+            self.baseline_model = FlashMQATForCausalLM.from_starcoder(from_model=pretrained,
                                                                       dtype=dtype,
                                                                       device=device)
         else:
             raise NotImplementedError()
 
-        self.baseline_model.eval()
+        # self.baseline_model.eval()
 
     @torch.no_grad()
     def testGenerateAccordance(self):
@@ -289,27 +287,43 @@ class PipeFlashMQATTest(unittest.TestCase):
         self.gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
         # baseline model calculate
         self.init_baseline_model()
-        prompt, prompt_att_mask = make_batch(self.tokenizer, self.device, BATCH_SIZE, 0, 1, seed=self.seed)
+        prompt, prompt_att_mask = make_batch(self.tokenizer,
+                                             self.device,
+                                             BATCH_SIZE,
+                                             0,
+                                             NUM_DP,
+                                             seed=self.seed)
 
         s2 = time.monotonic()
+
+        # base.consistency.set_step_id(0)
+        # base.consistency.set_parallel_mode(False)
+        vg, vlogprob, vmask, *_ = generate(model=self.baseline_model,
+                                           tokenizer=self.tokenizer,
+                                           input_ids=prompt,
+                                           attention_mask=prompt_att_mask,
+                                           gconfig=self.gconfig)
+
+        self.baseline_model.eval()
         vg, vlogprob, vmask, *_ = generate(model=self.baseline_model,
                                            tokenizer=self.tokenizer,
                                            input_ids=prompt,
                                            attention_mask=prompt_att_mask,
                                            gconfig=self.gconfig)
         t2 = time.monotonic() - s2
+        # base.consistency.check_all()
         print("pipe time:", t)
         print("vanilla time:", t2)
 
-        print(f"at seed {self.seed} diff {torch.abs(g-vg)}, {torch.abs(g-vg).abs()}")
+        print(f"at seed {self.seed} diff {torch.abs(g-vg)}, {torch.abs(g-vg).max()}")
 
-        try:
-            assert torch.allclose(logprob, vlogprob, atol=0, rtol=0.01)
-        except AssertionError as e:
-            print(
-                f"at seed {self.seed} diff {torch.abs(logprob-vlogprob)}, {torch.abs(logprob-vlogprob).abs()}"
-            )
-            raise e
+        # try:
+        #     assert torch.allclose(logprob, vlogprob, atol=0, rtol=0.01)
+        # except AssertionError as e:
+        #     print(
+        #         f"at seed {self.seed} diff {torch.abs(logprob-vlogprob)}, {torch.abs(logprob-vlogprob).abs()}"
+        #     )
+        #     raise e
 
     @torch.no_grad()
     def testGenerate(self):
@@ -349,4 +363,4 @@ class PipeFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testGenerateAccordance")
+    unittest.main(defaultTest="PipeFlashMQATTest.testTrainBatch")

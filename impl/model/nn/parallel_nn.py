@@ -8,7 +8,7 @@ import transformers
 
 from base.monitor import process_memory_mb
 from base.topology import PipeModelDataParallelTopology
-from impl.model.nn.tp_flash_mqat import *
+from impl.model.nn.mp_flash_mqat import *
 from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model

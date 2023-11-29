@@ -26,20 +26,10 @@ def print_data_shapes(name, rank, mbid, x, ys):
 
 
 class TensorBuffer:
+    # could store both tensors and other data
 
     def __init__(self):
         self.tensors = defaultdict(dict)
-        self.others = defaultdict(dict)
-
-    def put_non_tensor(self, name: str, mbid: int, x: Any):
-        """put anything except for tensor"""
-        self.others[name][mbid] = x
-
-    def get_non_tensor(self, name: str, mbid: int, remove: bool = False):
-        if remove:
-            return self.others[name].pop(mbid)
-        else:
-            return self.others[name][mbid]
 
     def put(self, name: str, mbid: int, x: torch.Tensor):
         self.tensors[name][mbid] = x
@@ -71,21 +61,15 @@ class TensorBuffer:
             raise KeyError(f"TensorBuffer.remove: key {name} mbid {mbid} not found")
 
     def check_name(self, name: str):
-        return name in self.tensors or name in self.others
+        return name in self.tensors
 
-    def check_tensor_mbid(self, name: str, mbid: int):
+    def check_mbid(self, name: str, mbid: int):
         if name not in self.tensors:
             return False
         return mbid in self.tensors[name]
 
-    def check_others_mbid(self, name: str, mbid: int):
-        if name not in self.others:
-            return False
-        return mbid in self.others[name]
-
     def clear(self):
         self.tensors = defaultdict(dict)
-        self.tensor_tuples = defaultdict(dict)
 
 
 def send_grad(grad: torch.Tensor, dst_stage: int):

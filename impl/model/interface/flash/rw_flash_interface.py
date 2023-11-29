@@ -22,7 +22,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
     def __post_init__(self):
         self.train_total_predictions = self.train_total_correct_predictions = 0
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_input_ids: torch.Tensor = data['packed_input_ids'].squeeze()
@@ -106,7 +106,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
             os.makedirs(save_path, exist_ok=True)
             torch.save(model.module.module.head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
         device = model_.device
         model = model_.module
@@ -154,7 +154,7 @@ class PackedPlackettLuceRewardInterface(api.model.ModelInterface):
     def __post_init__(self):
         self.train_total_predictions = self.train_total_correct_predictions = 0
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_input_ids: torch.Tensor = data['packed_input_ids'].squeeze()
@@ -244,7 +244,7 @@ class PackedPlackettLuceRewardInterface(api.model.ModelInterface):
             os.makedirs(save_path, exist_ok=True)
             torch.save(model.module.module.head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
         device = model_.device
         model = model_.module

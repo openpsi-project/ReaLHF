@@ -28,9 +28,9 @@ except ModuleNotFoundError:
     pass
 import logging
 
-from impl.model.utils.tensor_parallel.modules import (ColumnParallelLinear, LayerNormColumnLinear,
-                                                      LayerNormParallelMLP, ParallelEmbedding,
-                                                      RowParallelLinear)
+from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormColumnLinear,
+                                                     LayerNormParallelMLP, ParallelEmbedding,
+                                                     RowParallelLinear)
 
 logger = logging.getLogger("TensorParallelFlashMQAT")
 

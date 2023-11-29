@@ -7,10 +7,10 @@ from itertools import product as cartesian_product
 from typing import NamedTuple
 
 
-class PipeDataTensorProcessCoord(NamedTuple):
+class PipeDataModelProcessCoord(NamedTuple):
     pipe: int
     data: int
-    tensor: int
+    model: int
 
 
 class PipeDataProcessCoord(NamedTuple):
@@ -20,7 +20,7 @@ class PipeDataProcessCoord(NamedTuple):
 
 # Explicitly define these class to allow pickling.
 PROCESS_COORD_REGISTRY = {
-    "pipe#data#tensor": PipeDataTensorProcessCoord,
+    "pipe#data#model": PipeDataModelProcessCoord,
     "pipe#data": PipeDataProcessCoord,
 }
 
@@ -264,8 +264,8 @@ class PipeDataParallelTopology(ProcessTopology):
 class PipeModelDataParallelTopology(ProcessTopology):
     """ A topology for hybrid pipeline, model, and data parallelism. """
 
-    def __init__(self, num_pp, num_tp, num_dp):
-        super().__init__(axes=['pipe', 'data', 'tensor'], dims=[num_pp, num_dp, num_tp])
+    def __init__(self, num_pp, num_mp, num_dp):
+        super().__init__(axes=['pipe', 'data', 'model'], dims=[num_pp, num_dp, num_mp])
 
 
 class PipelineParallelGrid:
@@ -311,8 +311,8 @@ class PipelineParallelGrid:
             self._topo = PipeDataParallelTopology(num_dp=num_dp, num_pp=num_pp)
         self.data_parallel_size = max(self._topo.get_dim('data'), 1)
         self.pipe_parallel_size = max(self._topo.get_dim('pipe'), 1)
-        self.tensor_parallel_size = max(self._topo.get_dim('tensor'), 1)
-        self.slice_parallel_size = self.tensor_parallel_size
+        self.model_parallel_size = max(self._topo.get_dim('model'), 1)
+        self.slice_parallel_size = self.model_parallel_size
         assert self._is_grid_valid(), "Invalid Grid"
 
         self.stage_id = self.get_stage_id()
@@ -368,7 +368,7 @@ class PipelineParallelGrid:
         # Short circuit case without model parallelism.
         # TODO: it would be nice if topology had bcast semantics to avoid this branching
         # case?
-        if self.tensor_parallel_size == 1:
+        if self.model_parallel_size == 1:
             for group_rank in range(self.world_size):
                 group_rank = [group_rank]
                 group = dist.new_group(ranks=group_rank)
@@ -378,7 +378,7 @@ class PipelineParallelGrid:
             return
         else:
             self.mp_group = []
-            self.model_groups = self._topo.get_axis_comm_lists('tensor')
+            self.model_groups = self._topo.get_axis_comm_lists('model')
             for g in self.model_groups:
                 proc_group = dist.new_group(ranks=g)
                 if self.global_rank in g:
@@ -455,33 +455,24 @@ class PipelineParallelGrid:
 
     # These are model parallel groups across all types of model parallelism.
     # Deepspeed uses them to detect overflow, etc.
-    def get_tensor_parallel_rank(self):
+    def get_parallel_rank(self):
         return self.ds_model_rank
 
-    def get_tensor_parallel_world_size(self):
+    def get_parallel_world_size(self):
         return self.ds_model_world_size
 
-    def get_tensor_parallel_group(self):
+    def get_parallel_group(self):
         return self.ds_model_proc_group
 
-    def get_model_parallel_rank(self):
-        return self.get_tensor_parallel_rank()
-
-    def get_model_parallel_world_size(self):
-        return self.get_tensor_parallel_world_size()
-
-    def get_model_parallel_group(self):
-        return self.get_tensor_parallel_group()
-
     # For Megatron-style tensor slicing
-    def get_slice_parallel_rank(self):
-        if 'tensor' in self._topo.get_axis_names():
-            return self._topo.get_coord(rank=self.global_rank).tensor
+    def get_model_parallel_rank(self):
+        if 'model' in self._topo.get_axis_names():
+            return self._topo.get_coord(rank=self.global_rank).model
         else:
             return 0
 
-    def get_slice_parallel_world_size(self):
+    def get_model_parallel_world_size(self):
         return self.slice_parallel_size
 
-    def get_slice_parallel_group(self):
+    def get_model_parallel_group(self):
         return self.slice_proc_group

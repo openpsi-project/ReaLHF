@@ -11,10 +11,10 @@ import torch.nn.init as init
 
 from base.constants import *
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-from impl.model.utils.tensor_parallel.mappings import *
-from impl.model.utils.tensor_parallel.utils import (_initialize_affine_weight_cpu,
-                                                    _initialize_affine_weight_gpu, divide,
-                                                    set_tensor_model_parallel_attributes, VocabUtility)
+from impl.model.utils.model_parallel.mappings import *
+from impl.model.utils.model_parallel.utils import (_initialize_affine_weight_cpu,
+                                                   _initialize_affine_weight_gpu, divide,
+                                                   set_tensor_model_parallel_attributes, VocabUtility)
 
 _grad_accum_fusion_available = True
 try:
@@ -24,7 +24,7 @@ except ImportError:
 
 import logging
 
-logger = logging.getLogger("tensor_parallel.modules")
+logger = logging.getLogger("model_parallel.modules")
 
 
 class ParallelEmbedding(torch.nn.Module):
@@ -61,18 +61,18 @@ class ParallelEmbedding(torch.nn.Module):
         self.scale_grad_by_freq = False
         self.sparse = False
         self._weight = None
-        self.tensor_model_parallel_size = tensor_parallel_world_size()
+        self.tensor_model_parallel_size = model_parallel_world_size()
         # Divide the weight matrix along the vocaburaly dimension.
         self.vocab_start_index, self.vocab_end_index = \
             VocabUtility.vocab_range_from_global_vocab_size(
-                self.num_embeddings, tensor_parallel_rank(),
+                self.num_embeddings, model_parallel_rank(),
                 self.tensor_model_parallel_size)
         self.num_embeddings_per_partition = self.vocab_end_index - \
             self.vocab_start_index
 
         logger.info(
             f"ParallelEmbedding: num_embeddings={num_embeddings}, per_partition={self.num_embeddings_per_partition}, embedding_dim={embedding_dim},"
-            f"tp_rank={tensor_parallel_rank()},tp_world_size={tensor_parallel_world_size()}")
+            f"tp_rank={model_parallel_rank()},tp_world_size={model_parallel_world_size()}")
         # Allocate weights and initialize.
         self.weight = Parameter(
             torch.empty(self.num_embeddings_per_partition, self.embedding_dim, device=device, dtype=dtype))
@@ -182,7 +182,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
 
         if ctx.async_grad_allreduce:
             # Asynchronous all-reduce
-            handle = torch.distributed.all_reduce(grad_input, group=tensor_parallel_group(), async_op=True)
+            handle = torch.distributed.all_reduce(grad_input, group=model_parallel_group(), async_op=True)
             # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
             # all-reduce is scheduled before the weight gradient computation
 
@@ -363,7 +363,7 @@ class ColumnParallelLinear(torch.nn.Module):
         self.output_size = output_size
         self.gather_output = gather_output
         # Divide the weight matrix along the last dimension.
-        world_size = tensor_parallel_world_size()
+        world_size = model_parallel_world_size()
         self.output_size_per_partition = divide(output_size, world_size)
         self.skip_bias_add = skip_bias_add
 
@@ -496,7 +496,7 @@ class RowParallelLinear(torch.nn.Module):
         self.output_size = output_size
         self.input_is_parallel = input_is_parallel
         # Divide the weight matrix along the last dimension.
-        world_size = tensor_parallel_world_size()
+        world_size = model_parallel_world_size()
         self.input_size_per_partition = divide(input_size, world_size)
         self.skip_bias_add = skip_bias_add
         self.gradient_accumulation_fusion = gradient_accumulation_fusion

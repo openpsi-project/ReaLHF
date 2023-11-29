@@ -34,7 +34,10 @@ def save_hf_format(model: transformers.PreTrainedModel,
         config = dataclasses.asdict(model_to_save.config)
         with open(output_config_file, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=4)
-    tokenizer.save_vocabulary(output_dir)
+    try:
+        tokenizer.save_vocabulary(output_dir)
+    except ValueError:
+        logger.warning("Cannot save fast tokenizer for llama.")
 
 
 def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
@@ -65,3 +68,15 @@ def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
             "lora.bin",
         ),
     )
+
+
+def save_pipeline_model(model: api.model.Model, output_dir: str):
+    module = model.module
+    sub_folder = f"epoch{model.version.epoch}step{model.version.epoch_step}"
+    output_dir = os.path.join(output_dir, sub_folder)
+    os.makedirs(output_dir, exist_ok=True)
+    module.save(output_dir)
+    output_config_file = os.path.join(output_dir, "config.json")
+    config = dataclasses.asdict(module.config)
+    with open(output_config_file, 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=4)

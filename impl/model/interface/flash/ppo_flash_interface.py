@@ -61,7 +61,7 @@ class PackedActorInterface(api.model.ModelInterface):
         if self.enable_save:
             save_hf_or_lora_model(model, save_dir)
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         if isinstance(module, deepspeed.DeepSpeedEngine):
@@ -144,7 +144,7 @@ class PackedActorInterface(api.model.ModelInterface):
         )
         return recursive_apply(from_dict(res), lambda x: x.cpu())
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
@@ -335,7 +335,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         if self.enable_save:
             save_hf_or_lora_model(model, save_dir)
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
@@ -382,6 +382,9 @@ class PackedCriticInterface(api.model.ModelInterface):
         ])
         loss_mask = loss_mask[shift_one_indices]
 
+        if packed_input_ids.is_inference():
+            packed_input_ids = packed_input_ids.clone()
+            cu_seqlens = cu_seqlens.clone()
         new_values: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
                                                cu_seqlens=cu_seqlens,
                                                max_seqlen=max_seqlen).float()

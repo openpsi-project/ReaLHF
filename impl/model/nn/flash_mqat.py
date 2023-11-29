@@ -1371,7 +1371,7 @@ def generate(
         # Model forward will set k/v cache in PipeCacheData.
         prompt_logits = model(x, ys).pp_output
         logits = prompt_logits[cu_seqlens[1:] - 1]
-        cache_seqlens = input_lens
+        cache_seqlens = input_lens.clone().to(dtype=torch.int32)
         for y in ys[1:-1]:
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(max_seq_len + gconfig.max_new_tokens,
@@ -1389,7 +1389,7 @@ def generate(
             y.k_cache = k_cache
             y.v_cache = v_cache
             y.cache_seqlens = cache_seqlens
-        x = PipeTransferData(store_kv_cache=torch.tensor(1))
+        x = PipeTransferData(store_kv_cache=True)
         ys[0].cache_seqlens = cache_seqlens
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.

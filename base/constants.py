@@ -37,16 +37,16 @@ def pipe_parallel_group():
     return grid().get_pipe_parallel_group()
 
 
-def tensor_parallel_rank() -> int:
-    return grid().get_tensor_parallel_rank()
+def model_parallel_rank() -> int:
+    return grid().get_model_parallel_rank()
 
 
-def tensor_parallel_world_size() -> int:
-    return grid().get_tensor_parallel_world_size()
+def model_parallel_world_size() -> int:
+    return grid().get_model_parallel_world_size()
 
 
-def tensor_parallel_group():
-    return grid().get_tensor_parallel_group()
+def model_parallel_group():
+    return grid().get_model_parallel_group()
 
 
 def data_parallel_rank() -> int:

@@ -13,9 +13,9 @@ _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS = {
 }
 
 
-def param_is_not_tensor_parallel_duplicate(param):
+def param_is_not_model_parallel_duplicate(param):
     return (hasattr(param, 'tensor_model_parallel')
-            and param.tensor_model_parallel) or (tensor_parallel_rank() == 0)
+            and param.tensor_model_parallel) or (model_parallel_rank() == 0)
 
 
 def set_tensor_model_parallel_attributes(tensor, is_parallel, dim, stride):
@@ -82,8 +82,8 @@ def _initialize_affine_weight_cpu(weight,
     # Split and copy
     per_partition_per_stride_size = divide(per_partition_size, stride)
     weight_list = torch.split(master_weight, per_partition_per_stride_size, dim=partition_dim)
-    rank = tensor_parallel_rank()
-    world_size = tensor_parallel_world_size()
+    rank = model_parallel_rank()
+    world_size = model_parallel_world_size()
     my_weight_list = weight_list[rank::world_size]
 
     with torch.no_grad():
@@ -147,8 +147,8 @@ def split_tensor_into_1d_equal_chunks(tensor, new_buffer=False):
                                Default is False
 
     """
-    partition_size = torch.numel(tensor) // tensor_parallel_world_size()
-    start_index = partition_size * tensor_parallel_rank()
+    partition_size = torch.numel(tensor) // model_parallel_world_size()
+    start_index = partition_size * model_parallel_rank()
     end_index = start_index + partition_size
     if new_buffer:
         data = torch.empty(partition_size,
@@ -170,7 +170,7 @@ def gather_split_1d_tensor(tensor):
         Arguments:
             tensor: A Tensor or view of this rank's portion of the data.
     """
-    numel_gathered = torch.numel(tensor) * tensor_parallel_world_size()
+    numel_gathered = torch.numel(tensor) * model_parallel_world_size()
     gathered = torch.empty(numel_gathered,
                            dtype=tensor.dtype,
                            device=torch.cuda.current_device(),
@@ -180,7 +180,7 @@ def gather_split_1d_tensor(tensor):
     # as opposed to torch.distributed.all_gather for efficiency reasons.
     # This API calls directly NCCL all-gather versus the former does
     # internal copies and can potentially cause slow down.
-    torch.distributed._all_gather_base(gathered, tensor, group=tensor_parallel_group())
+    torch.distributed._all_gather_base(gathered, tensor, group=model_parallel_group())
     return gathered
 
 

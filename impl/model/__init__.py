@@ -13,8 +13,8 @@ import impl.model.interface.wps_ac_interface
 import impl.model.nn.basic_nn
 import impl.model.nn.flash_mqat
 import impl.model.nn.lora
+import impl.model.nn.mp_flash_mqat
 import impl.model.nn.parallel_nn
 import impl.model.nn.pipe_nn
 import impl.model.nn.rw_nn
 import impl.model.nn.stream_pipe_nn
-import impl.model.nn.tp_flash_mqat

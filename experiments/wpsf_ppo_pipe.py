@@ -74,7 +74,8 @@ class PipeWpsfFlashPPOExperiment(Experiment):
                  n_refs=2,
                  seed=1,
                  num_actor_pipeline_stages=4,
-                 benchmark_only=False):
+                 benchmark_only=False,
+                 model_type="starcoder"):
         if benchmark_only:
             n_actors = n_critics = n_rewards = n_refs = 1
 
@@ -91,6 +92,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
         self.n_data_workers = n_actors
 
         self.seed = seed
+        self.model_type = model_type
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(data_worker=TasksGroup(
@@ -115,7 +117,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
                                                 gpu=1,
                                                 gpu_type='tesla',
                                                 mem=100000,
-                                                nodelist='QH-com08',
+                                                nodelist='QH-com09',
                                             ),
                                         ),
                                         TasksGroup(
@@ -125,17 +127,22 @@ class PipeWpsfFlashPPOExperiment(Experiment):
                                                 gpu=1,
                                                 gpu_type='tesla',
                                                 mem=100000,
-                                                nodelist='QH-com09',
+                                                nodelist='QH-com14',
                                             ),
                                         )
                                     ])
 
     def initial_setup(self) -> ExperimentConfig:
-        actor_path = "/lustre/meizy/models/pipe_pretrained/starcoder_4pp_3s"
-        ref_path = "/lustre/fw/pretrained/starcoder"
-        # actor_path = "/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
-        # ref_path = "/lustre/meizy/models/starcoder_4l"
-        critic_path = "/lustre/meizy/models/starcoder_4l"  # a 4 layer starcoder model only for testing purpose
+        if self.model_type == "starcoder":
+            actor_path = "/lustre/meizy/models/pipe_pretrained/starcoder_4pp_3s"
+            ref_path = "/lustre/fw/pretrained/starcoder"
+            # actor_path = "/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
+            # ref_path = "/lustre/meizy/models/starcoder_4l"
+            critic_path = "/lustre/meizy/models/starcoder_4l"  # a 4 layer starcoder model only for testing purpose
+        elif self.model_type == "llama":
+            actor_path = "/home/meizy/models/llama-2-13b_4pp_3s"
+            ref_path = "/lustre/fw/pretrained/llama-13b"
+            critic_path = "/home/meizy/models/Llama-2-4l"
 
         # rw_lora_head_path = None
 
@@ -146,8 +153,8 @@ class PipeWpsfFlashPPOExperiment(Experiment):
         rw_output_bias = 0.0
 
         batch_size_per_device = 2
-        max_prompt_len = 2048
-        max_answer_len = 2048
+        max_prompt_len = 1024
+        max_answer_len = 512
 
         dataset = Dataset(
             'prompt',
@@ -183,27 +190,31 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             temperature=1.0,
         )
 
-        actor_model = Model("starcoder_flash_mqat_pipe",
+        model_class_name = "starcoder_flash_mqat_pipe" \
+            if self.model_type == "starcoder" else "llama_flash_mqat_pipe"
+        actor_model = Model(model_class_name,
                             args=dict(model_path=actor_path,
                                       num_pp=self.n_actor_num_pp,
                                       num_dp=self.dp_worldsize,
                                       load_from_full_ckpt=False))
 
         ref_model = Model(
-            'flash_mqat_clm_hf',
-            args=dict(model_path=ref_path,),
-            wrappers=[],
+            "flash_mqat_clm_hf",
+            args=dict(
+                model_path=ref_path,
+                from_type="llama",
+                tokenizer_path=ref_path,
+            ),
         )
-        rw_model = Model(
+        rw_model = critic_model = Model(
             "flash_mqat_critic",
             args=dict(
                 model_path=critic_path,
-                from_type='starcoder',
+                from_type="llama",
+                tokenizer_path=critic_path,
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
-                v_head_path=None,
             ),
-            wrappers=[],
         )
         critic_model = copy.deepcopy(rw_model)
 
@@ -257,11 +268,18 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             value_eps_clip=0.2,
             max_reward_clip=20.0,
         )
-        actor_interface = ref_interface = ModelInterface(
+        actor_interface = ModelInterface(
             'pipe_flash_actor',
             args={
                 **copy.deepcopy(ppo_kwargs), "generation_config": generation_kwargs,
                 "force_no_logits_mask": True
+            },
+        )
+        ref_interface = ModelInterface(
+            "flash_actor",
+            args={
+                **copy.deepcopy(ppo_kwargs),
+                "force_no_logits_mask": True,
             },
         )
         critic_interface = ModelInterface(
@@ -327,7 +345,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
 
         return ExperimentConfig(
             total_train_epochs=1,
-            save_frequency_epochs=None,
+            save_frequency_epochs=1,
             save_frequency_seconds=None,
             model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
             data_worker=data_worker,
@@ -335,4 +353,8 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             benchmark_steps=20)
 
 
-register_experiment("wpsf-flash-ppo-pipe", PipeWpsfFlashPPOExperiment)
+register_experiment("wpsf-flash-ppo-pipe-starcoder",
+                    functools.partial(PipeWpsfFlashPPOExperiment, model_type="starcoder"))
+
+register_experiment("wpsf-flash-ppo-pipe-llama",
+                    functools.partial(PipeWpsfFlashPPOExperiment, model_type="llama"))

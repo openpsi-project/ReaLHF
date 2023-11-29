@@ -142,7 +142,7 @@ def critic_loss_fn(value: torch.FloatTensor,
     return value_loss, stat
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def compute_rewards(
     kl_ctl: float,
     clip_reward_value: float,
@@ -184,7 +184,7 @@ def compute_rewards(
     return kl_rewards, kl_rewards + score_rewards
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def get_advantages_and_returns(
     gamma: float,
     lam: float,
@@ -223,7 +223,7 @@ def get_advantages_and_returns(
     return advantages, returns
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def get_packed_rewards(
     kl_ctl: float,
     clip_reward_value: float,
@@ -243,7 +243,7 @@ def get_packed_rewards(
     return kl_rewards, tot_rewards
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def get_packed_advantages_and_returns(
     gamma: float,
     lam: float,
