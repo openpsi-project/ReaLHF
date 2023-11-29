@@ -196,7 +196,8 @@ def _min_abs_diff_partition(arr: np.ndarray, k: int) -> List[Tuple[int]]:
 
 
 def min_abs_diff_partition(arr: Union[np.ndarray, List], k: int) -> List[Tuple[int]]:
-    err_hint = " Errors should not be reported in this function. It is probably a bug in the dataset code."
+    err_hint = " Errors should not be reported in this function. It is probably a bug in the dataset code"\
+               " or too small batch size in pipeline parallel experiments."
 
     if isinstance(arr, list):
         arr = np.array(arr)

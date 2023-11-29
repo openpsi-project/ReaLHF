@@ -7,7 +7,7 @@ from deepspeed.runtime.engine import DeepSpeedEngine, DeepSpeedOptimizerCallable
 import deepspeed
 import torch
 
-from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
 
 DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU = 32  # A place-holder for inference.
 
@@ -145,6 +145,18 @@ def deepspeed_initialize(
                                          optimizer=optimizer,
                                          lr_scheduler=lr_scheduler,
                                          dist_init_required=False)
+        return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
+    elif engine_type == "stream_pipe":
+        mpu = model.mpu()
+        config_class = DeepSpeedConfig(config, mpu)
+        engine = StreamPipeEngine(model=model,
+                                  args=None,
+                                  config=config,
+                                  config_class=config_class,
+                                  mpu=mpu,
+                                  optimizer=optimizer,
+                                  lr_scheduler=lr_scheduler,
+                                  dist_init_required=False)
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
 
     return tuple(return_items)

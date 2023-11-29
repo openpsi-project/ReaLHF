@@ -20,8 +20,8 @@ import torch.nn as nn
 
 from base.monitor import process_memory_mb, time_mark
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid
-from impl.model.utils.data import (data_list_to_tensor_tuple, PipeCacheData, PipeTransferData,
-                                   tensor_tuple_to_data_list)
+from impl.model.utils.data import PipeCacheData, PipeTransferData
+import base.constants
 
 
 class PipelineError(Exception):
@@ -137,6 +137,7 @@ class PipelineModule(nn.Module):
                  seed_fn=None,
                  base_seed=1234,
                  partition_method='parameters',
+                 config=None,
                  activation_checkpoint_interval=0,
                  activation_checkpoint_func=checkpointing.checkpoint,
                  checkpointable_layers=None):
@@ -184,6 +185,7 @@ class PipelineModule(nn.Module):
 
         # Construct communicators for pipeline topology
         self._grid = PipelineParallelGrid(process_group=self.world_group, topology=self._topo)
+        base.constants.set_grid(self._grid)
 
         self.stage_id = self._topo.get_coord(self.global_rank).pipe
         print(f"rank {torch.distributed.get_rank()} pipeline stage ID: {self.stage_id}")
@@ -213,6 +215,12 @@ class PipelineModule(nn.Module):
 
         # for saving checkpoints
         self.num_checkpoint_shards = 1
+
+        self.config = config  # get underlying config
+
+    @property
+    def get_config(self):
+        return self.config
 
     def _build(self):
         specs = self._layer_specs
@@ -314,13 +322,9 @@ class PipelineModule(nn.Module):
         """
         return len(self.forward_funcs)
 
-    def forward(self, forward_input_tuple: Tuple):
-        time_mark("module_forward_start", self.global_rank)
-        inputs = tensor_tuple_to_data_list(forward_input_tuple)
-        x: PipeTransferData = inputs[0]
-        ys: List[PipeCacheData] = inputs[1:]
+    def forward(self, x: PipeTransferData, ys: List[PipeCacheData]):
         local_micro_offset = self.micro_offset + 1
-        time_mark("module_forward_end", self.global_rank)
+
         for idx, (layer, y) in enumerate(zip(self.forward_funcs, ys)):
             time_mark(f"layer_{idx}_start", dist.get_rank())
             self.curr_layer = idx + self._local_start
@@ -552,7 +556,8 @@ class PipelineModule(nn.Module):
                 shard[keys[j]] = self.state_dict()[keys[j]]
                 # print(f"shard {i} key {keys[j]}")
             start += size
-            save_fn = f"pytorch_model-pp-{self.stage_id:02d}-mp-00-s-{i:02d}.bin"
+            tp_rank = self._grid.get_model_parallel_rank()
+            save_fn = f"pytorch_model-pp-{self.stage_id:02d}-mp-{tp_rank:02d}-s-{i:02d}.bin"
             save_abs_fn = os.path.join(save_dir, save_fn)
             torch.save(shard, save_abs_fn)
 
@@ -564,10 +569,14 @@ class PipelineModule(nn.Module):
             for file in os.listdir(load_dir):
                 if file.endswith(".bin"):
                     # filename format should be:
-                    # pytorch_model-pp-{pp_index:02d}-mo-{mp_index:02d}-s-{shard_index:02d}
+                    # pytorch_model-pp-{pp_index:02d}-tp-{tp_index:02d}-s-{shard_index:02d}
                     pp_stage = int(file.split("-")[2])
                     if pp_stage == self.stage_id:
                         fn_to_load.append(file)
+                    if self._grid.get_model_parallel_world_size() > 1:
+                        tp_stage = int(file.split("-")[4])
+                        if tp_stage == self._grid.get_model_parallel_rank():
+                            fn_to_load.append(file)
             for fn in fn_to_load:
                 shard = torch.load(os.path.join(load_dir, fn))
                 self.load_state_dict(shard, strict=False)
@@ -575,6 +584,7 @@ class PipelineModule(nn.Module):
                 n_shards += 1
                 process_memory_mb(f"after_load_shard_{n_shards}")
         else:
+            assert self._grid.get_model_parallel_world_size() == 1
             single_file_path = os.path.join(load_dir, "pytorch_model.bin")
             if os.path.exists(single_file_path):
                 shard = torch.load(single_file_path)

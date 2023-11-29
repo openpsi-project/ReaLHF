@@ -47,7 +47,7 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
     remove_code_comments: bool = False
     pos_weight: float = 1.0
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
@@ -129,7 +129,7 @@ class WPSRewardUnpairedInterface(api.model.ModelInterface):
             os.makedirs(save_path, exist_ok=True)
             torch.save(model.module.v_head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
         device = model_.device
         model = model_.module
@@ -183,7 +183,7 @@ class WPSActorInterface(api.model.ModelInterface):
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
         self.kl_ctl = None
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         tokenizer = model.tokenizer
@@ -249,7 +249,7 @@ class WPSActorInterface(api.model.ModelInterface):
             ),)
         return recursive_apply(res, lambda x: x.cpu())
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
@@ -424,7 +424,7 @@ class WPSCriticInterface(api.model.ModelInterface):
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
         self.kl_ctl = None
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
@@ -538,7 +538,7 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
         self.train_total_correct_predictions = 0
         self.train_total_predictions = 0
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
@@ -613,7 +613,7 @@ class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
             os.makedirs(save_path, exist_ok=True)
             torch.save(model.module.v_head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
         device = model_.device
         model = model_.module

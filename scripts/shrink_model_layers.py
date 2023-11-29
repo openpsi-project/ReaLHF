@@ -17,8 +17,8 @@ LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
 logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
 
-LOAD_PATH = "/lustre/meizy/models/starcoder_scratch"
-SAVE_PATH = "/lustre/meizy/models/starcoder_4l"
+LOAD_PATH = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
+SAVE_PATH = "/home/meizy/models/Llama-2-4l"
 NUM_SHRINKED_LAYERS = 4
 
 if __name__ == "__main__":
@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
     new_state_dict = {}
     for k in state_dict.keys():
-        if k.startswith("transformer.h."):
+        if k.startswith("transformer.h.") or k.startswith("model.layers."):
             layer_idx = int(k.split(".")[2])
             if layer_idx < NUM_SHRINKED_LAYERS:
                 new_state_dict[k] = state_dict[k]
@@ -48,5 +48,8 @@ if __name__ == "__main__":
 
     config = json.load(open(os.path.join(LOAD_PATH, "config.json"), "r"))
     # for starcoder
-    config["n_layer"] = NUM_SHRINKED_LAYERS
+    if "n_layer" in config:
+        config["n_layer"] = NUM_SHRINKED_LAYERS
+    elif "num_hidden_layers" in config:
+        config["num_hidden_layers"] = NUM_SHRINKED_LAYERS
     json.dump(config, open(os.path.join(SAVE_PATH, "config.json"), "w"))

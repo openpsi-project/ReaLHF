@@ -2,6 +2,7 @@ import os
 import sys
 
 sys.path.append("../")
+from typing import Dict
 import shutil
 
 from deepspeed.runtime import utils as ds_utils
@@ -13,10 +14,11 @@ from base.monitor import process_memory_mb
 from impl.model.backend.ds_pipe_engine import LayerSpec
 from impl.model.nn.flash_mqat import *
 
-FULL_MODEL_DIR = "/lustre/fw/pretrained/starcoder"
+MODEL_TYPE = "llama"
+FULL_MODEL_DIR = "/home/meizy/models/Llama-2-4l"
 NUM_PIPE_STAGES = 4
 NUM_SHARDS = 3
-PIPE_MODEL_DIR = f"/lustre/meizy/models/pipe_pretrained/starcoder_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
+PIPE_MODEL_DIR = f"/home/meizy/models/llama-2-4l_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
 TEST_EXPR_NAME = "test"
 TEST_TRIAL_NAME = "test"
 TEST_MODEL_NAME = "default"
@@ -44,17 +46,37 @@ def flash_mqat_config(model_path: str):
     return config
 
 
-def layer_specs_and_key_mappings(config: FlashMQATConfig):
+def llama_config(model_path: str):
+    hf_config = transformers.AutoConfig.from_pretrained(os.path.join(model_path, "config.json"))
+    config = FlashMQATConfig(
+        n_layers=hf_config.num_hidden_layers,
+        n_kv_heads=hf_config.num_key_value_heads,
+        hidden_dim=hf_config.hidden_size,
+        head_dim=hf_config.hidden_size // hf_config.num_attention_heads,
+        intermediate_dim=hf_config.intermediate_size,
+        vocab_size=hf_config.vocab_size,
+        n_positions=hf_config.max_position_embeddings,
+        embd_pdrop=0.0,
+        attn_pdrop=hf_config.attention_dropout if hasattr(hf_config, "attention_dropout") else 0.1,
+        layer_norm_epsilon=hf_config.rms_norm_eps,
+        activation_function=hf_config.hidden_act,
+        use_attention_bias=hf_config.attention_bias,
+        scale_attn_by_inverse_layer_idx=False,
+        layer_norm_type="rms",
+        mlp_type="llama",
+        apply_rotary=True,
+        rotary_base=hf_config.rope_theta,
+        rotary_interleaved=False,
+        rotary_scaling=None if hf_config.rope_scaling is None else hf_config.rope_scaling["factor"],
+        rotary_scaling_type=None if hf_config.rope_scaling is None else hf_config.rope_scaling["type"],
+    )
+    return config
+
+
+def layer_specs_and_key_mappings(config: FlashMQATConfig, model_type: str):
     layer_specs = []
     # vocab pos embedding
-    embedding_layer = LayerSpec(VocabPositionEmbedding,
-                                config.vocab_size,
-                                config.n_positions,
-                                config.hidden_dim,
-                                config.embd_pdrop,
-                                config.fixed_abs_position_ids,
-                                dtype=None,
-                                device=None)
+    embedding_layer = LayerSpec(VocabPositionEmbedding, config, dtype=None, device=None)
 
     layer_specs.append(embedding_layer)
 
@@ -79,21 +101,52 @@ def layer_specs_and_key_mappings(config: FlashMQATConfig):
     )
     layer_specs.append(lm_head)
 
-    layer_key_mappings = {
-        "transformer.wte.": "0.wte.",
-        "transformer.wpe.": "0.wpe.",
-    }
-    for i in range(config.n_layers):
-        layer_key_mappings[f"transformer.h.{i}.attn.c_proj."] = f"{i+1}.attn.c_proj."
-        layer_key_mappings[f"transformer.h.{i}.mlp.c_proj."] = f"{i+1}.mlp.c_proj."
-        layer_key_mappings[f"transformer.h.{i}.mlp.c_fc."] = f"{i+1}.mlp.c_fc."
-        layer_key_mappings[f"transformer.h.{i}.ln_1."] = f"{i+1}.attn.c_attn.ln."
-        layer_key_mappings[f"transformer.h.{i}.ln_2."] = f"{i+1}.mlp.ln."
-        layer_key_mappings[f"transformer.h.{i}.attn.c_attn."] = f"{i+1}.attn.c_attn.linear."
-        if i == config.n_layers - 1:
-            layer_key_mappings[f"transformer.ln_f."] = f"{i+1}.ln_f."
-    layer_key_mappings["lm_head."] = f"{config.n_layers+1}."
+    if model_type == "starcoder":
+        layer_key_mappings = {
+            "transformer.wte.": "0.wte.",
+            "transformer.wpe.": "0.wpe.",
+        }
+        for i in range(config.n_layers):
+            layer_key_mappings[f"transformer.h.{i}.attn.c_proj."] = f"{i+1}.attn.c_proj."
+            layer_key_mappings[f"transformer.h.{i}.mlp.c_proj."] = f"{i+1}.mlp.c_proj."
+            layer_key_mappings[f"transformer.h.{i}.mlp.c_fc."] = f"{i+1}.mlp.c_fc."
+            layer_key_mappings[f"transformer.h.{i}.ln_1."] = f"{i+1}.attn.c_attn.ln."
+            layer_key_mappings[f"transformer.h.{i}.ln_2."] = f"{i+1}.mlp.ln."
+            layer_key_mappings[f"transformer.h.{i}.attn.c_attn."] = f"{i+1}.attn.c_attn.linear."
+            if i == config.n_layers - 1:
+                layer_key_mappings[f"transformer.ln_f."] = f"{i+1}.ln_f."
+        layer_key_mappings["lm_head."] = f"{config.n_layers+1}."
+    elif model_type == "llama":
+        layer_key_mappings = {
+            "model.embed_tokens.": "0.wte.",
+        }
+        for i in range(config.n_layers):
+            layer_key_mappings[f"model.layers.{i}."] = f"{i+1}."
+            if i == config.n_layers - 1:
+                layer_key_mappings[f"model.norm."] = f"{i+1}.ln_f."
+
+        layer_key_mappings[".self_attn."] = ".attn."
+        layer_key_mappings[".post_attention_layernorm."] = ".mlp.ln."
+        layer_key_mappings[".input_layernorm."] = ".attn.c_attn.ln."
+        layer_key_mappings["attn.o_proj."] = "attn.c_proj."
+        layer_key_mappings["lm_head."] = f"{config.n_layers+1}."
+    else:
+        raise NotImplementedError("currently only support llama and starcoder")
     return layer_specs, layer_key_mappings
+
+
+def llama_state_dict_transfrom(config: FlashMQATConfig, state_dict: Dict[str, torch.Tensor]):
+    # merge k_proj, o_proj, q_proj into a single layer
+    for i in range(config.n_layers):
+        q_proj_w = state_dict[f"model.layers.{i}.self_attn.q_proj.weight"]
+        k_proj_w = state_dict[f"model.layers.{i}.self_attn.k_proj.weight"]
+        v_proj_w = state_dict[f"model.layers.{i}.self_attn.v_proj.weight"]
+        w = torch.cat([q_proj_w, k_proj_w, v_proj_w], dim=0)
+        state_dict[f"model.layers.{i}.self_attn.c_attn.linear.weight"] = w
+        state_dict.pop(f"model.layers.{i}.self_attn.q_proj.weight")
+        state_dict.pop(f"model.layers.{i}.self_attn.k_proj.weight")
+        state_dict.pop(f"model.layers.{i}.self_attn.v_proj.weight")
+    return state_dict
 
 
 def count_layer_params(layer_specs):
@@ -143,17 +196,18 @@ def partition_layers(layer_specs, num_stages, method="uniform"):
     return stage_to_layer_idx
 
 
-def update_state_dict_keys(state_dict, key_mappings):
-    new_state_dict = {}
-    for k, v in state_dict.items():
-        for old_key, new_key in key_mappings.items():
-            if k.startswith(old_key):
-                new_key = k.replace(old_key, new_key)
-                new_state_dict[new_key] = v
-                break
-        else:
+def update_state_dict_keys(state_dict, key_mappings, config, model_type):
+    if model_type == "llama":
+        state_dict = llama_state_dict_transfrom(config, state_dict)
+    for old_key, new_key in key_mappings.items():
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if old_key in k:
+                k = k.replace(old_key, new_key)
             new_state_dict[k] = v
-    return new_state_dict
+        state_dict = new_state_dict
+    print(f"state dict keys = {list(state_dict.keys())}")
+    return state_dict
 
 
 def split_state_dict_by_stage(state_dict, stage_to_layer_idx):
@@ -181,8 +235,11 @@ def save_state_dict(state_dict, stage_index, shard_index, model_dir):
 
 def copy_configs(src_model_dir, dst_model_dir):
     for file in MODEL_CONFIG_FILES:
-        shutil.copy(os.path.join(src_model_dir, file), os.path.join(dst_model_dir, file))
-        print(f"copied {file} from {src_model_dir} to {dst_model_dir}")
+        try:
+            shutil.copy(os.path.join(src_model_dir, file), os.path.join(dst_model_dir, file))
+            print(f"copied {file} from {src_model_dir} to {dst_model_dir}")
+        except FileNotFoundError:
+            print(f"{file} not exist in {src_model_dir} skipping.")
 
 
 def load_full_ckpt(path):
@@ -225,12 +282,17 @@ def split_state_dict_into_shards(state_dict, n_shards):
 
 
 def main():
-    cfg = flash_mqat_config(FULL_MODEL_DIR)
-    layer_specs, key_mappings = layer_specs_and_key_mappings(cfg)
+    if MODEL_TYPE == "llama":
+        cfg = llama_config(FULL_MODEL_DIR)
+    elif MODEL_TYPE == "starcoder":
+        cfg = flash_mqat_config(FULL_MODEL_DIR)
+    else:
+        raise NotImplementedError("currently only support llama and starcoder")
+    layer_specs, key_mappings = layer_specs_and_key_mappings(cfg, MODEL_TYPE)
     # TODO: load and process full statedict by shard for large model that can not fit into memory
     state_dict, _ = load_full_ckpt(FULL_MODEL_DIR)
     print("loaded full state_dict")
-    state_dict = update_state_dict_keys(state_dict, key_mappings)
+    state_dict = update_state_dict_keys(state_dict, key_mappings, cfg, MODEL_TYPE)
     stage_to_layer_idx = partition_layers(layer_specs, num_stages=NUM_PIPE_STAGES, method="parameters")
     stage_to_state_dict = split_state_dict_by_stage(state_dict, stage_to_layer_idx)
     for stage, state_dict in stage_to_state_dict.items():

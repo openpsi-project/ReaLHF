@@ -6,7 +6,7 @@ import math
 import deepspeed
 import torch
 
-from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
 import api.model
 import base.deepspeed_utils as deepspeed_utils
 import base.logging as logging
@@ -39,9 +39,13 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
     engine_type: str = "deepspeed"
     num_pipeline_stages: int = 1
+    # stream pipe engine require model configs
+    max_seq_len: int = 512
+    max_new_tokens: int = 512
+    max_mb_size: int = 32
 
     def __post_init__(self):
-        if self.engine_type == "pipe":
+        if self.engine_type == "pipe" or self.engine_type == "stream_pipe":
             assert self.zero_stage < 2
             assert self.enable_hybrid_engine is False
             assert self.gradient_checkpointing is False
@@ -129,9 +133,9 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             engine_type=self.engine_type,
         )
 
-        if self.engine_type == "pipe":
+        if self.engine_type == "pipe" or self.engine_type == "stream_pipe":
             # log pipeline infos
-            assert isinstance(module, DeepSpeedPipelineEngine)
+            assert isinstance(module, DeepSpeedPipelineEngine) or isinstance(module, StreamPipeEngine)
             logger.info(f"PipelineEngine:: ddp rank = {torch.distributed.get_rank()}; "
                         f"pipe id = {module.stage_id}; dp id = {module.dp_id};")
 

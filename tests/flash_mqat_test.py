@@ -1,6 +1,10 @@
 import unittest
 
-from flash_attn.bert_padding import pad_input, unpad_input
+try:
+    from flash_attn.bert_padding import pad_input, unpad_input
+except ModuleNotFoundError:
+    pass
+
 import torch
 import transformers
 

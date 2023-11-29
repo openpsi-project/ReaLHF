@@ -27,6 +27,7 @@ try:
     from flash_attn.layers.rotary import RotaryEmbedding
 except ModuleNotFoundError:
     pass
+import logging
 
 logger = logging.getLogger("FlashMQAT")
 
@@ -868,7 +869,7 @@ class FlashMQATForCausalLM(nn.Module):
                     k = k.replace(k1, k2)
                 new_state_dict[k] = v
             state_dict = new_state_dict
-        model.load_state_dict(new_state_dict)
+        model.load_state_dict(new_state_dict, strict=False)
         return model
 
     @classmethod
@@ -879,6 +880,7 @@ class FlashMQATForCausalLM(nn.Module):
         device: Optional[Union[str, torch.device]] = None,
     ):
         with open(os.path.join(model_path, "config.json"), "r") as f:
+            # TODO: load will get unexpected keys and values for FlashMQATConfig
             config = FlashMQATConfig(**json.load(f))
         state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
         model = cls(config, dtype, device)
@@ -1369,7 +1371,7 @@ def generate(
         # Model forward will set k/v cache in PipeCacheData.
         prompt_logits = model(x, ys).pp_output
         logits = prompt_logits[cu_seqlens[1:] - 1]
-        cache_seqlens = input_lens
+        cache_seqlens = input_lens.clone().to(dtype=torch.int32)
         for y in ys[1:-1]:
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(max_seq_len + gconfig.max_new_tokens,
@@ -1387,7 +1389,7 @@ def generate(
             y.k_cache = k_cache
             y.v_cache = v_cache
             y.cache_seqlens = cache_seqlens
-        x = PipeTransferData()
+        x = PipeTransferData(store_kv_cache=True)
         ys[0].cache_seqlens = cache_seqlens
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
@@ -1408,11 +1410,11 @@ def generate(
                 k_caches[i] = nn.functional.pad(k_caches[i], pad)
             if v_caches[i].shape[1] < max_seq_len:
                 v_caches[i] = nn.functional.pad(v_caches[i], pad)
-        x = PipeTransferData()
-        ys = ([PipeCacheData(cache_seqlens=cache_seqlens)] + [
+        x = PipeTransferData(store_kvcache=torch.tensor(1))
+        ys = [PipeCacheData(cache_seqlens=cache_seqlens)] + [
             PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens)
             for k, v in zip(k_caches, v_caches)
-        ] + [PipeCacheData()])
+        ] + [PipeCacheData()]
         next_tokens = input_ids[:, -1]
 
     # The main loop.

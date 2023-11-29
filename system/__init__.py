@@ -47,8 +47,8 @@ def run_worker(worker_type, experiment_name, trial_name, worker_name, worker_ser
     try:
         worker.run()
     except Exception as e:
-        logging.error("Worker %s failed with exception: %s", worker_name, e)
-        logging.error(traceback.format_exc())
+        logger.error("Worker %s failed with exception: %s", worker_name, e)
+        logger.error(traceback.format_exc())
         raise e
 
 
