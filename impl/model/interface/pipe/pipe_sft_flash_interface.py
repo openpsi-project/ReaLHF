@@ -64,6 +64,7 @@ class PipePackedSupervisedFinetuningInterface(api.model.ModelInterface):
         # agg_loss = average loss of data parallel batches
         if r is not None:
             avg_loss, stats = r
+            logger.info("loss: %s", avg_loss)
             return dict(losses=avg_loss)
         else:
             return dict()
