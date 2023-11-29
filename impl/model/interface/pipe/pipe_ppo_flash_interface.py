@@ -1,14 +1,8 @@
 from typing import Dict, Optional
-import collections
 import dataclasses
 import itertools
-import random
 
-from flash_attn.bert_padding import unpad_input
-import deepspeed
 import torch
-import tqdm
-import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.ds_pipe_engine import DeepSpeedPipelineEngine
@@ -20,29 +14,35 @@ import base.logging as logging
 import impl.model.nn.flash_mqat as flash_mqat
 import impl.model.utils.ppo_functional as ppo_functional
 
+try:
+    from flash_attn.bert_padding import unpad_input
+except ModuleNotFoundError:  # for cpu docker image
+    pass
+
 logger = logging.getLogger("PipePackedPPOInterface")
 
 
 def _ppo_actor_step(
-        logits: torch.FloatTensor,  # [tot_seqlen, vocab_size]
-        packed_input_ids: torch.LongTensor,  # [tot_seqlen]
-        cu_seqlens: torch.LongTensor,  # [bs+1] 
-        old_logp: torch.FloatTensor,  # [tot_seqlen-bs]
-        ref_logp: torch.FloatTensor,  # [tot_seqlen-bs]
-        reward_score: torch.FloatTensor,  # [bs]
-        values: torch.FloatTensor,  # [tot_seqlen]
-        prompt_mask: torch.FloatTensor,  # [tot_seqlen]
-        seq_no_eos_mask: torch.FloatTensor,  # [bs]
-        pad_token_id: int,  # const
-        eos_token_id: int,  # const
-        kl_adapter_value: int,  # const
-        max_reward_clip: int,  # const
-        discount: int,  # const
-        gae_lambda: int,  # const
-        eps_clip: int,  # const
-        logits_mask: Optional[torch.BoolTensor] = None,  # [tot_seqlen, vocab_size]
-        **kwargs):
-    """ Loss function for ppo actor step, all inputs should be splitted into pipeline micro batches,
+    logits: torch.FloatTensor,  # [tot_seqlen, vocab_size]
+    packed_input_ids: torch.LongTensor,  # [tot_seqlen]
+    cu_seqlens: torch.LongTensor,  # [bs+1]
+    old_logp: torch.FloatTensor,  # [tot_seqlen-bs]
+    ref_logp: torch.FloatTensor,  # [tot_seqlen-bs]
+    reward_score: torch.FloatTensor,  # [bs]
+    values: torch.FloatTensor,  # [tot_seqlen]
+    prompt_mask: torch.FloatTensor,  # [tot_seqlen]
+    seq_no_eos_mask: torch.FloatTensor,  # [bs]
+    pad_token_id: int,  # const
+    eos_token_id: int,  # const
+    kl_adapter_value: int,  # const
+    max_reward_clip: int,  # const
+    discount: int,  # const
+    gae_lambda: int,  # const
+    eps_clip: int,  # const
+    logits_mask: Optional[torch.BoolTensor] = None,  # [tot_seqlen, vocab_size]
+    **kwargs,
+):
+    """Loss function for ppo actor step, all inputs should be splitted into pipeline micro batches,
     returns loss and logging stats.
     """
     # input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
@@ -77,15 +77,17 @@ def _ppo_actor_step(
     ])
     loss_mask = loss_mask[shift_one_indices]
 
-    loss, loss_stat = ppo_functional.actor_loss_fn(logprobs=new_logp,
-                                                   old_logprobs=old_logp,
-                                                   advantages=advantages,
-                                                   eps_clip=eps_clip,
-                                                   loss_mask=loss_mask)
+    loss, loss_stat = ppo_functional.actor_loss_fn(
+        logprobs=new_logp,
+        old_logprobs=old_logp,
+        advantages=advantages,
+        eps_clip=eps_clip,
+        loss_mask=loss_mask,
+    )
 
     # mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
-    importance_weight = loss_stat['importance_weight']
-    clip_ratio = loss_stat['clip_ratio']
+    importance_weight = loss_stat["importance_weight"]
+    clip_ratio = loss_stat["clip_ratio"]
     approx_kl = ((old_logp - new_logp).detach() * loss_mask).sum() / loss_mask.sum()
     stats = dict(
         task_reward=reward_score.mean().detach(),
@@ -98,13 +100,12 @@ def _ppo_actor_step(
         importance_weight=importance_weight,
     )
     if logits_mask is not None:
-        stats['ignoring_logits_ratio'] = (1 - logits_mask).float().mean()
+        stats["ignoring_logits_ratio"] = (1 - logits_mask).float().mean()
     return loss, stats
 
 
 @dataclasses.dataclass
 class PipePackedActorInterface(api.model.ModelInterface):
-
     generation_config: Optional[Dict] = None
 
     mini_batch_size: int = 8
@@ -148,8 +149,8 @@ class PipePackedActorInterface(api.model.ModelInterface):
         module.eval()
 
         data = recursive_apply(data, lambda x: x.to(model.device))
-        prompts: torch.LongTensor = data['prompts']
-        prompt_att_mask: torch.BoolTensor = data['prompt_att_mask']
+        prompts: torch.LongTensor = data["prompts"]
+        prompt_att_mask: torch.BoolTensor = data["prompt_att_mask"]
         bs, prompt_max_len = prompts.shape[:2]
 
         packed_input_ids, _, cu_seqlens, _ = unpad_input(prompts, prompt_att_mask)
@@ -204,8 +205,11 @@ class PipePackedActorInterface(api.model.ModelInterface):
              seq_lengths.cumsum(0)])
         packed_logprobs = torch.cat(
             list(itertools.chain.from_iterable(zip(prompt_log_probs_list, gen_log_probs_list))))
-        assert packed_seq.shape[0] == packed_logprobs.shape[0] + bs, (packed_seq.shape, packed_logprobs.shape,
-                                                                      bs)
+        assert packed_seq.shape[0] == packed_logprobs.shape[0] + bs, (
+            packed_seq.shape,
+            packed_logprobs.shape,
+            bs,
+        )
         packed_logits_mask = None
         if not self.force_no_logits_mask and gen_logits_mask_list:
             packed_logits_mask = torch.cat(
@@ -233,20 +237,20 @@ class PipePackedActorInterface(api.model.ModelInterface):
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
 
-        cu_seqlens = data['cu_seqlens']
+        cu_seqlens = data["cu_seqlens"]
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        res = module(packed_input_ids=data['packed_seq'], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+        res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
 
         if res is None:  # if not pipeline last stage, module.generate return nothing.
             return None
 
         logits: torch.FloatTensor = res.logits.float()
 
-        if data['packed_logits_mask'] is not None:
-            logits.masked_fill_(data['packed_logits_mask'].logical_not(), torch.finfo(logits.dtype).min)
-        logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data['packed_seq'])
+        if data["packed_logits_mask"] is not None:
+            logits.masked_fill_(data["packed_logits_mask"].logical_not(), torch.finfo(logits.dtype).min)
+        logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         return from_dict(dict(logprobs=logprobs.cpu()))
 
     def train_step(self, model: api.model.Model, data: NamedArray) -> Dict:
@@ -259,16 +263,16 @@ class PipePackedActorInterface(api.model.ModelInterface):
 
         module.set_version_steps(model.version.global_step)
 
-        cu_seqlens = data['cu_seqlens']
+        cu_seqlens = data["cu_seqlens"]
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         loss_fn_kwargs = dict(
             input_lens=input_lens,
-            old_logp=data['packed_logprobs'],
-            ref_logp=data['packed_ref_logprobs'],
-            reward_score=data['rewards'],
-            values=data['values'],
-            prompt_mask=data['prompt_mask'],
-            seq_no_eos_mask=data['seq_no_eos_mask'],
+            old_logp=data["packed_logprobs"],
+            ref_logp=data["packed_ref_logprobs"],
+            reward_score=data["rewards"],
+            values=data["values"],
+            prompt_mask=data["prompt_mask"],
+            seq_no_eos_mask=data["seq_no_eos_mask"],
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
             kl_adapter_value=self.kl_adapter.value,
@@ -276,13 +280,13 @@ class PipePackedActorInterface(api.model.ModelInterface):
             discount=self.discount,
             gae_lambda=self.gae_lambda,
             eps_clip=self.eps_clip,
-            logits_mask=data['packed_logits_mask'],
+            logits_mask=data["packed_logits_mask"],
         )
 
         # print(f"in train_step() packed_seq shape data['packed_seq'].shape: {data['packed_seq'].shape}")
         train_stats = module.train_batch(
-            packed_input_ids=data['packed_seq'],
-            cu_seqlens=data['cu_seqlens'],
+            packed_input_ids=data["packed_seq"],
+            cu_seqlens=data["cu_seqlens"],
             loss_fn=_ppo_actor_step,
             **loss_fn_kwargs,
         )
@@ -308,4 +312,4 @@ class PipePackedActorInterface(api.model.ModelInterface):
         return {}
 
 
-api.model.register_interface('pipe_flash_actor', PipePackedActorInterface)
+api.model.register_interface("pipe_flash_actor", PipePackedActorInterface)
