@@ -16,7 +16,7 @@ sft = ModelRPC(
 
 class WpsFormulaSFTPipelineExperiment(Experiment):
 
-    def __init__(self, n_models=8, num_pipeline_stages=4, seed=1, total_train_epochs=4):
+    def __init__(self, n_models=4, num_pipeline_stages=4, seed=1, total_train_epochs=4):
         self.weight_decay = 0.05
         self.lora_lr = 2.5e-4
         self.lora_scaling = 32.0
@@ -48,7 +48,7 @@ class WpsFormulaSFTPipelineExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type='tesla',
-                    nodelist="QH-com08",
+                    # nodelist="QH-com08",
                     mem=100000,
                 ),
             ),
