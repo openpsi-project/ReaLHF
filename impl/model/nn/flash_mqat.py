@@ -27,7 +27,7 @@ try:
     from flash_attn.layers.rotary import RotaryEmbedding
 except ModuleNotFoundError:
     pass
-import logging
+import base.logging as logging
 
 logger = logging.getLogger("FlashMQAT")
 

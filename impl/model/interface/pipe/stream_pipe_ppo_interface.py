@@ -1,12 +1,12 @@
 import asyncio
 import dataclasses
-import logging
 
 import torch
 
 from base.namedarray import NamedArray
 from impl.model.backend.stream_pipe_engine import StreamPipeEngine
 import api.model
+import base.logging as logging
 
 logger = logging.getLogger("stream_pipe_ppo")
 

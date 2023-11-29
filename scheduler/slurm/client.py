@@ -11,7 +11,7 @@ from scheduler.slurm.utils import (allocate_resources, SlurmLaunchInfo, SlurmRes
                                    SlurmResourceNotEnoughException)
 import base.logging as logging
 
-logger = logging.getLogger("Slurm scheduler")
+logger = logging.getLogger("Slurm-scheduler")
 
 SCHEDULING_RETRY_INTERVAL_SECONDS = 30
 SCHEDULING_TIMEOUT_MAX_SECONDS = 3600 * 24
@@ -62,6 +62,8 @@ class SlurmSchedulerClient(SchedulerClient):
             resource_requirement=SlurmResource(mem=mem, cpu=cpu, gpu=gpu, gpu_type=gpu_type),
             cmd=cmd,
             run_name=self.run_name,
+            exper_name=self.expr_name,
+            trial_name=self.trial_name,
             container_image=container_image,
             container_mounts=container_mounts,
             env_vars=env_vars,
@@ -119,8 +121,8 @@ class SlurmSchedulerClient(SchedulerClient):
                 #     logger.info(info)
                 break
             except SlurmResourceNotEnoughException:
-                logger.info("Not enough resources to allocate all pending jobs. Retrying ...")
-                logger.info("Time since start: %d seconds", time.monotonic() - start_time)
+                logger.critical("Not enough resources to allocate all pending jobs. Retrying ...")
+                logger.warning("Time since start: %d seconds", time.monotonic() - start_time)
                 fcntl.flock(fp, fcntl.LOCK_UN)
                 time.sleep(SCHEDULING_RETRY_INTERVAL_SECONDS)
                 if time.monotonic() - start_time > SCHEDULING_TIMEOUT_MAX_SECONDS:
@@ -188,7 +190,9 @@ class SlurmSchedulerClient(SchedulerClient):
         deadline = None if timeout is None else time.time() + timeout
         left = set(self.__committed_jobs.keys())
         num_jobs_left = len(left)
-        logger.info(f"Waiting for {num_jobs_left} jobs.")
+        logger.info(
+            f"Waiting for {num_jobs_left} jobs. Jobs IDs: {','.join(sorted([x.job_info.slurm_id for x in self.__committed_jobs.values()]))}."
+        )
         while len(left) > 0:
             if len(left) < num_jobs_left:
                 num_jobs_left = len(left)

@@ -2,7 +2,6 @@ from typing import Callable, List, Optional, Tuple, Union
 import copy
 import dataclasses
 import json
-import logging
 import math
 import os
 import queue
@@ -21,16 +20,16 @@ from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP
 import api.huggingface
 import api.model
+import base.logging as logging
 
 try:
     from flash_attn import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache
 except ModuleNotFoundError:
     pass
-import logging
-
 from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormColumnLinear,
                                                      LayerNormParallelMLP, ParallelEmbedding,
                                                      RowParallelLinear)
+import base.logging as logging
 
 logger = logging.getLogger("TensorParallelFlashMQAT")
 
