@@ -22,7 +22,7 @@ try:
 except ImportError:
     _grad_accum_fusion_available = False
 
-import logging
+import base.logging as logging
 
 logger = logging.getLogger("model_parallel.modules")
 

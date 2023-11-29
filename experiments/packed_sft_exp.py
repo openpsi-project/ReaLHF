@@ -19,10 +19,10 @@ class PackedSupervisedFinetuningExperiment(Experiment):
 
     def __init__(
         self,
-        dp_size=8,
+        dp_size=16,
         seed=1,
         total_train_epochs=8,
-        base_model="llama",
+        base_model="gpt2",
         train_dataset_path="/lustre/meizy/data/wps-formula/train.json",
         valid_dataset_path="/lustre/meizy/data/wps-formula/valid.json",
         train_tokens_per_batch: int = 16384,
@@ -76,7 +76,6 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type="tesla",
-                    nodelist="QH-com02",
                     mem=100000,
                 ),
             ),

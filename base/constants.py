@@ -1,9 +1,6 @@
 # log format constants
 from base.topology import PipelineParallelGrid
 
-LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
-DATE_FORMAT = "%Y%m%d-%H:%M:%S"
-
 # constants in experiment instance scope
 
 _experiment_name = None

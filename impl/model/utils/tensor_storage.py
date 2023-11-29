@@ -1,10 +1,10 @@
 from collections import defaultdict
 from typing import Any, List, Optional, Tuple
-import logging
 
 import torch
 
 from impl.model.utils.data import PipeCacheData, PipeTransferData
+import base.logging as logging
 import impl.model.utils.p2p as p2p
 
 logger = logging.getLogger("tensor_utils")

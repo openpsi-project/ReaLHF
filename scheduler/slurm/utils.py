@@ -179,6 +179,8 @@ class SlurmLaunchInfo:
         multiprog_content (str, optional): The content of the multiprog file.
     """
     run_name: str
+    exper_name: str
+    trial_name: str
     worker_type: str
     worker_submission_idx: int
     wprocs_in_job: int
@@ -242,16 +244,17 @@ class SlurmLaunchInfo:
 
     @property
     def log_path(self) -> str:
-        return os.path.join(LOG_BASE_PATH, self.run_name, f"{self.worker_type}-{self.worker_submission_idx}")
+        return os.path.join(LOG_BASE_PATH, self.exper_name, self.trial_name,
+                            f"{self.worker_type}-{self.worker_submission_idx}")
 
     @property
     def multiprog_path(self) -> str:
-        return os.path.join(LOG_BASE_PATH, self.run_name,
+        return os.path.join(LOG_BASE_PATH, self.exper_name, self.trial_name,
                             f"{self.worker_type}-{self.worker_submission_idx}.multiprog")
 
     @property
     def hostfile_path(self) -> str:
-        return os.path.join(LOG_BASE_PATH, self.run_name,
+        return os.path.join(LOG_BASE_PATH, self.exper_name, self.trial_name,
                             f"{self.worker_type}-{self.worker_submission_idx}.hostfile")
 
     def show_log(self):

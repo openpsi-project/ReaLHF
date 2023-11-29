@@ -14,7 +14,6 @@ from deepspeed.accelerator import get_accelerator
 from deepspeed.runtime import utils as ds_utils
 from deepspeed.runtime.activation_checkpointing import checkpointing
 from deepspeed.runtime.state_dict_factory import SDLoaderFactory
-from deepspeed.utils import logger
 import torch
 import torch.nn as nn
 
@@ -22,6 +21,9 @@ from base.monitor import process_memory_mb, time_mark
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 import base.constants
+import base.logging as logging
+
+logger = logging.getLogger("Pipeline Module")
 
 
 class PipelineError(Exception):
