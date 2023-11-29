@@ -1,5 +1,4 @@
 from typing import Dict, List, Optional, Tuple, Union
-import logging
 import os
 
 import torch
@@ -12,6 +11,7 @@ from impl.model.nn.mp_flash_mqat import *
 from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
+import base.logging as logging
 
 logger = logging.getLogger("3d_parallel_nn")
 

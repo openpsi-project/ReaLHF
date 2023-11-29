@@ -14,8 +14,16 @@ log_config = {
     "version": 1,
     "formatters": {
         "plain": {
-            "format": LOG_FORMAT,
+            "()": colorlog.ColoredFormatter,
+            "format": "%(log_color)s" + LOG_FORMAT,
             "datefmt": DATE_FORMAT,
+            "log_colors": {
+                "DEBUG": "white",
+                "INFO": "white",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "bold_white,bg_red",
+            },
         },
         "colored": {
             "()": colorlog.ColoredFormatter,
@@ -116,6 +124,7 @@ def getLogger(
             "handlers": [f"{type_}Handler"],
             "level": LOGLEVEL,
         }
+        logging.config.dictConfig(log_config)
     return logging.getLogger(name)
 
 

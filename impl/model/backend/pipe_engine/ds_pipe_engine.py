@@ -6,13 +6,11 @@
 from types import MethodType
 from typing import Callable, List, Optional, Tuple, Union
 import dataclasses
-import logging
 
 from deepspeed import comm as dist
 from deepspeed.runtime.bf16_optimizer import BF16_Optimizer
 from deepspeed.runtime.engine import DeepSpeedEngine, MEMORY_OPT_ALLREDUCE_SIZE
 from deepspeed.runtime.zero.config import ZeroStageEnum
-from deepspeed.utils import logger
 import torch
 import transformers
 
@@ -26,6 +24,7 @@ from impl.model.utils.data import (data_list_to_tensor_tuple, DuckGenerationOutp
 from impl.model.utils.pipeline_module import PipelineError, PipelineModule
 from impl.model.utils.tensor_storage import recv_grad, send_grad, TensorBuffer
 import base.constants
+import base.logging as logging
 # import base.consistency
 import impl.model.backend.pipe_engine.static_schedule as schedule
 import impl.model.utils.p2p as p2p
