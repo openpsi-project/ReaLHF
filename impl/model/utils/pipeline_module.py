@@ -324,6 +324,13 @@ class PipelineModule(nn.Module):
         """
         return len(self.forward_funcs)
 
+    def gradient_checkpointing_enable(self):
+        for layer in self.forward_funcs:
+            try:
+                layer.gradient_checkpointing_enable()
+            except AttributeError:
+                pass
+
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]):
         local_micro_offset = self.micro_offset + 1
 
@@ -571,7 +578,7 @@ class PipelineModule(nn.Module):
             for file in os.listdir(load_dir):
                 if file.endswith(".bin"):
                     # filename format should be:
-                    # pytorch_model-pp-{pp_index:02d}-tp-{tp_index:02d}-s-{shard_index:02d}
+                    # pytorch_model-pp-{pp_index:02d}-mp-{tp_index:02d}-s-{shard_index:02d}
                     pp_stage = int(file.split("-")[2])
                     if pp_stage == self.stage_id:
                         fn_to_load.append(file)

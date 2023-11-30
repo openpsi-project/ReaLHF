@@ -10,25 +10,21 @@ import torch
 import torch.nn as nn
 import transformers
 
-from base.monitor import process_memory_mb
-from impl.model.backend.ds_pipe_engine import LayerSpec
 from impl.model.nn.flash_mqat import *
+from impl.model.utils.pipeline_module import LayerSpec
 
 MODEL_TYPE = "llama"
-FULL_MODEL_DIR = "/home/meizy/models/Llama-2-4l"
+FULL_MODEL_DIR = "/lustre/fw/pretrained/llama-13b"
 NUM_PIPE_STAGES = 4
 NUM_SHARDS = 3
-PIPE_MODEL_DIR = f"/home/meizy/models/llama-2-4l_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
-TEST_EXPR_NAME = "test"
-TEST_TRIAL_NAME = "test"
-TEST_MODEL_NAME = "default"
+PIPE_MODEL_DIR = f"/home/meizy/models/llama-13b_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
 MODEL_CONFIG_FILES = [
     "config.json", "generation_config.json", "tokenizer_config.json", "vocab.json", "merges.txt",
     "special_tokens_map.json", "tokenizer.json"
 ]
 
 
-def flash_mqat_config(model_path: str):
+def starcoder_config(model_path: str):
     starcoder_config = transformers.AutoConfig.from_pretrained(os.path.join(model_path, "config.json"))
     config = FlashMQATConfig(
         n_layers=starcoder_config.n_layer,
@@ -282,10 +278,14 @@ def split_state_dict_into_shards(state_dict, n_shards):
 
 
 def main():
+    assert os.path.exists(FULL_MODEL_DIR)
+    if os.path.exists(PIPE_MODEL_DIR):
+        logger.warning(f"!!! PIPE_MODEL_DIR {PIPE_MODEL_DIR} already exists, will overwrite. !!!")
+
     if MODEL_TYPE == "llama":
         cfg = llama_config(FULL_MODEL_DIR)
     elif MODEL_TYPE == "starcoder":
-        cfg = flash_mqat_config(FULL_MODEL_DIR)
+        cfg = starcoder_config(FULL_MODEL_DIR)
     else:
         raise NotImplementedError("currently only support llama and starcoder")
     layer_specs, key_mappings = layer_specs_and_key_mappings(cfg, MODEL_TYPE)
