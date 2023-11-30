@@ -28,8 +28,8 @@ NUM_DP = 1
 WORLD_SIZE = NUM_PP * NUM_DP
 MODEL_TYPE = "llama"
 if MODEL_TYPE == "llama":
-    BASELINE_MODEL_PATH = "/home/meizy/models/Llama-2-4l"
-    PIPELINE_MODEL_PATH = F"/home/meizy/models/llama-2-4l_4pp_3s"
+    BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/testOnly/llama-2-4l"
+    PIPELINE_MODEL_PATH = F"/lustre/public/pretrained_model_weights/testOnly/llama-2-4l_4pp_3s"
 elif MODEL_TYPE == "starcoder":
     BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
     PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
@@ -109,24 +109,14 @@ def make_pipe_model(model_path, device):
     import api.model
     import impl.model
     topology = PipeDataParallelTopology(num_pp=NUM_PP, num_dp=NUM_DP)
-    if MODEL_TYPE == "llama":
-        model_config = config_package.Model(type_="llama_flash_mqat_pipe",
-                                            args=dict(
-                                                model_path=model_path,
-                                                num_pp=NUM_PP,
-                                                num_dp=NUM_DP,
-                                                load_from_full_ckpt=False,
-                                                dtype=torch.float16,
-                                            ))
-    elif MODEL_TYPE == "starcoder":
-        model_config = config_package.Model(type_="starcoder_flash_mqat_pipe",
-                                            args=dict(
-                                                model_path=model_path,
-                                                num_pp=NUM_PP,
-                                                num_dp=NUM_DP,
-                                                load_from_full_ckpt=False,
-                                                dtype=torch.float16,
-                                            ))
+    model_config = config_package.Model(type_="flash_mqat_pipe",
+                                        args=dict(
+                                            model_path=model_path,
+                                            num_pp=NUM_PP,
+                                            num_dp=NUM_DP,
+                                            from_type=MODEL_TYPE,
+                                            dtype=torch.float16,
+                                        ))
     model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
     return topology, model
 
@@ -238,7 +228,8 @@ class PipeFlashMQATTest(unittest.TestCase):
     def init_baseline_model(self):
         import transformers
 
-        from impl.model.nn.flash_mqat import FlashMQATForCausalLM, generate, GenerationConfig
+        from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM
+        from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
         import api.huggingface
 
         self.device = device = 'cuda'
@@ -283,7 +274,7 @@ class PipeFlashMQATTest(unittest.TestCase):
         for p in self.pipe_model_processes:
             p.join()
 
-        from impl.model.nn.flash_mqat import generate, GenerationConfig
+        from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
         self.gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
         # baseline model calculate
         self.init_baseline_model()

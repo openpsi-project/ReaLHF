@@ -107,6 +107,7 @@ def main_controller(args):
     if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
         with open(QUICKSTART_EXPR_CACHE_PATH, 'rb') as f:
             api.config.register_experiment(*pickle.load(f))
+        os.system(f"rm -rf {QUICKSTART_EXPR_CACHE_PATH}")
     logger.info("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
     if args.type == 'ray':

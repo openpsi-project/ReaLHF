@@ -19,6 +19,7 @@ import api.config
 
 SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "saved"]
 
+
 cs = ConfigStore.instance()
 
 
@@ -303,22 +304,26 @@ class PPOConfig:
     ref: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     rew: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
-    actor_optimizer: OptimizerConfig = dataclasses.field(default_factory=functools.partial(
-        OptimizerConfig,
-        lr=9.65e-6,
-        weight_decay=0.0,
-        eps=1e-5,
-        lr_scheduler_type="linear",
-        warmup_steps_proportion=0.075,
-    ))
-    critic_optimizer: OptimizerConfig = dataclasses.field(default_factory=functools.partial(
-        OptimizerConfig,
-        lr=5e-6,
-        weight_decay=0.0,
-        eps=1e-5,
-        lr_scheduler_type="linear",
-        warmup_steps_proportion=0.075,
-    ))
+    actor_optimizer: OptimizerConfig = dataclasses.field(
+        default_factory=functools.partial(
+            OptimizerConfig,
+            lr=9.65e-6,
+            weight_decay=0.0,
+            eps=1e-5,
+            lr_scheduler_type="linear",
+            warmup_steps_proportion=0.075,
+        )
+    )
+    critic_optimizer: OptimizerConfig = dataclasses.field(
+        default_factory=functools.partial(
+            OptimizerConfig,
+            lr=5e-6,
+            weight_decay=0.0,
+            eps=1e-5,
+            lr_scheduler_type="linear",
+            warmup_steps_proportion=0.075,
+        )
+    )
     max_new_tokens: int = 512
     min_new_tokens: int = 10
     greedy: bool = False
@@ -381,7 +386,6 @@ class _MainStartArgs:
     partition: str = "dev"
     wandb_mode: str = "disabled"
     image_name: Optional[str] = None
-    LOGLEVEL: str = "INFO"
     ignore_worker_error: bool = False
     remote_reset: bool = False
     trace: bool = False
@@ -389,45 +393,53 @@ class _MainStartArgs:
 
 @hydra.main(version_base=None, config_name="sft")
 def run_sft(args: SFTConfig):
+    import base.logging as logging
+
+    logger = logging.getLogger("quickstart", "colored")
+
     exp_name = args.experiment_name
     trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    from experiments.common.sft_exp import SFTExperiment
     from apps.main import main_start
 
-    if args.model.parallel.pipeline_parallel_size == 1:
-        from experiments.common.sft_exp import SFTExperiment
-
-        exp_fn = functools.partial(
-            SFTExperiment,
-            seed=args.seed,
-            total_train_epochs=args.train_epochs,
-            base_model=args.model.type,
-            dp_size=args.model.parallel.data_parallel_size,
-            use_lora=args.model.lora,
-            lora_scaling=args.model.lora_scaling,
-            lora_dim=args.model.lora_dim,
-            enable_fp16=args.model.enable_fp16,
-            gradient_checkpointing=args.model.gradient_checkpointing,
-            max_seqlen=args.dataset.max_seqlen,
-            train_dataset_path=args.dataset.train_path,
-            valid_dataset_path=args.dataset.valid_path,
-            train_tokens_per_batch=args.dataset.train_tokens_per_batch,
-            valid_tokens_per_batch=args.dataset.valid_tokens_per_batch,
-            lr=args.optimizer.lr,
-            weight_decay=args.optimizer.weight_decay,
-            adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
-            lr_scheduler_type=args.optimizer.lr_scheduler_type,
-            warmup_proportion=args.optimizer.warmup_steps_proportion,
-            adam_eps=args.optimizer.eps,
-            min_lr_ratio=args.optimizer.min_lr_ratio,
-            zero_stage=args.optimizer.zero_stage,
+    if args.model.parallel.pipeline_parallel_size > 1:
+        logger.warning(
+            "Pipeline parallel is enabled. Please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
 
-        os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
-        with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
-            pickle.dump((exp_name, exp_fn), f)
-        api.config.register_experiment(exp_name, exp_fn)
-    else:
-        raise NotImplementedError()
+    exp_fn = functools.partial(
+        SFTExperiment,
+        seed=args.seed,
+        total_train_epochs=args.train_epochs,
+        model_type=args.model.type,
+        model_path=args.model.path,
+        dp_size=args.model.parallel.data_parallel_size,
+        pp_size=args.model.parallel.pipeline_parallel_size,
+        use_lora=args.model.lora,
+        lora_scaling=args.model.lora_scaling,
+        lora_dim=args.model.lora_dim,
+        enable_fp16=args.model.enable_fp16,
+        gradient_checkpointing=args.model.gradient_checkpointing,
+        max_seqlen=args.dataset.max_seqlen,
+        train_dataset_path=args.dataset.train_path,
+        valid_dataset_path=args.dataset.valid_path,
+        train_tokens_per_batch=args.dataset.train_tokens_per_batch,
+        valid_tokens_per_batch=args.dataset.valid_tokens_per_batch,
+        lr=args.optimizer.lr,
+        weight_decay=args.optimizer.weight_decay,
+        adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
+        lr_scheduler_type=args.optimizer.lr_scheduler_type,
+        warmup_proportion=args.optimizer.warmup_steps_proportion,
+        adam_eps=args.optimizer.eps,
+        min_lr_ratio=args.optimizer.min_lr_ratio,
+        zero_stage=args.optimizer.zero_stage,
+    )
+
+    os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
+    with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
+        pickle.dump((exp_name, exp_fn), f)
+    api.config.register_experiment(exp_name, exp_fn)
 
     slurm_available = int(subprocess.run("squeue", shell=True, stdout=open(os.devnull, "wb")).returncode) == 0
     mode = "slurm" if slurm_available else "local"
@@ -437,6 +449,9 @@ def run_sft(args: SFTConfig):
 
 @hydra.main(version_base=None, config_name="rw")
 def run_rw(args):
+    import base.logging as logging
+
+    logger = logging.getLogger("quickstart", "colored")
     # TODO: implement this
     trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     print(args)
@@ -444,6 +459,9 @@ def run_rw(args):
 
 @hydra.main(version_base=None, config_name="ppo")
 def run_ppo(args):
+    import base.logging as logging
+
+    logger = logging.getLogger("quickstart", "colored")
     # TODO: implement this
     trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     print(args)
@@ -451,6 +469,9 @@ def run_ppo(args):
 
 @hydra.main(version_base=None, config_name="dpo")
 def run_dpo(args):
+    import base.logging as logging
+
+    logger = logging.getLogger("quickstart", "colored")
     # TODO: implement this
     trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     print(args)

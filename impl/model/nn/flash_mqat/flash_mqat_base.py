@@ -559,30 +559,25 @@ class FlashMQATForCausalLM(nn.Module):
         x.pp_input = raw_pp_input
         return x
 
-    def _append_layer_idx_to_state_dict(config: FlashMQATConfig, state_dict: Dict) -> Dict:
-        new_state_dict = {}
+    @staticmethod
+    def map_to_pipe_state_dict(config: FlashMQATConfig, state_dict: Dict):
+        pipe_state_dict = {}
         for k, v in state_dict.items():
-            if k.startswith("transformer.h."):
-                layer_idx = int(k.split(".")[2])
+            if k.startswith("transformer.embedding_layer."):
+                new_k = k.replace("transformer.embedding_layer.", "0.")
+            elif k.startswith("transformer.h."):
+                idx = int(k.split(".")[2])
+                new_k = k.replace(f"transformer.h.{idx}.", f"{idx+1}.")
             elif k.startswith("lm_head"):
-                layer_idx = 1 + config.n_layers
-            elif k.startswith("transformer.embedding_layer"):
-                layer_idx = 0
+                new_k = k.replace("lm_head.", f"{config.n_layers+1}.")
             else:
-                raise NotImplementedError(f"Cannot parse layer index from {k}.")
-            new_state_dict[k + f"#{layer_idx}"] = v
-        return new_state_dict
+                raise ValueError(f"Unexpected key: {k}")
+            pipe_state_dict[new_k] = v
+        return pipe_state_dict
 
-    def _remove_layer_idx_from_state_dict(state_dict: Dict) -> Dict:
-        return {k.split("#")[0]: v for k, v in state_dict.items()}
-
-    def state_dict(self):
-        return FlashMQATForCausalLM._append_layer_idx_to_state_dict(self.config, super().state_dict())
-
-    def load_state_dict(self, state_dict: Mapping[str, Any], *args, **kwargs):
-        return super().load_state_dict(
-            FlashMQATForCausalLM._remove_layer_idx_from_state_dict(state_dict), *args, **kwargs
-        )
+    def pipe_state_dict(self):
+        state_dict = self.state_dict()
+        return FlashMQATForCausalLM.map_to_pipe_state_dict(self.config, state_dict)
 
     def _config_from_hf_template(
         config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
@@ -631,7 +626,6 @@ class FlashMQATForCausalLM(nn.Module):
 
         if not init_from_scratch:
             state_dict = state_dict_converter(state_dict, config)
-            state_dict = FlashMQATForCausalLM._append_layer_idx_to_state_dict(config, state_dict)
 
         return config, state_dict
 

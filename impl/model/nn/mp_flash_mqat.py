@@ -392,7 +392,7 @@ class FlashMQATBlock(nn.Module):
         # Set kv cache during the first forward pass of generation.
         # Do we need an option to disable this?
         # TODO: option to disable this to avoid redundant kvcache store
-        if x.store_kvcache:
+        if x.store_kv_cache:
             if y.k_cache is None:
                 y.k_cache = k.detach()
             if y.v_cache is None:

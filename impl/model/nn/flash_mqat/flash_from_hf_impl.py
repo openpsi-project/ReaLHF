@@ -174,6 +174,10 @@ def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
                 k = k.replace(k1, k2)
             new_state_dict[k] = v
         state_dict = new_state_dict
+    
+    keys_to_pop = [k for k in state_dict.keys() if "rotary_emb.inv_freq" in k]
+    for k in keys_to_pop:
+        state_dict.pop(k)
     return new_state_dict
 
 
