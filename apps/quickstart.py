@@ -394,10 +394,10 @@ def run_sft(args: SFTConfig):
     from apps.main import main_start
 
     if args.model.parallel.pipeline_parallel_size == 1:
-        from experiments.packed_sft_exp import PackedSupervisedFinetuningExperiment
+        from experiments.common.sft_exp import SFTExperiment
 
         exp_fn = functools.partial(
-            PackedSupervisedFinetuningExperiment,
+            SFTExperiment,
             seed=args.seed,
             total_train_epochs=args.train_epochs,
             base_model=args.model.type,

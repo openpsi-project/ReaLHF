@@ -13,7 +13,7 @@ import tqdm
 import transformers
 
 from base.namedarray import from_dict, NamedArray, recursive_aggregate, recursive_apply
-from impl.model.utils.data import gather_shifted_log_probs, get_eos_indices, masked_normalization
+from impl.model.utils.functional import gather_shifted_log_probs, get_eos_indices, masked_normalization
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.save import save_hf_or_lora_model
 import api.huggingface

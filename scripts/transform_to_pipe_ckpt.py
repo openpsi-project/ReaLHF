@@ -11,8 +11,8 @@ import torch.nn as nn
 import transformers
 
 from base.monitor import process_memory_mb
-from impl.model.backend.ds_pipe_engine import LayerSpec
 from impl.model.nn.flash_mqat import *
+from impl.model.utils.pipeline_module import LayerSpec
 
 MODEL_TYPE = "llama"
 FULL_MODEL_DIR = "/home/meizy/models/Llama-2-4l"
