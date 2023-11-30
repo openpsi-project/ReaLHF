@@ -41,4 +41,4 @@ Notes:
 1. Do not set num_pipeline_parallel to 1
 2. In ModelBackend, pipeline parallel does not support `zero_stage > 1`.
 3. PPO experiment example only shows the case when actor model is pipeline paralleled. To support critic model pipeline parallel you need to implement critic interface in [Pipe PPO Interface](../../impl/model/interface/pipe/pipe_ppo_flash_interface.py).
-4. [This issue](https://github.com/garrett4wade/distributed_llm/issues/56) can cause error when training. As a temporarily fix, you can set **(batch size per device / pipeline_stage) > 4** to avoid the issue. 
+4. [This issue](https://github.com/garrett4wade/distributed_llm/issues/56) can cause error when training. Setting **(batch size per device / pipeline_stage) > 4** might fix this issue. 
