@@ -8,8 +8,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
-from impl.model.nn.flash_mqat.flash_mqat_interface import FlashMQATForCausalLM
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATForCausalLM
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import mask_eos_token
 from impl.model.utils.logits_warper import top_k_top_p_logits
@@ -239,7 +238,7 @@ def generate(
                 k_caches[i] = nn.functional.pad(k_caches[i], pad)
             if v_caches[i].shape[1] < max_seq_len:
                 v_caches[i] = nn.functional.pad(v_caches[i], pad)
-        x = PipeTransferData(store_kvcache=torch.tensor(1))
+        x = PipeTransferData(store_kv_cache=torch.tensor(1))
         ys = ([PipeCacheData(cache_seqlens=cache_seqlens)] + [
             PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens)
             for k, v in zip(k_caches, v_caches)

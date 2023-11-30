@@ -177,4 +177,5 @@ def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
     return new_state_dict
 
 
+FlashMQATForCausalLM.register_hf_model("llama", convert_config_llama, convert_state_dict_llama)
 ################################ LLaMa End ################################
