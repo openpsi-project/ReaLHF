@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import os
 
 import deepspeed
@@ -19,7 +19,7 @@ logger = logging.getLogger("pipe_flash_sft")
 
 
 def compute_packed_sft_loss(logits: torch.Tensor, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor,
-                            prompt_mask: torch.Tensor, **kwargs) -> torch.Tensor:
+                            prompt_mask: torch.Tensor, **kwargs) -> Tuple[torch.Tensor, Dict]:
     loss_mask = 1 - prompt_mask.float()
     logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
     shift_one_indices = torch.cat([

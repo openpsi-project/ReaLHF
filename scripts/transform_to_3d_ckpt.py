@@ -329,9 +329,9 @@ def save_state_dict(state_dict, stage_index, shard_index, model_dir):
         torch.save(
             state_dict_of_rank,
             os.path.join(model_dir,
-                         f"pytorch_model-pp-{stage_index:02d}-tp-{tp_rank:02d}-s-{shard_index:02d}.bin"))
+                         f"pytorch_model-pp-{stage_index:02d}-mp-{tp_rank:02d}-s-{shard_index:02d}.bin"))
         print(f"saved {state_dict.keys()} to "
-              f"{model_dir}/pytorch_model-pp-{stage_index:02d}-tp-{tp_rank:02d}-s-{shard_index:02d}.bin")
+              f"{model_dir}/pytorch_model-pp-{stage_index:02d}-mp-{tp_rank:02d}-s-{shard_index:02d}.bin")
 
 
 def copy_configs(src_model_dir, dst_model_dir):

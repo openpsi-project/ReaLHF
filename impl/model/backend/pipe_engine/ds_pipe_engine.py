@@ -19,8 +19,7 @@ from base.monitor import time_mark
 from base.namedarray import NamedArray
 from base.topology import PipelineParallelGrid
 from impl.model.nn.flash_mqat import GenerationConfig, genstep
-from impl.model.utils.data import (data_list_to_tensor_tuple, DuckGenerationOutput, DuckModelOutput,
-                                   PipeCacheData, PipeTransferData, tensor_tuple_to_data_list)
+from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.pipeline_module import PipelineError, PipelineModule
 from impl.model.utils.tensor_storage import recv_grad, send_grad, TensorBuffer
 import base.constants
@@ -109,7 +108,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.kv_cache_reserved = []
 
         # optimizer lr scheduler variables
-        self.version_steps = 0
+        self.version_steps = None
 
         self._post_init_logging()
 
@@ -168,6 +167,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             bool: whether reductions and optimizer steps should occur.
         """
         return self._force_grad_boundary
+
+    def gradient_checkpointing_enable(self):
+        self.module.gradient_checkpointing_enable()
 
     def _prepare_input(self,
                        packed_input_ids: torch.Tensor,
@@ -399,9 +401,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     @torch.no_grad()
     def generate(
         self,
-        tokenizer: transformers.PreTrainedTokenizerFast,
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
+        tokenizer: transformers.PreTrainedTokenizerFast,
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
         self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=True)
@@ -733,9 +735,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def _exec_optimizer_step(self, stage_id: int, micro_batch_id: int, step_id: int):
         self._force_grad_boundary = True
-        # self._take_model_step(lr_kwargs={'epoch': self.version_steps})
-        # super().step(lr_kwargs={'epoch': self.version_steps})
-        super().step()
+        lr_kwargs = None
+        if self.version_steps is not None:
+            lr_kwargs = {'epoch': self.version_steps}
+        self._take_model_step(lr_kwargs=lr_kwargs)
         self._force_grad_boundary = False
 
     def _zero_grads(self, inputs):

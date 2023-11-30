@@ -155,7 +155,7 @@ class ModelWorker(worker_base.Worker):
             raise e
 
         if self.is_master:
-            logging.getLogger("benchmark").debug(
+            logging.getLogger("benchmark").info(
                 f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
                 f" in ${time.perf_counter() - tik:.4f}$s")
 
