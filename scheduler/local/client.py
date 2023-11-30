@@ -24,6 +24,7 @@ def terminate_process_and_children(pid: int):
 
 
 class LocalSchedulerClient(SchedulerClient):
+    # TODO: log to file
     """Instead of talking to the scheduler server (the typical behaviour), this client starts jobs directly
     on the local host and keeps a collection of job processes.
     """

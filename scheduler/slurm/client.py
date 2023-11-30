@@ -6,6 +6,7 @@ import subprocess
 import time
 
 from base.cluster import spec as cluster_spec
+from base.constants import SLURM_LOCK_FILE_NAME as LOCK_FILE_NAME
 from scheduler.client import JobException, JobInfo, JobState, SchedulerClient
 from scheduler.slurm.utils import (allocate_resources, SlurmLaunchInfo, SlurmResource,
                                    SlurmResourceNotEnoughException)
@@ -15,7 +16,6 @@ logger = logging.getLogger("Slurm-scheduler")
 
 SCHEDULING_RETRY_INTERVAL_SECONDS = 30
 SCHEDULING_TIMEOUT_MAX_SECONDS = 3600 * 24
-LOCK_FILE_NAME = f"{cluster_spec.fileroot}/logs/slurm_scheduler.lock"
 
 
 class SlurmSchedulerClient(SchedulerClient):

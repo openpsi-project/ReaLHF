@@ -1,3 +1,4 @@
+import dataclasses
 import functools
 import math
 import random
@@ -15,52 +16,42 @@ sft = ModelRPC(
 )
 
 
+@dataclasses.dataclass
 class PackedSupervisedFinetuningExperiment(Experiment):
+    seed: int = 1
+    total_train_epochs: int = 1
+    # model
+    base_model: str = "gpt2"
+    dp_size: int = 16
+    use_lora: bool = False
+    lora_scaling: float = 32.0
+    lora_dim: int = 32
+    enable_fp16: bool = True
+    gradient_checkpointing: bool = True
+    # dataset
+    max_seqlen: int = 1024
+    train_tokens_per_batch: int = 16384
+    valid_tokens_per_batch: int = 16384
+    train_dataset_path: str = "/lustre/meizy/data/wps-formula/train.json"
+    valid_dataset_path: str = "/lustre/meizy/data/wps-formula/valid.json"
+    # optimizer
+    lr: float = 2.5e-4
+    weight_decay: float = 0.05
+    adam_betas: tuple = (0.9, 0.95)
+    lr_scheduler_type: str = "cosine"
+    warmup_proportion: float = 0.02
+    adam_eps: float = 1e-5
+    min_lr_ratio: float = 0.0
+    zero_stage: int = 2
 
-    def __init__(
-        self,
-        dp_size=16,
-        seed=1,
-        total_train_epochs=8,
-        base_model="gpt2",
-        train_dataset_path="/lustre/meizy/data/wps-formula/train.json",
-        valid_dataset_path="/lustre/meizy/data/wps-formula/valid.json",
-        train_tokens_per_batch: int = 16384,
-        eval_tokens_per_batch: int = 16384,
-        use_lora: bool = False,
-        benchmark_only=False,
-    ):
-        self.use_lora = use_lora
-        self.weight_decay = 0.05
-        self.lr = 2.5e-4 if use_lora else 1e-5
-        self.lora_scaling = 32.0
-        self.lora_dim = 32
-        self.adam_betas = (0.9, 0.95)
-        self.lr_scheduler_type = "cosine"
-        self.warmup_proportion = 0.02
-
-        self.dp_size = dp_size
-        self.n_data_workers = 1
-        self.seed = seed
-
-        self.total_train_epochs = total_train_epochs
-        self.benchmark_only = benchmark_only
-        self.base_model = base_model
-        self.train_dataset_path = train_dataset_path
-        self.valid_dataset_path = valid_dataset_path
-
-        self.train_tokens_per_batch = train_tokens_per_batch
-        self.eval_tokens_per_batch = eval_tokens_per_batch
-
-        if self.benchmark_only:
-            self.dp_size = self.n_data_workers = 1
-            self.total_train_epochs = 1
-            self.base_model = "starcoder"
+    def __post_init__(self):
+        if self.base_model == "gpt2" and self.max_seqlen > 1024:
+            raise ValueError("GPT2 only supports max seqlen of 1024")
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
             data_worker=TasksGroup(
-                count=self.n_data_workers,
+                count=1,
                 scheduling=Scheduling.data_worker_default(
                     cpu=2,
                     mem=10000,
@@ -82,24 +73,20 @@ class PackedSupervisedFinetuningExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        if not self.benchmark_only:
-            if self.base_model == "starcoder":
-                model_path = "/data/aigc/public/starcoder-16bit"
-            elif self.base_model == "gpt2":
-                model_path = "/lustre/fw/pretrained/gpt2-large/"
-            elif self.base_model == "llama":
-                model_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
-            else:
-                raise NotImplementedError()
+        if self.base_model == "starcoder":
+            model_path = "/data/aigc/public/starcoder-16bit"
+        elif self.base_model == "gpt2":
+            model_path = "/lustre/fw/pretrained/gpt2-large/"
+        elif self.base_model == "llama":
+            model_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
         else:
-            model_path = "/data/aigc/llm/checkpoints/1l-starcoder"
-        max_seq_len = 1024
+            raise NotImplementedError()
 
         dataset = Dataset(
             "packed_prompt_answer",
             args=dict(
-                n_tokens_per_batch=self.train_tokens_per_batch // self.n_data_workers,
-                max_length=max_seq_len,
+                n_tokens_per_batch=self.train_tokens_per_batch,
+                max_length=self.max_seqlen,
                 dataset_path=self.train_dataset_path,
             ),
         )
@@ -110,12 +97,12 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                 datasets=[dataset],
                 dataloader=dataloader,
                 seed=self.seed,
-            ) for i in range(self.n_data_workers)
+            )
         ]
 
         eval_dataset = copy.deepcopy(dataset)
         eval_dataset.args["dataset_path"] = self.valid_dataset_path
-        eval_dataset.args["n_tokens_per_batch"] = self.eval_tokens_per_batch // self.n_data_workers
+        eval_dataset.args["n_tokens_per_batch"] = self.valid_tokens_per_batch
 
         backend = ModelBackend(
             "ds_train",
@@ -124,15 +111,15 @@ class PackedSupervisedFinetuningExperiment(Experiment):
                 optimizer_config=dict(
                     lr=self.lr,
                     weight_decay=self.weight_decay,
-                    eps=1e-5,
+                    eps=self.adam_eps,
                     betas=self.adam_betas,
                 ),
                 lr_scheduler_type=self.lr_scheduler_type,
                 warmup_steps_proportion=self.warmup_proportion,
-                min_lr_ratio=0.0,
-                zero_stage=2,
-                enable_fp16=True,
-                gradient_checkpointing=True,
+                min_lr_ratio=self.min_lr_ratio,
+                zero_stage=self.zero_stage,
+                enable_fp16=self.enable_fp16,
+                gradient_checkpointing=self.gradient_checkpointing,
             ),
         )
 
@@ -210,5 +197,3 @@ for s in seeds:
             use_lora=False,
         ),
     )
-register_experiment("wpsf-sft-flash-benchmark",
-                    functools.partial(PackedSupervisedFinetuningExperiment, benchmark_only=True))

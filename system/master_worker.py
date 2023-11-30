@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 from base.cluster import spec as cluster_spec
+from base.constants import MODEL_SAVE_ROOT
 import api.config as config_pkg
 import api.data as data_api
 import api.dfg
@@ -139,7 +140,6 @@ async def model_rpc_func(
 
 
 class MasterWorker(worker_base.Worker):
-    MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
     os.makedirs(MODEL_SAVE_ROOT, exist_ok=True)
 
     def __init__(self, server=None):
@@ -187,7 +187,7 @@ class MasterWorker(worker_base.Worker):
             frequency_steps=config.eval_frequency_epochs)
 
         self.MODEL_SAVE_ROOT = os.path.join(
-            self.MODEL_SAVE_ROOT,
+            MODEL_SAVE_ROOT,
             config.worker_info.experiment_name,
             config.worker_info.trial_name,
         )
