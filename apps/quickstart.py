@@ -14,12 +14,10 @@ from omegaconf import MISSING
 import hydra
 
 from base.cluster import spec as cluster_spec
-from base.constants import QUICKSTART_EXPR_CACHE_PATH, LOG_ROOT, MODEL_SAVE_ROOT
+from base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
 import api.config
 
-
 SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "saved"]
-
 
 cs = ConfigStore.instance()
 
@@ -308,26 +306,22 @@ class PPOConfig:
     ref: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     rew: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
-    actor_optimizer: OptimizerConfig = dataclasses.field(
-        default_factory=functools.partial(
-            OptimizerConfig,
-            lr=9.65e-6,
-            weight_decay=0.0,
-            eps=1e-5,
-            lr_scheduler_type="linear",
-            warmup_steps_proportion=0.075,
-        )
-    )
-    critic_optimizer: OptimizerConfig = dataclasses.field(
-        default_factory=functools.partial(
-            OptimizerConfig,
-            lr=5e-6,
-            weight_decay=0.0,
-            eps=1e-5,
-            lr_scheduler_type="linear",
-            warmup_steps_proportion=0.075,
-        )
-    )
+    actor_optimizer: OptimizerConfig = dataclasses.field(default_factory=functools.partial(
+        OptimizerConfig,
+        lr=9.65e-6,
+        weight_decay=0.0,
+        eps=1e-5,
+        lr_scheduler_type="linear",
+        warmup_steps_proportion=0.075,
+    ))
+    critic_optimizer: OptimizerConfig = dataclasses.field(default_factory=functools.partial(
+        OptimizerConfig,
+        lr=5e-6,
+        weight_decay=0.0,
+        eps=1e-5,
+        lr_scheduler_type="linear",
+        warmup_steps_proportion=0.075,
+    ))
     max_new_tokens: int = 512
     min_new_tokens: int = 10
     greedy: bool = False
@@ -403,8 +397,8 @@ def run_sft(args: SFTConfig):
 
     exp_name = args.experiment_name
     trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
-    from experiments.common.sft_exp import SFTExperiment
     from apps.main import main_start
+    from experiments.common.sft_exp import SFTExperiment
 
     logger.info("Running supervised-finetuning experiment.")
     logger.info("Logs will be dumped to %s", os.path.join(LOG_ROOT, exp_name, trial_name))
@@ -464,8 +458,8 @@ def run_rw(args: RWConfig):
     logger = logging.getLogger("quickstart")
     exp_name = args.experiment_name
     trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
-    from experiments.common.rw_exp import PairedRWExperiment
     from apps.main import main_start
+    from experiments.common.rw_exp import PairedRWExperiment
 
     logger.info("Running paired comparison reward modeling experiment.")
     logger.info("Logs will be dumped to %s", os.path.join(LOG_ROOT, exp_name, trial_name))

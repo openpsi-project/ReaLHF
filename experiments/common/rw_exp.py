@@ -1,7 +1,7 @@
+import dataclasses
 import functools
 import math
 import random
-import dataclasses
 
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
@@ -60,7 +60,7 @@ class PairedRWExperiment(Experiment):
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
         if self.is_sft_lora and (self.sft_lora_path is None or self.base_model_type is None):
             raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
-        # FIXME: 
+        # FIXME:
         if self.pp_size > 1:
             raise NotImplementedError()
 
@@ -181,8 +181,7 @@ class PairedRWExperiment(Experiment):
                         ),
                         lora_keys_to_replace=["c_attn.linear", "c_proj."],
                     ),
-                )
-            )
+                ))
 
         if self.pp_size == 1:
             interface = ModelInterface("flash_paired_rw")

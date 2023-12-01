@@ -87,6 +87,7 @@ class FrequencyControl:
     def reset_time(self):
         self.__last_time = time.monotonic()
 
+
 @dataclasses.dataclass
 class EpochStepTimeFreqCtl:
     freq_epoch: int
@@ -97,10 +98,11 @@ class EpochStepTimeFreqCtl:
         self.epoch_ctl = FrequencyControl(frequency_steps=self.freq_epoch)
         self.step_ctl = FrequencyControl(frequency_steps=self.freq_step)
         self.time_ctl = FrequencyControl(frequency_seconds=self.freq_sec)
-    
-    def check(self, epochs:int, steps:int):
+
+    def check(self, epochs: int, steps: int):
         x, y, z = self.epoch_ctl.check(epochs), self.step_ctl.check(steps), self.time_ctl.check()
         return x or y or z
+
 
 class PrometheusSummaryObserve:
 

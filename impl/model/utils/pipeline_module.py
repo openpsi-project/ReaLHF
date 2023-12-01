@@ -573,7 +573,7 @@ class PipelineModule(nn.Module):
             tp_stage = int(file.split("-")[4])
             if pp_stage == self.stage_id and tp_stage == self._grid.get_model_parallel_rank():
                 fn_to_load.append(file)
-        
+
         state_dict = {}
         for fn in fn_to_load:
             state_dict.update(torch.load(os.path.join(load_dir, fn)))

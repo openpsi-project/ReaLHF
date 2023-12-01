@@ -228,8 +228,8 @@ class PipeFlashMQATTest(unittest.TestCase):
     def init_baseline_model(self):
         import transformers
 
-        from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM
         from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+        from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM
         import api.huggingface
 
         self.device = device = 'cuda'

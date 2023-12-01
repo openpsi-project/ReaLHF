@@ -1,6 +1,5 @@
-import os
 import argparse
-
+import os
 import shutil
 
 from deepspeed.runtime import utils as ds_utils
@@ -178,9 +177,8 @@ def main():
         output_dir = args.output_dir
 
     # TODO: load and process full statedict by shard for large model that can not fit into memory
-    cfg, state_dict = getattr(FlashMQATForCausalLM, f"config_and_param_from_{args.model_type}")(
-        model_path=args.model_dir
-    )
+    cfg, state_dict = getattr(FlashMQATForCausalLM,
+                              f"config_and_param_from_{args.model_type}")(model_path=args.model_dir)
     layer_specs = get_layer_specs(cfg)
     state_dict = FlashMQATForCausalLM.map_to_pipe_state_dict(cfg, state_dict)
     print("loaded full state_dict")

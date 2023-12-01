@@ -172,8 +172,12 @@ class MasterWorker(worker_base.Worker):
 
         # Save and eval control.
         self.__total_train_epochs = config.total_train_epochs
-        self.__save_ctl = base.timeutil.EpochStepTimeFreqCtl(freq_epoch=config.save_frequency_epochs,freq_step=config.save_frequency_steps,freq_sec=config.save_frequency_seconds)
-        self.__eval_ctl = base.timeutil.EpochStepTimeFreqCtl(freq_epoch=config.eval_frequency_epochs,freq_step=config.eval_frequency_steps,freq_sec=config.eval_frequency_seconds)
+        self.__save_ctl = base.timeutil.EpochStepTimeFreqCtl(freq_epoch=config.save_frequency_epochs,
+                                                             freq_step=config.save_frequency_steps,
+                                                             freq_sec=config.save_frequency_seconds)
+        self.__eval_ctl = base.timeutil.EpochStepTimeFreqCtl(freq_epoch=config.eval_frequency_epochs,
+                                                             freq_step=config.eval_frequency_steps,
+                                                             freq_sec=config.eval_frequency_seconds)
 
         self.MODEL_SAVE_ROOT = os.path.join(
             MODEL_SAVE_ROOT,
