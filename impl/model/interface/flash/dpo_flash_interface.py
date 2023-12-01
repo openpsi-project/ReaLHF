@@ -8,7 +8,7 @@ import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.utils.functional import gather_packed_shifted_log_probs
-from impl.model.utils.save import save_hf_or_lora_model
+from impl.model.utils.save_load import save_hf_or_lora_model
 import api.model
 import base.logging as logging
 import impl.model.utils.dpo_functional as dpo_functional
@@ -106,7 +106,6 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
                     f"epoch{model.version.epoch}step{model.version.epoch_step}",
                 ))
             os.makedirs(save_path, exist_ok=True)
-            torch.save(model.module.module.head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
 
 
 api.model.register_interface("flash_dpo", PackedDirectPerferenceOptimizationInterface)

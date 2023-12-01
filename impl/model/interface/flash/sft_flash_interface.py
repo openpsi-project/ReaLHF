@@ -7,7 +7,7 @@ import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.utils.functional import gather_packed_shifted_log_probs
-from impl.model.utils.save import save_hf_or_lora_model
+from impl.model.utils.save_load import save_hf_or_lora_model
 import api.data
 import api.model
 

@@ -13,6 +13,7 @@ from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import torch_attn_func
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
 import base.logging as logging
+from impl.model.utils.save_load import load_from_disk
 
 try:
     from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
@@ -599,25 +600,15 @@ class FlashMQATForCausalLM(nn.Module):
         if model_path is not None:
             if init_from_scratch:
                 state_dict = None
-            elif os.path.exists(os.path.join(model_path, "DLLM_pytorch_model.bin")):
-                # HACK: for HF models with tied weights, we use DLLM_pytorch_model.bin instead of pytorch_model.bin
-                # for the full state dict.
-                state_dict = torch.load(os.path.join(model_path, "DLLM_pytorch_model.bin"), map_location="cpu")
-            elif os.path.exists(os.path.join(model_path, "pytorch_model.bin")):
-                state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"), map_location="cpu")
-            elif os.path.exists(os.path.join(model_path, "pytorch_model.bin.index.json")):
-                with open(os.path.join(model_path, "pytorch_model.bin.index.json"), "r") as f:
-                    weight_map = json.load(f)["weight_map"]
-                state_dict = {}
-                for filename in list(set(list(weight_map.values()))):
-                    assert os.path.exists(os.path.join(model_path, filename))
-                    state_dict.update(torch.load(os.path.join(model_path, filename), map_location="cpu"))
             else:
-                logger.critical(
-                    "Neither pytorch_model.bin or pytorch_model.bin.index.json are found in path, "
-                    "using huggingface model initialization. "
+                try:
+                    state_dict = load_from_disk(model_path)
+                except Exception as e:
+                    logger.critical(f"Failed to load state dict from {model_path}: {e}")
+                    logger.critical(
+                    "Degenerate to using huggingface model initialization. "
                     "This will probably cause (CPU) OOM.")
-                state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
+                    state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
         else:
             assert from_model is not None
             state_dict = from_model.state_dict() if not init_from_scratch else None
@@ -696,7 +687,7 @@ class FlashMQATForCausalLM(nn.Module):
     ):
         with open(os.path.join(model_path, "config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
-        state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
+        state_dict = load_from_disk(model_path)
         model = cls(config, dtype, device)
         model.load_state_dict(state_dict)
         return model

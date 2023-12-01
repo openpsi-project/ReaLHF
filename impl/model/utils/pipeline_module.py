@@ -16,7 +16,7 @@ from deepspeed.runtime.activation_checkpointing import checkpointing
 from deepspeed.runtime.state_dict_factory import SDLoaderFactory
 import torch
 import torch.nn as nn
-
+from impl.model.utils.save_load import load_from_disk, save_to_disk
 from base.monitor import process_memory_mb, time_mark
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid
 from impl.model.utils.data import PipeCacheData, PipeTransferData
@@ -550,43 +550,11 @@ class PipelineModule(nn.Module):
         if dp_rank > 0:  # only save on dp_rank = 0
             return
 
-        keys = list(self.state_dict().keys())
-        # if len(keys) < n_shards:
-        #     raise ValueError(f"state_dict has {len(keys)} keys, but n_shards={n_shards}")
-
-        shard_size = len(keys) // self.num_checkpoint_shards
-        extra = len(keys) % self.num_checkpoint_shards
-        shard_size_list = [shard_size for _ in range(self.num_checkpoint_shards)]
-        shard_size_list[-1] = shard_size + extra
-        start, shards = 0, []
-        for i, size in enumerate(shard_size_list):
-            shard = {}
-            for j in range(start, start + size):
-                shard[keys[j]] = self.state_dict()[keys[j]]
-                # print(f"shard {i} key {keys[j]}")
-            start += size
-            tp_rank = self._grid.get_model_parallel_rank()
-            save_fn = f"pytorch_model-pp-{self.stage_id:02d}-mp-{tp_rank:02d}-s-{i:02d}.bin"
-            save_abs_fn = os.path.join(save_dir, save_fn)
-            torch.save(shard, save_abs_fn)
+        tp_rank = self._grid.get_model_parallel_rank()
+        save_to_disk(self.state_dict(), save_dir, output_fn=f"pytorch_model-pp-{self.stage_id:02d}-mp-{tp_rank:02d}-s-" + "{shard:02d}.bin", save_type="pt", n_shards=self.num_checkpoint_shards)
 
     def load(self, load_dir):
-        n_shards = 0
-        fn_to_load = []
-        for file in filter(lambda x: x.endswith(".bin"), os.listdir(load_dir)):
-            # filename format should be:
-            # pytorch_model-pp-{pp_index:02d}-tp-{tp_index:02d}-s-{shard_index:02d}
-            pp_stage = int(file.split("-")[2])
-            tp_stage = int(file.split("-")[4])
-            if pp_stage == self.stage_id and tp_stage == self._grid.get_model_parallel_rank():
-                fn_to_load.append(file)
-
-        state_dict = {}
-        for fn in fn_to_load:
-            state_dict.update(torch.load(os.path.join(load_dir, fn)))
-            logger.info(f"loaded shard {fn}")
-            n_shards += 1
-            process_memory_mb(f"after_load_shard_{n_shards}")
+        state_dict, n_shards = load_from_disk(load_dir, fn_pattern=r".*" + f"-pp-{self.stage_id:02d}-mp-{self._grid.get_model_parallel_rank():02d}-" + r"s-(\d{2}).*", return_n_shards=True)
         self.load_state_dict(state_dict)
 
         self.num_checkpoint_shards = n_shards

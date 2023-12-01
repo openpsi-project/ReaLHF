@@ -16,6 +16,7 @@ from impl.model.utils.data import DuckGenerationOutput, DuckModelOutput, PipeCac
 import api.huggingface
 import api.model
 import base.logging as logging
+from impl.model.utils.save_load import load_from_disk
 
 try:
     from flash_attn.bert_padding import pad_input, unpad_input
@@ -101,7 +102,7 @@ class HuggingfaceLikeFlashMQATForCausalLM(nn.Module):
     ):
         with open(os.path.join(model_path, "config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
-        state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
+        state_dict = load_from_disk(model_path)
         net = FlashMQATForCausalLM(config, dtype, device)
         model = cls(net)
         model.load_state_dict(state_dict)
@@ -209,7 +210,7 @@ class DeepSpeedChatLikeFlashMQATCriticModel(nn.Module):
     ):
         with open(os.path.join(model_path, "config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
-        state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
+        state_dict = load_from_disk(model_path)
         net = FlashMQATBase(config, dtype, device)
         model = cls(net, output_bias=output_bias, output_scaling=output_scaling)
         model.load_state_dict(state_dict)

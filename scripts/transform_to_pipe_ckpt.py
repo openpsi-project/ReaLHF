@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from impl.model.nn.flash_mqat.flash_mqat_base import *
 from impl.model.utils.pipeline_module import LayerSpec
+from impl.model.utils.save_load import save_to_disk
 
 MODEL_CONFIG_FILES = [
     "config.json",
@@ -117,12 +118,10 @@ def split_state_dict_by_stage(state_dict, stage_to_layer_idx):
 
 def save_state_dict(state_dict, stage_index, shard_index, model_dir):
     os.makedirs(model_dir, exist_ok=True)
-    torch.save(
-        state_dict,
-        os.path.join(model_dir, f"pytorch_model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.bin"),
-    )
+    output_fn = f"model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.safetensors"
+    save_to_disk(state_dict, model_dir, output_fn=output_fn, save_type="st", n_shards=1, no_shard_suffix=True)
     print(
-        f"saved {state_dict.keys()} to {model_dir}/pytorch_model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.bin"
+        f"saved {state_dict.keys()} to {model_dir}/model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.safetensors"
     )
 
 

@@ -26,7 +26,7 @@ WORKER_TYPE = "model_worker"
 NUM_PP = 4
 NUM_DP = 1
 WORLD_SIZE = NUM_PP * NUM_DP
-MODEL_TYPE = "gpt2"
+MODEL_TYPE = "llama"
 if MODEL_TYPE == "llama":
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/testOnly/llama-2-4l"
     PIPELINE_MODEL_PATH = F"/lustre/public/pretrained_model_weights/testOnly/llama-2-4l_4pp_3s"
@@ -164,6 +164,14 @@ def init_handles(rank):
     backend.initialize(model, ft_spec)
 
     return device, model, backend, interface
+
+def pipe_load_save(rank):
+    device, model, backend, interface = init_handles(rank)
+    os.makedirs("/tmp/pipe_mqat_test", exist_ok=True)
+    model.module.save("/tmp/pipe_mqat_test")
+    print("pipeline module save successful")
+    model.module.load("/tmp/pipe_mqat_test")
+    print("pipeline module load successful")
 
 
 def init_data(rank, model, device, seed):
@@ -347,6 +355,16 @@ class PipeFlashMQATTest(unittest.TestCase):
         #     )
         #     raise e
 
+    def testSaveLoad(self):
+        clear_name_resolve()
+        self.pipe_model_processes = [
+            mp.Process(target=pipe_load_save, args=(i, ))
+            for i in range(WORLD_SIZE)
+        ]
+        for p in self.pipe_model_processes:
+            p.start()
+        for p in self.pipe_model_processes:
+            p.join()
     @torch.no_grad()
     def testGenerate(self):
         clear_name_resolve()
