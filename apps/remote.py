@@ -1,17 +1,18 @@
 import argparse
 import multiprocessing
 import os
+import pickle
 import re
 import socket
 import subprocess
 
 import torch
 
-import base.logging as logging
-
 multiprocessing.set_start_method("spawn", force=True)
 
+from base.constants import QUICKSTART_EXPR_CACHE_PATH
 import base.gpu_utils
+import base.logging as logging
 import base.name_resolve
 import base.names
 
@@ -103,6 +104,10 @@ def main_controller(args):
     import api.config
     import experiments
     import system
+    if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
+        with open(QUICKSTART_EXPR_CACHE_PATH, 'rb') as f:
+            api.config.register_experiment(*pickle.load(f))
+        os.system(f"rm -rf {QUICKSTART_EXPR_CACHE_PATH}")
     logger.info("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
     if args.type == 'ray':

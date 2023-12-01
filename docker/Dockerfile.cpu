@@ -18,6 +18,7 @@ RUN pip3 install -U ray[default,serve,data] -i https://pypi.tuna.tsinghua.edu.cn
 RUN pip3 install -U transformers huggingface_hub datasets accelerate bitsandbytes -i https://pypi.tuna.tsinghua.edu.cn/simple
 RUN pip3 install -U deepspeed -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy h5py ninja packaging tensorboardx sentencepiece numba viztracer[full] pyzmq -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip3 install -U blosc cmake prometheus_client wandb redis scipy h5py ninja packaging tensorboardx \
+    sentencepiece numba viztracer[full] pyzmq hydra-core -i https://pypi.tuna.tsinghua.edu.cn/simple
 RUN pip3 install colorlog colorama -i https://pypi.tuna.tsinghua.edu.cn/simple
 

@@ -8,9 +8,10 @@ except ModuleNotFoundError:
 import torch
 import transformers
 
-from impl.model.nn.flash_mqat import (FlashMQATForCausalLM, generate, GenerationConfig, PipeCacheData,
-                                      PipeTransferData, vanilla_cpu_generate, vanilla_packed_generate)
-from impl.model.utils.data import gather_shifted_log_probs
+from impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig, vanilla_cpu_generate,
+                                                     vanilla_packed_generate)
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM, PipeCacheData, PipeTransferData
+from impl.model.utils.functional import gather_shifted_log_probs
 import api.huggingface
 
 

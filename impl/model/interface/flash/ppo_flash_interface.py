@@ -10,12 +10,13 @@ import transformers
 
 from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import from_dict, NamedArray, recursive_apply
-from impl.model.utils.data import gather_packed_shifted_log_probs
+from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+from impl.model.nn.flash_mqat.flash_mqat_interface import HuggingfaceLikeFlashMQATForCausalLM
+from impl.model.utils.functional import gather_packed_shifted_log_probs
 from impl.model.utils.save import save_hf_or_lora_model
 import api.huggingface
 import api.model
 import base.logging as logging
-import impl.model.nn.flash_mqat as flash_mqat
 import impl.model.utils.ppo_functional as ppo_functional
 
 logger = logging.getLogger("PackedPPOInterface")
@@ -69,18 +70,18 @@ class PackedActorInterface(api.model.ModelInterface):
             module = module.module
 
         module.eval()
-        assert isinstance(module, flash_mqat.HuggingfaceLikeFlashMQATForCausalLM)
+        assert isinstance(module, HuggingfaceLikeFlashMQATForCausalLM)
 
         data = recursive_apply(data, lambda x: x.to(model.device))
         prompts: torch.LongTensor = data['prompts']
         prompt_att_mask: torch.BoolTensor = data['prompt_att_mask']
         bs, prompt_max_len = prompts.shape[:2]
-        gen_tokens, logprobs, logits_mask, _, _ = flash_mqat.generate(
+        gen_tokens, logprobs, logits_mask, _, _ = generate(
             model=module.net,
             tokenizer=model.tokenizer,
             input_ids=prompts,
             attention_mask=prompt_att_mask,
-            gconfig=flash_mqat.GenerationConfig(**self.generation_config),
+            gconfig=GenerationConfig(**self.generation_config),
         )
 
         pad_token_id = model.tokenizer.pad_token_id

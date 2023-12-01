@@ -570,45 +570,24 @@ class PipelineModule(nn.Module):
             save_abs_fn = os.path.join(save_dir, save_fn)
             torch.save(shard, save_abs_fn)
 
-    def load(self, load_dir, from_full_ckpt=False):
-        # TODO: support loading from shards
+    def load(self, load_dir):
         n_shards = 0
-        if not from_full_ckpt:
-            fn_to_load = []
-            for file in os.listdir(load_dir):
-                if file.endswith(".bin"):
-                    # filename format should be:
-                    # pytorch_model-pp-{pp_index:02d}-mp-{tp_index:02d}-s-{shard_index:02d}
-                    pp_stage = int(file.split("-")[2])
-                    if pp_stage == self.stage_id:
-                        fn_to_load.append(file)
-                    if self._grid.get_model_parallel_world_size() > 1:
-                        tp_stage = int(file.split("-")[4])
-                        if tp_stage == self._grid.get_model_parallel_rank():
-                            fn_to_load.append(file)
-            for fn in fn_to_load:
-                shard = torch.load(os.path.join(load_dir, fn))
-                self.load_state_dict(shard, strict=False)
-                logger.info(f"loaded shard {fn}")
-                n_shards += 1
-                process_memory_mb(f"after_load_shard_{n_shards}")
-        else:
-            assert self._grid.get_model_parallel_world_size() == 1
-            single_file_path = os.path.join(load_dir, "pytorch_model.bin")
-            if os.path.exists(single_file_path):
-                shard = torch.load(single_file_path)
-                self.load_state_dict(shard, strict=True)
-                logger.info(f"loaded shard pytorch_model.bin")
-                n_shards += 1
-                process_memory_mb(f"after_load_shard_{n_shards}")
-            else:
-                for file in os.listdir(load_dir):
-                    if file.endswith(".bin"):
-                        shard = torch.load(os.path.join(load_dir, file))
-                        self.load_state_dict(shard, strict=False)
-                        logger.info(f"loaded shard {file}")
-                        n_shards += 1
-                    process_memory_mb(f"after_load_shard_{n_shards}")
+        fn_to_load = []
+        for file in filter(lambda x: x.endswith(".bin"), os.listdir(load_dir)):
+            # filename format should be:
+            # pytorch_model-pp-{pp_index:02d}-tp-{tp_index:02d}-s-{shard_index:02d}
+            pp_stage = int(file.split("-")[2])
+            tp_stage = int(file.split("-")[4])
+            if pp_stage == self.stage_id and tp_stage == self._grid.get_model_parallel_rank():
+                fn_to_load.append(file)
+
+        state_dict = {}
+        for fn in fn_to_load:
+            state_dict.update(torch.load(os.path.join(load_dir, fn)))
+            logger.info(f"loaded shard {fn}")
+            n_shards += 1
+            process_memory_mb(f"after_load_shard_{n_shards}")
+        self.load_state_dict(state_dict)
 
         self.num_checkpoint_shards = n_shards
         logger.info("Loaded model from {}".format(load_dir))

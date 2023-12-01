@@ -10,7 +10,7 @@ import shutil
 import socket
 import subprocess
 
-from base.cluster import spec as cluster_spec
+from base.constants import LOG_ROOT
 from scheduler.client import JobException, JobInfo, JobState
 import base.cluster
 import base.logging as logging
@@ -41,7 +41,6 @@ STATUS_MAPPING = {
     "DEADLINE": JobState.COMPLETED,
     "TIMEOUT": JobState.COMPLETED
 }
-LOG_BASE_PATH = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}"
 
 
 class SlurmResourceNotEnoughException(Exception):
@@ -244,17 +243,17 @@ class SlurmLaunchInfo:
 
     @property
     def log_path(self) -> str:
-        return os.path.join(LOG_BASE_PATH, self.exper_name, self.trial_name,
+        return os.path.join(LOG_ROOT, self.exper_name, self.trial_name,
                             f"{self.worker_type}-{self.worker_submission_idx}")
 
     @property
     def multiprog_path(self) -> str:
-        return os.path.join(LOG_BASE_PATH, self.exper_name, self.trial_name,
+        return os.path.join(LOG_ROOT, self.exper_name, self.trial_name,
                             f"{self.worker_type}-{self.worker_submission_idx}.multiprog")
 
     @property
     def hostfile_path(self) -> str:
-        return os.path.join(LOG_BASE_PATH, self.exper_name, self.trial_name,
+        return os.path.join(LOG_ROOT, self.exper_name, self.trial_name,
                             f"{self.worker_type}-{self.worker_submission_idx}.hostfile")
 
     def show_log(self):

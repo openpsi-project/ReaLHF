@@ -9,9 +9,10 @@ import torch.distributed as dist
 import transformers
 
 from base.namedarray import NamedArray, recursive_apply
+from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
+from impl.model.nn.flash_mqat.flash_mqat_interface import HuggingfaceLikeFlashMQATForCausalLM
 import api.huggingface
 import api.model
-import impl.model.nn.flash_mqat as flash_mqat
 
 
 @dataclasses.dataclass
@@ -24,7 +25,7 @@ class PackedGenScoringInterface(api.model.ModelInterface):
         self.score_tokenizer = api.huggingface.load_hf_tokenizer(
             "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english")
 
-        self.sft_model = flash_mqat.HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(
+        self.sft_model = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(
             model_path=
             "/data/aigc/llm/checkpoints/fw/flash-ppo-s42/run20231106-rw2/actor@pp_00-mp_00-dp_00/epoch0step0/",
             dtype=torch.float16,
@@ -50,9 +51,9 @@ class PackedGenScoringInterface(api.model.ModelInterface):
             module = module.module
 
         module.eval()
-        assert isinstance(module, flash_mqat.HuggingfaceLikeFlashMQATForCausalLM)
+        assert isinstance(module, HuggingfaceLikeFlashMQATForCausalLM)
 
-        gconfig = flash_mqat.GenerationConfig(**self.generation_config)
+        gconfig = GenerationConfig(**self.generation_config)
         num_samples = gconfig.num_samples
 
         data = recursive_apply(data, lambda x: x.to(model.device))
