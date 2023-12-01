@@ -33,7 +33,7 @@ if MODEL_TYPE == "llama":
 elif MODEL_TYPE == "starcoder":
     BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
     PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
-BATCH_SIZE = 8
+BATCH_SIZE = 16
 MIN_NEW_TOKENS = 1024
 MAX_NEW_TOKENS = 1024
 
@@ -47,7 +47,7 @@ DATE_FORMAT = "%Y%m%d-%H:%M:%S"
 #                     datefmt=DATE_FORMAT,
 #                     level="DEBUG")
 
-logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
+logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="DEBUG")
 
 logger = logging.getLogger("pipe_mqat_test")
 
@@ -217,6 +217,34 @@ def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
     print(f"{rank} {outputs} timecost {t} {t1}")
 
 
+def pipe_train_batch_accordance(rank: int, res_queue: mp.Queue, seed: int):
+    device, model, backend, interface = init_handles(rank)
+    # data = init_data(rank, model, device, seed)
+    module = model.module.module  # pipeline module
+
+    before = {name: param.detach().clone() for name, param in module.state_dict().items()}
+
+    for _ in range(20):
+        data = init_data(rank, model, device, seed)
+        outputs = interface.train_step(model, data)
+        seed = random.randint(0, 7777)
+
+    after = module.state_dict()
+    # for name, param in after.items():
+    #     # grads
+    #     print(f"grads {name}: {param.grad}")
+
+    print(f"rank {rank} PipeModule parameters")
+    for name, param in before.items():
+        print(f"train diff {name}: {torch.abs(param-after[name]).max()}")
+        # print(f"rank {rank} {name}: {param.size()}")
+
+    [sampled] = random.sample(list(module.state_dict().items()), 1)
+    res_queue.put(sampled)
+
+    time.sleep(2)
+
+
 class PipeFlashMQATTest(unittest.TestCase):
 
     @classmethod
@@ -352,6 +380,72 @@ class PipeFlashMQATTest(unittest.TestCase):
         for p in self.pipe_model_processes:
             p.join()
 
+    def testTrainBatchAccordance(self):
+        self.seed = random.randint(0, 1000)
+        self.res_queue = mp.Queue(maxsize=128)
+        self.pipe_model_processes = [
+            mp.Process(target=pipe_train_batch_accordance, args=(i, self.res_queue, self.seed))
+            for i in range(WORLD_SIZE)
+        ]
+        for p in self.pipe_model_processes:
+            p.start()
+
+        sampled_weights = {}
+        for _ in range(WORLD_SIZE):
+            param_name, param = self.res_queue.get()
+            sampled_weights[param_name] = param
+            print(f"sampled weight {param_name} {param.size()}")
+
+        for p in self.pipe_model_processes:
+            p.join()
+
+        # self.init_baseline_model()
+        # print("Baseline model parameters")
+
+        # datas = [init_data(rank, self.baseline_model, self.device, self.seed) for rank in range(WORLD_SIZE)]
+
+        # from impl.model.interface.flash.sft_flash_interface import compute_packed_sft_loss
+        # self.baseline_model.train()
+        # for data in datas:
+        #     packed_input_ids = data["packed_input_ids"]
+        #     cu_seqlens = data["cu_seqlens"]
+        #     prompt_mask = data["prompt_mask"]
+        #     max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+        #     logits = self.baseline_model(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
+        #                                  max_seqlen=max_seqlen).logits.float()
+        #     loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask.float())
+        #     self.baseline_model.backward(loss)
+
+        # self.baseline_model.step()
+
+        # state_dict = self.baseline_model.state_dict()
+        # # print("Baseline model parameters")
+        # # for name, param in state_dict.items():
+        # #     print(f"{name}: {param.size()}")
+        # # transform
+        # layer_key_mappings = {
+        #     "transformer.embedding_layer.": "0.",
+        #     "lm_head.": "5."
+        # }
+        # for i in range(4):
+        #     layer_key_mappings[f"transformer.h.{i}."] = f"{i+1}."
+
+        # for old_key, new_key in layer_key_mappings.items():
+        #     new_state_dict = {}
+        #     for k, v in state_dict.items():
+        #         if old_key in k:
+        #             k = k.replace(old_key, new_key)
+        #         new_state_dict[k] = v
+        #     state_dict = new_state_dict
+
+        # print("Baseline model parameters")
+        # for name, param in state_dict.items():
+        #     print(f"{name}: {param.size()}")
+
+        # for param_name, param in sampled_weights.items():
+        #     other = state_dict[param_name]
+        #     print(f"param {param_name} diff: \n{torch.abs(param-other).max()}\n")
+
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testTrainBatch")
+    unittest.main(defaultTest="PipeFlashMQATTest.testTrainBatchAccordance")
