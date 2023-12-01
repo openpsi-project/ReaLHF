@@ -26,13 +26,16 @@ WORKER_TYPE = "model_worker"
 NUM_PP = 4
 NUM_DP = 1
 WORLD_SIZE = NUM_PP * NUM_DP
-MODEL_TYPE = "llama"
+MODEL_TYPE = "gpt2"
 if MODEL_TYPE == "llama":
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/testOnly/llama-2-4l"
     PIPELINE_MODEL_PATH = F"/lustre/public/pretrained_model_weights/testOnly/llama-2-4l_4pp_3s"
 elif MODEL_TYPE == "starcoder":
     BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
     PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
+elif MODEL_TYPE == "gpt2":
+    BASELINE_MODEL_PATH = "/lustre/fw/pretrained/gpt2/"
+    PIPELINE_MODEL_PATH = F"/lustre/public/pretrained_model_weights/testOnly/gpt2_4pp_1s"
 BATCH_SIZE = 16
 MIN_NEW_TOKENS = 1024
 MAX_NEW_TOKENS = 1024

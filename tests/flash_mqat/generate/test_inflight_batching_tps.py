@@ -7,7 +7,8 @@ import torch
 import transformers
 import viztracer
 
-import impl.model.nn.flash_mqat as flash_mqat
+from impl.model.nn.flash_mqat.flash_mqat_base import *
+from impl.model.nn.flash_mqat.flash_generate import *   
 
 
 class InflightBatchingThroughputTest(unittest.TestCase):
@@ -19,7 +20,7 @@ class InflightBatchingThroughputTest(unittest.TestCase):
 
         self.device = "cuda"
         model_path = "/lustre/fw/pretrained/gpt2"
-        self.model = flash_mqat.FlashMQATForCausalLM.from_gpt2(model_path=model_path,
+        self.model = FlashMQATForCausalLM.from_gpt2(model_path=model_path,
                                                                dtype=torch.float16,
                                                                device=self.device)
         self.model.eval()
@@ -50,7 +51,7 @@ class InflightBatchingThroughputTest(unittest.TestCase):
             max_length=self.max_prompt_len,
         )
 
-        self.gconfig = flash_mqat.GenerationConfig(
+        self.gconfig = GenerationConfig(
             min_new_tokens=10,
             max_new_tokens=512,
             greedy=False,
@@ -62,7 +63,7 @@ class InflightBatchingThroughputTest(unittest.TestCase):
         answers = []
         for i in range(self.n_prompts // self.bs):
             s = slice(i * self.bs, (i + 1) * self.bs)
-            gen_tokens, *_ = flash_mqat.generate(
+            gen_tokens, *_ = generate(
                 self.model,
                 self.tokenizer,
                 input_ids=self.pad_prompt_encodings["input_ids"][s],
@@ -91,7 +92,7 @@ class InflightBatchingThroughputTest(unittest.TestCase):
                         device=self.device,
                         dtype=torch.long,
                     ))
-        generator = flash_mqat.InflightBatchingGenerator(
+        generator = InflightBatchingGenerator(
             inqueue,
             outqueue,
             self.model,

@@ -7,8 +7,9 @@ from viztracer import VizTracer
 import torch
 import transformers
 
-from impl.model.nn.flash_mqat import (FlashMQATForCausalLM, generate, GenerationConfig,
-                                      InflightBatchingGenerator, PipeCacheData, PipeTransferData)
+from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATForCausalLM, 
+                                      PipeCacheData, PipeTransferData)
+from impl.model.nn.flash_mqat.flash_generate import *                                      
 import api.huggingface
 
 
@@ -203,7 +204,7 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
         t2 = time.perf_counter() - tik
         throughput2 = cnt_ / t2
 
-        print(t1, t2, throughput1, throughput2)
+        # print(t1, t2, throughput1, throughput2)
 
         seqs2 = []
         logps2 = []
