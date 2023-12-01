@@ -13,10 +13,10 @@ from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBase, FlashMQATBlock, FlashMQATConfig,
                                                       FlashMQATForCausalLM)
 from impl.model.utils.data import DuckGenerationOutput, DuckModelOutput, PipeCacheData, PipeTransferData
+from impl.model.utils.save_load import load_from_disk
 import api.huggingface
 import api.model
 import base.logging as logging
-from impl.model.utils.save_load import load_from_disk
 
 try:
     from flash_attn.bert_padding import pad_input, unpad_input

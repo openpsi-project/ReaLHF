@@ -8,18 +8,15 @@ except ModuleNotFoundError:
 import torch
 import transformers
 
-from impl.model.nn.flash_mqat.flash_generate import (
-    generate,
-    GenerationConfig,
-    vanilla_cpu_generate,
-    vanilla_packed_generate,
-)
+from impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig, vanilla_cpu_generate,
+                                                     vanilla_packed_generate)
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM, PipeCacheData, PipeTransferData
 from impl.model.utils.functional import gather_shifted_log_probs
 import api.huggingface
 
 
 class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 7
@@ -37,8 +34,7 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
-            dtype=dtype, device=device
-        )
+            dtype=dtype, device=device)
         starcoder.eval()
 
         cls.model = FlashMQATForCausalLM.from_starcoder(from_model=starcoder, dtype=dtype, device=device)
@@ -94,6 +90,7 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
 
 
 class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 7
@@ -111,8 +108,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
-            dtype=dtype, device=device
-        )
+            dtype=dtype, device=device)
         starcoder.eval()
 
         cls.model = FlashMQATForCausalLM.from_starcoder(from_model=starcoder, dtype=dtype, device=device)
@@ -157,17 +153,15 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         vglogprob = vglogprob.float().cpu()
 
         seq = torch.cat([prompt, vcg], -1)
-        seq_attn_mask = torch.logical_and(
-            seq.ne(self.tokenizer.pad_token_id), seq.ne(self.tokenizer.eos_token_id)
-        )
+        seq_attn_mask = torch.logical_and(seq.ne(self.tokenizer.pad_token_id),
+                                          seq.ne(self.tokenizer.eos_token_id))
         packed_input_ids, pad_indices, cu_seqlens, max_seq_len = unpad_input(seq, seq_attn_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens.cuda(), max_seqlen=max_seq_len)
-        ys = [PipeCacheData(input_ids=packed_input_ids.cuda())] + [
-            PipeCacheData() for _ in range(self.model.config.n_layers + 1)
-        ]
+        ys = [PipeCacheData(input_ids=packed_input_ids.cuda())
+              ] + [PipeCacheData() for _ in range(self.model.config.n_layers + 1)]
         inf_logits = self.model(x, ys).pp_output.float().cpu()
         inf_logits = pad_input(inf_logits, pad_indices, seq.shape[0], seq.shape[1])
-        inf_logprob = gather_shifted_log_probs(inf_logits, seq)[:, prompt.shape[1] - 1 :]
+        inf_logprob = gather_shifted_log_probs(inf_logits, seq)[:, prompt.shape[1] - 1:]
         assert torch.allclose(vcg, vg.cpu()), (vcg, vg)
         assert torch.allclose(inf_logprob, vclogprob, atol=5e-3), (
             inf_logprob,

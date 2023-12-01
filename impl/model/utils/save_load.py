@@ -1,15 +1,15 @@
-from typing import Tuple, Dict, Optional
-import re
+from typing import Dict, Optional, Tuple
 import dataclasses
 import json
 import os
+import re
+
 from safetensors import safe_open
 from safetensors.torch import save_file as save_safetensors_file
-
 import torch
 import transformers
-from base.monitor import process_memory_mb
 
+from base.monitor import process_memory_mb
 import api.model
 import base.logging as logging
 
@@ -52,12 +52,10 @@ def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
     tokenizer = model.tokenizer
     logger.info(f"saving the model for epoch {model.version.epoch} step {model.version.epoch_step}...")
     os.makedirs(
-        os.path.abspath(
-            os.path.join(
-                output_dir,
-                f"epoch{model.version.epoch}step{model.version.epoch_step}",
-            )
-        ),
+        os.path.abspath(os.path.join(
+            output_dir,
+            f"epoch{model.version.epoch}step{model.version.epoch_step}",
+        )),
         exist_ok=True,
     )
     if not is_lora_model(module):
@@ -69,9 +67,8 @@ def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
         )
         return
     lora_sd = get_lora_state_dict(module)
-    save_to_disk(
-        lora_sd, os.path.join(output_dir, f"epoch{model.version.epoch}step{model.version.epoch_step}")
-    )
+    save_to_disk(lora_sd, os.path.join(output_dir,
+                                       f"epoch{model.version.epoch}step{model.version.epoch_step}"))
 
 
 def save_pipeline_model(model: api.model.Model, output_dir: str):
@@ -110,13 +107,13 @@ def split_state_dict_into_shards(state_dict: Dict, n_shards: int) -> Dict:
 
 
 def save_to_disk(
-    state_dict: Dict[str, torch.Tensor],
-    output_dir: str,
-    output_fn: Optional[str] = None,
-    save_type: str = "pt",
-    n_shards: Optional[int] = None,
-    no_shard_suffix: bool = False,
-    max_shard_size_byte: int = int(1e10),
+        state_dict: Dict[str, torch.Tensor],
+        output_dir: str,
+        output_fn: Optional[str] = None,
+        save_type: str = "pt",
+        n_shards: Optional[int] = None,
+        no_shard_suffix: bool = False,
+        max_shard_size_byte: int = int(1e10),
 ):
     if n_shards is None:
         param_size = sum([value.numel() * value.element_size() for value in state_dict.values()])
@@ -125,7 +122,7 @@ def save_to_disk(
     if no_shard_suffix:
         if n_shards != 1:
             raise RuntimeError("no_shard_suffix is True, but n_shards != 1")
-        
+
         if output_fn is None:
             if save_type == "pt":
                 output_fn = "pytorch_model.bin"
@@ -143,7 +140,7 @@ def save_to_disk(
         else:
             raise NotImplementedError(f"save_type {save_type} is not supported")
         return
-    
+
     if output_fn is None:
         if save_type == "pt":
             output_fn = "pytorch_model" + "-{shard:05d}" + f"-of-{n_shards:05d}.bin"
@@ -165,9 +162,9 @@ def save_to_disk(
         raise NotImplementedError(f"save_type {save_type} is not supported")
 
 
-def load_from_safetensors(
-    model_dir: str, ext: str = ".safetensors", pattern: Optional[str] = None
-) -> Tuple[Dict, int]:
+def load_from_safetensors(model_dir: str,
+                          ext: str = ".safetensors",
+                          pattern: Optional[str] = None) -> Tuple[Dict, int]:
     state_dict = {}
     cnt = 0
     for fn in os.listdir(model_dir):

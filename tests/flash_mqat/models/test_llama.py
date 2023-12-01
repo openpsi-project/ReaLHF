@@ -12,13 +12,13 @@ import api.huggingface
 
 
 class LlamaFlashMQATForwardTest(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         cls.bs = bs = 3
         cls.device = device = "cuda"
         hf_config = transformers.AutoConfig.from_pretrained(
-            "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
-        )
+            "/lustre/public/pretrained_model_weights/Llama-2-13b-hf")
         hf_config.num_hidden_layers = 2
         hf_config.hidden_size = 256
         hf_config.num_attention_heads = 4
@@ -26,13 +26,11 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         hf_config.intermediate_size = 1024
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
-        )
+            "/lustre/public/pretrained_model_weights/Llama-2-13b-hf")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.llama: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(hf_config).to(
-            dtype=torch.float16, device=device
-        )
+            dtype=torch.float16, device=device)
         cls.llama.eval()
 
         cls.model = FlashMQATForCausalLM.from_llama(from_model=cls.llama, dtype=torch.float16, device=device)
@@ -69,9 +67,8 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         input_ids = torch.randint(0, self.config.vocab_size, (self.bs, max_prompt_len)).to(self.device)
         input_lens = torch.randint(1, max_prompt_len, (self.bs,), dtype=torch.long).to(self.device)
         if with_mask:
-            attention_mask = torch.arange(max_prompt_len - 1, -1, -1, device=self.device).unsqueeze(
-                0
-            ) < input_lens.unsqueeze(1)
+            attention_mask = torch.arange(max_prompt_len - 1, -1, -1,
+                                          device=self.device).unsqueeze(0) < input_lens.unsqueeze(1)
         else:
             attention_mask = None
 

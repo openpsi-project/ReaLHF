@@ -7,9 +7,8 @@ from viztracer import VizTracer
 import torch
 import transformers
 
-from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATForCausalLM, 
-                                      PipeCacheData, PipeTransferData)
-from impl.model.nn.flash_mqat.flash_generate import *                                      
+from impl.model.nn.flash_mqat.flash_generate import *
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM, PipeCacheData, PipeTransferData
 import api.huggingface
 
 

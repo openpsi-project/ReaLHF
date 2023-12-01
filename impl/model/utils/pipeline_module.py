@@ -16,10 +16,11 @@ from deepspeed.runtime.activation_checkpointing import checkpointing
 from deepspeed.runtime.state_dict_factory import SDLoaderFactory
 import torch
 import torch.nn as nn
-from impl.model.utils.save_load import load_from_disk, save_to_disk
+
 from base.monitor import process_memory_mb, time_mark
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid
 from impl.model.utils.data import PipeCacheData, PipeTransferData
+from impl.model.utils.save_load import load_from_disk, save_to_disk
 import base.constants
 import base.logging as logging
 
@@ -551,10 +552,19 @@ class PipelineModule(nn.Module):
             return
 
         tp_rank = self._grid.get_model_parallel_rank()
-        save_to_disk(self.state_dict(), save_dir, output_fn=f"pytorch_model-pp-{self.stage_id:02d}-mp-{tp_rank:02d}-s-" + "{shard:02d}.bin", save_type="pt", n_shards=self.num_checkpoint_shards)
+        save_to_disk(self.state_dict(),
+                     save_dir,
+                     output_fn=f"pytorch_model-pp-{self.stage_id:02d}-mp-{tp_rank:02d}-s-" +
+                     "{shard:02d}.bin",
+                     save_type="pt",
+                     n_shards=self.num_checkpoint_shards)
 
     def load(self, load_dir):
-        state_dict, n_shards = load_from_disk(load_dir, fn_pattern=r".*" + f"-pp-{self.stage_id:02d}-mp-{self._grid.get_model_parallel_rank():02d}-" + r"s-(\d{2}).*", return_n_shards=True)
+        state_dict, n_shards = load_from_disk(
+            load_dir,
+            fn_pattern=r".*" + f"-pp-{self.stage_id:02d}-mp-{self._grid.get_model_parallel_rank():02d}-" +
+            r"s-(\d{2}).*",
+            return_n_shards=True)
         self.load_state_dict(state_dict)
 
         self.num_checkpoint_shards = n_shards

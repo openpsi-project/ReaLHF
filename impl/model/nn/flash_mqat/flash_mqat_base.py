@@ -12,8 +12,8 @@ import transformers
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import torch_attn_func
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
-import base.logging as logging
 from impl.model.utils.save_load import load_from_disk
+import base.logging as logging
 
 try:
     from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
@@ -605,9 +605,8 @@ class FlashMQATForCausalLM(nn.Module):
                     state_dict = load_from_disk(model_path)
                 except Exception as e:
                     logger.critical(f"Failed to load state dict from {model_path}: {e}")
-                    logger.critical(
-                    "Degenerate to using huggingface model initialization. "
-                    "This will probably cause (CPU) OOM.")
+                    logger.critical("Degenerate to using huggingface model initialization. "
+                                    "This will probably cause (CPU) OOM.")
                     state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
         else:
             assert from_model is not None

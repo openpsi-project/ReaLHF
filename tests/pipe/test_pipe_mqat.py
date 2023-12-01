@@ -165,6 +165,7 @@ def init_handles(rank):
 
     return device, model, backend, interface
 
+
 def pipe_load_save(rank):
     device, model, backend, interface = init_handles(rank)
     os.makedirs("/tmp/pipe_mqat_test", exist_ok=True)
@@ -357,14 +358,12 @@ class PipeFlashMQATTest(unittest.TestCase):
 
     def testSaveLoad(self):
         clear_name_resolve()
-        self.pipe_model_processes = [
-            mp.Process(target=pipe_load_save, args=(i, ))
-            for i in range(WORLD_SIZE)
-        ]
+        self.pipe_model_processes = [mp.Process(target=pipe_load_save, args=(i,)) for i in range(WORLD_SIZE)]
         for p in self.pipe_model_processes:
             p.start()
         for p in self.pipe_model_processes:
             p.join()
+
     @torch.no_grad()
     def testGenerate(self):
         clear_name_resolve()

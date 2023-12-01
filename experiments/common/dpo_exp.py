@@ -1,5 +1,5 @@
-import functools
 import dataclasses
+import functools
 
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC

@@ -7,8 +7,8 @@ import torch
 import transformers
 import viztracer
 
+from impl.model.nn.flash_mqat.flash_generate import *
 from impl.model.nn.flash_mqat.flash_mqat_base import *
-from impl.model.nn.flash_mqat.flash_generate import *   
 
 
 class InflightBatchingThroughputTest(unittest.TestCase):
@@ -21,8 +21,8 @@ class InflightBatchingThroughputTest(unittest.TestCase):
         self.device = "cuda"
         model_path = "/lustre/fw/pretrained/gpt2"
         self.model = FlashMQATForCausalLM.from_gpt2(model_path=model_path,
-                                                               dtype=torch.float16,
-                                                               device=self.device)
+                                                    dtype=torch.float16,
+                                                    device=self.device)
         self.model.eval()
 
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
