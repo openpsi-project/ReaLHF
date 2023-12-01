@@ -350,8 +350,8 @@ class DPOConfig:
         eval_freq (int): Evaluation frequency in terms of *epochs8.
         save_freq (int): Checkpoint saving frequency in terms of *training steps*.
         seed (int): Random seed.
-        actor (ModelConfig): Actor model configuration. Should be initialized with a SFT model.
-        ref (ModelConfig): Reference model configuration. The SFT model should be loaded and freezed.
+        model (ModelConfig): Model model configuration. Should be initialized with a SFT model.
+            It is also used as the reference model.
         optimizer (OptimizerConfig): Optimizer configuration.
         dataset (PromptAnswerDatasetConfig): Dataset configuration.
         beta (float): KL coefficient in the DPO paper. The same meaning as `kl_ctl` in PPO config.
@@ -362,8 +362,9 @@ class DPOConfig:
     eval_freq: int = 1
     save_freq: int = 50
     seed: int = 42
-    actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
-    ref: ModelConfig = dataclasses.field(default_factory=ModelConfig)
+    is_sft_lora: bool = False
+    sft_lora_path: Optional[str] = None
+    model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
     optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
     beta: float = 0.1
@@ -529,13 +530,69 @@ def run_ppo(args):
 
 
 @hydra.main(version_base=None, config_name="dpo")
-def run_dpo(args):
+def run_dpo(args: DPOConfig):
     import base.logging as logging
 
     logger = logging.getLogger("quickstart")
-    # TODO: implement this
+    exp_name = args.experiment_name
     trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
-    print(args)
+    from apps.main import main_start
+    from experiments.common.dpo_exp import DPOExperiment
+
+    logger.info("Running DPO experiment.")
+    logger.info("Logs will be dumped to %s", os.path.join(LOG_ROOT, exp_name, trial_name))
+    logger.info("Model checkpoints will be saved to %s", os.path.join(MODEL_SAVE_ROOT, exp_name, trial_name))
+
+    if args.model.parallel.pipeline_parallel_size > 1:
+        logger.warning(
+            "Pipeline parallel is enabled. Please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
+    if args.model.base_model_path is None:
+        raise ValueError("model.base_model_path must be specified for RW experiment.")
+
+    exp_fn = functools.partial(
+        DPOExperiment,
+        model_path=args.model.path,
+        tokenizer_path=args.model.base_model_path,
+        seed=args.seed,
+        total_train_epochs=args.train_epochs,
+        save_freq_steps=args.save_freq,
+        eval_freq_epochs=args.eval_freq,
+        is_sft_lora=args.is_sft_lora,
+        base_model_type=args.model.type,
+        sft_lora_path=args.sft_lora_path,
+        dp_size=args.model.parallel.data_parallel_size,
+        pp_size=args.model.parallel.pipeline_parallel_size,
+        use_lora=args.model.lora,
+        lora_scaling=args.model.lora_scaling,
+        lora_dim=args.model.lora_dim,
+        enable_fp16=args.model.enable_fp16,
+        gradient_checkpointing=args.model.gradient_checkpointing,
+        max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
+        max_seqlen=args.dataset.max_seqlen,
+        dataset_path=args.dataset.train_path,
+        train_tokens_per_batch=args.dataset.train_tokens_per_batch,
+        lr=args.optimizer.lr,
+        weight_decay=args.optimizer.weight_decay,
+        adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
+        lr_scheduler_type=args.optimizer.lr_scheduler_type,
+        warmup_proportion=args.optimizer.warmup_steps_proportion,
+        adam_eps=args.optimizer.eps,
+        min_lr_ratio=args.optimizer.min_lr_ratio,
+        zero_stage=args.optimizer.zero_stage,
+        beta=args.beta,
+    )
+
+    os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
+    with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
+        pickle.dump((exp_name, exp_fn), f)
+    api.config.register_experiment(exp_name, exp_fn)
+
+    slurm_available = int(subprocess.run("squeue", shell=True, stdout=open(os.devnull, "wb")).returncode) == 0
+    mode = "slurm" if slurm_available else "local"
+
+    main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
 
 
 def main():
