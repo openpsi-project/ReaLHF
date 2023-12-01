@@ -5,6 +5,7 @@ from experiments.common.sft_exp import SFTExperiment
 
 seeds = range(1, 64)
 for s in seeds:
+    # TODO: hyperparameters here is not correct
     exp_name = f"imdb-sft-pos-neg-s{s}"
     register_experiment(
         exp_name,

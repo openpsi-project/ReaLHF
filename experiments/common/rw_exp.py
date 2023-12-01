@@ -1,27 +1,34 @@
+import functools
+import math
+import random
 import dataclasses
 
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
 
-sft = ModelRPC(
+rw_modeling = ModelRPC(
     "default",
     ModelInterfaceType.TRAIN_STEP,
-    input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
+    input_data=["packed_input_ids", "input_lens", "group_factor", "pair_input_lens"],
     dp_broker_type="packed",
     log_return_value=True,
 )
 
 
 @dataclasses.dataclass
-class SFTExperiment(Experiment):
+class PairedRWExperiment(Experiment):
+    model_path: str  # Must be SFT model path
+    tokenizer_path: str  # Since we use SFT model, we need to specify HF tokenizer path
+
     seed: int = 1
     total_train_epochs: int = 1
-    save_freq_steps: int = 50
+    save_freq_steps: int = 20
     eval_freq_epochs: int = 1
+    is_sft_lora: bool = False
+    base_model_type: Optional[str] = None
+    sft_lora_path: Optional[str] = None
     # model
-    model_type: str = "gpt2"
-    model_path: str = "/lustre/fw/pretrained/gpt2/"
     dp_size: int = 1
     pp_size: int = 1
     use_lora: bool = False
@@ -30,11 +37,12 @@ class SFTExperiment(Experiment):
     enable_fp16: bool = True
     gradient_checkpointing: bool = True
     # dataset
+    max_pairs_per_prompt: int = 2
     max_seqlen: int = 1024
     train_tokens_per_batch: int = 16384
     valid_tokens_per_batch: int = 16384
-    train_dataset_path: str = "/lustre/meizy/data/wps-formula/train.json"
-    valid_dataset_path: str = "/lustre/meizy/data/wps-formula/valid.json"
+    train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl"
+    valid_dataset_path: str = "/lustre/fw/datasets/imdb/rl/rm_paired-valid.jsonl"
     # optimizer
     lr: float = 2.5e-4
     weight_decay: float = 0.05
@@ -46,12 +54,15 @@ class SFTExperiment(Experiment):
     zero_stage: int = 2
 
     def __post_init__(self):
-        if self.model_type == "gpt2" and self.max_seqlen > 1024:
-            raise ValueError("GPT2 only supports max seqlen of 1024")
         if self.pp_size < 1 or self.dp_size < 1:
             raise ValueError("pp_size and dp_size must be positive integers.")
         if self.pp_size > 1 and self.use_lora:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
+        if self.is_sft_lora and (self.sft_lora_path is None or self.base_model_type is None):
+            raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
+        # FIXME: 
+        if self.pp_size > 1:
+            raise NotImplementedError()
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -72,26 +83,25 @@ class SFTExperiment(Experiment):
                     cpu=4,
                     gpu=1,
                     gpu_type="tesla",
-                    mem=100000,
+                    mem=60000,
                 ),
             ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = self.model_path
-
         dataset = Dataset(
-            "packed_prompt_answer",
+            "packed_rw_pair",
             args=dict(
                 n_tokens_per_batch=self.train_tokens_per_batch,
                 max_length=self.max_seqlen,
+                max_pairs_per_prompt=self.max_pairs_per_prompt,
                 dataset_path=self.train_dataset_path,
             ),
         )
         dataloader = eval_dataloader = DataLoader("iterable_dataset_loader")
         data_worker = [
             DataWorker(
-                tokenizer_name_or_path=self.model_path,
+                tokenizer_name_or_path=self.tokenizer_path,
                 datasets=[dataset],
                 dataloader=dataloader,
                 seed=self.seed,
@@ -124,19 +134,44 @@ class SFTExperiment(Experiment):
         )
 
         if self.pp_size == 1:
-            model = Model("flash_mqat_clm_hf", args=dict(model_path=model_path, from_type=self.model_type))
+            if not self.is_sft_lora:
+                model = Model(
+                    "flash_mqat_critic",
+                    args=dict(
+                        model_path=self.model_path,
+                        from_type="sft",
+                        tokenizer_path=self.tokenizer_path,
+                    ),
+                )
+            else:
+                model = Model(
+                    "flash_mqat_critic",
+                    args=dict(
+                        model_path=self.model_path,
+                        from_type=self.base_model_type,
+                        tokenizer_path=self.tokenizer_path,
+                    ),
+                    wrappers=[
+                        ModelWrapper(
+                            "lora",
+                            args=dict(
+                                lora_module_kwargs=dict(
+                                    lora_dim=self.lora_dim,
+                                    lora_scaling=self.lora_scaling,
+                                ),
+                                lora_keys_to_replace=["c_attn.linear", "c_proj."],
+                                load_lora_path=self.sft_lora_path,
+                                lora_op_after_creation="squash",
+                            ),
+                        ),
+                    ],
+                )
         else:
-            model = Model(
-                "flash_mqat_pipe",
-                args=dict(
-                    model_path=model_path,
-                    num_pp=self.pp_size,
-                    num_dp=self.dp_size,
-                    from_type=self.model_type,
-                ),
-            )
+            # FIXME: implement critic model
+            # FIXME: is_sft_lora
+            pass
         if self.use_lora:
-            model.wrappers = [
+            model.wrappers.append(
                 ModelWrapper(
                     "lora",
                     args=dict(
@@ -146,13 +181,14 @@ class SFTExperiment(Experiment):
                         ),
                         lora_keys_to_replace=["c_attn.linear", "c_proj."],
                     ),
-                ),
-            ]
+                )
+            )
 
         if self.pp_size == 1:
-            interface = ModelInterface("flash_sft")
+            interface = ModelInterface("flash_paired_rw")
         else:
-            interface = ModelInterface("pipe_flash_sft")
+            # FIXME:
+            pass
 
         topo = PipeModelDataParallelTopology(self.pp_size, 1, self.dp_size)
         model_worker = []
@@ -179,7 +215,7 @@ class SFTExperiment(Experiment):
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=self.save_freq_steps,
             eval_frequency_epochs=self.eval_freq_epochs,
-            model_rpcs=[sft],
+            model_rpcs=[rw_modeling],
             data_worker=data_worker,
             model_worker=model_worker,
         )
