@@ -599,6 +599,10 @@ class FlashMQATForCausalLM(nn.Module):
         if model_path is not None:
             if init_from_scratch:
                 state_dict = None
+            elif os.path.exists(os.path.join(model_path, "DLLM_pytorch_model.bin")):
+                # HACK: for HF models with tied weights, we use DLLM_pytorch_model.bin instead of pytorch_model.bin
+                # for the full state dict.
+                state_dict = torch.load(os.path.join(model_path, "DLLM_pytorch_model.bin"), map_location="cpu")
             elif os.path.exists(os.path.join(model_path, "pytorch_model.bin")):
                 state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"), map_location="cpu")
             elif os.path.exists(os.path.join(model_path, "pytorch_model.bin.index.json")):
