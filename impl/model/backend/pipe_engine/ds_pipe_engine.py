@@ -18,7 +18,7 @@ from base.dataparallel import PackedParallelDataBroker
 from base.monitor import time_mark
 from base.namedarray import NamedArray
 from base.topology import PipelineParallelGrid
-from impl.model.nn.flash_mqat import GenerationConfig, genstep
+from impl.model.nn.flash_mqat.flash_generate import GenerationConfig, genstep
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.pipeline_module import PipelineError, PipelineModule
 from impl.model.utils.tensor_storage import recv_grad, send_grad, TensorBuffer

@@ -207,25 +207,24 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             temperature=1.0,
         )
 
-        actor_model_class_name = "starcoder_flash_mqat_pipe" \
-            if self.model_type == "starcoder" else "llama_flash_mqat_pipe"
+        actor_model_class_name = "flash_mqat_pipe"
         critic_model_class_name = actor_model_class_name + "_critic"
         actor_model = Model(actor_model_class_name,
                             args=dict(model_path=actor_path,
                                       num_pp=self.n_actor_num_pp,
                                       num_dp=self.actor_dp_world_size,
-                                      load_from_full_ckpt=False))
+                                      from_type=self.model_type))
         critic_model = Model(critic_model_class_name,
                              args=dict(model_path=critic_path,
                                        num_pp=self.n_critic_num_pp,
                                        num_dp=self.critic_dp_world_size,
-                                       load_from_full_ckpt=False))
+                                       from_type=self.model_type))
 
         ref_model = Model(
             "flash_mqat_clm_hf",
             args=dict(
                 model_path=ref_path,
-                from_type="llama",
+                from_type=self.model_type,
                 tokenizer_path=ref_path,
             ),
         )
@@ -233,7 +232,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             "flash_mqat_critic",
             args=dict(
                 model_path=rw_path,
-                from_type="llama",
+                from_type=self.model_type,
                 tokenizer_path=critic_path,
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,

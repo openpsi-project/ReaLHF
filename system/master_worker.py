@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 from base.cluster import spec as cluster_spec
+from base.constants import MODEL_SAVE_ROOT
 import api.config as config_pkg
 import api.data as data_api
 import api.dfg
@@ -139,7 +140,6 @@ async def model_rpc_func(
 
 
 class MasterWorker(worker_base.Worker):
-    MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
     os.makedirs(MODEL_SAVE_ROOT, exist_ok=True)
 
     def __init__(self, server=None):
@@ -172,22 +172,15 @@ class MasterWorker(worker_base.Worker):
 
         # Save and eval control.
         self.__total_train_epochs = config.total_train_epochs
-        self.__save_step_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_seconds=config.save_frequency_seconds,
-            frequency_steps=config.save_frequency_steps,
-        )
-        self.__save_epoch_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_steps=config.save_frequency_epochs)
-
-        self.__eval_step_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_seconds=config.eval_frequency_seconds,
-            frequency_steps=config.eval_frequency_steps,
-        )
-        self.__eval_epoch_freq_ctl = base.timeutil.FrequencyControl(
-            frequency_steps=config.eval_frequency_epochs)
+        self.__save_ctl = base.timeutil.EpochStepTimeFreqCtl(freq_epoch=config.save_frequency_epochs,
+                                                             freq_step=config.save_frequency_steps,
+                                                             freq_sec=config.save_frequency_seconds)
+        self.__eval_ctl = base.timeutil.EpochStepTimeFreqCtl(freq_epoch=config.eval_frequency_epochs,
+                                                             freq_step=config.eval_frequency_steps,
+                                                             freq_sec=config.eval_frequency_seconds)
 
         self.MODEL_SAVE_ROOT = os.path.join(
-            self.MODEL_SAVE_ROOT,
+            MODEL_SAVE_ROOT,
             config.worker_info.experiment_name,
             config.worker_info.trial_name,
         )
@@ -248,8 +241,8 @@ class MasterWorker(worker_base.Worker):
         assert len(set(x.epoch_step for x in data_batches)) == 1
         assert len(set(x.global_step for x in data_batches)) == 1
 
-        epoch_should_save = self.__save_epoch_freq_ctl.check(steps=int(data_batches[0].epoch > self._epoch))
-        epoch_should_eval = self.__eval_epoch_freq_ctl.check(steps=int(data_batches[0].epoch > self._epoch))
+        should_eval = self.__eval_ctl.check(epochs=int(data_batches[0].epoch > self._epoch), steps=1)
+        should_save = self.__save_ctl.check(epochs=int(data_batches[0].epoch > self._epoch), steps=1)
 
         # Update counters. All starting from 0.
         self._epoch = epoch = data_batches[0].epoch
@@ -265,8 +258,7 @@ class MasterWorker(worker_base.Worker):
             self._data_registry[key] = value
 
         # Evaluate if necessary.
-        step_time_should_eval = self.__eval_step_freq_ctl.check()
-        if epoch_should_eval or step_time_should_eval:
+        if should_eval:
             all_model_streams = list(self.__model_streams.values())
             request_all(all_model_streams, "evaluate", [None for _ in all_model_streams])
             eval_stats = dataparallel.ParallelDataBroker.gather_from(gather_all_replies(all_model_streams))
@@ -274,8 +266,7 @@ class MasterWorker(worker_base.Worker):
                 f"Evaluation results at epoch {self._epoch + 1} step {self._epoch_step + 1}: {eval_stats}")
 
         # Save if necessary.
-        step_should_save = self.__save_step_freq_ctl.check()
-        if epoch_should_save or step_should_save:
+        if should_save:
             dp0streams = {k: v for k, v in self.__model_streams.items() if "dp_00" in k.split("@")[1]}
             assert len(dp0streams) > 0
             model_save_dirs = [os.path.join(self.MODEL_SAVE_ROOT, k.split("@")[0]) for k in dp0streams]

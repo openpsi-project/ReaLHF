@@ -6,13 +6,13 @@ import torch
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
-from impl.model.utils.data import gather_packed_shifted_log_probs
+from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
+from impl.model.utils.functional import gather_packed_shifted_log_probs
 from impl.model.utils.save import save_pipeline_model
 import api.huggingface
 import api.model
 import base.constants
 import base.logging as logging
-import impl.model.nn.flash_mqat as flash_mqat
 import impl.model.utils.ppo_functional as ppo_functional
 
 try:
@@ -164,7 +164,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
             tokenizer=model.tokenizer,
             packed_input_ids=packed_input_ids,
             cu_seqlens=cu_seqlens,
-            gconfig=flash_mqat.GenerationConfig(**self.generation_config),
+            gconfig=GenerationConfig(**self.generation_config),
         )
 
         if res is None:  # if not pipeline last stage, module.generate return nothing.

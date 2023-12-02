@@ -12,10 +12,8 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
-from impl.model.nn.flash_mqat import FlashMQATConfig
-from impl.model.utils.data import (DuckGenerationOutput, DuckModelOutput, mask_eos_token, PipeCacheData,
-                                   PipeTransferData, repeat_kv, TensorDataclassToTupleInterface,
-                                   upcast_masked_softmax, upcast_softmax)
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.logits_warper import top_k_top_p_logits
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP
 import api.huggingface
@@ -394,7 +392,7 @@ class FlashMQATBlock(nn.Module):
         # Set kv cache during the first forward pass of generation.
         # Do we need an option to disable this?
         # TODO: option to disable this to avoid redundant kvcache store
-        if x.store_kvcache:
+        if x.store_kv_cache:
             if y.k_cache is None:
                 y.k_cache = k.detach()
             if y.v_cache is None:

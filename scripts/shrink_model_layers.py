@@ -18,7 +18,7 @@ DATE_FORMAT = "%Y%m%d-%H:%M:%S"
 logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
 
 LOAD_PATH = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
-SAVE_PATH = "/home/meizy/models/Llama-2-4l"
+SAVE_PATH = "/lustre/public/pretrained_model_weights/testOnly/llama-2-4l"
 NUM_SHRINKED_LAYERS = 4
 
 if __name__ == "__main__":

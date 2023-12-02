@@ -10,13 +10,10 @@ import os
 import sys
 
 from base.cluster import spec as cluster_spec
+from base.constants import (DATASET_CACHE_PATH, PYTORCH_KERNEL_CACHE_PATH, TORCH_EXTENSIONS_DIR,
+                            TRITON_CACHE_PATH)
 import api.dfg
 import base.topology
-
-PYTORCH_KERNEL_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/kernels"
-TRITON_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/triton"
-DATASET_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/datasets"
-TORCH_EXTENSIONS_DIR = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/extensions"
 
 _LLM_ENVVARS = {
     # "NCCL_P2P_DISABLE": "1",
