@@ -14,10 +14,10 @@ from impl.model.nn.flash_mqat import *
 from impl.model.utils.pipeline_module import LayerSpec
 
 MODEL_TYPE = "llama"
-FULL_MODEL_DIR = "/lustre/fw/pretrained/llama-13b"
+FULL_MODEL_DIR = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
 NUM_PIPE_STAGES = 4
 NUM_SHARDS = 3
-PIPE_MODEL_DIR = f"/home/meizy/models/llama-13b_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
+PIPE_MODEL_DIR = f"/home/meizy/models/llama-2-13b-critic_{NUM_PIPE_STAGES}pp_{NUM_SHARDS}s"
 MODEL_CONFIG_FILES = [
     "config.json", "generation_config.json", "tokenizer_config.json", "vocab.json", "merges.txt",
     "special_tokens_map.json", "tokenizer.json"
@@ -142,6 +142,10 @@ def llama_state_dict_transfrom(config: FlashMQATConfig, state_dict: Dict[str, to
         state_dict.pop(f"model.layers.{i}.self_attn.q_proj.weight")
         state_dict.pop(f"model.layers.{i}.self_attn.k_proj.weight")
         state_dict.pop(f"model.layers.{i}.self_attn.v_proj.weight")
+
+    head = state_dict["lm_head.weight"]
+    state_dict["lm_head.weight"] = head[0].clone()
+    print(f"llama_state_dict_transfrom state_dict['lm_head.weight'] shape {state_dict['lm_head.weight']}")
     return state_dict
 
 

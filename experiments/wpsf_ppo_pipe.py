@@ -69,11 +69,12 @@ class PipeWpsfFlashPPOExperiment(Experiment):
 
     def __init__(self,
                  n_actors=8,
-                 n_critics=1,
-                 n_rewards=1,
+                 n_critics=8,
+                 n_rewards=2,
                  n_refs=2,
                  seed=1,
                  num_actor_pipeline_stages=4,
+                 num_critic_pipeline_stages=4,
                  benchmark_only=False,
                  model_type="starcoder"):
         if benchmark_only:
@@ -85,10 +86,12 @@ class PipeWpsfFlashPPOExperiment(Experiment):
         self.n_critics = n_critics
 
         self.n_actor_num_pp = num_actor_pipeline_stages
-        self.n_data_workers = self.dp_worldsize = self.n_actors // self.n_actor_num_pp
+        self.n_critic_num_pp = num_critic_pipeline_stages
+        self.actor_dp_world_size = self.n_actors // self.n_actor_num_pp
+        self.critic_dp_world_size = self.n_critics // self.n_critic_num_pp
+        # self.n_data_workers = self.dp_worldsize = self.n_actors // self.n_actor_num_pp
 
         self.n_total = n_actors + n_rewards + n_refs + n_critics
-
         self.n_data_workers = n_actors
 
         self.seed = seed
@@ -100,6 +103,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             scheduling=Scheduling.data_worker_default(
                 cpu=2,
                 mem=10000,
+                nodelist='QH-com14',
             ),
         ),
                                     master_worker=TasksGroup(
@@ -107,6 +111,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
                                         scheduling=Scheduling.master_worker_default(
                                             cpu=4,
                                             mem=10000,
+                                            nodelist='QH-com14',
                                         ),
                                     ),
                                     model_worker=[
@@ -117,17 +122,27 @@ class PipeWpsfFlashPPOExperiment(Experiment):
                                                 gpu=1,
                                                 gpu_type='tesla',
                                                 mem=100000,
-                                                nodelist='QH-com09',
+                                                nodelist='QH-com10',
                                             ),
                                         ),
                                         TasksGroup(
-                                            count=self.n_critics + self.n_rewards + self.n_refs,
+                                            count=self.n_critics,
                                             scheduling=Scheduling.model_worker_default(
                                                 cpu=4,
                                                 gpu=1,
                                                 gpu_type='tesla',
                                                 mem=100000,
-                                                nodelist='QH-com14',
+                                                nodelist='QH-com11',
+                                            ),
+                                        ),
+                                        TasksGroup(
+                                            count=self.n_rewards + self.n_refs,
+                                            scheduling=Scheduling.model_worker_default(
+                                                cpu=4,
+                                                gpu=1,
+                                                gpu_type='tesla',
+                                                mem=100000,
+                                                nodelist='QH-com12',
                                             ),
                                         )
                                     ])
@@ -139,10 +154,12 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             # actor_path = "/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
             # ref_path = "/lustre/meizy/models/starcoder_4l"
             critic_path = "/lustre/meizy/models/starcoder_4l"  # a 4 layer starcoder model only for testing purpose
+            rw_path = critic_path
         elif self.model_type == "llama":
             actor_path = "/home/meizy/models/llama-2-13b_4pp_3s"
-            ref_path = "/lustre/fw/pretrained/llama-13b"
-            critic_path = "/home/meizy/models/Llama-2-4l"
+            ref_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
+            critic_path = "/home/meizy/models/llama-2-13b-critic_4pp_3s"
+            rw_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
 
         # rw_lora_head_path = None
 
@@ -190,13 +207,19 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             temperature=1.0,
         )
 
-        model_class_name = "starcoder_flash_mqat_pipe" \
+        actor_model_class_name = "starcoder_flash_mqat_pipe" \
             if self.model_type == "starcoder" else "llama_flash_mqat_pipe"
-        actor_model = Model(model_class_name,
+        critic_model_class_name = actor_model_class_name + "_critic"
+        actor_model = Model(actor_model_class_name,
                             args=dict(model_path=actor_path,
                                       num_pp=self.n_actor_num_pp,
-                                      num_dp=self.dp_worldsize,
+                                      num_dp=self.actor_dp_world_size,
                                       load_from_full_ckpt=False))
+        critic_model = Model(critic_model_class_name,
+                             args=dict(model_path=critic_path,
+                                       num_pp=self.n_critic_num_pp,
+                                       num_dp=self.critic_dp_world_size,
+                                       load_from_full_ckpt=False))
 
         ref_model = Model(
             "flash_mqat_clm_hf",
@@ -206,19 +229,16 @@ class PipeWpsfFlashPPOExperiment(Experiment):
                 tokenizer_path=ref_path,
             ),
         )
-        rw_model = critic_model = Model(
+        rw_model = Model(
             "flash_mqat_critic",
             args=dict(
-                model_path=critic_path,
+                model_path=rw_path,
                 from_type="llama",
                 tokenizer_path=critic_path,
                 output_bias=rw_output_bias,
                 output_scaling=rw_output_scaling,
             ),
         )
-        critic_model = copy.deepcopy(rw_model)
-
-        # critic_model.wrappers.append(lora_wrapper(squash=False))
 
         actor_backend = ModelBackend(
             'ds_train',
@@ -241,22 +261,21 @@ class PipeWpsfFlashPPOExperiment(Experiment):
 
         critic_backend = ModelBackend(
             'ds_train',
-            args=dict(
-                optimizer_name='adam',
-                optimizer_config=dict(
-                    lr=2.5e-4,
-                    weight_decay=0.0,
-                    eps=1e-5,
-                    betas=(0.9, 0.95),
-                ),
-                lr_scheduler_type='linear',
-                warmup_steps_proportion=0.075,
-                min_lr_ratio=0.0,
-                zero_stage=2,
-                offload_param=False,
-                offload_optimizer_state=False,
-                enable_fp16=True,
-            ),
+            args=dict(optimizer_name='adam',
+                      optimizer_config=dict(
+                          lr=2.5e-4,
+                          weight_decay=0.0,
+                          eps=1e-5,
+                          betas=(0.9, 0.95),
+                      ),
+                      lr_scheduler_type='linear',
+                      warmup_steps_proportion=0.075,
+                      min_lr_ratio=0.0,
+                      zero_stage=1,
+                      enable_fp16=True,
+                      gradient_checkpointing=False,
+                      engine_type="pipe",
+                      num_pipeline_stages=self.n_critic_num_pp),
         )
         ref_backend = rw_backend = ModelBackend('ds_inference', args=dict(enable_fp16=True))
 
@@ -283,22 +302,44 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             },
         )
         critic_interface = ModelInterface(
-            'flash_critic',
+            'pipe_flash_critic',
             args=copy.deepcopy(ppo_kwargs),
         )
         rw_interface = ModelInterface('flash_plrw')
 
         model_worker = []
-        topo = PipeModelDataParallelTopology(self.n_actor_num_pp, 1, self.dp_worldsize)
+        actor_topo = PipeModelDataParallelTopology(num_pp=self.n_actor_num_pp,
+                                                   num_mp=1,
+                                                   num_dp=self.actor_dp_world_size)
         for i in range(self.n_actors):
-            coord = topo.get_coord(i)
+            coord = actor_topo.get_coord(i)
             mw = ModelWorker(
                 seed=self.seed,
                 model=actor_model,
                 backend=actor_backend,
                 interface=actor_interface,
                 model_name='actor',
-                topo=topo,
+                topo=actor_topo,
+                dp_rank=coord.data,
+                pp_rank=coord.pipe,
+                mp_rank=coord.model,
+                cuda_cache_cleanliness=True,
+                cuda_cache_clear_freq=1,
+            )
+            model_worker.append(mw)
+
+        critic_topo = PipeModelDataParallelTopology(num_pp=self.n_critic_num_pp,
+                                                    num_mp=1,
+                                                    num_dp=self.critic_dp_world_size)
+        for i in range(self.n_critics):
+            coord = critic_topo.get_coord(i)
+            mw = ModelWorker(
+                seed=self.seed,
+                model=critic_model,
+                backend=critic_backend,
+                interface=critic_interface,
+                model_name='critic',
+                topo=critic_topo,
                 dp_rank=coord.data,
                 pp_rank=coord.pipe,
                 mp_rank=coord.model,
@@ -329,23 +370,11 @@ class PipeWpsfFlashPPOExperiment(Experiment):
                 cuda_cache_cleanliness=True,
                 cuda_cache_clear_freq=1,
             ) for i in range(self.n_refs)
-        ] + [
-            ModelWorker(
-                seed=self.seed,
-                model=critic_model,
-                backend=critic_backend,
-                interface=critic_interface,
-                model_name='critic',
-                dp_rank=i,
-                topo=PipeModelDataParallelTopology(1, 1, self.n_critics),
-                cuda_cache_cleanliness=True,
-                cuda_cache_clear_freq=1,
-            ) for i in range(self.n_critics)
         ]
 
         return ExperimentConfig(
             total_train_epochs=1,
-            save_frequency_epochs=1,
+            save_frequency_epochs=None,
             save_frequency_seconds=None,
             model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
             data_worker=data_worker,

@@ -7,7 +7,7 @@ import torch.nn as nn
 import transformers
 
 from base.monitor import process_memory_mb
-from base.topology import PipeDataParallelTopology
+from base.topology import PipeDataParallelTopology, PipeModelDataParallelTopology
 from impl.model.nn.flash_mqat import *
 from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
@@ -21,6 +21,7 @@ def make_causal_flash_mqat_pipe_module(
     config: FlashMQATConfig,
     topology: PipeDataParallelTopology,
     from_type: str = 'starcoder',
+    is_critic: bool = False,
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
 ):
@@ -41,14 +42,25 @@ def make_causal_flash_mqat_pipe_module(
                                      device=device)
         layer_specs.append(flash_mqat_block)
 
-    lm_head = LayerSpec(
-        LanguageModelHead,
-        config.hidden_dim,
-        config.vocab_size,
-        bias=False,
-        device=device,
-        dtype=dtype,
-    )
+    if not is_critic:
+        lm_head = LayerSpec(
+            LanguageModelHead,
+            config.hidden_dim,
+            config.vocab_size,
+            bias=False,
+            device=device,
+            dtype=dtype,
+        )
+    else:
+        lm_head = LayerSpec(
+            LanguageModelHead,
+            config.hidden_dim,
+            1,
+            bias=False,
+            device=device,
+            dtype=dtype,
+        )
+
     layer_specs.append(lm_head)
 
     if from_type == 'starcoder':
@@ -86,6 +98,7 @@ def make_starcoder_flash_mqat_pipe_module(
     topology: PipeDataParallelTopology,
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
+    is_critic: bool = False,
 ):
     starcoder_config = transformers.AutoConfig.from_pretrained(os.path.join(model_path, "config.json"))
     config = FlashMQATConfig(
@@ -104,6 +117,7 @@ def make_starcoder_flash_mqat_pipe_module(
     return make_causal_flash_mqat_pipe_module(config,
                                               topology,
                                               from_type="starcoder",
+                                              is_critic=is_critic,
                                               dtype=dtype,
                                               device=device)
 
@@ -113,6 +127,7 @@ def make_llama_flash_mqat_pipe_module(
     topology: PipeDataParallelTopology,
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
+    is_critic: bool = False,
 ):
     hf_config = transformers.AutoConfig.from_pretrained(os.path.join(model_path, "config.json"))
     config = FlashMQATConfig(
@@ -137,7 +152,12 @@ def make_llama_flash_mqat_pipe_module(
         rotary_scaling=None if hf_config.rope_scaling is None else hf_config.rope_scaling["factor"],
         rotary_scaling_type=None if hf_config.rope_scaling is None else hf_config.rope_scaling["type"],
     )
-    return make_causal_flash_mqat_pipe_module(config, topology, from_type="llama", dtype=dtype, device=device)
+    return make_causal_flash_mqat_pipe_module(config,
+                                              topology,
+                                              from_type="llama",
+                                              is_critic=is_critic,
+                                              dtype=dtype,
+                                              device=device)
 
 
 def load_starcoder_flash_mqat_pipe(module: PipelineModule,
@@ -182,6 +202,7 @@ def make_flash_mqat_pipe_model(
     num_dp: int,
     dtype: torch.dtype = torch.float16,
     from_type: str = 'starcoder',
+    is_critic: bool = False,
     tokenizer_path: Optional[str] = None,
     load_from_full_ckpt: Optional[bool] = False,
     ckpt_path: Optional[str] = None,
@@ -194,9 +215,9 @@ def make_flash_mqat_pipe_model(
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token_id = tokenizer.eos_token_id
         # logger.info("tokenizer initialized")
-        topology = PipeDataParallelTopology(num_pp=num_pp, num_dp=num_dp)
+        topology = PipeModelDataParallelTopology(num_pp=num_pp, num_mp=1, num_dp=num_dp)
         module, layer_key_mappings = make_starcoder_flash_mqat_pipe_module(model_path, topology, dtype,
-                                                                           device)
+                                                                           device, is_critic)
         process_memory_mb("after_make_pipe_module")
         # logger.info("module initialized")
         if ckpt_path:
@@ -210,8 +231,9 @@ def make_flash_mqat_pipe_model(
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token_id = tokenizer.eos_token_id
-        topology = PipeDataParallelTopology(num_pp=num_pp, num_dp=num_dp)
-        module, layer_key_mappings = make_llama_flash_mqat_pipe_module(model_path, topology, dtype, device)
+        topology = PipeModelDataParallelTopology(num_pp=num_pp, num_mp=1, num_dp=num_dp)
+        module, layer_key_mappings = make_llama_flash_mqat_pipe_module(model_path, topology, dtype, device,
+                                                                       is_critic)
         module = load_llama_flash_mqat_pipe(module, model_path)
     else:
         raise NotImplementedError()
@@ -221,3 +243,8 @@ def make_flash_mqat_pipe_model(
 api.model.register_model("starcoder_flash_mqat_pipe", make_flash_mqat_pipe_model)
 api.model.register_model("llama_flash_mqat_pipe",
                          functools.partial(make_flash_mqat_pipe_model, from_type="llama"))
+
+api.model.register_model("starcoder_flash_mqat_pipe_critic",
+                         functools.partial(make_flash_mqat_pipe_model, is_critic=True))
+api.model.register_model("llama_flash_mqat_pipe_critic",
+                         functools.partial(make_flash_mqat_pipe_model, from_type="llama", is_critic=True))

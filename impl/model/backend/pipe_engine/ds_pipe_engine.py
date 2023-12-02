@@ -284,23 +284,26 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.tensor_buffer.remove("losses")
         self.tensor_buffer.remove("stats")
 
+    def _pre_forward(self):
+        self._compute_loss = False
+        self._generating = False
+
+    def _post_forward(self):
+        self._post_eval_batch()
+        self.tensor_buffer.remove("logits")
+
     def _pre_train_batch(self):
         self._compute_loss = True
         self._generating = False
 
     def _post_train_batch(self):
-        self.tensor_buffer.remove("batch_input_x")
-        self.tensor_buffer.remove("batch_input_ys")
-        self.tensor_buffer.remove("batch_lengths")
-        self.tensor_buffer.remove("loss_inputs")
-        self.tensor_buffer.remove("input_cache")
-        self.tensor_buffer.remove("losses")
-        self.tensor_buffer.remove("stats")
+        self._post_eval_batch()
 
     def set_version_steps(self, version_steps):
-        # this method should be used by interface
-        # version_steps = batch id (not micro batch !!)
         self.version_steps = version_steps
+
+    def set_tokenizer(self, tokenizer):
+        self.tokenizer = tokenizer
 
     def _initialize_comm(self):
         p2p.init_process_groups(self.grid)
@@ -328,6 +331,26 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def train(self):
         self.module.train()
 
+    def forward(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor):
+        # forward one step and return packed logits
+        self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=False)
+        self._pre_forward()
+        sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
+                                           stages=self.num_stages,
+                                           stage_id=self.stage_id)
+        self._exec_schedule(sched)
+
+        logits = None
+        if self.is_last_stage():
+            logits_list = []
+            for i in range(self.num_micro_batches):
+                logits = self.tensor_buffer.get("logits", i, remove=True)
+                logits_list.append(logits)
+            logits = torch.cat(logits_list, dim=0)
+
+        self._post_forward()
+        return logits
+
     def eval_batch(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, loss_fn: Callable,
                    **loss_fn_kwargs):
         self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=False)
@@ -345,23 +368,24 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         self._exec_schedule(sched)
 
-        # currently losses are avged across micro batches
-        # stats are returned as a list of dict, one dict per micro batch
-        # this can be configurable in the future
-        r = None
+        avg_loss, avg_stats = None, None
         if self.is_last_stage():
-            loss_sum = 0
+            losses = []
             stats = []
 
             for mbid in range(self.num_micro_batches):
-                loss = self.tensor_buffer.get("losses", mbid)
-                loss_sum += loss.item()
+                loss = self.tensor_buffer.get("losses", mbid).detach()
+                losses.append(loss)
                 stats.append(self.tensor_buffer.get("stats", mbid))
-            avg_loss = loss_sum / self.num_micro_batches
 
-            r = avg_loss, stats
+            assert len(losses) > 0
+            avg_loss = torch.stack(losses).mean()
+            avg_stats = dict()
+            for key in stats[0].keys():
+                avg_stats[key] = torch.stack([stat[key] for stat in stats]).mean()
+
         self._post_eval_batch()
-        return r
+        return avg_loss, avg_stats
 
     def train_batch(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, loss_fn: Callable,
                     **loss_fn_kwargs):
@@ -379,24 +403,24 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                                        stage_id=self.stage_id)
         self._exec_schedule(sched)
 
-        # currently losses are avged across micro batches
-        # stats are returned as a list of dict, one dict per micro batch
-        # this can be configurable in the future
-        r = None
+        avg_loss, avg_stats = None, None
         if self.is_last_stage():
-            loss_sum = 0
+            losses = []
             stats = []
 
             for mbid in range(self.num_micro_batches):
-                loss = self.tensor_buffer.get("losses", mbid)
-                loss_sum += loss.item()
+                loss = self.tensor_buffer.get("losses", mbid).detach()
+                losses.append(loss)
                 stats.append(self.tensor_buffer.get("stats", mbid))
-            avg_loss = loss_sum / self.num_micro_batches
 
-            r = avg_loss, stats
+            assert len(losses) > 0
+            avg_loss = torch.stack(losses).mean()
+            avg_stats = dict()
+            for key in stats[0].keys():
+                avg_stats[key] = torch.stack([stat[key] for stat in stats]).mean()
 
-        self._post_train_batch()
-        return r
+        self._post_eval_batch()
+        return avg_loss, avg_stats
 
     @torch.no_grad()
     def generate(
@@ -528,33 +552,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         x = self.tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
         ys = self.tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
 
-        # self.last_kv_cache = [(y.k_cache.clone().detach(), y.v_cache.clone().detach())
-        #                        if y.k_cache is not None else (None, None) for y in ys]
-
-        # self._zero_grads(x)
-        # self._zero_grads(ys)
-        # base.consistency.set_micro_batch_id(micro_batch_id)
-
         x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
-
-        # if micro_batch_id == self.num_micro_batches - 1:
-        #     base.consistency.inc_step_id()
-
-        # this_kv_cache = [(y.k_cache, y.v_cache) for y in ys]
-
-        # # check if kv cache is changed
-        # for last_kv, this_kv in zip(self.last_kv_cache, this_kv_cache):
-        #     if last_kv[0] is None or last_kv[1] is None:
-        #         continue
-        #     k_diff = torch.abs(last_kv[0] - this_kv[0])
-        #     v_diff = torch.abs(last_kv[1] - this_kv[1])
-        #     print(f"K_DIFF MAX {k_diff.max()}")
-        # print(f"V_DIFF MAX {v_diff.max()}")
 
         logits = self.__maybe_init_kv_cache(x, ys, micro_batch_id)
         self.__maybe_increase_cache_seqlens(x, ys, micro_batch_id, logits=logits)
         self.__maybe_genstep(x, ys, micro_batch_id, logits=logits)
         self.__maybe_calculate_loss(x, micro_batch_id)
+        self.__maybe_store_logits(x, micro_batch_id)
         self.tensor_buffer.put("batch_output_x", micro_batch_id, x)  # send activation
 
     def __maybe_init_kv_cache(self, x: PipeTransferData, ys: List[PipeCacheData], mbid: int):
@@ -646,11 +650,17 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             self.tensor_buffer.put("losses", mbid, loss)
             self.tensor_buffer.put("stats", mbid, stats)
 
+    def __maybe_store_logits(self, x: PipeTransferData, mbid: int):
+        if self.is_last_stage() and not self._compute_loss:
+            logits = x.pp_input
+            self.tensor_buffer.put("logits", mbid, logits)
+
     def _exec_backward_pass(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert self.optimizer is not None, "must provide optimizer during " \
                                            "init in order to use backward"
         # The last stage just runs backward on the loss using DeepSpeed's typical
         # mechanisms.
+
         if self.is_last_stage():
             loss = self.tensor_buffer.get("losses", micro_batch_id, remove=False)
             super().backward(loss)
@@ -755,10 +765,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         else:
             # do nothing for non tensor
             pass
-
-    def forward(self, *args, **kwargs):
-        """Disabled for pipeline parallel training. See ``eval_batch()`` and ``train_batch()``. """
-        raise PipelineError("Only train_batch() is accessible in pipeline mode.")
 
     def backward(self, *args, **kwargs):
         """Disabled for pipeline parallel training. See ``train_batch()``. """

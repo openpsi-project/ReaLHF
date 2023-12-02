@@ -4,7 +4,16 @@ import functools
 import torch
 
 
-class AdaptiveKLController:
+class KLController:
+
+    def __init__(self, kl_coef):
+        self.value = kl_coef
+
+    def update(self):
+        raise NotImplementedError()
+
+
+class AdaptiveKLController(KLController):
     """
     Adaptive KL controller described in the paper:
     https://arxiv.org/pdf/1909.08593.pdf
@@ -22,7 +31,7 @@ class AdaptiveKLController:
         self.value = self.value * mult
 
 
-class FixedKLController:
+class FixedKLController(KLController):
     """Fixed KL controller."""
 
     def __init__(self, kl_coef):
@@ -111,7 +120,6 @@ def critic_loss_fn(value: torch.FloatTensor,
     Returns:
         Tuple[torch.Tensor, Dict]: Scalar loss and statistics.
     """
-
     if loss_fn_type == 'huber':
         loss_fn = functools.partial(torch.nn.functional.huber_loss, reduction='none', delta=10.0)
     elif loss_fn_type == 'mse':
@@ -121,9 +129,14 @@ def critic_loss_fn(value: torch.FloatTensor,
 
     target_value = target_value.clone()  # clone a inference tensor
 
-    value_loss_original = loss_fn(value, target_value)
+    # TODO: bf16 support for autocast
+    with torch.autocast("cuda"):
+        value_loss_original = loss_fn(value, target_value)
+
     value_clipped = old_value + (value - old_value).clamp(-value_eps_clip, value_eps_clip)
-    value_loss_clipped = loss_fn(value_clipped, target_value)
+
+    with torch.autocast("cuda"):
+        value_loss_clipped = loss_fn(value_clipped, target_value)
 
     value_loss = torch.max(value_loss_original, value_loss_clipped)
 
@@ -132,6 +145,7 @@ def critic_loss_fn(value: torch.FloatTensor,
         proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
     else:
         proportion_clipped = proportion_clipped.float().mean()
+
     stat = dict(clip_ratio=proportion_clipped.detach())
 
     if loss_mask is not None:
