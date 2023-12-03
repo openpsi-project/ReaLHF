@@ -18,6 +18,7 @@ logger = logging.getLogger("pipe_nn")
 def make_causal_flash_mqat_pipe_module(
     config: FlashMQATConfig,
     topology: PipeDataParallelTopology,
+    is_critic: bool = False,
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
 ):
@@ -40,14 +41,25 @@ def make_causal_flash_mqat_pipe_module(
         )
         layer_specs.append(flash_mqat_block)
 
-    lm_head = LayerSpec(
-        LanguageModelHead,
-        config.hidden_dim,
-        config.vocab_size,
-        bias=False,
-        device=device,
-        dtype=dtype,
-    )
+    if not is_critic:
+        lm_head = LayerSpec(
+            LanguageModelHead,
+            config.hidden_dim,
+            config.vocab_size,
+            bias=False,
+            device=device,
+            dtype=dtype,
+        )
+    else:
+        lm_head = LayerSpec(
+            LanguageModelHead,
+            config.hidden_dim,
+            1,
+            bias=False,
+            device=device,
+            dtype=dtype,
+        )
+
     layer_specs.append(lm_head)
 
     def compute_loss(output, label):
@@ -69,6 +81,7 @@ def make_flash_mqat_pipe_model(
     num_dp: int,
     from_type: str,
     dtype: torch.dtype = torch.float16,
+    is_critic: bool = False,
     tokenizer_path: Optional[str] = None,
 ):
     if tokenizer_path is None:
@@ -76,7 +89,7 @@ def make_flash_mqat_pipe_model(
     tokenizer = api.huggingface.load_hf_tokenizer(model_path)
     topology = PipeDataParallelTopology(num_pp=num_pp, num_dp=num_dp)
     config = getattr(FlashMQATForCausalLM, f"config_from_{from_type}")(model_path=model_path)
-    module = make_causal_flash_mqat_pipe_module(config, topology, dtype, device)
+    module = make_causal_flash_mqat_pipe_module(config, topology, is_critic, dtype, device)
     process_memory_mb("before_load")
     module.load(model_path)
     process_memory_mb("after_load")
@@ -84,3 +97,5 @@ def make_flash_mqat_pipe_model(
 
 
 api.model.register_model("flash_mqat_pipe", make_flash_mqat_pipe_model)
+api.model.register_model("flash_mqat_pipe_critic",
+                         functools.partial(make_flash_mqat_pipe_model, is_critic=True))

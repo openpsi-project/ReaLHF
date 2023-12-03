@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 
 from base.monitor import process_memory_mb, time_mark
-from base.topology import PipeDataParallelTopology, PipelineParallelGrid
+from base.topology import PipeDataParallelTopology, PipelineParallelGrid, PipeModelDataParallelTopology
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 import base.constants
 import base.logging as logging
@@ -182,7 +182,7 @@ class PipelineModule(nn.Module):
                         f'num_stages ({self.num_stages}) must divide distributed world size ({self.world_size})'
                     )
                 dp = self.world_size // num_stages
-                topology = PipeDataParallelTopology(num_pp=num_stages, num_dp=dp)
+                topology = PipeModelDataParallelTopology(num_pp=num_stages, num_mp=1, num_dp=dp)
                 self._topo = topology
 
         # Construct communicators for pipeline topology
@@ -587,7 +587,11 @@ class PipelineModule(nn.Module):
             logger.info(f"loaded shard {fn}")
             n_shards += 1
             process_memory_mb(f"after_load_shard_{n_shards}")
-        self.load_state_dict(state_dict)
+
+        if "41.weight" in state_dict:
+            state_dict.pop("41.weight")
+
+        self.load_state_dict(state_dict, strict=False)
 
         self.num_checkpoint_shards = n_shards
         logger.info("Loaded model from {}".format(load_dir))

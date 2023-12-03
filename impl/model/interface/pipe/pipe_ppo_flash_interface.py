@@ -11,6 +11,7 @@ from impl.model.utils.functional import gather_packed_shifted_log_probs
 from impl.model.utils.save import save_pipeline_model
 import api.huggingface
 import api.model
+import base.constants
 import base.logging as logging
 import impl.model.utils.ppo_functional as ppo_functional
 
@@ -34,7 +35,7 @@ def _ppo_actor_step(
     seq_no_eos_mask: torch.FloatTensor,  # [bs]
     pad_token_id: int,  # const
     eos_token_id: int,  # const
-    kl_adapter_value: int,  # const
+    kl_adapter: ppo_functional.KLController,  # const
     max_reward_clip: int,  # const
     discount: int,  # const
     gae_lambda: int,  # const
@@ -45,7 +46,7 @@ def _ppo_actor_step(
     """Loss function for ppo actor step, all inputs should be splitted into pipeline micro batches,
     returns loss and logging stats.
     """
-    # input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
     short1cu_seqlens = cu_seqlens.clone()
     short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
     if logits_mask is not None:
@@ -53,7 +54,7 @@ def _ppo_actor_step(
 
     new_logp = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
     kl_rewards, rewards = ppo_functional.get_packed_rewards(
-        kl_ctl=kl_adapter_value,
+        kl_ctl=kl_adapter.value,
         clip_reward_value=max_reward_clip,
         log_probs=old_logp,
         ref_log_probs=ref_logp,
@@ -85,15 +86,19 @@ def _ppo_actor_step(
         loss_mask=loss_mask,
     )
 
-    # mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
+    mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
+    # HACK: we don't consider data parallel here
+    kl_adapter.update(mean_ref_kl, n_steps=input_lens.sum().item())
+
     importance_weight = loss_stat["importance_weight"]
     clip_ratio = loss_stat["clip_ratio"]
     approx_kl = ((old_logp - new_logp).detach() * loss_mask).sum() / loss_mask.sum()
+
     stats = dict(
         task_reward=reward_score.mean().detach(),
         kl_reward=(kl_rewards.detach() * loss_mask).sum().mean(),
         ppo_approx_kl=approx_kl,
-        cur_kl_ctl=torch.tensor(kl_adapter_value).to(approx_kl),
+        cur_kl_ctl=torch.tensor(kl_adapter.value).to(approx_kl),
         advantage=advantages.mean().detach(),
         actor_loss=loss.detach(),
         actor_clip_ratio=clip_ratio,
@@ -139,8 +144,6 @@ class PipePackedActorInterface(api.model.ModelInterface):
         self.kl_ctl = None
 
     def save(self, model: api.model.Model, save_dir: str):
-        # os.makedirs(save_dir, exist_ok=True)
-        # model.module.save(save_dir)
         save_pipeline_model(model, save_dir)
 
     @torch.no_grad()
@@ -223,12 +226,18 @@ class PipePackedActorInterface(api.model.ModelInterface):
         )
         prompt_mask = torch.cat(list(itertools.chain.from_iterable(prompt_mask)))
 
+        # transmit sparse_packed_logits_mask as a sparse tensor
+        # if not self.force_no_logits_mask and packed_logits_mask is not None:
+        #     packed_logits_mask = packed_logits_mask.to(torch.bool)
+        #     sparse_inverse_packed_logits_mask = (~packed_logits_mask).to_sparse()
+
         res = dict(
             seq_no_eos_mask=seq_no_eos_mask,
             packed_seq=packed_seq,
             cu_seqlens=cu_seqlens,
             packed_logprobs=packed_logprobs.float(),
-            packed_logits_mask=packed_logits_mask if not self.force_no_logits_mask else None,
+            packed_logits_mask=packed_logits_mask \
+                               if not self.force_no_logits_mask else None,
             prompt_mask=prompt_mask,
         )
         return recursive_apply(from_dict(res), lambda x: x.cpu())
@@ -245,13 +254,18 @@ class PipePackedActorInterface(api.model.ModelInterface):
 
         res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
 
-        if res is None:  # if not pipeline last stage, module.generate return nothing.
+        if res is None:  # if not pipeline last stage, module forward return nothing.
             return None
 
-        logits: torch.FloatTensor = res.logits.float()
+        logits: torch.FloatTensor = res.float()
 
-        if data["packed_logits_mask"] is not None:
-            logits.masked_fill_(data["packed_logits_mask"].logical_not(), torch.finfo(logits.dtype).min)
+        if 'packed_logits_mask' in data and data['packed_logits_mask'] is not None:
+            logits.masked_fill_(data['packed_logits_mask'].logical_not(), torch.finfo(logits.dtype).min)
+            # here data['packed_logits_mask'] is ~packed_logits_mask
+            # sparse_inverse_packed_logits_mask = data['packed_logits_mask']
+            # inverse_packed_logits_mask = sparse_inverse_packed_logits_mask.to_dense()
+            # logits.masked_fill_(inverse_packed_logits_mask, torch.finfo(logits.dtype).min)
+
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         return from_dict(dict(logprobs=logprobs.cpu()))
 
@@ -261,6 +275,11 @@ class PipePackedActorInterface(api.model.ModelInterface):
         assert isinstance(module, DeepSpeedPipelineEngine) or isinstance(module, StreamPipeEngine)
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
+
+        # if data["packed_logits_mask"]  is not None:
+        #     # reform dense packed_logits_mask
+        #     data["packed_logits_mask"] = ~(data["packed_logits_mask"].to_dense())
+
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         module.set_version_steps(model.version.global_step)
@@ -277,7 +296,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
             seq_no_eos_mask=data["seq_no_eos_mask"],
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
-            kl_adapter_value=self.kl_adapter.value,
+            kl_adapter=self.kl_adapter,
             max_reward_clip=self.max_reward_clip,
             discount=self.discount,
             gae_lambda=self.gae_lambda,
@@ -285,7 +304,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
             logits_mask=data["packed_logits_mask"],
         )
 
-        r = module.train_batch(
+        avg_loss, avg_stats = module.train_batch(
             packed_input_ids=data['packed_seq'],
             cu_seqlens=data['cu_seqlens'],
             loss_fn=_ppo_actor_step,
@@ -297,11 +316,205 @@ class PipePackedActorInterface(api.model.ModelInterface):
         if model.version.epoch > cur_epoch:
             module.tput_timer.update_epoch_count()
 
-        if r is None:
+        if avg_loss is None:
             return dict()
         else:
-            avg_loss, train_stats = r
-            return {"loss": avg_loss}
+            r = {"loss": avg_loss.item()}
+            log_str = f"loss: {avg_loss:.4f};\n"
+            for k, v in avg_stats.items():
+                log_str += f" {k}: {v:.4f};\n"
+                r[k] = v.item()
+
+            logger.info(f"Critic DP rank {base.constants.data_parallel_rank()} avg train stats: \n {log_str}")
+            return r
+
+
+def _ppo_critic_step(
+        logits: torch.FloatTensor,  # [tot_seqlen, vocab_size]
+        packed_input_ids: torch.LongTensor,
+        cu_seqlens: torch.LongTensor,
+        old_logp: torch.FloatTensor,
+        ref_logp: torch.FloatTensor,
+        reward_score: torch.FloatTensor,
+        values: torch.FloatTensor,
+        prompt_mask: torch.FloatTensor,
+        seq_no_eos_mask: torch.FloatTensor,
+        value_eps_clip: float,
+        max_reward_clip: float,
+        kl_adapter: ppo_functional.KLController,
+        discount: float,
+        gae_lambda: float,
+        **kwargs) -> Dict:
+    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+    max_seqlen = int(max(input_lens))
+
+    short1cu_seqlens = cu_seqlens.clone()
+    short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
+
+    loss_mask = 1 - prompt_mask.float()
+    shift_one_indices = torch.cat([
+        torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
+        for i in range(cu_seqlens.shape[0] - 1)
+    ])
+    loss_mask = loss_mask[shift_one_indices]
+
+    if packed_input_ids.is_inference():
+        packed_input_ids = packed_input_ids.clone()
+        cu_seqlens = cu_seqlens.clone()
+
+    old_logp *= loss_mask
+    ref_logp *= loss_mask
+
+    kl_rewards, rewards = ppo_functional.get_packed_rewards(
+        kl_ctl=kl_adapter.value,
+        clip_reward_value=max_reward_clip,
+        log_probs=old_logp,
+        ref_log_probs=ref_logp,
+        reward_score=reward_score,
+        short1cu_seqlens=short1cu_seqlens,
+        seq_no_eos_mask=seq_no_eos_mask,
+    )
+
+    _, returns = ppo_functional.get_packed_advantages_and_returns(
+        gamma=discount,
+        lam=gae_lambda,
+        values=values,
+        rewards=rewards,
+        short1cu_seqlens=short1cu_seqlens,
+        seq_no_eos_mask=seq_no_eos_mask,
+    )
+
+    leave_one_indices = torch.cat([
+        torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
+        for i in range(cu_seqlens.shape[0] - 1)
+    ])
+    new_values = logits[leave_one_indices]
+    values = values[leave_one_indices]
+
+    loss, loss_stat = ppo_functional.critic_loss_fn(value=new_values,
+                                                    old_value=values,
+                                                    target_value=returns,
+                                                    value_eps_clip=value_eps_clip,
+                                                    loss_mask=loss_mask)
+
+    mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
+
+    # HACK: we don't consider data parallel here
+    kl_adapter.update(mean_ref_kl, n_steps=input_lens.sum().item())
+
+    clip_ratio = loss_stat['clip_ratio']
+
+    return loss, dict(
+        value_loss=loss.detach(),
+        value_clip_ratio=clip_ratio,
+        values=new_values.mean().detach(),
+        returns=returns.mean().detach(),
+    )
+
+
+@dataclasses.dataclass
+class PipePackedCriticInterface(api.model.ModelInterface):
+    n_minibatches: int = 4
+    enable_save: bool = True
+    kl_ctl: float = 0.1
+    discount: float = 1.0
+    gae_lambda: float = 0.95
+    eps_clip: float = 0.2
+    value_eps_clip: float = 0.2
+    max_reward_clip: float = 5.0
+    adaptive_kl_ctl: bool = False
+    adaptive_kl_target: Optional[float] = 6
+    adaptive_kl_horizon: Optional[float] = 10000
+
+    def __post_init__(self):
+        if self.adaptive_kl_ctl:
+            assert self.adaptive_kl_target is not None
+            assert self.adaptive_kl_horizon is not None
+            self.kl_adapter = ppo_functional.AdaptiveKLController(self.kl_ctl, self.adaptive_kl_target,
+                                                                  self.adaptive_kl_horizon)
+        else:
+            self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
+        self.kl_ctl = None
+
+    def save(self, model: api.model.Model, save_dir: str):
+        save_pipeline_model(model, save_dir)
+
+    @torch.no_grad()
+    def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+        module = model.module
+        module.eval()
+        data = recursive_apply(data, lambda x: x.to(model.device))
+
+        cu_seqlens = data['cu_seqlens']
+        input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+        max_seqlen = int(max(input_lens))
+
+        scores: torch.FloatTensor = module(packed_input_ids=data['packed_seq'], cu_seqlens=cu_seqlens)
+        if scores is None:  # if not pipeline last stage, module forward return nothing.
+            return None
+
+        logger.info(f"scores shape before {scores.shape}")
+        scores = scores.squeeze(dim=-1).float()
+        logger.info(f"scores shape after {scores.shape}")
+        seq_no_eos_mask = data['seq_no_eos_mask']
+        for i in range(seq_no_eos_mask.shape[0]):
+            if not seq_no_eos_mask[i]:
+                # Set value at the EOS token to be zero.
+                scores[cu_seqlens[i + 1] - 1] = 0.0
+        return from_dict(dict(scores=scores.cpu()))
+
+    def train_step(self, model: api.model.Model, data: NamedArray) -> Dict:
+        module = model.module
+        tokenizer = model.tokenizer
+        assert isinstance(module, DeepSpeedPipelineEngine) or isinstance(module, StreamPipeEngine)
+        # We call module.eval() because dropout causes the computation of incorrect of log probs.
+        module.eval()
+        data = recursive_apply(data, lambda x: x.to(model.device))
+
+        module.set_version_steps(model.version.global_step)
+        module.set_tokenizer(tokenizer)
+
+        input_lens = data['cu_seqlens'][1:] - data['cu_seqlens'][:-1]
+
+        loss_kwargs = dict(
+            input_lens=input_lens,
+            old_logp=data['packed_logprobs'],
+            ref_logp=data['packed_ref_logprobs'],
+            reward_score=data['rewards'],
+            values=data['values'],
+            prompt_mask=data['prompt_mask'],
+            seq_no_eos_mask=data['seq_no_eos_mask'],
+            value_eps_clip=self.value_eps_clip,
+            max_reward_clip=self.max_reward_clip,
+            kl_adapter=self.kl_adapter,
+            discount=self.discount,
+            gae_lambda=self.gae_lambda,
+        )
+
+        avg_loss, avg_stats = module.train_batch(
+            packed_input_ids=data['packed_seq'],
+            cu_seqlens=data['cu_seqlens'],
+            loss_fn=_ppo_critic_step,
+            **loss_kwargs,
+        )
+
+        cur_epoch = model.version.epoch
+        model.inc_version()
+        if model.version.epoch > cur_epoch:
+            module.tput_timer.update_epoch_count()
+
+        if avg_loss is None:
+            return dict()
+        else:
+            r = {"loss": avg_loss.item()}
+            log_str = f"loss: {avg_loss:.4f};\n"
+            for k, v in avg_stats.items():
+                log_str += f" {k}: {v:.4f};\n"
+                r[k] = v.item()
+
+            logger.info(f"Critic DP rank {base.constants.data_parallel_rank()} avg train stats: \n {log_str}")
+            return r
 
 
 api.model.register_interface("pipe_flash_actor", PipePackedActorInterface)
+api.model.register_interface("pipe_flash_critic", PipePackedCriticInterface)

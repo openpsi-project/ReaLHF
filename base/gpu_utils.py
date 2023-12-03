@@ -57,10 +57,10 @@ def setup_ddp(expr_name, trial_name, model_name, worker_index):
     logger.info(f"Setup DDP {worker_index} for model {model_name}")
 
     global_peers = list(
-        sorted(name_resolve.get_subtree(names.trainer_ddp_peer(expr_name, trial_name, model_name))))
+        sorted(map(int, name_resolve.get_subtree(names.trainer_ddp_peer(expr_name, trial_name, model_name)))))
     assert len(global_peers) == len(set(global_peers)), f"Duplicated trainer worker index. {global_peers}"
     world_size = len(global_peers)
-    ddp_rank = global_peers.index(str(worker_index))
+    ddp_rank = global_peers.index(worker_index)
 
     # global GPU_DEVICES_ISOLATED
     # if not GPU_DEVICES_ISOLATED and 'RAY' not in os.environ['DLLM_MODE']:
