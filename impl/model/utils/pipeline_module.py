@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 
 from base.monitor import process_memory_mb, time_mark
-from base.topology import PipeDataParallelTopology, PipelineParallelGrid
+from base.topology import PipeDataParallelTopology, PipelineParallelGrid, PipeModelDataParallelTopology
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.save_load import load_from_disk, save_to_disk
 import base.constants
@@ -183,7 +183,7 @@ class PipelineModule(nn.Module):
                         f'num_stages ({self.num_stages}) must divide distributed world size ({self.world_size})'
                     )
                 dp = self.world_size // num_stages
-                topology = PipeDataParallelTopology(num_pp=num_stages, num_dp=dp)
+                topology = PipeModelDataParallelTopology(num_pp=num_stages, num_mp=1, num_dp=dp)
                 self._topo = topology
 
         # Construct communicators for pipeline topology

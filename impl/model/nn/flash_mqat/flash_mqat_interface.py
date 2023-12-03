@@ -255,11 +255,11 @@ def make_flash_mqat_critic(
             from_type=from_type,
             tokenizer_path=tokenizer_path,
         )
-        model = DeepSpeedChatLikeFlashMQATCriticModel(from_model.module.net.transformer,
-                                                      output_bias=output_bias,
-                                                      output_scaling=output_scaling)
+        module = DeepSpeedChatLikeFlashMQATCriticModel(from_model.module.net.transformer,
+                                                       output_bias=output_bias,
+                                                       output_scaling=output_scaling)
         if v_head_path is not None:
-            model.head.load_state_dict(torch.load(v_head_path))
+            module.head.load_state_dict(torch.load(v_head_path))
     tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
     return api.model.Model(name, module, tokenizer, device)
 
