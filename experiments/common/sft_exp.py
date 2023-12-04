@@ -149,10 +149,7 @@ class SFTExperiment(Experiment):
                 ),
             ]
 
-        if self.pp_size == 1:
-            interface = ModelInterface("flash_sft")
-        else:
-            interface = ModelInterface("pipe_flash_sft")
+        interface = ModelInterface("flash_sft")
 
         topo = PipeModelDataParallelTopology(self.pp_size, 1, self.dp_size)
         model_worker = []

@@ -624,7 +624,7 @@ def main():
     args = parser.parse_known_args()[0]
 
     # Disable hydra logging.
-    if any("hydra/job_logging=disabled" in x for x in sys.argv):
+    if not any("hydra/job_logging=disabled" in x for x in sys.argv):
         sys.argv += ["hydra/job_logging=disabled"]
 
     if any("experiment_name=" in x for x in sys.argv):
@@ -632,7 +632,7 @@ def main():
     else:
         experiment_name = f"quickstart-{args.cmd}"
         sys.argv += [f"experiment_name={experiment_name}"]
-        
+
     if "--multirun" not in sys.argv and "hydra.mode=MULTIRUN" not in sys.argv and "-m" not in sys.argv:
         # non-multirun mode, add trial_name and hydra run dir
         if any("trial_name=" in x for x in sys.argv):

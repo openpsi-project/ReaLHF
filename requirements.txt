@@ -1,3 +1,4 @@
 colorlog
 colorama
+hydra-core
 prometheus_client
