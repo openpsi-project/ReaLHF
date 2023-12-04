@@ -123,18 +123,10 @@ class SFTExperiment(Experiment):
             ),
         )
 
-        if self.pp_size == 1:
-            model = Model("flash_mqat_clm_hf", args=dict(model_path=model_path, from_type=self.model_type))
-        else:
-            model = Model(
-                "flash_mqat_pipe",
-                args=dict(
-                    model_path=model_path,
-                    num_pp=self.pp_size,
-                    num_dp=self.dp_size,
-                    from_type=self.model_type,
-                ),
-            )
+        model = Model(
+            "flash_mqat_clm_hf",
+            args=dict(model_path=model_path, from_type=self.model_type, init_from_scratch=(self.pp_size > 1)),
+        )
         if self.use_lora:
             model.wrappers = [
                 ModelWrapper(
@@ -147,6 +139,17 @@ class SFTExperiment(Experiment):
                         lora_keys_to_replace=["c_attn.linear", "c_proj."],
                     ),
                 ),
+            ]
+        if self.pp_size > 1:
+            model.wrappers += [
+                ModelWrapper(
+                    "pipe_actor",
+                    args=dict(
+                        model_path=model_path,
+                        num_pp=self.pp_size,
+                        num_dp=self.dp_size,
+                    ),
+                )
             ]
 
         interface = ModelInterface("flash_sft")
