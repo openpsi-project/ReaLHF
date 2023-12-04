@@ -222,9 +222,10 @@ class SFTConfig:
     """
 
     experiment_name: str = MISSING
+    trial_name: str = MISSING
     train_epochs: int = 1
-    eval_freq: int = 1
-    save_freq: int = 50
+    eval_freq: Optional[int] = 1
+    save_freq: Optional[int] = 50
     seed: int = 42
     model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
@@ -247,9 +248,10 @@ class RWConfig:
     """
 
     experiment_name: str = MISSING
+    trial_name: str = MISSING
     train_epochs: int = 1
-    eval_freq: int = 1
-    save_freq: int = 50
+    eval_freq: Optional[int] = 1
+    save_freq: Optional[int] = 50
     seed: int = 42
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
@@ -297,9 +299,10 @@ class PPOConfig:
     """
 
     experiment_name: str = MISSING
+    trial_name: str = MISSING
     train_epochs: int = 1
-    eval_freq: int = 1
-    save_freq: int = 50
+    eval_freq: Optional[int] = 1
+    save_freq: Optional[int] = 50
     seed: int = 42
     actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     critic: ModelConfig = dataclasses.field(default_factory=ModelConfig)
@@ -358,9 +361,10 @@ class DPOConfig:
     """
 
     experiment_name: str = MISSING
+    trial_name: str = MISSING
     train_epochs: int = 1
-    eval_freq: int = 1
-    save_freq: int = 50
+    eval_freq: Optional[int] = 1
+    save_freq: Optional[int] = 50
     seed: int = 42
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
@@ -397,7 +401,10 @@ def run_sft(args: SFTConfig):
     logger = logging.getLogger("quickstart")
 
     exp_name = args.experiment_name
-    trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    if args.trial_name == MISSING:
+        trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    else:
+        trial_name = args.trial_name
     from apps.main import main_start
     from experiments.common.sft_exp import SFTExperiment
 
@@ -458,7 +465,10 @@ def run_rw(args: RWConfig):
 
     logger = logging.getLogger("quickstart")
     exp_name = args.experiment_name
-    trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    if args.trial_name == MISSING:
+        trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    else:
+        trial_name = args.trial_name
     from apps.main import main_start
     from experiments.common.rw_exp import PairedRWExperiment
 
@@ -535,7 +545,10 @@ def run_dpo(args: DPOConfig):
 
     logger = logging.getLogger("quickstart")
     exp_name = args.experiment_name
-    trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    if args.trial_name == MISSING:
+        trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    else:
+        trial_name = args.trial_name
     from apps.main import main_start
     from experiments.common.dpo_exp import DPOExperiment
 
@@ -610,18 +623,29 @@ def main():
     subparser.set_defaults(func=run_dpo)
     args = parser.parse_known_args()[0]
 
-    experiment_name = f"quickstart-{args.cmd}"
-    if any("experiment_name" in x for x in sys.argv):
-        raise ValueError("experiment_name should not be specified in the command line")
-    sys.argv += [f"experiment_name={experiment_name}", "hydra/job_logging=disabled"]
+    # Disable hydra logging.
+    if any("hydra/job_logging=disabled" in x for x in sys.argv):
+        sys.argv += ["hydra/job_logging=disabled"]
+
+    if any("experiment_name=" in x for x in sys.argv):
+        experiment_name = next(x for x in sys.argv if "experiment_name=" in x).split("=")[1]
+    else:
+        experiment_name = f"quickstart-{args.cmd}"
+        sys.argv += [f"experiment_name={experiment_name}"]
+        
     if "--multirun" not in sys.argv and "hydra.mode=MULTIRUN" not in sys.argv and "-m" not in sys.argv:
-        trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+        # non-multirun mode, add trial_name and hydra run dir
+        if any("trial_name=" in x for x in sys.argv):
+            trial_name = next(x for x in sys.argv if "trial_name=" in x).split("=")[1]
+        else:
+            trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+            sys.argv += [f"trial_name={trial_name}"]
         sys.argv += [
             f"hydra.run.dir={cluster_spec.fileroot}/logs/{getpass.getuser()}/"
             f"{experiment_name}/{trial_name}/hydra-outputs/"
-            f"{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
         ]
     else:
+        # Multi-run mode, add hydra sweep dir. Trial names will be automatically generated.
         sys.argv += [
             f"hydra.sweep.dir={cluster_spec.fileroot}/logs/{getpass.getuser()}/"
             f"{experiment_name}/hydra-sweep-outputs/"
