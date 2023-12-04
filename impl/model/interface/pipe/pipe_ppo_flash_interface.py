@@ -105,7 +105,7 @@ def _ppo_actor_step(
         importance_weight=importance_weight,
     )
     if logits_mask is not None:
-        stats["ignoring_logits_ratio"] = (1 - logits_mask).float().mean()
+        stats["ignoring_logits_ratio"] = logits_mask.logical_not().float().mean()
     return loss, stats
 
 
@@ -132,6 +132,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
     adaptive_kl_horizon: Optional[float] = 10000
 
     force_no_logits_mask: bool = False
+    sparse_logits_mask: bool = False
 
     def __post_init__(self):
         if self.adaptive_kl_ctl:
@@ -219,17 +220,14 @@ class PipePackedActorInterface(api.model.ModelInterface):
         if not self.force_no_logits_mask and gen_logits_mask_list:
             packed_logits_mask = torch.cat(
                 list(itertools.chain.from_iterable(zip(prompt_logits_mask_list, gen_logits_mask_list))))
+            if self.sparse_logits_mask:
+                packed_logits_mask = packed_logits_mask.logical_not()
 
         prompt_mask = zip(
             [torch.ones(plen, dtype=torch.bool, device=model.device) for plen in prompt_lengths],
             [torch.zeros(glen, dtype=torch.bool, device=model.device) for glen in gen_lengths],
         )
         prompt_mask = torch.cat(list(itertools.chain.from_iterable(prompt_mask)))
-
-        # transmit sparse_packed_logits_mask as a sparse tensor
-        # if not self.force_no_logits_mask and packed_logits_mask is not None:
-        #     packed_logits_mask = packed_logits_mask.to(torch.bool)
-        #     sparse_inverse_packed_logits_mask = (~packed_logits_mask).to_sparse()
 
         res = dict(
             seq_no_eos_mask=seq_no_eos_mask,
@@ -252,7 +250,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+        res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens)
 
         if res is None:  # if not pipeline last stage, module forward return nothing.
             return None
@@ -260,11 +258,10 @@ class PipePackedActorInterface(api.model.ModelInterface):
         logits: torch.FloatTensor = res.float()
 
         if 'packed_logits_mask' in data and data['packed_logits_mask'] is not None:
-            logits.masked_fill_(data['packed_logits_mask'].logical_not(), torch.finfo(logits.dtype).min)
-            # here data['packed_logits_mask'] is ~packed_logits_mask
-            # sparse_inverse_packed_logits_mask = data['packed_logits_mask']
-            # inverse_packed_logits_mask = sparse_inverse_packed_logits_mask.to_dense()
-            # logits.masked_fill_(inverse_packed_logits_mask, torch.finfo(logits.dtype).min)
+            packed_logits_mask = data['packed_logits_mask']
+            if not self.sparse_logits_mask:
+                packed_logits_mask = packed_logits_mask.logical_not()
+            logits.masked_fill_(packed_logits_mask, torch.finfo(logits.dtype).min)
 
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         return from_dict(dict(logprobs=logprobs.cpu()))
@@ -276,11 +273,9 @@ class PipePackedActorInterface(api.model.ModelInterface):
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
 
-        # if data["packed_logits_mask"]  is not None:
-        #     # reform dense packed_logits_mask
-        #     data["packed_logits_mask"] = ~(data["packed_logits_mask"].to_dense())
-
         data = recursive_apply(data, lambda x: x.to(model.device))
+        if self.sparse_logits_mask:
+            data["packed_logits_mask"] = data["packed_logits_mask"].logical_not()
 
         module.set_version_steps(model.version.global_step)
 
@@ -325,7 +320,7 @@ class PipePackedActorInterface(api.model.ModelInterface):
                 log_str += f" {k}: {v:.4f};\n"
                 r[k] = v.item()
 
-            logger.info(f"Critic DP rank {base.constants.data_parallel_rank()} avg train stats: \n {log_str}")
+            logger.info(f"Actor DP rank {base.constants.data_parallel_rank()} avg train stats: \n {log_str}")
             return r
 
 
@@ -453,9 +448,7 @@ class PipePackedCriticInterface(api.model.ModelInterface):
         if scores is None:  # if not pipeline last stage, module forward return nothing.
             return None
 
-        logger.info(f"scores shape before {scores.shape}")
         scores = scores.squeeze(dim=-1).float()
-        logger.info(f"scores shape after {scores.shape}")
         seq_no_eos_mask = data['seq_no_eos_mask']
         for i in range(seq_no_eos_mask.shape[0]):
             if not seq_no_eos_mask[i]:

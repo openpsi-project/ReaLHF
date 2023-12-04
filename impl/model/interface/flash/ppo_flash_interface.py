@@ -47,6 +47,7 @@ class PackedActorInterface(api.model.ModelInterface):
     enable_save: bool = True
 
     force_no_logits_mask: bool = False
+    sparse_logits_mask: bool = False
 
     def __post_init__(self):
         if self.adaptive_kl_ctl:
@@ -128,6 +129,8 @@ class PackedActorInterface(api.model.ModelInterface):
         if not self.force_no_logits_mask and gen_logits_mask_list:
             packed_logits_mask = torch.cat(
                 list(itertools.chain.from_iterable(zip(prompt_logits_mask_list, gen_logits_mask_list))))
+            if self.sparse_logits_mask:
+                packed_logits_mask = packed_logits_mask.logical_not()
 
         prompt_mask = zip(
             [torch.ones(plen, dtype=torch.bool, device=model.device) for plen in prompt_lengths],
@@ -158,8 +161,13 @@ class PackedActorInterface(api.model.ModelInterface):
         logits: torch.FloatTensor = module(packed_input_ids=data['packed_seq'],
                                            cu_seqlens=cu_seqlens,
                                            max_seqlen=max_seqlen).logits.float()
+
         if 'packed_logits_mask' in data and data['packed_logits_mask'] is not None:
-            logits.masked_fill_(data['packed_logits_mask'].logical_not(), torch.finfo(logits.dtype).min)
+            packed_logits_mask = data['packed_logits_mask']
+            if not self.sparse_logits_mask:
+                packed_logits_mask = packed_logits_mask.logical_not()
+            logits.masked_fill_(packed_logits_mask, torch.finfo(logits.dtype).min)
+
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data['packed_seq'])
         return from_dict(dict(logprobs=logprobs.cpu()))
 
@@ -255,7 +263,7 @@ class PackedActorInterface(api.model.ModelInterface):
         )
 
         if logits_mask is not None:
-            stats['ignoring_logits_ratio'] = (1 - logits_mask).float().mean()
+            stats['ignoring_logits_ratio'] = logits_mask.logical_not().float().mean()
 
         if self.early_stop_kl is not None and api.huggingface.get_all_reduce_mean(
                 approx_kl) > self.early_stop_kl:
@@ -273,6 +281,8 @@ class PackedActorInterface(api.model.ModelInterface):
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
+        if self.sparse_logits_mask:
+            data["packed_logits_mask"] = data["packed_logits_mask"].logical_not()
 
         datas = PackedParallelDataBroker.scatter_to(data, self.n_minibatches)
         random.shuffle(datas)

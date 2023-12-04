@@ -39,6 +39,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
     engine_type: str = "deepspeed"
     num_pipeline_stages: int = 1
+    num_pipeline_micro_batches: Optional[int] = None
     # stream pipe engine require model configs
     max_seq_len: int = 512
     max_new_tokens: int = 512
@@ -130,6 +131,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             config=ds_config,
             lr_scheduler=lr_scheduler,
             engine_type=self.engine_type,
+            num_pipeline_micro_batches=self.num_pipeline_micro_batches,
         )
 
         if self.engine_type == "pipe" or self.engine_type == "stream_pipe":

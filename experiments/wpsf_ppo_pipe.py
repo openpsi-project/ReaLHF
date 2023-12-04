@@ -98,54 +98,55 @@ class PipeWpsfFlashPPOExperiment(Experiment):
         self.model_type = model_type
 
     def scheduling_setup(self) -> ExperimentScheduling:
-        return ExperimentScheduling(data_worker=TasksGroup(
-            count=self.n_data_workers,
-            scheduling=Scheduling.data_worker_default(
-                cpu=2,
-                mem=10000,
-                nodelist='QH-com14',
+        return ExperimentScheduling(
+            data_worker=TasksGroup(
+                count=self.n_data_workers,
+                scheduling=Scheduling.data_worker_default(
+                    cpu=2,
+                    mem=10000,
+                    nodelist='QH-com14',
+                ),
             ),
-        ),
-                                    master_worker=TasksGroup(
-                                        count=1,
-                                        scheduling=Scheduling.master_worker_default(
-                                            cpu=4,
-                                            mem=10000,
-                                            nodelist='QH-com14',
-                                        ),
-                                    ),
-                                    model_worker=[
-                                        TasksGroup(
-                                            count=self.n_actors,
-                                            scheduling=Scheduling.model_worker_default(
-                                                cpu=4,
-                                                gpu=1,
-                                                gpu_type='tesla',
-                                                mem=100000,
-                                                nodelist='QH-com10',
-                                            ),
-                                        ),
-                                        TasksGroup(
-                                            count=self.n_critics,
-                                            scheduling=Scheduling.model_worker_default(
-                                                cpu=4,
-                                                gpu=1,
-                                                gpu_type='tesla',
-                                                mem=100000,
-                                                nodelist='QH-com11',
-                                            ),
-                                        ),
-                                        TasksGroup(
-                                            count=self.n_rewards + self.n_refs,
-                                            scheduling=Scheduling.model_worker_default(
-                                                cpu=4,
-                                                gpu=1,
-                                                gpu_type='tesla',
-                                                mem=100000,
-                                                nodelist='QH-com12',
-                                            ),
-                                        )
-                                    ])
+            master_worker=TasksGroup(
+                count=1,
+                scheduling=Scheduling.master_worker_default(
+                    cpu=4,
+                    mem=10000,
+                    # nodelist='QH-com14',
+                ),
+            ),
+            model_worker=[
+                TasksGroup(
+                    count=self.n_actors,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=1,
+                        gpu_type='tesla',
+                        mem=100000,
+                        # nodelist='QH-com10',
+                    ),
+                ),
+                TasksGroup(
+                    count=self.n_critics,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=1,
+                        gpu_type='tesla',
+                        mem=100000,
+                        # nodelist='QH-com11',
+                    ),
+                ),
+                TasksGroup(
+                    count=self.n_rewards + self.n_refs,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=1,
+                        gpu_type='tesla',
+                        mem=100000,
+                        # nodelist='QH-com12',
+                    ),
+                )
+            ])
 
     def initial_setup(self) -> ExperimentConfig:
         if self.model_type == "starcoder":
@@ -156,9 +157,9 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             critic_path = "/lustre/meizy/models/starcoder_4l"  # a 4 layer starcoder model only for testing purpose
             rw_path = critic_path
         elif self.model_type == "llama":
-            actor_path = "/home/meizy/models/llama-2-13b_4pp_3s"
+            actor_path = "/home/meizy/models/test/llama-2-13b_4pp_3s"
             ref_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
-            critic_path = "/home/meizy/models/llama-2-13b-critic_4pp_3s"
+            critic_path = "/home/meizy/models/test/llama-2-13b-critic_4pp_3s"
             rw_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
 
         # rw_lora_head_path = None
@@ -171,7 +172,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
 
         batch_size_per_device = 2
         max_prompt_len = 1024
-        max_answer_len = 512
+        max_answer_len = 1024
 
         dataset = Dataset(
             'prompt',
@@ -289,15 +290,18 @@ class PipeWpsfFlashPPOExperiment(Experiment):
         actor_interface = ModelInterface(
             'pipe_flash_actor',
             args={
-                **copy.deepcopy(ppo_kwargs), "generation_config": generation_kwargs,
-                "force_no_logits_mask": True
+                **copy.deepcopy(ppo_kwargs),
+                "generation_config": generation_kwargs,
+                # "force_no_logits_mask": True
+                "sparse_logits_mask": True
             },
         )
         ref_interface = ModelInterface(
             "flash_actor",
             args={
                 **copy.deepcopy(ppo_kwargs),
-                "force_no_logits_mask": True,
+                # "force_no_logits_mask": True,
+                "sparse_logits_mask": True
             },
         )
         critic_interface = ModelInterface(

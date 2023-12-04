@@ -153,7 +153,6 @@ def main_start(args):
         cpu=1,
         gpu=0,
         mem=1024,
-        nodelist="QH-com[01-14]",
         env_vars=base_environs,
         container_image=args.image_name or setup.controller_image,
         time_limit=CONTROLLER_TIME_LIMIT,
