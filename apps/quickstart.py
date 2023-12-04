@@ -13,14 +13,12 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
 import hydra
 
-import base.logging as logging
 from base.cluster import spec as cluster_spec
 from base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
 import api.config
 
 SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "saved"]
 
-logger = logging.getLogger("quickstart")
 
 cs = ConfigStore.instance()
 
@@ -73,14 +71,6 @@ class ModelConfig:
     gradient_checkpointing: bool = False
     enable_fp16: bool = True
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
-
-    def __post_init__(self):
-        if self.base_model_path is None:
-            logger.warning("`base_model_path` is not specified. Using `path` as `base_model_path`.")
-            self.base_model_path = self.path
-        if self.tokenizer_path is None:
-            logger.warning("`tokenizer_path` is not specified. Using `base_model_path` as `tokenizer_path`.")
-            self.tokenizer_path = self.base_model_path
 
 
 @dataclasses.dataclass
@@ -242,6 +232,7 @@ class SFTConfig:
     model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
     dataset: PromptAnswerDatasetConfig = dataclasses.field(default_factory=PromptAnswerDatasetConfig)
+    _configuration_name: str = "Supervised-Finetuning"
 
 
 @dataclasses.dataclass
@@ -270,6 +261,7 @@ class RWConfig:
     model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
     dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
+    _configuration_name: str = "Paired Comparison Reward Modeling"
 
 
 @dataclasses.dataclass
@@ -362,6 +354,7 @@ class PPOConfig:
     reward_output_bias: float = 0.0
     early_stop_imp_ratio: float = 5.0
     use_adaptive_kl_ctl: bool = False
+    _configuration_name: str = "Proximal Policy Optimization"
 
     def __post_init__(self):
         if (
@@ -405,15 +398,16 @@ class DPOConfig:
     experiment_name: str = MISSING
     trial_name: str = MISSING
     train_epochs: int = 1
-    eval_freq: Optional[int] = 1
     save_freq: Optional[int] = 50
     seed: int = 42
+    is_sft_pipe: bool = False
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
     model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
     optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
     beta: float = 0.1
+    _configuration_name: str = "Direct Preference Optimization"
 
 
 cs.store(name="sft", node=SFTConfig)
@@ -436,19 +430,30 @@ class _MainStartArgs:
     trace: bool = False
 
 
+def kind_reminder(logger, args):
+    logger.info(f"Running {args._configuration_name} experiment.")
+    logger.info(f"Logs will be dumped to {os.path.join(LOG_ROOT, args.experiment_name, args.trial_name)}")
+    logger.info(
+        f"Model checkpoints will be saved to {os.path.join(MODEL_SAVE_ROOT, args.experiment_name, args.trial_name)}"
+    )
+
+
 @hydra.main(version_base=None, config_name="sft")
 def run_sft(args: SFTConfig):
+    # NOTE: we import logging here to avoid hydra logging overwrite
+    import base.logging as logging
+
+    logger = logging.getLogger("quickstart", "colored")
+
     exp_name = args.experiment_name
     if args.trial_name == MISSING:
-        trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+        args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
     from apps.main import main_start
     from experiments.common.sft_exp import SFTExperiment
 
-    logger.info("Running supervised-finetuning experiment.")
-    logger.info("Logs will be dumped to %s", os.path.join(LOG_ROOT, exp_name, trial_name))
-    logger.info("Model checkpoints will be saved to %s", os.path.join(MODEL_SAVE_ROOT, exp_name, trial_name))
+    kind_reminder(logger, args)
 
     if args.model.parallel.pipeline_parallel_size > 1:
         logger.warning(
@@ -499,21 +504,33 @@ def run_sft(args: SFTConfig):
 
 @hydra.main(version_base=None, config_name="rw")
 def run_rw(args: RWConfig):
+    # NOTE: we import logging here to avoid hydra logging overwrite
+    import base.logging as logging
+
+    logger = logging.getLogger("quickstart", "colored")
+
     exp_name = args.experiment_name
     if args.trial_name == MISSING:
-        trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+        args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
     from apps.main import main_start
     from experiments.common.rw_exp import PairedRWExperiment
 
-    logger.info("Running paired comparison reward modeling experiment.")
-    logger.info("Logs will be dumped to %s", os.path.join(LOG_ROOT, exp_name, trial_name))
-    logger.info("Model checkpoints will be saved to %s", os.path.join(MODEL_SAVE_ROOT, exp_name, trial_name))
+    kind_reminder(logger, args)
+
+    if args.model.base_model_path is None:
+        logger.warning("`base_model_path` is not specified. Using `path` as `base_model_path`.")
+        args.model.base_model_path = args.model.path
+    if args.model.tokenizer_path is None:
+        logger.warning("`tokenizer_path` is not specified. Using `base_model_path` as `tokenizer_path`.")
+        args.model.tokenizer_path = args.model.base_model_path
 
     if args.model.parallel.pipeline_parallel_size > 1:
         logger.warning(
-            "Pipeline parallel is enabled. Please ensure that (1) there are enough GPUs for your experiment "
+            "Pipeline parallel is enabled when training the reward model. **This is usually unnecessary.** "
+            "The reward model should not be large and using DeepSpeed ZeRO-2 data parallel is usually sufficient. "
+            "If you insist in using PP, please ensure that (1) there are enough GPUs for your experiment "
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
     if args.is_sft_lora and (args.model.base_model_path == args.model.path or args.sft_lora_path is None):
@@ -569,17 +586,34 @@ def run_rw(args: RWConfig):
 
 @hydra.main(version_base=None, config_name="ppo")
 def run_ppo(args: PPOConfig):
+    # NOTE: we import logging here to avoid hydra logging overwrite
+    import base.logging as logging
+
+    logger = logging.getLogger("quickstart", "colored")
+
     exp_name = args.experiment_name
     if args.trial_name == MISSING:
-        trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+        args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
     from apps.main import main_start
     from experiments.common.ppo_exp import PPOExperiment
 
-    logger.info("Running PPO experiment.")
-    logger.info("Logs will be dumped to %s", os.path.join(LOG_ROOT, exp_name, trial_name))
-    logger.info("Model checkpoints will be saved to %s", os.path.join(MODEL_SAVE_ROOT, exp_name, trial_name))
+    kind_reminder(logger, args)
+
+    if args.actor.base_model_path is None:
+        logger.warning("`base_model_path` is not specified. Using `path` as `base_model_path`.")
+        args.actor.base_model_path = args.actor.path
+    if args.actor.tokenizer_path is None:
+        logger.warning("`tokenizer_path` is not specified. Using `base_model_path` as `tokenizer_path`.")
+        args.actor.tokenizer_path = args.actor.base_model_path
+
+    if args.critic.base_model_path is None:
+        logger.warning("`base_model_path` is not specified. Using `path` as `base_model_path`.")
+        args.critic.base_model_path = args.critic.path
+    if args.critic.tokenizer_path is None:
+        logger.warning("`tokenizer_path` is not specified. Using `base_model_path` as `tokenizer_path`.")
+        args.critic.tokenizer_path = args.critic.base_model_path
 
     if args.actor.parallel.pipeline_parallel_size > 1:
         logger.warning(
@@ -699,17 +733,27 @@ def run_ppo(args: PPOConfig):
 
 @hydra.main(version_base=None, config_name="dpo")
 def run_dpo(args: DPOConfig):
+    # NOTE: we import logging here to avoid hydra logging overwrite
+    import base.logging as logging
+
+    logger = logging.getLogger("quickstart", "colored")
+
     exp_name = args.experiment_name
     if args.trial_name == MISSING:
-        trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+        args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
     from apps.main import main_start
     from experiments.common.dpo_exp import DPOExperiment
 
-    logger.info("Running DPO experiment.")
-    logger.info("Logs will be dumped to %s", os.path.join(LOG_ROOT, exp_name, trial_name))
-    logger.info("Model checkpoints will be saved to %s", os.path.join(MODEL_SAVE_ROOT, exp_name, trial_name))
+    kind_reminder(logger, args)
+
+    if args.model.base_model_path is None:
+        logger.warning("`base_model_path` is not specified. Using `path` as `base_model_path`.")
+        args.model.base_model_path = args.model.path
+    if args.model.tokenizer_path is None:
+        logger.warning("`tokenizer_path` is not specified. Using `base_model_path` as `tokenizer_path`.")
+        args.model.tokenizer_path = args.model.base_model_path
 
     if args.model.parallel.pipeline_parallel_size > 1:
         logger.warning(
@@ -721,6 +765,8 @@ def run_dpo(args: DPOConfig):
             "sft_lora_path and model.base_model_path must be specified for DPO experiment."
             " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
         )
+    if args.dataset.valid_path is not None:
+        logger.warning("DPO does not support validation because we can't compute reference logps during training.")
 
     exp_fn = functools.partial(
         DPOExperiment,
@@ -729,7 +775,7 @@ def run_dpo(args: DPOConfig):
         seed=args.seed,
         total_train_epochs=args.train_epochs,
         save_freq_steps=args.save_freq,
-        eval_freq_epochs=args.eval_freq,
+        is_sft_pipe=args.is_sft_pipe,
         is_sft_lora=args.is_sft_lora,
         base_model_type=args.model.type,
         sft_lora_path=args.sft_lora_path,
@@ -742,7 +788,7 @@ def run_dpo(args: DPOConfig):
         gradient_checkpointing=args.model.gradient_checkpointing,
         max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
         max_seqlen=args.dataset.max_seqlen,
-        dataset_path=args.dataset.train_path,
+        train_dataset_path=args.dataset.train_path,
         train_tokens_per_batch=args.dataset.train_tokens_per_batch,
         lr=args.optimizer.lr,
         weight_decay=args.optimizer.weight_decay,
@@ -787,6 +833,8 @@ def main():
 
     if any("experiment_name=" in x for x in sys.argv):
         experiment_name = next(x for x in sys.argv if "experiment_name=" in x).split("=")[1]
+        if "_" in experiment_name:
+            raise RuntimeError("experiment_name should not contain `_`.")
     else:
         experiment_name = f"quickstart-{args.cmd}"
         sys.argv += [f"experiment_name={experiment_name}"]
@@ -798,6 +846,8 @@ def main():
         else:
             trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
             sys.argv += [f"trial_name={trial_name}"]
+        if "_" in trial_name:
+            raise RuntimeError("trial_name should not contain `_`.")
         sys.argv += [
             f"hydra.run.dir={cluster_spec.fileroot}/logs/{getpass.getuser()}/"
             f"{experiment_name}/{trial_name}/hydra-outputs/"

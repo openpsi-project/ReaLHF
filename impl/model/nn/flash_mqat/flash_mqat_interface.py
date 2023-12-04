@@ -133,6 +133,13 @@ def make_flash_mqat_clm_hf(
         if tokenizer_path is None:
             raise ValueError("tokenizer_path must be provided when from_type is 'self'.")
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
+    elif from_type == "pipe":
+        if init_from_scratch:
+            raise ValueError("init_from_scratch must be False when from_type is 'pipe'.")
+        module = HuggingfaceLikeFlashMQATForCausalLM(
+            FlashMQATForCausalLM.from_pipeline_module(model_path=model_path, dtype=dtype, device=device)
+        )
+        tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
     else:
         module = HuggingfaceLikeFlashMQATForCausalLM(
             getattr(FlashMQATForCausalLM, f"from_{from_type}")(

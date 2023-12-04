@@ -576,6 +576,20 @@ class FlashMQATForCausalLM(nn.Module):
             pipe_state_dict[new_k] = v
         return pipe_state_dict
 
+    @staticmethod
+    def from_pipe_state_dict(config: FlashMQATConfig, pipe_state_dict: Dict):
+        state_dict = {}
+        for k, v in pipe_state_dict.items():
+            if k.startswith("0."):
+                new_k = k.replace("0.", "transformer.embedding_layer.")
+            elif k.startswith(f"{config.n_layers+1}."):
+                new_k = k.replace(f"{config.n_layers+1}.", "lm_head.")
+            else:
+                idx = int(k.split(".")[0])
+                new_k = k.replace(f"{idx}.", f"transformer.h.{idx-1}.")
+            state_dict[new_k] = v
+        return state_dict
+
     def pipe_state_dict(self):
         state_dict = self.state_dict()
         return FlashMQATForCausalLM.map_to_pipe_state_dict(self.config, state_dict)
@@ -701,4 +715,18 @@ class FlashMQATForCausalLM(nn.Module):
         if not init_from_scratch:
             state_dict = load_from_disk(model_path)
             model.load_state_dict(state_dict)
+        return model
+    
+    @classmethod
+    def from_pipeline_module(
+        cls,
+        model_path: str,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        with open(os.path.join(model_path, "config.json"), "r") as f:
+            config = FlashMQATConfig(**json.load(f))
+        model = cls(config, dtype, device)
+        state_dict = cls.from_pipe_state_dict(config, load_from_disk(model_path))
+        model.load_state_dict(state_dict)
         return model

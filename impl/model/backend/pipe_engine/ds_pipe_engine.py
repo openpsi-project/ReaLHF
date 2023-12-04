@@ -174,6 +174,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def _prepare_input(self,
                        packed_input_ids: torch.Tensor,
                        cu_seqlens: torch.Tensor,
+                       input_lens_for_partition: Optional[torch.Tensor] = None,
                        generate_mode: bool = False):
         """ Prepare input for train or inference
         split all input tensors into micro batches for pipeline parallel
@@ -182,8 +183,14 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             packed_input_ids (torch.Tensor): packed input ids of shape [total_seq_len]
             cu_seqlens (torch.Tensor): cu_seqlens of shape [batch_size]
         """
-        data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
+        if input_lens_for_partition is not None:
+            pair_input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+            data = NamedArray(packed_input_ids=packed_input_ids, pair_input_lens=pair_input_lens, input_lens=input_lens_for_partition)
+        else:
+            data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
         splitted = PackedParallelDataBroker.scatter_to(data, self.num_micro_batches)
+        if input_lens_for_partition is not None:
+            splitted = [NamedArray(packed_input_ids=x['packed_input_ids'], cu_seqlens=torch.nn.functional.pad(x['pair_input_lens'].cumsum(0), (1, 0))) for x in splitted]
         if not generate_mode:
             for mbid, x in enumerate(splitted):
                 self.tensor_buffer.put("input_cache", mbid, x)
@@ -331,9 +338,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def train(self):
         self.module.train()
 
-    def forward(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor):
+    def forward(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, input_lens_for_partition: Optional[torch.Tensor]= None):
         # forward one step and return packed logits
-        self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=False)
+        self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=False, input_lens_for_partition=input_lens_for_partition)
         self._pre_forward()
         sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
                                            stages=self.num_stages,
@@ -352,8 +359,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         return logits
 
     def eval_batch(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, loss_fn: Callable,
-                   **loss_fn_kwargs):
-        self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=False)
+                   input_lens_for_partition: Optional[torch.Tensor]=None,**loss_fn_kwargs):
+        self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=False,input_lens_for_partition=input_lens_for_partition)
         self._loss_fn = loss_fn
         self._prepare_loss_input(**loss_fn_kwargs)
         self._pre_eval_batch()
@@ -388,11 +395,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         return avg_loss, avg_stats
 
     def train_batch(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, loss_fn: Callable,
+                    input_lens_for_partition: Optional[torch.Tensor] = None,
                     **loss_fn_kwargs):
         if not torch._C.is_grad_enabled():
             raise RuntimeError(f'train_batch() requires gradients enabled. Use eval_batch() instead.')
 
-        self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=False)
+        self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=False,input_lens_for_partition=input_lens_for_partition)
         self._loss_fn = loss_fn
         self._prepare_loss_input(**loss_fn_kwargs)
         self._pre_train_batch()

@@ -31,7 +31,7 @@ class DPOExperiment(Experiment):
     seed: int = 1
     total_train_epochs: int = 1
     save_freq_steps: int = 20
-    eval_freq_epochs: int = 1
+    is_sft_pipe: bool = False
     is_sft_lora: bool = False
     base_model_type: Optional[str] = None
     sft_lora_path: Optional[str] = None
@@ -46,9 +46,9 @@ class DPOExperiment(Experiment):
     # dataset
     max_pairs_per_prompt: int = 2
     max_seqlen: int = 1024
-    train_tokens_per_batch: int = 16384
-    # TODO: support evaluate in DPO
-    dataset_path: str = "/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl"
+    # NOTE: DPO does not support evaluation because we can't compute reference logp when training the actor.
+    train_tokens_per_batch: int = 16384  
+    train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl"
     # optimizer
     lr: float = 2.5e-4
     weight_decay: float = 0.05
@@ -68,9 +68,8 @@ class DPOExperiment(Experiment):
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
         if self.is_sft_lora and (self.sft_lora_path is None or self.base_model_type is None):
             raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
-        # FIXME:
-        if self.pp_size > 1:
-            raise NotImplementedError()
+
+        self.n_actors = int(self.dp_size * self.pp_size)
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -86,7 +85,7 @@ class DPOExperiment(Experiment):
                 scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
             ),
             model_worker=TasksGroup(
-                count=self.dp_size + 1,
+                count=self.n_actors + 1,
                 scheduling=Scheduling.model_worker_default(
                     cpu=4,
                     gpu=1,
@@ -103,9 +102,10 @@ class DPOExperiment(Experiment):
                 n_tokens_per_batch=self.train_tokens_per_batch,
                 max_length=self.max_seqlen,
                 max_pairs_per_prompt=self.max_pairs_per_prompt,
-                dataset_path=self.dataset_path,
+                dataset_path=self.train_dataset_path,
             ),
         )
+
         dataloader = DataLoader("iterable_dataset_loader")
         data_worker = [
             DataWorker(
@@ -138,9 +138,10 @@ class DPOExperiment(Experiment):
         )
         inf_backend = ModelBackend("ds_inference", args=dict(enable_fp16=True))
 
+        # We should merge pipeline model weights for the reference model to load.
         ref_model = get_flash_mqat_model_config(
             model_path=self.model_path,
-            from_model_type="self" if not self.is_sft_lora else self.base_model_type,
+            from_model_type=("pipe" if self.is_sft_pipe else "self") if not self.is_sft_lora else self.base_model_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=1,
             dp_size=1,
@@ -161,12 +162,8 @@ class DPOExperiment(Experiment):
             sft_lora_path=self.sft_lora_path,
         )
 
-        if self.pp_size == 1:
-            interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=True))
-            ref_interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=False))
-        else:
-            # FIXME:
-            pass
+        interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=True))
+        ref_interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=False))
 
         topo = PipeModelDataParallelTopology(self.pp_size, 1, self.dp_size)
         model_worker = []
@@ -203,7 +200,6 @@ class DPOExperiment(Experiment):
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=self.save_freq_steps,
-            eval_frequency_epochs=self.eval_freq_epochs,
             model_rpcs=[dpo, ref_inf],
             data_worker=data_worker,
             model_worker=model_worker,

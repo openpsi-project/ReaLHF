@@ -315,9 +315,7 @@ class PPOExperiment(Experiment):
             is_rew_lora=self.is_rew_lora,
             rew_lora_path=self.rew_lora_path,
             v_head_path=self.rew_head_path,
-            # TODO: is this correct?
-            reward_scaling=self.rew_output_scaling,
-            reward_bias=self.rew_output_bias,
+            # NOTE: critic is not scaled as rewards
         )
 
         # actor train backend
