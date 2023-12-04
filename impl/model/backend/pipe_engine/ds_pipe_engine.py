@@ -640,13 +640,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def __maybe_calculate_loss(self, x: PipeTransferData, mbid: int):
         if self.is_last_stage() and self._compute_loss:
-            logits = x.pp_input
+            model_output = x.pp_input
             loss_kwargs = self.tensor_buffer.get("loss_inputs", mbid, remove=True)
             input_cache = self.tensor_buffer.get("input_cache", mbid, remove=True)
             packed_input_ids = input_cache.packed_input_ids
             cu_seqlens = input_cache.cu_seqlens
             assert self._loss_fn is not None, "loss function is not set, please use engine.set_loss_fn(fn)"
-            loss, stats = self._loss_fn(logits, packed_input_ids, cu_seqlens, **loss_kwargs)
+            loss, stats = self._loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_kwargs)
             self.tensor_buffer.put("losses", mbid, loss)
             self.tensor_buffer.put("stats", mbid, stats)
 
