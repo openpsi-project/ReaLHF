@@ -588,12 +588,7 @@ class PipelineModule(nn.Module):
             n_shards += 1
             process_memory_mb(f"after_load_shard_{n_shards}")
 
-        # TODO: remove this hack
-        if "41.weight" in state_dict:
-            state_dict.pop("41.weight")
-
-        # TODO: strict = True?
-        self.load_state_dict(state_dict, strict=False)
+        self.load_state_dict(state_dict, strict=True)
         self.num_checkpoint_shards = n_shards
         logger.info("Loaded model from {}".format(load_dir))
         process_memory_mb("after_load_state_dict")
