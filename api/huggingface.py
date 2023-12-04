@@ -5,6 +5,7 @@ import time
 
 import torch
 import transformers
+import torch.distributed
 
 import base.logging as logging
 
@@ -141,7 +142,7 @@ def create_hf_nn(
     return model
 
 
-def get_all_reduce_mean(tensor):
-    torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.SUM)
+def get_all_reduce_mean(tensor, group=None):
+    torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.SUM, group=group)
     tensor = tensor / torch.distributed.get_world_size()
     return tensor
