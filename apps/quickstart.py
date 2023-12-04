@@ -223,8 +223,8 @@ class SFTConfig:
 
     experiment_name: str = MISSING
     train_epochs: int = 1
-    eval_freq: int = 1
-    save_freq: int = 50
+    eval_freq: Optional[int] = 1
+    save_freq: Optional[int] = 50
     seed: int = 42
     model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
@@ -248,8 +248,8 @@ class RWConfig:
 
     experiment_name: str = MISSING
     train_epochs: int = 1
-    eval_freq: int = 1
-    save_freq: int = 50
+    eval_freq: Optional[int] = 1
+    save_freq: Optional[int] = 50
     seed: int = 42
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
@@ -298,8 +298,8 @@ class PPOConfig:
 
     experiment_name: str = MISSING
     train_epochs: int = 1
-    eval_freq: int = 1
-    save_freq: int = 50
+    eval_freq: Optional[int] = 1
+    save_freq: Optional[int] = 50
     seed: int = 42
     actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     critic: ModelConfig = dataclasses.field(default_factory=ModelConfig)
@@ -359,8 +359,8 @@ class DPOConfig:
 
     experiment_name: str = MISSING
     train_epochs: int = 1
-    eval_freq: int = 1
-    save_freq: int = 50
+    eval_freq: Optional[int] = 1
+    save_freq: Optional[int] = 50
     seed: int = 42
     actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     ref: ModelConfig = dataclasses.field(default_factory=ModelConfig)
