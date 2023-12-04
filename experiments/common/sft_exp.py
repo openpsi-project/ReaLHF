@@ -1,9 +1,9 @@
 import dataclasses
 
 from api.config import *
-from experiments.common.config_utils import get_flash_mqat_model_config
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
+from experiments.common.config_utils import get_flash_mqat_model_config
 
 sft = ModelRPC(
     "default",

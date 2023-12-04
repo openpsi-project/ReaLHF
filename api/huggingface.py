@@ -4,8 +4,8 @@ import os
 import time
 
 import torch
-import transformers
 import torch.distributed
+import transformers
 
 import base.logging as logging
 

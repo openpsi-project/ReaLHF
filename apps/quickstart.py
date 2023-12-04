@@ -19,7 +19,6 @@ import api.config
 
 SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "saved"]
 
-
 cs = ConfigStore.instance()
 
 
@@ -317,26 +316,22 @@ class PPOConfig:
     ref: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     rew: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
-    actor_optimizer: OptimizerConfig = dataclasses.field(
-        default_factory=functools.partial(
-            OptimizerConfig,
-            lr=9.65e-6,
-            weight_decay=0.0,
-            eps=1e-5,
-            lr_scheduler_type="linear",
-            warmup_steps_proportion=0.075,
-        )
-    )
-    critic_optimizer: OptimizerConfig = dataclasses.field(
-        default_factory=functools.partial(
-            OptimizerConfig,
-            lr=5e-6,
-            weight_decay=0.0,
-            eps=1e-5,
-            lr_scheduler_type="linear",
-            warmup_steps_proportion=0.075,
-        )
-    )
+    actor_optimizer: OptimizerConfig = dataclasses.field(default_factory=functools.partial(
+        OptimizerConfig,
+        lr=9.65e-6,
+        weight_decay=0.0,
+        eps=1e-5,
+        lr_scheduler_type="linear",
+        warmup_steps_proportion=0.075,
+    ))
+    critic_optimizer: OptimizerConfig = dataclasses.field(default_factory=functools.partial(
+        OptimizerConfig,
+        lr=5e-6,
+        weight_decay=0.0,
+        eps=1e-5,
+        lr_scheduler_type="linear",
+        warmup_steps_proportion=0.075,
+    ))
     max_new_tokens: int = 512
     min_new_tokens: int = 10
     greedy: bool = False
@@ -357,25 +352,18 @@ class PPOConfig:
     _configuration_name: str = "Proximal Policy Optimization"
 
     def __post_init__(self):
-        if (
-            self.actor.path != self.ref.path
-            or self.actor.base_model_path != self.ref.base_model_path
-            or self.actor.type != self.ref.type
-        ):
+        if (self.actor.path != self.ref.path or self.actor.base_model_path != self.ref.base_model_path
+                or self.actor.type != self.ref.type):
             raise ValueError("actor and ref must be the same model.")
-        if (
-            self.critic.path != self.rew.path
-            or self.critic.base_model_path != self.rew.base_model_path
-            or self.critic.type != self.rew.type
-        ):
+        if (self.critic.path != self.rew.path or self.critic.base_model_path != self.rew.base_model_path
+                or self.critic.type != self.rew.type):
             raise ValueError("critic and rew must be the same model.")
         if self.actor.tokenizer_path != self.critic.tokenizer_path:
             raise ValueError(
                 f"`actor` and `critic` must use the same tokenizer. "
                 "It is possible that you are using the same base model with different sizes "
                 "(e.g., LLaMa 13b as the actor and 7b as the critic). They have the same "
-                "tokenizer but different model paths. Please specify the tokenizer path manually."
-            )
+                "tokenizer but different model paths. Please specify the tokenizer path manually.")
 
 
 @dataclasses.dataclass
@@ -536,8 +524,7 @@ def run_rw(args: RWConfig):
     if args.is_sft_lora and (args.model.base_model_path == args.model.path or args.sft_lora_path is None):
         raise ValueError(
             "model.base_model_path and sft_lora_path must be specified for RW experiment if SFT was trained with LoRA."
-            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
-        )
+            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model.")
 
     exp_fn = functools.partial(
         PairedRWExperiment,
@@ -630,17 +617,12 @@ def run_ppo(args: PPOConfig):
     if args.is_sft_lora and (args.actor.base_model_path == args.actor.path or args.sft_lora_path is None):
         raise ValueError(
             "sft_lora_path and actor.base_model_path must be specified if the SFT model was trained with LoRA."
-            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
-        )
-    if args.is_rew_lora and (
-        args.critic.base_model_path == args.critic.path
-        or args.rew_lora_path is None
-        or args.rew_head_path is None
-    ):
+            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model.")
+    if args.is_rew_lora and (args.critic.base_model_path == args.critic.path or args.rew_lora_path is None
+                             or args.rew_head_path is None):
         raise ValueError(
             "rew_lora_path and critic.base_model_path must be specified for RW experiment."
-            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
-        )
+            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model.")
 
     exp_fn = functools.partial(
         PPOExperiment,
@@ -763,10 +745,10 @@ def run_dpo(args: DPOConfig):
     if args.is_sft_lora and (args.sft_lora_path == args.model.path or args.model.base_model_path is None):
         raise ValueError(
             "sft_lora_path and model.base_model_path must be specified for DPO experiment."
-            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
-        )
+            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model.")
     if args.dataset.valid_path is not None:
-        logger.warning("DPO does not support validation because we can't compute reference logps during training.")
+        logger.warning(
+            "DPO does not support validation because we can't compute reference logps during training.")
 
     exp_fn = functools.partial(
         DPOExperiment,

@@ -2,8 +2,8 @@ import functools
 
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
-from experiments.common.config_utils import get_flash_mqat_model_config
 from base.topology import PipeModelDataParallelTopology
+from experiments.common.config_utils import get_flash_mqat_model_config
 
 rollout = ModelRPC(
     "actor",
@@ -178,9 +178,8 @@ class PPOExperiment(Experiment):
 
         if self.is_sft_lora and (self.sft_lora_path is None or self.sft_base_model_type is None):
             raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
-        if self.is_rew_lora and (
-            self.rew_lora_path is None or self.rew_base_model_type is None or self.rew_head_path is None
-        ):
+        if self.is_rew_lora and (self.rew_lora_path is None or self.rew_base_model_type is None
+                                 or self.rew_head_path is None):
             raise ValueError(
                 "rew_lora_path, rew_base_model_type and rew_head_path must be specified when is_rw_lora is True."
             )
@@ -387,70 +386,63 @@ class PPOExperiment(Experiment):
         )
         rw_interface = ModelInterface("flash_paired_rw", args=dict(enable_save=False))
 
-        actor_topo = PipeModelDataParallelTopology(
-            num_pp=self.actor_pp_size, num_mp=1, num_dp=self.actor_dp_size
-        )
-        critic_topo = PipeModelDataParallelTopology(
-            num_pp=self.critic_pp_size, num_mp=1, num_dp=self.critic_dp_size
-        )
+        actor_topo = PipeModelDataParallelTopology(num_pp=self.actor_pp_size,
+                                                   num_mp=1,
+                                                   num_dp=self.actor_dp_size)
+        critic_topo = PipeModelDataParallelTopology(num_pp=self.critic_pp_size,
+                                                    num_mp=1,
+                                                    num_dp=self.critic_dp_size)
         ref_topo = PipeModelDataParallelTopology(num_pp=1, num_mp=1, num_dp=self.ref_dp_size)
         rw_topo = PipeModelDataParallelTopology(num_pp=1, num_mp=1, num_dp=self.rew_dp_size)
-        model_worker = (
-            [
-                ModelWorker(
-                    seed=self.seed,
-                    model=actor_model,
-                    backend=actor_backend,
-                    interface=actor_interface,
-                    model_name="actor",
-                    topo=actor_topo,
-                    dp_rank=actor_topo.get_coord(i).data,
-                    pp_rank=actor_topo.get_coord(i).pipe,
-                    mp_rank=actor_topo.get_coord(i).model,
-                    cuda_cache_cleanliness=True,
-                    cuda_cache_clear_freq=30,
-                )
-                for i in range(self.n_actors)
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    model=critic_model,
-                    backend=critic_backend,
-                    interface=critic_interface,
-                    model_name="critic",
-                    topo=critic_topo,
-                    dp_rank=critic_topo.get_coord(i).data,
-                    pp_rank=critic_topo.get_coord(i).pipe,
-                    mp_rank=critic_topo.get_coord(i).model,
-                    cuda_cache_cleanliness=True,
-                    cuda_cache_clear_freq=30,
-                )
-                for i in range(self.n_critics)
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    model=rw_model,
-                    backend=rw_backend,
-                    interface=rw_interface,
-                    model_name="reward",
-                    dp_rank=rw_topo.get_coord(i).data,
-                    topo=rw_topo,
-                ) for i in range(self.n_rewards)
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    model=ref_model,
-                    backend=ref_backend,
-                    interface=ref_interface,
-                    model_name="ref",
-                    dp_rank=ref_topo.get_coord(i).data,
-                    topo=ref_topo,
-                ) for i in range(self.n_refs)
-            ]
-        )
+        model_worker = ([
+            ModelWorker(
+                seed=self.seed,
+                model=actor_model,
+                backend=actor_backend,
+                interface=actor_interface,
+                model_name="actor",
+                topo=actor_topo,
+                dp_rank=actor_topo.get_coord(i).data,
+                pp_rank=actor_topo.get_coord(i).pipe,
+                mp_rank=actor_topo.get_coord(i).model,
+                cuda_cache_cleanliness=True,
+                cuda_cache_clear_freq=30,
+            ) for i in range(self.n_actors)
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=critic_model,
+                backend=critic_backend,
+                interface=critic_interface,
+                model_name="critic",
+                topo=critic_topo,
+                dp_rank=critic_topo.get_coord(i).data,
+                pp_rank=critic_topo.get_coord(i).pipe,
+                mp_rank=critic_topo.get_coord(i).model,
+                cuda_cache_cleanliness=True,
+                cuda_cache_clear_freq=30,
+            ) for i in range(self.n_critics)
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=rw_model,
+                backend=rw_backend,
+                interface=rw_interface,
+                model_name="reward",
+                dp_rank=rw_topo.get_coord(i).data,
+                topo=rw_topo,
+            ) for i in range(self.n_rewards)
+        ] + [
+            ModelWorker(
+                seed=self.seed,
+                model=ref_model,
+                backend=ref_backend,
+                interface=ref_interface,
+                model_name="ref",
+                dp_rank=ref_topo.get_coord(i).data,
+                topo=ref_topo,
+            ) for i in range(self.n_refs)
+        ])
 
         return ExperimentConfig(
             total_train_epochs=self.total_train_epochs,

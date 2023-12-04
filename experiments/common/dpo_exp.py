@@ -2,9 +2,9 @@ import dataclasses
 import functools
 
 from api.config import *
-from experiments.common.config_utils import get_flash_mqat_model_config
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
+from experiments.common.config_utils import get_flash_mqat_model_config
 
 ref_inf = ModelRPC(
     "ref",
@@ -47,7 +47,7 @@ class DPOExperiment(Experiment):
     max_pairs_per_prompt: int = 2
     max_seqlen: int = 1024
     # NOTE: DPO does not support evaluation because we can't compute reference logp when training the actor.
-    train_tokens_per_batch: int = 16384  
+    train_tokens_per_batch: int = 16384
     train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl"
     # optimizer
     lr: float = 2.5e-4
@@ -141,7 +141,8 @@ class DPOExperiment(Experiment):
         # We should merge pipeline model weights for the reference model to load.
         ref_model = get_flash_mqat_model_config(
             model_path=self.model_path,
-            from_model_type=("pipe" if self.is_sft_pipe else "self") if not self.is_sft_lora else self.base_model_type,
+            from_model_type=("pipe" if self.is_sft_pipe else "self")
+            if not self.is_sft_lora else self.base_model_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=1,
             dp_size=1,

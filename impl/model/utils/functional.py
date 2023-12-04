@@ -4,8 +4,8 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import transformers
-from base.constants import data_parallel_group
 
+from base.constants import data_parallel_group
 import base.logging as logging
 
 logger = logging.getLogger("Modeling Functional Utils")

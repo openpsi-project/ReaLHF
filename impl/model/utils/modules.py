@@ -1,11 +1,11 @@
 from typing import Callable, Optional, Union
 
-from base.constants import data_parallel_group
 import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 
+from base.constants import data_parallel_group
 import base.logging as logging
 
 logger = logging.getLogger("Modules")
