@@ -1,6 +1,7 @@
 import dataclasses
 
 from api.config import *
+from experiments.common.config_utils import get_flash_mqat_model_config
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
 
@@ -123,34 +124,17 @@ class SFTExperiment(Experiment):
             ),
         )
 
-        model = Model(
-            "flash_mqat_clm_hf",
-            args=dict(model_path=model_path, from_type=self.model_type, init_from_scratch=(self.pp_size > 1)),
+        model = get_flash_mqat_model_config(
+            model_path=model_path,
+            from_model_type=self.model_type,
+            tokenizer_path=model_path,
+            pp_size=self.pp_size,
+            dp_size=self.dp_size,
+            is_critic=False,
+            use_lora=self.use_lora,
+            lora_dim=self.lora_dim,
+            lora_scaling=self.lora_scaling,
         )
-        if self.use_lora:
-            model.wrappers = [
-                ModelWrapper(
-                    "lora",
-                    args=dict(
-                        lora_module_kwargs=dict(
-                            lora_dim=self.lora_dim,
-                            lora_scaling=self.lora_scaling,
-                        ),
-                        lora_keys_to_replace=["c_attn.linear", "c_proj."],
-                    ),
-                ),
-            ]
-        if self.pp_size > 1:
-            model.wrappers += [
-                ModelWrapper(
-                    "pipe_actor",
-                    args=dict(
-                        model_path=model_path,
-                        num_pp=self.pp_size,
-                        num_dp=self.dp_size,
-                    ),
-                )
-            ]
 
         interface = ModelInterface("flash_sft")
 

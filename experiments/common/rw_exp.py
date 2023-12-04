@@ -4,6 +4,7 @@ import math
 import random
 
 from api.config import *
+from experiments.common.config_utils import get_flash_mqat_model_config
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
 
@@ -133,55 +134,19 @@ class PairedRWExperiment(Experiment):
             ),
         )
 
-        if self.pp_size == 1:
-            if not self.is_sft_lora:
-                model = Model(
-                    "flash_mqat_critic",
-                    args=dict(
-                        model_path=self.model_path,
-                        from_type="sft",
-                        tokenizer_path=self.tokenizer_path,
-                    ),
-                )
-            else:
-                model = Model(
-                    "flash_mqat_critic",
-                    args=dict(
-                        model_path=self.model_path,
-                        from_type=self.base_model_type,
-                        tokenizer_path=self.tokenizer_path,
-                    ),
-                    wrappers=[
-                        ModelWrapper(
-                            "lora",
-                            args=dict(
-                                lora_module_kwargs=dict(
-                                    lora_dim=self.lora_dim,
-                                    lora_scaling=self.lora_scaling,
-                                ),
-                                lora_keys_to_replace=["c_attn.linear", "c_proj."],
-                                load_lora_path=self.sft_lora_path,
-                                lora_op_after_creation="squash",
-                            ),
-                        ),
-                    ],
-                )
-        else:
-            # FIXME: implement critic model
-            # FIXME: is_sft_lora
-            pass
-        if self.use_lora:
-            model.wrappers.append(
-                ModelWrapper(
-                    "lora",
-                    args=dict(
-                        lora_module_kwargs=dict(
-                            lora_dim=self.lora_dim,
-                            lora_scaling=self.lora_scaling,
-                        ),
-                        lora_keys_to_replace=["c_attn.linear", "c_proj."],
-                    ),
-                ))
+        model = get_flash_mqat_model_config(
+            model_path=self.model_path,
+            from_model_type="sft" if not self.is_sft_lora else self.base_model_type,
+            tokenizer_path=self.tokenizer_path,
+            pp_size=self.pp_size,
+            dp_size=self.dp_size,
+            is_critic=True,
+            use_lora=self.use_lora,
+            lora_dim=self.lora_dim,
+            lora_scaling=self.lora_scaling,
+            is_sft_lora=self.is_sft_lora,
+            sft_lora_path=self.sft_lora_path,
+        )
 
         if self.pp_size == 1:
             interface = ModelInterface("flash_paired_rw")

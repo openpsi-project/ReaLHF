@@ -2,6 +2,7 @@ import dataclasses
 import functools
 
 from api.config import *
+from experiments.common.config_utils import get_flash_mqat_model_config
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
 
@@ -137,60 +138,28 @@ class DPOExperiment(Experiment):
         )
         inf_backend = ModelBackend("ds_inference", args=dict(enable_fp16=True))
 
-        if not self.is_sft_lora:
-            ref_model = Model(
-                "flash_mqat_clm_hf",
-                args=dict(
-                    model_path=self.model_path,
-                    from_type="self",
-                    tokenizer_path=self.tokenizer_path,
-                ),
-            )
-        else:
-            ref_model = Model(
-                "flash_mqat_clm_hf",
-                args=dict(
-                    model_path=self.model_path,
-                    from_type=self.base_model_type,
-                    tokenizer_path=self.tokenizer_path,
-                ),
-                wrappers=[
-                    ModelWrapper(
-                        "lora",
-                        args=dict(
-                            lora_module_kwargs=dict(
-                                lora_dim=self.lora_dim,
-                                lora_scaling=self.lora_scaling,
-                            ),
-                            lora_keys_to_replace=["c_attn.linear", "c_proj."],
-                            load_lora_path=self.sft_lora_path,
-                            lora_op_after_creation="squash",
-                        ),
-                    ),
-                ],
-            )
-
-        if self.pp_size == 1:
-            model = ref_model
-        else:
-            # FIXME: implement critic model
-            # FIXME: is_sft_lora
-            pass
-
-        if self.use_lora:
-            model.wrappers = [
-                ModelWrapper(
-                    "lora",
-                    args=dict(
-                        lora_module_kwargs=dict(
-                            lora_dim=self.lora_dim,
-                            lora_scaling=self.lora_scaling,
-                        ),
-                        lora_keys_to_replace=["c_attn.linear", "c_proj."],
-                        additional_module_names_to_opt=["v_head"],
-                    ),
-                ),
-            ]
+        ref_model = get_flash_mqat_model_config(
+            model_path=self.model_path,
+            from_model_type="self" if not self.is_sft_lora else self.base_model_type,
+            tokenizer_path=self.tokenizer_path,
+            pp_size=1,
+            dp_size=1,
+            is_critic=False,
+            use_lora=False,
+        )
+        model = get_flash_mqat_model_config(
+            model_path=self.model_path,
+            from_model_type="self" if not self.is_sft_lora else self.base_model_type,
+            tokenizer_path=self.tokenizer_path,
+            pp_size=self.pp_size,
+            dp_size=self.dp_size,
+            is_critic=False,
+            use_lora=self.use_lora,
+            lora_dim=self.lora_dim,
+            lora_scaling=self.lora_scaling,
+            is_sft_lora=self.is_sft_lora,
+            sft_lora_path=self.sft_lora_path,
+        )
 
         if self.pp_size == 1:
             interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=True))

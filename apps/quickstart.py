@@ -13,11 +13,14 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
 import hydra
 
+import base.logging as logging
 from base.cluster import spec as cluster_spec
 from base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
 import api.config
 
 SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "saved"]
+
+logger = logging.getLogger("quickstart")
 
 cs = ConfigStore.instance()
 
@@ -62,13 +65,22 @@ class ModelConfig:
         default="llama",
     )
     path: str = "/lustre/fw/pretrained/llama-7b/"
+    base_model_path: Optional[str] = None
+    tokenizer_path: Optional[str] = None
     lora: bool = False
     lora_dim: int = 32
     lora_scaling: float = 32.0
     gradient_checkpointing: bool = False
     enable_fp16: bool = True
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
-    base_model_path: Optional[str] = None
+
+    def __post_init__(self):
+        if self.base_model_path is None:
+            logger.warning("`base_model_path` is not specified. Using `path` as `base_model_path`.")
+            self.base_model_path = self.path
+        if self.tokenizer_path is None:
+            logger.warning("`tokenizer_path` is not specified. Using `base_model_path` as `tokenizer_path`.")
+            self.tokenizer_path = self.base_model_path
 
 
 @dataclasses.dataclass
@@ -203,7 +215,7 @@ class PromptOnlyDatasetConfig:
 
     max_prompt_len: int = 256
     batch_size: int = 256
-    path: str = "/data/aigc/llm/datasets/llama/train.jsonl"
+    path: str = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl"
 
 
 @dataclasses.dataclass
@@ -301,30 +313,38 @@ class PPOConfig:
     experiment_name: str = MISSING
     trial_name: str = MISSING
     train_epochs: int = 1
-    eval_freq: Optional[int] = 1
     save_freq: Optional[int] = 50
     seed: int = 42
+    is_sft_lora: bool = False
+    sft_lora_path: Optional[str] = None
+    is_rew_lora: bool = False
+    rew_lora_path: Optional[str] = None
+    rew_head_path: Optional[str] = None
     actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     critic: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     ref: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     rew: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
-    actor_optimizer: OptimizerConfig = dataclasses.field(default_factory=functools.partial(
-        OptimizerConfig,
-        lr=9.65e-6,
-        weight_decay=0.0,
-        eps=1e-5,
-        lr_scheduler_type="linear",
-        warmup_steps_proportion=0.075,
-    ))
-    critic_optimizer: OptimizerConfig = dataclasses.field(default_factory=functools.partial(
-        OptimizerConfig,
-        lr=5e-6,
-        weight_decay=0.0,
-        eps=1e-5,
-        lr_scheduler_type="linear",
-        warmup_steps_proportion=0.075,
-    ))
+    actor_optimizer: OptimizerConfig = dataclasses.field(
+        default_factory=functools.partial(
+            OptimizerConfig,
+            lr=9.65e-6,
+            weight_decay=0.0,
+            eps=1e-5,
+            lr_scheduler_type="linear",
+            warmup_steps_proportion=0.075,
+        )
+    )
+    critic_optimizer: OptimizerConfig = dataclasses.field(
+        default_factory=functools.partial(
+            OptimizerConfig,
+            lr=5e-6,
+            weight_decay=0.0,
+            eps=1e-5,
+            lr_scheduler_type="linear",
+            warmup_steps_proportion=0.075,
+        )
+    )
     max_new_tokens: int = 512
     min_new_tokens: int = 10
     greedy: bool = False
@@ -341,6 +361,28 @@ class PPOConfig:
     reward_output_scaling: float = 1.0
     reward_output_bias: float = 0.0
     early_stop_imp_ratio: float = 5.0
+    use_adaptive_kl_ctl: bool = False
+
+    def __post_init__(self):
+        if (
+            self.actor.path != self.ref.path
+            or self.actor.base_model_path != self.ref.base_model_path
+            or self.actor.type != self.ref.type
+        ):
+            raise ValueError("actor and ref must be the same model.")
+        if (
+            self.critic.path != self.rew.path
+            or self.critic.base_model_path != self.rew.base_model_path
+            or self.critic.type != self.rew.type
+        ):
+            raise ValueError("critic and rew must be the same model.")
+        if self.actor.tokenizer_path != self.critic.tokenizer_path:
+            raise ValueError(
+                f"`actor` and `critic` must use the same tokenizer. "
+                "It is possible that you are using the same base model with different sizes "
+                "(e.g., LLaMa 13b as the actor and 7b as the critic). They have the same "
+                "tokenizer but different model paths. Please specify the tokenizer path manually."
+            )
 
 
 @dataclasses.dataclass
@@ -396,10 +438,6 @@ class _MainStartArgs:
 
 @hydra.main(version_base=None, config_name="sft")
 def run_sft(args: SFTConfig):
-    import base.logging as logging
-
-    logger = logging.getLogger("quickstart")
-
     exp_name = args.experiment_name
     if args.trial_name == MISSING:
         trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
@@ -461,9 +499,6 @@ def run_sft(args: SFTConfig):
 
 @hydra.main(version_base=None, config_name="rw")
 def run_rw(args: RWConfig):
-    import base.logging as logging
-
-    logger = logging.getLogger("quickstart")
     exp_name = args.experiment_name
     if args.trial_name == MISSING:
         trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
@@ -481,13 +516,16 @@ def run_rw(args: RWConfig):
             "Pipeline parallel is enabled. Please ensure that (1) there are enough GPUs for your experiment "
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
-    if args.model.base_model_path is None:
-        raise ValueError("model.base_model_path must be specified for RW experiment.")
+    if args.is_sft_lora and (args.model.base_model_path == args.model.path or args.sft_lora_path is None):
+        raise ValueError(
+            "model.base_model_path and sft_lora_path must be specified for RW experiment if SFT was trained with LoRA."
+            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
+        )
 
     exp_fn = functools.partial(
         PairedRWExperiment,
         model_path=args.model.path,
-        tokenizer_path=args.model.base_model_path,
+        tokenizer_path=args.model.tokenizer_path,
         seed=args.seed,
         total_train_epochs=args.train_epochs,
         save_freq_steps=args.save_freq,
@@ -530,20 +568,137 @@ def run_rw(args: RWConfig):
 
 
 @hydra.main(version_base=None, config_name="ppo")
-def run_ppo(args):
-    import base.logging as logging
+def run_ppo(args: PPOConfig):
+    exp_name = args.experiment_name
+    if args.trial_name == MISSING:
+        trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    else:
+        trial_name = args.trial_name
+    from apps.main import main_start
+    from experiments.common.ppo_exp import PPOExperiment
 
-    logger = logging.getLogger("quickstart")
-    # TODO: implement this
-    trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
-    print(args)
+    logger.info("Running PPO experiment.")
+    logger.info("Logs will be dumped to %s", os.path.join(LOG_ROOT, exp_name, trial_name))
+    logger.info("Model checkpoints will be saved to %s", os.path.join(MODEL_SAVE_ROOT, exp_name, trial_name))
+
+    if args.actor.parallel.pipeline_parallel_size > 1:
+        logger.warning(
+            "Pipeline parallel of the actor model is enabled. Please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
+    if args.critic.parallel.pipeline_parallel_size > 1:
+        logger.critical(
+            "Pipeline parallel of the critic model is enabled. **This is usually unnecessary.** "
+            "The reward model should not be large and using DeepSpeed ZeRO-2 data parallel is usually sufficient. "
+            "If you insist in using PP, please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
+    if args.is_sft_lora and (args.actor.base_model_path == args.actor.path or args.sft_lora_path is None):
+        raise ValueError(
+            "sft_lora_path and actor.base_model_path must be specified if the SFT model was trained with LoRA."
+            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
+        )
+    if args.is_rew_lora and (
+        args.critic.base_model_path == args.critic.path
+        or args.rew_lora_path is None
+        or args.rew_head_path is None
+    ):
+        raise ValueError(
+            "rew_lora_path and critic.base_model_path must be specified for RW experiment."
+            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
+        )
+
+    exp_fn = functools.partial(
+        PPOExperiment,
+        sft_model_path=args.actor.path,
+        rew_model_path=args.critic.path,
+        tokenizer_path=args.actor.tokenizer_path,
+        seed=args.seed,
+        total_train_epochs=args.train_epochs,
+        save_freq_steps=args.save_freq,
+        # sft lora
+        is_sft_lora=args.is_sft_lora,
+        sft_base_model_type=args.actor.type,
+        sft_lora_path=args.sft_lora_path,
+        # rew lora
+        is_rew_lora=args.is_rew_lora,
+        rew_base_model_type=args.critic.type,
+        rew_lora_path=args.rew_lora_path,
+        rew_head_path=args.rew_head_path,
+        # actor
+        actor_dp_size=args.actor.parallel.data_parallel_size,
+        actor_pp_size=args.actor.parallel.pipeline_parallel_size,
+        actor_use_lora=args.actor.lora,
+        actor_lora_scaling=args.actor.lora_scaling,
+        actor_lora_dim=args.actor.lora_dim,
+        actor_enable_fp16=args.actor.enable_fp16,
+        actor_gradient_checkpointing=args.actor.gradient_checkpointing,
+        # critic
+        critic_dp_size=args.critic.parallel.data_parallel_size,
+        critic_pp_size=args.critic.parallel.pipeline_parallel_size,
+        critic_use_lora=args.critic.lora,
+        critic_lora_scaling=args.critic.lora_scaling,
+        critic_lora_dim=args.critic.lora_dim,
+        critic_enable_fp16=args.critic.enable_fp16,
+        critic_gradient_checkpointing=args.critic.gradient_checkpointing,
+        # rew & ref
+        ref_dp_size=args.ref.parallel.data_parallel_size,
+        rew_dp_size=args.rew.parallel.data_parallel_size,
+        # dataset
+        max_prompt_len=args.dataset.max_prompt_len,
+        batch_size=args.dataset.batch_size,
+        dataset_path=args.dataset.path,
+        # actor optim
+        actor_lr=args.actor_optimizer.lr,
+        actor_weight_decay=args.actor_optimizer.weight_decay,
+        actor_adam_betas=(args.actor_optimizer.beta1, args.actor_optimizer.beta2),
+        actor_lr_scheduler_type=args.actor_optimizer.lr_scheduler_type,
+        actor_warmup_proportion=args.actor_optimizer.warmup_steps_proportion,
+        actor_adam_eps=args.actor_optimizer.eps,
+        actor_min_lr_ratio=args.actor_optimizer.min_lr_ratio,
+        actor_zero_stage=args.actor_optimizer.zero_stage,
+        # critic optim
+        critic_lr=args.critic_optimizer.lr,
+        critic_weight_decay=args.critic_optimizer.weight_decay,
+        critic_adam_betas=(args.critic_optimizer.beta1, args.critic_optimizer.beta2),
+        critic_lr_scheduler_type=args.critic_optimizer.lr_scheduler_type,
+        critic_warmup_proportion=args.critic_optimizer.warmup_steps_proportion,
+        critic_adam_eps=args.critic_optimizer.eps,
+        critic_min_lr_ratio=args.critic_optimizer.min_lr_ratio,
+        critic_zero_stage=args.critic_optimizer.zero_stage,
+        # ppo
+        rew_output_scaling=args.reward_output_scaling,
+        rew_output_bias=args.reward_output_bias,
+        max_new_tokens=args.max_new_tokens,
+        min_new_tokens=args.min_new_tokens,
+        greedy=args.greedy,
+        top_p=args.top_p,
+        top_k=args.top_k,
+        temperature=args.temperature,
+        n_minibatches=args.n_minibatches,
+        kl_ctl=args.kl_ctl,
+        discount=args.discount,
+        gae_lambda=args.gae_lambda,
+        eps_clip=args.eps_clip,
+        value_eps_clip=args.value_eps_clip,
+        max_reward_clip=args.max_reward_clip,
+        early_stop_imp_ratio=args.early_stop_imp_ratio,
+        use_adaptive_kl_ctl=args.use_adaptive_kl_ctl,
+    )
+
+    os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
+    with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
+        pickle.dump((exp_name, exp_fn), f)
+    api.config.register_experiment(exp_name, exp_fn)
+
+    slurm_available = int(subprocess.run("squeue", shell=True, stdout=open(os.devnull, "wb")).returncode) == 0
+    mode = "slurm" if slurm_available else "local"
+
+    main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
 
 
 @hydra.main(version_base=None, config_name="dpo")
 def run_dpo(args: DPOConfig):
-    import base.logging as logging
-
-    logger = logging.getLogger("quickstart")
     exp_name = args.experiment_name
     if args.trial_name == MISSING:
         trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
@@ -561,13 +716,16 @@ def run_dpo(args: DPOConfig):
             "Pipeline parallel is enabled. Please ensure that (1) there are enough GPUs for your experiment "
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
-    if args.model.base_model_path is None:
-        raise ValueError("model.base_model_path must be specified for RW experiment.")
+    if args.is_sft_lora and (args.sft_lora_path == args.model.path or args.model.base_model_path is None):
+        raise ValueError(
+            "sft_lora_path and model.base_model_path must be specified for DPO experiment."
+            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
+        )
 
     exp_fn = functools.partial(
         DPOExperiment,
         model_path=args.model.path,
-        tokenizer_path=args.model.base_model_path,
+        tokenizer_path=args.model.tokenizer_path,
         seed=args.seed,
         total_train_epochs=args.train_epochs,
         save_freq_steps=args.save_freq,

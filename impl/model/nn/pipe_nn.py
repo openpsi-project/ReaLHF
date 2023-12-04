@@ -82,7 +82,7 @@ def make_causal_flash_mqat_pipe_module(
     )
 
 
-def pipe_wrap_fn(model_path: str, num_pp: int, num_dp: int, is_critic: bool):
+def pipe_wrap_fn(model_path: str, num_pp: int, num_dp: int, is_critic: bool, init_from_scratch: bool = False):
     def pipe_wrap_fn_(model: api.model.Model) -> api.model.Model:
         topology = PipeDataParallelTopology(num_pp=num_pp, num_dp=num_dp)
         if not isinstance(
@@ -95,14 +95,14 @@ def pipe_wrap_fn(model_path: str, num_pp: int, num_dp: int, is_critic: bool):
             )
         config = model.module.config
         module = make_causal_flash_mqat_pipe_module(config, topology, is_critic, device=model.device)
-        process_memory_mb("before_load")
-        module.load(model_path)
-        process_memory_mb("after_load")
+        if not init_from_scratch:
+            process_memory_mb("before_load")
+            module.load(model_path)
+            process_memory_mb("after_load")
         model.module = module
         return model
 
     return pipe_wrap_fn_
 
 
-api.model.register_wrapper("pipe_actor", functools.partial(pipe_wrap_fn, is_critic=False))
-api.model.register_wrapper("pipe_critic", functools.partial(pipe_wrap_fn, is_critic=True))
+api.model.register_wrapper("pipe", pipe_wrap_fn)
