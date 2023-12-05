@@ -269,7 +269,7 @@ class PipeFlashMQATTest(unittest.TestCase):
         import transformers
 
         from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-        from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM
+        from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
         import api.huggingface
 
         self.device = device = 'cuda'
@@ -284,11 +284,11 @@ class PipeFlashMQATTest(unittest.TestCase):
         pretrained.eval()
 
         if MODEL_TYPE == "llama":
-            self.baseline_model = FlashMQATForCausalLM.from_llama(from_model=pretrained,
+            self.baseline_model = FlashMQATModel.from_llama(from_model=pretrained,
                                                                   dtype=dtype,
                                                                   device=device)
         elif MODEL_TYPE == "starcoder":
-            self.baseline_model = FlashMQATForCausalLM.from_starcoder(from_model=pretrained,
+            self.baseline_model = FlashMQATModel.from_starcoder(from_model=pretrained,
                                                                       dtype=dtype,
                                                                       device=device)
         else:
@@ -445,7 +445,7 @@ class PipeFlashMQATTest(unittest.TestCase):
         # # transform
         # layer_key_mappings = {
         #     "transformer.embedding_layer.": "0.",
-        #     "lm_head.": "5."
+        #     "head.": "5."
         # }
         # for i in range(4):
         #     layer_key_mappings[f"transformer.h.{i}."] = f"{i+1}."

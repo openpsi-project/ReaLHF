@@ -24,7 +24,7 @@ def get_flash_mqat_model_config(
     reward_bias: float = 0.0,
 ):
     model = Model(
-        "flash_mqat_clm_hf" if not is_critic else "flash_mqat_critic",
+        "flash_mqat_actor" if not is_critic else "flash_mqat_critic",
         args=dict(
             model_path=model_path,
             from_type=from_model_type,

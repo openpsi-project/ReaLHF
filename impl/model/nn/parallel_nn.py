@@ -46,15 +46,15 @@ def make_causal_flash_mqat_3d_module(
                                      device=device)
         layer_specs.append(flash_mqat_block)
 
-    lm_head = LayerSpec(
-        LanguageModelHead,
+    head = LayerSpec(
+        OutputHead,
         config.hidden_dim,
         config.vocab_size,
         bias=False,
         device=device,
         dtype=dtype,
     )
-    layer_specs.append(lm_head)
+    layer_specs.append(head)
 
     def compute_loss(output, label):
         return output.loss

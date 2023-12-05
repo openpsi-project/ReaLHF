@@ -8,7 +8,7 @@ import torch
 import transformers
 
 from impl.model.nn.flash_mqat.flash_generate import *
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM, PipeCacheData, PipeTransferData
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
 import api.huggingface
 
 
@@ -23,7 +23,7 @@ class PackedKVCacheTest(unittest.TestCase):
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
 
-        cls.model = FlashMQATForCausalLM.from_starcoder(model_path=model_path,
+        cls.model = FlashMQATModel.from_starcoder(model_path=model_path,
                                                         dtype=torch.float16,
                                                         device=device)
         cls.model.eval()
@@ -99,7 +99,7 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
 
-        cls.model = FlashMQATForCausalLM.from_starcoder(model_path=model_path,
+        cls.model = FlashMQATModel.from_starcoder(model_path=model_path,
                                                         dtype=torch.float16,
                                                         device=device)
         cls.model.eval()

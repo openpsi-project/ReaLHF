@@ -10,7 +10,7 @@ import transformers
 
 from impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig, vanilla_cpu_generate,
                                                      vanilla_packed_generate)
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM, PipeCacheData, PipeTransferData
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
 from impl.model.utils.functional import gather_shifted_log_probs
 import api.huggingface
 
@@ -37,7 +37,7 @@ class FlashMQATGPT2Test(unittest.TestCase):
             dtype=dtype, device=device)
         cls.gpt.eval()
 
-        cls.model = FlashMQATForCausalLM.from_gpt2(from_model=cls.gpt, dtype=dtype, device=device)
+        cls.model = FlashMQATModel.from_gpt2(from_model=cls.gpt, dtype=dtype, device=device)
         cls.model.eval()
         cls.config = cls.model.config
 

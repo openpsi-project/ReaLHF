@@ -452,8 +452,3 @@ class FlashMQATBase(nn.Module):
         return x
 
 
-class LanguageModelHead(nn.Linear):
-
-    def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
-        x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
-        return x

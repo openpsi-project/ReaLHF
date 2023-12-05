@@ -41,15 +41,15 @@ def get_layer_specs(config: FlashMQATConfig):
         )
         layer_specs.append(flash_mqat_block)
 
-    lm_head = LayerSpec(
-        LanguageModelHead,
+    head = LayerSpec(
+        OutputHead,
         config.hidden_dim,
         config.vocab_size,
         bias=False,
         device=None,
         dtype=None,
     )
-    layer_specs.append(lm_head)
+    layer_specs.append(head)
 
     return layer_specs
 
@@ -176,10 +176,10 @@ def main():
         output_dir = args.output_dir
 
     # TODO: load and process full statedict by shard for large model that can not fit into memory
-    cfg, state_dict = getattr(FlashMQATForCausalLM,
+    cfg, state_dict = getattr(FlashMQATModel,
                               f"config_and_param_from_{args.model_type}")(model_path=args.model_dir)
     layer_specs = get_layer_specs(cfg)
-    state_dict = FlashMQATForCausalLM.map_to_pipe_state_dict(cfg, state_dict)
+    state_dict = FlashMQATModel.map_to_pipe_state_dict(cfg, state_dict)
     print("loaded full state_dict")
     stage_to_layer_idx = partition_layers(layer_specs, num_stages=args.num_stages, method="parameters")
     stage_to_state_dict = split_state_dict_by_stage(state_dict, stage_to_layer_idx)

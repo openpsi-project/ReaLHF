@@ -69,11 +69,12 @@ class PairedRWExperiment(Experiment):
                 scheduling=Scheduling.data_worker_default(
                     cpu=2,
                     mem=10000,
+                    nodelist="QH-com[01-14]",
                 ),
             ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
+                scheduling=Scheduling.master_worker_default(cpu=4, mem=20000,nodelist="QH-com[01-14]",),
             ),
             model_worker=TasksGroup(
                 count=self.dp_size * self.pp_size,
@@ -82,6 +83,7 @@ class PairedRWExperiment(Experiment):
                     gpu=1,
                     gpu_type="tesla",
                     mem=60000,
+                    nodelist="QH-com[01-14]",
                 ),
             ),
         )

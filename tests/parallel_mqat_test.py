@@ -242,7 +242,7 @@ class PipeFlashMQATTest(unittest.TestCase):
     def init_baseline_model(self):
         import transformers
 
-        from impl.model.nn.flash_mqat import FlashMQATForCausalLM, generate, GenerationConfig
+        from impl.model.nn.flash_mqat import FlashMQATModel, generate, GenerationConfig
         import api.huggingface
 
         self.device = device = 'cuda'
@@ -256,7 +256,7 @@ class PipeFlashMQATTest(unittest.TestCase):
             pretrained_model_name_or_path="/lustre/meizy/models/starcoder_4l").to(dtype=dtype, device=device)
         starcoder.eval()
 
-        self.baseline_model = FlashMQATForCausalLM.from_starcoder(from_model=starcoder,
+        self.baseline_model = FlashMQATModel.from_starcoder(from_model=starcoder,
                                                                   dtype=dtype,
                                                                   device=device)
         self.baseline_model.eval()

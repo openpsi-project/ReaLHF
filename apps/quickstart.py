@@ -336,15 +336,15 @@ class PPOConfig:
     min_new_tokens: int = 10
     greedy: bool = False
     top_p: float = 1.0
-    top_k: float = 200
+    top_k: int = 200
     temperature: float = 1.0
-    n_minibatches: int = 8
+    ppo_n_minibatches: int = 4
     kl_ctl: float = 0.1
     discount: float = 1.0
     gae_lambda: float = 1.0
     eps_clip: float = 0.2
     value_eps_clip: float = 0.2
-    max_reward_clip = 20.0
+    max_reward_clip: float = 20.0
     reward_output_scaling: float = 1.0
     reward_output_bias: float = 0.0
     early_stop_imp_ratio: float = 5.0
@@ -424,6 +424,14 @@ def kind_reminder(logger, args):
     logger.info(
         f"Model checkpoints will be saved to {os.path.join(MODEL_SAVE_ROOT, args.experiment_name, args.trial_name)}"
     )
+    
+    slurm_available = int(subprocess.run("squeue", shell=True, stdout=open(os.devnull, "wb")).returncode) == 0
+    if slurm_available:
+        logger.warning("Slurm is available. You probably run the system on ctrl nodes. Using slurm to launch remote workers.")
+    else:
+        logger.warning("Slurm is not available. Using local mode.")
+    mode = "slurm" if slurm_available else "local"
+    return mode
 
 
 @hydra.main(version_base=None, config_name="sft")
@@ -441,7 +449,7 @@ def run_sft(args: SFTConfig):
     from apps.main import main_start
     from experiments.common.sft_exp import SFTExperiment
 
-    kind_reminder(logger, args)
+    mode = kind_reminder(logger, args)
 
     if args.model.parallel.pipeline_parallel_size > 1:
         logger.warning(
@@ -484,9 +492,6 @@ def run_sft(args: SFTConfig):
         pickle.dump((exp_name, exp_fn), f)
     api.config.register_experiment(exp_name, exp_fn)
 
-    slurm_available = int(subprocess.run("squeue", shell=True, stdout=open(os.devnull, "wb")).returncode) == 0
-    mode = "slurm" if slurm_available else "local"
-
     main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
 
 
@@ -505,7 +510,7 @@ def run_rw(args: RWConfig):
     from apps.main import main_start
     from experiments.common.rw_exp import PairedRWExperiment
 
-    kind_reminder(logger, args)
+    mode = kind_reminder(logger, args)
 
     if args.model.base_model_path is None:
         logger.warning("`base_model_path` is not specified. Using `path` as `base_model_path`.")
@@ -565,9 +570,6 @@ def run_rw(args: RWConfig):
         pickle.dump((exp_name, exp_fn), f)
     api.config.register_experiment(exp_name, exp_fn)
 
-    slurm_available = int(subprocess.run("squeue", shell=True, stdout=open(os.devnull, "wb")).returncode) == 0
-    mode = "slurm" if slurm_available else "local"
-
     main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
 
 
@@ -586,7 +588,7 @@ def run_ppo(args: PPOConfig):
     from apps.main import main_start
     from experiments.common.ppo_exp import PPOExperiment
 
-    kind_reminder(logger, args)
+    mode = kind_reminder(logger, args)
 
     if args.actor.base_model_path is None:
         logger.warning("`base_model_path` is not specified. Using `path` as `base_model_path`.")
@@ -691,7 +693,7 @@ def run_ppo(args: PPOConfig):
         top_p=args.top_p,
         top_k=args.top_k,
         temperature=args.temperature,
-        n_minibatches=args.n_minibatches,
+        ppo_n_minibatches=args.ppo_n_minibatches,
         kl_ctl=args.kl_ctl,
         discount=args.discount,
         gae_lambda=args.gae_lambda,
@@ -706,9 +708,6 @@ def run_ppo(args: PPOConfig):
     with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
         pickle.dump((exp_name, exp_fn), f)
     api.config.register_experiment(exp_name, exp_fn)
-
-    slurm_available = int(subprocess.run("squeue", shell=True, stdout=open(os.devnull, "wb")).returncode) == 0
-    mode = "slurm" if slurm_available else "local"
 
     main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
 
@@ -728,7 +727,7 @@ def run_dpo(args: DPOConfig):
     from apps.main import main_start
     from experiments.common.dpo_exp import DPOExperiment
 
-    kind_reminder(logger, args)
+    mode = kind_reminder(logger, args)
 
     if args.model.base_model_path is None:
         logger.warning("`base_model_path` is not specified. Using `path` as `base_model_path`.")
@@ -787,9 +786,6 @@ def run_dpo(args: DPOConfig):
     with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
         pickle.dump((exp_name, exp_fn), f)
     api.config.register_experiment(exp_name, exp_fn)
-
-    slurm_available = int(subprocess.run("squeue", shell=True, stdout=open(os.devnull, "wb")).returncode) == 0
-    mode = "slurm" if slurm_available else "local"
 
     main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
 

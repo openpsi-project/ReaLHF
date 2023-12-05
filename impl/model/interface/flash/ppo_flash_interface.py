@@ -14,7 +14,6 @@ from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.backend.pipe_engine.stream_pipe_engine import StreamPipeEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_interface import HuggingfaceLikeFlashMQATForCausalLM
 from impl.model.utils.functional import gather_packed_shifted_log_probs
 from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
 import api.huggingface
@@ -186,7 +185,6 @@ class PackedActorInterface(api.model.ModelInterface):
         if isinstance(module, deepspeed.DeepSpeedEngine):
             # we don't calculate gradient here, so it's safe to unwrap deepspeed
             module = module.module
-            assert isinstance(module, HuggingfaceLikeFlashMQATForCausalLM)
         else:
             assert isinstance(module, DeepSpeedPipelineEngine)
 

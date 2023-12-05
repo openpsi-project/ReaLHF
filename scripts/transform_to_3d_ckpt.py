@@ -12,7 +12,7 @@ import torch.nn as nn
 import transformers
 
 from base.monitor import process_memory_mb
-from impl.model.nn.flash_mqat import *
+from impl.model.nn.flash_mqat.flash_mqat_base import *
 from impl.model.utils.pipeline_module import LayerSpec
 
 FULL_MODEL_DIR = "/lustre/meizy/models/starcoder_4l"
@@ -83,15 +83,15 @@ def layer_specs_and_transform_mappings(config: FlashMQATConfig):
                                      device=None)
         layer_specs.append(flash_mqat_block)
 
-    lm_head = LayerSpec(
-        LanguageModelHead,
+    head = LayerSpec(
+        OutputHead,
         config.hidden_dim,
         config.vocab_size,
         bias=False,
         device=None,
         dtype=None,
     )
-    layer_specs.append(lm_head)
+    layer_specs.append(head)
 
     mappings = []
 

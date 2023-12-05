@@ -6,8 +6,8 @@ import torch
 import transformers
 
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM
-from impl.model.nn.flash_mqat.flash_mqat_interface import HuggingfaceLikeFlashMQATForCausalLM
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
+from impl.model.nn.flash_mqat.flash_mqat_api import HuggingfaceLikeFlashMQATForCausalLM
 import api.huggingface
 
 
@@ -33,7 +33,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
             dtype=torch.float16, device=device)
         cls.llama.eval()
 
-        cls.model = FlashMQATForCausalLM.from_llama(from_model=cls.llama, dtype=torch.float16, device=device)
+        cls.model = FlashMQATModel.from_llama(from_model=cls.llama, dtype=torch.float16, device=device)
         cls.model.eval()
         cls.hf_like_model = HuggingfaceLikeFlashMQATForCausalLM(cls.model)
         cls.config = cls.model.config

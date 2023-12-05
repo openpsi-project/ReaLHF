@@ -280,9 +280,17 @@ class PPOExperiment(Experiment):
             sft_lora_path=self.sft_lora_path,
         )
 
+        if self.is_rew_lora:
+            if self.is_sft_lora:
+                rew_from_type = self.rew_base_model_type
+            else:
+                rew_from_type = "sft"
+        else:
+            rew_from_type = "self"
+            
         rw_model = get_flash_mqat_model_config(
             model_path=self.rew_model_path,
-            from_model_type="sft" if not self.is_sft_lora else self.rew_base_model_type,
+            from_model_type=rew_from_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=1,
             dp_size=self.rew_dp_size,
@@ -301,7 +309,7 @@ class PPOExperiment(Experiment):
 
         critic_model = get_flash_mqat_model_config(
             model_path=self.rew_model_path,
-            from_model_type="sft" if not self.is_sft_lora else self.rew_base_model_type,
+            from_model_type=rew_from_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=self.critic_pp_size,
             dp_size=self.critic_dp_size,
@@ -332,7 +340,7 @@ class PPOExperiment(Experiment):
                 warmup_steps_proportion=self.actor_warmup_proportion,
                 min_lr_ratio=self.actor_min_lr_ratio,
                 zero_stage=max(1, self.actor_zero_stage) if self.actor_pp_size > 0 else 2,
-                enable_fp_16=self.actor_enable_fp16,
+                enable_fp16=self.actor_enable_fp16,
                 gradient_checkpointing=self.actor_gradient_checkpointing,
             ),
         )
@@ -351,7 +359,7 @@ class PPOExperiment(Experiment):
                 warmup_steps_proportion=self.critic_warmup_proportion,
                 min_lr_ratio=self.critic_min_lr_ratio,
                 zero_stage=max(1, self.critic_zero_stage) if self.critic_pp_size > 0 else 2,
-                enable_fp_16=self.critic_enable_fp16,
+                enable_fp16=self.critic_enable_fp16,
                 gradient_checkpointing=self.critic_gradient_checkpointing,
             ),
         )
