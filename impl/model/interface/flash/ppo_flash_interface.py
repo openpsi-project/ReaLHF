@@ -166,6 +166,7 @@ class PackedActorInterface(api.model.ModelInterface):
     adaptive_kl_horizon: Optional[float] = 10000
 
     enable_save: bool = True
+    force_no_logits_mask:bool = False
 
     def __post_init__(self):
         if self.adaptive_kl_ctl:
@@ -254,7 +255,7 @@ class PackedActorInterface(api.model.ModelInterface):
             if logits_mask is not None:
                 gen_logits_mask_list.append(
                     torch.cat([logits_mask[i, :gen_len], logits_mask.new_ones(1, logits_mask.shape[-1])])
-                ).logical_not()  # FIXME: for debugging, not correct
+                )
 
         # For complete sequences, EOS token is included. Otherwise the sequence may end with arbitrary token.
         # cu_seqlens marks the boundary of these sequences, no matter whether they are complete or not.
@@ -272,7 +273,7 @@ class PackedActorInterface(api.model.ModelInterface):
             bs,
         )
         packed_logits_mask = None
-        if gen_logits_mask_list:
+        if gen_logits_mask_list and not self.force_no_logits_mask:
             packed_logits_mask = torch.cat(
                 list(itertools.chain.from_iterable(zip(prompt_logits_mask_list, gen_logits_mask_list))))
 

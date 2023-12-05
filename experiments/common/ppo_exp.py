@@ -165,6 +165,8 @@ class PPOExperiment(Experiment):
     max_reward_clip: float = 20.0
     use_adaptive_kl_ctl: bool = False
     early_stop_imp_ratio: float = 5.0
+    
+    benchmark: bool = False
 
     def __post_init__(self):
         if self.actor_pp_size < 1 or self.actor_dp_size < 1:
@@ -383,6 +385,7 @@ class PPOExperiment(Experiment):
                 **copy.deepcopy(ppo_kwargs),
                 "generation_config": generation_kwargs,
                 "early_stop_imp_ratio": self.early_stop_imp_ratio,
+                "force_no_logits_mask": self.benchmark,  # For benchmark only
             },
         )
         ref_interface = copy.deepcopy(actor_interface)
@@ -413,8 +416,7 @@ class PPOExperiment(Experiment):
                 dp_rank=actor_topo.get_coord(i).data,
                 pp_rank=actor_topo.get_coord(i).pipe,
                 mp_rank=actor_topo.get_coord(i).model,
-                cuda_cache_cleanliness=True,
-                cuda_cache_clear_freq=30,
+                cuda_cache_cleanliness=(not self.benchmark),
             ) for i in range(self.n_actors)
         ] + [
             ModelWorker(
@@ -427,8 +429,7 @@ class PPOExperiment(Experiment):
                 dp_rank=critic_topo.get_coord(i).data,
                 pp_rank=critic_topo.get_coord(i).pipe,
                 mp_rank=critic_topo.get_coord(i).model,
-                cuda_cache_cleanliness=True,
-                cuda_cache_clear_freq=30,
+                cuda_cache_cleanliness=(not self.benchmark),
             ) for i in range(self.n_critics)
         ] + [
             ModelWorker(
@@ -439,6 +440,7 @@ class PPOExperiment(Experiment):
                 model_name="reward",
                 dp_rank=rw_topo.get_coord(i).data,
                 topo=rw_topo,
+                cuda_cache_cleanliness=(not self.benchmark),
             ) for i in range(self.n_rewards)
         ] + [
             ModelWorker(
@@ -449,6 +451,7 @@ class PPOExperiment(Experiment):
                 model_name="ref",
                 dp_rank=ref_topo.get_coord(i).data,
                 topo=ref_topo,
+                cuda_cache_cleanliness=(not self.benchmark),
             ) for i in range(self.n_refs)
         ])
 
