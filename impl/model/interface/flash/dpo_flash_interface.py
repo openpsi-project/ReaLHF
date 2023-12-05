@@ -31,9 +31,9 @@ def _dpo_loss_from_model_outputs(
     logprob_sum = []
     offset = 0
     for i in range(prompt_lens.shape[0]):
-        logprob_sum.append(logprobs[offset + prompt_lens[i] - 1:offset + input_lens[2 * i] - 1].sum())
+        logprob_sum.append(logprobs[offset + prompt_lens[i] - 1 : offset + input_lens[2 * i] - 1].sum())
         offset += input_lens[2 * i] - 1
-        logprob_sum.append(logprobs[offset + prompt_lens[i] - 1:offset + input_lens[2 * i + 1] - 1].sum())
+        logprob_sum.append(logprobs[offset + prompt_lens[i] - 1 : offset + input_lens[2 * i + 1] - 1].sum())
         offset += input_lens[2 * i + 1] - 1
     assert offset == sum(input_lens) - input_lens.shape[0], (offset, sum(input_lens), input_lens.shape)
 
@@ -72,24 +72,26 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
                 return None
             logits = res.float()
         else:
-            logits: torch.FloatTensor = module(packed_input_ids=data["packed_input_ids"],
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits.float()
+            logits: torch.FloatTensor = module(
+                packed_input_ids=data["packed_input_ids"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
+            ).logits.float()
 
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_input_ids"])
 
         logprob_sum = []
         offset = 0
         for i in range(prompt_lens.shape[0]):
-            logprob_sum.append(logprobs[offset + prompt_lens[i] - 1:offset + input_lens[2 * i] - 1].sum())
+            logprob_sum.append(logprobs[offset + prompt_lens[i] - 1 : offset + input_lens[2 * i] - 1].sum())
             offset += input_lens[2 * i] - 1
-            logprob_sum.append(logprobs[offset + prompt_lens[i] - 1:offset + input_lens[2 * i + 1] - 1].sum())
+            logprob_sum.append(
+                logprobs[offset + prompt_lens[i] - 1 : offset + input_lens[2 * i + 1] - 1].sum()
+            )
             offset += input_lens[2 * i + 1] - 1
         assert offset == sum(input_lens) - input_lens.shape[0], (offset, sum(input_lens), input_lens.shape)
 
         return from_dict(dict(seqlogp=torch.stack(logprob_sum).cpu()))
 
-    def train_step(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+    def train_step(self, model: api.model.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
@@ -116,9 +118,9 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
                 **loss_fn_kwargs,
             )
         else:
-            logits: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits.float()
+            logits: torch.FloatTensor = module(
+                packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
+            ).logits.float()
 
             loss, stats = _dpo_loss_from_model_outputs(
                 logits=logits,
@@ -137,7 +139,9 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
         if model.version.epoch > cur_epoch:
             module.tput_timer.update_epoch_count()
 
-        return stats
+        if stats is None:
+            stats = {}
+        return {k: float(v) for k, v in stats.items()}
 
     def save(self, model: api.model.Model, output_dir):
         if not self.enable_save:

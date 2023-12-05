@@ -61,9 +61,6 @@ class PairedRWExperiment(Experiment):
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
         if self.is_sft_lora and (self.sft_lora_path is None or self.base_model_type is None):
             raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
-        # FIXME:
-        if self.pp_size > 1:
-            raise NotImplementedError()
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -146,13 +143,10 @@ class PairedRWExperiment(Experiment):
             lora_scaling=self.lora_scaling,
             is_sft_lora=self.is_sft_lora,
             sft_lora_path=self.sft_lora_path,
+            init_critic_from_actor=True,
         )
 
-        if self.pp_size == 1:
-            interface = ModelInterface("flash_paired_rw")
-        else:
-            # FIXME:
-            pass
+        interface = ModelInterface("flash_paired_rw")
 
         topo = PipeModelDataParallelTopology(self.pp_size, 1, self.dp_size)
         model_worker = []
