@@ -189,6 +189,8 @@ class PipelineModule(nn.Module):
         self._grid = PipelineParallelGrid(process_group=self.world_group, topology=self._topo)
         base.constants.set_grid(self._grid)
 
+        self._grid = base.constants.grid()
+
         self.stage_id = self._topo.get_coord(self.global_rank).pipe
         print(f"rank {torch.distributed.get_rank()} pipeline stage ID: {self.stage_id}")
 
@@ -588,11 +590,7 @@ class PipelineModule(nn.Module):
             n_shards += 1
             process_memory_mb(f"after_load_shard_{n_shards}")
 
-        if "41.weight" in state_dict:
-            state_dict.pop("41.weight")
-
-        self.load_state_dict(state_dict, strict=False)
-
+        self.load_state_dict(state_dict, strict=True)
         self.num_checkpoint_shards = n_shards
         logger.info("Loaded model from {}".format(load_dir))
         process_memory_mb("after_load_state_dict")

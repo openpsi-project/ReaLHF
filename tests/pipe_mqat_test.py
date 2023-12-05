@@ -24,18 +24,20 @@ TRIAL_NAME = "test"
 MODEL_NAME = "pipedatamodel"
 WORKER_TYPE = "model_worker"
 NUM_PP = 4
-NUM_DP = 1
+NUM_DP = 2
 WORLD_SIZE = NUM_PP * NUM_DP
 MODEL_TYPE = "llama"
 if MODEL_TYPE == "llama":
-    BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/testOnly/llama-2-4l"
-    PIPELINE_MODEL_PATH = F"/lustre/public/pretrained_model_weights/testOnly/llama-2-4l_4pp_3s"
+    BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
+    PIPELINE_MODEL_PATH = "/home/meizy/models/Llama-2-13b_4pp_3s"
+    # BASELINE_MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
+    # PIPELINE_MODEL_PATH = "/home/meizy/models/test/llama-2-4l_4pp_3s"
 elif MODEL_TYPE == "starcoder":
     BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
-    PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
-BATCH_SIZE = 16
-MIN_NEW_TOKENS = 1024
-MAX_NEW_TOKENS = 1024
+    PIPELINE_MODEL_PATH = "/lustre/meizy/models/pipe_pretrained/starcoder_4pp_3s"
+BATCH_SIZE = 32
+MIN_NEW_TOKENS = 1
+MAX_NEW_TOKENS = 2048
 
 BARRIER = mp.Barrier(WORLD_SIZE)
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
@@ -136,6 +138,7 @@ def random_sentence(min_len=1, max_len=10):
     words = ["the", "quick", "brown", "fox", "jumped", "over", "the", "lazy", "dog"]
     sentence_length = random.randint(min_len, max_len)
     return " ".join(random.choices(words, k=sentence_length))
+    # return "Output less than 50 words:"
 
 
 def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
@@ -185,23 +188,24 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
     data = init_data(rank, model, device, seed=seed)
 
-    from impl.model.nn.flash_mqat import GenerationConfig
+    random.seed(seed + rank)
+
+    from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
-    outputs = interface.generate(model, data, gconfig=gconfig)
+
     st = time.monotonic()
-    # base.consistency.set_step_id(0)
-    # base.consistency.set_parallel_mode(True)
     outputs = interface.generate(model, data, gconfig=gconfig)
     t = time.monotonic() - st
     # logger.info(input_ids)
+
     if len(outputs) > 0 and res_queue is not None:
         # logger.info(input_ids)
-        # logger.info(outputs["gen_tokens"])
+        logger.info(outputs["gen_tokens"].shape)
         # logger.info(outputs["log_probs"])
         res_queue.put(outputs["gen_tokens"])
         res_queue.put(outputs["log_probs"])
         res_queue.put(t)
-        time.sleep(1)  # wait for queue get, otherwise invalid tensor handle
+        time.sleep(2)  # wait for queue get, otherwise invalid tensor handle
 
 
 def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
@@ -253,41 +257,43 @@ class PipeFlashMQATTest(unittest.TestCase):
         clear_name_resolve()
         cls.baseline_model = None
 
-    def init_baseline_model(self):
-        import transformers
-
-        from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-        from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM
+    def init_tokenizer(self):
         import api.huggingface
-
-        self.device = device = 'cuda'
-        self.dtype = dtype = torch.float16
 
         self.tokenizer = api.huggingface.load_hf_tokenizer(BASELINE_MODEL_PATH)
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.tokenizer.padding_side = "left"
 
-        pretrained: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
-            pretrained_model_name_or_path=BASELINE_MODEL_PATH).to(dtype=dtype, device=device)
-        pretrained.eval()
+    def init_baseline_model(self):
+        import transformers
 
+        from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM
+        import impl.model.nn.flash_mqat.flash_from_hf_impl
+
+        self.device = device = 'cuda'
+        self.dtype = dtype = torch.float16
+
+        self.init_tokenizer()
+
+        # pretrained: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
+        #     pretrained_model_name_or_path=BASELINE_MODEL_PATH).to(dtype=dtype, device=device)
+        # pretrained.eval()
+
+        self.baseline_model = None
         if MODEL_TYPE == "llama":
-            self.baseline_model = FlashMQATForCausalLM.from_llama(from_model=pretrained,
-                                                                  dtype=dtype,
-                                                                  device=device)
+            self.baseline_model = FlashMQATForCausalLM.from_llama(model_path=BASELINE_MODEL_PATH)
         elif MODEL_TYPE == "starcoder":
-            self.baseline_model = FlashMQATForCausalLM.from_starcoder(from_model=pretrained,
-                                                                      dtype=dtype,
-                                                                      device=device)
+            self.baseline_model = FlashMQATForCausalLM.from_starcoder(model_path=BASELINE_MODEL_PATH)
         else:
             raise NotImplementedError()
 
-        # self.baseline_model.eval()
+        self.baseline_model.to(dtype=dtype, device=device)
+        self.baseline_model.eval()
 
     @torch.no_grad()
     def testGenerateAccordance(self):
         clear_name_resolve()
-        self.seed = random.randint(0, 1000)
+        self.seed = 212
         self.res_queue = mp.Queue(maxsize=128)
         self.pipe_model_processes = [
             mp.Process(target=pipe_generate, args=(i, self.res_queue, self.seed)) for i in range(WORLD_SIZE)
@@ -322,13 +328,6 @@ class PipeFlashMQATTest(unittest.TestCase):
                                            input_ids=prompt,
                                            attention_mask=prompt_att_mask,
                                            gconfig=self.gconfig)
-
-        self.baseline_model.eval()
-        vg, vlogprob, vmask, *_ = generate(model=self.baseline_model,
-                                           tokenizer=self.tokenizer,
-                                           input_ids=prompt,
-                                           attention_mask=prompt_att_mask,
-                                           gconfig=self.gconfig)
         t2 = time.monotonic() - s2
         # base.consistency.check_all()
         print("pipe time:", t)
@@ -347,7 +346,7 @@ class PipeFlashMQATTest(unittest.TestCase):
     @torch.no_grad()
     def testGenerate(self):
         clear_name_resolve()
-        self.seed = 1
+        self.seed = random.randint(0, 1000)
         self.res_queue = mp.Queue(maxsize=128)
         self.pipe_model_processes = [
             mp.Process(target=pipe_generate, args=(i, self.res_queue, self.seed)) for i in range(WORLD_SIZE)
@@ -362,9 +361,9 @@ class PipeFlashMQATTest(unittest.TestCase):
         for p in self.pipe_model_processes:
             p.join()
 
-        print(g)
-        print(logprob)
-        print(t)
+        print(f"Generated shape {g.shape}")
+        # print(logprob)
+        # print(t)
 
     def testTrainBatch(self):
         clear_name_resolve()
@@ -448,4 +447,4 @@ class PipeFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testTrainBatchAccordance")
+    unittest.main(defaultTest="PipeFlashMQATTest.testGenerate")

@@ -49,6 +49,7 @@ class RequestReplyStream:
 class IpRequestReplyStream(RequestReplyStream):
 
     def __init__(self, server_address: str, serialization_method: str):
+        assert serialization_method == "tensor_compress"
         self._context = zmq.Context(io_threads=ZMQ_IO_THREADS)
         self._send_socket = self._context.socket(zmq.PUSH)
         host_ip = socket.gethostbyname(socket.gethostname())
@@ -67,7 +68,8 @@ class IpRequestReplyStream(RequestReplyStream):
         tik = time.monotonic()
         if isinstance(payload.data, namedarray.NamedArray):
             assert isinstance(payload.data, namedarray.NamedArray), type(payload.data)
-            payload.data = namedarray.recursive_apply(payload.data, lambda x: x.cpu().numpy())
+            # payload.data = namedarray.recursive_apply(payload.data,
+            #                                           lambda x: x.cpu().numpy() if not x.is_sparse else pickle.dumps(x))
             payload.data = namedarray.dumps(payload.data, method=self._serialization_method)
             encoding = b"01"
         else:
@@ -92,7 +94,8 @@ class IpRequestReplyStream(RequestReplyStream):
         request_id = request_id.decode("ascii")
         if encoding == b"01":
             data = namedarray.loads(data)
-            data = namedarray.recursive_apply(data, lambda x: torch.from_numpy(x))
+            # data = namedarray.recursive_apply(data,
+            #                                   lambda x: torch.from_numpy(x) if not isinstance(x, bytes) else pickle.loads(x))
         elif encoding == b"00":
             assert len(data) == 1
             data = pickle.loads(data[0])

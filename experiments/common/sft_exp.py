@@ -84,6 +84,7 @@ class SFTExperiment(Experiment):
             "packed_prompt_answer",
             args=dict(
                 n_tokens_per_batch=self.train_tokens_per_batch,
+                min_seqs_per_batch=self.train_tokens_per_batch // self.max_seqlen,
                 max_length=self.max_seqlen,
                 dataset_path=self.train_dataset_path,
             ),

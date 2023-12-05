@@ -104,6 +104,11 @@ def genstep(
         unfinished_sequences.logical_and_(generated_idx < gconfig.max_new_tokens - 1)
         terminate = unfinished_sequences.max() == 0
 
+    import random
+    if random.random() < 0.01:
+        terminate = True
+        unfinished_sequences = torch.zeros_like(unfinished_sequences)
+
     logits_mask = next_token_logits != torch.finfo(next_token_logits.dtype).min
     if logits_mask.all():
         logits_mask = None

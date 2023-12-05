@@ -20,7 +20,7 @@ MODEL_CONFIG_FILES = [
 ]
 
 
-def get_layer_specs(config: FlashMQATConfig):
+def get_layer_specs(config: FlashMQATConfig, to_critic):
     layer_specs = []
     # vocab pos embedding
     embedding_layer = LayerSpec(VocabPositionEmbedding, config, dtype=None, device=None)
@@ -40,14 +40,24 @@ def get_layer_specs(config: FlashMQATConfig):
         )
         layer_specs.append(flash_mqat_block)
 
-    lm_head = LayerSpec(
-        LanguageModelHead,
-        config.hidden_dim,
-        config.vocab_size,
-        bias=False,
-        device=None,
-        dtype=None,
-    )
+    if not to_critic:
+        lm_head = LayerSpec(
+            LanguageModelHead,
+            config.hidden_dim,
+            config.vocab_size,
+            bias=False,
+            device=None,
+            dtype=None,
+        )
+    else:
+        lm_head = LayerSpec(
+            LanguageModelHead,
+            config.hidden_dim,
+            1,
+            bias=False,
+            device=None,
+            dtype=None,
+        )
     layer_specs.append(lm_head)
 
     return layer_specs
@@ -126,6 +136,16 @@ def save_state_dict(state_dict, stage_index, shard_index, model_dir):
     )
 
 
+def fit_state_dict_to_critic(num_layers, state_dict):
+    # modify last layer shape
+    for k, v in state_dict.items():
+        if k.startswith(f"{num_layers-1}."):
+            print(f"last layer key {k} tensor shape {v.shape}")
+            state_dict[k] = v[0].unsqueeze(0)
+            print(f"critic head shape {state_dict[k].shape}")
+    return state_dict
+
+
 def copy_configs(src_model_dir, dst_model_dir):
     for file in MODEL_CONFIG_FILES:
         try:
@@ -169,6 +189,10 @@ def main():
     parser.add_argument("--num_stages", type=int, default=4)
     parser.add_argument("--num_shards", type=int, default=3)
     parser.add_argument("--output_dir", type=str, default=None)
+    parser.add_argument(
+        "--to_critic",
+        action="store_true",
+        help="transform actor model to critic model by changing the last layer, only for test purposes.")
     args = parser.parse_args()
 
     if args.output_dir is None:
@@ -179,8 +203,10 @@ def main():
     # TODO: load and process full statedict by shard for large model that can not fit into memory
     cfg, state_dict = getattr(FlashMQATForCausalLM,
                               f"config_and_param_from_{args.model_type}")(model_path=args.model_dir)
-    layer_specs = get_layer_specs(cfg)
+    layer_specs = get_layer_specs(cfg, args.to_critic)
     state_dict = FlashMQATForCausalLM.map_to_pipe_state_dict(cfg, state_dict)
+    if args.to_critic:
+        state_dict = fit_state_dict_to_critic(len(layer_specs), state_dict)
     print("loaded full state_dict")
     stage_to_layer_idx = partition_layers(layer_specs, num_stages=args.num_stages, method="parameters")
     stage_to_state_dict = split_state_dict_by_stage(state_dict, stage_to_layer_idx)
