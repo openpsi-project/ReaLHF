@@ -20,9 +20,7 @@ class InflightBatchingThroughputTest(unittest.TestCase):
 
         self.device = "cuda"
         model_path = "/lustre/fw/pretrained/gpt2"
-        self.model = FlashMQATModel.from_gpt2(model_path=model_path,
-                                                    dtype=torch.float16,
-                                                    device=self.device)
+        self.model = FlashMQATModel.from_gpt2(model_path=model_path, dtype=torch.float16, device=self.device)
         self.model.eval()
 
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)

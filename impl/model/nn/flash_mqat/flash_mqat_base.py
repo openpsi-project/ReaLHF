@@ -16,12 +16,8 @@ from impl.model.utils.save_load import load_from_disk
 import base.logging as logging
 
 try:
-    from flash_attn import (
-        flash_attn_func,
-        flash_attn_varlen_func,
-        flash_attn_varlen_func_with_kvcache,
-        flash_attn_with_kvcache,
-    )
+    from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
+                            flash_attn_with_kvcache)
     from flash_attn.layers.rotary import RotaryEmbedding
 except ModuleNotFoundError:
     pass
@@ -62,6 +58,7 @@ class FlashMQATConfig:
 
 
 class CausalSelfAttentionLayer(nn.Module):
+
     def __init__(
         self,
         hidden_dim: int,
@@ -268,6 +265,7 @@ class CausalSelfAttentionLayer(nn.Module):
 
 
 class FlashMQATBlock(nn.Module):
+
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -324,9 +322,10 @@ class FlashMQATBlock(nn.Module):
                 layer_norm_fn = nn.LayerNorm
             elif config.layer_norm_type == "rms":
                 layer_norm_fn = LlamaRMSNorm
-            self.ln_f = layer_norm_fn(
-                config.hidden_dim, eps=config.layer_norm_epsilon, dtype=dtype, device=device
-            )
+            self.ln_f = layer_norm_fn(config.hidden_dim,
+                                      eps=config.layer_norm_epsilon,
+                                      dtype=dtype,
+                                      device=device)
 
         self.ckpt_attn = ckpt_attn
         self.ckpt_mlp = ckpt_mlp
@@ -379,6 +378,7 @@ class FlashMQATBlock(nn.Module):
 
 
 class VocabPositionEmbedding(nn.Module):
+
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -396,8 +396,7 @@ class VocabPositionEmbedding(nn.Module):
         self.embed_drop = nn.Dropout(config.embd_pdrop)
 
         self.self_attention_mask = torch.tril(
-            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device)
-        )
+            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device))
         self.fixed_abs_position_ids = config.fixed_abs_position_ids
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
@@ -429,16 +428,13 @@ class VocabPositionEmbedding(nn.Module):
             lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             if y.cache_seqlens is None:
                 y.position_ids = torch.cat(
-                    [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths]
-                )
+                    [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
                 assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
             else:
-                y.position_ids = torch.cat(
-                    [
-                        torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) + cache_len
-                        for l, cache_len in zip(lengths, y.cache_seqlens)
-                    ]
-                )
+                y.position_ids = torch.cat([
+                    torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) + cache_len
+                    for l, cache_len in zip(lengths, y.cache_seqlens)
+                ])
             if x.max_seqlen > self.n_positions:
                 raise ValueError(f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions}).")
             assert y.position_ids.shape == y.input_ids.shape, (
@@ -452,17 +448,16 @@ class VocabPositionEmbedding(nn.Module):
             # For debugging only.
             attention_mask = x.attention_mask
             if self.fixed_abs_position_ids:
-                y.position_ids = torch.arange(
-                    y.input_ids.shape[-1], dtype=torch.long, device=y.input_ids.device
-                ).unsqueeze(0)
+                y.position_ids = torch.arange(y.input_ids.shape[-1],
+                                              dtype=torch.long,
+                                              device=y.input_ids.device).unsqueeze(0)
             else:
                 y.position_ids = attention_mask.long().cumsum(-1) - 1
                 y.position_ids.masked_fill_(attention_mask == 0, 1)
             seqlen = y.input_ids.shape[-1]
             self_attention_mask = self.self_attention_mask[None, :seqlen, :seqlen]
             self_attention_mask = self_attention_mask * attention_mask.view(batch_size, 1, -1).to(
-                dtype=torch.bool, device=self_attention_mask.device
-            )
+                dtype=torch.bool, device=self_attention_mask.device)
             x.attention_mask = self_attention_mask.unsqueeze(1)
 
         inputs_embeds = self.wte(y.input_ids)
@@ -473,6 +468,7 @@ class VocabPositionEmbedding(nn.Module):
 
 
 class FlashMQATBase(nn.Module):
+
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -488,20 +484,17 @@ class FlashMQATBase(nn.Module):
             dtype=dtype,
             device=device,
         )
-        self.h = nn.ModuleList(
-            [
-                FlashMQATBlock(
-                    config,
-                    layer_index=i,
-                    output_layernorm=(i == config.n_layers - 1),
-                    ckpt_attn=(i > 0 and config.ckpt_attn),
-                    ckpt_mlp=(i > 0 and config.ckpt_mlp),
-                    dtype=dtype,
-                    device=device,
-                )
-                for i in range(config.n_layers)
-            ]
-        )
+        self.h = nn.ModuleList([
+            FlashMQATBlock(
+                config,
+                layer_index=i,
+                output_layernorm=(i == config.n_layers - 1),
+                ckpt_attn=(i > 0 and config.ckpt_attn),
+                ckpt_mlp=(i > 0 and config.ckpt_mlp),
+                dtype=dtype,
+                device=device,
+            ) for i in range(config.n_layers)
+        ])
 
     def to_layers(self) -> List[nn.Module]:
         return [self.embedding_layer] + list(self.h)
@@ -521,12 +514,14 @@ class FlashMQATBase(nn.Module):
 
 
 class OutputHead(nn.Linear):
+
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
         x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
         return x
 
 
 class FlashMQATModel(nn.Module):
+
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -636,10 +631,8 @@ class FlashMQATModel(nn.Module):
                     state_dict = load_from_disk(model_path)
                 except Exception as e:
                     logger.critical(f"Failed to load state dict from {model_path}: {e}")
-                    logger.critical(
-                        "Degenerate to using huggingface model initialization. "
-                        "This will probably cause (CPU) OOM."
-                    )
+                    logger.critical("Degenerate to using huggingface model initialization. "
+                                    "This will probably cause (CPU) OOM.")
                     state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
         else:
             assert from_model is not None
@@ -688,8 +681,7 @@ class FlashMQATModel(nn.Module):
                     FlashMQATModel._from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
-                )
-            ),
+                )),
         )
         setattr(
             FlashMQATModel,
@@ -698,8 +690,7 @@ class FlashMQATModel(nn.Module):
                 functools.partial(
                     FlashMQATModel._config_from_hf_template,
                     config_converter=config_converter,
-                )
-            ),
+                )),
         )
         setattr(
             FlashMQATModel,
@@ -709,8 +700,7 @@ class FlashMQATModel(nn.Module):
                     FlashMQATModel._config_and_param_from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
-                )
-            ),
+                )),
         )
 
     @classmethod

@@ -74,7 +74,11 @@ class PairedRWExperiment(Experiment):
             ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=4, mem=20000,nodelist="QH-com[01-14]",),
+                scheduling=Scheduling.master_worker_default(
+                    cpu=4,
+                    mem=20000,
+                    nodelist="QH-com[01-14]",
+                ),
             ),
             model_worker=TasksGroup(
                 count=self.dp_size * self.pp_size,

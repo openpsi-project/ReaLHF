@@ -450,5 +450,3 @@ class FlashMQATBase(nn.Module):
         # In the first stage, pp_input is None.
         x.pp_input = raw_pp_input
         return x
-
-

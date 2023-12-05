@@ -18,7 +18,7 @@ def get_flash_mqat_model_config(
     is_rew_lora: bool = False,
     rew_lora_path: Optional[str] = None,
     init_from_scratch: bool = False,
-    init_critic_from_actor:bool=False,
+    init_critic_from_actor: bool = False,
     v_head_path: Optional[str] = None,
     reward_scaling: float = 1.0,
     reward_bias: float = 0.0,

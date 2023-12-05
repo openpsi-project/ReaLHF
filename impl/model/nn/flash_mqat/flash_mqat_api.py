@@ -1,8 +1,8 @@
 from typing import List, Optional, Union
 import dataclasses
+import functools
 import json
 import os
-import functools
 
 import torch
 import torch.nn as nn
@@ -11,12 +11,8 @@ import torch.utils.checkpoint
 import transformers
 
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_base import (
-    FlashMQATBase,
-    FlashMQATBlock,
-    FlashMQATConfig,
-    FlashMQATModel,
-)
+from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBase, FlashMQATBlock, FlashMQATConfig,
+                                                      FlashMQATModel)
 from impl.model.utils.data import DuckGenerationOutput, DuckModelOutput, PipeCacheData, PipeTransferData
 from impl.model.utils.save_load import load_from_disk
 import api.huggingface
@@ -59,14 +55,12 @@ class HuggingfaceLikeFlashMQATForCausalLM(FlashMQATModel):
             build_packed = True
         if packed_input_ids is not None:
             x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            ys = [PipeCacheData(input_ids=packed_input_ids)] + [
-                PipeCacheData() for _ in range(self.config.n_layers + 1)
-            ]
+            ys = [PipeCacheData(input_ids=packed_input_ids)
+                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
         else:
             x = PipeTransferData()
-            ys = [PipeCacheData(input_ids=input_ids)] + [
-                PipeCacheData() for _ in range(self.config.n_layers + 1)
-            ]
+            ys = [PipeCacheData(input_ids=input_ids)
+                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
         logits = FlashMQATModel.forward(self, x, ys).pp_output
         if build_packed:
             logits = pad_input(logits, indices, batch_size, seqlen)
@@ -99,6 +93,7 @@ class HuggingfaceLikeFlashMQATForCausalLM(FlashMQATModel):
 
 
 class DeepSpeedChatLikeFlashMQATCriticModel(FlashMQATModel):
+
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -127,14 +122,12 @@ class DeepSpeedChatLikeFlashMQATCriticModel(FlashMQATModel):
             batch_size, seqlen = input_ids
         if packed_input_ids is not None:
             x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            ys = [PipeCacheData(input_ids=packed_input_ids)] + [
-                PipeCacheData() for _ in range(self.config.n_layers + 1)
-            ]
+            ys = [PipeCacheData(input_ids=packed_input_ids)
+                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
         else:
             x = PipeTransferData()
-            ys = [PipeCacheData(input_ids=input_ids)] + [
-                PipeCacheData() for _ in range(self.config.n_layers + 1)
-            ]
+            ys = [PipeCacheData(input_ids=input_ids)
+                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
         scores = FlashMQATModel.forward(self, x, ys).pp_output
         if build_packed:
             scores = pad_input(scores, indices, batch_size, seqlen)
@@ -177,9 +170,10 @@ def make_flash_model(
         # Merge weights of the pipeline model into a single one, probably used for inference.
         if init_from_scratch:
             raise ValueError("init_from_scratch must be False when from_type is 'pipe'.")
-        net = FlashMQATModel.from_pipeline_module(
-            model_path=model_path, is_critic=is_critic, dtype=dtype, device=device
-        )
+        net = FlashMQATModel.from_pipeline_module(model_path=model_path,
+                                                  is_critic=is_critic,
+                                                  dtype=dtype,
+                                                  device=device)
         net.forward = functools.partial(module_cls.forward, net)
         if hasattr(module_cls, "generate"):
             net.generate = functools.partial(module_cls.generate, net)
@@ -211,18 +205,17 @@ def make_flash_model(
         # Convert a HuggingFace model into FlashMQAT.
         if is_critic:
             raise RuntimeError("Cannot initialize critic models directly from huggingface models.")
-        net = getattr(module_cls, f"from_{from_type}")(
-            model_path=model_path, dtype=dtype, device=device, init_from_scratch=init_from_scratch
-        )
+        net = getattr(module_cls, f"from_{from_type}")(model_path=model_path,
+                                                       dtype=dtype,
+                                                       device=device,
+                                                       init_from_scratch=init_from_scratch)
         tokenizer = api.huggingface.load_hf_tokenizer(model_path)
     if v_head_path is not None and not init_from_scratch:
         net.head.load_state_dict(torch.load(v_head_path, map_location="cpu"))
     return api.model.Model(name, net, tokenizer, device)
 
 
-api.model.register_model(
-    "flash_mqat_actor", functools.partial(make_flash_model, HuggingfaceLikeFlashMQATForCausalLM)
-)
-api.model.register_model(
-    "flash_mqat_critic", functools.partial(make_flash_model, DeepSpeedChatLikeFlashMQATCriticModel)
-)
+api.model.register_model("flash_mqat_actor",
+                         functools.partial(make_flash_model, HuggingfaceLikeFlashMQATForCausalLM))
+api.model.register_model("flash_mqat_critic",
+                         functools.partial(make_flash_model, DeepSpeedChatLikeFlashMQATCriticModel))

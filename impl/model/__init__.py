@@ -11,8 +11,8 @@ import impl.model.interface.wps_ac_interface
 import impl.model.nn.basic_nn
 import impl.model.nn.flash_mqat.flash_from_hf_impl
 import impl.model.nn.flash_mqat.flash_generate
-import impl.model.nn.flash_mqat.flash_mqat_base
 import impl.model.nn.flash_mqat.flash_mqat_api
+import impl.model.nn.flash_mqat.flash_mqat_base
 import impl.model.nn.lora
 import impl.model.nn.mp_flash_mqat
 import impl.model.nn.parallel_nn

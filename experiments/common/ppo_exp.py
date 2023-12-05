@@ -165,7 +165,7 @@ class PPOExperiment(Experiment):
     max_reward_clip: float = 20.0
     use_adaptive_kl_ctl: bool = False
     early_stop_imp_ratio: float = 5.0
-    
+
     benchmark: bool = False
 
     def __post_init__(self):
@@ -289,7 +289,7 @@ class PPOExperiment(Experiment):
                 rew_from_type = "sft"
         else:
             rew_from_type = "self"
-            
+
         rw_model = get_flash_mqat_model_config(
             model_path=self.rew_model_path,
             from_model_type=rew_from_type,

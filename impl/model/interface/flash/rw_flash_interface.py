@@ -8,8 +8,8 @@ import torch
 import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
-from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
 import api.model
 import base.logging as logging
 
@@ -58,17 +58,17 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
                 return
             scores = r.float()
         else:
-            scores: torch.FloatTensor = module(
-                packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
-            ).float()
+            scores: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
+                                               cu_seqlens=cu_seqlens,
+                                               max_seqlen=max_seqlen).float()
 
         chosen_end_scores = scores[cu_seqlens[1:] - 1]  # [bs]
 
         ###################### logging ######################
         input_ids = [packed_input_ids[start:end] for start, end in zip(cu_seqlens[:-1], cu_seqlens[1:])]
-        seq_strs = model.tokenizer.batch_decode(
-            input_ids, clean_up_tokenization_spaces=False, skip_special_tokens=True
-        )
+        seq_strs = model.tokenizer.batch_decode(input_ids,
+                                                clean_up_tokenization_spaces=False,
+                                                skip_special_tokens=True)
         for seq_str, score in zip(seq_strs, chosen_end_scores):
             logger.info(
                 f"reward is {colorama.Fore.RED}{score.item()}{colorama.Style.RESET_ALL}, sequence is: {colorama.Fore.YELLOW + colorama.Style.DIM}{seq_str}{colorama.Style.RESET_ALL}"
@@ -102,12 +102,11 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
                 **loss_fn_kwargs,
             )
         else:
-            scores: torch.FloatTensor = module(
-                packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
-            )
-            loss, stats = _paired_rw_loss_from_model_outputs(
-                scores, packed_input_ids, cu_seqlens, group_factor
-            )
+            scores: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
+                                               cu_seqlens=cu_seqlens,
+                                               max_seqlen=max_seqlen)
+            loss, stats = _paired_rw_loss_from_model_outputs(scores, packed_input_ids, cu_seqlens,
+                                                             group_factor)
 
             module.backward(loss)
             module.step()
@@ -143,8 +142,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
                     os.path.join(
                         output_dir,
                         f"epoch{model.version.epoch}step{model.version.epoch_step}",
-                    )
-                )
+                    ))
                 os.makedirs(save_path, exist_ok=True)
                 torch.save(model.module.module.head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
 
@@ -180,12 +178,11 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
                     **loss_fn_kwargs,
                 )
             else:
-                scores: torch.FloatTensor = model(
-                    packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
-                )
-                loss, stats = _paired_rw_loss_from_model_outputs(
-                    scores, packed_input_ids, cu_seqlens, group_factor
-                )
+                scores: torch.FloatTensor = model(packed_input_ids=packed_input_ids,
+                                                  cu_seqlens=cu_seqlens,
+                                                  max_seqlen=max_seqlen)
+                loss, stats = _paired_rw_loss_from_model_outputs(scores, packed_input_ids, cu_seqlens,
+                                                                 group_factor)
 
             if stats is not None:
                 assert input_lens.shape[0] % 2 == 0
@@ -206,7 +203,6 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
 
 
 api.model.register_interface("flash_paired_rw", PackedPairedRewardInterface)
-
 
 # @dataclasses.dataclass
 # class PackedPlackettLuceRewardInterface(api.model.ModelInterface):
@@ -355,6 +351,5 @@ api.model.register_interface("flash_paired_rw", PackedPairedRewardInterface)
 #             total_predictions += bs
 
 #         return dict(loss=float(loss / total_predictions), acc=correct_predictions / total_predictions)
-
 
 # api.model.register_interface("flash_plrw", PackedPlackettLuceRewardInterface)

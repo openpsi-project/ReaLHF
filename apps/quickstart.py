@@ -424,10 +424,12 @@ def kind_reminder(logger, args):
     logger.info(
         f"Model checkpoints will be saved to {os.path.join(MODEL_SAVE_ROOT, args.experiment_name, args.trial_name)}"
     )
-    
+
     slurm_available = int(subprocess.run("squeue", shell=True, stdout=open(os.devnull, "wb")).returncode) == 0
     if slurm_available:
-        logger.warning("Slurm is available. You probably run the system on ctrl nodes. Using slurm to launch remote workers.")
+        logger.warning(
+            "Slurm is available. You probably run the system on ctrl nodes. Using slurm to launch remote workers."
+        )
     else:
         logger.warning("Slurm is not available. Using local mode.")
     mode = "slurm" if slurm_available else "local"

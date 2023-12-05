@@ -3,8 +3,8 @@ from typing import Dict
 import torch
 import transformers
 
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 
 ################################ StarCoder Begin ################################
 

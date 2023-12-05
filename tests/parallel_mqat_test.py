@@ -256,9 +256,7 @@ class PipeFlashMQATTest(unittest.TestCase):
             pretrained_model_name_or_path="/lustre/meizy/models/starcoder_4l").to(dtype=dtype, device=device)
         starcoder.eval()
 
-        self.baseline_model = FlashMQATModel.from_starcoder(from_model=starcoder,
-                                                                  dtype=dtype,
-                                                                  device=device)
+        self.baseline_model = FlashMQATModel.from_starcoder(from_model=starcoder, dtype=dtype, device=device)
         self.baseline_model.eval()
 
     @torch.no_grad()

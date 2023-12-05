@@ -23,9 +23,7 @@ class PackedKVCacheTest(unittest.TestCase):
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
 
-        cls.model = FlashMQATModel.from_starcoder(model_path=model_path,
-                                                        dtype=torch.float16,
-                                                        device=device)
+        cls.model = FlashMQATModel.from_starcoder(model_path=model_path, dtype=torch.float16, device=device)
         cls.model.eval()
         cls.config = cls.model.config
 
@@ -99,9 +97,7 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
 
-        cls.model = FlashMQATModel.from_starcoder(model_path=model_path,
-                                                        dtype=torch.float16,
-                                                        device=device)
+        cls.model = FlashMQATModel.from_starcoder(model_path=model_path, dtype=torch.float16, device=device)
         cls.model.eval()
         cls.config = cls.model.config
 

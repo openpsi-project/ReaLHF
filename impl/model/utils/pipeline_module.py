@@ -4,7 +4,7 @@
 # DeepSpeed Team
 
 from functools import partial
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
 import glob
 import os
 import re as regex
@@ -19,9 +19,9 @@ import torch.nn as nn
 
 from base.monitor import process_memory_mb, time_mark
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid, PipeModelDataParallelTopology
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.save_load import load_from_disk, save_to_disk
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 import base.constants
 import base.logging as logging
 
@@ -141,7 +141,7 @@ class PipelineModule(nn.Module):
                  seed_fn=None,
                  base_seed=1234,
                  partition_method='parameters',
-                 config: Optional[FlashMQATConfig]=None,
+                 config: Optional[FlashMQATConfig] = None,
                  activation_checkpoint_interval=0,
                  activation_checkpoint_func=checkpointing.checkpoint,
                  checkpointable_layers=None):
@@ -562,19 +562,18 @@ class PipelineModule(nn.Module):
                      save_type="pt",
                      n_shards=self.num_checkpoint_shards)
 
-    def load(self, load_dir, init_critic_from_actor:bool=False):
+    def load(self, load_dir, init_critic_from_actor: bool = False):
         state_dict, n_shards = load_from_disk(
             load_dir,
             fn_pattern=r".*" + f"-pp-{self.stage_id:02d}-mp-{self._grid.get_model_parallel_rank():02d}-" +
             r"s-(\d{2}).*",
             return_n_shards=True)
-        
+
         if init_critic_from_actor and f'{self.config.n_layers + 1}.weight' in state_dict:
             state_dict.pop(f'{self.config.n_layers + 1}.weight')
             self.load_state_dict(state_dict, strict=False)
         else:
             self.load_state_dict(state_dict)
-            
 
         self.num_checkpoint_shards = n_shards
         logger.info("Loaded model from {}".format(load_dir))

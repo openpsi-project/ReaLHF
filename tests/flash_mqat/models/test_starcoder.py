@@ -173,8 +173,8 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         cls.starcoder.eval()
 
         cls.model = FlashMQATModel.from_starcoder(from_model=cls.starcoder,
-                                                        dtype=torch.float16,
-                                                        device=device)
+                                                  dtype=torch.float16,
+                                                  device=device)
         cls.model.eval()
         cls.config = cls.model.config
 

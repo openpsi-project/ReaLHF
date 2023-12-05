@@ -6,8 +6,8 @@ import torch
 import transformers
 
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
 from impl.model.nn.flash_mqat.flash_mqat_api import HuggingfaceLikeFlashMQATForCausalLM
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
 import api.huggingface
 
 
