@@ -159,7 +159,9 @@ class PackedActorInterface(api.model.ModelInterface):
 
     enable_save: bool = True
 
-    force_no_logits_mask: bool = False
+    sparse_logits_mask: bool = False  # Note: when sparse_logits_mask is True, packed_logits_mask is inversed when transmitting
+
+    # between models, because pytorch sparse tensor save more spaces when tensor contains more zeros.
 
     def __post_init__(self):
         if self.adaptive_kl_ctl:
@@ -238,13 +240,13 @@ class PackedActorInterface(api.model.ModelInterface):
             # Prompts are left-padded. Besides, prompt_log_probs is one-step shorter than prompts.
             prompts_list.append(prompts[i, prompt_max_len - prompt_len:])
             prompt_log_probs_list.append(logprobs.new_zeros(prompt_len - 1))
-            if not self.force_no_logits_mask and logits_mask is not None:
+            if logits_mask is not None:
                 prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len - 1, logits_mask.shape[-1])))
 
             # Generated tokens are right-padded.
             gen_tokens_list.append(gen_tokens[i, :gen_len])
             gen_log_probs_list.append(logprobs[i, :gen_len])
-            if not self.force_no_logits_mask and logits_mask is not None:
+            if logits_mask is not None:
                 gen_logits_mask_list.append(
                     torch.cat([logits_mask[i, :gen_len],
                                logits_mask.new_ones(1, logits_mask.shape[-1])]))
@@ -264,9 +266,11 @@ class PackedActorInterface(api.model.ModelInterface):
             bs,
         )
         packed_logits_mask = None
-        if not self.force_no_logits_mask and gen_logits_mask_list:
+        if gen_logits_mask_list:
             packed_logits_mask = torch.cat(
                 list(itertools.chain.from_iterable(zip(prompt_logits_mask_list, gen_logits_mask_list))))
+            if self.sparse_logits_mask:
+                packed_logits_mask = packed_logits_mask.logical_not()
 
         prompt_mask = zip(
             [torch.ones(plen, dtype=torch.bool, device=model.device) for plen in prompt_lengths],
@@ -279,7 +283,7 @@ class PackedActorInterface(api.model.ModelInterface):
             packed_seq=packed_seq,
             cu_seqlens=cu_seqlens,
             packed_logprobs=packed_logprobs.float(),
-            packed_logits_mask=packed_logits_mask if not self.force_no_logits_mask else None,
+            packed_logits_mask=packed_logits_mask,
             prompt_mask=prompt_mask,
         )
         return recursive_apply(from_dict(res), lambda x: x.cpu())
@@ -303,8 +307,11 @@ class PackedActorInterface(api.model.ModelInterface):
             res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
             logits = res.logits.float()
 
-        if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
-            logits.masked_fill_(data["packed_logits_mask"].logical_not(), torch.finfo(logits.dtype).min)
+        if 'packed_logits_mask' in data and data['packed_logits_mask'] is not None:
+            packed_logits_mask = data['packed_logits_mask']
+            if self.sparse_logits_mask:
+                packed_logits_mask = packed_logits_mask.logical_not()
+            logits.masked_fill_(packed_logits_mask.logical_not(), torch.finfo(logits.dtype).min)
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         return from_dict(dict(logprobs=logprobs.cpu()))
 
@@ -313,7 +320,9 @@ class PackedActorInterface(api.model.ModelInterface):
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
-        data_ = recursive_apply(data_, lambda x: x.to(model.device))
+        data = recursive_apply(data, lambda x: x.to(model.device))
+        if self.sparse_logits_mask:
+            data["packed_logits_mask"] = data["packed_logits_mask"].logical_not()
 
         datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches)
         random.shuffle(datas)

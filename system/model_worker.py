@@ -5,12 +5,15 @@ import time
 from deepspeed.accelerator import get_accelerator
 import deepspeed
 import torch
+import torch.distributed as dist
 import torch.utils.data
 
 from base.monitor import time_mark
+from base.topology import PipelineParallelGrid
 import api.config as config
 import api.data
 import api.model
+import base.constants
 import base.gpu_utils as gpu_utils
 import base.logging as logging
 import base.namedarray as namedarray
@@ -90,6 +93,10 @@ class ModelWorker(worker_base.Worker):
         )
         self.__interface = api.model.make_interface(self.config.interface)
         self.__backend = api.model.make_backend(self.config.backend)
+
+        self.__world_group = dist.new_group(ranks=range(self.__world_size))
+        self.__grid = PipelineParallelGrid(process_group=self.__world_group, topology=self.config.topo)
+        base.constants.set_grid(self.__grid)
 
         if self.config.eval_datasets is not None and self.config.eval_dataloader is not None:
             eval_datasets = [

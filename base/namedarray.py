@@ -12,6 +12,20 @@ import torch
 
 import base.logging as logging
 
+sparse_tensor_fields = ["packed_logits_mask"]
+
+
+def dense_tensor_size(x: torch.Tensor):
+    assert not x.is_sparse
+    return x.numel() * x.element_size()
+
+
+def sparse_tensor_size(x: torch.Tensor):
+    assert x.is_sparse
+    indices_size = x.indices().numel() * x.indices().element_size()
+    values_size = x.values().numel() * x.values().element_size()
+    return indices_size + values_size
+
 
 class NamedArrayLoadingError(Exception):
     pass
@@ -40,6 +54,7 @@ class NamedArrayEncodingMethod(bytes, enum.Enum):
     PICKLE_COMPRESS = b"0006"  # Pickle, then compress pickled bytes.
     OBS_COMPRESS = b"0007"  # Convert flattened numpy array to bytes and only compress observation.
     COMPRESS_EXCEPT_POLICY_STATE = b"0008"  # Compress all bytes except for policy states, which are basically random numbers.
+    TENSOR_COMPRESS = b"0009"  # Turn certain tensors into sparse tensors, then pickle. Turn other tensors into numpy arrays then compress.
 
 
 logger = logging.getLogger("NamedArray")
@@ -115,6 +130,13 @@ def _numpy_dtype_to_str(dtype):
 
 
 def dumps(namedarray_obj, method="pickle_dict"):
+    """Serialize a NamedArray object to bytes.
+    
+    Args:
+        namedarray_obj (NamedArray): The NamedArray object to be serialized.
+        method (str): The serialization method.
+    """
+
     if 'compress' in method:
         try:
             import blosc
@@ -139,6 +161,27 @@ def dumps(namedarray_obj, method="pickle_dict"):
                 shape_ = str(tuple(v.shape)).encode('ascii')
                 if compress and compress_condition(k):
                     v_ = blosc.compress(v_, typesize=4, cname='lz4')
+            flattened_bytes.append((k_, dtype_, shape_, v_))
+        return list(itertools.chain.from_iterable(flattened_bytes))
+
+    def _tensor_namedarray_to_bytes_list(x):
+        flattened_entries = flatten(x)
+        flattened_bytes = []
+        for k, v in flattened_entries:
+            k_ = k.encode('ascii')
+            dtype_ = v_ = shape_ = b''
+            if k in sparse_tensor_fields:
+                assert v is not None, f"Sparse tensor field {k} cannot be None."
+                # logger.info(f"Dense tensor {k} size {dense_tensor_size(v)} bytes")
+                v = v.to_sparse()
+                # logger.info(f"Sparse tensor {k} size {sparse_tensor_size(v)} bytes")
+                v_ = pickle.dumps(v)
+            elif v is not None:
+                v = v.cpu().numpy()
+                dtype_ = _numpy_dtype_to_str(v.dtype).encode('ascii')
+                v_ = v.tobytes()
+                shape_ = str(tuple(v.shape)).encode('ascii')
+                v_ = blosc.compress(v_, typesize=4, cname='lz4')
             flattened_bytes.append((k_, dtype_, shape_, v_))
         return list(itertools.chain.from_iterable(flattened_bytes))
 
@@ -171,6 +214,10 @@ def dumps(namedarray_obj, method="pickle_dict"):
     elif method == 'compress_except_policy_state':
         bytes_list = [NamedArrayEncodingMethod.COMPRESS_EXCEPT_POLICY_STATE.value
                       ] + _namedarray_to_bytes_list(namedarray_obj, True, lambda x: ('policy_state' not in x))
+
+    elif method == "tensor_compress":
+        bytes_list = [NamedArrayEncodingMethod.TENSOR_COMPRESS.value
+                      ] + _tensor_namedarray_to_bytes_list(namedarray_obj)
     else:
         raise NotImplementedError(
             f"Unknown method {method}. Available are {[m.name.lower() for m in NamedArrayEncodingMethod]}.")
@@ -180,7 +227,7 @@ def dumps(namedarray_obj, method="pickle_dict"):
 
 def loads(b):
     # safe import
-    if b[0] in [b'0004', b'0004', b'0005', b'0006', b'0007', b'0008']:
+    if b[0] in [b'0004', b'0004', b'0005', b'0006', b'0007', b'0008', b'0009']:
         try:
             import blosc
         except ModuleNotFoundError:
@@ -205,6 +252,31 @@ def loads(b):
             flattened.append((k, v))
         return from_flattened(flattened)
 
+    def _parse_tensor_namedarray_from_bytes_list(xs):
+        flattened = []
+        for i in range(len(xs) // 4):
+            k = xs[4 * i].decode('ascii')
+            if xs[4 * i + 3] == b'':
+                # None
+                v = None
+            elif xs[4 * i + 1] == b'':
+                # sparse tensor
+                v = pickle.loads(xs[4 * i + 3])
+                assert torch.is_tensor(
+                    v) and v.is_sparse, f"Field {k} is not a sparse tensor, but is serialized as one."
+                # logger.info(f"Sparse tensor {k} size {sparse_tensor_size(v)} bytes")
+                v = v.to_dense()
+                # logger.info(f"Dense tensor {k} size {dense_tensor_size(v)} bytes")
+            else:
+                # dense tensor
+                buf = xs[4 * i + 3]
+                buf = blosc.decompress(buf)
+                v = np.frombuffer(buf, dtype=np.dtype(
+                    xs[4 * i + 1].decode('ascii'))).reshape(*ast.literal_eval(xs[4 * i + 2].decode('ascii')))
+                v = torch.from_numpy(v)
+            flattened.append((k, v))
+        return from_flattened(flattened)
+
     if b[0] == NamedArrayEncodingMethod.PICKLE_DICT.value:
         class_name, values = pickle.loads(b[1])
         namedarray_obj = from_dict(values=values)
@@ -222,6 +294,8 @@ def loads(b):
         namedarray_obj = _parse_namedarray_from_bytes_list(b[1:-1], True, lambda x: ('obs' in x))
     elif b[0] == NamedArrayEncodingMethod.COMPRESS_EXCEPT_POLICY_STATE.value:
         namedarray_obj = _parse_namedarray_from_bytes_list(b[1:-1], True, lambda x: ('policy_state' not in x))
+    elif b[0] == NamedArrayEncodingMethod.TENSOR_COMPRESS.value:
+        namedarray_obj = _parse_tensor_namedarray_from_bytes_list(b[1:-1])
     else:
         raise NotImplementedError(f"Unknown NamedArrayEncodingMethod value {b[:4]}. "
                                   f"Existing are {[m for m in NamedArrayEncodingMethod]}.")

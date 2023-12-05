@@ -253,7 +253,7 @@ def get_packed_rewards(
     tot_rewards = -kl_ctl * (log_probs - ref_log_probs)
     kl_rewards = tot_rewards.clone()
     reward_score = reward_score.clip(-clip_reward_value, clip_reward_value)
-    tot_rewards[short1cu_seqlens[1:] - 1] += reward_score * (1 - seq_no_eos_mask)
+    tot_rewards[short1cu_seqlens[1:] - 1] += reward_score * (1 - seq_no_eos_mask.float())
     return kl_rewards, tot_rewards
 
 

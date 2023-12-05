@@ -191,6 +191,8 @@ class PipelineModule(nn.Module):
         self._grid = PipelineParallelGrid(process_group=self.world_group, topology=self._topo)
         base.constants.set_grid(self._grid)
 
+        self._grid = base.constants.grid()
+
         self.stage_id = self._topo.get_coord(self.global_rank).pipe
         print(f"rank {torch.distributed.get_rank()} pipeline stage ID: {self.stage_id}")
 
