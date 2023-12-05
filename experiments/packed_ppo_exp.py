@@ -274,7 +274,6 @@ class PackedPPOExperiment(Experiment):
                 **copy.deepcopy(ppo_kwargs),
                 "generation_config": generation_kwargs,
                 "early_stop_imp_ratio": 5.0,
-                # "force_no_logits_mask": True,
             },
         )
         ref_interface = copy.deepcopy(actor_interface)

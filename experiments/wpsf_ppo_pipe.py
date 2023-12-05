@@ -157,9 +157,9 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             critic_path = "/lustre/meizy/models/starcoder_4l"  # a 4 layer starcoder model only for testing purpose
             rw_path = critic_path
         elif self.model_type == "llama":
-            actor_path = "/home/meizy/models/test/llama-2-13b_4pp_3s"
+            actor_path = "/lustre/public/pretrained_model_weights/sharded/Llama-2-13b_4pp_3s"
             ref_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
-            critic_path = "/home/meizy/models/test/llama-2-13b-critic_4pp_3s"
+            critic_path = "/lustre/public/pretrained_model_weights/sharded/Llama-2-13b-critic_4pp_3s"
             rw_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
 
         # rw_lora_head_path = None
@@ -290,18 +290,14 @@ class PipeWpsfFlashPPOExperiment(Experiment):
         actor_interface = ModelInterface(
             'pipe_flash_actor',
             args={
-                **copy.deepcopy(ppo_kwargs),
-                "generation_config": generation_kwargs,
-                # "force_no_logits_mask": True
+                **copy.deepcopy(ppo_kwargs), "generation_config": generation_kwargs,
                 "sparse_logits_mask": True
             },
         )
         ref_interface = ModelInterface(
             "flash_actor",
             args={
-                **copy.deepcopy(ppo_kwargs),
-                # "force_no_logits_mask": True,
-                "sparse_logits_mask": True
+                **copy.deepcopy(ppo_kwargs), "sparse_logits_mask": True
             },
         )
         critic_interface = ModelInterface(
