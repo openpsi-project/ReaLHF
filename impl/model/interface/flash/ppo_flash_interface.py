@@ -2,7 +2,9 @@ from typing import Dict, Optional, Tuple
 import collections
 import dataclasses
 import itertools
+
 import torch
+
 from base.constants import data_parallel_group
 from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import from_dict, NamedArray, recursive_apply

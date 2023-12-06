@@ -1,8 +1,8 @@
 import functools
 import itertools
 
-from api.config import register_experiment
 from .rlhf import ChatRLHFBenchmarkConfig, get_exp_cls
+from api.config import register_experiment
 
 spec_to_n_params = {
     (9216, 64): "66b",

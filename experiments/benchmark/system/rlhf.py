@@ -1,9 +1,10 @@
+import dataclasses
 import functools
 import itertools
+
 from api.config import *
-import dataclasses
-from experiments.common.ppo_exp import PPOExperiment
 from api.config import register_experiment
+from experiments.common.ppo_exp import PPOExperiment
 
 EXPR_DEADLINE = None
 EXPR_TIME_LIMIT = None
@@ -24,7 +25,9 @@ def customized_schedule(schedule: ExperimentScheduling):
     """
 
     def wrapper(exp_cls):
+
         class SchedulingPlugin:
+
             def scheduling_setup(self) -> ExperimentScheduling:
                 return schedule
 

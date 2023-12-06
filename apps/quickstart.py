@@ -310,7 +310,7 @@ class PPOConfig:
     is_sft_pipe: bool = False
     sft_lora_path: Optional[str] = None
     is_rew_lora: bool = False
-    is_rew_pipe:bool = False
+    is_rew_pipe: bool = False
     rew_lora_path: Optional[str] = None
     rew_head_path: Optional[str] = None
     actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
@@ -450,7 +450,7 @@ def run_sft(args: SFTConfig):
         args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
-    from apps.main import main_stop, main_start
+    from apps.main import main_start, main_stop
     from experiments.common.sft_exp import SFTExperiment
 
     mode = kind_reminder(logger, args)
@@ -516,7 +516,7 @@ def run_rw(args: RWConfig):
         args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
-    from apps.main import main_stop, main_start
+    from apps.main import main_start, main_stop
     from experiments.common.rw_exp import PairedRWExperiment
 
     mode = kind_reminder(logger, args)
@@ -599,7 +599,7 @@ def run_ppo(args: PPOConfig):
         args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
-    from apps.main import main_stop, main_start
+    from apps.main import main_start, main_stop
     from experiments.common.ppo_exp import PPOExperiment
 
     mode = kind_reminder(logger, args)
@@ -745,7 +745,7 @@ def run_dpo(args: DPOConfig):
         args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
-    from apps.main import main_stop, main_start
+    from apps.main import main_start, main_stop
     from experiments.common.dpo_exp import DPOExperiment
 
     mode = kind_reminder(logger, args)
