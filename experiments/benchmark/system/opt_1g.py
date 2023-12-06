@@ -1,7 +1,7 @@
 import functools
 import itertools
 
-from .rlhf import ChatRLHFBenchmarkConfig, get_exp_cls
+from .rlhf_benchmark import ChatRLHFBenchmarkConfig, get_exp_cls
 from api.config import register_experiment
 
 spec_to_n_params = {

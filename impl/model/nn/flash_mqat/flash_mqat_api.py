@@ -157,12 +157,6 @@ def make_flash_model(
             dtype=dtype,
             device=device,
         )
-        net.forward = functools.partial(module_cls.forward, net)
-        if hasattr(module_cls, "generate"):
-            net.generate = functools.partial(module_cls.generate, net)
-        if is_critic:
-            net.output_scaling = output_scaling
-            net.output_bias = output_bias
         if tokenizer_path is None:
             raise ValueError("tokenizer_path must be provided when from_type is 'self'.")
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
@@ -174,12 +168,6 @@ def make_flash_model(
                                                   is_critic=is_critic,
                                                   dtype=dtype,
                                                   device=device)
-        net.forward = functools.partial(module_cls.forward, net)
-        if hasattr(module_cls, "generate"):
-            net.generate = functools.partial(module_cls.generate, net)
-        if is_critic:
-            net.output_scaling = output_scaling
-            net.output_bias = output_bias
         if tokenizer_path is None:
             raise ValueError("tokenizer_path must be provided when from_type is 'self'.")
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
@@ -203,13 +191,19 @@ def make_flash_model(
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
     else:
         # Convert a HuggingFace model into FlashMQAT.
-        if is_critic:
-            raise RuntimeError("Cannot initialize critic models directly from huggingface models.")
-        net = getattr(module_cls, f"from_{from_type}")(model_path=model_path,
+        net = getattr(FlashMQATModel, f"from_{from_type}")(model_path=model_path,
                                                        dtype=dtype,
                                                        device=device,
+                                                       is_critic=is_critic,
                                                        init_from_scratch=init_from_scratch)
         tokenizer = api.huggingface.load_hf_tokenizer(model_path)
+    if not isinstance(net, module_cls):
+        net.forward = functools.partial(module_cls.forward, net)
+        if hasattr(module_cls, "generate"):
+            net.generate = functools.partial(module_cls.generate, net)
+        if is_critic:
+            net.output_scaling = output_scaling
+            net.output_bias = output_bias
     if v_head_path is not None and not init_from_scratch:
         net.head.load_state_dict(torch.load(v_head_path, map_location="cpu"))
     return api.model.Model(name, net, tokenizer, device)

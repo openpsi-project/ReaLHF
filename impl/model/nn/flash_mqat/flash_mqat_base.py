@@ -514,6 +514,7 @@ class FlashMQATBase(nn.Module):
 
 
 class OutputHead(nn.Linear):
+    # TODO: do we need to care about the initialization scale?
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
         x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
@@ -650,6 +651,7 @@ class FlashMQATModel(nn.Module):
         from_model: Optional[transformers.PreTrainedModel] = None,
         model_path: Optional[str] = None,
         init_from_scratch: bool = False,
+        is_critic: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -660,8 +662,10 @@ class FlashMQATModel(nn.Module):
             model_path=model_path,
             init_from_scratch=init_from_scratch,
         )
-        model = cls(config, dtype=dtype, device=device)
+        model = cls(config, is_critic, dtype=dtype, device=device)
         if not init_from_scratch:
+            if is_critic:
+                state_dict['head.weight'] = model.state_dict()['head.weight']
             model.load_state_dict(state_dict)
         return model
 

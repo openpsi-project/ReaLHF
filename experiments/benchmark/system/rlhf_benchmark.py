@@ -25,16 +25,11 @@ def customized_schedule(schedule: ExperimentScheduling):
     """
 
     def wrapper(exp_cls):
-
-        class SchedulingPlugin:
-
-            def scheduling_setup(self) -> ExperimentScheduling:
+        class WrappedConfig(exp_cls):
+            def scheduling_setup(self):
                 return schedule
 
-        class _WrappedExp(exp_cls, SchedulingPlugin):
-            pass
-
-        return _WrappedExp
+        return WrappedConfig
 
     return wrapper
 
@@ -42,23 +37,25 @@ def customized_schedule(schedule: ExperimentScheduling):
 @dataclasses.dataclass
 class ChatRLHFBenchmarkConfig:
     # resource
-    n_actors: int = 2
-    n_critics: int = 2
+    n_actors: int = 4
+    n_critics: int = 4
     n_rewards: int = 1
     n_refs: int = 1
     seed: int = 1
     gpu_per_actor: float = 1
     gpu_per_critic: float = 1
-    gpu_per_reward: float = 1
-    gpu_per_ref: float = 1
+    gpu_per_reward: float = 0.5
+    gpu_per_ref: float = 0.5
     # optimization options
     init_from_scratch: bool = False
     actor_model_name: str = "Llama-2-7b-hf"
+    actor_model_type: str = "llama"
     critic_model_name: str = "Llama-2-7b-hf"
+    critic_model_type: str = "llama"
     actor_zero_stage: int = 2
     critic_zero_stage: int = 2
     hybrid_engine: bool = False
-    batch_size_per_device: int = 1
+    batch_size_per_device: int = 8
     max_prompt_length: int = 256
     max_answer_length: int = 256
     offload_actor_param: bool = False
@@ -67,7 +64,7 @@ class ChatRLHFBenchmarkConfig:
     offload_critic_optimizer_states: bool = False
     offload_ref: bool = False
     offload_reward: bool = False
-    gradient_checkpointing: bool = False
+    gradient_checkpointing: bool = True
 
 
 def get_schduling_config(config: ChatRLHFBenchmarkConfig) -> ExperimentScheduling:
@@ -95,7 +92,7 @@ def get_schduling_config(config: ChatRLHFBenchmarkConfig) -> ExperimentSchedulin
                     gpu=last_gpu_per_type,
                     gpu_type="tesla",
                     mem=int(100000 * last_gpu_per_type),
-                    nodelist='QH-com[44-45]',
+                    nodelist="QH-com[44-45]",
                     deadline=EXPR_DEADLINE,
                     time_limit=EXPR_TIME_LIMIT,
                 ),
@@ -113,7 +110,7 @@ def get_schduling_config(config: ChatRLHFBenchmarkConfig) -> ExperimentSchedulin
             gpu=last_gpu_per_type,
             gpu_type="tesla",
             mem=100000,
-            nodelist='QH-com[44-45]',
+            nodelist="QH-com[44-45]",
             deadline=EXPR_DEADLINE,
             time_limit=EXPR_TIME_LIMIT,
         ),
@@ -126,7 +123,7 @@ def get_schduling_config(config: ChatRLHFBenchmarkConfig) -> ExperimentSchedulin
                 cpu=4,
                 mem=10000,
                 begin=None,
-                nodelist='QH-com[44-45]',
+                nodelist="QH-com[44-45]",
                 deadline=EXPR_DEADLINE,
                 time_limit=EXPR_TIME_LIMIT,
             ),
@@ -137,7 +134,7 @@ def get_schduling_config(config: ChatRLHFBenchmarkConfig) -> ExperimentSchedulin
                 cpu=4,
                 mem=10000,
                 begin=None,
-                nodelist='QH-com[44-45]',
+                nodelist="QH-com[44-45]",
                 deadline=EXPR_DEADLINE,
                 time_limit=EXPR_TIME_LIMIT,
             ),
@@ -157,13 +154,16 @@ def get_exp_cls(config: ChatRLHFBenchmarkConfig):
         rew_dp_size=config.n_rewards,
         seed=config.seed,
         sft_model_path=f"/lustre/public/pretrained_model_weights/{config.actor_model_name}",
+        sft_base_model_type=config.actor_model_type,
         rew_model_path=f"/lustre/public/pretrained_model_weights/{config.critic_model_name}",
+        rew_base_model_type=config.critic_model_type,
         actor_zero_stage=config.actor_zero_stage,
         critic_zero_stage=config.critic_zero_stage,
         hybrid_engine=config.hybrid_engine,
         batch_size=config.n_actors * config.batch_size_per_device,
         max_prompt_len=config.max_prompt_length,
         max_new_tokens=config.max_answer_length,
+        ppo_n_minibatches=4,
         offload_actor_param=config.offload_actor_param,
         offload_actor_optimizer_state=config.offload_actor_optimizer_state,
         offload_critic_param=config.offload_critic_param,
@@ -173,7 +173,8 @@ def get_exp_cls(config: ChatRLHFBenchmarkConfig):
         actor_gradient_checkpointing=config.gradient_checkpointing,
         critic_gradient_checkpointing=config.gradient_checkpointing,
     )
-    return functools.partial(customized_schedule(get_schduling_config(config))(PPOExperiment), **args)
+    exp_cls = functools.partial(customized_schedule(get_schduling_config(config))(PPOExperiment), **args)
+    return exp_cls
 
 
 register_experiment("sysb-llama-7b", get_exp_cls(ChatRLHFBenchmarkConfig()))
