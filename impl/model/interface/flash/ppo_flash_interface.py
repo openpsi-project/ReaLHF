@@ -181,11 +181,6 @@ class PackedActorInterface(api.model.ModelInterface):
     @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
-        if isinstance(module, deepspeed.DeepSpeedEngine):
-            # we don't calculate gradient here, so it's safe to unwrap deepspeed
-            module = module.module
-        else:
-            assert isinstance(module, DeepSpeedPipelineEngine)
 
         module.eval()
 
@@ -208,6 +203,8 @@ class PackedActorInterface(api.model.ModelInterface):
 
             gen_tokens, logprobs, logits_mask, *_ = res
         else:
+            # unwrap deepspeed engine here
+            module = module.module
             gen_res = module.generate(
                 tokenizer=model.tokenizer,
                 input_ids=prompts,
@@ -398,6 +395,7 @@ class PackedActorInterface(api.model.ModelInterface):
 
 def _ppo_critic_loss_from_model_outputs(
     new_values: torch.FloatTensor,
+    packed_input_ids: torch.LongTensor,
     cu_seqlens: torch.LongTensor,
     old_logp: torch.FloatTensor,
     ref_logp: torch.FloatTensor,
@@ -580,6 +578,7 @@ class PackedCriticInterface(api.model.ModelInterface):
 
                 loss, stats = _ppo_critic_loss_from_model_outputs(
                     new_values=new_values,
+                    packed_input_ids=data["packed_seq"],
                     cu_seqlens=data["cu_seqlens"],
                     old_logp=data["packed_logprobs"],
                     ref_logp=data["packed_ref_logprobs"],
@@ -612,7 +611,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                 v = v.detach() / self.n_minibatches
                 train_stats[k] = api.huggingface.get_all_reduce_mean(v, group=data_parallel_group()).item()
 
-        return train_stats
+        return dict(train_stats)
 
 
 api.model.register_interface("flash_actor", PackedActorInterface)
