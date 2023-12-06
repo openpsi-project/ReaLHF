@@ -192,10 +192,10 @@ def make_flash_model(
     else:
         # Convert a HuggingFace model into FlashMQAT.
         net = getattr(FlashMQATModel, f"from_{from_type}")(model_path=model_path,
-                                                       dtype=dtype,
-                                                       device=device,
-                                                       is_critic=is_critic,
-                                                       init_from_scratch=init_from_scratch)
+                                                           dtype=dtype,
+                                                           device=device,
+                                                           is_critic=is_critic,
+                                                           init_from_scratch=init_from_scratch)
         tokenizer = api.huggingface.load_hf_tokenizer(model_path)
     if not isinstance(net, module_cls):
         net.forward = functools.partial(module_cls.forward, net)

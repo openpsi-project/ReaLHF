@@ -25,7 +25,9 @@ def customized_schedule(schedule: ExperimentScheduling):
     """
 
     def wrapper(exp_cls):
+
         class WrappedConfig(exp_cls):
+
             def scheduling_setup(self):
                 return schedule
 
