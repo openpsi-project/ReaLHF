@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Callable, Optional, Tuple, Union
 import os
 import warnings
 
@@ -10,11 +10,11 @@ import torch.nn.functional as F
 import torch.nn.init as init
 
 from base.constants import *
-from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.model_parallel.mappings import *
 from impl.model.utils.model_parallel.utils import (_initialize_affine_weight_cpu,
                                                    _initialize_affine_weight_gpu, divide,
                                                    set_tensor_model_parallel_attributes, VocabUtility)
+from impl.model.utils.modules import LlamaRMSNorm
 
 _grad_accum_fusion_available = True
 try:
@@ -25,6 +25,18 @@ except ImportError:
 import base.logging as logging
 
 logger = logging.getLogger("model_parallel.modules")
+
+
+def get_activation_fn(activation_function: str) -> Callable:
+    if activation_function == "gelu":
+        return nn.functional.gelu
+    elif activation_function == "gelu_new":
+        from impl.model.utils.activations import new_gelu_activation
+        return new_gelu_activation
+    elif activation_function == "silu":
+        return nn.SiLU()
+    else:
+        raise NotImplementedError('Only "gelu" activation function is available.')
 
 
 class ParallelEmbedding(torch.nn.Module):
@@ -79,7 +91,7 @@ class ParallelEmbedding(torch.nn.Module):
         if perform_initialization:
             _initialize_affine_weight_gpu(self.weight, init_method, partition_dim=0, stride=1)
 
-    def forward(self, input_):
+    def forward(self, input_) -> torch.Tensor:
         if self.tensor_model_parallel_size > 1:
             # Build the mask.
             input_mask = (input_ < self.vocab_start_index) | \
@@ -366,6 +378,8 @@ class ColumnParallelLinear(torch.nn.Module):
         world_size = model_parallel_world_size()
         self.output_size_per_partition = divide(output_size, world_size)
         self.skip_bias_add = skip_bias_add
+        # TODO: add fused bias add later
+        assert skip_bias_add is False
 
         # Parameters.
         # Note: torch.nn.functional.linear performs XA^T + b and as a result
@@ -403,7 +417,7 @@ class ColumnParallelLinear(torch.nn.Module):
                     "gradient accumulation fusion.")
         self.gradient_accumulation_fusion = gradient_accumulation_fusion
 
-    def forward(self, input_):
+    def forward(self, input_) -> torch.Tensor:
         """Forward of ColumnParallelLinear
 
         Args:
@@ -434,7 +448,7 @@ class ColumnParallelLinear(torch.nn.Module):
         else:
             output = output_parallel
         output_bias = self.bias if self.skip_bias_add else None
-        return output, output_bias
+        return output
 
 
 class RowParallelLinear(torch.nn.Module):
@@ -499,6 +513,8 @@ class RowParallelLinear(torch.nn.Module):
         world_size = model_parallel_world_size()
         self.input_size_per_partition = divide(input_size, world_size)
         self.skip_bias_add = skip_bias_add
+        # TODO: add fused bias add later
+        assert self.skip_bias_add is False
         self.gradient_accumulation_fusion = gradient_accumulation_fusion
 
         # Parameters.
@@ -519,7 +535,7 @@ class RowParallelLinear(torch.nn.Module):
         else:
             self.register_parameter('bias', None)
 
-    def forward(self, input_):
+    def forward(self, input_) -> torch.Tensor:
         """Forward of RowParallelLinear
 
         Args:
@@ -552,7 +568,7 @@ class RowParallelLinear(torch.nn.Module):
         else:
             output = output_
             output_bias = self.bias
-        return output, output_bias
+        return output
 
 
 class LayerNormColumnLinear(nn.Module):
@@ -562,14 +578,24 @@ class LayerNormColumnLinear(nn.Module):
         input_dim: int,
         output_dim: int,
         layer_norm_epsilon: float,
+        use_attention_bias: bool,
+        layer_norm_type: Optional[str] = None,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
     ):
         super().__init__()
         if dtype is None:
             dtype = torch.float16
-        self.ln = nn.LayerNorm(input_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.linear = ColumnParallelLinear(input_dim, output_dim, dtype=dtype, device=device)
+        if layer_norm_type is None:
+            layer_norm_fn = nn.LayerNorm
+        elif layer_norm_type == "rms":
+            layer_norm_fn = LlamaRMSNorm
+        self.ln = layer_norm_fn(input_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
+        self.linear = ColumnParallelLinear(input_dim,
+                                           output_dim,
+                                           bias=use_attention_bias,
+                                           dtype=dtype,
+                                           device=device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear(self.ln(x))
@@ -594,13 +620,7 @@ class LayerNormParallelMLP(nn.Module):
         self.ln = nn.LayerNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
         self.c_fc = ColumnParallelLinear(hidden_dim, intermediate_dim, dtype=dtype, device=device)
         self.c_proj = RowParallelLinear(intermediate_dim, hidden_dim, dtype=dtype, device=device)
-        if activation_function == "gelu":
-            self.act = nn.functional.gelu
-        elif activation_function == 'gelu_new':
-            from .activations import new_gelu_activation
-            self.act = new_gelu_activation
-        else:
-            raise NotImplementedError("Only \"gelu\" activation function is available.")
+        self.act = get_activation_fn(activation_function)
         self.dropout = nn.Dropout(resid_pdrop)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -609,3 +629,42 @@ class LayerNormParallelMLP(nn.Module):
         hidden_states = self.act(hidden_states)
         hidden_states, _ = self.c_proj(hidden_states)
         return self.dropout(hidden_states)
+
+
+class LlamaLayerNormParallelMLP(nn.Module):
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        intermediate_dim: int,
+        activation_function: str,
+        layer_norm_epsilon: float,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        super().__init__()
+        if dtype is None:
+            dtype = torch.float16
+        self.hidden_size = hidden_dim
+        self.intermediate_size = intermediate_dim
+        self.ln = LlamaRMSNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
+        self.gate_proj = ColumnParallelLinear(self.hidden_size,
+                                              self.intermediate_size,
+                                              bias=False,
+                                              dtype=dtype,
+                                              device=device)
+        self.up_proj = ColumnParallelLinear(self.hidden_size,
+                                            self.intermediate_size,
+                                            bias=False,
+                                            dtype=dtype,
+                                            device=device)
+        self.down_proj = RowParallelLinear(self.intermediate_size,
+                                           self.hidden_size,
+                                           bias=False,
+                                           dtype=dtype,
+                                           device=device)
+        self.act_fn = get_activation_fn(activation_function)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.ln(x)
+        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))

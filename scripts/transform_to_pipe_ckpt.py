@@ -7,7 +7,9 @@ import torch
 import torch.nn as nn
 
 from impl.model.nn.flash_mqat.flash_mqat_base import *
+from impl.model.nn.flash_mqat.flash_mqat_parallel import *
 from impl.model.utils.pipeline_module import LayerSpec
+import base.constants
 
 MODEL_CONFIG_FILES = [
     "config.json",
@@ -125,15 +127,15 @@ def split_state_dict_by_stage(state_dict, stage_to_layer_idx):
     return stage_to_state_dict
 
 
-def save_state_dict(state_dict, stage_index, shard_index, model_dir):
+def save_state_dict(state_dict, stage_index, mp_rank, shard_index, model_dir):
     os.makedirs(model_dir, exist_ok=True)
     torch.save(
         state_dict,
-        os.path.join(model_dir, f"pytorch_model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.bin"),
+        os.path.join(model_dir,
+                     f"pytorch_model-pp-{stage_index:02d}-mp-{mp_rank:02d}-s-{shard_index:02d}.bin"),
     )
-    print(
-        f"saved {state_dict.keys()} to {model_dir}/pytorch_model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.bin"
-    )
+    print(f"saved {state_dict.keys()} to "
+          f"{model_dir}/pytorch_model-pp-{stage_index:02d}-mp-{mp_rank:02d}-s-{shard_index:02d}.bin")
 
 
 def fit_state_dict_to_critic(num_layers, state_dict):
@@ -186,7 +188,8 @@ def main():
         default="/lustre/public/pretrained_model_weights/testOnly/llama-2-4l",
     )
     parser.add_argument("--model_type", type=str, default="llama")
-    parser.add_argument("--num_stages", type=int, default=4)
+    parser.add_argument("--num_pp", type=int, default=4)
+    parser.add_argument("--num_mp", type=int, default=1)
     parser.add_argument("--num_shards", type=int, default=3)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument(
@@ -195,26 +198,62 @@ def main():
         help="transform actor model to critic model by changing the last layer, only for test purposes.")
     args = parser.parse_args()
 
+    assert args.num_mp > 1 or args.num_pp > 1
     if args.output_dir is None:
-        output_dir = f"{args.model_dir}_{args.num_stages}pp_{args.num_shards}s"
+        if args.num_mp == 1:
+            output_dir = f"{args.model_dir}_{args.num_pp}pp_{args.num_shards}s"
+        elif args.num_pp == 1:
+            output_dir = f"{args.model_dir}_{args.num_mp}mp_{args.num_shards}s"
+        else:
+            output_dir = f"{args.model_dir}_{args.num_pp}pp_{args.num_mp}mp_{args.num_shards}s"
+        default_save_root = "/lustre/public/pretrained_model_weights/sharded"
+        output_dir = os.path.join(default_save_root, output_dir)
     else:
         output_dir = args.output_dir
 
     # TODO: load and process full statedict by shard for large model that can not fit into memory
-    cfg, state_dict = getattr(FlashMQATForCausalLM,
-                              f"config_and_param_from_{args.model_type}")(model_path=args.model_dir)
-    layer_specs = get_layer_specs(cfg, args.to_critic)
-    state_dict = FlashMQATForCausalLM.map_to_pipe_state_dict(cfg, state_dict)
-    if args.to_critic:
-        state_dict = fit_state_dict_to_critic(len(layer_specs), state_dict)
-    print("loaded full state_dict")
-    stage_to_layer_idx = partition_layers(layer_specs, num_stages=args.num_stages, method="parameters")
-    stage_to_state_dict = split_state_dict_by_stage(state_dict, stage_to_layer_idx)
-    for stage, state_dict in stage_to_state_dict.items():
-        shards = split_state_dict_into_shards(state_dict, args.num_shards)
-        print(f"stage {stage} state_dict keys: {state_dict.keys()}")
-        for shard_index, shard in enumerate(shards):
-            save_state_dict(shard, stage, shard_index, output_dir)
+    if args.num_mp == 1:
+        cfg, state_dict = getattr(FlashMQATForCausalLM,
+                                  f"config_and_param_from_{args.model_type}")(model_path=args.model_dir)
+        layer_specs = get_layer_specs(cfg, args.to_critic)
+        state_dict = FlashMQATForCausalLM.map_to_pipe_state_dict(cfg, state_dict)
+        if args.to_critic:
+            state_dict = fit_state_dict_to_critic(len(layer_specs), state_dict)
+        print("loaded full state_dict")
+        stage_to_layer_idx = partition_layers(layer_specs, num_stages=args.num_pp, method="parameters")
+        stage_to_state_dict = split_state_dict_by_stage(state_dict, stage_to_layer_idx)
+        for stage, state_dict in stage_to_state_dict.items():
+            shards = split_state_dict_into_shards(state_dict, args.num_shards)
+            print(f"stage {stage} state_dict keys: {state_dict.keys()}")
+            for shard_index, shard in enumerate(shards):
+                save_state_dict(shard, stage, shard_index, output_dir)
+    else:
+        cfg = None
+        base.constants.set_fake_mp_world_size(args.num_mp)
+        for mp_rank in range(args.num_mp):
+            base.constants.set_fake_mp_rank(mp_rank)
+            cfg, state_dict = getattr(FlashMQATForCausalLM,
+                                      f"config_and_param_from_{args.model_type}")(model_path=args.model_dir)
+            if args.num_pp > 1:
+                state_dict = FlashMQATForCausalLM.map_to_pipe_state_dict(cfg, state_dict)
+                if args.to_critic:
+                    state_dict = fit_state_dict_to_critic(len(layer_specs), state_dict)
+                stage_to_layer_idx = partition_layers(layer_specs,
+                                                      num_stages=args.num_pp,
+                                                      method="parameters")
+                stage_to_state_dict = split_state_dict_by_stage(state_dict, stage_to_layer_idx)
+                for stage, state_dict in stage_to_state_dict.items():
+                    shards = split_state_dict_into_shards(state_dict, args.num_shards)
+                    print(f"stage {stage} state_dict keys: {state_dict.keys()}")
+                    for shard_index, shard in enumerate(shards):
+                        save_state_dict(shard, stage, shard_index, output_dir)
+            else:
+                for stage, state_dict in stage_to_state_dict.items():
+                    shards = split_state_dict_into_shards(state_dict, args.num_shards)
+                    print(f"stage {stage} state_dict keys: {state_dict.keys()}")
+                    for shard_index, shard in enumerate(shards):
+                        save_state_dict(shard, stage, shard_index, output_dir)
+
     copy_configs(args.model_dir, output_dir)
 
 
