@@ -73,15 +73,7 @@ class DirectPreferenceOptimizationInterface(api.model.ModelInterface):
     def save(self, model: api.model.Model, output_dir):
         if not self.enable_save:
             return
-        from impl.model.nn.lora import is_lora_model
         save_hf_or_lora_model(model, output_dir)
-        if is_lora_model(model.module):
-            save_path = os.path.abspath(
-                os.path.join(
-                    output_dir,
-                    f"epoch{model.version.epoch}step{model.version.epoch_step}",
-                ))
-            os.makedirs(save_path, exist_ok=True)
 
 
 api.model.register_interface("dpo", DirectPreferenceOptimizationInterface)
