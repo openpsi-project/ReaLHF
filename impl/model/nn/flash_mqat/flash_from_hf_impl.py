@@ -262,6 +262,8 @@ def convert_state_dict_parallel_llama(state_dict: Dict, config: FlashMQATConfig)
     row_linear_keys = [".attn.c_proj", ".mlp.c_proj"]  # dim=-1 + no partition bias
 
     for k, v in state_dict.items():
+        # print(f"key {k}:: ")
+        # print(f"before partition shape {state_dict[k].shape}")
         if any([ek in k for ek in embedding_keys]):
             if "weight" in k:
                 state_dict[k] = mp_partition(v, mp_rank, mp_world_size, dim=0)
@@ -273,6 +275,7 @@ def convert_state_dict_parallel_llama(state_dict: Dict, config: FlashMQATConfig)
         elif any([rk in k for rk in row_linear_keys]):
             if "weight" in k:
                 state_dict[k] = mp_partition(v, mp_rank, mp_world_size, dim=-1)
+        # print(f"after partition shape {state_dict[k].shape}")
 
     return state_dict
 

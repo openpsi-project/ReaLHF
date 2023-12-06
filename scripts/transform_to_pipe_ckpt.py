@@ -185,10 +185,10 @@ def main():
     parser.add_argument(
         "--model_dir",
         type=str,
-        default="/lustre/public/pretrained_model_weights/testOnly/llama-2-4l",
-    )
+        # default="/lustre/public/pretrained_model_weights/testOnly/llama-2-4l",
+        default="/lustre/public/pretrained_model_weights/Llama-2-13b-hf")
     parser.add_argument("--model_type", type=str, default="llama")
-    parser.add_argument("--num_pp", type=int, default=4)
+    parser.add_argument("--num_pp", type=int, default=2)
     parser.add_argument("--num_mp", type=int, default=1)
     parser.add_argument("--num_shards", type=int, default=3)
     parser.add_argument("--output_dir", type=str, default=None)
@@ -200,59 +200,42 @@ def main():
 
     assert args.num_mp > 1 or args.num_pp > 1
     if args.output_dir is None:
+        model_name = args.model_dir.split("/")[-1]
         if args.num_mp == 1:
-            output_dir = f"{args.model_dir}_{args.num_pp}pp_{args.num_shards}s"
+            output_dir = f"{model_name}_{args.num_pp}pp_{args.num_shards}s"
         elif args.num_pp == 1:
-            output_dir = f"{args.model_dir}_{args.num_mp}mp_{args.num_shards}s"
+            output_dir = f"{model_name}_{args.num_mp}mp_{args.num_shards}s"
         else:
-            output_dir = f"{args.model_dir}_{args.num_pp}pp_{args.num_mp}mp_{args.num_shards}s"
+            output_dir = f"{model_name}_{args.num_pp}pp_{args.num_mp}mp_{args.num_shards}s"
         default_save_root = "/lustre/public/pretrained_model_weights/sharded"
         output_dir = os.path.join(default_save_root, output_dir)
     else:
         output_dir = args.output_dir
 
     # TODO: load and process full statedict by shard for large model that can not fit into memory
-    if args.num_mp == 1:
+    cfg = None
+    base.constants.set_fake_mp_world_size(args.num_mp)
+    for mp_rank in range(args.num_mp):
         cfg, state_dict = getattr(FlashMQATForCausalLM,
                                   f"config_and_param_from_{args.model_type}")(model_path=args.model_dir)
-        layer_specs = get_layer_specs(cfg, args.to_critic)
-        state_dict = FlashMQATForCausalLM.map_to_pipe_state_dict(cfg, state_dict)
-        if args.to_critic:
-            state_dict = fit_state_dict_to_critic(len(layer_specs), state_dict)
-        print("loaded full state_dict")
-        stage_to_layer_idx = partition_layers(layer_specs, num_stages=args.num_pp, method="parameters")
-        stage_to_state_dict = split_state_dict_by_stage(state_dict, stage_to_layer_idx)
-        for stage, state_dict in stage_to_state_dict.items():
+        if args.num_pp > 1:
+            layer_specs = get_layer_specs(cfg, args.to_critic)
+            state_dict = FlashMQATForCausalLM.map_to_pipe_state_dict(cfg, state_dict)
+            if args.to_critic:
+                state_dict = fit_state_dict_to_critic(len(layer_specs), state_dict)
+            print("loaded full state_dict")
+            stage_to_layer_idx = partition_layers(layer_specs, num_stages=args.num_pp, method="parameters")
+            stage_to_state_dict = split_state_dict_by_stage(state_dict, stage_to_layer_idx)
+            for stage, state_dict in stage_to_state_dict.items():
+                shards = split_state_dict_into_shards(state_dict, args.num_shards)
+                print(f"stage {stage} state_dict keys: {state_dict.keys()}")
+                for shard_index, shard in enumerate(shards):
+                    save_state_dict(shard, stage, mp_rank, shard_index, output_dir)
+        elif args.num_pp == 1:
             shards = split_state_dict_into_shards(state_dict, args.num_shards)
-            print(f"stage {stage} state_dict keys: {state_dict.keys()}")
+            print(f"state_dict keys: {state_dict.keys()}")
             for shard_index, shard in enumerate(shards):
-                save_state_dict(shard, stage, shard_index, output_dir)
-    else:
-        cfg = None
-        base.constants.set_fake_mp_world_size(args.num_mp)
-        for mp_rank in range(args.num_mp):
-            base.constants.set_fake_mp_rank(mp_rank)
-            cfg, state_dict = getattr(FlashMQATForCausalLM,
-                                      f"config_and_param_from_{args.model_type}")(model_path=args.model_dir)
-            if args.num_pp > 1:
-                state_dict = FlashMQATForCausalLM.map_to_pipe_state_dict(cfg, state_dict)
-                if args.to_critic:
-                    state_dict = fit_state_dict_to_critic(len(layer_specs), state_dict)
-                stage_to_layer_idx = partition_layers(layer_specs,
-                                                      num_stages=args.num_pp,
-                                                      method="parameters")
-                stage_to_state_dict = split_state_dict_by_stage(state_dict, stage_to_layer_idx)
-                for stage, state_dict in stage_to_state_dict.items():
-                    shards = split_state_dict_into_shards(state_dict, args.num_shards)
-                    print(f"stage {stage} state_dict keys: {state_dict.keys()}")
-                    for shard_index, shard in enumerate(shards):
-                        save_state_dict(shard, stage, shard_index, output_dir)
-            else:
-                for stage, state_dict in stage_to_state_dict.items():
-                    shards = split_state_dict_into_shards(state_dict, args.num_shards)
-                    print(f"stage {stage} state_dict keys: {state_dict.keys()}")
-                    for shard_index, shard in enumerate(shards):
-                        save_state_dict(shard, stage, shard_index, output_dir)
+                save_state_dict(shard, 0, mp_rank, shard_index, output_dir)
 
     copy_configs(args.model_dir, output_dir)
 

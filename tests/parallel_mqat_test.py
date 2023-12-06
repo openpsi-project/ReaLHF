@@ -4,8 +4,6 @@ import random
 import time
 import unittest
 
-# import transformers
-from torch.profiler import profile, ProfilerActivity, record_function
 import torch
 import torch.multiprocessing as mp
 
@@ -21,12 +19,13 @@ EXPR_NAME = "test"
 TRIAL_NAME = "test"
 MODEL_NAME = "ptdmodel"
 MODEL_TYPE = "model_worker"
-NUM_PP = 4
-NUM_TP = 2
+NUM_PP = 1
+NUM_MP = 2
 NUM_DP = 1
-WORLD_SIZE = NUM_PP * NUM_DP * NUM_TP
-BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
-PIPELINE_MODEL_PATH = F"/home/meizy/models/3d/starcoder_4l_{NUM_PP}pp_{NUM_TP}tp_1s"
+WORLD_SIZE = NUM_PP * NUM_DP * NUM_MP
+# BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
+# PIPELINE_MODEL_PATH = F"/home/meizy/models/3d/starcoder_4l_{NUM_PP}pp_{NUM_MP}tp_1s"
+MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
 BATCH_SIZE = 32
 MIN_NEW_TOKENS = 30
 MAX_NEW_TOKENS = 30
@@ -48,7 +47,7 @@ logger = logging.getLogger("pipe_mqat_test")
 
 def setup_gpu(rank):
     os.environ["DLLM_MODE"] = "LOCAL"
-    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+    # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
     BARRIER.wait()
     base.gpu_utils.isolate_cuda_device(MODEL_TYPE, rank, WORLD_SIZE, EXPR_NAME, TRIAL_NAME)

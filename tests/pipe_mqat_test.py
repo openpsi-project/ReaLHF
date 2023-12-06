@@ -1,3 +1,4 @@
+from statistics import mean
 import logging
 import os
 import random
@@ -23,13 +24,13 @@ EXPR_NAME = "test"
 TRIAL_NAME = "test"
 MODEL_NAME = "pipedatamodel"
 WORKER_TYPE = "model_worker"
-NUM_PP = 4
-NUM_DP = 2
+NUM_PP = 2
+NUM_DP = 8 // NUM_PP
 WORLD_SIZE = NUM_PP * NUM_DP
 MODEL_TYPE = "llama"
 if MODEL_TYPE == "llama":
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
-    PIPELINE_MODEL_PATH = "/home/meizy/models/Llama-2-13b_4pp_3s"
+    PIPELINE_MODEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-13b-hf_{NUM_PP}pp_3s"
     # BASELINE_MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
     # PIPELINE_MODEL_PATH = "/home/meizy/models/test/llama-2-4l_4pp_3s"
 elif MODEL_TYPE == "starcoder":
@@ -134,7 +135,7 @@ def make_input(tokenizer, device, s):
     return input_ids, attention_mask
 
 
-def random_sentence(min_len=1, max_len=10):
+def random_sentence(min_len=50, max_len=100):
     words = ["the", "quick", "brown", "fox", "jumped", "over", "the", "lazy", "dog"]
     sentence_length = random.randint(min_len, max_len)
     return " ".join(random.choices(words, k=sentence_length))
@@ -210,15 +211,15 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
 
 def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
-    data = init_data(rank, model, device, seed)
-    st = time.monotonic()
-    outputs = interface.train_step(model, data)
-    t = time.monotonic() - st
-
-    st = time.monotonic()
-    outputs = interface.train_step(model, data)
-    t1 = time.monotonic() - st
-    print(f"{rank} {outputs} timecost {t} {t1}")
+    ts = []
+    for seed in range(20):
+        data = init_data(rank, model, device, seed)
+        st = time.monotonic()
+        outputs = interface.train_step(model, data)
+        t = time.monotonic() - st
+        ts.append(t)
+    t = mean(ts[1:])
+    print(f"{rank} {outputs} timecost {t} {ts}")
 
 
 def pipe_train_batch_accordance(rank: int, res_queue: mp.Queue, seed: int):
@@ -367,7 +368,6 @@ class PipeFlashMQATTest(unittest.TestCase):
 
     def testTrainBatch(self):
         clear_name_resolve()
-
         self.seed = random.randint(0, 1000)
         self.res_queue = mp.Queue(maxsize=128)
         self.pipe_model_processes = [
@@ -447,4 +447,4 @@ class PipeFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testGenerate")
+    unittest.main(defaultTest="PipeFlashMQATTest.testTrainBatch")
