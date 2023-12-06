@@ -2,12 +2,7 @@ from typing import Dict, Optional, Tuple
 import collections
 import dataclasses
 import itertools
-import random
-
-import deepspeed
 import torch
-import transformers
-
 from base.constants import data_parallel_group
 from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import from_dict, NamedArray, recursive_apply
@@ -313,7 +308,7 @@ class PackedActorInterface(api.model.ModelInterface):
         data_ = recursive_apply(data_, lambda x: x.to(model.device))
 
         datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches)
-        random.shuffle(datas)
+        # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         for data in datas:
             cu_seqlens = data["cu_seqlens"]
@@ -540,7 +535,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         data_ = recursive_apply(data_, lambda x: x.to(model.device))
 
         datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches)
-        random.shuffle(datas)
+        # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
 
         for data in datas:

@@ -238,7 +238,6 @@ class PPOExperiment(Experiment):
                     mem=10000,
                 ),
             ),
-            # FIXME:
             model_worker=[
                 TasksGroup(
                     count=self.n_actors,
@@ -247,7 +246,6 @@ class PPOExperiment(Experiment):
                         gpu=1,
                         gpu_type="tesla",
                         mem=100000,
-                        nodelist="QH-com46",
                     ),
                 ),
                 TasksGroup(
@@ -257,7 +255,6 @@ class PPOExperiment(Experiment):
                         gpu=1,
                         gpu_type="tesla",
                         mem=100000,
-                        nodelist="QH-com46",
                     ),
                 ),
                 TasksGroup(
@@ -267,7 +264,6 @@ class PPOExperiment(Experiment):
                         gpu=1,
                         gpu_type="tesla",
                         mem=100000,
-                        nodelist="QH-com47",
                     ),
                 ),
             ],

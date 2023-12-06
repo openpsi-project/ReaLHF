@@ -191,7 +191,8 @@ def main_start(args):
 
 def main_stop(args):
     sched = scheduler.client.make(mode=scheduler_mode(args.mode),
-                                  job_name=f"{args.experiment_name}_{args.trial_name}")
+                                  expr_name=args.experiment_name,
+                                  trial_name=args.trial_name,)
     sched.find_all()
     sched.stop_all()
 

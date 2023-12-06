@@ -450,7 +450,7 @@ def run_sft(args: SFTConfig):
         args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
-    from apps.main import main_start
+    from apps.main import main_stop, main_start
     from experiments.common.sft_exp import SFTExperiment
 
     mode = kind_reminder(logger, args)
@@ -496,7 +496,12 @@ def run_sft(args: SFTConfig):
         pickle.dump((exp_name, exp_fn), f)
     api.config.register_experiment(exp_name, exp_fn)
 
-    main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+    try:
+        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+    except Exception as e:
+        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        logger.warning("Exception occurred. Stopping all workers.")
+        raise e
 
 
 @hydra.main(version_base=None, config_name="rw")
@@ -511,7 +516,7 @@ def run_rw(args: RWConfig):
         args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
-    from apps.main import main_start
+    from apps.main import main_stop, main_start
     from experiments.common.rw_exp import PairedRWExperiment
 
     mode = kind_reminder(logger, args)
@@ -574,7 +579,12 @@ def run_rw(args: RWConfig):
         pickle.dump((exp_name, exp_fn), f)
     api.config.register_experiment(exp_name, exp_fn)
 
-    main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+    try:
+        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+    except Exception as e:
+        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        logger.warning("Exception occurred. Stopping all workers.")
+        raise e
 
 
 @hydra.main(version_base=None, config_name="ppo")
@@ -589,7 +599,7 @@ def run_ppo(args: PPOConfig):
         args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
-    from apps.main import main_start
+    from apps.main import main_stop, main_start
     from experiments.common.ppo_exp import PPOExperiment
 
     mode = kind_reminder(logger, args)
@@ -715,7 +725,12 @@ def run_ppo(args: PPOConfig):
         pickle.dump((exp_name, exp_fn), f)
     api.config.register_experiment(exp_name, exp_fn)
 
-    main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+    try:
+        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+    except Exception as e:
+        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        logger.warning("Exception occurred. Stopping all workers.")
+        raise e
 
 
 @hydra.main(version_base=None, config_name="dpo")
@@ -730,7 +745,7 @@ def run_dpo(args: DPOConfig):
         args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
     else:
         trial_name = args.trial_name
-    from apps.main import main_start
+    from apps.main import main_stop, main_start
     from experiments.common.dpo_exp import DPOExperiment
 
     mode = kind_reminder(logger, args)
@@ -793,7 +808,12 @@ def run_dpo(args: DPOConfig):
         pickle.dump((exp_name, exp_fn), f)
     api.config.register_experiment(exp_name, exp_fn)
 
-    main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+    try:
+        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+    except Exception as e:
+        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        logger.warning("Exception occurred. Stopping all workers.")
+        raise e
 
 
 def main():
