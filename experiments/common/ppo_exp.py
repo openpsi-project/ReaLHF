@@ -238,15 +238,36 @@ class PPOExperiment(Experiment):
                     mem=10000,
                 ),
             ),
+            # FIXME:
             model_worker=[
                 TasksGroup(
-                    count=self.n_actors + self.n_critics + self.n_rewards + self.n_refs,
+                    count=self.n_actors,
                     scheduling=Scheduling.model_worker_default(
                         cpu=4,
                         gpu=1,
                         gpu_type="tesla",
                         mem=100000,
-                        nodelist="QH-com[46-47]",
+                        nodelist="QH-com46",
+                    ),
+                ),
+                TasksGroup(
+                    count=self.n_critics,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=1,
+                        gpu_type="tesla",
+                        mem=100000,
+                        nodelist="QH-com46",
+                    ),
+                ),
+                TasksGroup(
+                    count=self.n_rewards + self.n_refs,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=1,
+                        gpu_type="tesla",
+                        mem=100000,
+                        nodelist="QH-com47",
                     ),
                 ),
             ],

@@ -28,7 +28,7 @@ import base.logging as logging
 import impl.model.backend.pipe_engine.static_schedule as schedule
 import impl.model.utils.p2p as p2p
 
-logger = logging.getLogger("DeepSpeedPipelineEngine")
+logger = logging.getLogger("DeepSpeedPipelineEngine", "benchmark")
 
 
 class DeepSpeedPipelineEngine(DeepSpeedEngine):
@@ -585,14 +585,20 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         x = self.tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
         ys = self.tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
 
+        # FIXME:
+        logger.info(f"Stage {stage_id} mbid {micro_batch_id} before forward")
         x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
+        logger.info(f"Stage {stage_id} mbid {micro_batch_id} after forward")
 
         logits = self.__maybe_init_kv_cache(x, ys, micro_batch_id)
         self.__maybe_increase_cache_seqlens(x, ys, micro_batch_id, logits=logits)
         self.__maybe_genstep(x, ys, micro_batch_id, logits=logits)
+        logger.info(f"Stage {stage_id} mbid {micro_batch_id} before calculating loss")
         self.__maybe_calculate_loss(x, micro_batch_id)
+        logger.info(f"Stage {stage_id} mbid {micro_batch_id} after calculating loss")
         self.__maybe_store_logits(x, micro_batch_id)
         self.tensor_buffer.put("batch_output_x", micro_batch_id, x)  # send activation
+        logger.info(f"Stage {stage_id} mbid {micro_batch_id} exec forward pass finished")
 
     def __maybe_init_kv_cache(self, x: PipeTransferData, ys: List[PipeCacheData], mbid: int):
         if not self._generating:
@@ -838,11 +844,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     break
             # For each instruction in the step
             step_id, micro_batch_id, step_cmds = step_cmds
-            # logger.debug(
-            #     f"rank {self.global_rank} step {self.step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
-            # )
+            # FIXME: 
+            logger.info(
+                f"rank {self.global_rank} step {self.step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
+            )
             for cmd in step_cmds:
-                logger.debug(f"rank {self.global_rank} exec cmd: {cmd}")
+                # FIXME: 
+                logger.info(f"rank {self.global_rank} exec cmd: {cmd}")
                 if type(cmd) not in self._INSTRUCTION_MAP:
                     raise RuntimeError(
                         f'{self.__class__.__name__} does not understand instruction {repr(cmd)}')
