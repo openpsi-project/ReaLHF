@@ -6,6 +6,7 @@ import random
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
+from experiments.common.config_utils import get_flash_mqat_model_config
 
 rw_modeling = ModelRPC(
     "default",
@@ -60,9 +61,6 @@ class PairedRWExperiment(Experiment):
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
         if self.is_sft_lora and (self.sft_lora_path is None or self.base_model_type is None):
             raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
-        # FIXME:
-        if self.pp_size > 1:
-            raise NotImplementedError()
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -71,11 +69,16 @@ class PairedRWExperiment(Experiment):
                 scheduling=Scheduling.data_worker_default(
                     cpu=2,
                     mem=10000,
+                    nodelist="QH-com[01-14]",
                 ),
             ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
+                scheduling=Scheduling.master_worker_default(
+                    cpu=4,
+                    mem=20000,
+                    nodelist="QH-com[01-14]",
+                ),
             ),
             model_worker=TasksGroup(
                 count=self.dp_size * self.pp_size,
@@ -84,6 +87,7 @@ class PairedRWExperiment(Experiment):
                     gpu=1,
                     gpu_type="tesla",
                     mem=60000,
+                    nodelist="QH-com[01-14]",
                 ),
             ),
         )
@@ -133,61 +137,22 @@ class PairedRWExperiment(Experiment):
             ),
         )
 
-        if self.pp_size == 1:
-            if not self.is_sft_lora:
-                model = Model(
-                    "flash_mqat_critic",
-                    args=dict(
-                        model_path=self.model_path,
-                        from_type="sft",
-                        tokenizer_path=self.tokenizer_path,
-                    ),
-                )
-            else:
-                model = Model(
-                    "flash_mqat_critic",
-                    args=dict(
-                        model_path=self.model_path,
-                        from_type=self.base_model_type,
-                        tokenizer_path=self.tokenizer_path,
-                    ),
-                    wrappers=[
-                        ModelWrapper(
-                            "lora",
-                            args=dict(
-                                lora_module_kwargs=dict(
-                                    lora_dim=self.lora_dim,
-                                    lora_scaling=self.lora_scaling,
-                                ),
-                                lora_keys_to_replace=["c_attn.linear", "c_proj."],
-                                load_lora_path=self.sft_lora_path,
-                                lora_op_after_creation="squash",
-                            ),
-                        ),
-                    ],
-                )
-        else:
-            # FIXME: implement critic model
-            # FIXME: is_sft_lora
-            pass
-        if self.use_lora:
-            model.wrappers.append(
-                ModelWrapper(
-                    "lora",
-                    args=dict(
-                        lora_module_kwargs=dict(
-                            lora_dim=self.lora_dim,
-                            lora_scaling=self.lora_scaling,
-                        ),
-                        lora_keys_to_replace=["c_attn.linear", "c_proj."],
-                    ),
-                ))
+        model = get_flash_mqat_model_config(
+            model_path=self.model_path,
+            from_model_type="sft" if not self.is_sft_lora else self.base_model_type,
+            tokenizer_path=self.tokenizer_path,
+            pp_size=self.pp_size,
+            dp_size=self.dp_size,
+            is_critic=True,
+            use_lora=self.use_lora,
+            lora_dim=self.lora_dim,
+            lora_scaling=self.lora_scaling,
+            is_sft_lora=self.is_sft_lora,
+            sft_lora_path=self.sft_lora_path,
+            init_critic_from_actor=True,
+        )
 
-        if self.pp_size == 1:
-            interface = ModelInterface("flash_paired_rw")
-        else:
-            # FIXME:
-            pass
+        interface = ModelInterface("flash_paired_rw")
 
         topo = PipeModelDataParallelTopology(self.pp_size, 1, self.dp_size)
         model_worker = []

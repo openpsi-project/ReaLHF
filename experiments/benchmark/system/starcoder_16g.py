@@ -1,7 +1,7 @@
 import functools
 
 from api.config import register_experiment
-from experiments.chat_rlhf_exp import ChatRLHFBenchmarkConfig, ChatRLHFBenchmarkExperiment
+from experiments.benchmark.system.rlhf_benchmark import ChatRLHFBenchmarkConfig, get_exp_cls
 
 resource_config = dict(
     n_actors=14,
@@ -27,6 +27,6 @@ config = ChatRLHFBenchmarkConfig(
     **zero_stage_option,
     **offload_option,
 )
-register_class = functools.partial(ChatRLHFBenchmarkExperiment, config=config)
+register_class = get_exp_cls(config=config)
 exp_name = f"starcoder-2x8-16b"
 register_experiment(exp_name, register_class)

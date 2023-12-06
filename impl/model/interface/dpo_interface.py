@@ -7,7 +7,7 @@ import torch.utils.data
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.utils.functional import gather_shifted_log_probs
-from impl.model.utils.save import save_hf_or_lora_model
+from impl.model.utils.save_load import save_hf_or_lora_model
 import api.model
 import impl.model.utils.dpo_functional as dpo_functional
 
@@ -73,16 +73,7 @@ class DirectPreferenceOptimizationInterface(api.model.ModelInterface):
     def save(self, model: api.model.Model, output_dir):
         if not self.enable_save:
             return
-        from impl.model.nn.lora import is_lora_model
         save_hf_or_lora_model(model, output_dir)
-        if is_lora_model(model.module):
-            save_path = os.path.abspath(
-                os.path.join(
-                    output_dir,
-                    f"epoch{model.version.epoch}step{model.version.epoch_step}",
-                ))
-            os.makedirs(save_path, exist_ok=True)
-            torch.save(model.module.v_head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
 
 
 api.model.register_interface("dpo", DirectPreferenceOptimizationInterface)

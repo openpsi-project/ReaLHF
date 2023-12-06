@@ -7,8 +7,8 @@ from viztracer import VizTracer
 import torch
 import transformers
 
-from impl.model.nn.flash_mqat import (FlashMQATForCausalLM, generate, GenerationConfig,
-                                      InflightBatchingGenerator, PipeCacheData, PipeTransferData)
+from impl.model.nn.flash_mqat.flash_generate import *
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
 import api.huggingface
 
 
@@ -23,9 +23,7 @@ class PackedKVCacheTest(unittest.TestCase):
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
 
-        cls.model = FlashMQATForCausalLM.from_starcoder(model_path=model_path,
-                                                        dtype=torch.float16,
-                                                        device=device)
+        cls.model = FlashMQATModel.from_starcoder(model_path=model_path, dtype=torch.float16, device=device)
         cls.model.eval()
         cls.config = cls.model.config
 
@@ -99,9 +97,7 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
 
         cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
 
-        cls.model = FlashMQATForCausalLM.from_starcoder(model_path=model_path,
-                                                        dtype=torch.float16,
-                                                        device=device)
+        cls.model = FlashMQATModel.from_starcoder(model_path=model_path, dtype=torch.float16, device=device)
         cls.model.eval()
         cls.config = cls.model.config
 
@@ -203,7 +199,7 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
         t2 = time.perf_counter() - tik
         throughput2 = cnt_ / t2
 
-        print(t1, t2, throughput1, throughput2)
+        # print(t1, t2, throughput1, throughput2)
 
         seqs2 = []
         logps2 = []

@@ -34,7 +34,10 @@ if MODEL_TYPE == "llama":
     # PIPELINE_MODEL_PATH = "/home/meizy/models/test/llama-2-4l_4pp_3s"
 elif MODEL_TYPE == "starcoder":
     BASELINE_MODEL_PATH = "/lustre/meizy/models/starcoder_4l"
-    PIPELINE_MODEL_PATH = "/lustre/meizy/models/pipe_pretrained/starcoder_4pp_3s"
+    PIPELINE_MODEL_PATH = F"/lustre/meizy/models/pipe_starcoder_4l_4pp_1s"
+elif MODEL_TYPE == "gpt2":
+    BASELINE_MODEL_PATH = "/lustre/fw/pretrained/gpt2/"
+    PIPELINE_MODEL_PATH = F"/lustre/public/pretrained_model_weights/testOnly/gpt2_4pp_1s"
 BATCH_SIZE = 32
 MIN_NEW_TOKENS = 1
 MAX_NEW_TOKENS = 2048
@@ -166,6 +169,15 @@ def init_handles(rank):
     return device, model, backend, interface
 
 
+def pipe_load_save(rank):
+    device, model, backend, interface = init_handles(rank)
+    os.makedirs("/tmp/pipe_mqat_test", exist_ok=True)
+    model.module.save("/tmp/pipe_mqat_test")
+    print("pipeline module save successful")
+    model.module.load("/tmp/pipe_mqat_test")
+    print("pipeline module load successful")
+
+
 def init_data(rank, model, device, seed):
     from flash_attn.bert_padding import pad_input, unpad_input
     input_ids, attention_mask = make_batch(model.tokenizer,
@@ -267,7 +279,8 @@ class PipeFlashMQATTest(unittest.TestCase):
     def init_baseline_model(self):
         import transformers
 
-        from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATForCausalLM
+        from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+        from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
         import impl.model.nn.flash_mqat.flash_from_hf_impl
 
         self.device = device = 'cuda'
@@ -281,9 +294,9 @@ class PipeFlashMQATTest(unittest.TestCase):
 
         self.baseline_model = None
         if MODEL_TYPE == "llama":
-            self.baseline_model = FlashMQATForCausalLM.from_llama(model_path=BASELINE_MODEL_PATH)
+            self.baseline_model = FlashMQATModel.from_llama(model_path=BASELINE_MODEL_PATH)
         elif MODEL_TYPE == "starcoder":
-            self.baseline_model = FlashMQATForCausalLM.from_starcoder(model_path=BASELINE_MODEL_PATH)
+            self.baseline_model = FlashMQATModel.from_starcoder(model_path=BASELINE_MODEL_PATH)
         else:
             raise NotImplementedError()
 
@@ -342,6 +355,14 @@ class PipeFlashMQATTest(unittest.TestCase):
         #         f"at seed {self.seed} diff {torch.abs(logprob-vlogprob)}, {torch.abs(logprob-vlogprob).abs()}"
         #     )
         #     raise e
+
+    def testSaveLoad(self):
+        clear_name_resolve()
+        self.pipe_model_processes = [mp.Process(target=pipe_load_save, args=(i,)) for i in range(WORLD_SIZE)]
+        for p in self.pipe_model_processes:
+            p.start()
+        for p in self.pipe_model_processes:
+            p.join()
 
     @torch.no_grad()
     def testGenerate(self):
@@ -424,7 +445,7 @@ class PipeFlashMQATTest(unittest.TestCase):
         # # transform
         # layer_key_mappings = {
         #     "transformer.embedding_layer.": "0.",
-        #     "lm_head.": "5."
+        #     "head.": "5."
         # }
         # for i in range(4):
         #     layer_key_mappings[f"transformer.h.{i}."] = f"{i+1}."

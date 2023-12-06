@@ -28,7 +28,7 @@ import base.logging as logging
 import impl.model.backend.pipe_engine.static_schedule as schedule
 import impl.model.utils.p2p as p2p
 
-logger = logging.getLogger("DeepSpeedPipelineEngine")
+logger = logging.getLogger("DeepSpeedPipelineEngine", "benchmark")
 
 
 class DeepSpeedPipelineEngine(DeepSpeedEngine):
@@ -174,6 +174,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def _prepare_input(self,
                        packed_input_ids: torch.Tensor,
                        cu_seqlens: torch.Tensor,
+                       input_lens_for_partition: Optional[torch.Tensor] = None,
                        generate_mode: bool = False):
         """ Prepare input for train or inference
         split all input tensors into micro batches for pipeline parallel
@@ -182,8 +183,20 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             packed_input_ids (torch.Tensor): packed input ids of shape [total_seq_len]
             cu_seqlens (torch.Tensor): cu_seqlens of shape [batch_size]
         """
-        data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
+        if input_lens_for_partition is not None:
+            pair_input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+            data = NamedArray(packed_input_ids=packed_input_ids,
+                              pair_input_lens=pair_input_lens,
+                              input_lens=input_lens_for_partition)
+        else:
+            data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
         splitted = PackedParallelDataBroker.scatter_to(data, self.num_micro_batches)
+        if input_lens_for_partition is not None:
+            splitted = [
+                NamedArray(packed_input_ids=x['packed_input_ids'],
+                           cu_seqlens=torch.nn.functional.pad(x['pair_input_lens'].cumsum(0), (1, 0)))
+                for x in splitted
+            ]
         if not generate_mode:
             for mbid, x in enumerate(splitted):
                 self.tensor_buffer.put("input_cache", mbid, x)
@@ -331,9 +344,15 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def train(self):
         self.module.train()
 
-    def forward(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor):
+    def forward(self,
+                packed_input_ids: torch.Tensor,
+                cu_seqlens: torch.Tensor,
+                input_lens_for_partition: Optional[torch.Tensor] = None):
         # forward one step and return packed logits
-        self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=False)
+        self._prepare_input(packed_input_ids,
+                            cu_seqlens,
+                            generate_mode=False,
+                            input_lens_for_partition=input_lens_for_partition)
         self._pre_forward()
         sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
                                            stages=self.num_stages,
@@ -351,9 +370,16 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._post_forward()
         return logits
 
-    def eval_batch(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, loss_fn: Callable,
+    def eval_batch(self,
+                   packed_input_ids: torch.Tensor,
+                   cu_seqlens: torch.Tensor,
+                   loss_fn: Callable,
+                   input_lens_for_partition: Optional[torch.Tensor] = None,
                    **loss_fn_kwargs):
-        self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=False)
+        self._prepare_input(packed_input_ids,
+                            cu_seqlens,
+                            generate_mode=False,
+                            input_lens_for_partition=input_lens_for_partition)
         self._loss_fn = loss_fn
         self._prepare_loss_input(**loss_fn_kwargs)
         self._pre_eval_batch()
@@ -387,12 +413,19 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._post_eval_batch()
         return avg_loss, avg_stats
 
-    def train_batch(self, packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, loss_fn: Callable,
+    def train_batch(self,
+                    packed_input_ids: torch.Tensor,
+                    cu_seqlens: torch.Tensor,
+                    loss_fn: Callable,
+                    input_lens_for_partition: Optional[torch.Tensor] = None,
                     **loss_fn_kwargs):
         if not torch._C.is_grad_enabled():
             raise RuntimeError(f'train_batch() requires gradients enabled. Use eval_batch() instead.')
 
-        self._prepare_input(packed_input_ids, cu_seqlens, generate_mode=False)
+        self._prepare_input(packed_input_ids,
+                            cu_seqlens,
+                            generate_mode=False,
+                            input_lens_for_partition=input_lens_for_partition)
         self._loss_fn = loss_fn
         self._prepare_loss_input(**loss_fn_kwargs)
         self._pre_train_batch()
@@ -552,14 +585,19 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         x = self.tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
         ys = self.tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
 
+        # logger.info(f"Stage {stage_id} mbid {micro_batch_id} before forward")
         x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
+        # logger.info(f"Stage {stage_id} mbid {micro_batch_id} after forward")
 
         logits = self.__maybe_init_kv_cache(x, ys, micro_batch_id)
         self.__maybe_increase_cache_seqlens(x, ys, micro_batch_id, logits=logits)
         self.__maybe_genstep(x, ys, micro_batch_id, logits=logits)
+        # logger.info(f"Stage {stage_id} mbid {micro_batch_id} before calculating loss")
         self.__maybe_calculate_loss(x, micro_batch_id)
+        # logger.info(f"Stage {stage_id} mbid {micro_batch_id} after calculating loss")
         self.__maybe_store_logits(x, micro_batch_id)
         self.tensor_buffer.put("batch_output_x", micro_batch_id, x)  # send activation
+        # logger.info(f"Stage {stage_id} mbid {micro_batch_id} exec forward pass finished")
 
     def __maybe_init_kv_cache(self, x: PipeTransferData, ys: List[PipeCacheData], mbid: int):
         if not self._generating:
@@ -641,13 +679,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def __maybe_calculate_loss(self, x: PipeTransferData, mbid: int):
         if self.is_last_stage() and self._compute_loss:
-            logits = x.pp_input
+            model_output = x.pp_input
             loss_kwargs = self.tensor_buffer.get("loss_inputs", mbid, remove=True)
             input_cache = self.tensor_buffer.get("input_cache", mbid, remove=True)
             packed_input_ids = input_cache.packed_input_ids
             cu_seqlens = input_cache.cu_seqlens
             assert self._loss_fn is not None, "loss function is not set, please use engine.set_loss_fn(fn)"
-            loss, stats = self._loss_fn(logits, packed_input_ids, cu_seqlens, **loss_kwargs)
+            loss, stats = self._loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_kwargs)
             self.tensor_buffer.put("losses", mbid, loss)
             self.tensor_buffer.put("stats", mbid, stats)
 
@@ -805,11 +843,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     break
             # For each instruction in the step
             step_id, micro_batch_id, step_cmds = step_cmds
-            # logger.debug(
+            # logger.info(
             #     f"rank {self.global_rank} step {self.step_count}, st {step_id} mb {micro_batch_id} step_cmds: {step_cmds}"
             # )
             for cmd in step_cmds:
-                logger.debug(f"rank {self.global_rank} exec cmd: {cmd}")
+                # logger.info(f"rank {self.global_rank} exec cmd: {cmd}")
                 if type(cmd) not in self._INSTRUCTION_MAP:
                     raise RuntimeError(
                         f'{self.__class__.__name__} does not understand instruction {repr(cmd)}')
@@ -828,5 +866,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 except Exception as e:
                     logger.error(f"Rank {self.global_rank} step {self.step_count}, Exception in cmd {cmd}")
                     raise e
+                # logger.info(f"rank {self.global_rank} complete cmd: {cmd}")
             self.step_count += 1
         self.sched_count += 1

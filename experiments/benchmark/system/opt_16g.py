@@ -2,7 +2,7 @@ import functools
 import itertools
 
 from api.config import register_experiment
-from experiments.chat_rlhf_exp import ChatRLHFBenchmarkConfig, ChatRLHFBenchmarkExperiment
+from experiments.benchmark.system.rlhf_benchmark import ChatRLHFBenchmarkConfig, get_exp_cls
 
 spec_to_n_params = {
     (5120, 60): "19b",
@@ -95,7 +95,7 @@ for zero_stage_option, offload_option in itertools.product(zero_stage_options, o
         **zero_stage_option,
         **offload_option,
     )
-    register_class = functools.partial(ChatRLHFBenchmarkExperiment, config=config)
+    register_class = get_exp_cls(config=config)
     exp_name = f"opt-2x8-optims-{config_count}"
     register_experiment(exp_name, register_class)
     config_count += 1
@@ -108,7 +108,7 @@ for actor_param, critic_param in itertools.product(actor_params, critic_params):
         critic_model_name=n_params_to_dir_name(critic_param),
         **resource_config,
     )
-    register_class = functools.partial(ChatRLHFBenchmarkExperiment, config=config)
+    register_class = get_exp_cls(config=config)
     exp_name = f"opt-2x8-params-r3-{config_count}"
     register_experiment(exp_name, register_class)
     config_count += 1
@@ -123,7 +123,7 @@ for batch_size_option, seq_len_option in itertools.product(batch_size, seq_len_o
         **resource_config,
         **seq_len_option,
     )
-    register_class = functools.partial(ChatRLHFBenchmarkExperiment, config=config)
+    register_class = get_exp_cls(config=config)
     exp_name = f"opt-2x8-batchseq-{config_count}"
     register_experiment(exp_name, register_class)
     config_count += 1
@@ -138,7 +138,7 @@ for actor_param, critic_param in itertools.product(actor_params, critic_params):
         **offload_option,
         **resource_config,
     )
-    register_class = functools.partial(ChatRLHFBenchmarkExperiment, config=config)
+    register_class = get_exp_cls(config=config)
     exp_name = f"opt-2x8-offloadref-r2-{config_count}"
     register_experiment(exp_name, register_class)
     config_count += 1
@@ -157,7 +157,7 @@ for actor_param, critic_param in itertools.product(actor_params, critic_params):
         **offload_option,
         **resource_config,
     )
-    register_class = functools.partial(ChatRLHFBenchmarkExperiment, config=config)
+    register_class = get_exp_cls(config=config)
     exp_name = f"opt-2x8-zero3offloadref-r2-{config_count}"
     register_experiment(exp_name, register_class)
     config_count += 1
@@ -177,6 +177,6 @@ config = ChatRLHFBenchmarkConfig(
     **offload_option,
     **resource_config,
 )
-register_class = functools.partial(ChatRLHFBenchmarkExperiment, config=config)
+register_class = get_exp_cls(config=config)
 exp_name = f"opt-2x8-30b-TEST"
 register_experiment(exp_name, register_class)

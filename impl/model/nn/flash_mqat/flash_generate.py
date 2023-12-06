@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATForCausalLM
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import mask_eos_token
 from impl.model.utils.logits_warper import top_k_top_p_logits
@@ -113,7 +113,7 @@ def genstep(
 
 @torch.no_grad()
 def generate(
-    model: FlashMQATForCausalLM,
+    model: FlashMQATModel,
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
@@ -125,7 +125,7 @@ def generate(
     """Generete a sequence with a FlashMQAT.
 
     Args:
-        model (FlashMQATForCausalLM): .
+        model (FlashMQATModel): .
         tokenizer (transformers.PreTrainedTokenizerFast): .
         input_ids (torch.Tensor): Prompts, may be padded. Shape [bs, seqlen].
         attention_mask (Optional[torch.Tensor], optional): The same as huggingface.
@@ -275,7 +275,7 @@ def generate(
 
 @torch.no_grad()
 def vanilla_packed_generate(
-    model: FlashMQATForCausalLM,
+    model: FlashMQATModel,
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
@@ -332,7 +332,7 @@ def vanilla_packed_generate(
 
 @torch.no_grad()
 def vanilla_cpu_generate(
-    model: FlashMQATForCausalLM,
+    model: FlashMQATModel,
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
@@ -391,7 +391,7 @@ class InflightBatchingGenerator:
         self,
         inqueue: queue.Queue,
         outqueue: queue.Queue,
-        model: FlashMQATForCausalLM,
+        model: FlashMQATModel,
         tokenizer: transformers.PreTrainedTokenizerFast,
         gconfig: GenerationConfig,
         batch_size: int,

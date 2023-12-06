@@ -5,8 +5,8 @@ import torch
 
 from base.monitor import process_memory_mb
 from base.topology import PipeDataParallelTopology
-from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, FlashMQATForCausalLM,
-                                                      LanguageModelHead, VocabPositionEmbedding)
+from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, FlashMQATModel,
+                                                      OutputHead, VocabPositionEmbedding)
 from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
@@ -41,26 +41,16 @@ def make_causal_flash_mqat_pipe_module(
         )
         layer_specs.append(flash_mqat_block)
 
-    if not is_critic:
-        lm_head = LayerSpec(
-            LanguageModelHead,
-            config.hidden_dim,
-            config.vocab_size,
-            bias=False,
-            device=device,
-            dtype=dtype,
-        )
-    else:
-        lm_head = LayerSpec(
-            LanguageModelHead,
-            config.hidden_dim,
-            1,
-            bias=False,
-            device=device,
-            dtype=dtype,
-        )
+    head = LayerSpec(
+        OutputHead,
+        config.hidden_dim,
+        1 if is_critic else config.vocab_size,
+        bias=False,
+        device=device,
+        dtype=dtype,
+    )
 
-    layer_specs.append(lm_head)
+    layer_specs.append(head)
 
     def compute_loss(output, label):
         return output.loss
@@ -73,29 +63,30 @@ def make_causal_flash_mqat_pipe_module(
     )
 
 
-def make_flash_mqat_pipe_model(
-    name: str,
-    device: torch.device,
+def pipe_wrap_fn(
     model_path: str,
     num_pp: int,
     num_dp: int,
-    from_type: str,
-    dtype: torch.dtype = torch.float16,
-    is_critic: bool = False,
-    tokenizer_path: Optional[str] = None,
+    is_critic: bool,
+    init_critic_from_actor: bool = False,
+    init_from_scratch: bool = False,
 ):
-    if tokenizer_path is None:
-        tokenizer_path = model_path
-    tokenizer = api.huggingface.load_hf_tokenizer(model_path)
-    topology = PipeDataParallelTopology(num_pp=num_pp, num_dp=num_dp)
-    config = getattr(FlashMQATForCausalLM, f"config_from_{from_type}")(model_path=model_path)
-    module = make_causal_flash_mqat_pipe_module(config, topology, is_critic, dtype, device)
-    process_memory_mb("before_load")
-    module.load(model_path)
-    process_memory_mb("after_load")
-    return api.model.Model(name, module, tokenizer, device)
+
+    def pipe_wrap_fn_(model: api.model.Model) -> api.model.Model:
+        topology = PipeDataParallelTopology(num_pp=num_pp, num_dp=num_dp)
+        if not isinstance(model.module, FlashMQATModel):
+            raise RuntimeError(f"Only FlashMQAT models can be wrapped as "
+                               f"pipeline module, provided type {type(model.module)}")
+        config = model.module.config
+        module = make_causal_flash_mqat_pipe_module(config, topology, is_critic, device=model.device)
+        if not init_from_scratch:
+            process_memory_mb("before_load")
+            module.load(model_path, init_critic_from_actor=init_critic_from_actor)
+            process_memory_mb("after_load")
+        model.module = module
+        return model
+
+    return pipe_wrap_fn_
 
 
-api.model.register_model("flash_mqat_pipe", make_flash_mqat_pipe_model)
-api.model.register_model("flash_mqat_pipe_critic",
-                         functools.partial(make_flash_mqat_pipe_model, is_critic=True))
+api.model.register_wrapper("pipe", pipe_wrap_fn)

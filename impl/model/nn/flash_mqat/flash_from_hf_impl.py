@@ -3,8 +3,8 @@ from typing import Dict
 import torch
 import transformers
 
+from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
-from impl.model.nn.flash_mqat.flash_mqat_interface import FlashMQATForCausalLM
 
 ################################ StarCoder Begin ################################
 
@@ -35,6 +35,7 @@ def convert_state_dict_starcoder(state_dict: Dict, config: FlashMQATConfig) -> D
         ".c_attn.weight",
         ".c_attn.bias",
         "transformer.ln_f.",
+        "lm_head",
     ]
     replace_to = [
         ".embedding_layer.wte",
@@ -44,6 +45,7 @@ def convert_state_dict_starcoder(state_dict: Dict, config: FlashMQATConfig) -> D
         ".c_attn.linear.weight",
         ".c_attn.linear.bias",
         f"transformer.h.{config.n_layers - 1}.ln_f.",
+        "head",
     ]
     for k, v in state_dict.items():
         for rf, rt in zip(replace_from, replace_to):
@@ -53,7 +55,7 @@ def convert_state_dict_starcoder(state_dict: Dict, config: FlashMQATConfig) -> D
     return new_state_dict
 
 
-FlashMQATForCausalLM.register_hf_model("starcoder", convert_config_starcoder, convert_state_dict_starcoder)
+FlashMQATModel.register_hf_model("starcoder", convert_config_starcoder, convert_state_dict_starcoder)
 
 ################################ StarCoder End ################################
 
@@ -90,6 +92,7 @@ def gpt2_state_dict_converter(state_dict: Dict, config: FlashMQATConfig) -> Dict
         ".c_attn.bias",
         "ln_f.weight",
         "ln_f.bias",
+        "lm_head",
     ]
     replace_to = [
         "embedding_layer.wte.weight",
@@ -100,6 +103,7 @@ def gpt2_state_dict_converter(state_dict: Dict, config: FlashMQATConfig) -> Dict
         ".c_attn.linear.bias",
         f"h.{config.n_layers - 1}.ln_f.weight",
         f"h.{config.n_layers - 1}.ln_f.bias",
+        "head",
     ]
     for k, v in state_dict.items():
         for rf, rt in zip(replace_from, replace_to):
@@ -113,7 +117,7 @@ def gpt2_state_dict_converter(state_dict: Dict, config: FlashMQATConfig) -> Dict
     return new_state_dict
 
 
-FlashMQATForCausalLM.register_hf_model("gpt2", gpt2_config_converter, gpt2_state_dict_converter)
+FlashMQATModel.register_hf_model("gpt2", gpt2_config_converter, gpt2_state_dict_converter)
 
 ################################ GPT2 End ################################
 
@@ -166,6 +170,7 @@ def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
         (".input_layernorm.", ".attn.c_attn.ln."),
         ("attn.o_proj.", "attn.c_proj."),
         (f".norm.", f".h.{config.n_layers - 1}.ln_f."),
+        ("lm_head", "head"),
     ]
     for k1, k2 in replace_pairs:
         new_state_dict = {}
@@ -181,5 +186,5 @@ def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
     return new_state_dict
 
 
-FlashMQATForCausalLM.register_hf_model("llama", convert_config_llama, convert_state_dict_llama)
+FlashMQATModel.register_hf_model("llama", convert_config_llama, convert_state_dict_llama)
 ################################ LLaMa End ################################

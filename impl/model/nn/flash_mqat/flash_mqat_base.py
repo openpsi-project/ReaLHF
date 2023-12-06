@@ -12,6 +12,7 @@ import transformers
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import torch_attn_func
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
+from impl.model.utils.save_load import load_from_disk
 import base.logging as logging
 
 try:
@@ -512,34 +513,47 @@ class FlashMQATBase(nn.Module):
         return x
 
 
-class LanguageModelHead(nn.Linear):
+class OutputHead(nn.Linear):
+    # TODO: do we need to care about the initialization scale?
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
         x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
         return x
 
 
-class FlashMQATForCausalLM(nn.Module):
+class FlashMQATModel(nn.Module):
 
     def __init__(
         self,
         config: FlashMQATConfig,
+        is_critic: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
         self.config = config
         self.transformer = FlashMQATBase(config, dtype=dtype, device=device)
-        self.lm_head = LanguageModelHead(
+        self.head = OutputHead(
             config.hidden_dim,
-            config.vocab_size,
+            1 if is_critic else config.vocab_size,
             bias=False,
             device=device,
             dtype=dtype,
         )
+        self._is_critic = is_critic
+
+    @property
+    def is_critic(self):
+        return self._is_critic
 
     def to_layers(self) -> List[nn.Module]:
-        return self.transformer.to_layers() + [self.lm_head]
+        return self.transformer.to_layers() + [self.head]
+
+    def gradient_checkpointing_enable(self):
+        for l in self.transformer.h[1:]:
+            # skip the first layer to enable lora together with grad checkpointing
+            l: FlashMQATBlock
+            l.gradient_checkpointing_enable()
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
         layers = self.to_layers()
@@ -563,16 +577,30 @@ class FlashMQATForCausalLM(nn.Module):
             elif k.startswith("transformer.h."):
                 idx = int(k.split(".")[2])
                 new_k = k.replace(f"transformer.h.{idx}.", f"{idx+1}.")
-            elif k.startswith("lm_head"):
-                new_k = k.replace("lm_head.", f"{config.n_layers+1}.")
+            elif k.startswith("head"):
+                new_k = k.replace("head.", f"{config.n_layers+1}.")
             else:
                 raise ValueError(f"Unexpected key: {k}")
             pipe_state_dict[new_k] = v
         return pipe_state_dict
 
+    @staticmethod
+    def from_pipe_state_dict(config: FlashMQATConfig, pipe_state_dict: Dict):
+        state_dict = {}
+        for k, v in pipe_state_dict.items():
+            if k.startswith("0."):
+                new_k = k.replace("0.", "transformer.embedding_layer.")
+            elif k.startswith(f"{config.n_layers+1}."):
+                new_k = k.replace(f"{config.n_layers+1}.", "head.")
+            else:
+                idx = int(k.split(".")[0])
+                new_k = k.replace(f"{idx}.", f"transformer.h.{idx-1}.")
+            state_dict[new_k] = v
+        return state_dict
+
     def pipe_state_dict(self):
         state_dict = self.state_dict()
-        return FlashMQATForCausalLM.map_to_pipe_state_dict(self.config, state_dict)
+        return FlashMQATModel.map_to_pipe_state_dict(self.config, state_dict)
 
     def _config_from_hf_template(
         config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
@@ -595,25 +623,18 @@ class FlashMQATForCausalLM(nn.Module):
     ) -> Tuple[FlashMQATConfig, Optional[Dict]]:
         if not init_from_scratch:
             assert state_dict_converter is not None
-        config = FlashMQATForCausalLM._config_from_hf_template(config_converter, from_model, model_path)
+        config = FlashMQATModel._config_from_hf_template(config_converter, from_model, model_path)
         if model_path is not None:
             if init_from_scratch:
                 state_dict = None
-            elif os.path.exists(os.path.join(model_path, "pytorch_model.bin")):
-                state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"), map_location="cpu")
-            elif os.path.exists(os.path.join(model_path, "pytorch_model.bin.index.json")):
-                with open(os.path.join(model_path, "pytorch_model.bin.index.json"), "r") as f:
-                    weight_map = json.load(f)["weight_map"]
-                state_dict = {}
-                for filename in list(set(list(weight_map.values()))):
-                    assert os.path.exists(os.path.join(model_path, filename))
-                    state_dict.update(torch.load(os.path.join(model_path, filename), map_location="cpu"))
             else:
-                logger.critical(
-                    "Neither pytorch_model.bin or pytorch_model.bin.index.json are found in path, "
-                    "using huggingface model initialization. "
-                    "This will probably cause (CPU) OOM.")
-                state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
+                try:
+                    state_dict = load_from_disk(model_path)
+                except Exception as e:
+                    logger.critical(f"Failed to load state dict from {model_path}: {e}")
+                    logger.critical("Degenerate to using huggingface model initialization. "
+                                    "This will probably cause (CPU) OOM.")
+                    state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
         else:
             assert from_model is not None
             state_dict = from_model.state_dict() if not init_from_scratch else None
@@ -630,18 +651,21 @@ class FlashMQATForCausalLM(nn.Module):
         from_model: Optional[transformers.PreTrainedModel] = None,
         model_path: Optional[str] = None,
         init_from_scratch: bool = False,
+        is_critic: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
-        config, state_dict = FlashMQATForCausalLM._config_and_param_from_hf_template(
+        config, state_dict = FlashMQATModel._config_and_param_from_hf_template(
             config_converter=config_converter,
             state_dict_converter=state_dict_converter,
             from_model=from_model,
             model_path=model_path,
             init_from_scratch=init_from_scratch,
         )
-        model = cls(config, dtype=dtype, device=device)
+        model = cls(config, is_critic, dtype=dtype, device=device)
         if not init_from_scratch:
+            if is_critic:
+                state_dict['head.weight'] = model.state_dict()['head.weight']
             model.load_state_dict(state_dict)
         return model
 
@@ -654,30 +678,30 @@ class FlashMQATForCausalLM(nn.Module):
         if model_name == "pretrained":
             raise ValueError("model_name cannot be 'pretrained'.")
         setattr(
-            FlashMQATForCausalLM,
+            FlashMQATModel,
             f"from_{model_name}",
             classmethod(
                 functools.partial(
-                    FlashMQATForCausalLM._from_hf_template,
+                    FlashMQATModel._from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
                 )),
         )
         setattr(
-            FlashMQATForCausalLM,
+            FlashMQATModel,
             f"config_from_{model_name}",
             staticmethod(
                 functools.partial(
-                    FlashMQATForCausalLM._config_from_hf_template,
+                    FlashMQATModel._config_from_hf_template,
                     config_converter=config_converter,
                 )),
         )
         setattr(
-            FlashMQATForCausalLM,
+            FlashMQATModel,
             f"config_and_param_from_{model_name}",
             staticmethod(
                 functools.partial(
-                    FlashMQATForCausalLM._config_and_param_from_hf_template,
+                    FlashMQATModel._config_and_param_from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
                 )),
@@ -687,12 +711,30 @@ class FlashMQATForCausalLM(nn.Module):
     def from_pretrained(
         cls,
         model_path: str,
+        init_from_scratch: bool = False,
+        is_critic: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
         with open(os.path.join(model_path, "config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
-        state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"))
-        model = cls(config, dtype, device)
+        model = cls(config, is_critic, dtype, device)
+        if not init_from_scratch:
+            state_dict = load_from_disk(model_path)
+            model.load_state_dict(state_dict)
+        return model
+
+    @classmethod
+    def from_pipeline_module(
+        cls,
+        model_path: str,
+        is_critic: bool = False,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        with open(os.path.join(model_path, "config.json"), "r") as f:
+            config = FlashMQATConfig(**json.load(f))
+        model = cls(config, is_critic, dtype, device)
+        state_dict = cls.from_pipe_state_dict(config, load_from_disk(model_path))
         model.load_state_dict(state_dict)
         return model
