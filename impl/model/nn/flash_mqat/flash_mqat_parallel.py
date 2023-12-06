@@ -1,64 +1,59 @@
-from typing import Callable, List, Optional, Tuple, Union
-import copy
-import dataclasses
-import json
-import math
+from typing import Callable, Dict, List, Optional, Tuple, Union
+import functools
 import os
-import queue
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATForCausalLM
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-from impl.model.utils.logits_warper import top_k_top_p_logits
-from impl.model.utils.modules import LayerNormLinear, LayerNormMLP
-import api.huggingface
-import api.model
+from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormColumnLinear,
+                                                     LayerNormParallelMLP, LlamaLayerNormParallelMLP,
+                                                     ParallelEmbedding, RowParallelLinear)
+from impl.model.utils.modules import LlamaRMSNorm
+import base.constants
 import base.logging as logging
 
 try:
-    from flash_attn import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache
+    from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
+                            flash_attn_with_kvcache)
+    from flash_attn.layers.rotary import RotaryEmbedding
 except ModuleNotFoundError:
     pass
-from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormColumnLinear,
-                                                     LayerNormParallelMLP, ParallelEmbedding,
-                                                     RowParallelLinear)
-import base.logging as logging
 
-logger = logging.getLogger("TensorParallelFlashMQAT")
+logger = logging.getLogger("ParallelFlashMQAT")
 
 
-class VocabPositionEmbedding(nn.Module):
+class ParallelVocabPositionEmbedding(nn.Module):
 
     def __init__(
         self,
-        vocab_size: int,
-        n_positions: int,
-        hidden_dim: int,
-        embed_pdrop: float,
-        fixed_abs_position_ids: bool,
+        config: FlashMQATConfig,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
-        self.n_positions = n_positions
-        self.wte = ParallelEmbedding(vocab_size, hidden_dim, dtype=dtype, device=device)
-        self.wpe = ParallelEmbedding(n_positions, hidden_dim, dtype=dtype, device=device)
-        self.embed_drop = nn.Dropout(embed_pdrop)
+        self.n_positions = config.n_positions
+        self.wte = ParallelEmbedding(config.vocab_size, config.hidden_dim, dtype=dtype, device=device)
+
+        self.apply_abs_pos_embed = not config.apply_rotary
+        if self.apply_abs_pos_embed:
+            self.wpe = ParallelEmbedding(config.n_positions, config.hidden_dim, dtype=dtype, device=device)
+
+        self.embed_drop = nn.Dropout(config.embd_pdrop)
 
         self.self_attention_mask = torch.tril(
-            torch.ones((n_positions, n_positions), dtype=torch.bool, device=device))
-        self.fixed_abs_position_ids = fixed_abs_position_ids
+            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device))
+        self.fixed_abs_position_ids = config.fixed_abs_position_ids
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
-        is_gen = y.cache_seqlens is not None
-        if is_gen and len(y.input_ids.shape) == 2:
+        # Initial sanity check.
+        with_cache = y.cache_seqlens is not None
+        if with_cache and len(y.input_ids.shape) == 2:
             assert y.input_ids.shape[1] == 1
-        elif is_gen and len(y.input_ids.shape) == 1:
+        elif with_cache and len(y.input_ids.shape) == 1:
             if x.cu_seqlens is None:
                 y.input_ids = y.input_ids.unsqueeze(-1)
         packed = len(y.input_ids.shape) == 1
@@ -66,6 +61,8 @@ class VocabPositionEmbedding(nn.Module):
             raise ValueError("cu_seqlens and max_seqlen must be both provided for packed input.")
 
         # Set position ids.
+        if not y.position_ids is None:
+            raise ValueError("In our use cases, position_ids must be None.")
         if not packed and y.position_ids is None:
             # input_ids is given
             batch_size, input_length = y.input_ids.shape
@@ -113,12 +110,13 @@ class VocabPositionEmbedding(nn.Module):
             x.attention_mask = self_attention_mask.unsqueeze(1)
 
         inputs_embeds = self.wte(y.input_ids)
-        position_embeds = self.wpe(y.position_ids)
-        x.pp_output = self.embed_drop(inputs_embeds + position_embeds)
+        if self.apply_abs_pos_embed:
+            inputs_embeds = inputs_embeds + self.wpe(y.position_ids)
+        x.pp_output = self.embed_drop(inputs_embeds)
         return x
 
 
-class CausalSelfAttentionLayer(nn.Module):
+class ParallelCausalSelfAttentionLayer(nn.Module):
 
     def __init__(
         self,
@@ -129,7 +127,19 @@ class CausalSelfAttentionLayer(nn.Module):
         attn_pdrop: float,
         layer_index: int,
         layer_norm_epsilon: float,
+        # gpt2 does not scale attn by inverse layer idx, in contrast to starcoder
         scale_attn_by_inverse_layer_idx: bool,
+        # llama does not require attention bias
+        use_attention_bias: bool,
+        # layer norm type is special for llama
+        layer_norm_type: Optional[str] = None,
+        # rotary embedding
+        apply_rotary: bool = False,
+        rotary_base: float = 10000.0,
+        rotary_interleaved: bool = False,  # False for LLaMA, GPT-neoX; True for GPT-J
+        rotary_scaling: Optional[float] = None,
+        rotary_scaling_type: Optional[str] = None,
+        # device and dtype
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -139,34 +149,49 @@ class CausalSelfAttentionLayer(nn.Module):
         assert device != "cpu", "Tensor Parallel FlashMQAT does not support CPU."
         assert hidden_dim % head_dim == 0
         n_q_heads = hidden_dim // head_dim
-        if n_kv_heads == n_q_heads:
-            # multi-head attention, still use combined layer norm + linear
-            self.c_attn = LayerNormColumnLinear(
-                hidden_dim,
-                head_dim * (n_q_heads + 2 * n_kv_heads),
-                layer_norm_epsilon=layer_norm_epsilon,
-                dtype=dtype,
-                device=device,
-            )
-        elif n_kv_heads == 1:
-            # multi-query attention, use separate layer norm + linear
-            # becasue only query is splitted for tensor parallel
-            self.ln = nn.LayerNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-            self.q_attn = ColumnParallelLinear(
-                hidden_dim,
-                head_dim * n_q_heads,
-                dtype=dtype,
-                device=device,
-            )
-            self.kv_attn = nn.Linear(hidden_dim, head_dim * (n_kv_heads * 2), dtype=dtype, device=device)
+
+        self.ln = nn.LayerNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
+
+        self.q_attn = ColumnParallelLinear(
+            hidden_dim,
+            head_dim * n_q_heads,
+            dtype=dtype,
+            device=device,
+        )
+        self.mp_world_size = base.constants.model_parallel_world_size()
+        if n_kv_heads > 1 and \
+            n_kv_heads % self.mp_world_size == 0:
+            # split model parallel among heads if possible
+            self.k_attn = ColumnParallelLinear(hidden_dim, head_dim * n_kv_heads, dtype=dtype, device=device)
+            self.v_attn = ColumnParallelLinear(hidden_dim, head_dim * n_kv_heads, dtype=dtype, device=device)
         else:
-            raise NotImplementedError("Currently tensor parallel FlashMQAT only supports MHA and MQA.")
+            if n_kv_heads > 1:
+                logger.warning(f"Cannot split {n_kv_heads} kv heads evenly among "
+                               f"{self.mp_world_size} model parallel ranks, "
+                               f"use unsplitted linear for kv heads instead")
+            self.k_attn = nn.Linear(hidden_dim, head_dim * n_kv_heads, dtype=dtype, device=device)
+            self.v_attn = nn.Linear(hidden_dim, head_dim * n_kv_heads, dtype=dtype, device=device)
+
         self.c_proj = RowParallelLinear(hidden_dim, hidden_dim, dtype=dtype, device=device)
         self.resid_dropout = nn.Dropout(resid_pdrop)
 
         self.attn_pdrop = attn_pdrop
 
         self.applied_attn_pdrop = attn_pdrop
+
+        self.apply_rotary = apply_rotary
+        self.rotary_interleaved = rotary_interleaved
+        if self.apply_rotary:
+            # Will layzily update the cache sequence length of cache.,
+            # so we don't need to pass in max_positions.
+            self.rotary_emb = RotaryEmbedding(
+                head_dim,
+                base=rotary_base,
+                scale_factor=rotary_scaling,
+                scale_type=rotary_scaling_type,
+                interleaved=rotary_interleaved,
+                device=device,
+            )
 
         # constant
         self.h = hidden_dim
@@ -198,7 +223,7 @@ class CausalSelfAttentionLayer(nn.Module):
         attention_mask: Optional[torch.BoolTensor] = None,  # only used for debugging
         max_seqlen: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # input shape: [bs, seq, hidden_dim]
+        # input hidden_states shape: [bs, seq, hidden_dim]/[total_seqlen, hidden_dim]
         # default upcast, scale
         if self.scale_attn_by_inverse_layer_idx:
             unscale = self.layer_index + 1
@@ -208,28 +233,41 @@ class CausalSelfAttentionLayer(nn.Module):
             scale_factor = 1
         scale_factor /= self.d**0.5
 
-        if self.nkv == self.nq:
-            # multi-head attention
-            qkv, _ = self.c_attn(hidden_states)
-            q, k, v = torch.split(qkv, (self.d * self.nq, self.d * self.nkv, self.d * self.nkv), dim=-1)
-        elif self.nkv == 1:
-            # multi-query attention
-            hidden_states = self.ln(hidden_states)
-            q, _ = self.q_attn(hidden_states)
-            kv = self.kv_attn(hidden_states)
-            k, v = torch.split(kv, (self.d * self.nkv, self.d * self.nkv), dim=-1)
-        else:
-            raise NotImplementedError("Currently tensor parallel FlashMQAT only supports MHA and MQA.")
+        q: torch.Tensor = self.q_attn(hidden_states)
+        k: torch.Tensor = self.k_attn(hidden_states)
+        v: torch.Tensor = self.v_attn(hidden_states)
+        kv = torch.cat([k, v], dim=-1)
 
-        if k_cache is not None and len(qkv.shape) == 3:
+        q = q.view(*q.shape[:-1], self.nq, self.d)
+        kv = kv.view(*kv.shape[:-1], 2, self.nkv, self.d)
+
+        if self.apply_rotary and k_cache is None:
+            # otherwise, we input rotary cos/sin directly into flash_attn_with_kvcache
+            q, kv = self.rotary_emb(
+                q,
+                kv,
+                seqlen_offset=0,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            )
+        elif self.apply_rotary:
+            self.rotary_emb._update_cos_sin_cache(k_cache.shape[1], device=q.device, dtype=q.dtype)
+            # Rotary cos/sin will be automatically offset by cache_seqlens in flash_attn.
+            rotary_cos, rotary_sin = self.rotary_emb._cos_cached, self.rotary_emb._sin_cached
+        else:
+            rotary_cos = rotary_sin = None
+
+        k, v = kv.unbind(dim=-3)
+
+        if k_cache is not None and len(q.shape) == 4:
             # k_cache/v_cache shape: [bs, max_seq, n_kv_heads, head_dim]
             if cache_seqlens is None:
                 raise RuntimeError("cache_seqlens must be provided if kv_cache is not None.")
-            assert q.shape[1] == 1, (qkv.shape, "Can only generate one token at a time.")
-            # q, k, v = torch.split(qkv, (self.d * self.nq, self.d * self.nkv, self.d * self.nkv), dim=-1)
-            q = q.view(*q.shape[:2], self.nq, self.d)
-            v = v.view(*v.shape[:2], self.nkv, self.d)
-            k = k.view(*k.shape[:2], self.nkv, self.d)
+            if not (q.shape[1] == k.shape[1] == v.shape[1] == 1):
+                raise RuntimeError(
+                    "Can only generate one token at a time, "
+                    f"while seqence length (q={q.shape[1]}, k={k.shape[1]}, v={v.shape[1]}) is larger than 1."
+                )
             # k_cache and v_cache will be modified in-place.
             hidden_states = flash_attn_with_kvcache(
                 q,
@@ -239,48 +277,31 @@ class CausalSelfAttentionLayer(nn.Module):
                 v=v,
                 cache_seqlens=cache_seqlens,
                 softmax_scale=scale_factor,
-                causal=False,
-                num_splits=1,
+                causal=False,  # True or False doesn't matter because seqlen=1
+                rotary_cos=rotary_cos,
+                rotary_sin=rotary_sin,
+                rotary_interleaved=self.rotary_interleaved,
             )
-        elif k_cache is not None and len(q.shape) == 2:
-            # q, k, v = torch.split(qkv, (self.d * self.nq, self.d * self.nkv, self.d * self.nkv), dim=-1)
-            q = q.view(q.shape[0], self.nq, self.d)
-            v = v.view(v.shape[0], self.nkv, self.d)
-            k = k.view(k.shape[0], self.nkv, self.d)
-            # FIXME: The following code is crazily slow. We should implement them as a customized kernel?
-            qlens = cu_seqlens[1:] - cu_seqlens[:-1]
-            offset = 0
-            new_k, new_v = [], []
-            for i, (qlen, cache_len) in enumerate(zip(qlens, cache_seqlens)):
-                new_k += [k_cache[i, :cache_len], k[offset:offset + qlen]]
-                new_v += [v_cache[i, :cache_len], v[offset:offset + qlen]]
-                with torch.no_grad():
-                    k_cache[i, cache_len:cache_len + qlen] = k[offset:offset + qlen].detach()
-                    v_cache[i, cache_len:cache_len + qlen] = v[offset:offset + qlen].detach()
-                offset += qlen
-            k, v = torch.cat(new_k), torch.cat(new_v)
-            kv_seqlens = qlens + cache_seqlens
-            max_kv_seqlen = int(kv_seqlens.max())
-            kv_cu_seqlens = torch.cat([kv_seqlens.new_zeros(1), kv_seqlens.cumsum(0)])
-            hidden_states = flash_attn_varlen_func(
-                q,
-                k,
-                v,
-                cu_seqlens_q=cu_seqlens.int(),
-                cu_seqlens_k=kv_cu_seqlens.int(),
+        elif k_cache is not None and len(q.shape) == 3:
+            hidden_states = flash_attn_varlen_func_with_kvcache(
+                q=q,
+                cu_seqlens_q=cu_seqlens,
                 max_seqlen_q=int(max_seqlen),
-                max_seqlen_k=int(max_kv_seqlen),
-                dropout_p=0.0,
+                k_cache=k_cache,
+                v_cache=v_cache,
+                cache_seqlens=cache_seqlens,
+                k=k,
+                v=v,
+                cu_seqlens_k=cu_seqlens,
                 softmax_scale=scale_factor,
                 causal=True,
+                rotary_cos=rotary_cos,
+                rotary_sin=rotary_sin,
+                rotary_interleaved=self.rotary_interleaved,
             )
         elif cu_seqlens is not None:
             assert max_seqlen is not None
-            assert len(q.shape) == 2
-            # q, k, v = torch.split(qkv, (self.d * self.nq, self.d * self.nkv, self.d * self.nkv), dim=-1)
-            q = q.view(q.shape[0], self.nq, self.d)
-            v = v.view(v.shape[0], self.nkv, self.d)
-            k = k.view(k.shape[0], self.nkv, self.d)
+            assert len(q.shape) == 3
             hidden_states = flash_attn_varlen_func(
                 q,
                 k,
@@ -294,22 +315,20 @@ class CausalSelfAttentionLayer(nn.Module):
                 causal=True,
             )
         else:
-            # q, k, v = torch.split(qkv, (self.d * self.nq, self.d * self.nkv, self.d * self.nkv), dim=-1)
-            k = k.view(*k.shape[:2], self.nkv, self.d)
-            v = v.view(*v.shape[:2], self.nkv, self.d)
-            q = q.view(*q.shape[:2], self.nq, self.d)
-            hidden_states = flash_attn_func(q,
-                                            k,
-                                            v,
-                                            dropout_p=self.applied_attn_pdrop,
-                                            softmax_scale=scale_factor,
-                                            causal=True)
+            hidden_states = flash_attn_func(
+                q,
+                k,
+                v,
+                dropout_p=self.applied_attn_pdrop,
+                softmax_scale=scale_factor,
+                causal=True,
+            )
         hidden_states, _ = self.c_proj(hidden_states.flatten(start_dim=-2))
         hidden_states = self.resid_dropout(hidden_states)
         return hidden_states, k, v
 
 
-class FlashMQATBlock(nn.Module):
+class ParallelFlashMQATBlock(nn.Module):
 
     def __init__(
         self,
@@ -322,7 +341,7 @@ class FlashMQATBlock(nn.Module):
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
-        self.attn = CausalSelfAttentionLayer(
+        self.attn = ParallelCausalSelfAttentionLayer(
             hidden_dim=config.hidden_dim,
             n_kv_heads=config.n_kv_heads,
             head_dim=config.head_dim,
@@ -334,21 +353,35 @@ class FlashMQATBlock(nn.Module):
             dtype=dtype,
             device=device,
         )
-        self.mlp = LayerNormParallelMLP(
-            hidden_dim=config.hidden_dim,
-            intermediate_dim=config.intermediate_dim,
-            resid_pdrop=config.resid_pdrop,
-            activation_function=config.activation_function,
-            layer_norm_epsilon=config.layer_norm_epsilon,
-            dtype=dtype,
-            device=device,
-        )
+        if config.mlp_type is None:
+            self.mlp = LayerNormParallelMLP(
+                hidden_dim=config.hidden_dim,
+                intermediate_dim=config.intermediate_dim,
+                resid_pdrop=config.resid_pdrop,
+                activation_function=config.activation_function,
+                layer_norm_epsilon=config.layer_norm_epsilon,
+                dtype=dtype,
+                device=device,
+            )
+        elif config.mlp_type == "llama":
+            self.mlp = LlamaLayerNormParallelMLP(
+                hidden_dim=config.hidden_dim,
+                intermediate_dim=config.intermediate_dim,
+                activation_function=config.activation_function,
+                layer_norm_epsilon=config.layer_norm_epsilon,
+                dtype=dtype,
+                device=device,
+            )
         self.output_layernorm = output_layernorm
         if output_layernorm:
-            self.ln_f = nn.LayerNorm(config.hidden_dim,
-                                     eps=config.layer_norm_epsilon,
-                                     dtype=dtype,
-                                     device=device)
+            if config.layer_norm_type is None:
+                layer_norm_fn = nn.LayerNorm
+            elif config.layer_norm_type == "rms":
+                layer_norm_fn = LlamaRMSNorm
+            self.ln_f = layer_norm_fn(config.hidden_dim,
+                                      eps=config.layer_norm_epsilon,
+                                      dtype=dtype,
+                                      device=device)
 
         self.ckpt_attn = ckpt_attn
         self.ckpt_mlp = ckpt_mlp
@@ -402,7 +435,7 @@ class FlashMQATBlock(nn.Module):
         return x
 
 
-class FlashMQATBase(nn.Module):
+class ParallelFlashMQATBase(nn.Module):
 
     def __init__(
         self,
@@ -414,7 +447,7 @@ class FlashMQATBase(nn.Module):
         self.config = config
         self.dtype = dtype
         self.device = device
-        self.embedding_layer = VocabPositionEmbedding(
+        self.embedding_layer = ParallelVocabPositionEmbedding(
             config.vocab_size,
             config.n_positions,
             config.hidden_dim,
@@ -424,7 +457,7 @@ class FlashMQATBase(nn.Module):
             device=device,
         )
         self.h = nn.ModuleList([
-            FlashMQATBlock(
+            ParallelFlashMQATBlock(
                 config,
                 layer_index=i,
                 output_layernorm=(i == config.n_layers - 1),
@@ -457,3 +490,53 @@ class LanguageModelHead(nn.Linear):
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
         x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
         return x
+
+
+class ParallelFlashMQATForCausalLM(FlashMQATForCausalLM):
+
+    def __init__(
+        self,
+        config: FlashMQATConfig,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        super().__init__(config, dtype, device)
+        self.transformer = ParallelFlashMQATBase(config, dtype=dtype, device=device)  # overwrite
+
+    @staticmethod
+    def register_hf_model(
+        model_name: str,
+        config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
+        state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]],
+    ):
+        if model_name == "pretrained":
+            raise ValueError("model_name cannot be 'pretrained'.")
+        setattr(
+            ParallelFlashMQATForCausalLM,
+            f"from_{model_name}",
+            classmethod(
+                functools.partial(
+                    ParallelFlashMQATForCausalLM._from_hf_template,
+                    config_converter=config_converter,
+                    state_dict_converter=state_dict_converter,
+                )),
+        )
+        setattr(
+            ParallelFlashMQATForCausalLM,
+            f"config_from_{model_name}",
+            staticmethod(
+                functools.partial(
+                    ParallelFlashMQATForCausalLM._config_from_hf_template,
+                    config_converter=config_converter,
+                )),
+        )
+        setattr(
+            ParallelFlashMQATForCausalLM,
+            f"config_and_param_from_{model_name}",
+            staticmethod(
+                functools.partial(
+                    ParallelFlashMQATForCausalLM._config_and_param_from_hf_template,
+                    config_converter=config_converter,
+                    state_dict_converter=state_dict_converter,
+                )),
+        )

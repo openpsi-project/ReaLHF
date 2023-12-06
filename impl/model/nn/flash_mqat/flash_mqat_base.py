@@ -215,7 +215,6 @@ class CausalSelfAttentionLayer(nn.Module):
                 rotary_cos=rotary_cos,
                 rotary_sin=rotary_sin,
                 rotary_interleaved=self.rotary_interleaved,
-                # num_splits=1,
             )
         elif k_cache is not None and len(qkv.shape) == 2:
             hidden_states = flash_attn_varlen_func_with_kvcache(

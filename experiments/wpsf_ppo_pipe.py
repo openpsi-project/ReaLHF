@@ -170,7 +170,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
         rw_output_scaling = 0.1
         rw_output_bias = 0.0
 
-        batch_size_per_device = 2
+        batch_size = 4
         max_prompt_len = 1024
         max_answer_len = 1024
 
@@ -187,7 +187,7 @@ class PipeWpsfFlashPPOExperiment(Experiment):
             args=dict(
                 shuffle=True,
                 drop_last=True,
-                batch_size=batch_size_per_device,
+                batch_size=batch_size,
             ),
         )
         data_worker = [
