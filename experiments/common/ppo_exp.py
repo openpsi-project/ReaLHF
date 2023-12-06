@@ -178,6 +178,8 @@ class PPOExperiment(Experiment):
     offload_critic_optimizer_states: bool = False
     offload_ref: bool = False
     offload_reward: bool = False
+    actor_num_pipeline_micro_batches: Optional[int] = None
+    critic_num_pipeline_micro_batches: Optional[int] = None
 
     benchmark: bool = False
 
@@ -412,6 +414,7 @@ class PPOExperiment(Experiment):
                 offload_param=self.offload_actor_param,
                 offload_optimizer_state=self.offload_actor_optimizer_state,
                 enable_hybrid_engine=self.hybrid_engine,
+                num_pipeline_micro_batches=self.actor_num_pipeline_micro_batches,
             ),
         )
         # critic train backend
@@ -435,6 +438,7 @@ class PPOExperiment(Experiment):
                 engine_type="pipe" if self.critic_pp_size > 1 else "deepspeed",
                 offload_param=self.offload_critic_param,
                 offload_optimizer_state=self.offload_critic_optimizer_states,
+                num_pipeline_micro_batches=self.critic_num_pipeline_micro_batches,
             ),
         )
 
