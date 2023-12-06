@@ -1,14 +1,12 @@
-import experiments.chat_rlhf_exp
 import experiments.common.dpo_exp
 import experiments.common.ppo_exp
 import experiments.common.rw_exp
 import experiments.common.sft_exp
-import experiments.dpo_exp
-import experiments.opt_1g
-import experiments.opt_16g
+import experiments.benchmark.system.opt_1g
+import experiments.benchmark.system.opt_16g
 import experiments.packed_gen_score_exp
-import experiments.starcoder_16g
-import experiments.wps_rlhf_exp
-import experiments.wps_rw_exp
-import experiments.wpsf_ppo_pipe
-import experiments.wpsf_rw_exp
+import experiments.benchmark.system.starcoder_16g
+# NOTE: experiments using huggingface models are not activaly maintained
+# import experiments.huggingface.hf_dpo_exp
+# import experiments.huggingface.hf_ppo_exp
+# import experiments.huggingface.hf_rw_exp

@@ -34,8 +34,8 @@ class SFTExperiment(Experiment):
     max_seqlen: int = 1024
     train_tokens_per_batch: int = 16384
     valid_tokens_per_batch: int = 16384
-    train_dataset_path: str = "/lustre/meizy/data/wps-formula/train.json"
-    valid_dataset_path: str = "/lustre/meizy/data/wps-formula/valid.json"
+    train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/sft_pos-train.jsonl"
+    valid_dataset_path: str = "/lustre/fw/datasets/imdb/rl/sft_pos-valid.jsonl"
     # optimizer
     lr: float = 2.5e-4
     weight_decay: float = 0.05
