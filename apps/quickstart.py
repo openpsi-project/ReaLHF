@@ -307,8 +307,10 @@ class PPOConfig:
     save_freq: Optional[int] = 50
     seed: int = 42
     is_sft_lora: bool = False
+    is_sft_pipe: bool = False
     sft_lora_path: Optional[str] = None
     is_rew_lora: bool = False
+    is_rew_pipe:bool = False
     rew_lora_path: Optional[str] = None
     rew_head_path: Optional[str] = None
     actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
@@ -522,7 +524,7 @@ def run_rw(args: RWConfig):
         args.model.tokenizer_path = args.model.base_model_path
 
     if args.model.parallel.pipeline_parallel_size > 1:
-        logger.warning(
+        logger.critical(
             "Pipeline parallel is enabled when training the reward model. **This is usually unnecessary.** "
             "The reward model should not be large and using DeepSpeed ZeRO-2 data parallel is usually sufficient. "
             "If you insist in using PP, please ensure that (1) there are enough GPUs for your experiment "
@@ -638,10 +640,12 @@ def run_ppo(args: PPOConfig):
         save_freq_steps=args.save_freq,
         # sft lora
         is_sft_lora=args.is_sft_lora,
+        is_sft_pipe=args.is_sft_pipe,
         sft_base_model_type=args.actor.type,
         sft_lora_path=args.sft_lora_path,
         # rew lora
         is_rew_lora=args.is_rew_lora,
+        is_rew_pipe=args.is_rew_pipe,
         rew_base_model_type=args.critic.type,
         rew_lora_path=args.rew_lora_path,
         rew_head_path=args.rew_head_path,
