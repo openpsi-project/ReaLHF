@@ -31,6 +31,9 @@ RUN pip3 install -U transformers -i https://pypi.tuna.tsinghua.edu.cn/simple
 COPY flash_attn-2.3.6-cp310-cp310-linux_x86_64.whl /flash_attn-2.3.6-cp310-cp310-linux_x86_64.whl
 RUN pip3 uninstall flash_attn -y && pip3 install /flash_attn-2.3.6-cp310-cp310-linux_x86_64.whl
 
+COPY cugae-0.1.0-cp310-cp310-linux_x86_64.whl /cugae-0.1.0-cp310-cp310-linux_x86_64.whl
+RUN pip3 install /cugae-0.1.0-cp310-cp310-linux_x86_64.whl
+
 # install zmq with pgm
 # COPY ./zeromq-4.3.4.tar.gz /
 # WORKDIR /
