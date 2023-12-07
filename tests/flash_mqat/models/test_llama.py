@@ -33,10 +33,11 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
             dtype=torch.float16, device=device)
         cls.llama.eval()
 
-        cls.model = FlashMQATModel.from_llama(from_model=cls.llama, dtype=torch.float16, device=device)
-        cls.model.eval()
-        cls.hf_like_model = HuggingfaceLikeFlashMQATForCausalLM(cls.model)
-        cls.config = cls.model.config
+        cls.hf_like_model = HuggingfaceLikeFlashMQATForCausalLM.from_llama(from_model=cls.llama,
+                                                                           dtype=torch.float16,
+                                                                           device=device)
+        cls.hf_like_model.eval()
+        cls.config = cls.hf_like_model.config
 
     @torch.no_grad()
     def _hf_like_forward(self, with_mask: bool, seqlen: int):
@@ -83,7 +84,8 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
             eos_token_id=self.tokenizer.eos_token_id,
         )
 
-        new_tokens, *_ = generate(self.model, self.tokenizer, input_ids, attention_mask, gconfig=gconfig)
+        new_tokens = self.hf_like_model.generate(self.tokenizer, input_ids, attention_mask,
+                                                 gconfig=gconfig).sequences
 
         assert torch.allclose(seq[:, max_prompt_len:], new_tokens), (
             seq,

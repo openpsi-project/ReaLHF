@@ -36,6 +36,7 @@ class HuggingfaceLikeFlashMQATForCausalLM(FlashMQATModel):
         config: FlashMQATConfig,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
+        **kwargs,
     ):
         super().__init__(config, is_critic=False, dtype=dtype, device=device)
 
@@ -101,6 +102,7 @@ class DeepSpeedChatLikeFlashMQATCriticModel(FlashMQATModel):
         device: Optional[torch.device] = None,
         output_scaling: float = 1.0,
         output_bias: float = 0.0,
+        **kwargs,
     ):
         super().__init__(config, is_critic=True, dtype=dtype, device=device)
         self.output_scaling = output_scaling

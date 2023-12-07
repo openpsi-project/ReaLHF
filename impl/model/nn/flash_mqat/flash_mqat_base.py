@@ -685,7 +685,7 @@ class FlashMQATModel(nn.Module):
             init_from_scratch=init_from_scratch,
             force_load_from_hf_pretrained=force_load_from_hf_pretrained,
         )
-        model = cls(config, is_critic, dtype=dtype, device=device)
+        model = cls(config=config, is_critic=is_critic, dtype=dtype, device=device)
         if not init_from_scratch:
             if is_critic:
                 state_dict['head.weight'] = model.state_dict()['head.weight']
@@ -788,7 +788,7 @@ class FlashMQATModel(nn.Module):
         """
         with open(os.path.join(model_path, "config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
-        model = cls(config, is_critic, dtype, device)
+        model = cls(config=config, is_critic=is_critic, dtype=dtype, device=device)
         if not init_from_scratch:
             state_dict = load_from_disk(model_path)
             model.load_state_dict(state_dict)
@@ -808,7 +808,7 @@ class FlashMQATModel(nn.Module):
         """
         with open(os.path.join(model_path, "config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
-        model = cls(config, is_critic, dtype, device)
+        model = cls(config=config, is_critic=is_critic, dtype=dtype, device=device)
         state_dict = cls.from_pipe_state_dict(config, load_from_disk(model_path))
         model.load_state_dict(state_dict)
         return model
