@@ -1,10 +1,32 @@
-from typing import Dict
+from typing import Dict, Tuple
 
 import torch
 import transformers
 
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+
+"""
+Examples of loading from (registered) and dumping to HuggingFace models, e.g., starcoder:
+
+# Obtain the config
+config: FlashMQATConfig = FlashMQATModel.config_from_starcoder(model_path)
+
+# Obtain config and state_dict (also support init_from_scratch=True)
+config, state_dict = FlashMQATModel.config_and_param_from_starcoder(model_path)
+
+# Directly construct from HuggingFace model (also support init_from_scratch=True)
+model = FlashMQATModel.from_starcoder(model_path="/lustre/public/pretrained_model_weights/starcoder-16bit")
+
+# Dump to HuggingFace model
+model.dump_to_starcoder(save_path)
+
+# Use the dumped weights
+from impl.model.nn.utils.save_load import load_from_disk
+config = transformers.AutoConfig.from_pretrained(model_path)
+hf_model = transformers.AutoModelForCausalLM.from_config(config)
+hf_model.load_state_dict(load_from_disk(save_path), strict=False)  # because we may omit some buffer tensors
+"""
 
 ################################ StarCoder Begin ################################
 
@@ -25,37 +47,48 @@ def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig) ->
     )
 
 
-def convert_state_dict_starcoder(state_dict: Dict, config: FlashMQATConfig) -> Dict:
+def _starcoder_key_mapping_fn(config: FlashMQATConfig) -> Dict[str, str]:
+    key_mappings = {
+        "transformer.wte.weight": "transformer.embedding_layer.wte.weight",
+        "transformer.wpe.weight": "transformer.embedding_layer.wpe.weight",
+        "transformer.ln_f.weight": f"transformer.h.{config.n_layers-1}.ln_f.weight",
+        "transformer.ln_f.bias": f"transformer.h.{config.n_layers-1}.ln_f.bias",
+        "lm_head.weight": "head.weight",
+    }
+    for i in range(config.n_layers):
+        key_mappings[f"transformer.h.{i}.ln_1.weight"] = f"transformer.h.{i}.attn.c_attn.ln.weight"
+        key_mappings[f"transformer.h.{i}.ln_1.bias"] = f"transformer.h.{i}.attn.c_attn.ln.bias"
+        key_mappings[f"transformer.h.{i}.attn.c_attn.weight"] = f"transformer.h.{i}.attn.c_attn.linear.weight"
+        key_mappings[f"transformer.h.{i}.attn.c_attn.bias"] = f"transformer.h.{i}.attn.c_attn.linear.bias"
+        key_mappings[f"transformer.h.{i}.attn.c_proj.weight"] = f"transformer.h.{i}.attn.c_proj.weight"
+        key_mappings[f"transformer.h.{i}.attn.c_proj.bias"] = f"transformer.h.{i}.attn.c_proj.bias"
+        key_mappings[f"transformer.h.{i}.ln_2.weight"] = f"transformer.h.{i}.mlp.ln.weight"
+        key_mappings[f"transformer.h.{i}.ln_2.bias"] = f"transformer.h.{i}.mlp.ln.bias"
+        key_mappings[f"transformer.h.{i}.mlp.c_fc.weight"] = f"transformer.h.{i}.mlp.c_fc.weight"
+        key_mappings[f"transformer.h.{i}.mlp.c_fc.bias"] = f"transformer.h.{i}.mlp.c_fc.bias"
+        key_mappings[f"transformer.h.{i}.mlp.c_proj.weight"] = f"transformer.h.{i}.mlp.c_proj.weight"
+        key_mappings[f"transformer.h.{i}.mlp.c_proj.bias"] = f"transformer.h.{i}.mlp.c_proj.bias"
+    return key_mappings
+
+
+def state_dict_from_starcoder(state_dict, config):
+    key_mappings = _starcoder_key_mapping_fn(config)
     new_state_dict = {}
-    replace_from = [
-        ".wte",
-        ".wpe",
-        ".ln_1.",
-        ".ln_2.",
-        ".c_attn.weight",
-        ".c_attn.bias",
-        "transformer.ln_f.",
-        "lm_head",
-    ]
-    replace_to = [
-        ".embedding_layer.wte",
-        ".embedding_layer.wpe",
-        ".attn.c_attn.ln.",
-        ".mlp.ln.",
-        ".c_attn.linear.weight",
-        ".c_attn.linear.bias",
-        f"transformer.h.{config.n_layers - 1}.ln_f.",
-        "head",
-    ]
     for k, v in state_dict.items():
-        for rf, rt in zip(replace_from, replace_to):
-            if rf in k:
-                k = k.replace(rf, rt)
-        new_state_dict[k] = v
+        new_state_dict[key_mappings[k]] = v
     return new_state_dict
 
 
-FlashMQATModel.register_hf_model("starcoder", convert_config_starcoder, convert_state_dict_starcoder)
+def state_dict_to_starcoder(state_dict, config):
+    key_mappings = {v: k for k, v in _starcoder_key_mapping_fn(config).items()}
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        new_state_dict[key_mappings[k]] = v
+    return new_state_dict
+
+
+FlashMQATModel.register_hf_model("starcoder", convert_config_starcoder, state_dict_from_starcoder,
+                                 state_dict_to_starcoder)
 
 ################################ StarCoder End ################################
 
@@ -114,10 +147,50 @@ def gpt2_state_dict_converter(state_dict: Dict, config: FlashMQATConfig) -> Dict
         if k.endswith(".linear.weight") or k.endswith("proj.weight") or k.endswith("fc.weight"):
             v = v.transpose(0, 1)
         new_state_dict[k] = v
+    new_state_dict['head.weight'] = state_dict['transformer.wte.weight']
     return new_state_dict
 
 
-FlashMQATModel.register_hf_model("gpt2", gpt2_config_converter, gpt2_state_dict_converter)
+def state_dict_to_gpt2(state_dict, config):
+    replace_to = [
+        "wte.weight",
+        "wpe.weight",
+        ".ln_1.",
+        ".ln_2.",
+        ".c_attn.weight",
+        ".c_attn.bias",
+        "ln_f.weight",
+        "ln_f.bias",
+        "lm_head",
+    ]
+    replace_from = [
+        "embedding_layer.wte.weight",
+        "embedding_layer.wpe.weight",
+        ".attn.c_attn.ln.",
+        ".mlp.ln.",
+        ".c_attn.linear.weight",
+        ".c_attn.linear.bias",
+        f"h.{config.n_layers - 1}.ln_f.weight",
+        f"h.{config.n_layers - 1}.ln_f.bias",
+        "head",
+    ]
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        for rf, rt in zip(replace_from, replace_to):
+            if rf in k:
+                k = k.replace(rf, rt)
+        if k.endswith(".linear.weight") or k.endswith("proj.weight") or k.endswith("fc.weight") or k.endswith(
+                "c_attn.weight"):
+            v = v.transpose(0, 1)
+        new_state_dict[k] = v
+    return new_state_dict
+
+
+FlashMQATModel.register_hf_model("gpt2",
+                                 gpt2_config_converter,
+                                 gpt2_state_dict_converter,
+                                 state_dict_to_gpt2,
+                                 force_load_from_hf_pretrained=True)
 
 ################################ GPT2 End ################################
 
@@ -186,5 +259,41 @@ def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
     return new_state_dict
 
 
-FlashMQATModel.register_hf_model("llama", convert_config_llama, convert_state_dict_llama)
+def to_llama_state_dict(state_dict: Dict, config: FlashMQATConfig) -> Dict:
+    replace_pairs = [
+        ("model.", "transformer."),
+        (".embed_tokens.", ".embedding_layer.wte."),
+        (".layers.", ".h."),
+        (".self_attn.", ".attn."),
+        (".post_attention_layernorm.", ".mlp.ln."),
+        (".input_layernorm.", ".attn.c_attn.ln."),
+        ("attn.o_proj.", "attn.c_proj."),
+        (f".norm.", f".h.{config.n_layers - 1}.ln_f."),
+        ("lm_head", "head"),
+        (".input_layernorm.", ".self_attn.c_attn.ln."),
+        ("model.norm.weight", f"model.layers.{config.n_layers - 1}.ln_f.weight"),
+    ]
+    for k2, k1 in replace_pairs:
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if k1 in k:
+                k = k.replace(k1, k2)
+            new_state_dict[k] = v
+        state_dict = new_state_dict
+    print(list(state_dict.keys()))
+    for i in range(config.n_layers):
+        w = state_dict[f"model.layers.{i}.self_attn.c_attn.linear.weight"]
+        nq = config.hidden_dim // config.head_dim
+        q_proj_w = w[:nq * config.head_dim]
+        k_proj_w = w[nq * config.head_dim:(nq + config.n_kv_heads) * config.head_dim]
+        v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim:]
+        w = torch.cat([q_proj_w, k_proj_w, v_proj_w], dim=0)
+        state_dict[f"model.layers.{i}.self_attn.q_proj.weight"] = q_proj_w
+        state_dict[f"model.layers.{i}.self_attn.k_proj.weight"] = k_proj_w
+        state_dict[f"model.layers.{i}.self_attn.v_proj.weight"] = v_proj_w
+        state_dict.pop(f"model.layers.{i}.self_attn.c_attn.linear.weight")
+    return state_dict
+
+
+FlashMQATModel.register_hf_model("llama", convert_config_llama, convert_state_dict_llama, to_llama_state_dict)
 ################################ LLaMa End ################################

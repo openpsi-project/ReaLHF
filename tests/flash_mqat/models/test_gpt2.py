@@ -28,8 +28,8 @@ class FlashMQATGPT2Test(unittest.TestCase):
         cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
-        cls.gpt: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(model_path).to(
-            dtype=dtype, device=device)
+        cls.gpt: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
+            model_path).to(dtype=dtype, device=device)
         cls.gpt.eval()
 
         cls.model = FlashMQATModel.from_gpt2(model_path=model_path, dtype=dtype, device=device)

@@ -12,7 +12,7 @@ import transformers
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import torch_attn_func
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
-from impl.model.utils.save_load import load_from_disk
+from impl.model.utils.save_load import load_from_disk, save_to_disk
 import base.logging as logging
 
 try:
@@ -620,6 +620,7 @@ class FlashMQATModel(nn.Module):
         from_model: Optional[transformers.PreTrainedModel] = None,
         model_path: Optional[str] = None,
         init_from_scratch: bool = False,
+        force_load_from_hf_pretrained: bool = False,
     ) -> Tuple[FlashMQATConfig, Optional[Dict]]:
         if not init_from_scratch:
             assert state_dict_converter is not None
@@ -627,6 +628,9 @@ class FlashMQATModel(nn.Module):
         if model_path is not None:
             if init_from_scratch:
                 state_dict = None
+            elif force_load_from_hf_pretrained:
+                logger.warning(f"Force to load from HuggingFace PreTrainedModel...")
+                state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
             else:
                 try:
                     state_dict = load_from_disk(model_path)
@@ -636,6 +640,10 @@ class FlashMQATModel(nn.Module):
                                     "This will probably cause (CPU) OOM.")
                     state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
         else:
+            logger.warning(
+                f"Note that HuggingFace PreTrainedModel may have different state dict keys from the saved one. "
+                "Loading from HuggingFace `model_path` is ensured to be correct but the `from_model` argument may cause key mismatch."
+            )
             assert from_model is not None
             state_dict = from_model.state_dict() if not init_from_scratch else None
 
@@ -652,6 +660,7 @@ class FlashMQATModel(nn.Module):
         model_path: Optional[str] = None,
         init_from_scratch: bool = False,
         is_critic: bool = False,
+        force_load_from_hf_pretrained: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -661,6 +670,7 @@ class FlashMQATModel(nn.Module):
             from_model=from_model,
             model_path=model_path,
             init_from_scratch=init_from_scratch,
+            force_load_from_hf_pretrained=force_load_from_hf_pretrained,
         )
         model = cls(config, is_critic, dtype=dtype, device=device)
         if not init_from_scratch:
@@ -669,11 +679,16 @@ class FlashMQATModel(nn.Module):
             model.load_state_dict(state_dict)
         return model
 
+    def _to_hf_template(self, output_dir, state_dict_converter_to_hf):
+        save_to_disk(state_dict_converter_to_hf(self.state_dict(), self.config), output_dir)
+
     @staticmethod
     def register_hf_model(
         model_name: str,
         config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
-        state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]],
+        state_dict_converter: Callable[[Dict, FlashMQATConfig], Dict],
+        state_dict_converter_to_hf: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None,
+        force_load_from_hf_pretrained: bool = False,
     ):
         if model_name == "pretrained":
             raise ValueError("model_name cannot be 'pretrained'.")
@@ -685,6 +700,7 @@ class FlashMQATModel(nn.Module):
                     FlashMQATModel._from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
+                    force_load_from_hf_pretrained=force_load_from_hf_pretrained,
                 )),
         )
         setattr(
@@ -704,8 +720,14 @@ class FlashMQATModel(nn.Module):
                     FlashMQATModel._config_and_param_from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
+                    force_load_from_hf_pretrained=force_load_from_hf_pretrained,
                 )),
         )
+        if state_dict_converter_to_hf:
+            setattr(
+                FlashMQATModel, f"dump_to_{model_name}",
+                functools.partialmethod(FlashMQATModel._to_hf_template,
+                                        state_dict_converter_to_hf=state_dict_converter_to_hf))
 
     @classmethod
     def from_pretrained(
