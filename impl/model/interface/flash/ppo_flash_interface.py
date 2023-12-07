@@ -11,7 +11,7 @@ from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.backend.pipe_engine.stream_pipe_engine import StreamPipeEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.utils.functional import gather_packed_shifted_log_probs
+from impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
 from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
 import api.huggingface
 import api.model
@@ -31,15 +31,10 @@ def _ppo_actor_loss_from_model_outputs(
     packed_input_ids: torch.LongTensor,  # [tot_seqlen]
     cu_seqlens: torch.LongTensor,  # [bs+1]
     old_logp: torch.FloatTensor,  # [tot_seqlen-bs]
-    ref_logp: torch.FloatTensor,  # [tot_seqlen-bs]
-    reward_score: torch.FloatTensor,  # [bs]
-    values: torch.FloatTensor,  # [tot_seqlen]
-    prompt_mask: torch.FloatTensor,  # [tot_seqlen]
-    seq_no_eos_mask: torch.FloatTensor,  # [bs]
+    ppo_loss_mask: torch.FloatTensor,  # [tot_seqlen-bs]
+    advantages: torch.FloatTensor,  # [tot_seqlen-bs]
+    kl_rewards: torch.FloatTensor,  # [tot_seqlen-bs]
     kl_adapter: ppo_functional.KLController,  # const
-    max_reward_clip: int,  # const
-    discount: int,  # const
-    gae_lambda: int,  # const
     eps_clip: int,  # const
     early_stop_imp_ratio: Optional[float],  # const
     early_stop_kl: Optional[float],  # const
@@ -49,56 +44,23 @@ def _ppo_actor_loss_from_model_outputs(
     """Loss function for ppo actor step, all inputs should be splitted into pipeline micro batches,
     returns loss and logging stats.
     """
-    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-    short1cu_seqlens = cu_seqlens.clone()
-    short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
-
     if logits_mask is not None:
         logits.masked_fill_(logits_mask.logical_not(), torch.finfo(logits.dtype).min)
     new_logp = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
 
-    loss_mask = 1 - prompt_mask.float()
-    shift_one_indices = torch.cat([
-        torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
-        for i in range(cu_seqlens.shape[0] - 1)
-    ])
-    loss_mask = loss_mask[shift_one_indices]
-
-    ref_logp *= loss_mask
-    old_logp *= loss_mask
-
-    new_logp = new_logp * loss_mask
-
-    kl_rewards, rewards = ppo_functional.get_packed_rewards(
-        kl_ctl=kl_adapter.value,
-        clip_reward_value=max_reward_clip,
-        log_probs=old_logp,
-        ref_log_probs=ref_logp,
-        reward_score=reward_score,
-        short1cu_seqlens=short1cu_seqlens,
-        seq_no_eos_mask=seq_no_eos_mask,
-    )
-
-    advantages, _ = ppo_functional.get_packed_advantages_and_returns(
-        gamma=discount,
-        lam=gae_lambda,
-        values=values,
-        rewards=rewards,
-        short1cu_seqlens=short1cu_seqlens,
-        seq_no_eos_mask=seq_no_eos_mask,
-    )
+    new_logp = new_logp * ppo_loss_mask
 
     loss, loss_stat = ppo_functional.actor_loss_fn(
         logprobs=new_logp,
         old_logprobs=old_logp,
         advantages=advantages,
         eps_clip=eps_clip,
-        loss_mask=loss_mask,
+        loss_mask=ppo_loss_mask,
     )
 
-    mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
-    # HACK: we don't consider data parallel here
-    kl_adapter.update(mean_ref_kl, n_steps=input_lens.sum().item())
+    mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
+    mean_ref_kl = api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
+    kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
     importance_weight = loss_stat["importance_weight"]
     clip_ratio = loss_stat["clip_ratio"]
@@ -107,14 +69,11 @@ def _ppo_actor_loss_from_model_outputs(
                        f"than early stop threshold {early_stop_imp_ratio}. Abandon this minibatch.")
         loss = loss * 0.0
 
-    approx_kl = ((old_logp - new_logp).detach() * loss_mask).sum() / loss_mask.sum()
+    approx_kl = ((old_logp - new_logp).detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
 
     stats = dict(
-        task_reward=reward_score.mean().detach(),
-        kl_reward=(kl_rewards.detach() * loss_mask).sum().mean(),
         ppo_approx_kl=approx_kl,
         cur_kl_ctl=torch.tensor(kl_adapter.value).to(approx_kl),
-        advantage=advantages.mean().detach(),
         actor_loss=loss.detach(),
         actor_clip_ratio=clip_ratio,
         importance_weight=importance_weight,
@@ -140,6 +99,7 @@ class PackedActorInterface(api.model.ModelInterface):
 
     kl_ctl: float = 0.1
 
+    adv_norm: bool = True
     discount: float = 1.0
     gae_lambda: float = 1.0
 
@@ -296,8 +256,8 @@ class PackedActorInterface(api.model.ModelInterface):
             res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
             logits = res.logits.float()
 
-        if 'packed_logits_mask' in data and data['packed_logits_mask'] is not None:
-            packed_logits_mask = data['packed_logits_mask']
+        if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
+            packed_logits_mask = data["packed_logits_mask"]
             logits.masked_fill_(packed_logits_mask.logical_not(), torch.finfo(logits.dtype).min)
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         return from_dict(dict(logprobs=logprobs.cpu()))
@@ -308,6 +268,65 @@ class PackedActorInterface(api.model.ModelInterface):
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
         data_ = recursive_apply(data_, lambda x: x.to(model.device))
+
+        old_logp = data_["packed_logprobs"]
+        ref_logp = data_["packed_ref_logprobs"]
+        prompt_mask = data_["prompt_mask"]
+        cu_seqlens = data_["cu_seqlens"]
+        reward_score = data_["rewards"]
+        values = data_["values"]
+        seq_no_eos_mask = data_["seq_no_eos_mask"]
+
+        input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+        short1cu_seqlens = cu_seqlens.clone()
+        short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
+        loss_mask = 1 - prompt_mask.float()
+        shift_one_indices = torch.cat([
+            torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
+            for i in range(cu_seqlens.shape[0] - 1)
+        ])
+        loss_mask = loss_mask[shift_one_indices]
+
+        ref_logp *= loss_mask
+        old_logp *= loss_mask
+
+        kl_rewards, rewards = ppo_functional.get_packed_rewards(
+            kl_ctl=self.kl_adapter.value,
+            clip_reward_value=self.max_reward_clip,
+            log_probs=old_logp,
+            ref_log_probs=ref_logp,
+            reward_score=reward_score,
+            short1cu_seqlens=short1cu_seqlens,
+            seq_no_eos_mask=seq_no_eos_mask,
+        )
+        advantages, _ = ppo_functional.get_packed_advantages_and_returns(
+            gamma=self.discount,
+            lam=self.gae_lambda,
+            values=values,
+            rewards=rewards,
+            short1cu_seqlens=short1cu_seqlens,
+            seq_no_eos_mask=seq_no_eos_mask,
+        )
+
+        global_stats = dict(
+            task_reward=reward_score.mean().detach(),
+            kl_reward=(kl_rewards.detach() * loss_mask).sum().mean(),
+            advantage=advantages.mean().detach(),
+        )
+
+        if self.adv_norm:
+            advantages = masked_normalization(advantages, loss_mask)
+
+        data_ = from_dict(
+            dict(
+                advantages=advantages,
+                old_logp=old_logp,
+                ppo_loss_mask=loss_mask,
+                packed_seq=data_["packed_seq"],
+                cu_seqlens=data_["cu_seqlens"],
+                kl_rewards=kl_rewards,
+                logits_mask=data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None,
+            ))
 
         datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
@@ -320,16 +339,11 @@ class PackedActorInterface(api.model.ModelInterface):
                 module.set_version_steps(model.version.global_step)
                 loss_fn_kwargs = dict(
                     input_lens=input_lens,  # used for partition
-                    old_logp=data["packed_logprobs"],
-                    ref_logp=data["packed_ref_logprobs"],
-                    reward_score=data["rewards"],
-                    values=data["values"],
-                    prompt_mask=data["prompt_mask"],
-                    seq_no_eos_mask=data["seq_no_eos_mask"],
+                    old_logp=data["old_logp"],
+                    ppo_loss_mask=data["ppo_loss_mask"],
+                    advantages=data["advantages"],
+                    kl_rewards=data["kl_rewards"],
                     kl_adapter=self.kl_adapter,
-                    max_reward_clip=self.max_reward_clip,
-                    discount=self.discount,
-                    gae_lambda=self.gae_lambda,
                     eps_clip=self.eps_clip,
                     early_stop_imp_ratio=self.early_stop_imp_ratio,
                     early_stop_kl=self.early_stop_kl,
@@ -353,16 +367,11 @@ class PackedActorInterface(api.model.ModelInterface):
                     logits=output,
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=cu_seqlens,
-                    old_logp=data["packed_logprobs"],
-                    ref_logp=data["packed_ref_logprobs"],
-                    reward_score=data["rewards"],
-                    values=data["values"],
-                    prompt_mask=data["prompt_mask"],
-                    seq_no_eos_mask=data["seq_no_eos_mask"],
+                    old_logp=data["old_logp"],
+                    ppo_loss_mask=data["ppo_loss_mask"],
+                    advantages=data["advantages"],
+                    kl_rewards=data["kl_rewards"],
                     kl_adapter=self.kl_adapter,
-                    max_reward_clip=self.max_reward_clip,
-                    discount=self.discount,
-                    gae_lambda=self.gae_lambda,
                     eps_clip=self.eps_clip,
                     early_stop_imp_ratio=self.early_stop_imp_ratio,
                     early_stop_kl=self.early_stop_kl,
@@ -382,7 +391,7 @@ class PackedActorInterface(api.model.ModelInterface):
             module.tput_timer.update_epoch_count()
 
         if train_stats:
-            train_stats: Dict[str, torch.Tensor] = dict(train_stats)
+            train_stats: Dict[str, torch.Tensor] = dict(train_stats, **global_stats)
             for k, v in train_stats.items():
                 v = v.detach() / self.n_minibatches
                 train_stats[k] = api.huggingface.get_all_reduce_mean(v, group=data_parallel_group()).item()
@@ -394,71 +403,32 @@ def _ppo_critic_loss_from_model_outputs(
     new_values: torch.FloatTensor,
     packed_input_ids: torch.LongTensor,
     cu_seqlens: torch.LongTensor,
-    old_logp: torch.FloatTensor,
-    ref_logp: torch.FloatTensor,
-    reward_score: torch.FloatTensor,
     values: torch.FloatTensor,
-    prompt_mask: torch.FloatTensor,
-    seq_no_eos_mask: torch.FloatTensor,
+    ppo_loss_mask: torch.FloatTensor,
+    returns: torch.FloatTensor,
+    kl_rewards: torch.FloatTensor,
     value_eps_clip: float,
-    max_reward_clip: float,
     kl_adapter: ppo_functional.KLController,
-    discount: float,
-    gae_lambda: float,
     **kwargs,
 ) -> Tuple[torch.FloatTensor, Dict]:
-    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-    short1cu_seqlens = cu_seqlens.clone()
-    short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
-
-    loss_mask = 1 - prompt_mask.float()
-    shift_one_indices = torch.cat([
-        torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
-        for i in range(cu_seqlens.shape[0] - 1)
-    ])
-    loss_mask = loss_mask[shift_one_indices]
-
-    old_logp *= loss_mask
-    ref_logp *= loss_mask
-
-    kl_rewards, rewards = ppo_functional.get_packed_rewards(
-        kl_ctl=kl_adapter.value,
-        clip_reward_value=max_reward_clip,
-        log_probs=old_logp,
-        ref_log_probs=ref_logp,
-        reward_score=reward_score,
-        short1cu_seqlens=short1cu_seqlens,
-        seq_no_eos_mask=seq_no_eos_mask,
-    )
-
-    _, returns = ppo_functional.get_packed_advantages_and_returns(
-        gamma=discount,
-        lam=gae_lambda,
-        values=values,
-        rewards=rewards,
-        short1cu_seqlens=short1cu_seqlens,
-        seq_no_eos_mask=seq_no_eos_mask,
-    )
-
     leave_one_indices = torch.cat([
         torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
         for i in range(cu_seqlens.shape[0] - 1)
     ])
-    new_values = new_values[leave_one_indices]
-    values = values[leave_one_indices]
+    new_values = new_values[leave_one_indices].squeeze(-1)
+    values = values[leave_one_indices].squeeze(-1)
 
     loss, loss_stat = ppo_functional.critic_loss_fn(
         value=new_values,
         old_value=values,
         target_value=returns,
         value_eps_clip=value_eps_clip,
-        loss_mask=loss_mask,
+        loss_mask=ppo_loss_mask,
     )
 
-    mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
-
-    # HACK: we don't consider data parallel here
-    kl_adapter.update(mean_ref_kl, n_steps=input_lens.sum().item())
+    mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
+    mean_ref_kl = api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
+    kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
     clip_ratio = loss_stat["clip_ratio"]
 
@@ -466,7 +436,6 @@ def _ppo_critic_loss_from_model_outputs(
         value_loss=loss.detach(),
         value_clip_ratio=clip_ratio,
         values=new_values.mean().detach(),
-        returns=returns.mean().detach(),
     )
 
 
@@ -475,6 +444,7 @@ class PackedCriticInterface(api.model.ModelInterface):
     n_minibatches: int = 4
     enable_save: bool = True
     kl_ctl: float = 0.1
+    adv_norm: bool = False
     discount: float = 1.0
     gae_lambda: float = 0.95
     eps_clip: float = 0.2
@@ -520,7 +490,7 @@ class PackedCriticInterface(api.model.ModelInterface):
             scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
                                                cu_seqlens=cu_seqlens,
                                                max_seqlen=max_seqlen)
-        scores = scores.float()
+        scores = scores.float().squeeze(-1)
 
         seq_no_eos_mask = data["seq_no_eos_mask"]
         for i in range(seq_no_eos_mask.shape[0]):
@@ -536,10 +506,64 @@ class PackedCriticInterface(api.model.ModelInterface):
         module.eval()
         data_ = recursive_apply(data_, lambda x: x.to(model.device))
 
+        old_logp = data_["packed_logprobs"]
+        ref_logp = data_["packed_ref_logprobs"]
+        prompt_mask = data_["prompt_mask"]
+        cu_seqlens = data_["cu_seqlens"]
+        reward_score = data_["rewards"]
+        values = data_["values"]
+        seq_no_eos_mask = data_["seq_no_eos_mask"]
+
+        input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+        short1cu_seqlens = cu_seqlens.clone()
+        short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
+
+        loss_mask = 1 - prompt_mask.float()
+        shift_one_indices = torch.cat([
+            torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
+            for i in range(cu_seqlens.shape[0] - 1)
+        ])
+        loss_mask = loss_mask[shift_one_indices]
+
+        old_logp *= loss_mask
+        ref_logp *= loss_mask
+
+        kl_rewards, rewards = ppo_functional.get_packed_rewards(
+            kl_ctl=self.kl_adapter.value,
+            clip_reward_value=self.max_reward_clip,
+            log_probs=old_logp,
+            ref_log_probs=ref_logp,
+            reward_score=reward_score,
+            short1cu_seqlens=short1cu_seqlens,
+            seq_no_eos_mask=seq_no_eos_mask,
+        )
+
+        _, returns = ppo_functional.get_packed_advantages_and_returns(
+            gamma=self.discount,
+            lam=self.gae_lambda,
+            values=values,
+            rewards=rewards,
+            short1cu_seqlens=short1cu_seqlens,
+            seq_no_eos_mask=seq_no_eos_mask,
+        )
+
+        global_stats = dict(returns=returns.mean().detach())
+
+        if self.adv_norm:
+            advantages = masked_normalization(advantages, loss_mask)
+        data_ = from_dict(
+            dict(
+                returns=returns,
+                values=values,
+                ppo_loss_mask=loss_mask,
+                kl_rewards=kl_rewards,
+                packed_seq=data_["packed_seq"],
+                cu_seqlens=data_["cu_seqlens"],
+            ))
+
         datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
-
         for data in datas:
             input_lens = data["cu_seqlens"][1:] - data["cu_seqlens"][:-1]
             if isinstance(module, DeepSpeedPipelineEngine):
@@ -548,17 +572,12 @@ class PackedCriticInterface(api.model.ModelInterface):
 
                 loss_kwargs = dict(
                     input_lens=input_lens,
-                    old_logp=data["packed_logprobs"],
-                    ref_logp=data["packed_ref_logprobs"],
-                    reward_score=data["rewards"],
                     values=data["values"],
-                    prompt_mask=data["prompt_mask"],
-                    seq_no_eos_mask=data["seq_no_eos_mask"],
+                    ppo_loss_mask=data["ppo_loss_mask"],
+                    returns=data["returns"],
+                    kl_rewards=data["kl_rewards"],
                     value_eps_clip=self.value_eps_clip,
-                    max_reward_clip=self.max_reward_clip,
                     kl_adapter=self.kl_adapter,
-                    discount=self.discount,
-                    gae_lambda=self.gae_lambda,
                 )
 
                 loss, stats = module.train_batch(
@@ -577,17 +596,12 @@ class PackedCriticInterface(api.model.ModelInterface):
                     new_values=new_values,
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=data["cu_seqlens"],
-                    old_logp=data["packed_logprobs"],
-                    ref_logp=data["packed_ref_logprobs"],
-                    reward_score=data["rewards"],
                     values=data["values"],
-                    prompt_mask=data["prompt_mask"],
-                    seq_no_eos_mask=data["seq_no_eos_mask"],
+                    ppo_loss_mask=data["ppo_loss_mask"],
+                    returns=data["returns"],
+                    kl_rewards=data["kl_rewards"],
                     value_eps_clip=self.value_eps_clip,
-                    max_reward_clip=self.max_reward_clip,
                     kl_adapter=self.kl_adapter,
-                    discount=self.discount,
-                    gae_lambda=self.gae_lambda,
                 )
 
                 module.backward(loss)
@@ -603,7 +617,7 @@ class PackedCriticInterface(api.model.ModelInterface):
             module.tput_timer.update_epoch_count()
 
         if train_stats:
-            train_stats: Dict[str, torch.Tensor] = dict(train_stats)
+            train_stats: Dict[str, torch.Tensor] = dict(train_stats, **global_stats)
             for k, v in train_stats.items():
                 v = v.detach() / self.n_minibatches
                 train_stats[k] = api.huggingface.get_all_reduce_mean(v, group=data_parallel_group()).item()

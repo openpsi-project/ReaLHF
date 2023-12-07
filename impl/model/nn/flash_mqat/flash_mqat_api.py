@@ -100,13 +100,9 @@ class DeepSpeedChatLikeFlashMQATCriticModel(FlashMQATModel):
         config: FlashMQATConfig,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
-        output_scaling: float = 1.0,
-        output_bias: float = 0.0,
         **kwargs,
     ):
         super().__init__(config, is_critic=True, dtype=dtype, device=device)
-        self.output_scaling = output_scaling
-        self.output_bias = output_bias
 
     def forward(
         self,
@@ -133,7 +129,7 @@ class DeepSpeedChatLikeFlashMQATCriticModel(FlashMQATModel):
         scores = FlashMQATModel.forward(self, x, ys).pp_output
         if build_packed:
             scores = pad_input(scores, indices, batch_size, seqlen)
-        return (scores.squeeze(-1) - self.output_bias) * self.output_scaling
+        return scores
 
 
 def make_flash_model(
@@ -146,8 +142,6 @@ def make_flash_model(
     tokenizer_path: Optional[str] = None,
     init_from_scratch: bool = False,
     v_head_path: Optional[str] = None,
-    output_scaling: Optional[float] = None,
-    output_bias: Optional[float] = None,
 ) -> api.model.Model:
     is_critic = module_cls == DeepSpeedChatLikeFlashMQATCriticModel
     if from_type == "self":
@@ -183,8 +177,6 @@ def make_flash_model(
             config,
             dtype=dtype,
             device=device,
-            output_scaling=output_scaling,
-            output_bias=output_bias,
         )
         if not init_from_scratch:
             state_dict = load_from_disk(model_path)
@@ -203,9 +195,6 @@ def make_flash_model(
         net.forward = functools.partial(module_cls.forward, net)
         if hasattr(module_cls, "generate"):
             net.generate = functools.partial(module_cls.generate, net)
-        if is_critic:
-            net.output_scaling = output_scaling
-            net.output_bias = output_bias
     if v_head_path is not None and not init_from_scratch:
         net.head.load_state_dict(torch.load(v_head_path, map_location="cpu"))
     return api.model.Model(name, net, tokenizer, device)

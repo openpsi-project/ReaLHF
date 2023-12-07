@@ -342,6 +342,7 @@ class PPOConfig:
     temperature: float = 1.0
     ppo_n_minibatches: int = 4
     kl_ctl: float = 0.1
+    adv_norm: bool = False
     discount: float = 1.0
     gae_lambda: float = 1.0
     eps_clip: float = 0.2
@@ -711,6 +712,7 @@ def run_ppo(args: PPOConfig):
         temperature=args.temperature,
         ppo_n_minibatches=args.ppo_n_minibatches,
         kl_ctl=args.kl_ctl,
+        adv_norm=args.adv_norm,
         discount=args.discount,
         gae_lambda=args.gae_lambda,
         eps_clip=args.eps_clip,

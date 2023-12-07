@@ -20,8 +20,6 @@ def get_flash_mqat_model_config(
     init_from_scratch: bool = False,
     init_critic_from_actor: bool = False,
     v_head_path: Optional[str] = None,
-    reward_scaling: float = 1.0,
-    reward_bias: float = 0.0,
 ):
     model = Model(
         "flash_mqat_actor" if not is_critic else "flash_mqat_critic",
@@ -34,9 +32,6 @@ def get_flash_mqat_model_config(
     )
     if is_critic:
         model.args["v_head_path"] = v_head_path
-        model.args["output_scaling"] = reward_scaling
-        model.args["output_bias"] = reward_bias
-
     if is_sft_lora:
         model.wrappers += [
             ModelWrapper(
