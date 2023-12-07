@@ -6,6 +6,7 @@ import math
 import deepspeed
 import torch
 
+from base.constants import data_parallel_world_size
 from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
 import api.model
 import base.deepspeed_utils as deepspeed_utils
@@ -22,7 +23,6 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     lr_scheduler_type: str = 'cosine'
     warmup_steps_proportion: float = 0.0
     min_lr_ratio: float = 0.0  # will be used for linear and cosine schedule
-    gradient_accumulation_steps: int = 1
     gradient_checkpointing: bool = False
     offload_param: bool = False
     offload_optimizer_state: bool = False
@@ -86,8 +86,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
         )
 
         ds_config['train_micro_batch_size_per_gpu'] = spec.batch_size_per_device
-        ds_config['train_batch_size'] = (spec.batch_size_per_device * torch.distributed.get_world_size() *
-                                         self.gradient_accumulation_steps) // self.num_pipeline_stages
+        ds_config['train_batch_size'] = spec.batch_size_per_device * data_parallel_world_size()
 
         def warmup_then_cosine_anneal(step, warmup_steps_proportion, total_steps, min_lr_ratio):
             warmup_steps = max(5, int(total_steps * warmup_steps_proportion))

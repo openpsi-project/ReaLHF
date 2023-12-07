@@ -31,6 +31,10 @@ if __name__ == "__main__":
             layer_idx = int(k.split(".")[2])
             if layer_idx < NUM_SHRINKED_LAYERS:
                 new_state_dict[k] = state_dict[k]
+        elif k.startswith("h."):
+            layer_idx = int(k.split(".")[1])
+            if layer_idx < NUM_SHRINKED_LAYERS:
+                new_state_dict[k] = state_dict[k]
         else:
             new_state_dict[k] = state_dict[k]
 
@@ -39,7 +43,7 @@ if __name__ == "__main__":
 
     os.makedirs(SAVE_PATH, exist_ok=True)
     copy_configs(LOAD_PATH, SAVE_PATH)
-    save_to_disk(new_state_dict, SAVE_PATH, save_type='st', n_shards=1, no_shard_suffix=True)
+    save_to_disk(new_state_dict, SAVE_PATH, save_type='pt', n_shards=1, no_shard_suffix=True)
 
     config = json.load(open(os.path.join(LOAD_PATH, "config.json"), "r"))
     # for starcoder
@@ -48,3 +52,4 @@ if __name__ == "__main__":
     elif "num_hidden_layers" in config:
         config["num_hidden_layers"] = NUM_SHRINKED_LAYERS
     json.dump(config, open(os.path.join(SAVE_PATH, "config.json"), "w"))
+    os.system("chmod -R 775 " + SAVE_PATH)

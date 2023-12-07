@@ -54,6 +54,8 @@ class PairedRWExperiment(Experiment):
     min_lr_ratio: float = 0.0
     zero_stage: int = 2
 
+    num_pipeline_micro_batches: Optional[int] = None
+
     def __post_init__(self):
         if self.pp_size < 1 or self.dp_size < 1:
             raise ValueError("pp_size and dp_size must be positive integers.")
@@ -134,6 +136,7 @@ class PairedRWExperiment(Experiment):
                 gradient_checkpointing=self.gradient_checkpointing,
                 num_pipeline_stages=self.pp_size,
                 engine_type="pipe" if self.pp_size > 1 else "deepspeed",
+                num_pipeline_micro_batches=self.num_pipeline_micro_batches,
             ),
         )
 

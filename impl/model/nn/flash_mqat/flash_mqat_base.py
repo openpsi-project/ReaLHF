@@ -12,7 +12,7 @@ import transformers
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import torch_attn_func
 from impl.model.utils.modules import LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
-from impl.model.utils.save_load import load_from_disk
+from impl.model.utils.save_load import load_from_disk, save_to_disk
 import base.logging as logging
 
 try:
@@ -568,7 +568,13 @@ class FlashMQATModel(nn.Module):
         return x
 
     @staticmethod
-    def map_to_pipe_state_dict(config: FlashMQATConfig, state_dict: Dict):
+    def map_to_pipe_state_dict(config: FlashMQATConfig, state_dict: Dict) -> Dict:
+        """Map a FlashMQAT state dict to a state dict for the pipeline module.
+        
+        Note that pipeline module assumes a special state dict key format that
+        every key starts with a f"{layer_idx}." prefix, which is different from
+        the default keys of self.state_dict().
+        """
         pipe_state_dict = {}
         for k, v in state_dict.items():
             if k.startswith("transformer.embedding_layer."):
@@ -585,6 +591,8 @@ class FlashMQATModel(nn.Module):
 
     @staticmethod
     def from_pipe_state_dict(config: FlashMQATConfig, pipe_state_dict: Dict):
+        """The reverse function of map_to_pipe_state_dict.
+        """
         state_dict = {}
         for k, v in pipe_state_dict.items():
             if k.startswith("0."):
@@ -598,9 +606,12 @@ class FlashMQATModel(nn.Module):
         return state_dict
 
     def pipe_state_dict(self):
+        """Get a loadable state dict for the pipeline module.
+        """
         state_dict = self.state_dict()
         return FlashMQATModel.map_to_pipe_state_dict(self.config, state_dict)
 
+    # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
     def _config_from_hf_template(
         config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
         from_model: Optional[transformers.PreTrainedModel] = None,
@@ -613,12 +624,14 @@ class FlashMQATModel(nn.Module):
             hf_config = from_model.config
         return config_converter(hf_config)
 
+    # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
     def _config_and_param_from_hf_template(
         config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
         state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None,
         from_model: Optional[transformers.PreTrainedModel] = None,
         model_path: Optional[str] = None,
         init_from_scratch: bool = False,
+        force_load_from_hf_pretrained: bool = False,
     ) -> Tuple[FlashMQATConfig, Optional[Dict]]:
         if not init_from_scratch:
             assert state_dict_converter is not None
@@ -626,6 +639,9 @@ class FlashMQATModel(nn.Module):
         if model_path is not None:
             if init_from_scratch:
                 state_dict = None
+            elif force_load_from_hf_pretrained:
+                logger.warning(f"Force to load from HuggingFace PreTrainedModel...")
+                state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
             else:
                 try:
                     state_dict = load_from_disk(model_path)
@@ -635,6 +651,10 @@ class FlashMQATModel(nn.Module):
                                     "This will probably cause (CPU) OOM.")
                     state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
         else:
+            logger.warning(
+                f"Note that HuggingFace PreTrainedModel may have different state dict keys from the saved one. "
+                "Loading from HuggingFace `model_path` is ensured to be correct but the `from_model` argument may cause key mismatch."
+            )
             assert from_model is not None
             state_dict = from_model.state_dict() if not init_from_scratch else None
 
@@ -643,6 +663,7 @@ class FlashMQATModel(nn.Module):
 
         return config, state_dict
 
+    # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
     def _from_hf_template(
         cls,
         config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
@@ -651,6 +672,7 @@ class FlashMQATModel(nn.Module):
         model_path: Optional[str] = None,
         init_from_scratch: bool = False,
         is_critic: bool = False,
+        force_load_from_hf_pretrained: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -660,6 +682,7 @@ class FlashMQATModel(nn.Module):
             from_model=from_model,
             model_path=model_path,
             init_from_scratch=init_from_scratch,
+            force_load_from_hf_pretrained=force_load_from_hf_pretrained,
         )
         model = cls(config, is_critic, dtype=dtype, device=device)
         if not init_from_scratch:
@@ -668,12 +691,50 @@ class FlashMQATModel(nn.Module):
             model.load_state_dict(state_dict)
         return model
 
+    # Template function used for FlashMQAT to HF models, similar to C++ template but is ugly in python.
+    def _to_hf_template(self, output_dir, state_dict_converter_to_hf):
+        save_to_disk(state_dict_converter_to_hf(self.state_dict(), self.config), output_dir)
+
     @staticmethod
     def register_hf_model(
         model_name: str,
         config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
-        state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]],
+        state_dict_converter: Callable[[Dict, FlashMQATConfig], Dict],
+        state_dict_converter_to_hf: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None,
+        force_load_from_hf_pretrained: bool = False,
     ):
+        """Register a HuggingFace model with `model_name`, such that models can be converted back-and-forth.
+        
+        Example usage:
+        
+        ```
+        # 1. Register a model called `starcoder` with helper functions.
+        # Check `impl/model/nn/flash_mqat/flash_from_hf_impl.py` for details.
+        FlashMQATModel.register_hf_model("starcoder",
+                                         convert_config_starcoder, 
+                                         state_dict_from_starcoder,
+                                         state_dict_to_starcoder)
+        
+        # 2. Obtain the config
+        config: FlashMQATConfig = FlashMQATModel.config_from_starcoder(model_path)
+
+        # 3. Obtain config and state_dict (also support init_from_scratch=True)
+        config, state_dict = FlashMQATModel.config_and_param_from_starcoder(model_path)
+
+        # 4. Directly construct from HuggingFace model (also support init_from_scratch=True)
+        model = FlashMQATModel.from_starcoder(model_path="/lustre/public/pretrained_model_weights/starcoder-16bit")
+
+        # 5. Dump to HuggingFace model
+        model.dump_to_starcoder(save_path)
+
+        # 6. Use the dumped weights
+        from impl.model.nn.utils.save_load import load_from_disk
+        config = transformers.AutoConfig.from_pretrained(model_path)
+        hf_model = transformers.AutoModelForCausalLM.from_config(config)
+        hf_model.load_state_dict(load_from_disk(save_path))
+        ```
+
+        """
         if model_name == "pretrained":
             raise ValueError("model_name cannot be 'pretrained'.")
         setattr(
@@ -684,6 +745,7 @@ class FlashMQATModel(nn.Module):
                     FlashMQATModel._from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
+                    force_load_from_hf_pretrained=force_load_from_hf_pretrained,
                 )),
         )
         setattr(
@@ -703,8 +765,14 @@ class FlashMQATModel(nn.Module):
                     FlashMQATModel._config_and_param_from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
+                    force_load_from_hf_pretrained=force_load_from_hf_pretrained,
                 )),
         )
+        if state_dict_converter_to_hf:
+            setattr(
+                FlashMQATModel, f"dump_to_{model_name}",
+                functools.partialmethod(FlashMQATModel._to_hf_template,
+                                        state_dict_converter_to_hf=state_dict_converter_to_hf))
 
     @classmethod
     def from_pretrained(
@@ -715,6 +783,8 @@ class FlashMQATModel(nn.Module):
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
+        """Load from a pretrained FlashMQAT model (usually the SFT/RW model).
+        """
         with open(os.path.join(model_path, "config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
         model = cls(config, is_critic, dtype, device)
@@ -731,6 +801,10 @@ class FlashMQATModel(nn.Module):
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
+        """Merge the state dict of a pipeline module to a single FlashMQAT.
+        
+        Used for loading weights for the reference model if SFT used pipeline parallel,
+        """
         with open(os.path.join(model_path, "config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
         model = cls(config, is_critic, dtype, device)
