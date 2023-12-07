@@ -9,6 +9,7 @@ import torch.nn as nn
 from impl.model.nn.flash_mqat.flash_mqat_base import *
 from impl.model.nn.flash_mqat.flash_mqat_parallel import *
 from impl.model.utils.pipeline_module import LayerSpec
+from impl.model.utils.save_load import save_to_disk
 import base.constants
 
 MODEL_CONFIG_FILES = [
@@ -42,25 +43,15 @@ def get_layer_specs(config: FlashMQATConfig, to_critic):
         )
         layer_specs.append(flash_mqat_block)
 
-    if not to_critic:
-        lm_head = LayerSpec(
-            LanguageModelHead,
-            config.hidden_dim,
-            config.vocab_size,
-            bias=False,
-            device=None,
-            dtype=None,
-        )
-    else:
-        lm_head = LayerSpec(
-            LanguageModelHead,
-            config.hidden_dim,
-            1,
-            bias=False,
-            device=None,
-            dtype=None,
-        )
-    layer_specs.append(lm_head)
+    head = LayerSpec(
+        OutputHead,
+        config.hidden_dim,
+        config.vocab_size if not to_critic else 1,
+        bias=False,
+        device=None,
+        dtype=None,
+    )
+    layer_specs.append(head)
 
     return layer_specs
 
@@ -129,10 +120,10 @@ def split_state_dict_by_stage(state_dict, stage_to_layer_idx):
 
 def save_state_dict(state_dict, stage_index, mp_rank, shard_index, model_dir):
     os.makedirs(model_dir, exist_ok=True)
-    torch.save(
-        state_dict,
-        os.path.join(model_dir,
-                     f"pytorch_model-pp-{stage_index:02d}-mp-{mp_rank:02d}-s-{shard_index:02d}.bin"),
+    output_fn = f"model-pp-{stage_index:02d}-mp-{mp_rank:02d}-s-{shard_index:02d}.safetensors"
+    save_to_disk(state_dict, model_dir, output_fn=output_fn, save_type="st", n_shards=1, no_shard_suffix=True)
+    print(
+        f"saved {state_dict.keys()} to {model_dir}/model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.safetensors"
     )
     print(f"saved {state_dict.keys()} to "
           f"{model_dir}/pytorch_model-pp-{stage_index:02d}-mp-{mp_rank:02d}-s-{shard_index:02d}.bin")
@@ -216,11 +207,12 @@ def main():
     cfg = None
     base.constants.set_fake_mp_world_size(args.num_mp)
     for mp_rank in range(args.num_mp):
-        cfg, state_dict = getattr(FlashMQATForCausalLM,
+        base.constants.set_fake_mp_rank(mp_rank)
+        cfg, state_dict = getattr(FlashMQATModel,
                                   f"config_and_param_from_{args.model_type}")(model_path=args.model_dir)
         if args.num_pp > 1:
             layer_specs = get_layer_specs(cfg, args.to_critic)
-            state_dict = FlashMQATForCausalLM.map_to_pipe_state_dict(cfg, state_dict)
+            state_dict = FlashMQATModel.map_to_pipe_state_dict(cfg, state_dict)
             if args.to_critic:
                 state_dict = fit_state_dict_to_critic(len(layer_specs), state_dict)
             print("loaded full state_dict")

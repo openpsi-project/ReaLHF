@@ -12,6 +12,7 @@ import torch
 from scripts.transform_to_pipe_ckpt import copy_configs
 
 from api.huggingface import create_hf_nn
+from impl.model.utils.save_load import load_from_disk, save_to_disk
 
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
@@ -22,11 +23,7 @@ SAVE_PATH = "/lustre/public/pretrained_model_weights/testOnly/llama-2-4l"
 NUM_SHRINKED_LAYERS = 4
 
 if __name__ == "__main__":
-    state_dict = {}
-    for fn in os.listdir(LOAD_PATH):
-        if fn.endswith(".bin"):
-            state_dict.update(torch.load(os.path.join(LOAD_PATH, fn)))
-            print(f"loaded {fn}")
+    state_dict = load_from_disk(LOAD_PATH)
 
     new_state_dict = {}
     for k in state_dict.keys():
@@ -42,9 +39,7 @@ if __name__ == "__main__":
 
     os.makedirs(SAVE_PATH, exist_ok=True)
     copy_configs(LOAD_PATH, SAVE_PATH)
-    abs_save_path = os.path.join(SAVE_PATH, "pytorch_model.bin")
-    torch.save(new_state_dict, abs_save_path)
-    print(f"saved to {abs_save_path}")
+    save_to_disk(new_state_dict, SAVE_PATH, save_type='st', n_shards=1, no_shard_suffix=True)
 
     config = json.load(open(os.path.join(LOAD_PATH, "config.json"), "r"))
     # for starcoder

@@ -1,28 +1,41 @@
 import dataclasses
+import functools
 
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
 from experiments.common.config_utils import get_flash_mqat_model_config
 
-sft = ModelRPC(
-    "default",
+ref_inf = ModelRPC(
+    "ref",
+    ModelInterfaceType.INFERENCE,
+    input_data=["packed_input_ids", "input_lens", "pair_input_lens", "prompt_lens"],
+    output_data=["seqlogp"],
+    output_key_remap={"seqlogp": "pair_ref_seqlogp"},
+    dp_broker_type="packed",
+)
+dpo = ModelRPC(
+    "actor",
     ModelInterfaceType.TRAIN_STEP,
-    input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
+    input_data=["packed_input_ids", "input_lens", "pair_input_lens", "pair_ref_seqlogp", "prompt_lens"],
     dp_broker_type="packed",
     log_return_value=True,
 )
 
 
 @dataclasses.dataclass
-class SFTExperiment(Experiment):
+class DPOExperiment(Experiment):
+    model_path: str  # Must be SFT model path
+    tokenizer_path: str  # Since we use SFT model, we need to specify HF tokenizer path
+
     seed: int = 1
     total_train_epochs: int = 1
-    save_freq_steps: int = 50
-    eval_freq_epochs: int = 1
+    save_freq_steps: int = 20
+    is_sft_pipe: bool = False
+    is_sft_lora: bool = False
+    base_model_type: Optional[str] = None
+    sft_lora_path: Optional[str] = None
     # model
-    model_type: str = "gpt2"
-    model_path: str = "/lustre/fw/pretrained/gpt2/"
     dp_size: int = 1
     pp_size: int = 1
     use_lora: bool = False
@@ -31,11 +44,11 @@ class SFTExperiment(Experiment):
     enable_fp16: bool = True
     gradient_checkpointing: bool = True
     # dataset
+    max_pairs_per_prompt: int = 2
     max_seqlen: int = 1024
+    # NOTE: DPO does not support evaluation because we can't compute reference logp when training the actor.
     train_tokens_per_batch: int = 16384
-    valid_tokens_per_batch: int = 16384
-    train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/sft_pos-train.jsonl"
-    valid_dataset_path: str = "/lustre/fw/datasets/imdb/rl/sft_pos-valid.jsonl"
+    train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl"
     # optimizer
     lr: float = 2.5e-4
     weight_decay: float = 0.05
@@ -45,14 +58,18 @@ class SFTExperiment(Experiment):
     adam_eps: float = 1e-5
     min_lr_ratio: float = 0.0
     zero_stage: int = 2
+    # dpo
+    beta: float = 0.1
 
     def __post_init__(self):
-        if self.model_type == "gpt2" and self.max_seqlen > 1024:
-            raise ValueError("GPT2 only supports max seqlen of 1024")
         if self.pp_size < 1 or self.dp_size < 1:
             raise ValueError("pp_size and dp_size must be positive integers.")
         if self.pp_size > 1 and self.use_lora:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
+        if self.is_sft_lora and (self.sft_lora_path is None or self.base_model_type is None):
+            raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
+
+        self.n_actors = int(self.dp_size * self.pp_size)
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -68,7 +85,7 @@ class SFTExperiment(Experiment):
                 scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
             ),
             model_worker=TasksGroup(
-                count=self.dp_size * self.pp_size,
+                count=self.n_actors + 1,
                 scheduling=Scheduling.model_worker_default(
                     cpu=4,
                     gpu=1,
@@ -79,32 +96,27 @@ class SFTExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = self.model_path
-
         dataset = Dataset(
-            "packed_prompt_answer",
+            "packed_rw_pair",
             args=dict(
                 n_tokens_per_batch=self.train_tokens_per_batch,
-                min_seqs_per_batch=self.train_tokens_per_batch // self.max_seqlen,
                 max_length=self.max_seqlen,
+                max_pairs_per_prompt=self.max_pairs_per_prompt,
                 dataset_path=self.train_dataset_path,
             ),
         )
-        dataloader = eval_dataloader = DataLoader("iterable_dataset_loader")
+
+        dataloader = DataLoader("iterable_dataset_loader")
         data_worker = [
             DataWorker(
-                tokenizer_name_or_path=self.model_path,
+                tokenizer_name_or_path=self.tokenizer_path,
                 datasets=[dataset],
                 dataloader=dataloader,
                 seed=self.seed,
             )
         ]
 
-        eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args["dataset_path"] = self.valid_dataset_path
-        eval_dataset.args["n_tokens_per_batch"] = self.valid_tokens_per_batch
-
-        backend = ModelBackend(
+        train_backend = ModelBackend(
             "ds_train",
             args=dict(
                 optimizer_name="adam",
@@ -124,20 +136,35 @@ class SFTExperiment(Experiment):
                 engine_type="pipe" if self.pp_size > 1 else "deepspeed",
             ),
         )
+        inf_backend = ModelBackend("ds_inference", args=dict(enable_fp16=True))
 
+        # We should merge pipeline model weights for the reference model to load.
+        ref_model = get_flash_mqat_model_config(
+            model_path=self.model_path,
+            from_model_type=("pipe" if self.is_sft_pipe else "self")
+            if not self.is_sft_lora else self.base_model_type,
+            tokenizer_path=self.tokenizer_path,
+            pp_size=1,
+            dp_size=1,
+            is_critic=False,
+            use_lora=False,
+        )
         model = get_flash_mqat_model_config(
-            model_path=model_path,
-            from_model_type=self.model_type,
-            tokenizer_path=model_path,
+            model_path=self.model_path,
+            from_model_type="self" if not self.is_sft_lora else self.base_model_type,
+            tokenizer_path=self.tokenizer_path,
             pp_size=self.pp_size,
             dp_size=self.dp_size,
             is_critic=False,
             use_lora=self.use_lora,
             lora_dim=self.lora_dim,
             lora_scaling=self.lora_scaling,
+            is_sft_lora=self.is_sft_lora,
+            sft_lora_path=self.sft_lora_path,
         )
 
-        interface = ModelInterface("flash_sft")
+        interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=True))
+        ref_interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=False))
 
         topo = PipeModelDataParallelTopology(self.pp_size, 1, self.dp_size)
         model_worker = []
@@ -146,25 +173,35 @@ class SFTExperiment(Experiment):
             mw = ModelWorker(
                 seed=self.seed,
                 model=model,
-                backend=backend,
+                backend=train_backend,
                 interface=interface,
-                model_name="default",
+                model_name="actor",
                 topo=topo,
                 dp_rank=coord.data,
                 pp_rank=coord.pipe,
                 mp_rank=coord.model,
-                eval_datasets=[dataset],
-                eval_dataloader=eval_dataloader,
                 cuda_cache_cleanliness=True,
                 cuda_cache_clear_freq=1,
             )
             model_worker.append(mw)
 
+        model_worker += [
+            ModelWorker(
+                seed=self.seed,
+                model=ref_model,
+                backend=inf_backend,
+                interface=ref_interface,
+                model_name="ref",
+                topo=PipeModelDataParallelTopology(1, 1, 1),
+                cuda_cache_cleanliness=True,
+                cuda_cache_clear_freq=60,
+            )
+        ]
+
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=self.save_freq_steps,
-            eval_frequency_epochs=self.eval_freq_epochs,
-            model_rpcs=[sft],
+            model_rpcs=[dpo, ref_inf],
             data_worker=data_worker,
             model_worker=model_worker,
         )

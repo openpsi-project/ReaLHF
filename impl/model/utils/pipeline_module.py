@@ -4,7 +4,7 @@
 # DeepSpeed Team
 
 from functools import partial
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 import glob
 import os
 import re as regex
@@ -19,7 +19,9 @@ import torch.nn as nn
 
 from base.monitor import process_memory_mb, time_mark
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid, PipeModelDataParallelTopology
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 from impl.model.utils.data import PipeCacheData, PipeTransferData
+from impl.model.utils.save_load import load_from_disk, save_to_disk
 import base.constants
 import base.logging as logging
 
@@ -139,7 +141,7 @@ class PipelineModule(nn.Module):
                  seed_fn=None,
                  base_seed=1234,
                  partition_method='parameters',
-                 config=None,
+                 config: Optional[FlashMQATConfig] = None,
                  activation_checkpoint_interval=0,
                  activation_checkpoint_func=checkpointing.checkpoint,
                  checkpointable_layers=None):
@@ -552,45 +554,27 @@ class PipelineModule(nn.Module):
         if dp_rank > 0:  # only save on dp_rank = 0
             return
 
-        keys = list(self.state_dict().keys())
-        # if len(keys) < n_shards:
-        #     raise ValueError(f"state_dict has {len(keys)} keys, but n_shards={n_shards}")
+        tp_rank = self._grid.get_model_parallel_rank()
+        save_to_disk(self.state_dict(),
+                     save_dir,
+                     output_fn=f"pytorch_model-pp-{self.stage_id:02d}-mp-{tp_rank:02d}-s-" +
+                     "{shard:02d}.bin",
+                     save_type="pt",
+                     n_shards=self.num_checkpoint_shards)
 
-        shard_size = len(keys) // self.num_checkpoint_shards
-        extra = len(keys) % self.num_checkpoint_shards
-        shard_size_list = [shard_size for _ in range(self.num_checkpoint_shards)]
-        shard_size_list[-1] = shard_size + extra
-        start, shards = 0, []
-        for i, size in enumerate(shard_size_list):
-            shard = {}
-            for j in range(start, start + size):
-                shard[keys[j]] = self.state_dict()[keys[j]]
-                # print(f"shard {i} key {keys[j]}")
-            start += size
-            tp_rank = self._grid.get_model_parallel_rank()
-            save_fn = f"pytorch_model-pp-{self.stage_id:02d}-mp-{tp_rank:02d}-s-{i:02d}.bin"
-            save_abs_fn = os.path.join(save_dir, save_fn)
-            torch.save(shard, save_abs_fn)
+    def load(self, load_dir, init_critic_from_actor: bool = False):
+        state_dict, n_shards = load_from_disk(
+            load_dir,
+            fn_pattern=r".*" + f"-pp-{self.stage_id:02d}-mp-{self._grid.get_model_parallel_rank():02d}-" +
+            r"s-(\d{2}).*",
+            return_n_shards=True)
 
-    def load(self, load_dir):
-        n_shards = 0
-        fn_to_load = []
-        for file in filter(lambda x: x.endswith(".bin"), os.listdir(load_dir)):
-            # filename format should be:
-            # pytorch_model-pp-{pp_index:02d}-tp-{tp_index:02d}-s-{shard_index:02d}
-            pp_stage = int(file.split("-")[2])
-            tp_stage = int(file.split("-")[4])
-            if pp_stage == self.stage_id and tp_stage == self._grid.get_model_parallel_rank():
-                fn_to_load.append(file)
+        if init_critic_from_actor and f'{self.config.n_layers + 1}.weight' in state_dict:
+            state_dict.pop(f'{self.config.n_layers + 1}.weight')
+            self.load_state_dict(state_dict, strict=False)
+        else:
+            self.load_state_dict(state_dict)
 
-        state_dict = {}
-        for fn in fn_to_load:
-            state_dict.update(torch.load(os.path.join(load_dir, fn)))
-            logger.info(f"loaded shard {fn}")
-            n_shards += 1
-            process_memory_mb(f"after_load_shard_{n_shards}")
-
-        self.load_state_dict(state_dict, strict=True)
         self.num_checkpoint_shards = n_shards
         logger.info("Loaded model from {}".format(load_dir))
         process_memory_mb("after_load_state_dict")

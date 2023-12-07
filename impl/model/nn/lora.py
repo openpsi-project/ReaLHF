@@ -9,6 +9,7 @@ import deepspeed.compression.helper
 import torch
 import torch.nn.functional as F
 
+from impl.model.utils.save_load import load_from_disk
 import api.config
 import api.huggingface
 import api.model
@@ -209,7 +210,7 @@ def lora_wrap_fn(
 
         if load_lora_path is not None:
             logger.info(f"Loading LoRA from {load_lora_path}")
-            lora_sds = torch.load(load_lora_path, map_location=model.device)
+            lora_sds = load_from_disk(load_lora_path)
             lora_names = [
                 name for name, module in model.module.named_modules() if isinstance(module, LinearLoRA)
             ]

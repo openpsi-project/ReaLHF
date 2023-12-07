@@ -10,7 +10,7 @@ import transformers
 
 from base.namedarray import NamedArray, recursive_apply
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_interface import HuggingfaceLikeFlashMQATForCausalLM
+from impl.model.nn.flash_mqat.flash_mqat_api import HuggingfaceLikeFlashMQATForCausalLM
 import api.huggingface
 import api.model
 

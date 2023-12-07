@@ -7,7 +7,7 @@ import transformers
 
 from base.monitor import process_memory_mb
 from base.topology import PipeDataParallelTopology
-from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, LanguageModelHead,
+from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, OutputHead,
                                                       VocabPositionEmbedding)
 from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
@@ -46,15 +46,15 @@ def make_causal_flash_mqat_pipe_module(
                                      device=device)
         layer_specs.append(flash_mqat_block)
 
-    lm_head = LayerSpec(
-        LanguageModelHead,
+    head = LayerSpec(
+        OutputHead,
         config.hidden_dim,
         config.vocab_size,
         bias=False,
         device=device,
         dtype=dtype,
     )
-    layer_specs.append(lm_head)
+    layer_specs.append(head)
 
     layer_key_mappings = {
         "transformer.wte.": "0.wte.",
@@ -69,7 +69,7 @@ def make_causal_flash_mqat_pipe_module(
         layer_key_mappings[f"transformer.h.{i}.attn.c_attn."] = f"{i+1}.attn.c_attn.linear."
         if i == config.n_layers - 1:
             layer_key_mappings[f"transformer.ln_f."] = f"{i+1}.ln_f."
-    layer_key_mappings["lm_head."] = f"{config.n_layers+1}."
+    layer_key_mappings["head."] = f"{config.n_layers+1}."
 
     def compute_loss(output, label):
         return output.loss

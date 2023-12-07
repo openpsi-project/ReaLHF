@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.utils.checkpoint
 import transformers
 
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATForCausalLM
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormColumnLinear,
                                                      LayerNormParallelMLP, LlamaLayerNormParallelMLP,
@@ -492,7 +492,7 @@ class LanguageModelHead(nn.Linear):
         return x
 
 
-class ParallelFlashMQATForCausalLM(FlashMQATForCausalLM):
+class ParallelFlashMQATModel(FlashMQATModel):
 
     def __init__(
         self,
@@ -512,30 +512,30 @@ class ParallelFlashMQATForCausalLM(FlashMQATForCausalLM):
         if model_name == "pretrained":
             raise ValueError("model_name cannot be 'pretrained'.")
         setattr(
-            ParallelFlashMQATForCausalLM,
+            ParallelFlashMQATModel,
             f"from_{model_name}",
             classmethod(
                 functools.partial(
-                    ParallelFlashMQATForCausalLM._from_hf_template,
+                    ParallelFlashMQATModel._from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
                 )),
         )
         setattr(
-            ParallelFlashMQATForCausalLM,
+            ParallelFlashMQATModel,
             f"config_from_{model_name}",
             staticmethod(
                 functools.partial(
-                    ParallelFlashMQATForCausalLM._config_from_hf_template,
+                    ParallelFlashMQATModel._config_from_hf_template,
                     config_converter=config_converter,
                 )),
         )
         setattr(
-            ParallelFlashMQATForCausalLM,
+            ParallelFlashMQATModel,
             f"config_and_param_from_{model_name}",
             staticmethod(
                 functools.partial(
-                    ParallelFlashMQATForCausalLM._config_and_param_from_hf_template,
+                    ParallelFlashMQATModel._config_and_param_from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
                 )),

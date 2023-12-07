@@ -13,7 +13,7 @@ import torch
 
 import base.logging as logging
 
-sparse_tensor_fields = ["packed_logits_mask"]
+sparse_tensor_fields = []
 
 
 def dense_tensor_size(x: torch.Tensor):
