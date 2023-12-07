@@ -14,6 +14,8 @@ from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheDa
 from impl.model.utils.functional import gather_shifted_log_probs
 import api.huggingface
 
+torch.random.manual_seed(0)
+
 
 class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
 

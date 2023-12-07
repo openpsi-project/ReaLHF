@@ -257,6 +257,40 @@ def get_packed_rewards(
     return kl_rewards, tot_rewards
 
 
+def _pygae1d_nolp_misalign(
+    rewards: torch.FloatTensor,
+    values: torch.FloatTensor,
+    cu_seqlens_: torch.IntTensor,
+    bootstrap: torch.FloatTensor,
+    gamma: float,
+    lam: float,
+) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+    cu_seqlens = cu_seqlens_.clone()
+    cu_seqlens[1:] += torch.ones_like(cu_seqlens_[1:]).cumsum(0)
+
+    bs = cu_seqlens_.shape[0] - 1
+    assert values.shape[0] == rewards.shape[0] + bs
+    advantages_reversed = []
+    returns_reversed = []
+    for i in reversed(range(bs)):
+        v_offset = cu_seqlens[i]
+        r_offset, r_end = cu_seqlens_[i], cu_seqlens_[i + 1]
+        assert cu_seqlens[i + 1] - v_offset - 1 == r_end - r_offset
+        lastgaelam = 0
+        for t in reversed(range(r_end - r_offset)):
+            nextvalues = values[v_offset + t + 1]
+            if t == r_end - r_offset - 1:
+                nextvalues *= bootstrap[i]
+            delta = rewards[r_offset + t] + gamma * nextvalues - values[v_offset + t]
+            lastgaelam = delta + gamma * lam * lastgaelam
+            advantages_reversed.append(lastgaelam)
+            returns_reversed.append(lastgaelam + values[v_offset + t])
+
+    advantages = torch.stack(advantages_reversed[::-1])
+    returns = torch.stack(returns_reversed[::-1])
+    return advantages, returns
+
+
 @torch.no_grad()
 def get_packed_advantages_and_returns(
     gamma: float,
@@ -266,29 +300,9 @@ def get_packed_advantages_and_returns(
     short1cu_seqlens: torch.IntTensor,
     seq_no_eos_mask: torch.FloatTensor,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
-    # TODO: implement a CUDA kernel to speed up this function
-    # the current implementation has complexity O(#tokens_in_batch), while it can be O(max_seqlen)
-    cu_seqlens = short1cu_seqlens.clone()
-    cu_seqlens[1:] += torch.ones_like(short1cu_seqlens[1:]).cumsum(0)
-
-    bs = short1cu_seqlens.shape[0] - 1
-    assert values.shape[0] == rewards.shape[0] + bs
-    advantages_reversed = []
-    returns_reversed = []
-    for i in reversed(range(bs)):
-        v_offset = cu_seqlens[i]
-        r_offset, r_end = short1cu_seqlens[i], short1cu_seqlens[i + 1]
-        assert cu_seqlens[i + 1] - v_offset - 1 == r_end - r_offset
-        lastgaelam = 0
-        for t in reversed(range(r_end - r_offset)):
-            nextvalues = values[v_offset + t + 1]
-            if t == r_end - r_offset - 1:
-                nextvalues *= seq_no_eos_mask[i]
-            delta = rewards[r_offset + t] + gamma * nextvalues - values[v_offset + t]
-            lastgaelam = delta + gamma * lam * lastgaelam
-            advantages_reversed.append(lastgaelam)
-            returns_reversed.append(lastgaelam + values[v_offset + t])
-
-    advantages = torch.stack(advantages_reversed[::-1])
-    returns = torch.stack(returns_reversed[::-1])
-    return advantages, returns
+    try:
+        import cugae
+        return cugae.cugae1d_nolp_misalign_func(rewards, values, short1cu_seqlens.int(),
+                                                seq_no_eos_mask.bool(), gamma, lam)
+    except ModuleNotFoundError:
+        return _pygae1d_nolp_misalign(rewards, values, short1cu_seqlens, seq_no_eos_mask, gamma, lam)

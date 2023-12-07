@@ -6,28 +6,6 @@ import transformers
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 
-"""
-Examples of loading from (registered) and dumping to HuggingFace models, e.g., starcoder:
-
-# Obtain the config
-config: FlashMQATConfig = FlashMQATModel.config_from_starcoder(model_path)
-
-# Obtain config and state_dict (also support init_from_scratch=True)
-config, state_dict = FlashMQATModel.config_and_param_from_starcoder(model_path)
-
-# Directly construct from HuggingFace model (also support init_from_scratch=True)
-model = FlashMQATModel.from_starcoder(model_path="/lustre/public/pretrained_model_weights/starcoder-16bit")
-
-# Dump to HuggingFace model
-model.dump_to_starcoder(save_path)
-
-# Use the dumped weights
-from impl.model.nn.utils.save_load import load_from_disk
-config = transformers.AutoConfig.from_pretrained(model_path)
-hf_model = transformers.AutoModelForCausalLM.from_config(config)
-hf_model.load_state_dict(load_from_disk(save_path), strict=False)  # because we may omit some buffer tensors
-"""
-
 ################################ StarCoder Begin ################################
 
 
