@@ -163,6 +163,7 @@ class PPOExperiment(Experiment):
     temperature: float = 1.0
     ppo_n_minibatches: int = 8
     kl_ctl: float = 0.1
+    adv_norm: bool = False
     discount: float = 1.0
     gae_lambda: float = 1.0
     eps_clip: float = 0.2
@@ -462,6 +463,7 @@ class PPOExperiment(Experiment):
         ppo_kwargs = dict(
             n_minibatches=self.ppo_n_minibatches,
             kl_ctl=self.kl_ctl,
+            adv_norm=self.adv_norm,
             discount=self.discount,
             gae_lambda=self.gae_lambda,
             eps_clip=self.eps_clip,

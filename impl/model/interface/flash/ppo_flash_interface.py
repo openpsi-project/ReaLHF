@@ -11,7 +11,7 @@ from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.backend.pipe_engine.stream_pipe_engine import StreamPipeEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.utils.functional import gather_packed_shifted_log_probs
+from impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
 from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
 import api.huggingface
 import api.model
@@ -105,6 +105,7 @@ class PackedActorInterface(api.model.ModelInterface):
 
     kl_ctl: float = 0.1
 
+    adv_norm: bool = True
     discount: float = 1.0
     gae_lambda: float = 1.0
 
@@ -324,6 +325,9 @@ class PackedActorInterface(api.model.ModelInterface):
             advantage=advantages.mean().detach(),
         )
 
+        if self.adv_norm:
+            advantages = masked_normalization(advantages, loss_mask)
+            
         data_ = from_dict(
             dict(
                 advantages=advantages,
@@ -454,6 +458,7 @@ class PackedCriticInterface(api.model.ModelInterface):
     n_minibatches: int = 4
     enable_save: bool = True
     kl_ctl: float = 0.1
+    adv_norm:bool=False
     discount: float = 1.0
     gae_lambda: float = 0.95
     eps_clip: float = 0.2
@@ -561,6 +566,8 @@ class PackedCriticInterface(api.model.ModelInterface):
 
         global_stats = dict(returns=returns.mean().detach())
 
+        if self.adv_norm:
+            advantages = masked_normalization(advantages, loss_mask)
         data_ = from_dict(
             dict(
                 returns=returns,
