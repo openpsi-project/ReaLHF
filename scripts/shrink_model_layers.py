@@ -48,3 +48,4 @@ if __name__ == "__main__":
     elif "num_hidden_layers" in config:
         config["num_hidden_layers"] = NUM_SHRINKED_LAYERS
     json.dump(config, open(os.path.join(SAVE_PATH, "config.json"), "w"))
+    os.system("chmod -R 775 " + SAVE_PATH)
