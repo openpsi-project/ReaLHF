@@ -46,6 +46,8 @@ class SFTExperiment(Experiment):
     min_lr_ratio: float = 0.0
     zero_stage: int = 2
 
+    num_pipeline_micro_batches: Optional[int] = None
+
     def __post_init__(self):
         if self.model_type == "gpt2" and self.max_seqlen > 1024:
             raise ValueError("GPT2 only supports max seqlen of 1024")
@@ -122,6 +124,7 @@ class SFTExperiment(Experiment):
                 gradient_checkpointing=self.gradient_checkpointing,
                 num_pipeline_stages=self.pp_size,
                 engine_type="pipe" if self.pp_size > 1 else "deepspeed",
+                num_pipeline_micro_batches=self.num_pipeline_micro_batches,
             ),
         )
 

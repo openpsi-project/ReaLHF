@@ -23,21 +23,16 @@ class FlashMQATGPT2Test(unittest.TestCase):
         cls.device = device = "cpu"
         cls.dtype = dtype = torch.float32
 
-        sc_cfg = transformers.AutoConfig.from_pretrained("/lustre/fw/pretrained/gpt2/")
-        sc_cfg.n_layer = 2
-        sc_cfg.n_embd = 1024
-        sc_cfg.n_head = 8
-        sc_cfg.n_inner = 4096
-        sc_cfg.n_positions = 512
+        model_path = "/lustre/public/pretrained_model_weights/testOnly/gpt2-4l"
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer("/lustre/fw/pretrained/gpt2/")
+        cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
-        cls.gpt: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
-            dtype=dtype, device=device)
+        cls.gpt: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
+            model_path).to(dtype=dtype, device=device)
         cls.gpt.eval()
 
-        cls.model = FlashMQATModel.from_gpt2(from_model=cls.gpt, dtype=dtype, device=device)
+        cls.model = FlashMQATModel.from_gpt2(model_path=model_path, dtype=dtype, device=device)
         cls.model.eval()
         cls.config = cls.model.config
 
