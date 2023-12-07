@@ -115,6 +115,7 @@ def save_to_disk(
         no_shard_suffix: bool = False,
         max_shard_size_byte: int = int(1e10),
 ):
+    os.makedirs(output_dir, exist_ok=True)
     if n_shards is None:
         param_size = sum([value.numel() * value.element_size() for value in state_dict.values()])
         n_shards = (param_size + max_shard_size_byte - 1) // max_shard_size_byte
