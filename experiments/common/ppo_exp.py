@@ -371,8 +371,6 @@ class PPOExperiment(Experiment):
             is_rew_lora=self.is_rew_lora,
             rew_lora_path=self.rew_lora_path,
             v_head_path=self.rew_head_path,
-            reward_scaling=self.rew_output_scaling,
-            reward_bias=self.rew_output_bias,
         )
 
         critic_model = get_flash_mqat_model_config(
@@ -488,7 +486,10 @@ class PPOExperiment(Experiment):
             "flash_critic",
             args=copy.deepcopy(ppo_kwargs),
         )
-        rw_interface = ModelInterface("flash_paired_rw", args=dict(enable_save=False))
+        rw_interface = ModelInterface("flash_paired_rw",
+                                      args=dict(enable_save=False,
+                                                output_scaling=self.rew_output_scaling,
+                                                output_bias=self.rew_output_bias))
 
         actor_topo = PipeModelDataParallelTopology(num_pp=self.actor_pp_size,
                                                    num_mp=1,

@@ -31,7 +31,7 @@ def _ppo_actor_loss_from_model_outputs(
     packed_input_ids: torch.LongTensor,  # [tot_seqlen]
     cu_seqlens: torch.LongTensor,  # [bs+1]
     old_logp: torch.FloatTensor,  # [tot_seqlen-bs]
-    loss_mask: torch.FloatTensor,  # [tot_seqlen-bs]
+    ppo_loss_mask: torch.FloatTensor,  # [tot_seqlen-bs]
     advantages: torch.FloatTensor,  # [tot_seqlen-bs]
     kl_rewards: torch.FloatTensor,  # [tot_seqlen-bs]
     kl_adapter: ppo_functional.KLController,  # const
@@ -48,17 +48,17 @@ def _ppo_actor_loss_from_model_outputs(
         logits.masked_fill_(logits_mask.logical_not(), torch.finfo(logits.dtype).min)
     new_logp = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
 
-    new_logp = new_logp * loss_mask
+    new_logp = new_logp * ppo_loss_mask
 
     loss, loss_stat = ppo_functional.actor_loss_fn(
         logprobs=new_logp,
         old_logprobs=old_logp,
         advantages=advantages,
         eps_clip=eps_clip,
-        loss_mask=loss_mask,
+        loss_mask=ppo_loss_mask,
     )
 
-    mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
+    mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
     mean_ref_kl = api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
@@ -69,7 +69,7 @@ def _ppo_actor_loss_from_model_outputs(
                        f"than early stop threshold {early_stop_imp_ratio}. Abandon this minibatch.")
         loss = loss * 0.0
 
-    approx_kl = ((old_logp - new_logp).detach() * loss_mask).sum() / loss_mask.sum()
+    approx_kl = ((old_logp - new_logp).detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
 
     stats = dict(
         ppo_approx_kl=approx_kl,
@@ -340,7 +340,7 @@ class PackedActorInterface(api.model.ModelInterface):
                 loss_fn_kwargs = dict(
                     input_lens=input_lens,  # used for partition
                     old_logp=data["old_logp"],
-                    loss_mask=data["ppo_loss_mask"],
+                    ppo_loss_mask=data["ppo_loss_mask"],
                     advantages=data["advantages"],
                     kl_rewards=data["kl_rewards"],
                     kl_adapter=self.kl_adapter,
@@ -368,7 +368,7 @@ class PackedActorInterface(api.model.ModelInterface):
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=cu_seqlens,
                     old_logp=data["old_logp"],
-                    loss_mask=data["ppo_loss_mask"],
+                    ppo_loss_mask=data["ppo_loss_mask"],
                     advantages=data["advantages"],
                     kl_rewards=data["kl_rewards"],
                     kl_adapter=self.kl_adapter,
@@ -404,7 +404,7 @@ def _ppo_critic_loss_from_model_outputs(
     packed_input_ids: torch.LongTensor,
     cu_seqlens: torch.LongTensor,
     values: torch.FloatTensor,
-    loss_mask: torch.FloatTensor,
+    ppo_loss_mask: torch.FloatTensor,
     returns: torch.FloatTensor,
     kl_rewards: torch.FloatTensor,
     value_eps_clip: float,
@@ -415,18 +415,18 @@ def _ppo_critic_loss_from_model_outputs(
         torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
         for i in range(cu_seqlens.shape[0] - 1)
     ])
-    new_values = new_values[leave_one_indices]
-    values = values[leave_one_indices]
+    new_values = new_values[leave_one_indices].squeeze(-1)
+    values = values[leave_one_indices].squeeze(-1)
 
     loss, loss_stat = ppo_functional.critic_loss_fn(
         value=new_values,
         old_value=values,
         target_value=returns,
         value_eps_clip=value_eps_clip,
-        loss_mask=loss_mask,
+        loss_mask=ppo_loss_mask,
     )
 
-    mean_ref_kl = (kl_rewards.detach() * loss_mask).sum() / loss_mask.sum()
+    mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
     mean_ref_kl = api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
@@ -490,7 +490,7 @@ class PackedCriticInterface(api.model.ModelInterface):
             scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
                                                cu_seqlens=cu_seqlens,
                                                max_seqlen=max_seqlen)
-        scores = scores.float()
+        scores = scores.float().squeeze(-1)
 
         seq_no_eos_mask = data["seq_no_eos_mask"]
         for i in range(seq_no_eos_mask.shape[0]):
@@ -573,7 +573,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                 loss_kwargs = dict(
                     input_lens=input_lens,
                     values=data["values"],
-                    loss_mask=data["ppo_loss_mask"],
+                    ppo_loss_mask=data["ppo_loss_mask"],
                     returns=data["returns"],
                     kl_rewards=data["kl_rewards"],
                     value_eps_clip=self.value_eps_clip,
@@ -597,7 +597,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=data["cu_seqlens"],
                     values=data["values"],
-                    loss_mask=data["ppo_loss_mask"],
+                    ppo_loss_mask=data["ppo_loss_mask"],
                     returns=data["returns"],
                     kl_rewards=data["kl_rewards"],
                     value_eps_clip=self.value_eps_clip,
