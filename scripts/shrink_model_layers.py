@@ -18,9 +18,9 @@ LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
 logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="INFO")
 
-LOAD_PATH = "/lustre/fw/pretrained/gpt2/"
-SAVE_PATH = "/lustre/public/pretrained_model_weights/testOnly/gpt2-4l"
-NUM_SHRINKED_LAYERS = 1
+LOAD_PATH = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
+SAVE_PATH = "/lustre/public/pretrained_model_weights/testOnly/llama-2-4l"
+NUM_SHRINKED_LAYERS = 4
 
 if __name__ == "__main__":
     state_dict = load_from_disk(LOAD_PATH)
