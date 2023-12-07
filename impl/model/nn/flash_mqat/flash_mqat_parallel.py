@@ -23,6 +23,8 @@ try:
 except ModuleNotFoundError:
     pass
 
+from impl.model.utils.save_load import load_from_disk, save_to_disk
+
 logger = logging.getLogger("ParallelFlashMQAT")
 
 
@@ -492,7 +494,27 @@ class LanguageModelHead(nn.Linear):
         return x
 
 
+class ModelParallelModule(nn.Module):
+
+    def __init__(
+        self,
+        module: FlashMQATModel,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        self.module = module
+        self.module.transformer = ParallelFlashMQATBase(module.config,
+                                                        dtype=module.dtype,
+                                                        device=module.device)
+
+    def load():
+        pass
+
+
 class ParallelFlashMQATModel(FlashMQATModel):
+    """ TODO: change into lower level module substitution
+    Currently only substitute FlashMQATModel into a ParallelFlashMQATBase
+    """
 
     def __init__(
         self,
@@ -502,41 +524,28 @@ class ParallelFlashMQATModel(FlashMQATModel):
     ):
         super().__init__(config, dtype, device)
         self.transformer = ParallelFlashMQATBase(config, dtype=dtype, device=device)  # overwrite
+        self.num_checkpoint_shards = 1
 
-    @staticmethod
-    def register_hf_model(
-        model_name: str,
-        config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
-        state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]],
-    ):
-        if model_name == "pretrained":
-            raise ValueError("model_name cannot be 'pretrained'.")
-        setattr(
-            ParallelFlashMQATModel,
-            f"from_{model_name}",
-            classmethod(
-                functools.partial(
-                    ParallelFlashMQATModel._from_hf_template,
-                    config_converter=config_converter,
-                    state_dict_converter=state_dict_converter,
-                )),
-        )
-        setattr(
-            ParallelFlashMQATModel,
-            f"config_from_{model_name}",
-            staticmethod(
-                functools.partial(
-                    ParallelFlashMQATModel._config_from_hf_template,
-                    config_converter=config_converter,
-                )),
-        )
-        setattr(
-            ParallelFlashMQATModel,
-            f"config_and_param_from_{model_name}",
-            staticmethod(
-                functools.partial(
-                    ParallelFlashMQATModel._config_and_param_from_hf_template,
-                    config_converter=config_converter,
-                    state_dict_converter=state_dict_converter,
-                )),
-        )
+    def load(self, load_dir: str, init_critic_from_actor: bool = False):
+        mp_rank = base.constants.model_parallel_rank()
+        state_dict, n_shards = load_from_disk(load_dir,
+                                              fn_pattern=r".*" + f"-pp-00-mp-{mp_rank:02d}-" + r"s-(\d{2}).*",
+                                              return_n_shards=True)
+
+        if init_critic_from_actor and f'{self.config.n_layers + 1}.weight' in state_dict:
+            state_dict.pop(f'{self.config.n_layers + 1}.weight')
+            self.load_state_dict(state_dict, strict=False)
+        else:
+            self.load_state_dict(state_dict)
+
+    def save(self, save_dir):
+        dp_rank = base.constants.data_parallel_rank()
+        mp_rank = base.constants.model_parallel_rank()
+        if dp_rank > 0:  # only save on dp_rank = 0
+            return
+
+        save_to_disk(self.state_dict(),
+                     save_dir,
+                     output_fn=f"pytorch_model-pp-00-mp-{mp_rank:02d}-s-" + "{shard:02d}.bin",
+                     save_type="pt",
+                     n_shards=self.num_checkpoint_shards)
