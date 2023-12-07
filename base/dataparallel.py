@@ -12,6 +12,7 @@ InterfaceReturnDataType = Union[namedarray.NamedArray, Dict]
 
 
 class ParallelDataBroker:
+
     @staticmethod
     def gather_from(src: List[InterfaceReturnDataType]) -> InterfaceReturnDataType:
         """Gather outputs of a data-parallel model RPC."""
@@ -41,6 +42,7 @@ class ParallelDataBroker:
 
 
 class PaddedBatchParallelDataBroker(ParallelDataBroker):
+
     @staticmethod
     def gather_from(src: List[InterfaceReturnDataType]) -> InterfaceReturnDataType:
         return ParallelDataBroker.gather_from(src)
@@ -54,6 +56,7 @@ class PaddedBatchParallelDataBroker(ParallelDataBroker):
 
 
 class PackedParallelDataBroker(ParallelDataBroker):
+
     @staticmethod
     def gather_from(src: List[InterfaceReturnDataType]) -> InterfaceReturnDataType:
         return ParallelDataBroker.gather_from(src)
@@ -64,10 +67,8 @@ class PackedParallelDataBroker(ParallelDataBroker):
             if "cu_seqlens" in src:
                 src["input_lens"] = src["cu_seqlens"][1:] - src["cu_seqlens"][:-1]
             else:
-                raise RuntimeError(
-                    "input_lens must be in the return data when using packed data broker. "
-                    f"Current keys: {list(src.keys())}."
-                )
+                raise RuntimeError("input_lens must be in the return data when using packed data broker. "
+                                   f"Current keys: {list(src.keys())}.")
 
         partitions = datapack.min_abs_diff_partition(src["input_lens"].cpu().numpy().astype(np.int64), n_dp)
 
@@ -101,38 +102,36 @@ class PackedParallelDataBroker(ParallelDataBroker):
                     sp[k] = cu_seqlens[i]
                 elif k in ["pair_input_lens", "pair_ref_seqlogp"]:
                     start, end = partitions[i]
-                    sp[k] = v[2 * start : 2 * end]
+                    sp[k] = v[2 * start:2 * end]
                 elif k in ["seq_no_eos_mask", "rewards", "reward_score", "group_factor", "prompt_lens"]:
                     start, end = partitions[i]
                     sp[k] = v[start:end]
                 elif k in [
-                    "packed_seq",
-                    "packed_logits_mask",
-                    "prompt_mask",
-                    "packed_input_ids",
-                    "values",
-                    "logits_mask",
+                        "packed_seq",
+                        "packed_logits_mask",
+                        "prompt_mask",
+                        "packed_input_ids",
+                        "values",
+                        "logits_mask",
                 ]:
-                    sp[k] = v[offsets[i] : offsets[i] + cu_seqlens[i][-1]]
+                    sp[k] = v[offsets[i]:offsets[i] + cu_seqlens[i][-1]]
                 elif k in [
-                    "packed_logprobs",
-                    "packed_ref_logprobs",
-                    "old_logp",
-                    "ref_logp",
-                    "advantages",
-                    "ppo_loss_mask",
-                    "kl_rewards",
-                    "returns",
+                        "packed_logprobs",
+                        "packed_ref_logprobs",
+                        "old_logp",
+                        "ref_logp",
+                        "advantages",
+                        "ppo_loss_mask",
+                        "kl_rewards",
+                        "returns",
                 ]:
-                    sp[k] = v[short1offsets[i] : short1offsets[i] + short1cu_seqlens[i][-1]]
+                    sp[k] = v[short1offsets[i]:short1offsets[i] + short1cu_seqlens[i][-1]]
                 elif not torch.is_tensor(src[k]):
                     # for constant, preserve value for each splitted instance
                     sp[k] = src[k]
                 else:
-                    raise RuntimeError(
-                        f"Unknown key {k} in packed data. We don't know how to split it. "
-                        f"Check base/dataparallel.py for implemented keys."
-                    )
+                    raise RuntimeError(f"Unknown key {k} in packed data. We don't know how to split it. "
+                                       f"Check base/dataparallel.py for implemented keys.")
         splitted_data = [namedarray.from_dict(dict(x)) for x in splitted_data]
         for x in splitted_data:
             x.register_metadata(**src.metadata)
