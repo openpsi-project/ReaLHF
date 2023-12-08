@@ -82,8 +82,7 @@ def _ppo_actor_loss_from_model_outputs(
     if logits_mask is not None:
         stats["ignoring_logits_ratio"] = (1 - logits_mask.float()).mean()
 
-    if (early_stop_kl is not None
-            and api.huggingface.get_all_reduce_mean(approx_kl, group=data_parallel_group()) > early_stop_kl):
+    if (early_stop_kl is not None and approx_kl > early_stop_kl):
         logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
                        f"than early stop threshold {early_stop_kl}. Abort actor update.")
         loss = loss * 0.0
@@ -600,8 +599,8 @@ class PackedCriticInterface(api.model.ModelInterface):
         )
 
         if self.value_norm:
-            normalized_returns = self.rms.normalize(returns)
             self.rms.update(returns, mask=loss_mask)
+            normalized_returns = self.rms.normalize(returns)
         else:
             normalized_returns = returns
 

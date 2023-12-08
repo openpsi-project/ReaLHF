@@ -227,6 +227,8 @@ class PPOExperiment(Experiment):
             self.dataset_path = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl"
             self.use_adaptive_kl_ctl = False
             self.early_stop_imp_ratio = 1e10
+            self.top_k = 1000000
+            self.top_p = 1.0
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
