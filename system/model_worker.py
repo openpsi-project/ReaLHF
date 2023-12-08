@@ -163,9 +163,8 @@ class ModelWorker(worker_base.Worker):
             raise e
 
         if self.is_master:
-            blogger.info(
-                f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
-                f" in ${time.perf_counter() - tik:.4f}$s")
+            blogger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
+                         f" in ${time.perf_counter() - tik:.4f}$s")
 
         reply = request_reply_stream.Payload(request_id=request.request_id,
                                              handle_name=request.handle_name,
@@ -180,18 +179,16 @@ class ModelWorker(worker_base.Worker):
             gc.collect()
             et = time.monotonic()
             if self.is_master:
-                blogger.debug(
-                    f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
+                blogger.debug(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
 
         # logging gpu/cpu stats
         # self.print_monitor_info()
         tik = time.perf_counter()
-        blogger.debug(
-            ("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
-                self.model_name,
-                round(get_accelerator().memory_allocated() / 1024**3, 2),
-                round(get_accelerator().max_memory_allocated() / 1024**3, 2),
-            )))
+        blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
+            self.model_name,
+            round(get_accelerator().memory_allocated() / 1024**3, 2),
+            round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+        )))
         blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
 
         sample_count = (request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 0)
