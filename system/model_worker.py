@@ -27,6 +27,7 @@ import impl.model  # isort:skip
 import impl.dataset  # isort:skip
 
 logger = logging.getLogger("Model Worker", "colored")
+blogger = logging.getLogger("benchmark")
 
 
 class ModelWorker(worker_base.Worker):
@@ -162,7 +163,7 @@ class ModelWorker(worker_base.Worker):
             raise e
 
         if self.is_master:
-            logging.getLogger("benchmark").info(
+            blogger.info(
                 f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
                 f" in ${time.perf_counter() - tik:.4f}$s")
 
@@ -179,19 +180,19 @@ class ModelWorker(worker_base.Worker):
             gc.collect()
             et = time.monotonic()
             if self.is_master:
-                logging.getLogger("benchmark").debug(
+                blogger.debug(
                     f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
 
         # logging gpu/cpu stats
         # self.print_monitor_info()
         tik = time.perf_counter()
-        logging.getLogger("benchmark").debug(
+        blogger.debug(
             ("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
                 self.model_name,
                 round(get_accelerator().memory_allocated() / 1024**3, 2),
                 round(get_accelerator().max_memory_allocated() / 1024**3, 2),
             )))
-        logging.getLogger("benchmark").debug(f"monitoring overhead {time.perf_counter()-tik}s")
+        blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
 
         sample_count = (request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 0)
         return worker_base.PollResult(sample_count=sample_count, batch_count=1)
