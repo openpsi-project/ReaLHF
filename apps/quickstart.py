@@ -352,6 +352,10 @@ class PPOConfig:
     reward_output_bias: float = 0.0
     early_stop_imp_ratio: float = 5.0
     use_adaptive_kl_ctl: bool = False
+    value_norm: bool = False
+    value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
+    value_norm_beta: float = 0.99995
+    value_norm_eps: float = 1e-5
     _configuration_name: str = "Proximal Policy Optimization"
 
     def __post_init__(self):
@@ -720,6 +724,10 @@ def run_ppo(args: PPOConfig):
         max_reward_clip=args.max_reward_clip,
         early_stop_imp_ratio=args.early_stop_imp_ratio,
         use_adaptive_kl_ctl=args.use_adaptive_kl_ctl,
+        value_norm=args.value_norm,
+        value_norm_type=args.value_norm_type,
+        value_norm_beta=args.value_norm_beta,
+        value_norm_eps=args.value_norm_eps,
     )
 
     os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)

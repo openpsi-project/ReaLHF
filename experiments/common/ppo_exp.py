@@ -171,6 +171,10 @@ class PPOExperiment(Experiment):
     max_reward_clip: float = 20.0
     use_adaptive_kl_ctl: bool = False
     early_stop_imp_ratio: float = 5.0
+    value_norm: bool = False
+    value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
+    value_norm_beta: float = 0.99995
+    value_norm_eps: float = 1e-5
 
     hybrid_engine: bool = False
     offload_actor_param: bool = False
@@ -461,13 +465,16 @@ class PPOExperiment(Experiment):
         ppo_kwargs = dict(
             n_minibatches=self.ppo_n_minibatches,
             kl_ctl=self.kl_ctl,
-            adv_norm=self.adv_norm,
             discount=self.discount,
             gae_lambda=self.gae_lambda,
             eps_clip=self.eps_clip,
             value_eps_clip=self.value_eps_clip,
             max_reward_clip=self.max_reward_clip,
             adaptive_kl_ctl=self.use_adaptive_kl_ctl,
+            value_norm=self.value_norm,
+            value_norm_type=self.value_norm_type,
+            value_norm_beta=self.value_norm_beta,
+            value_norm_eps=self.value_norm_eps,
         )
 
         actor_interface = ModelInterface(
@@ -477,6 +484,7 @@ class PPOExperiment(Experiment):
                 "generation_config": generation_kwargs,
                 "early_stop_imp_ratio": self.early_stop_imp_ratio,
                 "force_no_logits_mask": self.benchmark,  # For benchmark only
+                "adv_norm": self.adv_norm,
             },
         )
         ref_interface = copy.deepcopy(actor_interface)

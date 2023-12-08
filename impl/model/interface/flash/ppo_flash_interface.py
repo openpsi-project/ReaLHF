@@ -117,6 +117,11 @@ class PackedActorInterface(api.model.ModelInterface):
     enable_save: bool = True
     force_no_logits_mask: bool = False
 
+    value_norm: bool = False
+    value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
+    value_norm_beta: float = 0.99995
+    value_norm_eps: float = 1e-5
+
     def __post_init__(self):
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
@@ -125,6 +130,15 @@ class PackedActorInterface(api.model.ModelInterface):
                                                                   self.adaptive_kl_horizon)
         else:
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
+        if self.value_norm:
+            from impl.model.utils.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
+
+            if self.value_norm_type == "exp":
+                self.rms = ExponentialRunningMeanStd(beta=self.value_norm_beta, epsilon=self.value_norm_eps)
+            elif self.value_norm_type == "ma":
+                self.rms = MovingAverageRunningMeanStd()
+            else:
+                raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
 
     def save(self, model: api.model.Model, save_dir: str):
@@ -277,6 +291,17 @@ class PackedActorInterface(api.model.ModelInterface):
         values = data_["values"]
         seq_no_eos_mask = data_["seq_no_eos_mask"]
 
+        if self.value_norm:
+            denormalized_values = self.rms.denormalize(values)
+        else:
+            denormalized_values = values
+
+        for i in range(seq_no_eos_mask.shape[0]):
+            if not seq_no_eos_mask[i]:
+                # Set value at the EOS token to be zero.
+                denormalized_values[cu_seqlens[i + 1] - 1] = 0.0
+                values[cu_seqlens[i + 1] - 1] = 0.0
+
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
@@ -299,14 +324,17 @@ class PackedActorInterface(api.model.ModelInterface):
             short1cu_seqlens=short1cu_seqlens,
             seq_no_eos_mask=seq_no_eos_mask,
         )
-        advantages, _ = ppo_functional.get_packed_advantages_and_returns(
+        advantages, returns = ppo_functional.get_packed_advantages_and_returns(
             gamma=self.discount,
             lam=self.gae_lambda,
-            values=values,
+            values=denormalized_values,
             rewards=rewards,
             short1cu_seqlens=short1cu_seqlens,
             seq_no_eos_mask=seq_no_eos_mask,
         )
+
+        if self.value_norm:
+            self.rms.update(returns, mask=loss_mask)
 
         global_stats = dict(
             task_reward=reward_score.mean().detach(),
@@ -409,6 +437,7 @@ def _ppo_critic_loss_from_model_outputs(
     kl_rewards: torch.FloatTensor,
     value_eps_clip: float,
     kl_adapter: ppo_functional.KLController,
+    rms=None,
     **kwargs,
 ) -> Tuple[torch.FloatTensor, Dict]:
     leave_one_indices = torch.cat([
@@ -432,10 +461,16 @@ def _ppo_critic_loss_from_model_outputs(
 
     clip_ratio = loss_stat["clip_ratio"]
 
+    if rms is not None:
+        denormalized_values = rms.denormalize(new_values)
+    else:
+        denormalized_values = new_values
+
     return loss, dict(
         value_loss=loss.detach(),
         value_clip_ratio=clip_ratio,
-        values=new_values.mean().detach(),
+        normalized_values=new_values.mean().detach(),
+        denormalized_values=denormalized_values.mean().detach(),
     )
 
 
@@ -444,7 +479,6 @@ class PackedCriticInterface(api.model.ModelInterface):
     n_minibatches: int = 4
     enable_save: bool = True
     kl_ctl: float = 0.1
-    adv_norm: bool = False
     discount: float = 1.0
     gae_lambda: float = 0.95
     eps_clip: float = 0.2
@@ -453,6 +487,10 @@ class PackedCriticInterface(api.model.ModelInterface):
     adaptive_kl_ctl: bool = False
     adaptive_kl_target: Optional[float] = 6
     adaptive_kl_horizon: Optional[float] = 10000
+    value_norm: bool = False
+    value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
+    value_norm_beta: float = 0.99995
+    value_norm_eps: float = 1e-5
 
     def __post_init__(self):
         if self.adaptive_kl_ctl:
@@ -462,6 +500,15 @@ class PackedCriticInterface(api.model.ModelInterface):
                                                                   self.adaptive_kl_horizon)
         else:
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
+        if self.value_norm:
+            from impl.model.utils.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
+
+            if self.value_norm_type == "exp":
+                self.rms = ExponentialRunningMeanStd(beta=self.value_norm_beta, epsilon=self.value_norm_eps)
+            elif self.value_norm_type == "ma":
+                self.rms = MovingAverageRunningMeanStd()
+            else:
+                raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
 
     def save(self, model: api.model.Model, save_dir: str):
@@ -491,12 +538,6 @@ class PackedCriticInterface(api.model.ModelInterface):
                                                cu_seqlens=cu_seqlens,
                                                max_seqlen=max_seqlen)
         scores = scores.float().squeeze(-1)
-
-        seq_no_eos_mask = data["seq_no_eos_mask"]
-        for i in range(seq_no_eos_mask.shape[0]):
-            if not seq_no_eos_mask[i]:
-                # Set value at the EOS token to be zero.
-                scores[cu_seqlens[i + 1] - 1] = 0.0
         return from_dict(dict(scores=scores.cpu()))
 
     def train_step(self, model: api.model.Model, data_: NamedArray) -> Dict:
@@ -513,6 +554,17 @@ class PackedCriticInterface(api.model.ModelInterface):
         reward_score = data_["rewards"]
         values = data_["values"]
         seq_no_eos_mask = data_["seq_no_eos_mask"]
+
+        if self.value_norm:
+            denormalized_values = self.rms.denormalize(values)
+        else:
+            denormalized_values = values
+
+        for i in range(seq_no_eos_mask.shape[0]):
+            if not seq_no_eos_mask[i]:
+                # Set value at the EOS token to be zero.
+                denormalized_values[cu_seqlens[i + 1] - 1] = 0.0
+                values[cu_seqlens[i + 1] - 1] = 0.0
 
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         short1cu_seqlens = cu_seqlens.clone()
@@ -541,19 +593,23 @@ class PackedCriticInterface(api.model.ModelInterface):
         _, returns = ppo_functional.get_packed_advantages_and_returns(
             gamma=self.discount,
             lam=self.gae_lambda,
-            values=values,
+            values=denormalized_values,
             rewards=rewards,
             short1cu_seqlens=short1cu_seqlens,
             seq_no_eos_mask=seq_no_eos_mask,
         )
 
+        if self.value_norm:
+            normalized_returns = self.rms.normalize(returns)
+            self.rms.update(returns, mask=loss_mask)
+        else:
+            normalized_returns = returns
+
         global_stats = dict(returns=returns.mean().detach())
 
-        if self.adv_norm:
-            advantages = masked_normalization(advantages, loss_mask)
         data_ = from_dict(
             dict(
-                returns=returns,
+                returns=normalized_returns,
                 values=values,
                 ppo_loss_mask=loss_mask,
                 kl_rewards=kl_rewards,
@@ -578,6 +634,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                     kl_rewards=data["kl_rewards"],
                     value_eps_clip=self.value_eps_clip,
                     kl_adapter=self.kl_adapter,
+                    rms=self.rms if self.value_norm else None,
                 )
 
                 loss, stats = module.train_batch(
@@ -602,6 +659,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                     kl_rewards=data["kl_rewards"],
                     value_eps_clip=self.value_eps_clip,
                     kl_adapter=self.kl_adapter,
+                    rms=self.rms if self.value_norm else None,
                 )
 
                 module.backward(loss)
