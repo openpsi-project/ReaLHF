@@ -465,7 +465,6 @@ class PPOExperiment(Experiment):
         ppo_kwargs = dict(
             n_minibatches=self.ppo_n_minibatches,
             kl_ctl=self.kl_ctl,
-            adv_norm=self.adv_norm,
             discount=self.discount,
             gae_lambda=self.gae_lambda,
             eps_clip=self.eps_clip,
@@ -485,6 +484,7 @@ class PPOExperiment(Experiment):
                 "generation_config": generation_kwargs,
                 "early_stop_imp_ratio": self.early_stop_imp_ratio,
                 "force_no_logits_mask": self.benchmark,  # For benchmark only
+                "adv_norm": self.adv_norm,
             },
         )
         ref_interface = copy.deepcopy(actor_interface)

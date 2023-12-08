@@ -134,11 +134,9 @@ class PackedActorInterface(api.model.ModelInterface):
             from impl.model.utils.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
 
             if self.value_norm_type == "exp":
-                self.rms = ExponentialRunningMeanStd(input_shape=(),
-                                                     beta=self.value_norm_beta,
-                                                     eps=self.value_norm_eps)
+                self.rms = ExponentialRunningMeanStd(beta=self.value_norm_beta, epsilon=self.value_norm_eps)
             elif self.value_norm_type == "ma":
-                self.rms = MovingAverageRunningMeanStd(input_shape=())
+                self.rms = MovingAverageRunningMeanStd()
             else:
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
@@ -439,6 +437,7 @@ def _ppo_critic_loss_from_model_outputs(
     kl_rewards: torch.FloatTensor,
     value_eps_clip: float,
     kl_adapter: ppo_functional.KLController,
+    rms=None,
     **kwargs,
 ) -> Tuple[torch.FloatTensor, Dict]:
     leave_one_indices = torch.cat([
@@ -462,10 +461,16 @@ def _ppo_critic_loss_from_model_outputs(
 
     clip_ratio = loss_stat["clip_ratio"]
 
+    if rms is not None:
+        denormalized_values = rms.denormalize(new_values)
+    else:
+        denormalized_values = new_values
+
     return loss, dict(
         value_loss=loss.detach(),
         value_clip_ratio=clip_ratio,
-        values=new_values.mean().detach(),
+        normalized_values=new_values.mean().detach(),
+        denormalized_values=denormalized_values.mean().detach(),
     )
 
 
@@ -474,7 +479,6 @@ class PackedCriticInterface(api.model.ModelInterface):
     n_minibatches: int = 4
     enable_save: bool = True
     kl_ctl: float = 0.1
-    adv_norm: bool = False
     discount: float = 1.0
     gae_lambda: float = 0.95
     eps_clip: float = 0.2
@@ -500,11 +504,9 @@ class PackedCriticInterface(api.model.ModelInterface):
             from impl.model.utils.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
 
             if self.value_norm_type == "exp":
-                self.rms = ExponentialRunningMeanStd(input_shape=(),
-                                                     beta=self.value_norm_beta,
-                                                     eps=self.value_norm_eps)
+                self.rms = ExponentialRunningMeanStd(beta=self.value_norm_beta, epsilon=self.value_norm_eps)
             elif self.value_norm_type == "ma":
-                self.rms = MovingAverageRunningMeanStd(input_shape=())
+                self.rms = MovingAverageRunningMeanStd()
             else:
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
@@ -605,8 +607,6 @@ class PackedCriticInterface(api.model.ModelInterface):
 
         global_stats = dict(returns=returns.mean().detach())
 
-        if self.adv_norm:
-            advantages = masked_normalization(advantages, loss_mask)
         data_ = from_dict(
             dict(
                 returns=normalized_returns,
@@ -634,6 +634,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                     kl_rewards=data["kl_rewards"],
                     value_eps_clip=self.value_eps_clip,
                     kl_adapter=self.kl_adapter,
+                    rms=self.rms if self.value_norm else None,
                 )
 
                 loss, stats = module.train_batch(
@@ -658,6 +659,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                     kl_rewards=data["kl_rewards"],
                     value_eps_clip=self.value_eps_clip,
                     kl_adapter=self.kl_adapter,
+                    rms=self.rms if self.value_norm else None,
                 )
 
                 module.backward(loss)

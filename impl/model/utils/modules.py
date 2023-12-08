@@ -147,17 +147,18 @@ class LlamaRMSNorm(nn.Module):
 
 class ExponentialRunningMeanStd(nn.Module):
 
-    def __init__(self, input_shape, beta=0.999, epsilon=1e-5, high_precision=True):
+    def __init__(self, beta=0.999, epsilon=1e-5, high_precision=True):
         super().__init__()
         self.__beta = beta
         self.__eps = epsilon
-        self.__input_shape = input_shape
 
         self.__dtype = torch.float64 if high_precision else torch.float32
 
-        self.__mean = nn.Parameter(torch.zeros(input_shape, dtype=self.__dtype), requires_grad=False)
-        self.__mean_sq = nn.Parameter(torch.zeros(input_shape, dtype=self.__dtype), requires_grad=False)
-        self.__debiasing_term = nn.Parameter(torch.zeros(1, dtype=self.__dtype), requires_grad=False)
+        self.__mean = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"), requires_grad=False)
+        self.__mean_sq = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"),
+                                      requires_grad=False)
+        self.__debiasing_term = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"),
+                                             requires_grad=False)
 
         self.reset_parameters()
 
@@ -171,35 +172,19 @@ class ExponentialRunningMeanStd(nn.Module):
         # is somewhat ambiguous
         raise NotImplementedError()
 
-    def __check(self, x, mask):
-        assert isinstance(x, torch.Tensor)
-        trailing_shape = x.shape[-len(self.__input_shape):]
-        assert trailing_shape == self.__input_shape, (
-            "Trailing shape of input tensor"
-            f"{x.shape} does not equal to configured input shape {self.__input_shape}")
-        if mask is not None:
-            assert mask.shape == (
-                *x.shape[:-len(self.__input_shape)],
-                *((1,) * len(self.__input_shape)),
-            ), (mask.shape, x.shape)
-
     @torch.no_grad()
-    def update(self, x, mask=None):
-        self.__check(x, mask)
+    def update(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None):
         x = x.to(self.__dtype)
         if mask is not None:
             mask = mask.to(self.__dtype)
-        norm_dims = tuple(range(len(x.shape) - len(self.__input_shape)))
         if mask is None:
-            factor = torch.tensor(np.prod(x.shape[:-len(self.__input_shape)]),
-                                  dtype=self.__dtype,
-                                  device=x.device)
+            factor = torch.tensor(np.prod(x.shape), dtype=self.__dtype, device=x.device)
         else:
             x = x * mask
             factor = mask.sum()
 
-        x_sum = x.sum(dim=norm_dims)
-        x_sum_sq = x.square().sum(dim=norm_dims)
+        x_sum = x.sum()
+        x_sum_sq = x.square().sum()
         if dist.is_initialized():
             dist.all_reduce(factor, op=dist.ReduceOp.SUM, group=data_parallel_group())
             dist.all_reduce(x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group())
@@ -220,14 +205,12 @@ class ExponentialRunningMeanStd(nn.Module):
 
     @torch.no_grad()
     def normalize(self, x):
-        self.__check(x, None)
         x = x.to(self.__dtype)
         mean, std = self.mean_std()
         return ((x - mean) / std).clip(-5, 5).float()  # clipping is a trick from hide and seek
 
     @torch.no_grad()
     def denormalize(self, x):
-        self.__check(x, None)
         x = x.to(self.__dtype)
         mean, std = self.mean_std()
         return (x * std + mean).float()
@@ -235,14 +218,14 @@ class ExponentialRunningMeanStd(nn.Module):
 
 class MovingAverageRunningMeanStd(nn.Module):
 
-    def __init__(self, input_shape, high_precision=True):
+    def __init__(self, high_precision=True):
         super().__init__()
-        self.__input_shape = input_shape
 
         self.__dtype = torch.float64 if high_precision else torch.float32
 
-        self.__mean = nn.Parameter(torch.zeros(input_shape, dtype=self.__dtype), requires_grad=False)
-        self.__mean_sq = nn.Parameter(torch.zeros(input_shape, dtype=self.__dtype), requires_grad=False)
+        self.__mean = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"), requires_grad=False)
+        self.__mean_sq = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"),
+                                      requires_grad=False)
         self.__accum_denominator = 0
 
         self.reset_parameters()
@@ -257,35 +240,19 @@ class MovingAverageRunningMeanStd(nn.Module):
         # is somewhat ambiguous
         raise NotImplementedError()
 
-    def __check(self, x, mask):
-        assert isinstance(x, torch.Tensor)
-        trailing_shape = x.shape[-len(self.__input_shape):]
-        assert trailing_shape == self.__input_shape, (
-            "Trailing shape of input tensor"
-            f"{x.shape} does not equal to configured input shape {self.__input_shape}")
-        if mask is not None:
-            assert mask.shape == (
-                *x.shape[:-len(self.__input_shape)],
-                *((1,) * len(self.__input_shape)),
-            ), (mask.shape, x.shape)
-
     @torch.no_grad()
-    def update(self, x, mask=None):
-        self.__check(x, mask)
+    def update(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None):
         x = x.to(self.__dtype)
         if mask is not None:
             mask = mask.to(self.__dtype)
-        norm_dims = tuple(range(len(x.shape) - len(self.__input_shape)))
         if mask is None:
-            factor = torch.tensor(np.prod(x.shape[:-len(self.__input_shape)]),
-                                  dtype=self.__dtype,
-                                  device=x.device)
+            factor = torch.tensor(np.prod(x.shape), dtype=self.__dtype, device=x.device)
         else:
             x = x * mask
             factor = mask.sum()
 
-        x_sum = x.sum(dim=norm_dims)
-        x_sum_sq = x.square().sum(dim=norm_dims)
+        x_sum = x.sum()
+        x_sum_sq = x.square().sum()
         if dist.is_initialized():
             dist.all_reduce(factor, op=dist.ReduceOp.SUM, group=data_parallel_group())
             dist.all_reduce(x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group())
@@ -303,14 +270,12 @@ class MovingAverageRunningMeanStd(nn.Module):
 
     @torch.no_grad()
     def normalize(self, x):
-        self.__check(x, None)
         x = x.to(self.__dtype)
         mean, std = self.mean_std()
         return ((x - mean) / std).clip(-5, 5).float()  # clipping is a trick from hide and seek
 
     @torch.no_grad()
     def denormalize(self, x):
-        self.__check(x, None)
         x = x.to(self.__dtype)
         mean, std = self.mean_std()
         return (x * std + mean).float()
