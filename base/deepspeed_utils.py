@@ -8,6 +8,7 @@ import deepspeed
 import torch
 
 from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
+import base.constants
 
 DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU = 32  # A place-holder for inference.
 
@@ -111,6 +112,8 @@ def deepspeed_initialize(
     num_pipeline_micro_batches: int = None,
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
+    if mpu is None:
+        mpu = base.constants.grid()
     if engine_type == "deepspeed":
         # Disable zero.Init context if it's currently enabled
         zero.partition_parameters.shutdown_init_context()

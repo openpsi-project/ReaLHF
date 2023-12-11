@@ -298,7 +298,7 @@ class CausalSelfAttentionLayer(nn.Module):
         #     check_dim=-2,
         #     is_mp=False,
         # )
-        # hidden_states = self.c_proj(hidden_states.flatten(start_dim=-2))
+        hidden_states = self.c_proj(hidden_states.flatten(start_dim=-2))
         # base.consistency.store_model_parallel(
         #     f"layer_{self.layer_index}_after_c_proj",
         #     hidden_states,

@@ -10,15 +10,16 @@ from tests.parallel.utils import *
 import api.config as config_package
 
 NUM_MP = 4
+NUM_PP = 2
 NUM_DP = 1
-NUM_SHARDS = 3
+NUM_SHARDS = 1
 WORLD_SIZE = NUM_MP * NUM_DP
 MODEL_TYPE = "llama"
 if MODEL_TYPE == "llama":
-    # BASELINE_MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
-    # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l_{NUM_MP}mp_{NUM_SHARDS}s"
-    BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
-    MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-13b-hf_{NUM_MP}mp_{NUM_SHARDS}s"
+    BASELINE_MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
+    MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l_{NUM_MP}mp_{NUM_SHARDS}s"
+    # BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
+    # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf_{NUM_MP}mp_{NUM_SHARDS}s"
 BATCH_SIZE = 32
 MIN_NEW_TOKENS = 1
 MAX_NEW_TOKENS = 2048
@@ -53,15 +54,26 @@ def make_model(device):
                                             tokenizer_path=MODEL_PARALLEL_PATH,
                                             init_from_scratch=True,
                                         ))
-    model_config.wrappers += [
-        config_package.ModelWrapper("model_parallel",
-                                    args=dict(
-                                        model_path=MODEL_PARALLEL_PATH,
-                                        is_critic=False,
-                                        init_critic_from_actor=False,
-                                        init_from_scratch=False,
-                                    ))
-    ]
+    if NUM_PP == 1:
+        model_config.wrappers += [
+            config_package.ModelWrapper("model_parallel",
+                                        args=dict(
+                                            model_path=MODEL_PARALLEL_PATH,
+                                            is_critic=False,
+                                            init_critic_from_actor=False,
+                                            init_from_scratch=False,
+                                        ))
+        ]
+    elif NUM_PP > 1:
+        model_config.wrappers += [
+            config_package.ModelWrapper("model_pipe_parallel",
+                                        args=dict(
+                                            model_path=MODEL_PARALLEL_PATH,
+                                            is_critic=False,
+                                            init_critic_from_actor=False,
+                                            init_from_scratch=False,
+                                        ))
+        ]
 
     model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
     return model
@@ -69,7 +81,7 @@ def make_model(device):
 
 def init_handles(rank):
     device = setup_gpu(rank, WORLD_SIZE)
-    init_global_constants(NUM_DP, NUM_MP, 1)
+    init_global_constants(NUM_DP, NUM_MP, NUM_PP)
     torch_dist_rank = torch.distributed.get_rank()
     cuda_visible = os.environ["CUDA_VISIBLE_DEVICES"]
     print(f"PROCESS RANK: {rank}; \n"
@@ -77,14 +89,14 @@ def init_handles(rank):
           f"CUDA VISIBLE: {cuda_visible}")
 
     model = make_model(device)
-    # backend = make_backend()
-    # ft_spec = make_finetune_spec(BATCH_SIZE)
-    # interface = make_interface()
-    ft_spec = None
-    backend = None
-    interface = None
+    backend = make_backend()
+    ft_spec = make_finetune_spec(BATCH_SIZE)
+    interface = make_interface()
+    # ft_spec = None
+    # backend = None
+    # interface = None
 
-    # backend.initialize(model, ft_spec)
+    backend.initialize(model, ft_spec)
     return device, model, backend, interface
 
 
@@ -92,15 +104,17 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
 
-    packed_input_ids = data['packed_input_ids']
-    cu_seqlens = data['cu_seqlens']
-    max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
+    # packed_input_ids = data['packed_input_ids']
+    # cu_seqlens = data['cu_seqlens']
+    # max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
 
     model.module.eval()
 
     st = time.monotonic()
-    logits = model.module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-                          max_seqlen=max_seqlen).logits.float()
+    # logits = model.module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
+    #                       max_seqlen=max_seqlen).logits.float()
+    res = interface.inference(model, data)
+    logits = res['logits']
     print(f"rank {rank} mp FIRST inference time cost {time.monotonic() - st:.4f}")
 
     # for _ in range(10):
@@ -280,5 +294,5 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testInferenceAccordance")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testInference")
     # unittest.main(defaultTest="ModelParallelFlashMQATTest.testLinearAccordance")

@@ -121,5 +121,28 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
             return dict(ppl=perplexity)
         return res
 
+    @torch.inference_mode()
+    def inference(self, model: api.model.Model, data: NamedArray) -> Dict:
+        device = model.device
+        module = model.module
+        module.eval()
+
+        data = recursive_apply(data, lambda x: x.to(device))
+        packed_input_ids: torch.Tensor = data['packed_input_ids']
+        cu_seqlens: torch.Tensor = data['cu_seqlens']
+        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
+
+        if isinstance(module, DeepSpeedPipelineEngine):
+            logits = module.forward(packed_input_ids=packed_input_ids,
+                                    cu_seqlens=cu_seqlens,
+                                    max_seqlen=max_seqlen)
+            if logits is not None:
+                logits = logits.float()
+        else:
+            logits = model.module(packed_input_ids=packed_input_ids,
+                                  cu_seqlens=cu_seqlens,
+                                  max_seqlen=max_seqlen).logits.float()
+        return dict(logits=logits)
+
 
 api.model.register_interface("flash_sft", PackedSupervisedFinetuningInterface)
