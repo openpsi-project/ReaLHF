@@ -15,18 +15,20 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        hf_path = "/lustre/public/pretrained_model_weights/deepseek-coder-6.7b-base"
+        # hf_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
+        # hf_path = "/lustre/public/pretrained_model_weights/codellama-13B"
+
         cls.bs = bs = 3
         cls.device = device = "cuda"
-        hf_config = transformers.AutoConfig.from_pretrained(
-            "/lustre/public/pretrained_model_weights/Llama-2-13b-hf")
+        hf_config = transformers.AutoConfig.from_pretrained(hf_path, trust_remote_code=True)
         hf_config.num_hidden_layers = 2
         hf_config.hidden_size = 256
         hf_config.num_attention_heads = 4
         hf_config.num_key_value_heads = 2
         hf_config.intermediate_size = 1024
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer(
-            "/lustre/public/pretrained_model_weights/Llama-2-13b-hf")
+        cls.tokenizer = api.huggingface.load_hf_tokenizer(hf_path)
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.llama: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(hf_config).to(
