@@ -17,7 +17,7 @@ from base.cluster import spec as cluster_spec
 from base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
 import api.config
 
-SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "saved"]
+SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "deepseek", "codellama"]
 
 cs = ConfigStore.instance()
 

@@ -273,5 +273,7 @@ def to_llama_state_dict(state_dict: Dict, config: FlashMQATConfig) -> Dict:
     return state_dict
 
 
-FlashMQATModel.register_hf_model("llama", convert_config_llama, convert_state_dict_llama, to_llama_state_dict)
+for name in ["llama", "deepseek", "codellama"]:
+    FlashMQATModel.register_hf_model(name, convert_config_llama, convert_state_dict_llama,
+                                     to_llama_state_dict)
 ################################ LLaMa End ################################
