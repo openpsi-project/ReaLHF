@@ -165,7 +165,7 @@ def split_state_dict_into_shards(state_dict, n_shards):
         shard = {}
         for j in range(start, start + size):
             shard[keys[j]] = state_dict[keys[j]]
-            print(f"shard {i} key {keys[j]}")
+            # print(f"shard {i} key {keys[j]}")
         start += size
         shards.append(shard)
     return shards
@@ -203,6 +203,8 @@ def main():
 
     # TODO: load and process full statedict by shard for large model that can not fit into memory
     cfg = None
+    if args.num_mp > 1:
+        args.model_type = f"parallel_{args.model_type}"
     base.constants.set_fake_mp_world_size(args.num_mp)
     for mp_rank in range(args.num_mp):
         base.constants.set_fake_mp_rank(mp_rank)
@@ -218,12 +220,12 @@ def main():
             stage_to_state_dict = split_state_dict_by_stage(state_dict, stage_to_layer_idx)
             for stage, state_dict in stage_to_state_dict.items():
                 shards = split_state_dict_into_shards(state_dict, args.num_shards)
-                print(f"stage {stage} state_dict keys: {state_dict.keys()}")
+                # print(f"stage {stage} state_dict keys: {state_dict.keys()}")
                 for shard_index, shard in enumerate(shards):
                     save_state_dict(shard, stage, mp_rank, shard_index, output_dir)
         elif args.num_pp == 1:
             shards = split_state_dict_into_shards(state_dict, args.num_shards)
-            print(f"state_dict keys: {state_dict.keys()}")
+            # print(f"state_dict keys: {state_dict.keys()}")
             for shard_index, shard in enumerate(shards):
                 save_state_dict(shard, 0, mp_rank, shard_index, output_dir)
 

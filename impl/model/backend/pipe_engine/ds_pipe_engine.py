@@ -585,6 +585,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         x = self.tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
         ys = self.tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
 
+        self._zero_grads(x)
+        self._zero_grads(ys)
+
         # logger.info(f"Stage {stage_id} mbid {micro_batch_id} before forward")
         x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
         # logger.info(f"Stage {stage_id} mbid {micro_batch_id} after forward")

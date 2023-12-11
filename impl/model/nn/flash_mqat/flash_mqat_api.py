@@ -31,12 +31,11 @@ logger = logging.getLogger("FlashMQAT Interface")
 class HuggingfaceLikeFlashMQATForCausalLM(FlashMQATModel):
     """__call__ on this model will return a huggingface-like output."""
 
-    def __init__(
-        self,
-        config: FlashMQATConfig,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
-    ):
+    def __init__(self,
+                 config: FlashMQATConfig,
+                 dtype: Optional[torch.dtype] = None,
+                 device: Optional[torch.device] = None,
+                 **kwargs):
         super().__init__(config, is_critic=False, dtype=dtype, device=device)
 
     def forward(
@@ -94,14 +93,13 @@ class HuggingfaceLikeFlashMQATForCausalLM(FlashMQATModel):
 
 class DeepSpeedChatLikeFlashMQATCriticModel(FlashMQATModel):
 
-    def __init__(
-        self,
-        config: FlashMQATConfig,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
-        output_scaling: float = 1.0,
-        output_bias: float = 0.0,
-    ):
+    def __init__(self,
+                 config: FlashMQATConfig,
+                 dtype: Optional[torch.dtype] = None,
+                 device: Optional[torch.device] = None,
+                 output_scaling: float = 1.0,
+                 output_bias: float = 0.0,
+                 **kwargs):
         super().__init__(config, is_critic=True, dtype=dtype, device=device)
         self.output_scaling = output_scaling
         self.output_bias = output_bias

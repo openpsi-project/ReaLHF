@@ -11,6 +11,7 @@ import transformers
 
 from base.monitor import process_memory_mb
 import api.model
+import base.constants
 import base.logging as logging
 
 logger = logging.getLogger("Model Save")

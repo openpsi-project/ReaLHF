@@ -25,6 +25,8 @@ except ModuleNotFoundError:
 
 from impl.model.utils.save_load import load_from_disk, save_to_disk
 
+# import base.consistency
+
 logger = logging.getLogger("ParallelFlashMQAT")
 
 
@@ -36,6 +38,8 @@ class ParallelVocabPositionEmbedding(nn.Module):
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
+        if dtype is None:
+            self.dtype = dtype = torch.float16
         super().__init__()
         self.n_positions = config.n_positions
         self.wte = ParallelEmbedding(config.vocab_size, config.hidden_dim, dtype=dtype, device=device)
@@ -112,9 +116,21 @@ class ParallelVocabPositionEmbedding(nn.Module):
             x.attention_mask = self_attention_mask.unsqueeze(1)
 
         inputs_embeds = self.wte(y.input_ids)
+        # base.consistency.store_model_parallel(
+        #     "inputs_embeds",
+        #     inputs_embeds,
+        #     check_dim="full",
+        #     is_mp=True,
+        # )
         if self.apply_abs_pos_embed:
             inputs_embeds = inputs_embeds + self.wpe(y.position_ids)
         x.pp_output = self.embed_drop(inputs_embeds)
+        # base.consistency.store_model_parallel(
+        #     "embed_layer_output",
+        #     x.pp_output,
+        #     check_dim="full",
+        #     is_mp=True,
+        # )
         return x
 
 
@@ -152,29 +168,57 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         assert hidden_dim % head_dim == 0
         n_q_heads = hidden_dim // head_dim
 
-        self.ln = nn.LayerNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
+        if layer_norm_type is None:
+            layer_norm_fn = nn.LayerNorm
+        elif layer_norm_type == "rms":
+            layer_norm_fn = LlamaRMSNorm
+
+        self.ln = layer_norm_fn(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
 
         self.q_attn = ColumnParallelLinear(
             hidden_dim,
             head_dim * n_q_heads,
+            bias=use_attention_bias,
             dtype=dtype,
             device=device,
         )
-        self.mp_world_size = base.constants.model_parallel_world_size()
+        self.mp_worldsize = base.constants.model_parallel_world_size()
+        assert n_q_heads % self.mp_worldsize == 0, f"n_q_heads {n_q_heads} must be divisible by "\
+                                                    f"mp_worldsize {self.mp_worldsize}"
         if n_kv_heads > 1 and \
-            n_kv_heads % self.mp_world_size == 0:
+            n_kv_heads % self.mp_worldsize == 0:
             # split model parallel among heads if possible
-            self.k_attn = ColumnParallelLinear(hidden_dim, head_dim * n_kv_heads, dtype=dtype, device=device)
-            self.v_attn = ColumnParallelLinear(hidden_dim, head_dim * n_kv_heads, dtype=dtype, device=device)
+            self.k_attn = ColumnParallelLinear(hidden_dim,
+                                               head_dim * n_kv_heads,
+                                               bias=use_attention_bias,
+                                               dtype=dtype,
+                                               device=device)
+            self.v_attn = ColumnParallelLinear(hidden_dim,
+                                               head_dim * n_kv_heads,
+                                               bias=use_attention_bias,
+                                               dtype=dtype,
+                                               device=device)
         else:
             if n_kv_heads > 1:
                 logger.warning(f"Cannot split {n_kv_heads} kv heads evenly among "
-                               f"{self.mp_world_size} model parallel ranks, "
+                               f"{self.mp_worldsize} model parallel ranks, "
                                f"use unsplitted linear for kv heads instead")
-            self.k_attn = nn.Linear(hidden_dim, head_dim * n_kv_heads, dtype=dtype, device=device)
-            self.v_attn = nn.Linear(hidden_dim, head_dim * n_kv_heads, dtype=dtype, device=device)
+            self.k_attn = nn.Linear(hidden_dim,
+                                    head_dim * n_kv_heads,
+                                    bias=use_attention_bias,
+                                    dtype=dtype,
+                                    device=device)
+            self.v_attn = nn.Linear(hidden_dim,
+                                    head_dim * n_kv_heads,
+                                    bias=use_attention_bias,
+                                    dtype=dtype,
+                                    device=device)
 
-        self.c_proj = RowParallelLinear(hidden_dim, hidden_dim, dtype=dtype, device=device)
+        self.c_proj = RowParallelLinear(hidden_dim,
+                                        hidden_dim,
+                                        bias=use_attention_bias,
+                                        dtype=dtype,
+                                        device=device)
         self.resid_dropout = nn.Dropout(resid_pdrop)
 
         self.attn_pdrop = attn_pdrop
@@ -235,13 +279,41 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
             scale_factor = 1
         scale_factor /= self.d**0.5
 
+        # base.consistency.store_model_parallel(
+        #     f"layer_{self.layer_index}_causal_self_attn_input",
+        #     hidden_states,
+        #     check_dim="full",
+        #     is_mp=True,
+        # )
+
+        hidden_states = self.ln(hidden_states)
+        # base.consistency.store_model_parallel(
+        #     f"layer_{self.layer_index}_after_ln",
+        #     hidden_states,
+        #     check_dim="full",
+        #     is_mp=True,
+        # )
+        # print(f"hidden_states.dtype={hidden_states.dtype}, q_attn dtype {self.q_attn.weight.dtype}")
         q: torch.Tensor = self.q_attn(hidden_states)
         k: torch.Tensor = self.k_attn(hidden_states)
         v: torch.Tensor = self.v_attn(hidden_states)
         kv = torch.cat([k, v], dim=-1)
 
-        q = q.view(*q.shape[:-1], self.nq, self.d)
-        kv = kv.view(*kv.shape[:-1], 2, self.nkv, self.d)
+        q = q.view(*q.shape[:-1], self.nq // self.mp_worldsize, self.d)
+        kv = kv.view(*kv.shape[:-1], 2, self.nkv // self.mp_worldsize, self.d)
+
+        # base.consistency.store_model_parallel(
+        #     f"layer_{self.layer_index}_before_rotary_q",
+        #     q,
+        #     check_dim=-2,
+        #     is_mp=True,
+        # )
+        # base.consistency.store_model_parallel(
+        #     f"layer_{self.layer_index}_before_rotary_kv",
+        #     kv,
+        #     check_dim=-2,
+        #     is_mp=True,
+        # )
 
         if self.apply_rotary and k_cache is None:
             # otherwise, we input rotary cos/sin directly into flash_attn_with_kvcache
@@ -258,6 +330,19 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
             rotary_cos, rotary_sin = self.rotary_emb._cos_cached, self.rotary_emb._sin_cached
         else:
             rotary_cos = rotary_sin = None
+
+        # base.consistency.store_model_parallel(
+        #     f"layer_{self.layer_index}_before_attn_q",
+        #     q,
+        #     check_dim=-2,
+        #     is_mp=True,
+        # )
+        # base.consistency.store_model_parallel(
+        #     f"layer_{self.layer_index}_before_attn_kv",
+        #     kv,
+        #     check_dim=-2,
+        #     is_mp=True,
+        # )
 
         k, v = kv.unbind(dim=-3)
 
@@ -302,6 +387,8 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
                 rotary_interleaved=self.rotary_interleaved,
             )
         elif cu_seqlens is not None:
+            # logger.info(f"mp_rank {base.constants.model_parallel_rank()} "
+            #             f"cu_seqlens is not None :: q, k, v shape: {q.shape}, {k.shape}, {v.shape}")
             assert max_seqlen is not None
             assert len(q.shape) == 3
             hidden_states = flash_attn_varlen_func(
@@ -316,6 +403,8 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
                 softmax_scale=scale_factor,
                 causal=True,
             )
+            # logger.info(f"mp_rank {base.constants.model_parallel_rank()} "
+            #             f"hidden states shape: {hidden_states.shape}")
         else:
             hidden_states = flash_attn_func(
                 q,
@@ -325,7 +414,19 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
                 softmax_scale=scale_factor,
                 causal=True,
             )
-        hidden_states, _ = self.c_proj(hidden_states.flatten(start_dim=-2))
+        # base.consistency.store_model_parallel(
+        #     f"layer_{self.layer_index}_after_attn_func",
+        #     hidden_states,
+        #     check_dim=-2,
+        #     is_mp=True,
+        # )
+        hidden_states = self.c_proj(hidden_states.flatten(start_dim=-2))
+        # base.consistency.store_model_parallel(
+        #     f"layer_{self.layer_index}_after_c_proj",
+        #     hidden_states,
+        #     check_dim="full",
+        #     is_mp=True,
+        # )
         hidden_states = self.resid_dropout(hidden_states)
         return hidden_states, k, v
 
@@ -343,6 +444,9 @@ class ParallelFlashMQATBlock(nn.Module):
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
+        if dtype is None:
+            dtype = torch.float16
+        self.layer_index = layer_index
         self.attn = ParallelCausalSelfAttentionLayer(
             hidden_dim=config.hidden_dim,
             n_kv_heads=config.n_kv_heads,
@@ -352,6 +456,13 @@ class ParallelFlashMQATBlock(nn.Module):
             layer_index=layer_index,
             layer_norm_epsilon=config.layer_norm_epsilon,
             scale_attn_by_inverse_layer_idx=config.scale_attn_by_inverse_layer_idx,
+            layer_norm_type=config.layer_norm_type,
+            use_attention_bias=config.use_attention_bias,
+            apply_rotary=config.apply_rotary,
+            rotary_base=config.rotary_base,
+            rotary_interleaved=config.rotary_interleaved,
+            rotary_scaling=config.rotary_scaling,
+            rotary_scaling_type=config.rotary_scaling_type,
             dtype=dtype,
             device=device,
         )
@@ -417,12 +528,30 @@ class ParallelFlashMQATBlock(nn.Module):
                 attention_mask=x.attention_mask,
             )
         h = h + attn_out
+        # base.consistency.store_model_parallel(
+        #     f"layer_{self.layer_index}_after_attn",
+        #     h,
+        #     check_dim="full",
+        #     is_mp=True,
+        # )
         if self.ckpt_mlp:
             h = torch.utils.checkpoint.checkpoint(self.mlp, h, use_reentrant=True) + h
         else:
             h = self.mlp(h) + h
+        # base.consistency.store_model_parallel(
+        #     f"layer_{self.layer_index}_after_mlp",
+        #     h,
+        #     check_dim="full",
+        #     is_mp=True,
+        # )
         if self.output_layernorm:
             h = self.ln_f(h)
+        # base.consistency.store_model_parallel(
+        #     f"layer_{self.layer_index}_after_ln_f",
+        #     h,
+        #     check_dim="full",
+        #     is_mp=True,
+        # )
         x.pp_output = h
         # Set kv cache during the first forward pass of generation.
         # Do we need an option to disable this?
@@ -450,11 +579,7 @@ class ParallelFlashMQATBase(nn.Module):
         self.dtype = dtype
         self.device = device
         self.embedding_layer = ParallelVocabPositionEmbedding(
-            config.vocab_size,
-            config.n_positions,
-            config.hidden_dim,
-            config.embd_pdrop,
-            fixed_abs_position_ids=config.fixed_abs_position_ids,
+            config,
             dtype=dtype,
             device=device,
         )
@@ -477,7 +602,7 @@ class ParallelFlashMQATBase(nn.Module):
         layers = self.to_layers()
         assert len(ys) == len(layers), (len(ys), len(layers))
         raw_pp_input = x.pp_input
-        for layer, y in zip(layers, ys):
+        for i, (layer, y) in enumerate(zip(layers, ys)):
             x = layer(x, y)  # This will set pp_output.
             x.pp_input = x.pp_output
         # Finally, pp_input is the input of this pipeline stage,
@@ -487,44 +612,26 @@ class ParallelFlashMQATBase(nn.Module):
         return x
 
 
-class LanguageModelHead(nn.Linear):
-
-    def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
-        x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
-        return x
-
-
 class ModelParallelModule(nn.Module):
-
-    def __init__(
-        self,
-        module: FlashMQATModel,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[str, torch.device]] = None,
-    ):
-        self.module = module
-        self.module.transformer = ParallelFlashMQATBase(module.config,
-                                                        dtype=module.dtype,
-                                                        device=module.device)
-
-    def load():
-        pass
-
-
-class ParallelFlashMQATModel(FlashMQATModel):
     """ TODO: change into lower level module substitution
     Currently only substitute FlashMQATModel into a ParallelFlashMQATBase
     """
 
     def __init__(
         self,
+        module: FlashMQATModel,
         config: FlashMQATConfig,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
-        super().__init__(config, dtype, device)
-        self.transformer = ParallelFlashMQATBase(config, dtype=dtype, device=device)  # overwrite
+        super().__init__()
+
+        self.module = module
+        self.module.transformer = ParallelFlashMQATBase(config, dtype=dtype, device=device)  # overwrite
         self.num_checkpoint_shards = 1
+
+    def forward(self, *args, **kwargs):
+        return self.module.forward(*args, **kwargs)
 
     def load(self, load_dir: str, init_critic_from_actor: bool = False):
         mp_rank = base.constants.model_parallel_rank()
@@ -534,9 +641,9 @@ class ParallelFlashMQATModel(FlashMQATModel):
 
         if init_critic_from_actor and f'{self.config.n_layers + 1}.weight' in state_dict:
             state_dict.pop(f'{self.config.n_layers + 1}.weight')
-            self.load_state_dict(state_dict, strict=False)
+            self.module.load_state_dict(state_dict, strict=False)
         else:
-            self.load_state_dict(state_dict)
+            self.module.load_state_dict(state_dict, strict=True)
 
     def save(self, save_dir):
         dp_rank = base.constants.data_parallel_rank()
@@ -544,7 +651,7 @@ class ParallelFlashMQATModel(FlashMQATModel):
         if dp_rank > 0:  # only save on dp_rank = 0
             return
 
-        save_to_disk(self.state_dict(),
+        save_to_disk(self.module.state_dict(),
                      save_dir,
                      output_fn=f"pytorch_model-pp-00-mp-{mp_rank:02d}-s-" + "{shard:02d}.bin",
                      save_type="pt",

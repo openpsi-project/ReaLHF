@@ -82,7 +82,7 @@ class ParallelEmbedding(torch.nn.Module):
         self.num_embeddings_per_partition = self.vocab_end_index - \
             self.vocab_start_index
 
-        logger.info(
+        logger.debug(
             f"ParallelEmbedding: num_embeddings={num_embeddings}, per_partition={self.num_embeddings_per_partition}, embedding_dim={embedding_dim},"
             f"tp_rank={model_parallel_rank()},tp_world_size={model_parallel_world_size()}")
         # Allocate weights and initialize.
@@ -102,6 +102,7 @@ class ParallelEmbedding(torch.nn.Module):
         else:
             masked_input = input_
             # Get the embeddings.
+
         output_parallel = F.embedding(masked_input, self.weight, self.padding_idx, self.max_norm,
                                       self.norm_type, self.scale_grad_by_freq, self.sparse)
         # Mask the output embedding.
@@ -358,7 +359,7 @@ class ColumnParallelLinear(torch.nn.Module):
         input_size,
         output_size,
         bias=True,
-        gather_output=True,
+        gather_output=False,
         init_method=init.xavier_normal_,
         stride=1,
         skip_bias_add=False,
@@ -385,9 +386,9 @@ class ColumnParallelLinear(torch.nn.Module):
         # Note: torch.nn.functional.linear performs XA^T + b and as a result
         # we allocate the transpose.
         # Initialize weight.
-        logger.info(
-            f"ColumnLinear: input_size={input_size}, output_size={output_size}, output_size_per_partition={self.output_size_per_partition}"
-        )
+        # logger.info(
+        #     f"ColumnLinear: input_size={input_size}, output_size={output_size}, output_size_per_partition={self.output_size_per_partition}"
+        # )
         self.weight = Parameter(
             torch.empty(self.output_size_per_partition, self.input_size, device=device, dtype=dtype))
         if perform_initialization:

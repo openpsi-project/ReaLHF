@@ -14,6 +14,7 @@ import impl.model.nn.flash_mqat.flash_generate
 import impl.model.nn.flash_mqat.flash_mqat_api
 import impl.model.nn.flash_mqat.flash_mqat_base
 import impl.model.nn.lora
+import impl.model.nn.model_parallel_nn
 import impl.model.nn.pipe_nn
 import impl.model.nn.rw_nn
 import impl.model.nn.stream_pipe_nn

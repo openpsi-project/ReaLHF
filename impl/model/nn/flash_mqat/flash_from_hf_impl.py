@@ -5,7 +5,6 @@ import transformers
 
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
-from impl.model.nn.flash_mqat.flash_mqat_parallel import ParallelFlashMQATModel
 import base.constants
 
 """
@@ -305,8 +304,11 @@ FlashMQATModel.register_hf_model("llama", convert_config_llama, convert_state_di
 # model parallel partition util functions
 def mp_partition(tensor: torch.Tensor, mp_rank: int, mp_world_size: int, dim: int) -> torch.Tensor:
     assert tensor.shape[dim] % mp_world_size == 0
-    return tensor.narrow(dim, mp_rank * tensor.shape[dim] // mp_world_size,
-                         tensor.shape[dim] // mp_world_size)
+    splits = torch.split(tensor, tensor.shape[dim] // mp_world_size, dim=dim)
+    s = splits[mp_rank].contiguous()
+    return s
+    # return tensor.narrow(dim, mp_rank * tensor.shape[dim] // mp_world_size,
+    #                      tensor.shape[dim] // mp_world_size)
 
 
 ################################ Parallel LLaMa Begin ################################
@@ -352,6 +354,7 @@ def convert_state_dict_parallel_llama(state_dict: Dict, config: FlashMQATConfig)
         ("attn.k_proj.", "attn.k_attn."),
         ("attn.v_proj.", "attn.v_attn."),
         ("attn.o_proj.", "attn.c_proj."),
+        ("lm_head", "head"),
         (f".norm.", f".h.{config.n_layers - 1}.ln_f."),
     ]
     for k1, k2 in replace_pairs:
@@ -372,7 +375,7 @@ def convert_state_dict_parallel_llama(state_dict: Dict, config: FlashMQATConfig)
     column_linear_keys = [
         ".attn.q_attn", ".attn.k_attn", ".attn.v_attn", ".mlp.c_fc", ".mlp.gate_proj", ".mlp.up_proj"
     ]  # dim=0 + partition bias
-    row_linear_keys = [".attn.c_proj", ".mlp.c_proj"]  # dim=-1 + no partition bias
+    row_linear_keys = [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
 
     for k, v in state_dict.items():
         # print(f"key {k}:: ")
@@ -393,6 +396,6 @@ def convert_state_dict_parallel_llama(state_dict: Dict, config: FlashMQATConfig)
     return state_dict
 
 
-ParallelFlashMQATModel.register_hf_model("parallel_llama", convert_config_parallel_llama,
-                                         convert_state_dict_parallel_llama)
+FlashMQATModel.register_hf_model("parallel_llama", convert_config_parallel_llama,
+                                 convert_state_dict_parallel_llama)
 ################################ Parallel LLaMa End ################################
