@@ -554,7 +554,7 @@ class PipelineModule(nn.Module):
         if dp_rank > 0:  # only save on dp_rank = 0
             return
 
-        tp_rank = self._grid.get_model_parallel_rank()
+        tp_rank = self._grid.get_tensor_model_parallel_rank()
         save_to_disk(self.state_dict(),
                      save_dir,
                      output_fn=f"pytorch_model-pp-{self.stage_id:02d}-mp-{tp_rank:02d}-s-" +
@@ -565,8 +565,8 @@ class PipelineModule(nn.Module):
     def load(self, load_dir, init_critic_from_actor: bool = False):
         state_dict, n_shards = load_from_disk(
             load_dir,
-            fn_pattern=r".*" + f"-pp-{self.stage_id:02d}-mp-{self._grid.get_model_parallel_rank():02d}-" +
-            r"s-(\d{2}).*",
+            fn_pattern=r".*" +
+            f"-pp-{self.stage_id:02d}-mp-{self._grid.get_tensor_model_parallel_rank():02d}-" + r"s-(\d{2}).*",
             return_n_shards=True)
 
         if init_critic_from_actor and f'{self.config.n_layers + 1}.weight' in state_dict:

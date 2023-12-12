@@ -107,6 +107,8 @@ def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
     data = base.namedarray.NamedArray(
         packed_input_ids=packed_input_ids,
         cu_seqlens=cu_seqlens,
+        prompts=input_ids,
         prompt_mask=prompt_mask,
+        prompt_att_mask=attention_mask,
     )
     return data

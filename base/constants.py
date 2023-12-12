@@ -54,7 +54,7 @@ def pipe_parallel_group():
 
 def model_parallel_rank() -> int:
     try:
-        return grid().get_model_parallel_rank()
+        return grid().get_tensor_model_parallel_rank()
     except RuntimeError as e:  # used only in scripts and tests
         if _fake_mp_rank is not None:
             return _fake_mp_rank
@@ -64,7 +64,7 @@ def model_parallel_rank() -> int:
 
 def model_parallel_world_size() -> int:
     try:
-        return grid().get_model_parallel_world_size()
+        return grid().get_tensor_model_parallel_world_size()
     except RuntimeError as e:  # used only in scripts and tests
         if _fake_mp_world_size is not None:
             return _fake_mp_world_size
@@ -73,7 +73,7 @@ def model_parallel_world_size() -> int:
 
 
 def model_parallel_group():
-    return grid().get_model_parallel_group()
+    return grid().get_tensor_model_parallel_group()
 
 
 def data_parallel_rank() -> int:

@@ -455,24 +455,25 @@ class PipelineParallelGrid:
 
     # These are model parallel groups across all types of model parallelism.
     # Deepspeed uses them to detect overflow, etc.
-    def get_parallel_rank(self):
+    # group of ranks with same dp rank
+    def get_model_parallel_rank(self):
         return self.ds_model_rank
 
-    def get_parallel_world_size(self):
+    def get_model_parallel_world_size(self):
         return self.ds_model_world_size
 
-    def get_parallel_group(self):
+    def get_model_parallel_group(self):
         return self.ds_model_proc_group
 
     # For Megatron-style tensor slicing
-    def get_model_parallel_rank(self):
+    def get_tensor_model_parallel_rank(self):
         if 'model' in self._topo.get_axis_names():
             return self._topo.get_coord(rank=self.global_rank).model
         else:
             return 0
 
-    def get_model_parallel_world_size(self):
+    def get_tensor_model_parallel_world_size(self):
         return self.slice_parallel_size
 
-    def get_model_parallel_group(self):
+    def get_tensor_model_parallel_group(self):
         return self.slice_proc_group

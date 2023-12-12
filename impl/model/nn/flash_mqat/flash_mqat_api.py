@@ -132,21 +132,30 @@ class DeepSpeedChatLikeFlashMQATCriticModel(FlashMQATModel):
         return (scores.squeeze(-1) - self.output_bias) * self.output_scaling
 
 
-def make_flash_model(
-    module_cls: FlashMQATModel,
-    name: str,
-    device: torch.device,
-    model_path: str,
-    dtype: Optional[torch.dtype] = None,
-    from_type: str = "starcoder",
-    tokenizer_path: Optional[str] = None,
-    init_from_scratch: bool = False,
-    v_head_path: Optional[str] = None,
-    output_scaling: Optional[float] = None,
-    output_bias: Optional[float] = None,
-) -> api.model.Model:
+class DummyNet(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+
+def make_flash_model(module_cls: FlashMQATModel,
+                     name: str,
+                     device: torch.device,
+                     model_path: str,
+                     dtype: Optional[torch.dtype] = None,
+                     from_type: str = "starcoder",
+                     tokenizer_path: Optional[str] = None,
+                     init_from_scratch: bool = False,
+                     v_head_path: Optional[str] = None,
+                     output_scaling: Optional[float] = None,
+                     output_bias: Optional[float] = None,
+                     config_only: Optional[bool] = False) -> api.model.Model:
     is_critic = module_cls == DeepSpeedChatLikeFlashMQATCriticModel
-    if from_type == "self":
+    if config_only:
+        config = getattr(FlashMQATModel, f"config_from_{from_type}")(model_path=model_path)
+        net = DummyNet(config)
+    elif from_type == "self":
         # Initialize from a self-trained model, e.g., PPO actor loading SFT model.
         net = FlashMQATModel.from_pretrained(
             model_path=model_path,

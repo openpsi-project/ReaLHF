@@ -7,10 +7,16 @@ import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.utils.functional import gather_packed_shifted_log_probs
 from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
 import api.data
 import api.model
+
+try:
+    from flash_attn.bert_padding import unpad_input
+except ModuleNotFoundError:
+    pass
 
 
 def compute_packed_sft_loss(
@@ -41,7 +47,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         module: deepspeed.DeepSpeedEngine = model.module
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
-        module.train()
+        module.eval()
 
         if isinstance(module, DeepSpeedPipelineEngine):
             loss_fn_kwargs = dict(
@@ -133,9 +139,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            logits = module.forward(packed_input_ids=packed_input_ids,
-                                    cu_seqlens=cu_seqlens,
-                                    max_seqlen=max_seqlen)
+            logits = module.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
             if logits is not None:
                 logits = logits.float()
         else:
@@ -143,6 +147,50 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                                   cu_seqlens=cu_seqlens,
                                   max_seqlen=max_seqlen).logits.float()
         return dict(logits=logits)
+
+    # for testing only
+    @torch.no_grad()
+    def generate(self, model: api.model.Model, data: NamedArray, gconfig: GenerationConfig) -> NamedArray:
+        module = model.module
+
+        module.eval()
+
+        data = recursive_apply(data, lambda x: x.to(model.device))
+        prompts: torch.LongTensor = data["prompts"]
+        prompt_att_mask: torch.BoolTensor = data["prompt_att_mask"]
+        bs, prompt_max_len = prompts.shape[:2]
+
+        if isinstance(module, DeepSpeedPipelineEngine):
+            packed_input_ids, _, cu_seqlens, _ = unpad_input(prompts, prompt_att_mask)
+
+            res = module.generate(
+                tokenizer=model.tokenizer,
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                gconfig=gconfig,
+            )
+            if res is None:
+                return dict()
+
+            gen_tokens, logprobs, logits_mask, *_ = res
+        else:
+            # unwrap deepspeed engine here
+            module = module.module
+            gen_res = module.generate(
+                tokenizer=model.tokenizer,
+                input_ids=prompts,
+                attention_mask=prompt_att_mask,
+                gconfig=gconfig,
+            )
+            gen_tokens = gen_res.sequences
+            logprobs = gen_res.scores
+            logits_mask = gen_res.logits_mask
+
+        return dict(
+            gen_tokens=gen_tokens,
+            log_probs=logprobs,
+            logits_mask=logits_mask,
+        )
 
 
 api.model.register_interface("flash_sft", PackedSupervisedFinetuningInterface)

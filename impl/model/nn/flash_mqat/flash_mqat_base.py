@@ -706,13 +706,13 @@ class FlashMQATModel(nn.Module):
 
     # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
     def _config_and_param_from_hf_template(
-        config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
-        state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None,
-        from_model: Optional[transformers.PreTrainedModel] = None,
-        model_path: Optional[str] = None,
-        init_from_scratch: bool = False,
-        force_load_from_hf_pretrained: bool = False,
-    ) -> Tuple[FlashMQATConfig, Optional[Dict]]:
+            config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
+            state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None,
+            from_model: Optional[transformers.PreTrainedModel] = None,
+            model_path: Optional[str] = None,
+            init_from_scratch: bool = False,
+            force_load_from_hf_pretrained: bool = False,
+            load_model_parallel_as_list: bool = False) -> Tuple[FlashMQATConfig, Optional[Dict]]:
         if not init_from_scratch:
             assert state_dict_converter is not None
         config = FlashMQATModel._config_from_hf_template(config_converter, from_model, model_path)
@@ -739,7 +739,11 @@ class FlashMQATModel(nn.Module):
             state_dict = from_model.state_dict() if not init_from_scratch else None
 
         if not init_from_scratch:
-            state_dict = state_dict_converter(state_dict, config)
+            if load_model_parallel_as_list:
+                # here state_dict_converter is for parallel mqat models
+                state_dict = state_dict_converter(state_dict, config, load_model_parallel_as_list)
+            else:
+                state_dict = state_dict_converter(state_dict, config)
 
         return config, state_dict
 

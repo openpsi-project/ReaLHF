@@ -5,8 +5,8 @@ import torch
 from base.monitor import process_memory_mb
 from base.topology import PipeModelDataParallelTopology
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel, OutputHead
-from impl.model.nn.flash_mqat.flash_mqat_parallel import (ModelParallelModule, ParallelEmbedding,
-                                                          ParallelFlashMQATBlock)
+from impl.model.nn.flash_mqat.flash_mqat_parallel import (ModelParallelModule, ParallelFlashMQATBlock,
+                                                          ParallelVocabPositionEmbedding)
 from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
@@ -24,7 +24,7 @@ def make_causal_flash_mqat_parallel_pipe_module(
 ):
     layer_specs = []
     # vocab pos embedding
-    embedding_layer = LayerSpec(ParallelEmbedding, config, dtype=dtype, device=device)
+    embedding_layer = LayerSpec(ParallelVocabPositionEmbedding, config, dtype=dtype, device=device)
 
     layer_specs.append(embedding_layer)
 
@@ -86,6 +86,7 @@ def model_pipe_wrap_fn(
             module.load(model_path, init_critic_from_actor=init_critic_from_actor)
             process_memory_mb("after_load")
         model.module = module
+        return model
 
     return model_pipe_wrap_fn_
 

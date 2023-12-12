@@ -30,6 +30,7 @@ def get_flash_mqat_model_config(
             from_type=from_model_type,
             tokenizer_path=tokenizer_path,
             init_from_scratch=(init_from_scratch or pp_size > 1),
+            config_only=pp_size > 1,
         ),
     )
     if is_critic:

@@ -1,4 +1,4 @@
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import torch
 import transformers
@@ -302,11 +302,13 @@ FlashMQATModel.register_hf_model("llama", convert_config_llama, convert_state_di
 
 
 # model parallel partition util functions
-def mp_partition(tensor: torch.Tensor, mp_rank: int, mp_world_size: int, dim: int) -> torch.Tensor:
+def mp_partition(tensor: torch.Tensor, mp_rank: Optional[int], mp_world_size: int, dim: int) -> torch.Tensor:
     assert tensor.shape[dim] % mp_world_size == 0
     splits = torch.split(tensor, tensor.shape[dim] // mp_world_size, dim=dim)
-    s = splits[mp_rank].contiguous()
-    return s
+    if mp_rank is None:
+        return [s.contiguous() for s in splits]
+    else:
+        return splits[mp_rank].contiguous()
     # return tensor.narrow(dim, mp_rank * tensor.shape[dim] // mp_world_size,
     #                      tensor.shape[dim] // mp_world_size)
 
@@ -339,9 +341,14 @@ def convert_config_parallel_llama(hf_config: transformers.LlamaConfig) -> FlashM
     )
 
 
-def convert_state_dict_parallel_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
-    mp_rank = base.constants.model_parallel_rank()
+def convert_state_dict_parallel_llama(state_dict: Dict,
+                                      config: FlashMQATConfig,
+                                      load_model_parallel_as_list=False) -> Dict:
     mp_world_size = base.constants.model_parallel_world_size()
+    if not load_model_parallel_as_list:
+        mp_rank = base.constants.model_parallel_rank()
+    else:
+        mp_rank = None
 
     replace_pairs = [
         ("model.", "transformer."),
@@ -391,6 +398,8 @@ def convert_state_dict_parallel_llama(state_dict: Dict, config: FlashMQATConfig)
         elif any([rk in k for rk in row_linear_keys]):
             if "weight" in k:
                 state_dict[k] = mp_partition(v, mp_rank, mp_world_size, dim=-1)
+        elif load_model_parallel_as_list:
+            state_dict[k] = [state_dict[k] for _ in range(mp_world_size)]
         # print(f"after partition shape {state_dict[k].shape}")
 
     return state_dict
