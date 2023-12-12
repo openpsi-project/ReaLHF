@@ -38,6 +38,9 @@ def _paired_rw_loss_from_model_outputs(
 class PackedPairedRewardInterface(api.model.ModelInterface):
     enable_save: bool = True
 
+    output_scaling: float = 1.0
+    output_bias: float = 0.0
+
     def __post_init__(self):
         self.train_total_predictions = self.train_total_correct_predictions = 0
 
@@ -62,6 +65,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
                                                cu_seqlens=cu_seqlens,
                                                max_seqlen=max_seqlen).float()
 
+        scores = (scores.squeeze(-1) - self.output_bias) * self.output_scaling
         chosen_end_scores = scores[cu_seqlens[1:] - 1]  # [bs]
 
         ###################### logging ######################

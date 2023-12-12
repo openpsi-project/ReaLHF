@@ -31,11 +31,13 @@ logger = logging.getLogger("FlashMQAT Interface")
 class HuggingfaceLikeFlashMQATForCausalLM(FlashMQATModel):
     """__call__ on this model will return a huggingface-like output."""
 
-    def __init__(self,
-                 config: FlashMQATConfig,
-                 dtype: Optional[torch.dtype] = None,
-                 device: Optional[torch.device] = None,
-                 **kwargs):
+    def __init__(
+        self,
+        config: FlashMQATConfig,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[torch.device] = None,
+        **kwargs,
+    ):
         super().__init__(config, is_critic=False, dtype=dtype, device=device)
 
     def forward(
@@ -93,16 +95,14 @@ class HuggingfaceLikeFlashMQATForCausalLM(FlashMQATModel):
 
 class DeepSpeedChatLikeFlashMQATCriticModel(FlashMQATModel):
 
-    def __init__(self,
-                 config: FlashMQATConfig,
-                 dtype: Optional[torch.dtype] = None,
-                 device: Optional[torch.device] = None,
-                 output_scaling: float = 1.0,
-                 output_bias: float = 0.0,
-                 **kwargs):
+    def __init__(
+        self,
+        config: FlashMQATConfig,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[torch.device] = None,
+        **kwargs,
+    ):
         super().__init__(config, is_critic=True, dtype=dtype, device=device)
-        self.output_scaling = output_scaling
-        self.output_bias = output_bias
 
     def forward(
         self,
@@ -129,33 +129,23 @@ class DeepSpeedChatLikeFlashMQATCriticModel(FlashMQATModel):
         scores = FlashMQATModel.forward(self, x, ys).pp_output
         if build_packed:
             scores = pad_input(scores, indices, batch_size, seqlen)
-        return (scores.squeeze(-1) - self.output_bias) * self.output_scaling
+        return scores
 
 
-class DummyNet(nn.Module):
-
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-
-
-def make_flash_model(module_cls: FlashMQATModel,
-                     name: str,
-                     device: torch.device,
-                     model_path: str,
-                     dtype: Optional[torch.dtype] = None,
-                     from_type: str = "starcoder",
-                     tokenizer_path: Optional[str] = None,
-                     init_from_scratch: bool = False,
-                     v_head_path: Optional[str] = None,
-                     output_scaling: Optional[float] = None,
-                     output_bias: Optional[float] = None,
-                     config_only: Optional[bool] = False) -> api.model.Model:
+def make_flash_model(
+    module_cls: FlashMQATModel,
+    name: str,
+    device: torch.device,
+    model_path: str,
+    no_param_instantiation: bool = False,
+    dtype: Optional[torch.dtype] = None,
+    from_type: str = "starcoder",
+    tokenizer_path: Optional[str] = None,
+    init_from_scratch: bool = False,
+    v_head_path: Optional[str] = None,
+) -> api.model.Model:
     is_critic = module_cls == DeepSpeedChatLikeFlashMQATCriticModel
-    if config_only:
-        config = getattr(FlashMQATModel, f"config_from_{from_type}")(model_path=model_path)
-        net = DummyNet(config)
-    elif from_type == "self":
+    if from_type == "self":
         # Initialize from a self-trained model, e.g., PPO actor loading SFT model.
         net = FlashMQATModel.from_pretrained(
             model_path=model_path,
@@ -163,13 +153,14 @@ def make_flash_model(module_cls: FlashMQATModel,
             is_critic=is_critic,
             dtype=dtype,
             device=device,
+            no_param_instantiation=no_param_instantiation,
         )
         if tokenizer_path is None:
             raise ValueError("tokenizer_path must be provided when from_type is 'self'.")
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
     elif from_type == "pipe":
         # Merge weights of the pipeline model into a single one, probably used for inference.
-        if init_from_scratch:
+        if init_from_scratch or no_param_instantiation:
             raise ValueError("init_from_scratch must be False when from_type is 'pipe'.")
         net = FlashMQATModel.from_pipeline_module(model_path=model_path,
                                                   is_critic=is_critic,
@@ -186,12 +177,11 @@ def make_flash_model(module_cls: FlashMQATModel,
             config = FlashMQATConfig(**json.load(f))
         net = module_cls(
             config,
+            no_param_instantiation=no_param_instantiation,
             dtype=dtype,
             device=device,
-            output_scaling=output_scaling,
-            output_bias=output_bias,
         )
-        if not init_from_scratch:
+        if not init_from_scratch and not no_param_instantiation:
             state_dict = load_from_disk(model_path)
             state_dict["head.weight"] = net.state_dict()["head.weight"]
             net.load_state_dict(state_dict)
@@ -202,15 +192,13 @@ def make_flash_model(module_cls: FlashMQATModel,
                                                            dtype=dtype,
                                                            device=device,
                                                            is_critic=is_critic,
+                                                           no_param_instantiation=no_param_instantiation,
                                                            init_from_scratch=init_from_scratch)
         tokenizer = api.huggingface.load_hf_tokenizer(model_path)
     if not isinstance(net, module_cls):
         net.forward = functools.partial(module_cls.forward, net)
         if hasattr(module_cls, "generate"):
             net.generate = functools.partial(module_cls.generate, net)
-        if is_critic:
-            net.output_scaling = output_scaling
-            net.output_bias = output_bias
     if v_head_path is not None and not init_from_scratch:
         net.head.load_state_dict(torch.load(v_head_path, map_location="cpu"))
     return api.model.Model(name, net, tokenizer, device)

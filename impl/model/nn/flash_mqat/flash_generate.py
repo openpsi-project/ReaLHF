@@ -62,7 +62,7 @@ def genstep(
             unfinished_sequences: Bool tensor indicator of whether a sequence is finished.
                 Shape [bs].
     """
-
+    unfinished_sequences = unfinished_sequences.bool()
     next_token_logits = next_token_logits.float()
     if isinstance(generated_idx, int):
         if generated_idx < gconfig.min_new_tokens:
@@ -94,8 +94,10 @@ def genstep(
     if tokenizer.eos_token_id is not None:
         if tokenizer.pad_token_id is None:
             raise ValueError("If `eos_token_id` is defined, make sure that `pad_token_id` is defined.")
-        next_tokens = next_tokens * unfinished_sequences + tokenizer.pad_token_id * (1 - unfinished_sequences)
-    unfinished_sequences = next_tokens.ne(tokenizer.eos_token_id).long() * unfinished_sequences
+        next_tokens.masked_fill_(unfinished_sequences.logical_not(), tokenizer.pad_token_id)
+        # next_tokens = next_tokens * unfinished_sequences + tokenizer.pad_token_id * (1 - unfinished_sequences)
+    # unfinished_sequences = next_tokens.ne(tokenizer.eos_token_id).long() * unfinished_sequences
+    unfinished_sequences.logical_and_(next_tokens.ne(tokenizer.eos_token_id))
 
     # terminate check
     if isinstance(generated_idx, int):

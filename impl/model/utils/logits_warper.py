@@ -190,6 +190,12 @@ def top_k_top_p_logits(
     inplace: bool = False,
     ordered: bool = False,
 ) -> torch.FloatTensor:
+    if top_p == 1.0 and top_k >= logits.shape[-1]:
+        return logits
+    if top_p == 1.0:
+        return TopKLogitsWarper(top_k=top_k)(None, logits, inplace=inplace)
+    if top_k >= logits.shape[-1]:
+        return TopPLogitsWarper(top_p=top_p)(None, logits, inplace=inplace)
     warper_fn = unioned_logits_wraper if not ordered else chained_logits_wraper
     p = warper_fn([TopKLogitsWarper(top_k=top_k), TopPLogitsWarper(top_p=top_p)], inplace=inplace)
     return p(None, logits)

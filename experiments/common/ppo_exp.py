@@ -163,6 +163,7 @@ class PPOExperiment(Experiment):
     temperature: float = 1.0
     ppo_n_minibatches: int = 8
     kl_ctl: float = 0.1
+    adv_norm: bool = False
     discount: float = 1.0
     gae_lambda: float = 1.0
     eps_clip: float = 0.2
@@ -170,6 +171,10 @@ class PPOExperiment(Experiment):
     max_reward_clip: float = 20.0
     use_adaptive_kl_ctl: bool = False
     early_stop_imp_ratio: float = 5.0
+    value_norm: bool = False
+    value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
+    value_norm_beta: float = 0.99995
+    value_norm_eps: float = 1e-5
 
     hybrid_engine: bool = False
     offload_actor_param: bool = False
@@ -222,6 +227,8 @@ class PPOExperiment(Experiment):
             self.dataset_path = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl"
             self.use_adaptive_kl_ctl = False
             self.early_stop_imp_ratio = 1e10
+            self.top_k = 1000000
+            self.top_p = 1.0
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -370,8 +377,6 @@ class PPOExperiment(Experiment):
             is_rew_lora=self.is_rew_lora,
             rew_lora_path=self.rew_lora_path,
             v_head_path=self.rew_head_path,
-            reward_scaling=self.rew_output_scaling,
-            reward_bias=self.rew_output_bias,
         )
 
         critic_model = get_flash_mqat_model_config(
@@ -468,6 +473,10 @@ class PPOExperiment(Experiment):
             value_eps_clip=self.value_eps_clip,
             max_reward_clip=self.max_reward_clip,
             adaptive_kl_ctl=self.use_adaptive_kl_ctl,
+            value_norm=self.value_norm,
+            value_norm_type=self.value_norm_type,
+            value_norm_beta=self.value_norm_beta,
+            value_norm_eps=self.value_norm_eps,
         )
 
         actor_interface = ModelInterface(
@@ -477,6 +486,7 @@ class PPOExperiment(Experiment):
                 "generation_config": generation_kwargs,
                 "early_stop_imp_ratio": self.early_stop_imp_ratio,
                 "force_no_logits_mask": self.benchmark,  # For benchmark only
+                "adv_norm": self.adv_norm,
             },
         )
         ref_interface = copy.deepcopy(actor_interface)
@@ -486,7 +496,10 @@ class PPOExperiment(Experiment):
             "flash_critic",
             args=copy.deepcopy(ppo_kwargs),
         )
-        rw_interface = ModelInterface("flash_paired_rw", args=dict(enable_save=False))
+        rw_interface = ModelInterface("flash_paired_rw",
+                                      args=dict(enable_save=False,
+                                                output_scaling=self.rew_output_scaling,
+                                                output_bias=self.rew_output_bias))
 
         actor_topo = PipeModelDataParallelTopology(num_pp=self.actor_pp_size,
                                                    num_mp=1,

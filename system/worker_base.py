@@ -518,7 +518,8 @@ class Worker:
             base.cluster.spec.fileroot,
             "logs",
             getpass.getuser(),
-            f"{r.experiment_name}_{r.trial_name}",
+            r.experiment_name,
+            r.trial_name,
             "trace_results",
             f"{r.worker_type}-{r.worker_index}.json",
         )

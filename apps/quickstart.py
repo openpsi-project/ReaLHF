@@ -17,7 +17,7 @@ from base.cluster import spec as cluster_spec
 from base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
 import api.config
 
-SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "saved"]
+SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "deepseek", "codellama"]
 
 cs = ConfigStore.instance()
 
@@ -342,6 +342,7 @@ class PPOConfig:
     temperature: float = 1.0
     ppo_n_minibatches: int = 4
     kl_ctl: float = 0.1
+    adv_norm: bool = False
     discount: float = 1.0
     gae_lambda: float = 1.0
     eps_clip: float = 0.2
@@ -351,6 +352,10 @@ class PPOConfig:
     reward_output_bias: float = 0.0
     early_stop_imp_ratio: float = 5.0
     use_adaptive_kl_ctl: bool = False
+    value_norm: bool = False
+    value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
+    value_norm_beta: float = 0.99995
+    value_norm_eps: float = 1e-5
     _configuration_name: str = "Proximal Policy Optimization"
 
     def __post_init__(self):
@@ -711,6 +716,7 @@ def run_ppo(args: PPOConfig):
         temperature=args.temperature,
         ppo_n_minibatches=args.ppo_n_minibatches,
         kl_ctl=args.kl_ctl,
+        adv_norm=args.adv_norm,
         discount=args.discount,
         gae_lambda=args.gae_lambda,
         eps_clip=args.eps_clip,
@@ -718,6 +724,10 @@ def run_ppo(args: PPOConfig):
         max_reward_clip=args.max_reward_clip,
         early_stop_imp_ratio=args.early_stop_imp_ratio,
         use_adaptive_kl_ctl=args.use_adaptive_kl_ctl,
+        value_norm=args.value_norm,
+        value_norm_type=args.value_norm_type,
+        value_norm_beta=args.value_norm_beta,
+        value_norm_eps=args.value_norm_eps,
     )
 
     os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
