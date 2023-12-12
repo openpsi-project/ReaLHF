@@ -21,6 +21,8 @@ def get_flash_mqat_model_config(
     init_critic_from_actor: bool = False,
     v_head_path: Optional[str] = None,
 ):
+    if (use_lora or is_sft_lora or is_rew_lora) and pp_size > 1:
+        raise NotImplementedError("LORA is not supported in pipeline model")
     model = Model(
         "flash_mqat_actor" if not is_critic else "flash_mqat_critic",
         args=dict(
@@ -28,6 +30,7 @@ def get_flash_mqat_model_config(
             from_type=from_model_type,
             tokenizer_path=tokenizer_path,
             init_from_scratch=(init_from_scratch or pp_size > 1),
+            no_param_instantiation=(pp_size > 1),
         ),
     )
     if is_critic:

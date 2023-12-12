@@ -137,6 +137,7 @@ def make_flash_model(
     name: str,
     device: torch.device,
     model_path: str,
+    no_param_instantiation: bool = False,
     dtype: Optional[torch.dtype] = None,
     from_type: str = "starcoder",
     tokenizer_path: Optional[str] = None,
@@ -152,13 +153,14 @@ def make_flash_model(
             is_critic=is_critic,
             dtype=dtype,
             device=device,
+            no_param_instantiation=no_param_instantiation,
         )
         if tokenizer_path is None:
             raise ValueError("tokenizer_path must be provided when from_type is 'self'.")
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
     elif from_type == "pipe":
         # Merge weights of the pipeline model into a single one, probably used for inference.
-        if init_from_scratch:
+        if init_from_scratch or no_param_instantiation:
             raise ValueError("init_from_scratch must be False when from_type is 'pipe'.")
         net = FlashMQATModel.from_pipeline_module(model_path=model_path,
                                                   is_critic=is_critic,
@@ -175,10 +177,11 @@ def make_flash_model(
             config = FlashMQATConfig(**json.load(f))
         net = module_cls(
             config,
+            no_param_instantiation=no_param_instantiation,
             dtype=dtype,
             device=device,
         )
-        if not init_from_scratch:
+        if not init_from_scratch and not no_param_instantiation:
             state_dict = load_from_disk(model_path)
             state_dict["head.weight"] = net.state_dict()["head.weight"]
             net.load_state_dict(state_dict)
@@ -189,6 +192,7 @@ def make_flash_model(
                                                            dtype=dtype,
                                                            device=device,
                                                            is_critic=is_critic,
+                                                           no_param_instantiation=no_param_instantiation,
                                                            init_from_scratch=init_from_scratch)
         tokenizer = api.huggingface.load_hf_tokenizer(model_path)
     if not isinstance(net, module_cls):

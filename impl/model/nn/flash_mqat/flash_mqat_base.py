@@ -472,6 +472,7 @@ class FlashMQATBase(nn.Module):
     def __init__(
         self,
         config: FlashMQATConfig,
+        no_param_instantiation: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -479,22 +480,25 @@ class FlashMQATBase(nn.Module):
         self.config = config
         self.dtype = dtype
         self.device = device
-        self.embedding_layer = VocabPositionEmbedding(
-            config,
-            dtype=dtype,
-            device=device,
-        )
-        self.h = nn.ModuleList([
-            FlashMQATBlock(
+        if not no_param_instantiation:
+            self.embedding_layer = VocabPositionEmbedding(
                 config,
-                layer_index=i,
-                output_layernorm=(i == config.n_layers - 1),
-                ckpt_attn=(i > 0 and config.ckpt_attn),
-                ckpt_mlp=(i > 0 and config.ckpt_mlp),
                 dtype=dtype,
                 device=device,
-            ) for i in range(config.n_layers)
-        ])
+            )
+            self.h = nn.ModuleList([
+                FlashMQATBlock(
+                    config,
+                    layer_index=i,
+                    output_layernorm=(i == config.n_layers - 1),
+                    ckpt_attn=(i > 0 and config.ckpt_attn),
+                    ckpt_mlp=(i > 0 and config.ckpt_mlp),
+                    dtype=dtype,
+                    device=device,
+                ) for i in range(config.n_layers)
+            ])
+        else:
+            self.embedding_layer = self.h = None
 
     def to_layers(self) -> List[nn.Module]:
         return [self.embedding_layer] + list(self.h)
@@ -527,19 +531,26 @@ class FlashMQATModel(nn.Module):
         self,
         config: FlashMQATConfig,
         is_critic: bool = False,
+        no_param_instantiation: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
         self.config = config
-        self.transformer = FlashMQATBase(config, dtype=dtype, device=device)
-        self.head = OutputHead(
-            config.hidden_dim,
-            1 if is_critic else config.vocab_size,
-            bias=False,
-            device=device,
-            dtype=dtype,
-        )
+        self.transformer = FlashMQATBase(config,
+                                         no_param_instantiation=no_param_instantiation,
+                                         dtype=dtype,
+                                         device=device)
+        if not no_param_instantiation:
+            self.head = OutputHead(
+                config.hidden_dim,
+                1 if is_critic else config.vocab_size,
+                bias=False,
+                device=device,
+                dtype=dtype,
+            )
+        else:
+            self.head = None
         self._is_critic = is_critic
 
     @property
@@ -632,13 +643,14 @@ class FlashMQATModel(nn.Module):
         from_model: Optional[transformers.PreTrainedModel] = None,
         model_path: Optional[str] = None,
         init_from_scratch: bool = False,
+        no_param_instantiation: bool = False,
         force_load_from_hf_pretrained: bool = False,
     ) -> Tuple[FlashMQATConfig, Optional[Dict]]:
-        if not init_from_scratch:
+        if not init_from_scratch and not no_param_instantiation:
             assert state_dict_converter is not None
         config = FlashMQATModel._config_from_hf_template(config_converter, from_model, model_path)
         if model_path is not None:
-            if init_from_scratch:
+            if init_from_scratch or no_param_instantiation:
                 state_dict = None
             elif force_load_from_hf_pretrained:
                 logger.warning(f"Force to load from HuggingFace PreTrainedModel...")
@@ -657,9 +669,10 @@ class FlashMQATModel(nn.Module):
                 "Loading from HuggingFace `model_path` is ensured to be correct but the `from_model` argument may cause key mismatch."
             )
             assert from_model is not None
-            state_dict = from_model.state_dict() if not init_from_scratch else None
+            state_dict = from_model.state_dict(
+            ) if not init_from_scratch and not no_param_instantiation else None
 
-        if not init_from_scratch:
+        if not init_from_scratch and not no_param_instantiation:
             state_dict = state_dict_converter(state_dict, config)
 
         return config, state_dict
@@ -672,6 +685,7 @@ class FlashMQATModel(nn.Module):
         from_model: Optional[transformers.PreTrainedModel] = None,
         model_path: Optional[str] = None,
         init_from_scratch: bool = False,
+        no_param_instantiation: bool = False,
         is_critic: bool = False,
         force_load_from_hf_pretrained: bool = False,
         dtype: Optional[torch.dtype] = None,
@@ -684,9 +698,14 @@ class FlashMQATModel(nn.Module):
             model_path=model_path,
             init_from_scratch=init_from_scratch,
             force_load_from_hf_pretrained=force_load_from_hf_pretrained,
+            no_param_instantiation=no_param_instantiation,
         )
-        model = cls(config=config, is_critic=is_critic, dtype=dtype, device=device)
-        if not init_from_scratch:
+        model = cls(config=config,
+                    is_critic=is_critic,
+                    dtype=dtype,
+                    device=device,
+                    no_param_instantiation=no_param_instantiation)
+        if not init_from_scratch and not no_param_instantiation:
             if is_critic:
                 state_dict['head.weight'] = model.state_dict()['head.weight']
             model.load_state_dict(state_dict)
@@ -781,6 +800,7 @@ class FlashMQATModel(nn.Module):
         model_path: str,
         init_from_scratch: bool = False,
         is_critic: bool = False,
+        no_param_instantiation: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -788,8 +808,14 @@ class FlashMQATModel(nn.Module):
         """
         with open(os.path.join(model_path, "config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
-        model = cls(config=config, is_critic=is_critic, dtype=dtype, device=device)
-        if not init_from_scratch:
+        model = cls(
+            config=config,
+            is_critic=is_critic,
+            dtype=dtype,
+            device=device,
+            no_param_instantiation=no_param_instantiation,
+        )
+        if not init_from_scratch and not no_param_instantiation:
             state_dict = load_from_disk(model_path)
             model.load_state_dict(state_dict)
         return model
