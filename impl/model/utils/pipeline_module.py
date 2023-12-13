@@ -19,7 +19,7 @@ import torch.nn as nn
 
 from base.monitor import process_memory_mb, time_mark
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid, PipeModelDataParallelTopology
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, OutputHead
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.save_load import load_from_disk, save_to_disk
 import base.constants
@@ -140,8 +140,11 @@ class PipelineModule(nn.Module):
                  seed_layers=False,
                  seed_fn=None,
                  base_seed=1234,
+                 is_critic=False,
                  partition_method='parameters',
                  config: Optional[FlashMQATConfig] = None,
+                 dtype=None,
+                 device=None,
                  activation_checkpoint_interval=0,
                  activation_checkpoint_func=checkpointing.checkpoint,
                  checkpointable_layers=None):
@@ -150,6 +153,11 @@ class PipelineModule(nn.Module):
 
         if num_stages is None and topology is None:
             raise RuntimeError('must provide num_stages or topology')
+
+        self.is_critic = is_critic
+        self.dtype = dtype
+        self.device = device
+        self.config = config  # get underlying config
 
         self.micro_offset = 0
 
@@ -222,8 +230,6 @@ class PipelineModule(nn.Module):
         # for saving checkpoints
         self.num_checkpoint_shards = 1
 
-        self.config = config  # get underlying config
-
     @property
     def get_config(self):
         return self.config
@@ -266,6 +272,17 @@ class PipelineModule(nn.Module):
 
             # LayerSpec objects contain an nn.Module that should be allocated now.
             elif isinstance(layer, LayerSpec):
+                # substitute output head if self.is_critic=True
+                # TODO: hack, find better solution
+                if layer_idx == self._num_layers - 1 and self.is_critic:
+                    layer = LayerSpec(
+                        OutputHead,
+                        self.config.hidden_dim,
+                        1,
+                        bias=False,
+                        device=self.device,
+                        dtype=self.dtype,
+                    )
                 module = layer.build()
                 name = str(layer_idx)
                 self.forward_funcs.append(module)

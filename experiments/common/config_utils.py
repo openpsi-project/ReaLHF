@@ -8,6 +8,7 @@ def get_flash_mqat_model_config(
     from_model_type: str,
     tokenizer_path: str,
     pp_size: int,
+    mp_size: int,
     dp_size: int,
     is_critic: bool,
     use_lora: bool,
@@ -29,8 +30,8 @@ def get_flash_mqat_model_config(
             model_path=model_path,
             from_type=from_model_type,
             tokenizer_path=tokenizer_path,
-            init_from_scratch=(init_from_scratch or pp_size > 1),
-            no_param_instantiation=(pp_size > 1),
+            init_from_scratch=(init_from_scratch or pp_size > 1 or mp_size > 1),
+            no_param_instantiation=(pp_size > 1 or mp_size > 1),
         ),
     )
     if is_critic:
@@ -79,7 +80,7 @@ def get_flash_mqat_model_config(
                 ),
             ),
         ]
-    if pp_size > 1:
+    if pp_size > 1 and mp_size == 1:
         model.wrappers += [
             ModelWrapper(
                 "pipe",
@@ -90,6 +91,29 @@ def get_flash_mqat_model_config(
                     is_critic=is_critic,
                     init_critic_from_actor=init_critic_from_actor,
                 ),
+            )
+        ]
+    elif mp_size > 1 and pp_size == 1:
+        model.wrappers += [
+            ModelWrapper(
+                "model_parallel",
+                args=dict(model_path=model_path,
+                          is_critic=is_critic,
+                          init_critic_from_actor=init_critic_from_actor,
+                          init_from_scratch=init_from_scratch),
+            )
+        ]
+    elif pp_size > 1 and mp_size > 1:
+        model.wrappers += [
+            ModelWrapper(
+                "model_pipe_parallel",
+                args=dict(model_path=model_path,
+                          num_pp=pp_size,
+                          num_mp=mp_size,
+                          num_dp=dp_size,
+                          is_critic=is_critic,
+                          init_critic_from_actor=init_critic_from_actor,
+                          init_from_scratch=init_from_scratch),
             )
         ]
     return model

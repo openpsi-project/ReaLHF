@@ -44,7 +44,8 @@ def make_causal_flash_mqat_pipe_module(
     head = LayerSpec(
         OutputHead,
         config.hidden_dim,
-        1 if is_critic else config.vocab_size,
+        # 1 if is_critic else config.vocab_size,
+        config.vocab_size,
         bias=False,
         device=device,
         dtype=dtype,
@@ -58,6 +59,7 @@ def make_causal_flash_mqat_pipe_module(
     return PipelineModule(
         layers=layer_specs,
         loss_fn=compute_loss,
+        is_critic=is_critic,
         topology=topology,
         config=config,
     )

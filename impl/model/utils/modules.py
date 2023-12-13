@@ -51,15 +51,7 @@ class LayerNormLinear(nn.Module):
         self.layer_index = layer_index
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        import base.consistency
-        x = self.ln(x)
-        base.consistency.store_model_parallel(
-            f"layer_{self.layer_index}_after_ln",
-            x,
-            check_dim="full",
-            is_mp=False,
-        )
-        return self.linear(x)
+        return self.linear(self.ln(x))
 
 
 class LayerNormMLP(nn.Module):

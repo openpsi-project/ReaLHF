@@ -79,16 +79,19 @@ async def parallel_rpc(
                 await asyncio.sleep(0.01)
         all_res.append(res)
 
+    # data contains all res for one data parallel rank
     data = [x.data for x in all_res]
     if len(data) == sum([bool(x) for x in data]):
         assert all([x == data[0] for x in data]), data
         data = data[0]
     elif sum([bool(x) for x in data]) == 1:
+        # pipeline parallel, only one result
         data = [x for x in data if bool(x)][0]
     elif sum([bool(x) for x in data]) == 0:
         data = {}
     else:
-        raise RuntimeError(data)
+        # model parallel, multiple same result
+        data = [x for x in data if bool(x)][0]
     return data
 
 

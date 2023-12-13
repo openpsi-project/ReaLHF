@@ -31,6 +31,7 @@ class PairedRWExperiment(Experiment):
     sft_lora_path: Optional[str] = None
     # model
     dp_size: int = 1
+    mp_size: int = 1
     pp_size: int = 1
     use_lora: bool = False
     lora_scaling: float = 32.0
@@ -57,8 +58,8 @@ class PairedRWExperiment(Experiment):
     num_pipeline_micro_batches: Optional[int] = None
 
     def __post_init__(self):
-        if self.pp_size < 1 or self.dp_size < 1:
-            raise ValueError("pp_size and dp_size must be positive integers.")
+        if self.pp_size < 1 or self.dp_size < 1 or self.mp_size < 1:
+            raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
         if self.pp_size > 1 and self.use_lora:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
         if self.is_sft_lora and (self.sft_lora_path is None or self.base_model_type is None):
@@ -71,7 +72,6 @@ class PairedRWExperiment(Experiment):
                 scheduling=Scheduling.data_worker_default(
                     cpu=2,
                     mem=10000,
-                    nodelist="QH-com[01-14]",
                 ),
             ),
             master_worker=TasksGroup(
@@ -79,17 +79,15 @@ class PairedRWExperiment(Experiment):
                 scheduling=Scheduling.master_worker_default(
                     cpu=4,
                     mem=20000,
-                    nodelist="QH-com[01-14]",
                 ),
             ),
             model_worker=TasksGroup(
-                count=self.dp_size * self.pp_size,
+                count=self.dp_size * self.pp_size * self.mp_size,
                 scheduling=Scheduling.model_worker_default(
                     cpu=4,
                     gpu=1,
                     gpu_type="tesla",
                     mem=60000,
-                    nodelist="QH-com[01-14]",
                 ),
             ),
         )
@@ -145,6 +143,7 @@ class PairedRWExperiment(Experiment):
             from_model_type="sft" if not self.is_sft_lora else self.base_model_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=self.pp_size,
+            mp_size=self.mp_size,
             dp_size=self.dp_size,
             is_critic=True,
             use_lora=self.use_lora,
@@ -157,9 +156,9 @@ class PairedRWExperiment(Experiment):
 
         interface = ModelInterface("flash_paired_rw")
 
-        topo = PipeModelDataParallelTopology(self.pp_size, 1, self.dp_size)
+        topo = PipeModelDataParallelTopology(self.pp_size, self.mp_size, self.dp_size)
         model_worker = []
-        for i in range(self.pp_size * self.dp_size):
+        for i in range(self.pp_size * self.dp_size * self.mp_size):
             coord = topo.get_coord(i)
             mw = ModelWorker(
                 seed=self.seed,

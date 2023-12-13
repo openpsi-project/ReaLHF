@@ -112,6 +112,7 @@ class PPOExperiment(Experiment):
     rew_head_path: Optional[str] = None
     # actor model
     actor_dp_size: int = 1
+    actor_mp_size: int = 1
     actor_pp_size: int = 1
     actor_use_lora: bool = False
     actor_lora_scaling: float = 32.0
@@ -120,6 +121,7 @@ class PPOExperiment(Experiment):
     actor_gradient_checkpointing: bool = True
     # critic model
     critic_dp_size: int = 1
+    critic_mp_size: int = 1
     critic_pp_size: int = 1
     critic_use_lora: bool = False
     critic_lora_scaling: float = 32.0
@@ -189,12 +191,12 @@ class PPOExperiment(Experiment):
     benchmark: bool = False
 
     def __post_init__(self):
-        if self.actor_pp_size < 1 or self.actor_dp_size < 1:
-            raise ValueError("pp_size and dp_size must be positive integers.")
+        if self.actor_pp_size < 1 or self.actor_dp_size < 1 or self.actor_mp_size < 1:
+            raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
         if self.actor_pp_size > 1 and self.actor_use_lora:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
-        if self.critic_pp_size < 1 or self.critic_dp_size < 1:
-            raise ValueError("pp_size and dp_size must be positive integers.")
+        if self.critic_pp_size < 1 or self.critic_dp_size < 1 or self.critic_mp_size < 1:
+            raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
         if self.critic_pp_size > 1 and self.critic_use_lora:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
 
@@ -206,8 +208,8 @@ class PPOExperiment(Experiment):
                 "rew_lora_path, rew_base_model_type and rew_head_path must be specified when is_rw_lora is True."
             )
 
-        self.n_actors = int(self.actor_pp_size * self.actor_dp_size)
-        self.n_critics = int(self.critic_pp_size * self.critic_dp_size)
+        self.n_actors = int(self.actor_pp_size * self.actor_dp_size * self.actor_mp_size)
+        self.n_critics = int(self.critic_pp_size * self.critic_dp_size * self.actor_mp_size)
         self.n_rewards = self.rew_dp_size
         self.n_refs = self.ref_dp_size
 
@@ -326,6 +328,7 @@ class PPOExperiment(Experiment):
             from_model_type=actor_model_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=self.actor_pp_size,
+            mp_size=self.actor_mp_size,
             dp_size=self.actor_dp_size,
             is_critic=False,
             use_lora=self.actor_use_lora,
@@ -339,6 +342,7 @@ class PPOExperiment(Experiment):
             from_model_type=ref_model_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=1,
+            mp_size=1,
             dp_size=self.ref_dp_size,
             is_critic=False,
             use_lora=False,
@@ -367,6 +371,7 @@ class PPOExperiment(Experiment):
             from_model_type=rew_from_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=1,
+            mp_size=1,
             dp_size=self.rew_dp_size,
             is_critic=True,
             use_lora=False,
@@ -384,6 +389,7 @@ class PPOExperiment(Experiment):
             from_model_type=critic_from_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=self.critic_pp_size,
+            mp_size=self.critic_mp_size,
             dp_size=self.critic_dp_size,
             is_critic=True,
             use_lora=self.critic_use_lora,
@@ -502,10 +508,10 @@ class PPOExperiment(Experiment):
                                                 output_bias=self.rew_output_bias))
 
         actor_topo = PipeModelDataParallelTopology(num_pp=self.actor_pp_size,
-                                                   num_mp=1,
+                                                   num_mp=self.actor_mp_size,
                                                    num_dp=self.actor_dp_size)
         critic_topo = PipeModelDataParallelTopology(num_pp=self.critic_pp_size,
-                                                    num_mp=1,
+                                                    num_mp=self.critic_mp_size,
                                                     num_dp=self.critic_dp_size)
         ref_topo = PipeModelDataParallelTopology(num_pp=1, num_mp=1, num_dp=self.ref_dp_size)
         rw_topo = PipeModelDataParallelTopology(num_pp=1, num_mp=1, num_dp=self.rew_dp_size)

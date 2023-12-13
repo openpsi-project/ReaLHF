@@ -23,8 +23,6 @@ except ModuleNotFoundError:
     pass
 import base.logging as logging
 
-# import base.consistency
-
 logger = logging.getLogger("FlashMQATBase")
 
 
@@ -160,30 +158,10 @@ class CausalSelfAttentionLayer(nn.Module):
             scale_factor = 1
         scale_factor /= self.d**0.5
 
-        # base.consistency.store_model_parallel(
-        #     f"layer_{self.layer_index}_causal_self_attn_input",
-        #     hidden_states,
-        #     check_dim="full",
-        #     is_mp=False,
-        # )
-
         qkv: torch.Tensor = self.c_attn(hidden_states)
         q, kv = torch.split(qkv, (self.d * self.nq, 2 * self.d * self.nkv), dim=-1)
         q = q.view(*q.shape[:-1], self.nq, self.d)
         kv = kv.view(*kv.shape[:-1], 2, self.nkv, self.d)
-
-        # base.consistency.store_model_parallel(
-        #     f"layer_{self.layer_index}_before_rotary_q",
-        #     q,
-        #     check_dim=-2,
-        #     is_mp=False,
-        # )
-        # base.consistency.store_model_parallel(
-        #     f"layer_{self.layer_index}_before_rotary_kv",
-        #     kv,
-        #     check_dim=-2,
-        #     is_mp=False,
-        # )
 
         if self.apply_rotary and k_cache is None:
             # otherwise, we input rotary cos/sin directly into flash_attn_with_kvcache
@@ -200,19 +178,6 @@ class CausalSelfAttentionLayer(nn.Module):
             rotary_cos, rotary_sin = self.rotary_emb._cos_cached, self.rotary_emb._sin_cached
         else:
             rotary_cos = rotary_sin = None
-
-        # base.consistency.store_model_parallel(
-        #     f"layer_{self.layer_index}_before_attn_q",
-        #     q,
-        #     check_dim=-2,
-        #     is_mp=False,
-        # )
-        # base.consistency.store_model_parallel(
-        #     f"layer_{self.layer_index}_before_attn_kv",
-        #     kv,
-        #     check_dim=-2,
-        #     is_mp=False,
-        # )
 
         k, v = kv.unbind(dim=-3)
 
@@ -292,19 +257,7 @@ class CausalSelfAttentionLayer(nn.Module):
                 softmax_scale=scale_factor,
                 causal=True,
             )
-        # base.consistency.store_model_parallel(
-        #     f"layer_{self.layer_index}_after_attn_func",
-        #     hidden_states,
-        #     check_dim=-2,
-        #     is_mp=False,
-        # )
         hidden_states = self.c_proj(hidden_states.flatten(start_dim=-2))
-        # base.consistency.store_model_parallel(
-        #     f"layer_{self.layer_index}_after_c_proj",
-        #     hidden_states,
-        #     check_dim="full",
-        #     is_mp=False,
-        # )
         hidden_states = self.resid_dropout(hidden_states)
         return hidden_states, k, v
 
@@ -406,30 +359,12 @@ class FlashMQATBlock(nn.Module):
                 attention_mask=x.attention_mask,
             )
         h = h + attn_out
-        # base.consistency.store_model_parallel(
-        #     f"layer_{self.layer_index}_after_attn",
-        #     h,
-        #     check_dim="full",
-        #     is_mp=False,
-        # )
         if self.ckpt_mlp:
             h = torch.utils.checkpoint.checkpoint(self.mlp, h, use_reentrant=True) + h
         else:
             h = self.mlp(h) + h
-        # base.consistency.store_model_parallel(
-        #     f"layer_{self.layer_index}_after_mlp",
-        #     h,
-        #     check_dim="full",
-        #     is_mp=False,
-        # )
         if self.output_layernorm:
             h = self.ln_f(h)
-        # base.consistency.store_model_parallel(
-        #     f"layer_{self.layer_index}_after_ln_f",
-        #     h,
-        #     check_dim="full",
-        #     is_mp=False,
-        # )
         x.pp_output = h
         # Set kv cache during the first forward pass of generation.
         if x.store_kv_cache:
@@ -526,21 +461,9 @@ class VocabPositionEmbedding(nn.Module):
             x.attention_mask = self_attention_mask.unsqueeze(1)
 
         inputs_embeds = self.wte(y.input_ids)
-        # base.consistency.store_model_parallel(
-        #     "inputs_embeds",
-        #     inputs_embeds,
-        #     check_dim="full",
-        #     is_mp=False,
-        # )
         if self.apply_abs_pos_embed:
             inputs_embeds = inputs_embeds + self.wpe(y.position_ids)
         x.pp_output = self.embed_drop(inputs_embeds)
-        # base.consistency.store_model_parallel(
-        #     "embed_layer_output",
-        #     x.pp_output,
-        #     check_dim="full",
-        #     is_mp=False,
-        # )
         return x
 
 
@@ -918,6 +841,6 @@ class FlashMQATModel(nn.Module):
         with open(os.path.join(model_path, "config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
         model = cls(config=config, is_critic=is_critic, dtype=dtype, device=device)
-        state_dict = cls.from_pipe_state_dict(config, load_from_disk(model_path))
+        state_dict = cls.from_pipe_state_dict(config, load_from_disk(model_path, load_all_mp_ranks=True))
         model.load_state_dict(state_dict)
         return model

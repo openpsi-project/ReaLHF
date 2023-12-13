@@ -24,13 +24,9 @@ cs = ConfigStore.instance()
 
 @dataclasses.dataclass
 class ParallelismConfig:
-    tensor_parallel_size: int = 1
+    model_parallel_size: int = 1
     pipeline_parallel_size: int = 1
     data_parallel_size: int = 1
-
-    def __post_init__(self):
-        if self.tensor_parallel_size != 1:
-            raise ValueError("Tensor parallelism is not supported yet")
 
 
 @dataclasses.dataclass
@@ -465,6 +461,11 @@ def run_sft(args: SFTConfig):
             "Pipeline parallel is enabled. Please ensure that (1) there are enough GPUs for your experiment "
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
+    if args.model.parallel.model_parallel_size > 1:
+        logger.warning(
+            "Model parallel is enabled. Please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
 
     exp_fn = functools.partial(
         SFTExperiment,
@@ -473,6 +474,7 @@ def run_sft(args: SFTConfig):
         model_type=args.model.type,
         model_path=args.model.path,
         dp_size=args.model.parallel.data_parallel_size,
+        mp_size=args.model.parallel.model_parallel_size,
         pp_size=args.model.parallel.pipeline_parallel_size,
         use_lora=args.model.lora,
         lora_scaling=args.model.lora_scaling,
@@ -540,6 +542,13 @@ def run_rw(args: RWConfig):
             "If you insist in using PP, please ensure that (1) there are enough GPUs for your experiment "
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
+    if args.model.parallel.model_parallel_size > 1:
+        logger.critical(
+            "Model parallel is enabled when training the reward model. **This is usually unnecessary.** "
+            "The reward model should not be large and using DeepSpeed ZeRO-2 data parallel is usually sufficient. "
+            "If you insist in using PP, please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
     if args.is_sft_lora and (args.model.base_model_path == args.model.path or args.sft_lora_path is None):
         raise ValueError(
             "model.base_model_path and sft_lora_path must be specified for RW experiment if SFT was trained with LoRA."
@@ -557,6 +566,7 @@ def run_rw(args: RWConfig):
         base_model_type=args.model.type,
         sft_lora_path=args.sft_lora_path,
         dp_size=args.model.parallel.data_parallel_size,
+        mp_size=args.model.parallel.model_parallel_size,
         pp_size=args.model.parallel.pipeline_parallel_size,
         use_lora=args.model.lora,
         lora_scaling=args.model.lora_scaling,
@@ -628,9 +638,21 @@ def run_ppo(args: PPOConfig):
             "Pipeline parallel of the actor model is enabled. Please ensure that (1) there are enough GPUs for your experiment "
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
+    if args.actor.parallel.model_parallel_size > 1:
+        logger.warning(
+            "Model parallel of the actor model is enabled. Please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
     if args.critic.parallel.pipeline_parallel_size > 1:
         logger.critical(
             "Pipeline parallel of the critic model is enabled. **This is usually unnecessary.** "
+            "The reward model should not be large and using DeepSpeed ZeRO-2 data parallel is usually sufficient. "
+            "If you insist in using PP, please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
+    if args.critic.parallel.model_parallel_size > 1:
+        logger.critical(
+            "Model parallel of the critic model is enabled. **This is usually unnecessary.** "
             "The reward model should not be large and using DeepSpeed ZeRO-2 data parallel is usually sufficient. "
             "If you insist in using PP, please ensure that (1) there are enough GPUs for your experiment "
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
@@ -666,6 +688,7 @@ def run_ppo(args: PPOConfig):
         rew_head_path=args.rew_head_path,
         # actor
         actor_dp_size=args.actor.parallel.data_parallel_size,
+        actor_mp_size=args.actor.parallel.model_parallel_size,
         actor_pp_size=args.actor.parallel.pipeline_parallel_size,
         actor_use_lora=args.actor.lora,
         actor_lora_scaling=args.actor.lora_scaling,
@@ -674,6 +697,7 @@ def run_ppo(args: PPOConfig):
         actor_gradient_checkpointing=args.actor.gradient_checkpointing,
         # critic
         critic_dp_size=args.critic.parallel.data_parallel_size,
+        critic_mp_size=args.critic.parallel.model_parallel_size,
         critic_pp_size=args.critic.parallel.pipeline_parallel_size,
         critic_use_lora=args.critic.lora,
         critic_lora_scaling=args.critic.lora_scaling,
@@ -772,6 +796,11 @@ def run_dpo(args: DPOConfig):
             "Pipeline parallel is enabled. Please ensure that (1) there are enough GPUs for your experiment "
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
+    if args.model.parallel.model_parallel_size > 1:
+        logger.warning(
+            "Model parallel is enabled. Please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
     if args.is_sft_lora and (args.sft_lora_path == args.model.path or args.model.base_model_path is None):
         raise ValueError(
             "sft_lora_path and model.base_model_path must be specified for DPO experiment."
@@ -792,6 +821,7 @@ def run_dpo(args: DPOConfig):
         base_model_type=args.model.type,
         sft_lora_path=args.sft_lora_path,
         dp_size=args.model.parallel.data_parallel_size,
+        mp_size=args.model.parallel.model_parallel_size,
         pp_size=args.model.parallel.pipeline_parallel_size,
         use_lora=args.model.lora,
         lora_scaling=args.model.lora_scaling,

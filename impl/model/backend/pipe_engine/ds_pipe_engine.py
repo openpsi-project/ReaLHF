@@ -24,7 +24,6 @@ from impl.model.utils.pipeline_module import PipelineError, PipelineModule
 from impl.model.utils.tensor_storage import recv_grad, send_grad, TensorBuffer
 import base.constants
 import base.logging as logging
-# import base.consistency
 import impl.model.backend.pipe_engine.static_schedule as schedule
 import impl.model.utils.p2p as p2p
 

@@ -385,5 +385,5 @@ def convert_state_dict_parallel_llama(state_dict: Dict,
 
 
 FlashMQATModel.register_hf_model("parallel_llama", convert_config_parallel_llama,
-                                 convert_state_dict_parallel_llama)
+                                 convert_state_dict_parallel_llama, to_llama_state_dict)
 ################################ Parallel LLaMa End ################################

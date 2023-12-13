@@ -47,7 +47,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         module: deepspeed.DeepSpeedEngine = model.module
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
-        module.eval()
+        module.train()
 
         if isinstance(module, DeepSpeedPipelineEngine):
             loss_fn_kwargs = dict(

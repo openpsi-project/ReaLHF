@@ -72,6 +72,7 @@ def make_model(device):
                                             from_type=MODEL_TYPE,
                                             tokenizer_path=MODEL_PARALLEL_PATH,
                                             init_from_scratch=True,
+                                            no_param_instantiation=True,
                                         ))
     if NUM_PP == 1:
         model_config.wrappers += [
@@ -393,5 +394,5 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testGenerate")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testInferenceAccordance")
     # unittest.main(defaultTest="ModelParallelFlashMQATTest.testLinearAccordance")

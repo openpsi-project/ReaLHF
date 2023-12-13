@@ -44,7 +44,10 @@ def make_causal_flash_mqat_parallel_pipe_module(
     head = LayerSpec(
         OutputHead,
         config.hidden_dim,
-        1 if is_critic else config.vocab_size,
+        # 1 if is_critic else config.vocab_size,
+        # here preserve the original head for critic and swap it in pipeline modules
+        # to preserve same pipe stage division.
+        config.vocab_size,
         bias=False,
         device=device,
         dtype=dtype,
@@ -59,6 +62,9 @@ def make_causal_flash_mqat_parallel_pipe_module(
         layers=layer_specs,
         loss_fn=compute_loss,
         topology=topology,
+        is_critic=is_critic,
+        dtype=dtype,
+        device=device,
         config=config,
     )
 

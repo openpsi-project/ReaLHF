@@ -37,6 +37,7 @@ class DPOExperiment(Experiment):
     sft_lora_path: Optional[str] = None
     # model
     dp_size: int = 1
+    mp_size: int = 1
     pp_size: int = 1
     use_lora: bool = False
     lora_scaling: float = 32.0
@@ -64,14 +65,14 @@ class DPOExperiment(Experiment):
     num_pipeline_micro_batches: Optional[int] = None
 
     def __post_init__(self):
-        if self.pp_size < 1 or self.dp_size < 1:
-            raise ValueError("pp_size and dp_size must be positive integers.")
+        if self.pp_size < 1 or self.dp_size < 1 or self.mp_size < 1:
+            raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
         if self.pp_size > 1 and self.use_lora:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
         if self.is_sft_lora and (self.sft_lora_path is None or self.base_model_type is None):
             raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
 
-        self.n_actors = int(self.dp_size * self.pp_size)
+        self.n_actors = int(self.dp_size * self.pp_size * self.mp_size)
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -148,6 +149,7 @@ class DPOExperiment(Experiment):
             if not self.is_sft_lora else self.base_model_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=1,
+            mp_size=1,
             dp_size=1,
             is_critic=False,
             use_lora=False,
@@ -157,6 +159,7 @@ class DPOExperiment(Experiment):
             from_model_type="self" if not self.is_sft_lora else self.base_model_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=self.pp_size,
+            mp_size=self.mp_size,
             dp_size=self.dp_size,
             is_critic=False,
             use_lora=self.use_lora,
@@ -169,9 +172,9 @@ class DPOExperiment(Experiment):
         interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=True))
         ref_interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=False))
 
-        topo = PipeModelDataParallelTopology(self.pp_size, 1, self.dp_size)
+        topo = PipeModelDataParallelTopology(self.pp_size, self.mp_size, self.dp_size)
         model_worker = []
-        for i in range(self.pp_size * self.dp_size):
+        for i in range(self.pp_size * self.dp_size * self.mp_size):
             coord = topo.get_coord(i)
             mw = ModelWorker(
                 seed=self.seed,

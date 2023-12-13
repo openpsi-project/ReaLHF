@@ -188,7 +188,7 @@ def dumps(namedarray_obj, method="pickle_dict"):
                 shape_ = str(tuple(v.shape)).encode('ascii')
                 v_ = blosc.compress(v_, typesize=4, cname='lz4')
             flattened_bytes.append((k_, dtype_, shape_, v_))
-        logger.info(f"dump namedarray time {time.monotonic() - t0:4f}")
+        # logger.info(f"dump namedarray time {time.monotonic() - t0:4f}")
         return list(itertools.chain.from_iterable(flattened_bytes))
 
     if method == "pickle_dict":
@@ -284,7 +284,7 @@ def loads(b):
                     xs[4 * i + 1].decode('ascii'))).reshape(*ast.literal_eval(xs[4 * i + 2].decode('ascii')))
                 v = torch.from_numpy(v)
             flattened.append((k, v))
-        logger.info(f"load namedarray time {time.monotonic() - t0:4f}")
+        # logger.info(f"load namedarray time {time.monotonic() - t0:4f}")
         return from_flattened(flattened)
 
     if b[0] == NamedArrayEncodingMethod.PICKLE_DICT.value:
