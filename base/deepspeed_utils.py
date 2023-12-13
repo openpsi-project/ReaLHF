@@ -8,6 +8,7 @@ import deepspeed
 import torch
 
 from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
+import base.constants
 
 DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU = 32  # A place-holder for inference.
 
@@ -39,7 +40,7 @@ def get_train_ds_config(offload_param: bool = False,
         "zero_optimization": zero_opt_dict,
         "fp16": {
             "enabled": enable_fp16,
-            "loss_scale_window": 100,
+            "loss_scale_window": 40,
             "initial_scale_power": 12,
         },
         "gradient_clipping": 1.0,
@@ -111,6 +112,8 @@ def deepspeed_initialize(
     num_pipeline_micro_batches: int = None,
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
+    if mpu is None:
+        mpu = base.constants.grid()
     if engine_type == "deepspeed":
         # Disable zero.Init context if it's currently enabled
         zero.partition_parameters.shutdown_init_context()
@@ -136,7 +139,7 @@ def deepspeed_initialize(
         zero.partition_parameters.restore_init_context()
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
     elif engine_type == "pipe":
-        mpu = model.mpu()
+        # mpu = model.mpu()
         config_class = DeepSpeedConfig(config, mpu)
         engine = DeepSpeedPipelineEngine(num_micro_batches=num_pipeline_micro_batches,
                                          model=model,
@@ -149,7 +152,7 @@ def deepspeed_initialize(
                                          dist_init_required=False)
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
     elif engine_type == "stream_pipe":
-        mpu = model.mpu()
+        # mpu = model.mpu()
         config_class = DeepSpeedConfig(config, mpu)
         engine = StreamPipeEngine(model=model,
                                   args=None,

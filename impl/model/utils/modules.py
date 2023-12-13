@@ -37,6 +37,7 @@ class LayerNormLinear(nn.Module):
         layer_norm_type: Optional[str] = None,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
+        layer_index=None,
     ):
         super().__init__()
         if dtype is None:
@@ -47,6 +48,7 @@ class LayerNormLinear(nn.Module):
             layer_norm_fn = LlamaRMSNorm
         self.ln = layer_norm_fn(input_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
         self.linear = nn.Linear(input_dim, output_dim, bias=use_attention_bias, dtype=dtype, device=device)
+        self.layer_index = layer_index
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear(self.ln(x))

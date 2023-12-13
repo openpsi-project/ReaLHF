@@ -89,15 +89,14 @@ class CausalSelfAttentionLayer(nn.Module):
             dtype = torch.float16
         assert hidden_dim % head_dim == 0
         n_q_heads = hidden_dim // head_dim
-        self.c_attn = LayerNormLinear(
-            hidden_dim,
-            head_dim * (n_q_heads + 2 * n_kv_heads),
-            layer_norm_epsilon=layer_norm_epsilon,
-            layer_norm_type=layer_norm_type,
-            use_attention_bias=use_attention_bias,
-            dtype=dtype,
-            device=device,
-        )
+        self.c_attn = LayerNormLinear(hidden_dim,
+                                      head_dim * (n_q_heads + 2 * n_kv_heads),
+                                      layer_norm_epsilon=layer_norm_epsilon,
+                                      layer_norm_type=layer_norm_type,
+                                      use_attention_bias=use_attention_bias,
+                                      dtype=dtype,
+                                      device=device,
+                                      layer_index=layer_index)
         self.c_proj = nn.Linear(hidden_dim, hidden_dim, bias=use_attention_bias, dtype=dtype, device=device)
         self.resid_dropout = nn.Dropout(resid_pdrop)
 
@@ -216,7 +215,6 @@ class CausalSelfAttentionLayer(nn.Module):
                 rotary_cos=rotary_cos,
                 rotary_sin=rotary_sin,
                 rotary_interleaved=self.rotary_interleaved,
-                # num_splits=1,
             )
         elif k_cache is not None and len(qkv.shape) == 2:
             hidden_states = flash_attn_varlen_func_with_kvcache(
@@ -277,6 +275,8 @@ class FlashMQATBlock(nn.Module):
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
+        if dtype is None:
+            dtype = torch.float16
         self.layer_index = layer_index
         self.attn = CausalSelfAttentionLayer(
             hidden_dim=config.hidden_dim,
@@ -507,7 +507,7 @@ class FlashMQATBase(nn.Module):
         layers = self.to_layers()
         assert len(ys) == len(layers), (len(ys), len(layers))
         raw_pp_input = x.pp_input
-        for layer, y in zip(layers, ys):
+        for i, (layer, y) in enumerate(zip(layers, ys)):
             x = layer(x, y)  # This will set pp_output.
             x.pp_input = x.pp_output
         # Finally, pp_input is the input of this pipeline stage,
@@ -536,6 +536,8 @@ class FlashMQATModel(nn.Module):
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
+        if dtype is None:
+            dtype = torch.float16
         self.config = config
         self.transformer = FlashMQATBase(config,
                                          no_param_instantiation=no_param_instantiation,
@@ -638,14 +640,14 @@ class FlashMQATModel(nn.Module):
 
     # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
     def _config_and_param_from_hf_template(
-        config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
-        state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None,
-        from_model: Optional[transformers.PreTrainedModel] = None,
-        model_path: Optional[str] = None,
-        init_from_scratch: bool = False,
-        no_param_instantiation: bool = False,
-        force_load_from_hf_pretrained: bool = False,
-    ) -> Tuple[FlashMQATConfig, Optional[Dict]]:
+            config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
+            state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None,
+            from_model: Optional[transformers.PreTrainedModel] = None,
+            model_path: Optional[str] = None,
+            init_from_scratch: bool = False,
+            no_param_instantiation: bool = False,
+            force_load_from_hf_pretrained: bool = False,
+            load_model_parallel_as_list: bool = False) -> Tuple[FlashMQATConfig, Optional[Dict]]:
         if not init_from_scratch and not no_param_instantiation:
             assert state_dict_converter is not None
         config = FlashMQATModel._config_from_hf_template(config_converter, from_model, model_path)
@@ -673,7 +675,11 @@ class FlashMQATModel(nn.Module):
             ) if not init_from_scratch and not no_param_instantiation else None
 
         if not init_from_scratch and not no_param_instantiation:
-            state_dict = state_dict_converter(state_dict, config)
+            if load_model_parallel_as_list:
+                # here state_dict_converter is for parallel mqat models
+                state_dict = state_dict_converter(state_dict, config, load_model_parallel_as_list)
+            else:
+                state_dict = state_dict_converter(state_dict, config)
 
         return config, state_dict
 
@@ -835,6 +841,6 @@ class FlashMQATModel(nn.Module):
         with open(os.path.join(model_path, "config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
         model = cls(config=config, is_critic=is_critic, dtype=dtype, device=device)
-        state_dict = cls.from_pipe_state_dict(config, load_from_disk(model_path))
+        state_dict = cls.from_pipe_state_dict(config, load_from_disk(model_path, load_all_mp_ranks=True))
         model.load_state_dict(state_dict)
         return model

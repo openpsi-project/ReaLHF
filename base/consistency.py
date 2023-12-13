@@ -5,14 +5,80 @@ import pickle
 import torch
 import torch.distributed as dist
 
+import base.constants
+
 # This module is used to check consistency of parallel methods
 
 ROOT_DIR = "/home/meizy/consistency_tmp"
 STEP_ID = 0
 MICRO_BATCH_ID = 0
 STORED_NAMES = set()
+MP_STORED_NAMES = dict()
 PARALLEL_MODE = False
 REPORT_FILE = "/home/meizy/logs/consistency_report.txt"
+
+
+def report(report_fp, name, full_tensor, other_tensor, atol, rtol):
+    if full_tensor.shape != other_tensor.shape:
+        print(f"tensor {name} shape mismatch {full_tensor.shape}!={other_tensor.shape}")
+        report_fp.write(f"tensor {name} shape mismatch {full_tensor.shape}!={other_tensor.shape}\n")
+        return
+    if not torch.allclose(full_tensor, other_tensor, atol=atol, rtol=rtol):
+        print(f"tensor {name} **MISMATCH** atol={atol} rtol={rtol}")
+        report_fp.write(f"tensor {name} **MISMATCH** atol={atol} rtol={rtol}\n")
+    else:
+        print(f"tensor {name} **MATCH**")
+        report_fp.write(f"tensor {name} **MATCH**\n")
+    print(f"max: {(full_tensor - other_tensor).abs().max()} "
+          f"mean: {(full_tensor - other_tensor).abs().mean()}")
+    report_fp.write(f"tensor {name} **MATCH**:\n")
+    report_fp.write(f"max: {(full_tensor - other_tensor).abs().max()}\n")
+    if torch.is_floating_point(full_tensor):
+        report_fp.write(f"mean: {(full_tensor - other_tensor).abs().mean()}\n")
+    report_fp.write(f"full_tensor: {full_tensor}\n")
+    report_fp.write(f"other_tensor: {other_tensor}\n")
+    report_fp.write(f"full_tensor - other_tensor abs: {(full_tensor - other_tensor).abs()}\n")
+
+
+def store_model_parallel(name: str, tensor: torch.Tensor, check_dim: int, is_mp: bool):
+    MP_STORED_NAMES[name] = check_dim
+    if is_mp:
+        name = f"{name}:MP:{base.constants.model_parallel_rank()}"
+    fn = os.path.join(ROOT_DIR, name)
+    tensor = tensor.clone().detach().cpu()
+    with open(fn, "wb") as f:
+        pickle.dump(tensor, f)
+
+
+def check_all_model_parallel(mp_world_size, atol=1e-5, rtol=1e-8):
+    report_fp = open(REPORT_FILE, "w")
+    stored_names = sorted(list(MP_STORED_NAMES))
+    for name in stored_names:
+        mp_names = [f"{name}:MP:{i}" for i in range(mp_world_size)]
+        mp_tensors = []
+        for mp_name in mp_names:
+            with open(os.path.join(ROOT_DIR, mp_name), "rb") as f:
+                mp_tensors.append(pickle.load(f))
+
+        with open(os.path.join(ROOT_DIR, name), "rb") as f:
+            full_tensor = pickle.load(f)
+
+        check_dim = MP_STORED_NAMES[name]
+        if check_dim is not "full":
+            other_tensor = torch.cat(mp_tensors, dim=MP_STORED_NAMES[name])
+            try:
+                report(report_fp, name, full_tensor, other_tensor, atol, rtol)
+            except Exception as e:
+                print(f"{name} report fail")
+                raise e
+        else:
+            for i in range(mp_world_size):
+                try:
+                    report(report_fp, mp_names[i], full_tensor, mp_tensors[i], atol, rtol)
+                except Exception as e:
+                    print(f"{mp_names[i]} report fail")
+                    raise e
+    report_fp.close()
 
 
 def store(name: str, tensor: torch.Tensor):
@@ -49,32 +115,7 @@ def check_all(atol=1e-5, rtol=1e-8):
             with open(os.path.join(ROOT_DIR, mb_name), "rb") as f:
                 mb_tensors.append(pickle.load(f))
         other_tensor = torch.cat(mb_tensors, dim=0)
-        if full_tensor.shape != other_tensor.shape:
-            # print(f"tensor {name} shape mismatch {full_tensor.shape}!={other_tensor.shape}")
-            report_fp.write(f"tensor {name} shape mismatch {full_tensor.shape}!={other_tensor.shape}\n")
-            continue
-        if not torch.allclose(full_tensor, other_tensor, atol=atol, rtol=rtol):
-            # print(f"tensor {name} **MISMATCH** atol={atol} rtol={rtol}")
-            # print(f"max: {(full_tensor - other_tensor).abs().max()} "
-            #     f"mean: {(full_tensor - other_tensor).abs().mean()}")
-            report_fp.write(f"tensor {name} **MISMATCH** atol={atol} rtol={rtol}\n")
-            report_fp.write(f"max: {(full_tensor - other_tensor).abs().max()}\n")
-            if torch.is_floating_point(full_tensor):
-                report_fp.write(f"mean: {(full_tensor - other_tensor).abs().mean()}\n")
-            report_fp.write(f"full_tensor: {full_tensor}\n")
-            report_fp.write(f"other_tensor: {other_tensor}\n")
-            report_fp.write(f"full_tensor - other_tensor abs: {(full_tensor - other_tensor).abs()}\n")
-        else:
-            # print(f"tensor {name} **MATCH**")
-            # print(f"max: {(full_tensor - other_tensor).abs().max()} "
-            #       f"mean: {(full_tensor - other_tensor).abs().mean()}")
-            report_fp.write(f"tensor {name} **MATCH**:\n")
-            report_fp.write(f"max: {(full_tensor - other_tensor).abs().max()}\n")
-            if torch.is_floating_point(full_tensor):
-                report_fp.write(f"mean: {(full_tensor - other_tensor).abs().mean()}\n")
-            report_fp.write(f"full_tensor: {full_tensor}\n")
-            report_fp.write(f"other_tensor: {other_tensor}\n")
-            report_fp.write(f"full_tensor - other_tensor abs: {(full_tensor - other_tensor).abs()}\n")
+        report(report_fp, name, full_tensor, other_tensor, atol, rtol)
     report_fp.close()
 
 

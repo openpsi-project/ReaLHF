@@ -1,3 +1,4 @@
+from statistics import mean
 import logging
 import os
 import random
@@ -5,31 +6,22 @@ import time
 import unittest
 
 # import transformers
-from torch.profiler import profile, ProfilerActivity, record_function
 import torch
 import torch.multiprocessing as mp
 
 from base.namedarray import NamedArray
+from tests.parallel.utils import *
 import api.config as config_package
-import base.gpu_utils
-import base.name_resolve as name_resolve
-import base.names as names
 
 # import base.consistency
 
-# mp.set_start_method('spawn', force=True) # this will make global barrier not work
-
-EXPR_NAME = "test"
-TRIAL_NAME = "test"
-MODEL_NAME = "pipedatamodel"
-WORKER_TYPE = "model_worker"
-NUM_PP = 4
-NUM_DP = 2
+NUM_PP = 2
+NUM_DP = 8 // NUM_PP
 WORLD_SIZE = NUM_PP * NUM_DP
 MODEL_TYPE = "llama"
 if MODEL_TYPE == "llama":
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
-    PIPELINE_MODEL_PATH = "/home/meizy/models/Llama-2-13b_4pp_3s"
+    PIPELINE_MODEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-13b-hf_{NUM_PP}pp_3s"
     # BASELINE_MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
     # PIPELINE_MODEL_PATH = "/home/meizy/models/test/llama-2-4l_4pp_3s"
 elif MODEL_TYPE == "starcoder":
@@ -42,55 +34,15 @@ BATCH_SIZE = 32
 MIN_NEW_TOKENS = 1
 MAX_NEW_TOKENS = 2048
 
-BARRIER = mp.Barrier(WORLD_SIZE)
 LOG_FORMAT = "%(asctime)s.%(msecs)03d %(name)s %(levelname)s: %(message)s"
 DATE_FORMAT = "%Y%m%d-%H:%M:%S"
-# for plotting
-# logging.basicConfig(filename="/home/meizy/logs/new_train_time.log",
-#                     filemode="w",
-#                     format=LOG_FORMAT,
-#                     datefmt=DATE_FORMAT,
-#                     level="DEBUG")
-
 logging.basicConfig(format=LOG_FORMAT, datefmt=DATE_FORMAT, level="DEBUG")
-
 logger = logging.getLogger("pipe_mqat_test")
-
-
-def setup_gpu(rank):
-    os.environ["DLLM_MODE"] = "LOCAL"
-    # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-
-    BARRIER.wait()
-    base.gpu_utils.isolate_cuda_device(WORKER_TYPE, rank, WORLD_SIZE, EXPR_NAME, TRIAL_NAME)
-    BARRIER.wait()
-    base.gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME, MODEL_NAME, rank)
-    BARRIER.wait()
-    world_size, ddp_rank, local_gpu_id = base.gpu_utils.setup_ddp(EXPR_NAME, TRIAL_NAME, MODEL_NAME, rank)
-    device = torch.device('cuda', 0)
-    import deepspeed
-    deepspeed.init_distributed()
-    return device
-
-
-def clear_name_resolve():
-    name_resolve.clear_subtree(names.trial_root(experiment_name=EXPR_NAME, trial_name=TRIAL_NAME))
 
 
 def make_pipe_interface():
     import api.model
     return api.model.make_interface(config_package.ModelInterface(type_="pipe_flash_sft", args=dict()))
-
-
-def make_finetune_spec(bs_per_device):
-    import api.model
-    finetune_spec = api.model.FinetuneSpec(
-        total_train_epochs=1,
-        total_train_steps=10,
-        steps_per_epoch=10,
-        batch_size_per_device=bs_per_device,
-    )
-    return finetune_spec
 
 
 def make_pipe_backend():
@@ -126,35 +78,10 @@ def make_pipe_model(model_path, device):
     return topology, model
 
 
-def make_input(tokenizer, device, s):
-    tokenizer.padding_side = "left"
-    prompts = tokenizer(s, return_tensors="pt", padding=True)
-
-    input_ids, attention_mask = prompts["input_ids"], prompts["attention_mask"]
-    input_ids = input_ids.to(device)
-    attention_mask = attention_mask.to(device)
-
-    return input_ids, attention_mask
-
-
-def random_sentence(min_len=1, max_len=10):
-    words = ["the", "quick", "brown", "fox", "jumped", "over", "the", "lazy", "dog"]
-    sentence_length = random.randint(min_len, max_len)
-    return " ".join(random.choices(words, k=sentence_length))
-    # return "Output less than 50 words:"
-
-
-def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
-    random.seed(seed)
-    whole_batch = [random_sentence() for _ in range(batch_size)]
-    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank:batch_size // dp_worldsize * (dp_rank + 1)]
-    return make_input(tokenizer, device, dp_batch)
-
-
 def init_handles(rank):
     device = setup_gpu(rank)
+    init_global_constants(NUM_DP, 1, NUM_PP)
 
-    rank = torch.distributed.get_rank()
     cuda_visible = os.environ["CUDA_VISIBLE_DEVICES"]
     logger.info(f"PROCESS RANK: {rank}; \n"
                 f"TORCH DIST RANK: {torch.distributed.get_rank()}; \n"
@@ -178,27 +105,9 @@ def pipe_load_save(rank):
     print("pipeline module load successful")
 
 
-def init_data(rank, model, device, seed):
-    from flash_attn.bert_padding import pad_input, unpad_input
-    input_ids, attention_mask = make_batch(model.tokenizer,
-                                           device,
-                                           BATCH_SIZE,
-                                           rank % NUM_DP,
-                                           NUM_DP,
-                                           seed=seed)
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
-    prompt_mask = torch.zeros_like(packed_input_ids)
-    data = NamedArray(
-        packed_input_ids=packed_input_ids,
-        cu_seqlens=cu_seqlens,
-        prompt_mask=prompt_mask,
-    )
-    return data
-
-
 def pipe_generate(rank, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
-    data = init_data(rank, model, device, seed=seed)
+    data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
 
     random.seed(seed + rank)
 
@@ -222,15 +131,15 @@ def pipe_generate(rank, res_queue: mp.Queue, seed: int):
 
 def pipe_train_batch(rank, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
-    data = init_data(rank, model, device, seed)
-    st = time.monotonic()
-    outputs = interface.train_step(model, data)
-    t = time.monotonic() - st
-
-    st = time.monotonic()
-    outputs = interface.train_step(model, data)
-    t1 = time.monotonic() - st
-    print(f"{rank} {outputs} timecost {t} {t1}")
+    ts = []
+    for seed in range(20):
+        data = init_data(rank, model, device, seed)
+        st = time.monotonic()
+        outputs = interface.train_step(model, data)
+        t = time.monotonic() - st
+        ts.append(t)
+    t = mean(ts[1:])
+    print(f"{rank} {outputs} timecost {t} {ts}")
 
 
 def pipe_train_batch_accordance(rank: int, res_queue: mp.Queue, seed: int):
@@ -388,7 +297,6 @@ class PipeFlashMQATTest(unittest.TestCase):
 
     def testTrainBatch(self):
         clear_name_resolve()
-
         self.seed = random.randint(0, 1000)
         self.res_queue = mp.Queue(maxsize=128)
         self.pipe_model_processes = [
@@ -419,53 +327,6 @@ class PipeFlashMQATTest(unittest.TestCase):
         for p in self.pipe_model_processes:
             p.join()
 
-        # self.init_baseline_model()
-        # print("Baseline model parameters")
-
-        # datas = [init_data(rank, self.baseline_model, self.device, self.seed) for rank in range(WORLD_SIZE)]
-
-        # from impl.model.interface.flash.sft_flash_interface import compute_packed_sft_loss
-        # self.baseline_model.train()
-        # for data in datas:
-        #     packed_input_ids = data["packed_input_ids"]
-        #     cu_seqlens = data["cu_seqlens"]
-        #     prompt_mask = data["prompt_mask"]
-        #     max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
-        #     logits = self.baseline_model(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-        #                                  max_seqlen=max_seqlen).logits.float()
-        #     loss = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, 1 - prompt_mask.float())
-        #     self.baseline_model.backward(loss)
-
-        # self.baseline_model.step()
-
-        # state_dict = self.baseline_model.state_dict()
-        # # print("Baseline model parameters")
-        # # for name, param in state_dict.items():
-        # #     print(f"{name}: {param.size()}")
-        # # transform
-        # layer_key_mappings = {
-        #     "transformer.embedding_layer.": "0.",
-        #     "head.": "5."
-        # }
-        # for i in range(4):
-        #     layer_key_mappings[f"transformer.h.{i}."] = f"{i+1}."
-
-        # for old_key, new_key in layer_key_mappings.items():
-        #     new_state_dict = {}
-        #     for k, v in state_dict.items():
-        #         if old_key in k:
-        #             k = k.replace(old_key, new_key)
-        #         new_state_dict[k] = v
-        #     state_dict = new_state_dict
-
-        # print("Baseline model parameters")
-        # for name, param in state_dict.items():
-        #     print(f"{name}: {param.size()}")
-
-        # for param_name, param in sampled_weights.items():
-        #     other = state_dict[param_name]
-        #     print(f"param {param_name} diff: \n{torch.abs(param-other).max()}\n")
-
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="PipeFlashMQATTest.testGenerate")
+    unittest.main(defaultTest="PipeFlashMQATTest.testTrainBatch")

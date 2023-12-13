@@ -24,6 +24,10 @@ _trial_name = None
 
 _grid: PipelineParallelGrid = None
 
+# used only in scripts and tests
+_fake_mp_world_size = None
+_fake_mp_rank = None
+
 
 def set_grid(grid):
     global _grid
@@ -49,15 +53,27 @@ def pipe_parallel_group():
 
 
 def model_parallel_rank() -> int:
-    return grid().get_model_parallel_rank()
+    try:
+        return grid().get_tensor_model_parallel_rank()
+    except RuntimeError as e:  # used only in scripts and tests
+        if _fake_mp_rank is not None:
+            return _fake_mp_rank
+        else:
+            raise e
 
 
 def model_parallel_world_size() -> int:
-    return grid().get_model_parallel_world_size()
+    try:
+        return grid().get_tensor_model_parallel_world_size()
+    except RuntimeError as e:  # used only in scripts and tests
+        if _fake_mp_world_size is not None:
+            return _fake_mp_world_size
+        else:
+            raise e
 
 
 def model_parallel_group():
-    return grid().get_model_parallel_group()
+    return grid().get_tensor_model_parallel_group()
 
 
 def data_parallel_rank() -> int:
@@ -70,3 +86,15 @@ def data_parallel_world_size() -> int:
 
 def data_parallel_group():
     return grid().get_data_parallel_group()
+
+
+def set_fake_mp_world_size(world_size):
+    # used only in scripts and tests
+    global _fake_mp_world_size
+    _fake_mp_world_size = world_size
+
+
+def set_fake_mp_rank(rank):
+    # used only in scripts and tests
+    global _fake_mp_rank
+    _fake_mp_rank = rank

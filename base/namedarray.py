@@ -4,6 +4,7 @@ import copy
 import enum
 import itertools
 import pickle
+import time
 import types
 import warnings
 
@@ -165,17 +166,21 @@ def dumps(namedarray_obj, method="pickle_dict"):
         return list(itertools.chain.from_iterable(flattened_bytes))
 
     def _tensor_namedarray_to_bytes_list(x):
+        t0 = time.monotonic()
         flattened_entries = flatten(x)
         flattened_bytes = []
         for k, v in flattened_entries:
             k_ = k.encode('ascii')
             dtype_ = v_ = shape_ = b''
             if k in sparse_tensor_fields:
+                t1 = time.monotonic()
                 assert v is not None, f"Sparse tensor field {k} cannot be None."
-                # logger.info(f"Dense tensor {k} size {dense_tensor_size(v)} bytes")
+                logger.info(f"Dense tensor {k} size {dense_tensor_size(v)} bytes")
+                vshape = v.shape
                 v = v.to_sparse()
-                # logger.info(f"Sparse tensor {k} size {sparse_tensor_size(v)} bytes")
+                logger.info(f"Sparse tensor {k} size {sparse_tensor_size(v)} bytes")
                 v_ = pickle.dumps(v)
+                logger.info(f"dump sparse tensor {k} time {time.monotonic() - t1:4f}, v shape {vshape}")
             elif v is not None:
                 v = v.cpu().numpy()
                 dtype_ = _numpy_dtype_to_str(v.dtype).encode('ascii')
@@ -183,6 +188,7 @@ def dumps(namedarray_obj, method="pickle_dict"):
                 shape_ = str(tuple(v.shape)).encode('ascii')
                 v_ = blosc.compress(v_, typesize=4, cname='lz4')
             flattened_bytes.append((k_, dtype_, shape_, v_))
+        # logger.info(f"dump namedarray time {time.monotonic() - t0:4f}")
         return list(itertools.chain.from_iterable(flattened_bytes))
 
     if method == "pickle_dict":
@@ -253,6 +259,7 @@ def loads(b):
         return from_flattened(flattened)
 
     def _parse_tensor_namedarray_from_bytes_list(xs):
+        t0 = time.monotonic()
         flattened = []
         for i in range(len(xs) // 4):
             k = xs[4 * i].decode('ascii')
@@ -260,13 +267,15 @@ def loads(b):
                 # None
                 v = None
             elif xs[4 * i + 1] == b'':
+                t1 = time.monotonic()
                 # sparse tensor
                 v = pickle.loads(xs[4 * i + 3])
                 assert torch.is_tensor(
                     v) and v.is_sparse, f"Field {k} is not a sparse tensor, but is serialized as one."
-                # logger.info(f"Sparse tensor {k} size {sparse_tensor_size(v)} bytes")
+                logger.info(f"Sparse tensor {k} size {sparse_tensor_size(v)} bytes")
                 v = v.to_dense()
-                # logger.info(f"Dense tensor {k} size {dense_tensor_size(v)} bytes")
+                logger.info(f"Dense tensor {k} size {dense_tensor_size(v)} bytes")
+                logger.info(f"load sparse tensor {k} time {time.monotonic() - t1:4f}, v shape {v.shape}")
             else:
                 # dense tensor
                 buf = xs[4 * i + 3]
@@ -275,6 +284,7 @@ def loads(b):
                     xs[4 * i + 1].decode('ascii'))).reshape(*ast.literal_eval(xs[4 * i + 2].decode('ascii')))
                 v = torch.from_numpy(v)
             flattened.append((k, v))
+        # logger.info(f"load namedarray time {time.monotonic() - t0:4f}")
         return from_flattened(flattened)
 
     if b[0] == NamedArrayEncodingMethod.PICKLE_DICT.value:
