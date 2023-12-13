@@ -587,19 +587,14 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._zero_grads(x)
         self._zero_grads(ys)
 
-        # logger.info(f"Stage {stage_id} mbid {micro_batch_id} before forward")
         x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
-        # logger.info(f"Stage {stage_id} mbid {micro_batch_id} after forward")
 
         logits = self.__maybe_init_kv_cache(x, ys, micro_batch_id)
         self.__maybe_increase_cache_seqlens(x, ys, micro_batch_id, logits=logits)
         self.__maybe_genstep(x, ys, micro_batch_id, logits=logits)
-        # logger.info(f"Stage {stage_id} mbid {micro_batch_id} before calculating loss")
         self.__maybe_calculate_loss(x, micro_batch_id)
-        # logger.info(f"Stage {stage_id} mbid {micro_batch_id} after calculating loss")
         self.__maybe_store_logits(x, micro_batch_id)
         self.tensor_buffer.put("batch_output_x", micro_batch_id, x)  # send activation
-        # logger.info(f"Stage {stage_id} mbid {micro_batch_id} exec forward pass finished")
 
     def __maybe_init_kv_cache(self, x: PipeTransferData, ys: List[PipeCacheData], mbid: int):
         if not self._generating:
@@ -688,6 +683,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             cu_seqlens = input_cache.cu_seqlens
             assert self._loss_fn is not None, "loss function is not set, please use engine.set_loss_fn(fn)"
             loss, stats = self._loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_kwargs)
+            loss = loss / self.num_micro_batches
             self.tensor_buffer.put("losses", mbid, loss)
             self.tensor_buffer.put("stats", mbid, stats)
 
@@ -785,6 +781,17 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if self.version_steps is not None:
             lr_kwargs = {'epoch': self.version_steps}
         self._take_model_step(lr_kwargs=lr_kwargs)
+
+        # sync loss scale across pipeline stages
+        loss_scale = self.optimizer.loss_scale
+        total_scale_cuda = torch.FloatTensor([float(loss_scale)]).to(self.device)
+        dist.all_reduce(total_scale_cuda, op=dist.ReduceOp.MIN, group=self.grid.get_model_parallel_group())
+        # all_loss_scale = total_scale_cuda[0].item()
+        logger.info(
+            f"loss scale: {total_scale_cuda}, group: { torch.distributed.get_process_group_ranks(self.mpu.get_model_parallel_group())}"
+        )
+        self.optimizer.loss_scaler.cur_scale = min(total_scale_cuda[0].item(), 8192)
+
         self._force_grad_boundary = False
 
     def _zero_grads(self, inputs):

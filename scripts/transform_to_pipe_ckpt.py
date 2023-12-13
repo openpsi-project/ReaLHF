@@ -191,8 +191,8 @@ def main():
                         type=str,
                         default="/lustre/public/pretrained_model_weights/Llama-2-7b-hf")
     parser.add_argument("--model_type", type=str, default="llama")
-    parser.add_argument("--num_pp", type=int, default=8)
-    parser.add_argument("--num_mp", type=int, default=1)
+    parser.add_argument("--num_pp", type=int, default=4)
+    parser.add_argument("--num_mp", type=int, default=4)
     parser.add_argument("--num_shards", type=int, default=3)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument(

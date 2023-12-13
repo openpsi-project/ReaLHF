@@ -40,7 +40,7 @@ def get_train_ds_config(offload_param: bool = False,
         "zero_optimization": zero_opt_dict,
         "fp16": {
             "enabled": enable_fp16,
-            "loss_scale_window": 100,
+            "loss_scale_window": 40,
             "initial_scale_power": 12,
         },
         "gradient_clipping": 1.0,
