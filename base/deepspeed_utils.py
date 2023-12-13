@@ -139,7 +139,7 @@ def deepspeed_initialize(
         zero.partition_parameters.restore_init_context()
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
     elif engine_type == "pipe":
-        mpu = model.mpu()
+        # mpu = model.mpu()
         config_class = DeepSpeedConfig(config, mpu)
         engine = DeepSpeedPipelineEngine(num_micro_batches=num_pipeline_micro_batches,
                                          model=model,
@@ -152,7 +152,7 @@ def deepspeed_initialize(
                                          dist_init_required=False)
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
     elif engine_type == "stream_pipe":
-        mpu = model.mpu()
+        # mpu = model.mpu()
         config_class = DeepSpeedConfig(config, mpu)
         engine = StreamPipeEngine(model=model,
                                   args=None,
