@@ -63,6 +63,7 @@ class DPOExperiment(Experiment):
     beta: float = 0.1
 
     num_pipeline_micro_batches: Optional[int] = None
+    partition_method: Optional[str] = "parameters"
 
     def __post_init__(self):
         if self.pp_size < 1 or self.dp_size < 1 or self.mp_size < 1:
@@ -153,6 +154,7 @@ class DPOExperiment(Experiment):
             dp_size=1,
             is_critic=False,
             use_lora=False,
+            partition_method=self.partition_method,
         )
         model = get_flash_mqat_model_config(
             model_path=self.model_path,
@@ -167,6 +169,7 @@ class DPOExperiment(Experiment):
             lora_scaling=self.lora_scaling,
             is_sft_lora=self.is_sft_lora,
             sft_lora_path=self.sft_lora_path,
+            partition_method=self.partition_method,
         )
 
         interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=True))

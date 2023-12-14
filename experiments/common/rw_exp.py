@@ -54,6 +54,7 @@ class PairedRWExperiment(Experiment):
     adam_eps: float = 1e-5
     min_lr_ratio: float = 0.0
     zero_stage: int = 2
+    partition_method: Optional[str] = "parameters"
 
     num_pipeline_micro_batches: Optional[int] = None
 
@@ -152,6 +153,7 @@ class PairedRWExperiment(Experiment):
             is_sft_lora=self.is_sft_lora,
             sft_lora_path=self.sft_lora_path,
             init_critic_from_actor=True,
+            partition_method=self.partition_method,
         )
 
         interface = ModelInterface("flash_paired_rw")
