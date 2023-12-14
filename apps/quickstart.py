@@ -212,6 +212,8 @@ class SFTConfig:
 
     Args:
         experiment_name (str): Experiment name. **This will be automatically filled**.
+        trial_name (str): Trial name. **This will be automatically filled**.
+        trace (bool): Whether to enable viztracer tracing.
         train_epochs (int): Number of training epochs.
         eval_freq (int): Evaluation frequency in terms of *epochs*.
         save_freq (int): Checkpoint saving frequency in terms of *training steps*.
@@ -223,6 +225,7 @@ class SFTConfig:
 
     experiment_name: str = MISSING
     trial_name: str = MISSING
+    trace: bool = False
     train_epochs: int = 1
     eval_freq: Optional[int] = 1
     save_freq: Optional[int] = 50
@@ -239,6 +242,8 @@ class RWConfig:
 
     Args:
         experiment_name (str): Experiment name. **This will be automatically filled**.
+        trial_name (str): Trial name. **This will be automatically filled**.
+        trace (bool): Whether to enable viztracer tracing.
         train_epochs (int): Number of training epochs.
         eval_freq (int): Evaluation frequency in terms of *epochs8.
         save_freq (int): Checkpoint saving frequency in terms of *training steps*.
@@ -250,6 +255,7 @@ class RWConfig:
 
     experiment_name: str = MISSING
     trial_name: str = MISSING
+    trace: bool = False
     train_epochs: int = 1
     eval_freq: Optional[int] = 1
     save_freq: Optional[int] = 50
@@ -268,6 +274,8 @@ class PPOConfig:
 
     Args:
         experiment_name (str): Experiment name. **This will be automatically filled**.
+        trial_name (str): Trial name. **This will be automatically filled**.
+        trace (bool): Whether to enable viztracer tracing.
         train_epochs (int): Number of training epochs.
         eval_freq (int): Evaluation frequency in terms of *epochs8.
         save_freq (int): Checkpoint saving frequency in terms of *training steps*.
@@ -302,6 +310,7 @@ class PPOConfig:
 
     experiment_name: str = MISSING
     trial_name: str = MISSING
+    trace: bool = False
     train_epochs: int = 1
     save_freq: Optional[int] = 50
     seed: int = 42
@@ -378,6 +387,8 @@ class DPOConfig:
 
     Args:
         experiment_name (str): Experiment name. **This will be automatically filled**.
+        trial_name (str): Trial name. **This will be automatically filled**.
+        trace (bool): Whether to enable viztracer tracing.
         train_epochs (int): Number of training epochs.
         eval_freq (int): Evaluation frequency in terms of *epochs8.
         save_freq (int): Checkpoint saving frequency in terms of *training steps*.
@@ -391,6 +402,7 @@ class DPOConfig:
 
     experiment_name: str = MISSING
     trial_name: str = MISSING
+    trace: bool = False
     train_epochs: int = 1
     save_freq: Optional[int] = 50
     seed: int = 42
@@ -506,9 +518,9 @@ def run_sft(args: SFTConfig):
     api.config.register_experiment(exp_name, exp_fn)
 
     try:
-        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
     except Exception as e:
-        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
         logger.warning("Exception occurred. Stopping all workers.")
         raise e
 
@@ -596,9 +608,9 @@ def run_rw(args: RWConfig):
     api.config.register_experiment(exp_name, exp_fn)
 
     try:
-        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
     except Exception as e:
-        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
         logger.warning("Exception occurred. Stopping all workers.")
         raise e
 
@@ -762,9 +774,9 @@ def run_ppo(args: PPOConfig):
     api.config.register_experiment(exp_name, exp_fn)
 
     try:
-        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
     except Exception as e:
-        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
         logger.warning("Exception occurred. Stopping all workers.")
         raise e
 
@@ -850,9 +862,9 @@ def run_dpo(args: DPOConfig):
     api.config.register_experiment(exp_name, exp_fn)
 
     try:
-        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
     except Exception as e:
-        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
         logger.warning("Exception occurred. Stopping all workers.")
         raise e
 
