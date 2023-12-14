@@ -21,6 +21,7 @@ def get_flash_mqat_model_config(
     init_from_scratch: bool = False,
     init_critic_from_actor: bool = False,
     v_head_path: Optional[str] = None,
+    partition_method: Optional[str] = "parameters",
 ):
     if (use_lora or is_sft_lora or is_rew_lora) and pp_size > 1:
         raise NotImplementedError("LORA is not supported in pipeline model")
@@ -89,6 +90,7 @@ def get_flash_mqat_model_config(
                     num_pp=pp_size,
                     num_dp=dp_size,
                     is_critic=is_critic,
+                    partition_method=partition_method,
                     init_critic_from_actor=init_critic_from_actor,
                 ),
             )
@@ -112,6 +114,7 @@ def get_flash_mqat_model_config(
                           num_mp=mp_size,
                           num_dp=dp_size,
                           is_critic=is_critic,
+                          partition_method=partition_method,
                           init_critic_from_actor=init_critic_from_actor,
                           init_from_scratch=init_from_scratch),
             )

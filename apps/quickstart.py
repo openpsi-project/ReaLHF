@@ -51,6 +51,8 @@ class ModelConfig:
         gradient_checkpointing (bool): Whether to use gradient checkpointing of MLP inside each block.
         enable_fp16 (bool): Whether to use fp16.
         parallel (ParallelismConfig): Parallelism configuration.
+        partition_method (str): Partition method for modules using pipeline parallel. 
+                                Support "uniform", "parameters" and "parameters_balanced".
     """
 
     type: str = dataclasses.field(
@@ -66,6 +68,7 @@ class ModelConfig:
     gradient_checkpointing: bool = False
     enable_fp16: bool = True
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    partition_method: Optional[str] = "parameters"
 
 
 @dataclasses.dataclass
@@ -467,36 +470,35 @@ def run_sft(args: SFTConfig):
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
 
-    exp_fn = functools.partial(
-        SFTExperiment,
-        seed=args.seed,
-        total_train_epochs=args.train_epochs,
-        model_type=args.model.type,
-        model_path=args.model.path,
-        dp_size=args.model.parallel.data_parallel_size,
-        mp_size=args.model.parallel.model_parallel_size,
-        pp_size=args.model.parallel.pipeline_parallel_size,
-        use_lora=args.model.lora,
-        lora_scaling=args.model.lora_scaling,
-        lora_dim=args.model.lora_dim,
-        enable_fp16=args.model.enable_fp16,
-        gradient_checkpointing=args.model.gradient_checkpointing,
-        max_seqlen=args.dataset.max_seqlen,
-        train_dataset_path=args.dataset.train_path,
-        valid_dataset_path=args.dataset.valid_path,
-        train_tokens_per_batch=args.dataset.train_tokens_per_batch,
-        valid_tokens_per_batch=args.dataset.valid_tokens_per_batch,
-        lr=args.optimizer.lr,
-        weight_decay=args.optimizer.weight_decay,
-        adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
-        lr_scheduler_type=args.optimizer.lr_scheduler_type,
-        warmup_proportion=args.optimizer.warmup_steps_proportion,
-        adam_eps=args.optimizer.eps,
-        min_lr_ratio=args.optimizer.min_lr_ratio,
-        zero_stage=args.optimizer.zero_stage,
-        save_freq_steps=args.save_freq,
-        eval_freq_epochs=args.eval_freq,
-    )
+    exp_fn = functools.partial(SFTExperiment,
+                               seed=args.seed,
+                               total_train_epochs=args.train_epochs,
+                               model_type=args.model.type,
+                               model_path=args.model.path,
+                               dp_size=args.model.parallel.data_parallel_size,
+                               mp_size=args.model.parallel.model_parallel_size,
+                               pp_size=args.model.parallel.pipeline_parallel_size,
+                               use_lora=args.model.lora,
+                               lora_scaling=args.model.lora_scaling,
+                               lora_dim=args.model.lora_dim,
+                               enable_fp16=args.model.enable_fp16,
+                               gradient_checkpointing=args.model.gradient_checkpointing,
+                               max_seqlen=args.dataset.max_seqlen,
+                               train_dataset_path=args.dataset.train_path,
+                               valid_dataset_path=args.dataset.valid_path,
+                               train_tokens_per_batch=args.dataset.train_tokens_per_batch,
+                               valid_tokens_per_batch=args.dataset.valid_tokens_per_batch,
+                               lr=args.optimizer.lr,
+                               weight_decay=args.optimizer.weight_decay,
+                               adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
+                               lr_scheduler_type=args.optimizer.lr_scheduler_type,
+                               warmup_proportion=args.optimizer.warmup_steps_proportion,
+                               adam_eps=args.optimizer.eps,
+                               min_lr_ratio=args.optimizer.min_lr_ratio,
+                               zero_stage=args.optimizer.zero_stage,
+                               save_freq_steps=args.save_freq,
+                               eval_freq_epochs=args.eval_freq,
+                               partition_method=args.model.partition_method)
 
     os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
     with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
@@ -554,40 +556,39 @@ def run_rw(args: RWConfig):
             "model.base_model_path and sft_lora_path must be specified for RW experiment if SFT was trained with LoRA."
             " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model.")
 
-    exp_fn = functools.partial(
-        PairedRWExperiment,
-        model_path=args.model.path,
-        tokenizer_path=args.model.tokenizer_path,
-        seed=args.seed,
-        total_train_epochs=args.train_epochs,
-        save_freq_steps=args.save_freq,
-        eval_freq_epochs=args.eval_freq,
-        is_sft_lora=args.is_sft_lora,
-        base_model_type=args.model.type,
-        sft_lora_path=args.sft_lora_path,
-        dp_size=args.model.parallel.data_parallel_size,
-        mp_size=args.model.parallel.model_parallel_size,
-        pp_size=args.model.parallel.pipeline_parallel_size,
-        use_lora=args.model.lora,
-        lora_scaling=args.model.lora_scaling,
-        lora_dim=args.model.lora_dim,
-        enable_fp16=args.model.enable_fp16,
-        gradient_checkpointing=args.model.gradient_checkpointing,
-        max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
-        max_seqlen=args.dataset.max_seqlen,
-        train_dataset_path=args.dataset.train_path,
-        valid_dataset_path=args.dataset.valid_path,
-        train_tokens_per_batch=args.dataset.train_tokens_per_batch,
-        valid_tokens_per_batch=args.dataset.valid_tokens_per_batch,
-        lr=args.optimizer.lr,
-        weight_decay=args.optimizer.weight_decay,
-        adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
-        lr_scheduler_type=args.optimizer.lr_scheduler_type,
-        warmup_proportion=args.optimizer.warmup_steps_proportion,
-        adam_eps=args.optimizer.eps,
-        min_lr_ratio=args.optimizer.min_lr_ratio,
-        zero_stage=args.optimizer.zero_stage,
-    )
+    exp_fn = functools.partial(PairedRWExperiment,
+                               model_path=args.model.path,
+                               tokenizer_path=args.model.tokenizer_path,
+                               seed=args.seed,
+                               total_train_epochs=args.train_epochs,
+                               save_freq_steps=args.save_freq,
+                               eval_freq_epochs=args.eval_freq,
+                               is_sft_lora=args.is_sft_lora,
+                               base_model_type=args.model.type,
+                               sft_lora_path=args.sft_lora_path,
+                               dp_size=args.model.parallel.data_parallel_size,
+                               mp_size=args.model.parallel.model_parallel_size,
+                               pp_size=args.model.parallel.pipeline_parallel_size,
+                               use_lora=args.model.lora,
+                               lora_scaling=args.model.lora_scaling,
+                               lora_dim=args.model.lora_dim,
+                               enable_fp16=args.model.enable_fp16,
+                               gradient_checkpointing=args.model.gradient_checkpointing,
+                               max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
+                               max_seqlen=args.dataset.max_seqlen,
+                               train_dataset_path=args.dataset.train_path,
+                               valid_dataset_path=args.dataset.valid_path,
+                               train_tokens_per_batch=args.dataset.train_tokens_per_batch,
+                               valid_tokens_per_batch=args.dataset.valid_tokens_per_batch,
+                               lr=args.optimizer.lr,
+                               weight_decay=args.optimizer.weight_decay,
+                               adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
+                               lr_scheduler_type=args.optimizer.lr_scheduler_type,
+                               warmup_proportion=args.optimizer.warmup_steps_proportion,
+                               adam_eps=args.optimizer.eps,
+                               min_lr_ratio=args.optimizer.min_lr_ratio,
+                               zero_stage=args.optimizer.zero_stage,
+                               partition_method=args.model.partition_method)
 
     os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
     with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
@@ -752,7 +753,7 @@ def run_ppo(args: PPOConfig):
         value_norm_type=args.value_norm_type,
         value_norm_beta=args.value_norm_beta,
         value_norm_eps=args.value_norm_eps,
-    )
+        partition_method=args.model.partition_method)
 
     os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
     with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
@@ -809,39 +810,38 @@ def run_dpo(args: DPOConfig):
         logger.warning(
             "DPO does not support validation because we can't compute reference logps during training.")
 
-    exp_fn = functools.partial(
-        DPOExperiment,
-        model_path=args.model.path,
-        tokenizer_path=args.model.tokenizer_path,
-        seed=args.seed,
-        total_train_epochs=args.train_epochs,
-        save_freq_steps=args.save_freq,
-        is_sft_pipe=args.is_sft_pipe,
-        is_sft_lora=args.is_sft_lora,
-        base_model_type=args.model.type,
-        sft_lora_path=args.sft_lora_path,
-        dp_size=args.model.parallel.data_parallel_size,
-        mp_size=args.model.parallel.model_parallel_size,
-        pp_size=args.model.parallel.pipeline_parallel_size,
-        use_lora=args.model.lora,
-        lora_scaling=args.model.lora_scaling,
-        lora_dim=args.model.lora_dim,
-        enable_fp16=args.model.enable_fp16,
-        gradient_checkpointing=args.model.gradient_checkpointing,
-        max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
-        max_seqlen=args.dataset.max_seqlen,
-        train_dataset_path=args.dataset.train_path,
-        train_tokens_per_batch=args.dataset.train_tokens_per_batch,
-        lr=args.optimizer.lr,
-        weight_decay=args.optimizer.weight_decay,
-        adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
-        lr_scheduler_type=args.optimizer.lr_scheduler_type,
-        warmup_proportion=args.optimizer.warmup_steps_proportion,
-        adam_eps=args.optimizer.eps,
-        min_lr_ratio=args.optimizer.min_lr_ratio,
-        zero_stage=args.optimizer.zero_stage,
-        beta=args.beta,
-    )
+    exp_fn = functools.partial(DPOExperiment,
+                               model_path=args.model.path,
+                               tokenizer_path=args.model.tokenizer_path,
+                               seed=args.seed,
+                               total_train_epochs=args.train_epochs,
+                               save_freq_steps=args.save_freq,
+                               is_sft_pipe=args.is_sft_pipe,
+                               is_sft_lora=args.is_sft_lora,
+                               base_model_type=args.model.type,
+                               sft_lora_path=args.sft_lora_path,
+                               dp_size=args.model.parallel.data_parallel_size,
+                               mp_size=args.model.parallel.model_parallel_size,
+                               pp_size=args.model.parallel.pipeline_parallel_size,
+                               use_lora=args.model.lora,
+                               lora_scaling=args.model.lora_scaling,
+                               lora_dim=args.model.lora_dim,
+                               enable_fp16=args.model.enable_fp16,
+                               gradient_checkpointing=args.model.gradient_checkpointing,
+                               max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
+                               max_seqlen=args.dataset.max_seqlen,
+                               train_dataset_path=args.dataset.train_path,
+                               train_tokens_per_batch=args.dataset.train_tokens_per_batch,
+                               lr=args.optimizer.lr,
+                               weight_decay=args.optimizer.weight_decay,
+                               adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
+                               lr_scheduler_type=args.optimizer.lr_scheduler_type,
+                               warmup_proportion=args.optimizer.warmup_steps_proportion,
+                               adam_eps=args.optimizer.eps,
+                               min_lr_ratio=args.optimizer.min_lr_ratio,
+                               zero_stage=args.optimizer.zero_stage,
+                               beta=args.beta,
+                               partition_method=args.model.partition_method)
 
     os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
     with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:

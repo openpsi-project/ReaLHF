@@ -19,6 +19,7 @@ def make_causal_flash_mqat_pipe_module(
     config: FlashMQATConfig,
     topology: PipeDataParallelTopology,
     is_critic: bool = False,
+    partition_method: str = "parameters",
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
 ):
@@ -60,6 +61,7 @@ def make_causal_flash_mqat_pipe_module(
         layers=layer_specs,
         loss_fn=compute_loss,
         is_critic=is_critic,
+        partition_method=partition_method,
         topology=topology,
         config=config,
     )
@@ -70,6 +72,7 @@ def pipe_wrap_fn(
     num_pp: int,
     num_dp: int,
     is_critic: bool,
+    partition_method: str = "parameters",
     init_critic_from_actor: bool = False,
     init_from_scratch: bool = False,
 ):
@@ -80,7 +83,11 @@ def pipe_wrap_fn(
             raise RuntimeError(f"Only FlashMQAT models can be wrapped as "
                                f"pipeline module, provided type {type(model.module)}")
         config = model.module.config
-        module = make_causal_flash_mqat_pipe_module(config, topology, is_critic, device=model.device)
+        module = make_causal_flash_mqat_pipe_module(config,
+                                                    topology,
+                                                    is_critic,
+                                                    partition_method=partition_method,
+                                                    device=model.device)
         if not init_from_scratch:
             process_memory_mb("before_load")
             module.load(model_path, init_critic_from_actor=init_critic_from_actor)

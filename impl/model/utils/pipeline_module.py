@@ -17,6 +17,7 @@ from deepspeed.runtime.state_dict_factory import SDLoaderFactory
 import torch
 import torch.nn as nn
 
+from base.datapack import partition_balanced as true_partition_balanced
 from base.monitor import process_memory_mb, time_mark
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid, PipeModelDataParallelTopology
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, OutputHead
@@ -372,7 +373,7 @@ class PipelineModule(nn.Module):
 
         return x, ys
 
-    def _partition_layers(self, method='uniform'):
+    def _partition_layers(self, method='parameters'):
         num_stages = self._topo.get_dim('pipe')
         stage_id = self._topo.get_coord(self.global_rank).pipe
 
@@ -381,13 +382,22 @@ class PipelineModule(nn.Module):
 
         method = method.lower()
 
-        # Each stage gets a simple uniform number of layers.
         if method == 'uniform':
             num_layers = len(self._layer_specs)
             self.parts = ds_utils.partition_uniform(num_items=num_layers, num_parts=num_stages)
         elif method == 'parameters':
+            logger.warning(
+                "method 'parameters' does not partition parameters to each stage evenly, "
+                "preserving the option as default due to checkpoints already partitioned in this way."
+                "Update to use 'parameters_balanced' option instead!"
+                "Change the option both in model partition script and pipe/pipe+model model wrapper configs!")
             param_counts = self._count_layer_params()
             self.parts = ds_utils.partition_balanced(weights=param_counts, num_parts=num_stages)
+        elif method == 'parameters_balanced':
+            param_counts = self._count_layer_params()
+            import numpy as np
+            param_counts = np.array(param_counts)
+            self.parts = true_partition_balanced(nums=param_counts, k=num_stages)
         elif method.startswith('type:'):
             layertype = method.split(':')[1]
             binary_weights = [0] * len(self._layer_specs)

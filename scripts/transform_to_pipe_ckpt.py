@@ -6,6 +6,7 @@ from deepspeed.runtime import utils as ds_utils
 import torch
 import torch.nn as nn
 
+from base.datapack import partition_balanced as true_partition_balanced
 from impl.model.nn.flash_mqat.flash_mqat_base import *
 from impl.model.nn.flash_mqat.flash_mqat_parallel import *
 from impl.model.utils.pipeline_module import LayerSpec
@@ -94,6 +95,11 @@ def partition_layers(layer_specs, num_stages, method="uniform"):
     elif method == "parameters":
         param_counts = count_layer_params(layer_specs)
         parts = ds_utils.partition_balanced(weights=param_counts, num_parts=num_stages)
+    elif method == "parameters_balanced":
+        param_counts = count_layer_params(layer_specs)
+        import numpy as np
+        param_counts = np.array(param_counts)
+        parts = true_partition_balanced(nums=param_counts, k=num_stages)
     else:
         raise NotImplementedError(f"Partitioning method {method} not implemented.")
 
@@ -126,7 +132,7 @@ def split_state_dict_by_stage(state_dict, stage_to_layer_idx):
             for i in range(start, stop):
                 if k.startswith(f"{i}."):
                     stage_state_dict[k] = v
-                    print(f"stage {stage} k={k}")
+                    # print(f"stage {stage} k={k}")
                     break
         stage_to_state_dict[stage] = stage_state_dict
     return stage_to_state_dict
@@ -137,7 +143,7 @@ def save_state_dict(state_dict, stage_index, mp_rank, shard_index, model_dir):
     output_fn = f"model-pp-{stage_index:02d}-mp-{mp_rank:02d}-s-{shard_index:02d}.safetensors"
     save_to_disk(state_dict, model_dir, output_fn=output_fn, save_type="st", n_shards=1, no_shard_suffix=True)
     print(
-        f"saved {state_dict.keys()} to {model_dir}/model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.safetensors"
+        f"saved {len(state_dict.keys())} keys to {model_dir}/model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.safetensors"
     )
     print(f"saved {state_dict.keys()} to "
           f"{model_dir}/pytorch_model-pp-{stage_index:02d}-mp-{mp_rank:02d}-s-{shard_index:02d}.bin")
@@ -191,15 +197,22 @@ def main():
                         type=str,
                         default="/lustre/public/pretrained_model_weights/Llama-2-7b-hf")
     parser.add_argument("--model_type", type=str, default="llama")
-    parser.add_argument("--num_pp", type=int, default=4)
-    parser.add_argument("--num_mp", type=int, default=4)
+    parser.add_argument("--num_pp", type=int, default=8)
+    parser.add_argument("--num_mp", type=int, default=2)
     parser.add_argument("--num_shards", type=int, default=3)
     parser.add_argument("--output_dir", type=str, default=None)
+    parser.add_argument("--partition_method", type=str, default="parameters")
     parser.add_argument(
         "--to_critic",
         action="store_true",
         help="transform actor model to critic model by changing the last layer, only for test purposes.")
     args = parser.parse_args()
+    if args.partition_method == "parameters":
+        logger.warning(
+            "method 'parameters' does not partition parameters to each stage evenly, "
+            "preserving the option as default due to checkpoints already partitioned in this way."
+            "Update to use 'parameters_balanced' option instead!"
+            "Change the option both in model partition script and pipe/pipe+model model wrapper configs!")
 
     assert args.num_mp > 1 or args.num_pp > 1
     if args.output_dir is None:
@@ -235,7 +248,9 @@ def main():
         if args.to_critic:
             state_dict_list = [fit_state_dict_to_critic(len(layer_specs), sd) for sd in state_dict_list]
         print("loaded full state_dict")
-        stage_to_layer_idx = partition_layers(layer_specs, num_stages=args.num_pp, method="parameters")
+        stage_to_layer_idx = partition_layers(layer_specs,
+                                              num_stages=args.num_pp,
+                                              method=args.partition_method)
         stage_to_state_dict_list = [
             split_state_dict_by_stage(sd, stage_to_layer_idx) for sd in state_dict_list
         ]

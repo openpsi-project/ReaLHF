@@ -46,6 +46,7 @@ class SFTExperiment(Experiment):
     adam_eps: float = 1e-5
     min_lr_ratio: float = 0.0
     zero_stage: int = 2
+    partition_method: Optional[str] = "parameters"
 
     num_pipeline_micro_batches: Optional[int] = None
 
@@ -140,6 +141,7 @@ class SFTExperiment(Experiment):
             use_lora=self.use_lora,
             lora_dim=self.lora_dim,
             lora_scaling=self.lora_scaling,
+            partition_method=self.partition_method,
         )
 
         interface = ModelInterface("flash_sft")

@@ -19,6 +19,7 @@ def make_causal_flash_mqat_parallel_pipe_module(
     config: FlashMQATConfig,
     topology: PipeModelDataParallelTopology,
     is_critic: bool = False,
+    partition_method: str = "parameters",
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
 ):
@@ -63,6 +64,7 @@ def make_causal_flash_mqat_parallel_pipe_module(
         loss_fn=compute_loss,
         topology=topology,
         is_critic=is_critic,
+        partition_method=partition_method,
         dtype=dtype,
         device=device,
         config=config,
@@ -75,6 +77,7 @@ def model_pipe_wrap_fn(
     num_mp: int,
     num_dp: int,
     is_critic: bool,
+    partition_method: str = "parameters",
     init_critic_from_actor: bool = False,
     init_from_scratch: bool = False,
 ):
@@ -86,7 +89,11 @@ def model_pipe_wrap_fn(
                                f"pipeline module, provided type {type(model.module)}")
         config = model.module.config
         topology = PipeModelDataParallelTopology(num_pp=num_pp, num_mp=num_mp, num_dp=num_dp)
-        module = make_causal_flash_mqat_parallel_pipe_module(config, topology, is_critic, device=model.device)
+        module = make_causal_flash_mqat_parallel_pipe_module(config,
+                                                             topology,
+                                                             is_critic,
+                                                             partition_method=partition_method,
+                                                             device=model.device)
         if not init_from_scratch:
             process_memory_mb("before_load")
             module.load(model_path, init_critic_from_actor=init_critic_from_actor)

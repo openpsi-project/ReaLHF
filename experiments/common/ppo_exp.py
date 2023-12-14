@@ -187,6 +187,7 @@ class PPOExperiment(Experiment):
     offload_reward: bool = False
     actor_num_pipeline_micro_batches: Optional[int] = None
     critic_num_pipeline_micro_batches: Optional[int] = None
+    parition_method: Optional[str] = "parameters"
 
     benchmark: bool = False
 
@@ -323,20 +324,19 @@ class PPOExperiment(Experiment):
             else:
                 ref_model_type = "self"
 
-        actor_model = get_flash_mqat_model_config(
-            model_path=self.sft_model_path,
-            from_model_type=actor_model_type,
-            tokenizer_path=self.tokenizer_path,
-            pp_size=self.actor_pp_size,
-            mp_size=self.actor_mp_size,
-            dp_size=self.actor_dp_size,
-            is_critic=False,
-            use_lora=self.actor_use_lora,
-            lora_dim=self.actor_lora_dim,
-            lora_scaling=self.actor_lora_scaling,
-            is_sft_lora=self.is_sft_lora,
-            sft_lora_path=self.sft_lora_path,
-        )
+        actor_model = get_flash_mqat_model_config(model_path=self.sft_model_path,
+                                                  from_model_type=actor_model_type,
+                                                  tokenizer_path=self.tokenizer_path,
+                                                  pp_size=self.actor_pp_size,
+                                                  mp_size=self.actor_mp_size,
+                                                  dp_size=self.actor_dp_size,
+                                                  is_critic=False,
+                                                  use_lora=self.actor_use_lora,
+                                                  lora_dim=self.actor_lora_dim,
+                                                  lora_scaling=self.actor_lora_scaling,
+                                                  is_sft_lora=self.is_sft_lora,
+                                                  sft_lora_path=self.sft_lora_path,
+                                                  partition_method=self.parition_method)
         ref_model = get_flash_mqat_model_config(
             model_path=self.sft_model_path,
             from_model_type=ref_model_type,
@@ -384,24 +384,24 @@ class PPOExperiment(Experiment):
             v_head_path=self.rew_head_path,
         )
 
-        critic_model = get_flash_mqat_model_config(
-            model_path=self.rew_model_path,
-            from_model_type=critic_from_type,
-            tokenizer_path=self.tokenizer_path,
-            pp_size=self.critic_pp_size,
-            mp_size=self.critic_mp_size,
-            dp_size=self.critic_dp_size,
-            is_critic=True,
-            use_lora=self.critic_use_lora,
-            lora_dim=self.critic_lora_dim,
-            lora_scaling=self.critic_lora_scaling,
-            is_sft_lora=self.is_sft_lora,
-            sft_lora_path=self.sft_lora_path,
-            is_rew_lora=self.is_rew_lora,
-            rew_lora_path=self.rew_lora_path,
-            v_head_path=self.rew_head_path,
-            # NOTE: critic is not scaled as rewards
-        )
+        critic_model = get_flash_mqat_model_config(model_path=self.rew_model_path,
+                                                   from_model_type=critic_from_type,
+                                                   tokenizer_path=self.tokenizer_path,
+                                                   pp_size=self.critic_pp_size,
+                                                   mp_size=self.critic_mp_size,
+                                                   dp_size=self.critic_dp_size,
+                                                   is_critic=True,
+                                                   use_lora=self.critic_use_lora,
+                                                   lora_dim=self.critic_lora_dim,
+                                                   lora_scaling=self.critic_lora_scaling,
+                                                   is_sft_lora=self.is_sft_lora,
+                                                   sft_lora_path=self.sft_lora_path,
+                                                   is_rew_lora=self.is_rew_lora,
+                                                   rew_lora_path=self.rew_lora_path,
+                                                   v_head_path=self.rew_head_path,
+                                                   partition_method=self.parition_method
+                                                   # NOTE: critic is not scaled as rewards
+                                                   )
 
         # actor train backend
         actor_backend = ModelBackend(
