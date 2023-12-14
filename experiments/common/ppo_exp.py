@@ -145,6 +145,7 @@ class PPOExperiment(Experiment):
     actor_adam_eps: float = 1e-5
     actor_min_lr_ratio: float = 0.0
     actor_zero_stage: int = 2
+    actor_partition_method: Optional[str] = "parameters"
     # critic optimizer
     critic_lr: float = 5e-6
     critic_weight_decay: float = 0.0
@@ -154,6 +155,7 @@ class PPOExperiment(Experiment):
     critic_adam_eps: float = 1e-5
     critic_min_lr_ratio: float = 0.0
     critic_zero_stage: int = 2
+    critic_partition_method: Optional[str] = "parameters"
     # ppo
     rew_output_scaling: float = 1.0
     rew_output_bias: float = 0.0
@@ -187,7 +189,6 @@ class PPOExperiment(Experiment):
     offload_reward: bool = False
     actor_num_pipeline_micro_batches: Optional[int] = None
     critic_num_pipeline_micro_batches: Optional[int] = None
-    parition_method: Optional[str] = "parameters"
 
     benchmark: bool = False
 
@@ -336,7 +337,7 @@ class PPOExperiment(Experiment):
                                                   lora_scaling=self.actor_lora_scaling,
                                                   is_sft_lora=self.is_sft_lora,
                                                   sft_lora_path=self.sft_lora_path,
-                                                  partition_method=self.parition_method)
+                                                  partition_method=self.actor_partition_method)
         ref_model = get_flash_mqat_model_config(
             model_path=self.sft_model_path,
             from_model_type=ref_model_type,
@@ -399,7 +400,7 @@ class PPOExperiment(Experiment):
                                                    is_rew_lora=self.is_rew_lora,
                                                    rew_lora_path=self.rew_lora_path,
                                                    v_head_path=self.rew_head_path,
-                                                   partition_method=self.parition_method
+                                                   partition_method=self.critic_partition_method
                                                    # NOTE: critic is not scaled as rewards
                                                    )
 

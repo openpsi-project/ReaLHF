@@ -696,6 +696,7 @@ def run_ppo(args: PPOConfig):
         actor_lora_dim=args.actor.lora_dim,
         actor_enable_fp16=args.actor.enable_fp16,
         actor_gradient_checkpointing=args.actor.gradient_checkpointing,
+        actor_partition_method=args.actor.partition_method,
         # critic
         critic_dp_size=args.critic.parallel.data_parallel_size,
         critic_mp_size=args.critic.parallel.model_parallel_size,
@@ -705,6 +706,7 @@ def run_ppo(args: PPOConfig):
         critic_lora_dim=args.critic.lora_dim,
         critic_enable_fp16=args.critic.enable_fp16,
         critic_gradient_checkpointing=args.critic.gradient_checkpointing,
+        critic_partition_method=args.critic.partition_method,
         # rew & ref
         ref_dp_size=args.ref.parallel.data_parallel_size,
         rew_dp_size=args.rew.parallel.data_parallel_size,
@@ -752,8 +754,7 @@ def run_ppo(args: PPOConfig):
         value_norm=args.value_norm,
         value_norm_type=args.value_norm_type,
         value_norm_beta=args.value_norm_beta,
-        value_norm_eps=args.value_norm_eps,
-        partition_method=args.model.partition_method)
+        value_norm_eps=args.value_norm_eps)
 
     os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
     with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
