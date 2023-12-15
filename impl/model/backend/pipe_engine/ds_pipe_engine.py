@@ -111,9 +111,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         self._post_init_logging()
 
-        ## DEBUG INFO CAHCE
-        self.last_kv_cache = None
-
     def _post_init_logging(self):
         model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
         num_params = sum([p.numel() for p in model_parameters])

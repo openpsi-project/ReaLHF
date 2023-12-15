@@ -4,6 +4,7 @@ from typing import List
 from deepspeed.runtime.utils import call_to_str
 
 
+# schedule executor
 class PipeInstruction:
     """Base class for all instructions to be executed by the pipeline engine.
 
