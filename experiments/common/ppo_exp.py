@@ -93,6 +93,7 @@ train_critic = ModelRPC(
 class PPOExperiment(Experiment):
     sft_model_path: Optional[str] = None
     rew_model_path: Optional[str] = None
+    ref_model_path: Optional[str] = None
 
     tokenizer_path: Optional[str] = None  # Since we use SFT model, we need to specify HF tokenizer path
 
@@ -136,6 +137,8 @@ class PPOExperiment(Experiment):
     ref_dp_size: int = 1
     offload_ref: bool = False
     ref_enable_bf16: bool = False
+    ref_mp_size: int = 1
+    ref_pp_size: int = 1
     # reward model
     rew_dp_size: int = 1  # Since reward model is usually not large, we disable PP and TP for it.
     offload_reward: bool = False
@@ -214,9 +217,9 @@ class PPOExperiment(Experiment):
             )
 
         self.n_actors = int(self.actor_pp_size * self.actor_dp_size * self.actor_mp_size)
-        self.n_critics = int(self.critic_pp_size * self.critic_dp_size * self.actor_mp_size)
+        self.n_critics = int(self.critic_pp_size * self.critic_dp_size * self.critic_mp_size)
         self.n_rewards = self.rew_dp_size
-        self.n_refs = self.ref_dp_size
+        self.n_refs = int(self.ref_pp_size * self.ref_dp_size * self.ref_mp_size)
 
         if self.benchmark:
             logger.warning("Benchmark mode is enabled. This will forcely set some experiment parameters. "
@@ -273,7 +276,16 @@ class PPOExperiment(Experiment):
                     ),
                 ),
                 TasksGroup(
-                    count=self.n_rewards + self.n_refs,
+                    count=self.n_rewards,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=1,
+                        gpu_type="tesla",
+                        mem=100000,
+                    ),
+                ),
+                TasksGroup(
+                    count=self.n_refs,
                     scheduling=Scheduling.model_worker_default(
                         cpu=4,
                         gpu=1,
@@ -323,7 +335,7 @@ class PPOExperiment(Experiment):
             actor_model_type = ref_model_type = self.sft_base_model_type
         else:
             actor_model_type = "self"
-            if self.is_sft_pipe:
+            if self.is_sft_pipe and self.ref_mp_size == 1 and self.ref_pp_size == 1:
                 ref_model_type = "pipe"
             else:
                 ref_model_type = "self"
@@ -341,12 +353,13 @@ class PPOExperiment(Experiment):
                                                   is_sft_lora=self.is_sft_lora,
                                                   sft_lora_path=self.sft_lora_path,
                                                   partition_method=self.actor_partition_method)
+
         ref_model = get_flash_mqat_model_config(
-            model_path=self.sft_model_path,
+            model_path=self.sft_model_path if self.ref_model_path is None else self.ref_model_path,
             from_model_type=ref_model_type,
             tokenizer_path=self.tokenizer_path,
-            pp_size=1,
-            mp_size=1,
+            pp_size=self.ref_pp_size,
+            mp_size=self.ref_mp_size,
             dp_size=self.ref_dp_size,
             is_critic=False,
             use_lora=False,
@@ -364,7 +377,10 @@ class PPOExperiment(Experiment):
             else:
                 critic_from_type = rew_from_type = "sft"
         else:
-            critic_from_type = "self"
+            if self.is_sft_pipe and self.critic_mp_size == 1 and self.critic_pp_size == 1:
+                critic_from_type = "pipe"
+            else:
+                critic_from_type = "self"
             if self.is_sft_pipe:
                 rew_from_type = "pipe"
             else:
@@ -466,6 +482,7 @@ class PPOExperiment(Experiment):
                 zero_stage=3 if self.offload_ref else 0,
                 offload=self.offload_ref,
                 enable_bf16=self.ref_enable_bf16,
+                engine_type="pipe" if self.ref_pp_size > 1 else "deepspeed",
             ),
         )
         rw_backend = ModelBackend(
@@ -521,7 +538,9 @@ class PPOExperiment(Experiment):
         critic_topo = PipeModelDataParallelTopology(num_pp=self.critic_pp_size,
                                                     num_mp=self.critic_mp_size,
                                                     num_dp=self.critic_dp_size)
-        ref_topo = PipeModelDataParallelTopology(num_pp=1, num_mp=1, num_dp=self.ref_dp_size)
+        ref_topo = PipeModelDataParallelTopology(num_pp=self.ref_pp_size,
+                                                 num_mp=self.ref_mp_size,
+                                                 num_dp=self.ref_dp_size)
         rw_topo = PipeModelDataParallelTopology(num_pp=1, num_mp=1, num_dp=self.rew_dp_size)
         model_worker = ([
             ModelWorker(
@@ -557,6 +576,8 @@ class PPOExperiment(Experiment):
                 interface=rw_interface,
                 model_name="reward",
                 dp_rank=rw_topo.get_coord(i).data,
+                pp_rank=rw_topo.get_coord(i).pipe,
+                mp_rank=rw_topo.get_coord(i).model,
                 topo=rw_topo,
                 cuda_cache_cleanliness=(not self.benchmark),
             ) for i in range(self.n_rewards)
@@ -568,6 +589,8 @@ class PPOExperiment(Experiment):
                 interface=ref_interface,
                 model_name="ref",
                 dp_rank=ref_topo.get_coord(i).data,
+                pp_rank=ref_topo.get_coord(i).pipe,
+                mp_rank=ref_topo.get_coord(i).model,
                 topo=ref_topo,
                 cuda_cache_cleanliness=(not self.benchmark),
             ) for i in range(self.n_refs)
