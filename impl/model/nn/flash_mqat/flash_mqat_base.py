@@ -543,16 +543,13 @@ class FlashMQATModel(nn.Module):
                                          no_param_instantiation=no_param_instantiation,
                                          dtype=dtype,
                                          device=device)
-        if not no_param_instantiation:
-            self.head = OutputHead(
-                config.hidden_dim,
-                1 if is_critic else config.vocab_size,
-                bias=False,
-                device=device,
-                dtype=dtype,
-            )
-        else:
-            self.head = None
+        self.head = OutputHead(
+            config.hidden_dim,
+            1 if is_critic else config.vocab_size,
+            bias=False,
+            device=device,
+            dtype=dtype,
+        )
         self._is_critic = is_critic
 
     @property

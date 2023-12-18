@@ -670,6 +670,16 @@ def run_ppo(args: PPOConfig):
             "If you insist in using PP, please ensure that (1) there are enough GPUs for your experiment "
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
+    if args.ref.parallel.pipeline_parallel_size > 1:
+        logger.warning(
+            "Pipeline parallel of the reference model is enabled. Please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
+    if args.ref.parallel.model_parallel_size > 1:
+        logger.warning(
+            "Model parallel of the reference model is enabled. Please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
     if args.is_sft_lora and (args.actor.base_model_path == args.actor.path or args.sft_lora_path is None):
         raise ValueError(
             "sft_lora_path and actor.base_model_path must be specified if the SFT model was trained with LoRA."
@@ -684,6 +694,7 @@ def run_ppo(args: PPOConfig):
         PPOExperiment,
         sft_model_path=args.actor.path,
         rew_model_path=args.critic.path,
+        ref_model_path=args.ref.path,
         tokenizer_path=args.actor.tokenizer_path,
         seed=args.seed,
         total_train_epochs=args.train_epochs,
@@ -721,6 +732,8 @@ def run_ppo(args: PPOConfig):
         critic_partition_method=args.critic.partition_method,
         # rew & ref
         ref_dp_size=args.ref.parallel.data_parallel_size,
+        ref_pp_size=args.ref.parallel.pipeline_parallel_size,
+        ref_mp_size=args.ref.parallel.model_parallel_size,
         rew_dp_size=args.rew.parallel.data_parallel_size,
         # dataset
         max_prompt_len=args.dataset.max_prompt_len,

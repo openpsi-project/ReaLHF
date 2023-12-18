@@ -153,6 +153,10 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
     zero_stage: int = 0
     enable_fp16: bool = True
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
+    # pipeline inference
+    engine_type: str = "deepspeed"
+    num_pipeline_stages: int = 1
+    num_pipeline_micro_batches: Optional[int] = None
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -161,7 +165,12 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
                                                        stage=self.zero_stage,
                                                        enable_fp16=self.enable_fp16,
                                                        **self.additional_ds_config)
-        module, *_ = deepspeed_utils.deepspeed_initialize(model=module, config=ds_config)
+        module, *_ = deepspeed_utils.deepspeed_initialize(
+            model=module,
+            config=ds_config,
+            engine_type=self.engine_type,
+            num_pipeline_micro_batches=self.num_pipeline_micro_batches,
+        )
         model.module = module
         return model
 
