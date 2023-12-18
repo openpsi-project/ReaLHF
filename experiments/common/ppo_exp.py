@@ -216,6 +216,13 @@ class PPOExperiment(Experiment):
                 "rew_lora_path, rew_base_model_type and rew_head_path must be specified when is_rw_lora is True."
             )
 
+        if self.actor_enable_bf16 and (self.actor_pp_size > 1 or self.actor_mp_size):
+            raise ValueError("Use bf16 with pipeline parallel or model parallel is not supported.")
+        if self.critic_enable_bf16 and (self.critic_pp_size > 1 or self.critic_mp_size):
+            raise ValueError("Use bf16 with pipeline parallel or model parallel is not supported.")
+        if self.ref_enable_bf16 and (self.ref_pp_size > 1 or self.ref_mp_size > 1):
+            raise ValueError("Use bf16 with pipeline parallel or model parallel is not supported.")
+
         self.n_actors = int(self.actor_pp_size * self.actor_dp_size * self.actor_mp_size)
         self.n_critics = int(self.critic_pp_size * self.critic_dp_size * self.critic_mp_size)
         self.n_rewards = self.rew_dp_size

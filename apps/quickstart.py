@@ -74,6 +74,9 @@ class ModelConfig:
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
+        if self.enable_bf16 and (self.parallel.model_parallel_size > 1
+                                 or self.parallel.pipeline_parallel_size > 1):
+            raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
 
 
 @dataclasses.dataclass

@@ -74,6 +74,8 @@ class DPOExperiment(Experiment):
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
         if self.is_sft_lora and (self.sft_lora_path is None or self.base_model_type is None):
             raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
+        if self.enable_bf16 and (self.pp_size > 1 or self.mp_size):
+            raise ValueError("Use bf16 with pipeline parallel or model parallel is not supported.")
 
         self.n_actors = int(self.dp_size * self.pp_size * self.mp_size)
 
