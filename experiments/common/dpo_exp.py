@@ -43,6 +43,8 @@ class DPOExperiment(Experiment):
     lora_scaling: float = 32.0
     lora_dim: int = 32
     enable_fp16: bool = True
+    enable_bf16: bool = False
+    offload_optimizer: bool = False
     gradient_checkpointing: bool = True
     # dataset
     max_pairs_per_prompt: int = 2
@@ -72,6 +74,8 @@ class DPOExperiment(Experiment):
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
         if self.is_sft_lora and (self.sft_lora_path is None or self.base_model_type is None):
             raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
+        if self.enable_bf16 and (self.pp_size > 1 or self.mp_size):
+            raise ValueError("Use bf16 with pipeline parallel or model parallel is not supported.")
 
         self.n_actors = int(self.dp_size * self.pp_size * self.mp_size)
 
@@ -134,14 +138,18 @@ class DPOExperiment(Experiment):
                 warmup_steps_proportion=self.warmup_proportion,
                 min_lr_ratio=self.min_lr_ratio,
                 zero_stage=self.zero_stage if self.pp_size == 1 else min(self.zero_stage, 1),
-                enable_fp16=self.enable_fp16,
                 gradient_checkpointing=self.gradient_checkpointing,
                 num_pipeline_stages=self.pp_size,
                 engine_type="pipe" if self.pp_size > 1 else "deepspeed",
                 num_pipeline_micro_batches=self.num_pipeline_micro_batches,
+                enable_fp16=self.enable_fp16,
+                enable_bf16=self.enable_bf16,
+                offload_optimizer_state=self.offload_optimizer,
             ),
         )
-        inf_backend = ModelBackend("ds_inference", args=dict(enable_fp16=True))
+        inf_backend = ModelBackend("ds_inference",
+                                   args=dict(enable_fp16=(not self.enable_fp16),
+                                             enable_bf16=self.enable_bf16))
 
         # We should merge pipeline model weights for the reference model to load.
         ref_model = get_flash_mqat_model_config(
