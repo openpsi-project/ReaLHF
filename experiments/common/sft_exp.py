@@ -30,6 +30,7 @@ class SFTExperiment(Experiment):
     lora_scaling: float = 32.0
     lora_dim: int = 32
     enable_fp16: bool = True
+    enable_bf16: bool = False
     gradient_checkpointing: bool = True
     # dataset
     max_seqlen: int = 1024
@@ -46,6 +47,7 @@ class SFTExperiment(Experiment):
     adam_eps: float = 1e-5
     min_lr_ratio: float = 0.0
     zero_stage: int = 2
+    offload_optimizer: bool = False
     partition_method: Optional[str] = "parameters"
 
     num_pipeline_micro_batches: Optional[int] = None
@@ -122,11 +124,13 @@ class SFTExperiment(Experiment):
                 warmup_steps_proportion=self.warmup_proportion,
                 min_lr_ratio=self.min_lr_ratio,
                 zero_stage=self.zero_stage if self.pp_size == 1 else min(self.zero_stage, 1),
-                enable_fp16=self.enable_fp16,
                 gradient_checkpointing=self.gradient_checkpointing,
                 num_pipeline_stages=self.pp_size,
                 engine_type="pipe" if self.pp_size > 1 else "deepspeed",
                 num_pipeline_micro_batches=self.num_pipeline_micro_batches,
+                offload_optimizer_state=self.offload_optimizer,
+                enable_bf16=self.enable_bf16,
+                enable_fp16=self.enable_fp16,
             ),
         )
 

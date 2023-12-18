@@ -118,7 +118,9 @@ class PPOExperiment(Experiment):
     actor_lora_scaling: float = 32.0
     actor_lora_dim: int = 32
     actor_enable_fp16: bool = True
+    actor_enable_bf16: bool = False
     actor_gradient_checkpointing: bool = True
+    actor_num_pipeline_micro_batches: Optional[int] = None
     # critic model
     critic_dp_size: int = 1
     critic_mp_size: int = 1
@@ -127,11 +129,17 @@ class PPOExperiment(Experiment):
     critic_lora_scaling: float = 32.0
     critic_lora_dim: int = 32
     critic_enable_fp16: bool = True
+    critic_enable_bf16: bool = False
     critic_gradient_checkpointing: bool = True
+    critic_num_pipeline_micro_batches: Optional[int] = None
     # ref model
     ref_dp_size: int = 1
+    offload_ref: bool = False
+    ref_enable_bf16: bool = False
     # reward model
     rew_dp_size: int = 1  # Since reward model is usually not large, we disable PP and TP for it.
+    offload_reward: bool = False
+    rew_enable_bf16: bool = False
     # dataset
     max_prompt_len: int = 256
     batch_size: int = 256
@@ -146,6 +154,8 @@ class PPOExperiment(Experiment):
     actor_min_lr_ratio: float = 0.0
     actor_zero_stage: int = 2
     actor_partition_method: Optional[str] = "parameters"
+    offload_actor_param: bool = False
+    offload_actor_optimizer_state: bool = False
     # critic optimizer
     critic_lr: float = 5e-6
     critic_weight_decay: float = 0.0
@@ -156,6 +166,8 @@ class PPOExperiment(Experiment):
     critic_min_lr_ratio: float = 0.0
     critic_zero_stage: int = 2
     critic_partition_method: Optional[str] = "parameters"
+    offload_critic_param: bool = False
+    offload_critic_optimizer_states: bool = False
     # ppo
     rew_output_scaling: float = 1.0
     rew_output_bias: float = 0.0
@@ -181,15 +193,6 @@ class PPOExperiment(Experiment):
     value_norm_eps: float = 1e-5
 
     hybrid_engine: bool = False
-    offload_actor_param: bool = False
-    offload_actor_optimizer_state: bool = False
-    offload_critic_param: bool = False
-    offload_critic_optimizer_states: bool = False
-    offload_ref: bool = False
-    offload_reward: bool = False
-    actor_num_pipeline_micro_batches: Optional[int] = None
-    critic_num_pipeline_micro_batches: Optional[int] = None
-
     benchmark: bool = False
 
     def __post_init__(self):
@@ -419,7 +422,6 @@ class PPOExperiment(Experiment):
                 warmup_steps_proportion=self.actor_warmup_proportion,
                 min_lr_ratio=self.actor_min_lr_ratio,
                 zero_stage=min(1, self.actor_zero_stage) if self.actor_pp_size > 0 else 2,
-                enable_fp16=self.actor_enable_fp16,
                 gradient_checkpointing=self.actor_gradient_checkpointing,
                 num_pipeline_stages=self.actor_pp_size,
                 engine_type="pipe" if self.actor_pp_size > 1 else "deepspeed",
@@ -427,6 +429,8 @@ class PPOExperiment(Experiment):
                 offload_optimizer_state=self.offload_actor_optimizer_state,
                 enable_hybrid_engine=self.hybrid_engine,
                 num_pipeline_micro_batches=self.actor_num_pipeline_micro_batches,
+                enable_fp16=self.actor_enable_fp16,
+                enable_bf16=self.actor_enable_bf16,
             ),
         )
         # critic train backend
@@ -444,30 +448,33 @@ class PPOExperiment(Experiment):
                 warmup_steps_proportion=self.critic_warmup_proportion,
                 min_lr_ratio=self.critic_min_lr_ratio,
                 zero_stage=min(1, self.critic_zero_stage) if self.critic_pp_size > 0 else 2,
-                enable_fp16=self.critic_enable_fp16,
                 gradient_checkpointing=self.critic_gradient_checkpointing,
                 num_pipeline_stages=self.critic_pp_size,
                 engine_type="pipe" if self.critic_pp_size > 1 else "deepspeed",
                 offload_param=self.offload_critic_param,
                 offload_optimizer_state=self.offload_critic_optimizer_states,
                 num_pipeline_micro_batches=self.critic_num_pipeline_micro_batches,
+                enable_fp16=self.critic_enable_fp16,
+                enable_bf16=self.critic_enable_bf16,
             ),
         )
 
         ref_backend = ModelBackend(
             "ds_inference",
             args=dict(
-                enable_fp16=True,
+                enable_fp16=(not self.ref_enable_bf16),
                 zero_stage=3 if self.offload_ref else 0,
                 offload=self.offload_ref,
+                enable_bf16=self.ref_enable_bf16,
             ),
         )
         rw_backend = ModelBackend(
             "ds_inference",
             args=dict(
-                enable_fp16=True,
+                enable_fp16=(not self.rew_enable_bf16),
                 zero_stage=3 if self.offload_reward else 0,
                 offload=self.offload_reward,
+                enable_bf16=self.rew_enable_bf16,
             ),
         )
 

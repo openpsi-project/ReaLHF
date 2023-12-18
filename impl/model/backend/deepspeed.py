@@ -27,6 +27,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     offload_param: bool = False
     offload_optimizer_state: bool = False
     enable_fp16: bool = True
+    enable_bf16: bool = False
     zero_stage: int = 2
     # hybrid engine args
     enable_hybrid_engine: bool = False
@@ -80,6 +81,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             offload_param=self.offload_param,
             offload_optimizer_state=self.offload_optimizer_state,
             stage=self.zero_stage,
+            enable_bf16=self.enable_bf16,
             enable_fp16=self.enable_fp16,
             hybrid_engine_args=hybrid_engine_args,
             **self.additional_ds_config,
@@ -152,6 +154,7 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
     offload: bool = False
     zero_stage: int = 0
     enable_fp16: bool = True
+    enable_bf16: bool = False
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
@@ -159,6 +162,7 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
         module = model.module
         ds_config = deepspeed_utils.get_eval_ds_config(offload=self.offload,
                                                        stage=self.zero_stage,
+                                                       enable_bf16=self.enable_bf16,
                                                        enable_fp16=self.enable_fp16,
                                                        **self.additional_ds_config)
         module, *_ = deepspeed_utils.deepspeed_initialize(model=module, config=ds_config)
