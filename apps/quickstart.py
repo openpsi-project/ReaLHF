@@ -70,7 +70,7 @@ class ModelConfig:
     enable_bf16: bool = False
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
     partition_method: Optional[str] = "parameters"
-    
+
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")

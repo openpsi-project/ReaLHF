@@ -145,7 +145,9 @@ class DPOExperiment(Experiment):
                 offload_optimizer_state=self.offload_optimizer,
             ),
         )
-        inf_backend = ModelBackend("ds_inference", args=dict(enable_fp16=(not self.enable_fp16), enable_bf16=self.enable_bf16))
+        inf_backend = ModelBackend("ds_inference",
+                                   args=dict(enable_fp16=(not self.enable_fp16),
+                                             enable_bf16=self.enable_bf16))
 
         # We should merge pipeline model weights for the reference model to load.
         ref_model = get_flash_mqat_model_config(

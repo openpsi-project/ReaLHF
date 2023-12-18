@@ -98,16 +98,14 @@ def get_optimizer_grouped_parameters(
     optimizer_grouped_parameters = [
         {
             "params": [
-                p
-                for n, p in model.named_parameters()
+                p for n, p in model.named_parameters()
                 if (not any(nd in n for nd in no_decay_name_list) and p.requires_grad)
             ],
             "weight_decay": weight_decay,
         },
         {
             "params": [
-                p
-                for n, p in model.named_parameters()
+                p for n, p in model.named_parameters()
                 if (any(nd in n for nd in no_decay_name_list) and p.requires_grad)
             ],
             "weight_decay": 0.0,
