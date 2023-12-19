@@ -259,7 +259,7 @@ class PPOExperiment(Experiment):
                 count=1,
                 scheduling=Scheduling.master_worker_default(
                     cpu=4,
-                    mem=200000,
+                    mem=100000,
                 ),
             ),
             model_worker=[
