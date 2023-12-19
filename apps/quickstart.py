@@ -69,9 +69,17 @@ class ModelConfig:
     lora_scaling: float = 32.0
     gradient_checkpointing: bool = False
     enable_fp16: bool = True
+    enable_bf16: bool = False
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
     partition_method: Optional[str] = "parameters"
     num_pipeline_micro_batches: Optional[int] = None
+
+    def __post_init__(self):
+        if self.enable_bf16 and self.enable_fp16:
+            raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
+        if self.enable_bf16 and (self.parallel.model_parallel_size > 1
+                                 or self.parallel.pipeline_parallel_size > 1):
+            raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
 
 
 @dataclasses.dataclass
@@ -113,6 +121,7 @@ class OptimizerConfig:
         default="cosine",
     )
     warmup_steps_proportion: float = 0.02
+    offload: bool = False
 
 
 @dataclasses.dataclass
@@ -497,6 +506,8 @@ def run_sft(args: SFTConfig):
                                lora_scaling=args.model.lora_scaling,
                                lora_dim=args.model.lora_dim,
                                enable_fp16=args.model.enable_fp16,
+                               enable_bf16=args.model.enable_bf16,
+                               offload_optimizer=args.optimizer.offload,
                                gradient_checkpointing=args.model.gradient_checkpointing,
                                max_seqlen=args.dataset.max_seqlen,
                                train_dataset_path=args.dataset.train_path,
@@ -588,6 +599,8 @@ def run_rw(args: RWConfig):
                                lora_scaling=args.model.lora_scaling,
                                lora_dim=args.model.lora_dim,
                                enable_fp16=args.model.enable_fp16,
+                               enable_bf16=args.model.enable_bf16,
+                               offload_optimizer=args.optimizer.offload,
                                gradient_checkpointing=args.model.gradient_checkpointing,
                                max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
                                max_seqlen=args.dataset.max_seqlen,
@@ -720,6 +733,8 @@ def run_ppo(args: PPOConfig):
         actor_lora_scaling=args.actor.lora_scaling,
         actor_lora_dim=args.actor.lora_dim,
         actor_enable_fp16=args.actor.enable_fp16,
+        actor_enable_bf16=args.actor.enable_bf16,
+        offload_actor_optimizer_state=args.actor_optimizer.offload,
         actor_gradient_checkpointing=args.actor.gradient_checkpointing,
         actor_partition_method=args.actor.partition_method,
         actor_num_pipeline_micro_batches=args.actor.num_pipeline_micro_batches,
@@ -731,6 +746,8 @@ def run_ppo(args: PPOConfig):
         critic_lora_scaling=args.critic.lora_scaling,
         critic_lora_dim=args.critic.lora_dim,
         critic_enable_fp16=args.critic.enable_fp16,
+        critic_enable_bf16=args.critic.enable_bf16,
+        offload_critic_optimizer_state=args.critic_optimizer.offload,
         critic_gradient_checkpointing=args.critic.gradient_checkpointing,
         critic_partition_method=args.critic.partition_method,
         critic_num_pipeline_micro_batches=args.critic.num_pipeline_micro_batches,
@@ -740,6 +757,8 @@ def run_ppo(args: PPOConfig):
         ref_mp_size=args.ref.parallel.model_parallel_size,
         rew_dp_size=args.rew.parallel.data_parallel_size,
         ref_num_pipeline_micro_batches=args.ref.num_pipeline_micro_batches,
+        ref_enable_bf16=args.ref.enable_bf16,
+        rew_enable_bf16=args.rew.enable_bf16,
         # dataset
         max_prompt_len=args.dataset.max_prompt_len,
         batch_size=args.dataset.batch_size,
@@ -858,6 +877,8 @@ def run_dpo(args: DPOConfig):
                                lora_scaling=args.model.lora_scaling,
                                lora_dim=args.model.lora_dim,
                                enable_fp16=args.model.enable_fp16,
+                               enable_bf16=args.model.enable_bf16,
+                               offload_optimizer=args.optimizer.offload,
                                gradient_checkpointing=args.model.gradient_checkpointing,
                                max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
                                max_seqlen=args.dataset.max_seqlen,
