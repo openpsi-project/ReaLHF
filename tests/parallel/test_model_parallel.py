@@ -297,7 +297,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
             p.start()
 
         res = []
-        for _ in range(WORLD_SIZE):
+        for _ in range(NUM_MP):
             res.append(self.res_queue.get())
 
         for p in self.pipe_model_processes:
@@ -394,5 +394,5 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testInferenceAccordance")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testGenerate")
     # unittest.main(defaultTest="ModelParallelFlashMQATTest.testLinearAccordance")

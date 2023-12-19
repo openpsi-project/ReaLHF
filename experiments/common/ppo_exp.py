@@ -93,7 +93,6 @@ train_critic = ModelRPC(
 class PPOExperiment(Experiment):
     sft_model_path: Optional[str] = None
     rew_model_path: Optional[str] = None
-    ref_model_path: Optional[str] = None
 
     tokenizer_path: Optional[str] = None  # Since we use SFT model, we need to specify HF tokenizer path
 
@@ -192,6 +191,7 @@ class PPOExperiment(Experiment):
     offload_reward: bool = False
     actor_num_pipeline_micro_batches: Optional[int] = None
     critic_num_pipeline_micro_batches: Optional[int] = None
+    ref_num_pipeline_micro_batches: Optional[int] = None
 
     benchmark: bool = False
 
@@ -352,7 +352,7 @@ class PPOExperiment(Experiment):
                                                   partition_method=self.actor_partition_method)
 
         ref_model = get_flash_mqat_model_config(
-            model_path=self.sft_model_path if self.ref_model_path is None else self.ref_model_path,
+            model_path=self.sft_model_path,
             from_model_type=ref_model_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=self.ref_pp_size,
@@ -472,12 +472,11 @@ class PPOExperiment(Experiment):
 
         ref_backend = ModelBackend(
             "ds_inference",
-            args=dict(
-                enable_fp16=True,
-                zero_stage=3 if self.offload_ref else 0,
-                offload=self.offload_ref,
-                engine_type="pipe" if self.ref_pp_size > 1 else "deepspeed",
-            ),
+            args=dict(enable_fp16=True,
+                      zero_stage=3 if self.offload_ref else 0,
+                      offload=self.offload_ref,
+                      engine_type="pipe" if self.ref_pp_size > 1 else "deepspeed",
+                      num_pipeline_micro_batches=self.ref_num_pipeline_micro_batches),
         )
         rw_backend = ModelBackend(
             "ds_inference",
