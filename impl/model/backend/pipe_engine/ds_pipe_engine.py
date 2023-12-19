@@ -231,7 +231,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         # pre allocate receive buffers and pre store other information
         for mbid, batch in enumerate(batches):
-            if self._train_mode and mbid < self.num_stages:
+            if self._train_mode:
                 activation_shape = (mb_seq_lens[mbid], self.hidden_dim)
                 self.tensor_buffer.alloc("activation",
                                          mbid,
