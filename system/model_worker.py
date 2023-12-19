@@ -74,7 +74,7 @@ class ModelWorker(worker_base.Worker):
 
     def __lazy_setup(self):
         """Setup pytorch ddp processes, and algorithms."""
-        self.__stream = request_reply_stream.make_stream(self.config.worker_info, self.config.stream)
+        self.__stream = request_reply_stream.make_worker_stream(self.config.worker_info, self.config.stream)
 
         self.__world_size, self.__ddp_rank, local_gpu_id = gpu_utils.setup_ddp(
             self.__experiment_name, self.__trial_name, self.model_name, self.__worker_index)

@@ -53,9 +53,9 @@ def request_all(
 
 
 def gather_all_replies(
-    streams: List[request_reply_stream.RequestReplyStream],) -> List[namedarray.NamedArray]:
+    streams: List[request_reply_stream.RequestReplyStream],) -> List[List[namedarray.NamedArray]]:
     """Collect responses from multiple streams. Blocking method."""
-    responses = [s.poll(block=True).data for s in streams]
+    responses = [list([v.data for v in s.poll_all_blocked().values()]) for s in streams]
     logging.getLogger("benchmark").debug(f"master worker #gather_all_replies# *end* time ${time.time_ns()}$")
     return responses
 
@@ -63,21 +63,13 @@ def gather_all_replies(
 async def parallel_rpc(
     rpc_handle_name: str,
     data: namedarray.NamedArray,
-    streams: List[request_reply_stream.RequestReplyStream],
+    stream: request_reply_stream.RequestReplyStream,
 ):
-    for stream in streams:
-        # NOTE: Since post_request change req.data in-place, we need to construct a new request for each stream.
-        req = request_reply_stream.Payload(handle_name=rpc_handle_name, data=data)
-        stream.post(req)
-    all_res: List[request_reply_stream.Payload] = []
-    for stream in streams:
-        while True:
-            try:
-                res = stream.poll()
-                break
-            except request_reply_stream.NoMessage:
-                await asyncio.sleep(0.01)
-        all_res.append(res)
+    req = request_reply_stream.Payload(handle_name=rpc_handle_name, data=data)
+    stream.post(req)
+
+    all_res = await stream.async_poll_all()
+    all_res = list(all_res.values())
 
     # data contains all res for one data parallel rank
     data = [x.data for x in all_res]
@@ -100,7 +92,7 @@ async def model_rpc_func(
     rpc_futures: Dict[str, asyncio.Future],
     parent_rpc_names: List[str],
     data_registry: Dict[str, torch.Tensor],
-    streams: List[List[request_reply_stream.RequestReplyStream]],
+    streams: List[request_reply_stream.RequestReplyStream],
 ):
     num_dp = len(streams)
 
@@ -175,12 +167,16 @@ class MasterWorker(worker_base.Worker):
 
         # Save and eval control.
         self.__total_train_epochs = config.total_train_epochs
-        self.__save_ctl = base.timeutil.EpochStepTimeFreqCtl(freq_epoch=config.save_frequency_epochs,
-                                                             freq_step=config.save_frequency_steps,
-                                                             freq_sec=config.save_frequency_seconds)
-        self.__eval_ctl = base.timeutil.EpochStepTimeFreqCtl(freq_epoch=config.eval_frequency_epochs,
-                                                             freq_step=config.eval_frequency_steps,
-                                                             freq_sec=config.eval_frequency_seconds)
+        self.__save_ctl = base.timeutil.EpochStepTimeFreqCtl(
+            freq_epoch=config.save_frequency_epochs,
+            freq_step=config.save_frequency_steps,
+            freq_sec=config.save_frequency_seconds,
+        )
+        self.__eval_ctl = base.timeutil.EpochStepTimeFreqCtl(
+            freq_epoch=config.eval_frequency_epochs,
+            freq_step=config.eval_frequency_steps,
+            freq_sec=config.eval_frequency_seconds,
+        )
 
         self.MODEL_SAVE_ROOT = os.path.join(
             MODEL_SAVE_ROOT,
@@ -196,16 +192,17 @@ class MasterWorker(worker_base.Worker):
 
     def _poll(self):
         if not self.__initialized:
-            self.__model_streams: Dict[str, List[request_reply_stream.NameResolvingRequstReplyStream]] = {
-                k: request_reply_stream.make_stream(self.config.worker_info, v)
-                for k, v in self.config.model_streams.items()
-            }
-            self.__data_streams: List[request_reply_stream.NameResolvingRequstReplyStream] = [
-                request_reply_stream.make_stream(self.config.worker_info, s) for s in self.config.data_streams
-            ]
+            self.__model_streams: Dict[config_pkg.MasterStreamID,
+                                       List[request_reply_stream.RequestReplyStream]] = {
+                                           k: request_reply_stream.make_master_stream(
+                                               self.config.worker_info, v)
+                                           for k, v in self.config.model_streams.items()
+                                       }
+            self.__data_stream: request_reply_stream.RequestReplyStream = (
+                request_reply_stream.make_master_stream(self.config.worker_info, self.config.data_stream))
             # Request training specification from data workers, e.g. batch size and total train steps.
-            request_all(self.__data_streams, "spec", [None for _ in self.__data_streams])
-            ft_specs: List[model_api.FinetuneSpec] = gather_all_replies(self.__data_streams)
+            request_all([self.__data_stream], "spec", [None])
+            ft_specs: List[model_api.FinetuneSpec] = gather_all_replies([self.__data_stream])[0]
             if len(set(x.steps_per_epoch for x in ft_specs)) != 1:
                 raise RuntimeError(f"steps_per_epoch not equal among data workers:"
                                    f" {list(x.steps_per_epoch for x in ft_specs)}. "
@@ -214,7 +211,7 @@ class MasterWorker(worker_base.Worker):
             ft_spec.total_train_epochs = self.config.total_train_epochs
             ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
 
-            batch_size = len(self.__data_streams) * ft_spec.batch_size_per_device
+            batch_size = len(self.__data_stream.recv_sockets) * ft_spec.batch_size_per_device
             logger.info("\n\n" + "=" * 40 + f"\nTotal train epochs: {ft_spec.total_train_epochs}" +
                         f"\nTotal train steps: {ft_spec.total_train_steps}" +
                         f"\nSteps per epoch: {ft_spec.steps_per_epoch}" +
@@ -222,8 +219,8 @@ class MasterWorker(worker_base.Worker):
             logger.info(f"ft_spec = {ft_spec}")
 
             model_ft_specs = []
-            for model_id in self.__model_streams:
-                model_name = model_id.split("@")[0]
+            for ms_id in self.__model_streams:
+                model_name = ms_id.model_name
                 num_dp = self.__model_topos[model_name].get_dim("data")
                 model_ft_spec = copy.deepcopy(ft_spec)
                 # FIXME: batch size returned by data workers may be the number of tokens, is this correct for deepspeed config?
@@ -238,8 +235,8 @@ class MasterWorker(worker_base.Worker):
 
         # fetch data from dataloader
         fetch_data_start = time.perf_counter()
-        request_all(self.__data_streams, "fetch", [None for _ in self.__data_streams])
-        data_batches: List[data_api.DataBatch] = gather_all_replies(self.__data_streams)
+        request_all([self.__data_stream], "fetch", [None])
+        data_batches: List[data_api.DataBatch] = gather_all_replies([self.__data_stream])[0]
         assert len(set(x.epoch for x in data_batches)) == 1
         assert len(set(x.epoch_step for x in data_batches)) == 1
         assert len(set(x.global_step for x in data_batches)) == 1
@@ -270,9 +267,9 @@ class MasterWorker(worker_base.Worker):
 
         # Save if necessary.
         if should_save:
-            dp0streams = {k: v for k, v in self.__model_streams.items() if "dp_00" in k.split("@")[1]}
+            dp0streams = {k: v for k, v in self.__model_streams.items() if k.dp_rank == 0}
             assert len(dp0streams) > 0
-            model_save_dirs = [os.path.join(self.MODEL_SAVE_ROOT, k.split("@")[0]) for k in dp0streams]
+            model_save_dirs = [os.path.join(self.MODEL_SAVE_ROOT, k.model_name) for k in dp0streams]
             request_all(list(dp0streams.values()), "save", model_save_dirs)
             gather_all_replies(list(dp0streams.values()))
 
@@ -286,16 +283,10 @@ class MasterWorker(worker_base.Worker):
         for i, rpc in enumerate(self.__model_rpcs):
             concerned_streams = {
                 k: v
-                for k, v in self.__model_streams.items() if k.startswith(rpc.model_name)
+                for k, v in self.__model_streams.items() if k.model_name == rpc.model_name
             }
             topo = self.__model_topos[rpc.model_name]
-            reorg_streams = []
-            for dp_i in range(topo.get_dim("data")):
-                dp_i_streams = [
-                    v for k, v in concerned_streams.items() if f"dp_{dp_i:02d}" in k.split("@")[1]
-                ]
-                assert len(dp_i_streams) > 0
-                reorg_streams.append(dp_i_streams)
+            assert len(concerned_streams) == topo.get_dim("data")
 
             task = self.__event_loop.create_task(
                 model_rpc_func(
@@ -303,7 +294,7 @@ class MasterWorker(worker_base.Worker):
                     futures,
                     self.__rpc_parents[i],
                     self._data_registry,
-                    reorg_streams,
+                    list(concerned_streams.values()),
                 ))
             tasks.append(task)
         self.__event_loop.run_until_complete(asyncio.gather(*tasks, *futures.values()))

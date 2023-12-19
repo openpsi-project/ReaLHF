@@ -25,6 +25,7 @@ _LLM_ENVVARS = {
     "TORCH_EXTENSIONS_DIR": TORCH_EXTENSIONS_DIR,
     # "CUDA_LAUNCH_BLOCKING": "1",
     # "TORCH_USE_CUDA_DSA": "1",
+    "CUDA_DEVICE_MAX_CONNECTIONS": str(1),
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
     "PYTHONUSERBASE": "/nonsense",
 }
@@ -156,8 +157,8 @@ class ModelBackend:
 @dataclasses.dataclass
 class RequestReplyStream:
     push_stream_name: str
-    pull_stream_name: str
-    serialization_method: str = "pickle_compress"
+    pull_stream_names: List[str]
+    serialization_method: str = "raw_bytes"
 
 
 @dataclasses.dataclass
@@ -184,7 +185,7 @@ class ModelWorker:
     cuda_cache_cleanliness: bool = True
     cuda_cache_clear_freq: int = 10
     # stream and worker_info will be configured automatically
-    stream: Optional[Union[str, RequestReplyStream]] = None
+    stream: Optional[RequestReplyStream] = None
     worker_info: Optional[WorkerInformation] = None
 
     def __post_init__(self):
@@ -201,8 +202,62 @@ class DataWorker:
     use_dataset_cache: bool = False
     dataset_cahce_root: str = DATASET_CACHE_PATH
     # stream and worker_info will be configured automatically
-    stream: Optional[Union[str, RequestReplyStream]] = None
+    stream: RequestReplyStream = None
     worker_info: Optional[WorkerInformation] = None
+
+
+@dataclasses.dataclass
+class ModelStreamID:
+    model_name: str
+    dp_rank: int
+    mp_rank: int
+    pp_rank: int
+
+    def __post_init__(self):
+        assert self.dp_rank >= 0 and self.mp_rank >= 0 and self.pp_rank >= 0
+        if "@" in self.model_name:
+            raise ValueError("model_name cannot contain @")
+
+    def __repr__(self):
+        return f"{self.model_name}@pp{self.pp_rank:02d}@mp{self.mp_rank:02d}@dp{self.dp_rank:02d}"
+
+    def __hash__(self):
+        return hash(str(self))
+
+    def __eq__(self, other):
+        # Compare the key attribute for equality
+        if isinstance(other, ModelStreamID):
+            return (self.model_name == other.model_name and self.dp_rank == other.dp_rank
+                    and self.mp_rank == other.mp_rank and self.pp_rank == other.pp_rank)
+        return ValueError("Cannot compare ModelStreamID with other types")
+
+
+@dataclasses.dataclass
+class MasterStreamID:
+    """ID for master streams.
+    This stream will broadcast requests for downstream workers.
+    Data within the same dp_rank is the same.
+    """
+
+    model_name: str
+    dp_rank: int
+
+    def __post_init__(self):
+        assert self.dp_rank >= 0
+        if "@" in self.model_name:
+            raise ValueError("model_name cannot contain @")
+
+    def __repr__(self):
+        return f"master2{self.model_name}@dp{self.dp_rank:02d}"
+
+    def __hash__(self):
+        return hash(str(self))
+
+    def __eq__(self, other):
+        # Compare the key attribute for equality
+        if isinstance(other, MasterStreamID):
+            return self.model_name == other.model_name and self.dp_rank == other.dp_rank
+        return ValueError("Cannot compare MasterStreamID with other types")
 
 
 @dataclasses.dataclass
@@ -218,8 +273,8 @@ class MasterWorker:
     eval_frequency_seconds: int
     # main components
     model_rpcs: List[api.dfg.ModelRPC]
-    data_streams: List[Union[str, RequestReplyStream]]
-    model_streams: Dict[Tuple[str, int, int, int], Union[str, RequestReplyStream]]
+    data_stream: RequestReplyStream
+    model_streams: Dict[MasterStreamID, RequestReplyStream]
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology]
     benchmark_steps: int
     worker_info: Optional[WorkerInformation] = None
@@ -276,22 +331,35 @@ class ExperimentConfig:
                                  f"model={[mw.mp_rank for mw in mws]}, "
                                  f"data={[mw.dp_rank for mw in mws]}, "
                                  f"flattened ranks {ranks}.")
-            model_topos[model_name] = mws[0].topo
+            model_topos[model_name] = topo = mws[0].topo
 
             # Set stream for model workers.
-            for mw in mws:
-                # Following the naming convention of deepspeed. Inner sep is '_' and outer sep is '-'.
-                model_id = (f"{mw.model_name}@pp_{mw.pp_rank:02d}-mp_{mw.mp_rank:02d}-dp_{mw.dp_rank:02d}")
-                mw.stream = RequestReplyStream(push_stream_name=model_id,
-                                               pull_stream_name=f"master2{model_id}")
-                model_streams[model_id] = RequestReplyStream(pull_stream_name=model_id,
-                                                             push_stream_name=f"master2{model_id}")
+            model_stream_ids = [
+                ModelStreamID(
+                    model_name=mw.model_name,
+                    pp_rank=mw.pp_rank,
+                    mp_rank=mw.mp_rank,
+                    dp_rank=mw.dp_rank,
+                ) for mw in mws
+            ]
+            for dp_i in range(topo.get_dim("data")):
+                master_stream_id = MasterStreamID(model_name, dp_i)
+                model_streams[master_stream_id] = RequestReplyStream(
+                    push_stream_name=str(master_stream_id),
+                    pull_stream_names=list(map(str, filter(lambda x: x.dp_rank == dp_i, model_stream_ids))),
+                )
+            for mw, model_id in zip(mws, model_stream_ids):
+                mw.stream = RequestReplyStream(
+                    push_stream_name=str(model_id),
+                    pull_stream_names=[str(MasterStreamID(model_name, mw.dp_rank))],
+                )
 
-        data_streams = []
+        data_stream = RequestReplyStream(
+            push_stream_name="master2data",
+            pull_stream_names=[f"data_{i}" for i in range(len(self.data_worker))],
+        )
         for i, d in enumerate(self.data_worker):
-            d.stream = RequestReplyStream(push_stream_name=f"data_{i}", pull_stream_name=f"master2data_{i}")
-            data_streams.append(
-                RequestReplyStream(pull_stream_name=f"data_{i}", push_stream_name=f"master2data_{i}"))
+            d.stream = RequestReplyStream(push_stream_name=f"data_{i}", pull_stream_names=[f"master2data"])
 
         for w in itertools.chain(self.model_worker, self.data_worker):
             assert w.stream is not None
@@ -305,7 +373,7 @@ class ExperimentConfig:
                 eval_frequency_epochs=self.eval_frequency_epochs,
                 eval_frequency_steps=self.eval_frequency_steps,
                 eval_frequency_seconds=self.eval_frequency_seconds,
-                data_streams=data_streams,
+                data_stream=data_stream,
                 model_streams=model_streams,
                 model_topos=model_topos,
                 model_rpcs=self.model_rpcs,
