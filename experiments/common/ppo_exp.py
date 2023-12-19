@@ -170,7 +170,7 @@ class PPOExperiment(Experiment):
     critic_zero_stage: int = 2
     critic_partition_method: Optional[str] = "parameters"
     offload_critic_param: bool = False
-    offload_critic_optimizer_states: bool = False
+    offload_critic_optimizer_state: bool = False
     # ppo
     rew_output_scaling: float = 1.0
     rew_output_bias: float = 0.0
@@ -475,7 +475,7 @@ class PPOExperiment(Experiment):
                 num_pipeline_stages=self.critic_pp_size,
                 engine_type="pipe" if self.critic_pp_size > 1 else "deepspeed",
                 offload_param=self.offload_critic_param,
-                offload_optimizer_state=self.offload_critic_optimizer_states,
+                offload_optimizer_state=self.offload_critic_optimizer_state,
                 num_pipeline_micro_batches=self.critic_num_pipeline_micro_batches,
                 enable_fp16=self.critic_enable_fp16,
                 enable_bf16=self.critic_enable_bf16,
