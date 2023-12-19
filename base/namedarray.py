@@ -150,6 +150,16 @@ def dumps(namedarray_obj, method="pickle_dict"):
 
             warnings.warn("Module `blosc` not found in the image. Abort NamedArray compression.")
 
+    def compress_large(buf, typesize=4, cname="lz4"):
+        chunk_size = 2**30
+        num_chunks = len(buf) // chunk_size + 1
+        chunks = [
+            blosc.compress(buf[i * chunk_size:(i + 1) * chunk_size], typesize=typesize, cname=cname)
+            for i in range(num_chunks)
+        ]
+        # logger.info(f"Compress {len(buf)} bytes to {sum([len(chunk) for chunk in chunks])} bytes, num_chunks = {num_chunks}")
+        return num_chunks, chunks
+
     def _namedarray_to_bytes_list(x, compress: bool, compress_condition: Callable[[str], bool]):
         flattened_entries = flatten(x)
         flattened_bytes = []
@@ -210,10 +220,14 @@ def dumps(namedarray_obj, method="pickle_dict"):
             pickle.dumps(_namedarray_to_bytes_list(namedarray_obj, True, lambda x: True))
         ]
     elif method == 'pickle_compress':
-        bytes_list = [
-            NamedArrayEncodingMethod.PICKLE_COMPRESS.value,
-            blosc.compress(pickle.dumps(namedarray_obj), typesize=4, cname='lz4')
-        ]
+        # bytes_list = [
+        #     NamedArrayEncodingMethod.PICKLE_COMPRESS.value,
+        #     blosc.compress(pickle.dumps(namedarray_obj), typesize=4, cname='lz4')
+        # ]
+        bytes_list = [NamedArrayEncodingMethod.PICKLE_COMPRESS.value]
+        buf = pickle.dumps(namedarray_obj)
+        num_chunks, chunks = compress_large(buf)
+        bytes_list += chunks
     elif method == 'obs_compress':
         bytes_list = [NamedArrayEncodingMethod.OBS_COMPRESS.value] + _namedarray_to_bytes_list(
             namedarray_obj, True, lambda x: ('obs' in x))
@@ -299,7 +313,10 @@ def loads(b):
     elif b[0] == NamedArrayEncodingMethod.COMPRESS_PICKLE.value:
         namedarray_obj = _parse_namedarray_from_bytes_list(pickle.loads(b[1]), True, lambda x: True)
     elif b[0] == NamedArrayEncodingMethod.PICKLE_COMPRESS.value:
-        namedarray_obj = pickle.loads(blosc.decompress(b[1]))
+        # namedarray_obj = pickle.loads(blosc.decompress(b[1]))
+        chunks = b[1:-1]
+        buf = b''.join([blosc.decompress(chunk) for chunk in chunks])
+        namedarray_obj = pickle.loads(buf)
     elif b[0] == NamedArrayEncodingMethod.OBS_COMPRESS.value:
         namedarray_obj = _parse_namedarray_from_bytes_list(b[1:-1], True, lambda x: ('obs' in x))
     elif b[0] == NamedArrayEncodingMethod.COMPRESS_EXCEPT_POLICY_STATE.value:

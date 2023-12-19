@@ -45,7 +45,8 @@ def _ppo_actor_loss_from_model_outputs(
     returns loss and logging stats.
     """
     if logits_mask is not None:
-        logits.masked_fill_(logits_mask.logical_not(), torch.finfo(logits.dtype).min)
+        logits.masked_fill_(logits_mask.logical_not_(),
+                            torch.finfo(logits.dtype).min)  # inplace operation for logits mask
     new_logp = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
 
     new_logp = new_logp * ppo_loss_mask
@@ -80,7 +81,7 @@ def _ppo_actor_loss_from_model_outputs(
     )
 
     if logits_mask is not None:
-        stats["ignoring_logits_ratio"] = (1 - logits_mask.float()).mean()
+        stats["ignoring_logits_ratio"] = logits_mask.half().mean()  # inversed logits mask
 
     if (early_stop_kl is not None and approx_kl > early_stop_kl):
         logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
@@ -245,7 +246,7 @@ class PackedActorInterface(api.model.ModelInterface):
             packed_seq=packed_seq,
             cu_seqlens=cu_seqlens,
             packed_logprobs=packed_logprobs.float(),
-            packed_logits_mask=packed_logits_mask,
+            packed_logits_mask=packed_logits_mask.bool() if packed_logits_mask is not None else None,
             prompt_mask=prompt_mask,
         )
         return recursive_apply(from_dict(res), lambda x: x.cpu())
@@ -264,16 +265,16 @@ class PackedActorInterface(api.model.ModelInterface):
             res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens)
             if res is None:
                 return None
-            logits = res.float()
+            logits = res
         else:
             res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            logits = res.logits.float()
+            logits = res.logits
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             packed_logits_mask = data["packed_logits_mask"]
-            logits.masked_fill_(packed_logits_mask.logical_not(), torch.finfo(logits.dtype).min)
+            logits.masked_fill_(packed_logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
-        return from_dict(dict(logprobs=logprobs.cpu()))
+        return from_dict(dict(logprobs=logprobs.float().cpu()))
 
     def train_step(self, model: api.model.Model, data_: NamedArray) -> Dict:
         module = model.module

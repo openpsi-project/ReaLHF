@@ -45,6 +45,7 @@ class ModelConfig:
         type (str): Model type. Please check SUPPORTED_MODELS. `saved` means loading a saved customized model,
             while others mean converting a HuggingFace model to our customized model.
         path (str): Model path, the directory instead of the file.
+                    If None, model should be ref or reward models in PPO, and path is automatically set to actor/critic path.
         lora (bool): Whether to use LoRA.
         lora_dim (int): LoRA dimension.
         lora_scaling (float): LoRA scaling factor.
@@ -53,13 +54,14 @@ class ModelConfig:
         parallel (ParallelismConfig): Parallelism configuration.
         partition_method (str): Partition method for modules using pipeline parallel. 
                                 Support "uniform", "parameters" and "parameters_balanced".
+        num_pipeline_micro_batches (int): Number of micro batches for pipeline parallelism.
     """
 
     type: str = dataclasses.field(
         metadata={"choices": SUPPORTED_MODELS},
         default="llama",
     )
-    path: str = "/lustre/fw/pretrained/llama-7b/"
+    path: Optional[str] = None
     base_model_path: Optional[str] = None
     tokenizer_path: Optional[str] = None
     lora: bool = False
@@ -70,6 +72,7 @@ class ModelConfig:
     enable_bf16: bool = False
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
     partition_method: Optional[str] = "parameters"
+    num_pipeline_micro_batches: Optional[int] = None
 
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
@@ -707,7 +710,6 @@ def run_ppo(args: PPOConfig):
         PPOExperiment,
         sft_model_path=args.actor.path,
         rew_model_path=args.critic.path,
-        ref_model_path=args.ref.path,
         tokenizer_path=args.actor.tokenizer_path,
         seed=args.seed,
         total_train_epochs=args.train_epochs,
@@ -735,6 +737,7 @@ def run_ppo(args: PPOConfig):
         offload_actor_optimizer_state=args.actor_optimizer.offload,
         actor_gradient_checkpointing=args.actor.gradient_checkpointing,
         actor_partition_method=args.actor.partition_method,
+        actor_num_pipeline_micro_batches=args.actor.num_pipeline_micro_batches,
         # critic
         critic_dp_size=args.critic.parallel.data_parallel_size,
         critic_mp_size=args.critic.parallel.model_parallel_size,
@@ -747,11 +750,13 @@ def run_ppo(args: PPOConfig):
         offload_critic_optimizer_state=args.critic_optimizer.offload,
         critic_gradient_checkpointing=args.critic.gradient_checkpointing,
         critic_partition_method=args.critic.partition_method,
+        critic_num_pipeline_micro_batches=args.critic.num_pipeline_micro_batches,
         # rew & ref
         ref_dp_size=args.ref.parallel.data_parallel_size,
         ref_pp_size=args.ref.parallel.pipeline_parallel_size,
         ref_mp_size=args.ref.parallel.model_parallel_size,
         rew_dp_size=args.rew.parallel.data_parallel_size,
+        ref_num_pipeline_micro_batches=args.ref.num_pipeline_micro_batches,
         ref_enable_bf16=args.ref.enable_bf16,
         rew_enable_bf16=args.rew.enable_bf16,
         # dataset

@@ -74,8 +74,8 @@ def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor
     return log_probs_labels.squeeze(-1)
 
 
-def gather_packed_shifted_log_probs(logits_: torch.FloatTensor, cu_seqlens: torch.Tensor,
-                                    labels_: torch.LongTensor) -> torch.FloatTensor:
+def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch.Tensor,
+                                    labels: torch.LongTensor) -> torch.FloatTensor:
     """Gather log probs from packed input_ids and logits.
 
     Args:
@@ -89,24 +89,26 @@ def gather_packed_shifted_log_probs(logits_: torch.FloatTensor, cu_seqlens: torc
     Returns:
         torch.FloatTensor: Log probability with shape [tot_seqlen - #seqs].
     """
+    logits_shape = logits.shape
     leave_one_indices = torch.cat([
         torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
         for i in range(cu_seqlens.shape[0] - 1)
     ])
-    shift_one_indices = torch.cat([
-        torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
-        for i in range(cu_seqlens.shape[0] - 1)
-    ])
-    logits = logits_[leave_one_indices]
-    labels = labels_[shift_one_indices]
+    # shift_one_indices = torch.cat([
+    #     torch.arange(cu_seqlens[i] + 1 , cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
+    #     for i in range(cu_seqlens.shape[0] - 1)
+    # ])
+    labels = torch.cat([labels[:-1], torch.tensor([0], dtype=labels.dtype, device=labels.device)], dim=0)
+    # shift labels one step to the left and pad it to match the shape of logits
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
     log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
-    assert log_probs_labels.shape[0] == logits_.shape[0] - cu_seqlens.shape[0] + 1, (
+    log_probs_labels = log_probs_labels[leave_one_indices]
+    assert log_probs_labels.shape[0] == logits_shape[0] - cu_seqlens.shape[0] + 1, (
         log_probs_labels.shape,
-        logits_.shape,
+        logits_shape,
         cu_seqlens.shape,
         cu_seqlens,
-        shift_one_indices,
+        # shift_one_indices,
     )
     return log_probs_labels
 
