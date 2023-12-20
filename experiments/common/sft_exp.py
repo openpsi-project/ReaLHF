@@ -59,8 +59,8 @@ class SFTExperiment(Experiment):
             raise ValueError("pp_size, dp_size and mp_size must be positive integers.")
         if self.pp_size > 1 and self.use_lora:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
-        if self.enable_bf16 and (self.pp_size > 1 or self.mp_size):
-            raise ValueError("Use bf16 with pipeline parallel or model parallel is not supported.")
+        # if self.enable_bf16 and (self.pp_size > 1 or self.mp_size):
+        #     raise ValueError("Use bf16 with pipeline parallel or model parallel is not supported.")
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(

@@ -93,6 +93,7 @@ def model_pipe_wrap_fn(
                                                              topology,
                                                              is_critic,
                                                              partition_method=partition_method,
+                                                             dtype=model.dtype,
                                                              device=model.device)
         if not init_from_scratch:
             process_memory_mb("before_load")
@@ -119,7 +120,7 @@ def model_parallel_wrap_fn(
             raise RuntimeError(f"Only FlashMQAT models can be wrapped as "
                                f"pipeline module, provided type {type(model.module)}")
         config = model.module.config
-        module = ModelParallelModule(model.module, config, device=model.device)
+        module = ModelParallelModule(model.module, config, dtype=model.dtype, device=model.device)
         if not init_from_scratch:
             process_memory_mb("before_load")
             module.load(model_path, init_critic_from_actor=init_critic_from_actor)

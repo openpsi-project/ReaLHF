@@ -87,6 +87,7 @@ def pipe_wrap_fn(
                                                     topology,
                                                     is_critic,
                                                     partition_method=partition_method,
+                                                    dtype=model.dtype,
                                                     device=model.device)
         if not init_from_scratch:
             process_memory_mb("before_load")

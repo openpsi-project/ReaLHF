@@ -51,6 +51,7 @@ class ModelConfig:
         lora_scaling (float): LoRA scaling factor.
         gradient_checkpointing (bool): Whether to use gradient checkpointing of MLP inside each block.
         enable_fp16 (bool): Whether to use fp16.
+        enable_bf16 (bool): Whether to use bf16.
         parallel (ParallelismConfig): Parallelism configuration.
         partition_method (str): Partition method for modules using pipeline parallel. 
                                 Support "uniform", "parameters" and "parameters_balanced".

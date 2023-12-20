@@ -11,8 +11,8 @@ import api.config as config_package
 
 # TODO: organize parallel testing codes, merge pipe_parallel_test.py and model_parallel_test.py
 
-NUM_MP = 4
-NUM_PP = 2
+NUM_MP = 1
+NUM_PP = 4
 NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
@@ -20,15 +20,19 @@ MODEL_TYPE = "llama"
 if MODEL_TYPE == "llama":
     if NUM_PP == 1:
         SUFFIX = f"_{NUM_MP}mp_{NUM_SHARDS}s"
+    elif NUM_MP == 1:
+        SUFFIX = f"_{NUM_PP}pp_{NUM_SHARDS}s"
     elif NUM_PP > 1:
         SUFFIX = f"_{NUM_PP}pp_{NUM_MP}mp_{NUM_SHARDS}s"
     # BASELINE_MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 128
+BATCH_SIZE = 32
 MIN_NEW_TOKENS = 10
 MAX_NEW_TOKENS = 128
+
+USE_BF16 = True
 
 
 def make_backend():
@@ -43,20 +47,26 @@ def make_backend():
                     warmup_steps_proportion=0.0,
                     min_lr_ratio=0.0,
                     # TODO: test zero_stage = 2 or 3 later
-                    zero_stage=1)))
+                    zero_stage=1,
+                    enable_fp16=not USE_BF16,
+                    enable_bf16=USE_BF16,
+                )))
     elif NUM_PP > 1:
         return api.model.make_backend(
             config_package.ModelBackend(type_='ds_train',
-                                        args=dict(optimizer_name='adam',
-                                                  optimizer_config=dict(lr=1e-5,
-                                                                        weight_decay=0.0,
-                                                                        betas=(0.9, 0.95)),
-                                                  warmup_steps_proportion=0.0,
-                                                  min_lr_ratio=0.0,
-                                                  zero_stage=1,
-                                                  engine_type="pipe",
-                                                  num_pipeline_stages=NUM_PP,
-                                                  num_pipeline_micro_batches=NUM_PP * 4)))
+                                        args=dict(
+                                            optimizer_name='adam',
+                                            optimizer_config=dict(lr=1e-5,
+                                                                  weight_decay=0.0,
+                                                                  betas=(0.9, 0.95)),
+                                            warmup_steps_proportion=0.0,
+                                            min_lr_ratio=0.0,
+                                            zero_stage=1,
+                                            engine_type="pipe",
+                                            num_pipeline_stages=NUM_PP,
+                                            enable_fp16=not USE_BF16,
+                                            enable_bf16=USE_BF16,
+                                        )))
 
 
 def make_interface():
@@ -74,12 +84,26 @@ def make_model(device):
                                             tokenizer_path=MODEL_PARALLEL_PATH,
                                             init_from_scratch=True,
                                             no_param_instantiation=True,
+                                            dtype="bf16" if USE_BF16 else "fp16",
                                         ))
+    assert NUM_PP > 1 or NUM_MP > 1, "can not test model without mp or dp"
     if NUM_PP == 1:
         model_config.wrappers += [
             config_package.ModelWrapper("model_parallel",
                                         args=dict(
                                             model_path=MODEL_PARALLEL_PATH,
+                                            is_critic=False,
+                                            init_critic_from_actor=False,
+                                            init_from_scratch=False,
+                                        ))
+        ]
+    elif NUM_MP == 1:
+        model_config.wrappers += [
+            config_package.ModelWrapper("pipe",
+                                        args=dict(
+                                            model_path=MODEL_PARALLEL_PATH,
+                                            num_pp=NUM_PP,
+                                            num_dp=NUM_DP,
                                             is_critic=False,
                                             init_critic_from_actor=False,
                                             init_from_scratch=False,

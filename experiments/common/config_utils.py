@@ -12,6 +12,7 @@ def get_flash_mqat_model_config(
     dp_size: int,
     is_critic: bool,
     use_lora: bool,
+    dtype: Optional[str] = None,
     lora_dim: Optional[int] = None,
     lora_scaling: Optional[float] = None,
     is_sft_lora: bool = False,
@@ -33,6 +34,7 @@ def get_flash_mqat_model_config(
             tokenizer_path=tokenizer_path,
             init_from_scratch=(init_from_scratch or pp_size > 1 or mp_size > 1),
             no_param_instantiation=(pp_size > 1 or mp_size > 1),
+            dtype=dtype,
         ),
     )
     if is_critic:
@@ -99,24 +101,28 @@ def get_flash_mqat_model_config(
         model.wrappers += [
             ModelWrapper(
                 "model_parallel",
-                args=dict(model_path=model_path,
-                          is_critic=is_critic,
-                          init_critic_from_actor=init_critic_from_actor,
-                          init_from_scratch=init_from_scratch),
+                args=dict(
+                    model_path=model_path,
+                    is_critic=is_critic,
+                    init_critic_from_actor=init_critic_from_actor,
+                    init_from_scratch=init_from_scratch,
+                ),
             )
         ]
     elif pp_size > 1 and mp_size > 1:
         model.wrappers += [
             ModelWrapper(
                 "model_pipe_parallel",
-                args=dict(model_path=model_path,
-                          num_pp=pp_size,
-                          num_mp=mp_size,
-                          num_dp=dp_size,
-                          is_critic=is_critic,
-                          partition_method=partition_method,
-                          init_critic_from_actor=init_critic_from_actor,
-                          init_from_scratch=init_from_scratch),
+                args=dict(
+                    model_path=model_path,
+                    num_pp=pp_size,
+                    num_mp=mp_size,
+                    num_dp=dp_size,
+                    is_critic=is_critic,
+                    partition_method=partition_method,
+                    init_critic_from_actor=init_critic_from_actor,
+                    init_from_scratch=init_from_scratch,
+                ),
             )
         ]
     return model

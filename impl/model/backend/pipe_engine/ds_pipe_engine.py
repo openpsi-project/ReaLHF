@@ -48,13 +48,18 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         assert self.zero_optimization_stage(
         ) < 2, "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
 
+        logger.info(f"bf16 enabled: {self.bfloat16_enabled()}, optimizer type = {type(self.optimizer)}")
+        model_dtype, grad_accum_dtype = self.get_data_types()
+        zero_enabled = self.zero_optimization()
+        zero_opt_stage = self.zero_optimization_stage()
+        logger.info(f"model_dtype {model_dtype} grad_accum_dtype {grad_accum_dtype} "
+                    f"zero_enabled {zero_enabled} zero_opt_stage {zero_opt_stage}")
         # deepspeed enigne attributes
         self.pipeline_parallelism = True
         # We schedule the all-reduces, so disable it in super().backward()
         self.enable_backward_allreduce = False
         # see method is_gradient_accumulation_boundary()
         self._force_grad_boundary = False
-        self.using_bf16_optimizer = type(self.optimizer) == BF16_Optimizer
 
         # configs for data shape
         self.config = self.module.config  # FlashMQATConfig in PipelineModule
@@ -62,6 +67,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.hidden_dim = self.config.hidden_dim
         self.head_dim = self.config.head_dim
         self.n_kv = self.config.n_kv_heads
+        if self.bfloat16_enabled():
+            assert isinstance(self.optimizer, BF16_Optimizer)
         self.dtype = torch.half if not self.bfloat16_enabled() else torch.bfloat16
 
         # logging
@@ -584,7 +591,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def _exec_reduce_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert self._train_mode, "_exec_reduce_grads() should only be executed in train mode"
         self._force_grad_boundary = True
-        if self.using_bf16_optimizer:
+        if self.bfloat16_enabled():
             if self.zero_optimization_stage() < ZeroStageEnum.gradients:
                 self._bf16_reduce_grads()
             else:
@@ -721,7 +728,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             super().backward(loss)
             return
 
-        if self.using_bf16_optimizer and not self.is_last_stage():
+        if self.bfloat16_enabled() and not self.is_last_stage():
             # manually call because we don't call optimizer.backward()
             self.optimizer.clear_lp_grads()
 
@@ -730,7 +737,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         output_tensor = output_x.pp_input
         torch.autograd.backward(tensors=output_tensor, grad_tensors=grad)
 
-        if self.using_bf16_optimizer and not self.is_last_stage():
+        if self.bfloat16_enabled() and not self.is_last_stage():
             # manually call because we don't call optimizer.backward()
             self.optimizer.update_hp_grads(clear_lp_grads=False)
 
