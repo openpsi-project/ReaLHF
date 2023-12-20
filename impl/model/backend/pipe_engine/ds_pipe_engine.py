@@ -52,8 +52,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         model_dtype, grad_accum_dtype = self.get_data_types()
         zero_enabled = self.zero_optimization()
         zero_opt_stage = self.zero_optimization_stage()
+        zero_cpu_offload = self.zero_cpu_offload()
         logger.info(f"model_dtype {model_dtype} grad_accum_dtype {grad_accum_dtype} "
-                    f"zero_enabled {zero_enabled} zero_opt_stage {zero_opt_stage}")
+                    f"zero_enabled {zero_enabled} zero_opt_stage {zero_opt_stage} "
+                    f"zero_cpu_offload {zero_cpu_offload}")
         # deepspeed enigne attributes
         self.pipeline_parallelism = True
         # We schedule the all-reduces, so disable it in super().backward()
@@ -815,14 +817,17 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._take_model_step(lr_kwargs=lr_kwargs)
 
         # sync loss scale across pipeline stages
-        loss_scale = self.optimizer.loss_scale
-        total_scale_cuda = torch.FloatTensor([float(loss_scale)]).to(self.device)
-        dist.all_reduce(total_scale_cuda, op=dist.ReduceOp.MIN, group=self.grid.get_model_parallel_group())
-        # all_loss_scale = total_scale_cuda[0].item()
-        logger.info(
-            f"loss scale: {total_scale_cuda}, group: { torch.distributed.get_process_group_ranks(self.mpu.get_model_parallel_group())}"
-        )
-        self.optimizer.loss_scaler.cur_scale = min(total_scale_cuda[0].item(), 8192)
+        if not self.bfloat16_enabled():
+            loss_scale = self.optimizer.loss_scale
+            total_scale_cuda = torch.FloatTensor([float(loss_scale)]).to(self.device)
+            dist.all_reduce(total_scale_cuda,
+                            op=dist.ReduceOp.MIN,
+                            group=self.grid.get_model_parallel_group())
+            # all_loss_scale = total_scale_cuda[0].item()
+            logger.info(
+                f"loss scale: {total_scale_cuda}, group: { torch.distributed.get_process_group_ranks(self.mpu.get_model_parallel_group())}"
+            )
+            self.optimizer.loss_scaler.cur_scale = min(total_scale_cuda[0].item(), 8192)
 
         self._force_grad_boundary = False
 

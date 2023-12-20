@@ -51,7 +51,9 @@ def get_train_ds_config(
         "bf16": {
             "enabled": enable_bf16,
         },
-        "grad_accum_dtype": "fp32" if enable_bf16 else "fp16",
+        "data_types": {
+            "grad_accum_dtype": "fp32" if enable_bf16 else "fp16",
+        },
         "gradient_clipping": 1.0,
         "prescale_gradients": False,
         "gradient_predevide_factor": 1.0,
