@@ -49,7 +49,6 @@ class RequestReplyStream:
 class IpRequestReplyStream(RequestReplyStream):
 
     def __init__(self, server_address: str, serialization_method: str):
-        assert serialization_method == "tensor_compress"
         self._context = zmq.Context(io_threads=ZMQ_IO_THREADS)
         self._send_socket = self._context.socket(zmq.PUSH)
         host_ip = socket.gethostbyname(socket.gethostname())

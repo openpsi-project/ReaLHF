@@ -157,7 +157,7 @@ class ModelBackend:
 class RequestReplyStream:
     push_stream_name: str
     pull_stream_name: str
-    serialization_method: str = "pickle"
+    serialization_method: str = "pickle_compress"
 
 
 @dataclasses.dataclass
