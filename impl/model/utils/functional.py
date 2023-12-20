@@ -98,7 +98,7 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
     #     torch.arange(cu_seqlens[i] + 1 , cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
     #     for i in range(cu_seqlens.shape[0] - 1)
     # ])
-    labels = torch.cat([labels[:-1], torch.tensor([0], dtype=labels.dtype, device=labels.device)], dim=0)
+    labels = torch.nn.functional.pad(labels[1:], (0, 1), value=0)
     # shift labels one step to the left and pad it to match the shape of logits
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
     log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
