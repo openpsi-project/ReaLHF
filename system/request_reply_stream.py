@@ -152,7 +152,7 @@ class IpRequestClient(RequestReplyStream):
             data = pickle.loads(data[0])
         else:
             raise NotImplementedError()
-        logger.info(f"Payload transfer time: {time.monotonic() - payload.send_time:.4f}s")
+        # logger.info(f"Payload transfer time: {time.monotonic() - payload.send_time:.4f}s")
         payload.data = data
         return payload
 
@@ -224,7 +224,7 @@ class IpReplyServer(RequestReplyStream):
             else:
                 raise NotImplementedError()
             payload.data = data
-        logger.debug(f"Payload transfer time: {time.monotonic() - payload.send_time:.4f}s")
+        # logger.debug(f"Payload transfer time: {time.monotonic() - payload.send_time:.4f}s")
         return payload
 
 

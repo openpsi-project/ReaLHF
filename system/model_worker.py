@@ -46,10 +46,6 @@ class ModelWorker(worker_base.Worker):
 
         self.__stream = None
 
-    @property
-    def is_master(self):
-        return self.__ddp_rank == 0
-
     def _configure(self, cfg: config.ModelWorker):
         self.config = cfg
         self.model_name = cfg.model_name
@@ -151,10 +147,14 @@ class ModelWorker(worker_base.Worker):
 
             # NOTE: Here "model_parallel_group" is the group of model *AND* pipeline parallel, thanks to deepspeed.
             self._bgroup = base.constants.grid().get_model_parallel_group()
-            dp_head_global_rank = self.config.topo.get_rank(
+            self._bsrc = dp_head_global_rank = self.config.topo.get_rank(
                 data=self._dp_rank, pipe=self._pp_size - 1, model=0
             )
-            self._bsrc = dist.get_group_rank(group=self._bgroup, global_rank=dp_head_global_rank)
+            self.logger.info(
+                f"Get broadcast src global_rank={dp_head_global_rank} "
+                f"with dp_rank={self._dp_rank}, pp_rank={self._pp_size-1}, mp_rank=0"
+            )
+            # self._bsrc = dist.get_group_rank(group=self._bgroup, global_rank=dp_head_global_rank)
 
             # DP head will receive data from the master, broadcast to all data parallel peers.
             # It will also return result back to master, while other workers in the data parallel group return None.
@@ -181,11 +181,11 @@ class ModelWorker(worker_base.Worker):
             else:
                 data = None
 
-        self.logger.info(
-            f"my rank is dp={self._dp_rank}, mp={self._mp_rank}, pp={self._pp_rank}, "
-            f"my group rank is {dist.get_rank(group=self._bgroup)}, "
-            f"broadcasting source is {self._bsrc}, my data is {request.data}"
-        )
+        # self.logger.info(
+        #     f"my rank is dp={self._dp_rank}, mp={self._mp_rank}, pp={self._pp_rank}, "
+        #     f"my group rank is {dist.get_rank(group=self._bgroup)}, "
+        #     f"broadcasting source is {self._bsrc}, my data is {request.data}"
+        # )
         if not request.is_tensor:
             obj_lis = [data]
             dist.broadcast_object_list(obj_lis, src=self._bsrc, group=self._bgroup)
@@ -195,10 +195,11 @@ class ModelWorker(worker_base.Worker):
                 dist.broadcast(data[k], src=self._bsrc, group=self._bgroup)
             data = namedarray.from_dict(data)
         request.data = data
-        self.logger.info(f"Model worker receive & broadcast time: {time.perf_counter() - btik}")
+        if self._is_dp_head:
+            self.logger.info(f"Model worker receive & broadcast time: {time.perf_counter() - btik}")
 
         tik = time.perf_counter()
-        if self.is_master:
+        if self._is_dp_head:
             logger.info(f"Model worker {self.model_name} received request {request.handle_name}.")
         try:
             worker_identifier = f"{self.model_name}_{self.__ddp_rank}"
@@ -227,7 +228,7 @@ class ModelWorker(worker_base.Worker):
             # We may print some info here.
             raise e
 
-        if self.is_master:
+        if self._is_dp_head:
             blogger.info(
                 f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
                 f" in ${time.perf_counter() - tik:.4f}$s"
@@ -247,7 +248,7 @@ class ModelWorker(worker_base.Worker):
             torch.cuda.empty_cache()
             gc.collect()
             et = time.monotonic()
-            if self.is_master:
+            if self._is_dp_head:
                 blogger.debug(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
 
         # logging gpu/cpu stats
