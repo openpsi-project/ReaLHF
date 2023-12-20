@@ -4,6 +4,7 @@ import time
 
 from deepspeed.accelerator import get_accelerator
 import deepspeed
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.utils.data
@@ -30,8 +31,11 @@ logger = logging.getLogger("Model Worker", "colored")
 blogger = logging.getLogger("benchmark")
 
 
-class ModelWorker(worker_base.Worker):
+def _str_to_torch_dtype(dtype: str):
+    return torch.from_numpy(np.zeros(1, dtype=np.dtype(dtype))).dtype
 
+
+class ModelWorker(worker_base.Worker):
     def __init__(self, server=None):
         super().__init__(server)
         self.config = None
@@ -61,12 +65,14 @@ class ModelWorker(worker_base.Worker):
         seeding.set_random_seed(cfg.seed)
 
         # Reveal DDP identity of this worker to world.
-        gpu_utils.reveal_ddp_identity(self.__experiment_name, self.__trial_name, self.model_name,
-                                      self.__worker_index)
+        gpu_utils.reveal_ddp_identity(
+            self.__experiment_name, self.__trial_name, self.model_name, self.__worker_index
+        )
         self.__ddp_env_resolved = False
 
         self.__clear_cache_frequency = base.timeutil.FrequencyControl(
-            frequency_steps=self.config.cuda_cache_clear_freq)
+            frequency_steps=self.config.cuda_cache_clear_freq
+        )
 
         r = self.config.worker_info
         r.model_name = cfg.model_name
@@ -74,13 +80,22 @@ class ModelWorker(worker_base.Worker):
 
     def __lazy_setup(self):
         """Setup pytorch ddp processes, and algorithms."""
-        self.__stream = request_reply_stream.make_worker_stream(self.config.worker_info, self.config.stream)
+        self.__stream = request_reply_stream.make_worker_stream(
+            self.config.worker_info,
+            self.config.stream,
+            is_dp_head=(
+                self.config.mp_rank == 0 and self.config.pp_rank == self.config.topo.get_dim("pipe") - 1
+            ),
+        )
 
         self.__world_size, self.__ddp_rank, local_gpu_id = gpu_utils.setup_ddp(
-            self.__experiment_name, self.__trial_name, self.model_name, self.__worker_index)
+            self.__experiment_name, self.__trial_name, self.model_name, self.__worker_index
+        )
 
-        logger.info(f"SetUp Information - Model worker index {self.__worker_index}"
-                    f' type "{self.config.model_name}" located at {socket.gethostname()} GPU {local_gpu_id}.')
+        logger.info(
+            f"SetUp Information - Model worker index {self.__worker_index}"
+            f' type "{self.config.model_name}" located at {socket.gethostname()} GPU {local_gpu_id}.'
+        )
 
         if self.config.backend.type_ in ["ds_train", "ds_inference"]:
             self.logger.info("deepspeed init distributed on model worker")
@@ -109,9 +124,11 @@ class ModelWorker(worker_base.Worker):
                     self.__model.tokenizer,
                     self.config.worker_info.experiment_name,
                     self.config.worker_info.trial_name,
-                    cache_root=(None
-                                if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
-                ) for d in self.config.eval_datasets
+                    cache_root=(
+                        None if not self.config.use_dataset_cache else self.config.dataset_cahce_root
+                    ),
+                )
+                for d in self.config.eval_datasets
             ]
             if len(eval_datasets) > 1:
                 eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
@@ -127,10 +144,58 @@ class ModelWorker(worker_base.Worker):
             self.__lazy_setup()
             self.__ddp_env_resolved = True
 
+            self._mp_rank = base.constants.model_parallel_rank()
+            self._pp_rank = base.constants.pipe_parallel_rank()
+            self._dp_rank = base.constants.data_parallel_rank()
+            self._pp_size = base.constants.pipe_parallel_world_size()
+
+            # NOTE: Here "model_parallel_group" is the group of model *AND* pipeline parallel, thanks to deepspeed.
+            self._bgroup = base.constants.grid().get_model_parallel_group()
+            dp_head_global_rank = self.config.topo.get_rank(
+                data=self._dp_rank, pipe=self._pp_size - 1, model=0
+            )
+            self._bsrc = dist.get_group_rank(group=self._bgroup, global_rank=dp_head_global_rank)
+
+            # DP head will receive data from the master, broadcast to all data parallel peers.
+            # It will also return result back to master, while other workers in the data parallel group return None.
+            self._is_dp_head = self._mp_rank == 0 and self._pp_rank == self._pp_size - 1
+
         try:
             request: request_reply_stream.Payload = self.__stream.poll()
         except request_reply_stream.NoMessage:
             return worker_base.PollResult(0, 0)
+
+        btik = time.perf_counter()
+        if self._is_dp_head:
+            if request.is_tensor:
+                assert isinstance(request.data, namedarray.NamedArray)
+                data = {k: v.cuda() for k, v in request.data.to_dict().items()}
+            else:
+                data = request.data
+        else:
+            if request.is_tensor:
+                data = {
+                    k: torch.empty(shape, dtype=_str_to_torch_dtype(dtype), device=self.__device)
+                    for (k, shape), dtype in zip(request.shapes.items(), request.dtypes.values())
+                }
+            else:
+                data = None
+
+        self.logger.info(
+            f"my rank is dp={self._dp_rank}, mp={self._mp_rank}, pp={self._pp_rank}, "
+            f"my group rank is {dist.get_rank(group=self._bgroup)}, "
+            f"broadcasting source is {self._bsrc}, my data is {request.data}"
+        )
+        if not request.is_tensor:
+            obj_lis = [data]
+            dist.broadcast_object_list(obj_lis, src=self._bsrc, group=self._bgroup)
+            data = obj_lis[0]
+        else:
+            for k in data:
+                dist.broadcast(data[k], src=self._bsrc, group=self._bgroup)
+            data = namedarray.from_dict(data)
+        request.data = data
+        self.logger.info(f"Model worker receive & broadcast time: {time.perf_counter() - btik}")
 
         tik = time.perf_counter()
         if self.is_master:
@@ -163,13 +228,17 @@ class ModelWorker(worker_base.Worker):
             raise e
 
         if self.is_master:
-            blogger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
-                         f" in ${time.perf_counter() - tik:.4f}$s")
+            blogger.info(
+                f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
+                f" in ${time.perf_counter() - tik:.4f}$s"
+            )
 
-        reply = request_reply_stream.Payload(request_id=request.request_id,
-                                             handle_name=request.handle_name,
-                                             data=res)
-        self.__stream.post(reply)
+        if self._is_dp_head:
+            # Discard returned data if not DP head.
+            reply = request_reply_stream.Payload(
+                request_id=request.request_id, handle_name=request.handle_name, data=res
+            )
+            self.__stream.post(reply)
 
         if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
             # following huggingface trl # ALWAYS COST 0.3+ SEC
@@ -184,12 +253,16 @@ class ModelWorker(worker_base.Worker):
         # logging gpu/cpu stats
         # self.print_monitor_info()
         tik = time.perf_counter()
-        blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
-            self.model_name,
-            round(get_accelerator().memory_allocated() / 1024**3, 2),
-            round(get_accelerator().max_memory_allocated() / 1024**3, 2),
-        )))
+        blogger.debug(
+            (
+                "Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
+                    self.model_name,
+                    round(get_accelerator().memory_allocated() / 1024**3, 2),
+                    round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+                )
+            )
+        )
         blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
 
-        sample_count = (request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 0)
+        sample_count = request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 1
         return worker_base.PollResult(sample_count=sample_count, batch_count=1)

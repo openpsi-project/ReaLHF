@@ -157,7 +157,7 @@ class ModelBackend:
 @dataclasses.dataclass
 class RequestReplyStream:
     push_stream_name: str
-    pull_stream_names: List[str]
+    pull_stream_name: str
     serialization_method: str = "raw_bytes"
 
 
@@ -346,20 +346,24 @@ class ExperimentConfig:
                 master_stream_id = MasterStreamID(model_name, dp_i)
                 model_streams[master_stream_id] = RequestReplyStream(
                     push_stream_name=str(master_stream_id),
-                    pull_stream_names=list(map(str, filter(lambda x: x.dp_rank == dp_i, model_stream_ids))),
+                    pull_stream_name=str(
+                        ModelStreamID(model_name, pp_rank=topo.get_dim('pipe') - 1, mp_rank=0, dp_rank=dp_i)),
                 )
             for mw, model_id in zip(mws, model_stream_ids):
                 mw.stream = RequestReplyStream(
                     push_stream_name=str(model_id),
-                    pull_stream_names=[str(MasterStreamID(model_name, mw.dp_rank))],
+                    pull_stream_name=str(MasterStreamID(model_name, mw.dp_rank)),
                 )
+
+        if len(self.data_worker) != 1:
+            raise RuntimeError("Only one data worker is supported now.")
 
         data_stream = RequestReplyStream(
             push_stream_name="master2data",
-            pull_stream_names=[f"data_{i}" for i in range(len(self.data_worker))],
+            pull_stream_name="data2master",
         )
         for i, d in enumerate(self.data_worker):
-            d.stream = RequestReplyStream(push_stream_name=f"data_{i}", pull_stream_names=[f"master2data"])
+            d.stream = RequestReplyStream(push_stream_name=f"data2master", pull_stream_name=f"master2data")
 
         for w in itertools.chain(self.model_worker, self.data_worker):
             assert w.stream is not None

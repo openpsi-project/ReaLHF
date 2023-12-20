@@ -34,7 +34,9 @@ class DataWorker(worker_base.Worker):
         return config.worker_info
 
     def __setup_stream(self):
-        self.__stream = request_reply_stream.make_worker_stream(self.config.worker_info, self.config.stream)
+        self.__stream = request_reply_stream.make_worker_stream(self.config.worker_info,
+                                                                self.config.stream,
+                                                                is_dp_head=True)
 
     def __setup_datasets(self):
         # initialize data sets
