@@ -11,7 +11,7 @@ import api.config
 
 EXP_NAME = "test_exp"
 TRIAL_NAME = "test_trial"
-SERIALIZATION_METHOD = "pickle_compress"
+SERIALIZATION_METHOD = "raw_bytes"
 DP_SIZE = 2
 PP_SIZE = 3
 MP_SIZE = 4
@@ -39,7 +39,8 @@ class TestSocketStream(unittest.TestCase):
                 handle_name="generate",
                 data=namedarray.from_dict({
                     "a": torch.randn(1000),
-                    "b": torch.randn(10000)
+                    "b": torch.randn(10000),
+                    "logits_mask": torch.zeros(4096, 32000, dtype=torch.bool),
                 }),
             ) for _ in range(DP_SIZE)
         ]
@@ -48,7 +49,8 @@ class TestSocketStream(unittest.TestCase):
                 handle_name="generate",
                 data=namedarray.from_dict({
                     "a": torch.randn(1000),
-                    "b": torch.randn(10000)
+                    "b": torch.randn(10000),
+                    "logits_mask": torch.zeros(4096, 32000, dtype=torch.bool),
                 }),
             ) for _ in range(DP_SIZE)
         ]
