@@ -26,7 +26,7 @@ def _dpo_loss_from_model_outputs(
     **kwargs,
 ):
     input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-    logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
+    logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids).float()
 
     logprob_sum = []
     offset = 0
@@ -70,13 +70,13 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
             res = module(packed_input_ids=data["packed_input_ids"], cu_seqlens=cu_seqlens)
             if res is None:
                 return None
-            logits = res.float()
+            logits = res
         else:
             logits: torch.FloatTensor = module(packed_input_ids=data["packed_input_ids"],
                                                cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits.float()
+                                               max_seqlen=max_seqlen).logits
 
-        logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_input_ids"])
+        logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_input_ids"]).float()
 
         logprob_sum = []
         offset = 0
@@ -118,7 +118,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
         else:
             logits: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
                                                cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits.float()
+                                               max_seqlen=max_seqlen).logits
 
             loss, stats = _dpo_loss_from_model_outputs(
                 logits=logits,

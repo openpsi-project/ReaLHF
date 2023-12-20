@@ -47,7 +47,7 @@ def _ppo_actor_loss_from_model_outputs(
     if logits_mask is not None:
         logits.masked_fill_(logits_mask.logical_not_(),
                             torch.finfo(logits.dtype).min)  # inplace operation for logits mask
-    new_logp = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
+    new_logp = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids).float()
 
     new_logp = new_logp * ppo_loss_mask
 
@@ -245,7 +245,7 @@ class PackedActorInterface(api.model.ModelInterface):
             seq_no_eos_mask=seq_no_eos_mask,
             packed_seq=packed_seq,
             cu_seqlens=cu_seqlens,
-            packed_logprobs=packed_logprobs.float(),
+            packed_logprobs=packed_logprobs,
             packed_logits_mask=packed_logits_mask.bool() if packed_logits_mask is not None else None,
             prompt_mask=prompt_mask,
         )
@@ -274,7 +274,7 @@ class PackedActorInterface(api.model.ModelInterface):
             packed_logits_mask = data["packed_logits_mask"]
             logits.masked_fill_(packed_logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
-        return from_dict(dict(logprobs=logprobs.float().cpu()))
+        return from_dict(dict(logprobs=logprobs.cpu()))
 
     def train_step(self, model: api.model.Model, data_: NamedArray) -> Dict:
         module = model.module
@@ -283,12 +283,12 @@ class PackedActorInterface(api.model.ModelInterface):
         module.eval()
         data_ = recursive_apply(data_, lambda x: x.to(model.device))
 
-        old_logp = data_["packed_logprobs"]
-        ref_logp = data_["packed_ref_logprobs"]
+        old_logp: torch.FloatTensor = data_["packed_logprobs"].float()
+        ref_logp: torch.FloatTensor = data_["packed_ref_logprobs"].float()
         prompt_mask = data_["prompt_mask"]
         cu_seqlens = data_["cu_seqlens"]
-        reward_score = data_["rewards"]
-        values = data_["values"]
+        reward_score = data_["rewards"].float()
+        values = data_["values"].float()
         seq_no_eos_mask = data_["seq_no_eos_mask"]
 
         if self.value_norm:
@@ -305,7 +305,7 @@ class PackedActorInterface(api.model.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
-        loss_mask = 1 - prompt_mask.float()
+        loss_mask = prompt_mask.logical_not()
         shift_one_indices = torch.cat([
             torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
             for i in range(cu_seqlens.shape[0] - 1)
@@ -537,7 +537,7 @@ class PackedCriticInterface(api.model.ModelInterface):
             scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
                                                cu_seqlens=cu_seqlens,
                                                max_seqlen=max_seqlen)
-        scores = scores.float().squeeze(-1)
+        scores = scores.squeeze(-1)
         return from_dict(dict(scores=scores.cpu()))
 
     def train_step(self, model: api.model.Model, data_: NamedArray) -> Dict:
@@ -547,12 +547,12 @@ class PackedCriticInterface(api.model.ModelInterface):
         module.eval()
         data_ = recursive_apply(data_, lambda x: x.to(model.device))
 
-        old_logp = data_["packed_logprobs"]
-        ref_logp = data_["packed_ref_logprobs"]
+        old_logp = data_["packed_logprobs"].float()
+        ref_logp = data_["packed_ref_logprobs"].float()
         prompt_mask = data_["prompt_mask"]
         cu_seqlens = data_["cu_seqlens"]
-        reward_score = data_["rewards"]
-        values = data_["values"]
+        reward_score = data_["rewards"].float()
+        values = data_["values"].float()
         seq_no_eos_mask = data_["seq_no_eos_mask"]
 
         if self.value_norm:
@@ -570,7 +570,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
 
-        loss_mask = 1 - prompt_mask.float()
+        loss_mask = prompt_mask.logical_not()
         shift_one_indices = torch.cat([
             torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
             for i in range(cu_seqlens.shape[0] - 1)
