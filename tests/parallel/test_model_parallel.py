@@ -26,7 +26,7 @@ if MODEL_TYPE == "llama":
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 32
+BATCH_SIZE = 128
 MIN_NEW_TOKENS = 10
 MAX_NEW_TOKENS = 128
 
@@ -55,7 +55,8 @@ def make_backend():
                                                   min_lr_ratio=0.0,
                                                   zero_stage=1,
                                                   engine_type="pipe",
-                                                  num_pipeline_stages=NUM_PP)))
+                                                  num_pipeline_stages=NUM_PP,
+                                                  num_pipeline_micro_batches=NUM_PP * 4)))
 
 
 def make_interface():
@@ -297,7 +298,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
             p.start()
 
         res = []
-        for _ in range(WORLD_SIZE):
+        for _ in range(NUM_MP):
             res.append(self.res_queue.get())
 
         for p in self.pipe_model_processes:
@@ -394,5 +395,5 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testInferenceAccordance")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testTrainStep")
     # unittest.main(defaultTest="ModelParallelFlashMQATTest.testLinearAccordance")

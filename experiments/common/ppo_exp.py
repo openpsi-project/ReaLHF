@@ -93,7 +93,6 @@ train_critic = ModelRPC(
 class PPOExperiment(Experiment):
     sft_model_path: Optional[str] = None
     rew_model_path: Optional[str] = None
-    ref_model_path: Optional[str] = None
 
     tokenizer_path: Optional[str] = None  # Since we use SFT model, we need to specify HF tokenizer path
 
@@ -139,6 +138,7 @@ class PPOExperiment(Experiment):
     ref_enable_bf16: bool = False
     ref_mp_size: int = 1
     ref_pp_size: int = 1
+    ref_num_pipeline_micro_batches: Optional[int] = None
     # reward model
     rew_dp_size: int = 1  # Since reward model is usually not large, we disable PP and TP for it.
     offload_reward: bool = False
@@ -194,8 +194,7 @@ class PPOExperiment(Experiment):
     value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
-
-    hybrid_engine: bool = False
+    # benchmark
     benchmark: bool = False
 
     def __post_init__(self):
@@ -260,7 +259,7 @@ class PPOExperiment(Experiment):
                 count=1,
                 scheduling=Scheduling.master_worker_default(
                     cpu=4,
-                    mem=200000,
+                    mem=100000,
                 ),
             ),
             model_worker=[
@@ -362,7 +361,7 @@ class PPOExperiment(Experiment):
                                                   partition_method=self.actor_partition_method)
 
         ref_model = get_flash_mqat_model_config(
-            model_path=self.sft_model_path if self.ref_model_path is None else self.ref_model_path,
+            model_path=self.sft_model_path,
             from_model_type=ref_model_type,
             tokenizer_path=self.tokenizer_path,
             pp_size=self.ref_pp_size,
@@ -490,6 +489,7 @@ class PPOExperiment(Experiment):
                 offload=self.offload_ref,
                 enable_bf16=self.ref_enable_bf16,
                 engine_type="pipe" if self.ref_pp_size > 1 else "deepspeed",
+                num_pipeline_micro_batches=self.ref_num_pipeline_micro_batches,
             ),
         )
         rw_backend = ModelBackend(
