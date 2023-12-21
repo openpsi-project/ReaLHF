@@ -11,8 +11,8 @@ import api.config as config_package
 
 # TODO: organize parallel testing codes, merge pipe_parallel_test.py and model_parallel_test.py
 
-NUM_MP = 1
-NUM_PP = 4
+NUM_MP = 4
+NUM_PP = 2
 NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
@@ -28,11 +28,13 @@ if MODEL_TYPE == "llama":
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 32
+BATCH_SIZE = 512
 MIN_NEW_TOKENS = 10
-MAX_NEW_TOKENS = 128
+MAX_NEW_TOKENS = 30
 
-USE_BF16 = True
+USE_GRADIENT_CHECKPOINTING = True
+USE_BF16 = False
+USE_SEQ_PARALLEL = True
 
 
 def make_backend():
@@ -47,6 +49,7 @@ def make_backend():
                     warmup_steps_proportion=0.0,
                     min_lr_ratio=0.0,
                     # TODO: test zero_stage = 2 or 3 later
+                    gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
                     zero_stage=1,
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
@@ -63,9 +66,11 @@ def make_backend():
                                             min_lr_ratio=0.0,
                                             zero_stage=1,
                                             engine_type="pipe",
+                                            gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
                                             num_pipeline_stages=NUM_PP,
                                             enable_fp16=not USE_BF16,
                                             enable_bf16=USE_BF16,
+                                            sequence_parallel=USE_SEQ_PARALLEL,
                                         )))
 
 
@@ -92,6 +97,7 @@ def make_model(device):
             config_package.ModelWrapper("model_parallel",
                                         args=dict(
                                             model_path=MODEL_PARALLEL_PATH,
+                                            sequence_parallel=USE_SEQ_PARALLEL,
                                             is_critic=False,
                                             init_critic_from_actor=False,
                                             init_from_scratch=False,
@@ -117,6 +123,7 @@ def make_model(device):
                                             num_pp=NUM_PP,
                                             num_mp=NUM_MP,
                                             num_dp=NUM_DP,
+                                            sequence_parallel=USE_SEQ_PARALLEL,
                                             is_critic=False,
                                             init_critic_from_actor=False,
                                             init_from_scratch=False,
@@ -163,17 +170,16 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     #                       max_seqlen=max_seqlen).logits.float()
     res = interface.inference(model, data)
     logits = res['logits']
-    print(f"rank {rank} mp FIRST inference time cost {time.monotonic() - st:.4f}")
+    print(f"rank {rank} mp FIRST inference "
+          f"time cost {time.monotonic() - st:.4f}")
+    if logits is not None:
+        print(f"rank {rank} mp FIRST inference logits shape {logits.shape}")
 
-    for _ in range(10):
-        st = time.monotonic()
-        res = interface.inference(model, data)
-        logits = res['logits']
-        print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
-    # for _ in range(10):
+    # for i in range(10):
+    #     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
     #     st = time.monotonic()
-    #     logits = model.module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-    #                         max_seqlen=max_seqlen).logits.float()
+    #     res = interface.inference(model, data)
+    #     logits = res['logits']
     #     print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
 
     import base.constants
@@ -210,7 +216,8 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
         print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
               f"log probs shape {outputs['log_probs'].shape}")
 
-    for _ in range(3):
+    for i in range(10):
+        data = init_data(model.tokenizer, device, BATCH_SIZE + i, seed=seed + i)
         st = time.monotonic()
         outputs = interface.generate(model, data, gconfig=gconfig)
         t = time.monotonic() - st
@@ -328,6 +335,8 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
         for p in self.pipe_model_processes:
             p.join()
 
+        print(f"res[0] shape {res[0].shape}")
+
     @torch.no_grad()
     def testInferenceAccordance(self):
         clear_name_resolve()
@@ -360,14 +369,15 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
                                 max_seqlen=max_seqlen).logits.float()
         print(f"baseline FIRST inference time cost {time.monotonic() - st:.4f}")
 
-        for _ in range(10):
-            st = time.monotonic()
-            r = self.baseline_model(packed_input_ids=packed_input_ids,
-                                    cu_seqlens=cu_seqlens,
-                                    max_seqlen=max_seqlen).logits.float()
-            print(f"baseline inference time cost {time.monotonic() - st:.4f}")
+        # for _ in range(10):
+        #     st = time.monotonic()
+        #     r = self.baseline_model(packed_input_ids=packed_input_ids,
+        #                             cu_seqlens=cu_seqlens,
+        #                             max_seqlen=max_seqlen).logits.float()
+        #     print(f"baseline inference time cost {time.monotonic() - st:.4f}")
 
-        print(f"diff: {r - res[0]}, {(r - res[0]).abs().max()}, mean {(r - res[0]).abs().mean()}")
+        print(f"diff: {r - res[0]}, max/correct_max {(r - res[0]).abs().max()}/{r.abs().max()}, "
+              f" mean {(r - res[0]).abs().mean()},")
 
         # import base.consistency
         # base.consistency.check_all_model_parallel(NUM_MP)
@@ -419,5 +429,5 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testTrainStep")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testGenerate")
     # unittest.main(defaultTest="ModelParallelFlashMQATTest.testLinearAccordance")

@@ -5,14 +5,16 @@ import os
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
-import transformers
 
+from impl.model.nn.flash_mqat.flash_mqat_api import (DeepSpeedChatLikeFlashMQATCriticModel,
+                                                     HuggingfaceLikeFlashMQATForCausalLM)
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel
-from impl.model.utils.data import PipeCacheData, PipeTransferData
+from impl.model.utils.data import DuckGenerationOutput, PipeCacheData, PipeTransferData
 from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormColumnLinear,
                                                      LayerNormParallelMLP, LlamaLayerNormParallelMLP,
                                                      ParallelEmbedding, RowParallelLinear)
 from impl.model.utils.modules import LlamaRMSNorm
+from impl.model.utils.tensor import pad_sequence_parallel_input
 import base.constants
 import base.logging as logging
 
@@ -25,7 +27,9 @@ except ModuleNotFoundError:
 
 from base.monitor import gpu_memory_mb
 from impl.model.utils.save_load import load_from_disk, save_to_disk
-import impl.model.utils.random
+import impl.model.utils.model_parallel.mappings as tensor_parallel
+
+# rom impl.model.utils.random import get_cuda_rng_tracker
 
 logger = logging.getLogger("ParallelFlashMQAT")
 
@@ -35,6 +39,7 @@ class ParallelVocabPositionEmbedding(nn.Module):
     def __init__(
         self,
         config: FlashMQATConfig,
+        sequence_parallel: Optional[bool] = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -42,6 +47,7 @@ class ParallelVocabPositionEmbedding(nn.Module):
             self.dtype = dtype = torch.float16
         super().__init__()
         self.n_positions = config.n_positions
+        self.sequence_parallel = sequence_parallel
         self.wte = ParallelEmbedding(config.vocab_size, config.hidden_dim, dtype=dtype, device=device)
 
         self.apply_abs_pos_embed = not config.apply_rotary
@@ -118,7 +124,18 @@ class ParallelVocabPositionEmbedding(nn.Module):
         inputs_embeds = self.wte(y.input_ids)
         if self.apply_abs_pos_embed:
             inputs_embeds = inputs_embeds + self.wpe(y.position_ids)
-        x.pp_output = self.embed_drop(inputs_embeds)
+
+        if self.sequence_parallel:
+            inputs_embeds = tensor_parallel.scatter_to_sequence_parallel_region(inputs_embeds)
+            # `scatter_to_sequence_parallel_region` returns a view, which prevents
+            # the original tensor from being garbage collected. Clone to facilitate GC.
+            # Has a small runtime cost (~0.5%).
+            # if self.config.clone_scatter_output_in_embedding:
+            #     embeddings = embeddings.clone()
+            # with tensor_parallel.get_cuda_rng_tracker().fork():
+            x.pp_output = self.embed_drop(inputs_embeds)
+        else:
+            x.pp_output = self.embed_drop(inputs_embeds)
         return x
 
 
@@ -145,6 +162,8 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         rotary_interleaved: bool = False,  # False for LLaMA, GPT-neoX; True for GPT-J
         rotary_scaling: Optional[float] = None,
         rotary_scaling_type: Optional[str] = None,
+        # parallel settings
+        sequence_parallel: Optional[bool] = False,
         # device and dtype
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
@@ -167,6 +186,8 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
             hidden_dim,
             head_dim * n_q_heads,
             bias=use_attention_bias,
+            async_tensor_model_parallel_allreduce=not sequence_parallel,
+            sequence_parallel=sequence_parallel,
             dtype=dtype,
             device=device,
         )
@@ -179,11 +200,15 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
             self.k_attn = ColumnParallelLinear(hidden_dim,
                                                head_dim * n_kv_heads,
                                                bias=use_attention_bias,
+                                               async_tensor_model_parallel_allreduce=not sequence_parallel,
+                                               sequence_parallel=sequence_parallel,
                                                dtype=dtype,
                                                device=device)
             self.v_attn = ColumnParallelLinear(hidden_dim,
                                                head_dim * n_kv_heads,
                                                bias=use_attention_bias,
+                                               async_tensor_model_parallel_allreduce=not sequence_parallel,
+                                               sequence_parallel=sequence_parallel,
                                                dtype=dtype,
                                                device=device)
         else:
@@ -205,6 +230,7 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         self.c_proj = RowParallelLinear(hidden_dim,
                                         hidden_dim,
                                         bias=use_attention_bias,
+                                        sequence_parallel=sequence_parallel,
                                         dtype=dtype,
                                         device=device)
         self.resid_dropout = nn.Dropout(resid_pdrop)
@@ -371,6 +397,7 @@ class ParallelFlashMQATBlock(nn.Module):
         config: FlashMQATConfig,
         layer_index: int,
         output_layernorm: bool = False,
+        sequence_parallel: Optional[bool] = False,
         ckpt_attn: bool = False,
         ckpt_mlp: bool = False,
         dtype: Optional[torch.dtype] = None,
@@ -396,6 +423,7 @@ class ParallelFlashMQATBlock(nn.Module):
             rotary_interleaved=config.rotary_interleaved,
             rotary_scaling=config.rotary_scaling,
             rotary_scaling_type=config.rotary_scaling_type,
+            sequence_parallel=sequence_parallel,
             dtype=dtype,
             device=device,
         )
@@ -406,6 +434,7 @@ class ParallelFlashMQATBlock(nn.Module):
                 resid_pdrop=config.resid_pdrop,
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
+                sequence_parallel=sequence_parallel,
                 dtype=dtype,
                 device=device,
             )
@@ -415,6 +444,7 @@ class ParallelFlashMQATBlock(nn.Module):
                 intermediate_dim=config.intermediate_dim,
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
+                sequence_parallel=sequence_parallel,
                 dtype=dtype,
                 device=device,
             )
@@ -470,7 +500,6 @@ class ParallelFlashMQATBlock(nn.Module):
                  v_cache: Optional[torch.Tensor], cache_seqlens: Optional[torch.Tensor], max_seqlen: int,
                  attention_mask: Optional[torch.Tensor]) -> PipeTransferData:
         h = pp_input
-
         attn_out, k, v = self.attn(
             hidden_states=h,
             cu_seqlens=cu_seqlens,
@@ -484,8 +513,15 @@ class ParallelFlashMQATBlock(nn.Module):
         h = self.mlp(h) + h
         if self.output_layernorm:
             h = self.ln_f(h)
-
         return h, k, v
+
+
+class SequenceParallelOutputHead(nn.Linear):
+
+    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
+        all_gather_buffer = tensor_parallel.gather_from_sequence_parallel_region(x.pp_input)
+        x.pp_output = nn.functional.linear(all_gather_buffer, self.weight, self.bias)
+        return x
 
 
 class ParallelFlashMQATBase(nn.Module):
@@ -493,6 +529,7 @@ class ParallelFlashMQATBase(nn.Module):
     def __init__(
         self,
         config: FlashMQATConfig,
+        sequence_parallel: Optional[bool] = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -502,6 +539,7 @@ class ParallelFlashMQATBase(nn.Module):
         self.device = device
         self.embedding_layer = ParallelVocabPositionEmbedding(
             config,
+            sequence_parallel=sequence_parallel,
             dtype=dtype,
             device=device,
         )
@@ -510,6 +548,7 @@ class ParallelFlashMQATBase(nn.Module):
                 config,
                 layer_index=i,
                 output_layernorm=(i == config.n_layers - 1),
+                sequence_parallel=sequence_parallel,
                 ckpt_attn=(i > 0 and config.ckpt_attn),
                 ckpt_mlp=(i > 0 and config.ckpt_mlp),
                 dtype=dtype,
@@ -541,19 +580,60 @@ class ModelParallelModule(nn.Module):
 
     def __init__(
         self,
-        module: FlashMQATModel,
+        module: Union[HuggingfaceLikeFlashMQATForCausalLM, DeepSpeedChatLikeFlashMQATCriticModel],
         config: FlashMQATConfig,
+        sequence_parallel: Optional[bool] = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
 
+        self.is_critic = module.is_critic
+        self.sequence_parallel = sequence_parallel
         self.module = module
-        self.module.transformer = ParallelFlashMQATBase(config, dtype=dtype, device=device)  # overwrite
+        self.module.transformer = ParallelFlashMQATBase(config,
+                                                        sequence_parallel=sequence_parallel,
+                                                        dtype=dtype,
+                                                        device=device)  # overwrite
+        if sequence_parallel:
+            self.module.head = SequenceParallelOutputHead(
+                config.hidden_dim,
+                1 if self.is_critic else config.vocab_size,
+                bias=False,
+                device=device,
+                dtype=dtype,
+            )
+
         self.num_checkpoint_shards = 1
 
-    def forward(self, *args, **kwargs):
-        return self.module.forward(*args, **kwargs)
+    def forward(self,
+                input_ids: Optional[torch.Tensor] = None,
+                attention_mask: Optional[torch.Tensor] = None,
+                packed_input_ids: Optional[torch.Tensor] = None,
+                cu_seqlens: Optional[torch.Tensor] = None,
+                max_seqlen: Optional[int] = None):
+        assert packed_input_ids is not None and cu_seqlens is not None, \
+               "Model parallel module only accept packed inputs."
+        pad_size = 0
+        if self.sequence_parallel:
+            packed_input_ids, cu_seqlens, max_seqlen, pad_size = pad_sequence_parallel_input(
+                packed_input_ids, cu_seqlens, max_seqlen)
+        output = self.module.forward(input_ids, attention_mask, packed_input_ids, cu_seqlens, max_seqlen)
+
+        if self.sequence_parallel and pad_size > 0:
+            if torch.is_tensor(output):
+                output = output[:-pad_size]
+            else:
+                output.logits = output.logits[:-pad_size]
+        return output
+
+    def generate(self, *args, **kwargs):
+        if self.sequence_parallel:
+            raise NotImplementedError("Generation is not supported yet for pure model+sequence parallel.")
+        return self.module.generate(*args, **kwargs)
+
+    def gradient_checkpointing_enable(self, attn: bool = True, mlp: bool = True):
+        self.module.gradient_checkpointing_enable()
 
     def load(self, load_dir: str, init_critic_from_actor: bool = False):
         mp_rank = base.constants.model_parallel_rank()

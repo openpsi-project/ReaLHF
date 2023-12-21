@@ -6,7 +6,8 @@ from base.monitor import process_memory_mb
 from base.topology import PipeModelDataParallelTopology
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel, OutputHead
 from impl.model.nn.flash_mqat.flash_mqat_parallel import (ModelParallelModule, ParallelFlashMQATBlock,
-                                                          ParallelVocabPositionEmbedding)
+                                                          ParallelVocabPositionEmbedding,
+                                                          SequenceParallelOutputHead)
 from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
@@ -19,13 +20,18 @@ def make_causal_flash_mqat_parallel_pipe_module(
     config: FlashMQATConfig,
     topology: PipeModelDataParallelTopology,
     is_critic: bool = False,
+    sequence_parallel: bool = False,
     partition_method: str = "parameters",
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
 ):
     layer_specs = []
     # vocab pos embedding
-    embedding_layer = LayerSpec(ParallelVocabPositionEmbedding, config, dtype=dtype, device=device)
+    embedding_layer = LayerSpec(ParallelVocabPositionEmbedding,
+                                config,
+                                sequence_parallel=sequence_parallel,
+                                dtype=dtype,
+                                device=device)
 
     layer_specs.append(embedding_layer)
 
@@ -35,6 +41,7 @@ def make_causal_flash_mqat_parallel_pipe_module(
             config,
             layer_index=i,
             output_layernorm=(i == config.n_layers - 1),
+            sequence_parallel=sequence_parallel,
             ckpt_attn=(i > 0 and config.ckpt_attn),
             ckpt_mlp=(i > 0 and config.ckpt_mlp),
             dtype=dtype,
@@ -42,8 +49,9 @@ def make_causal_flash_mqat_parallel_pipe_module(
         )
         layer_specs.append(flash_mqat_block)
 
+    head_cls = SequenceParallelOutputHead if sequence_parallel else OutputHead
     head = LayerSpec(
-        OutputHead,
+        head_cls,
         config.hidden_dim,
         # 1 if is_critic else config.vocab_size,
         # here preserve the original head for critic and swap it in pipeline modules
@@ -77,6 +85,7 @@ def model_pipe_wrap_fn(
     num_mp: int,
     num_dp: int,
     is_critic: bool,
+    sequence_parallel: bool = False,
     partition_method: str = "parameters",
     init_critic_from_actor: bool = False,
     init_from_scratch: bool = False,
@@ -92,6 +101,7 @@ def model_pipe_wrap_fn(
         module = make_causal_flash_mqat_parallel_pipe_module(config,
                                                              topology,
                                                              is_critic,
+                                                             sequence_parallel=sequence_parallel,
                                                              partition_method=partition_method,
                                                              dtype=model.dtype,
                                                              device=model.device)
@@ -111,6 +121,7 @@ api.model.register_wrapper("model_pipe_parallel", model_pipe_wrap_fn)
 def model_parallel_wrap_fn(
     model_path: str,
     is_critic: bool,
+    sequence_parallel: bool = False,
     init_critic_from_actor: bool = False,
     init_from_scratch: bool = False,
 ):
@@ -118,9 +129,13 @@ def model_parallel_wrap_fn(
     def model_parallel_wrap_fn_(model: api.model.Model) -> api.model.Model:
         if not isinstance(model.module, FlashMQATModel):
             raise RuntimeError(f"Only FlashMQAT models can be wrapped as "
-                               f"pipeline module, provided type {type(model.module)}")
+                               f"model parallel module, provided type {type(model.module)}")
         config = model.module.config
-        module = ModelParallelModule(model.module, config, dtype=model.dtype, device=model.device)
+        module = ModelParallelModule(model.module,
+                                     config,
+                                     sequence_parallel=sequence_parallel,
+                                     dtype=model.dtype,
+                                     device=model.device)
         if not init_from_scratch:
             process_memory_mb("before_load")
             module.load(model_path, init_critic_from_actor=init_critic_from_actor)

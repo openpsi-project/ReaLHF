@@ -83,3 +83,57 @@ def gather_split_1d_tensor(tensor):
     # internal copies and can potentially cause slow down.
     torch.distributed._all_gather_base(gathered, tensor, group=base.constants.model_parallel_group())
     return gathered
+
+
+def pad_sequence_parallel_input(packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int):
+    """ Sequence parallel requires packed_input_ids has a shape of 1 dimension [total_seq_len], and 
+    total_seq_len should be divisible by model_parallel_world_size. This function is used to pad packed_input_ids
+    to suitable length with an empty sequence, and return new packed_input_ids, cu_seqlens and max_seqlen.
+    
+    Args:
+        packed_input_ids (torch.Tensor): unpadded packed_input_ids
+        cu_seqlens (torch.Tensor): unpadded cu_seqlens
+        max_seqlen (int): unpadded max_seqlen
+    
+    Returns:
+        (torch.Tensor, torch.Tensor, int, int): padded (packed_input_ids, cu_seqlens, max_seqlen, pad_size)
+    """
+    mp_world_size = base.constants.model_parallel_world_size()
+    pad_size = 0
+    if len(packed_input_ids) % mp_world_size != 0:
+        pad_size = mp_world_size - len(packed_input_ids) % mp_world_size
+        packed_input_ids = torch.nn.functional.pad(packed_input_ids, (0, pad_size), value=1)
+        cu_seqlens = torch.nn.functional.pad(cu_seqlens, (0, 1), value=len(packed_input_ids))
+        max_seqlen = max_seqlen if pad_size < max_seqlen else pad_size
+    return packed_input_ids, cu_seqlens, max_seqlen, pad_size
+
+
+def pad_sequence_parallel_generate_input(packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor,
+                                         max_seqlen: int):
+    """ Only for pipeline generate input when model+seq parallel is enabled. To make sure inputs for seq parallel model 
+    have a shape with first dimension divisible by model_parallel_world_size, the packed_input_ids should have length 
+    divisible by model_parallel_world_size, and contains number of sequences divisible by model_parallel_world_size.
+    
+    Args:
+        packed_input_ids (torch.Tensor): unpadded packed_input_ids
+        cu_seqlens (torch.Tensor): unpadded cu_seqlens
+        max_seqlen (int): unpadded max_seqlen
+    
+    Returns:
+        (torch.Tensor, torch.Tensor, int, int, int): padded (packed_input_ids, cu_seqlens, max_seqlen, pad_size, pad_seq_size)
+    """
+    mp_world_size = base.constants.model_parallel_world_size()
+    pad_size, pad_seq_size = 0, 0
+    if len(packed_input_ids) % mp_world_size != 0 or (len(cu_seqlens) - 1) % mp_world_size != 0:
+        pad_size = mp_world_size - len(packed_input_ids) % mp_world_size
+        pad_seq_size = mp_world_size - (len(cu_seqlens) - 1) % mp_world_size
+        if pad_size < pad_seq_size:
+            pad_size += mp_world_size
+        pad_cu_seqlens = torch.tensor(list(range(1, pad_seq_size)) + [pad_size]) + len(packed_input_ids)
+        pad_cu_seqlens = pad_cu_seqlens.to(dtype=cu_seqlens.dtype, device=cu_seqlens.device)
+        packed_input_ids = torch.nn.functional.pad(packed_input_ids, (0, pad_size), value=1)
+        cu_seqlens = torch.cat([cu_seqlens, pad_cu_seqlens], dim=0)
+        max_seqlen = max_seqlen if (pad_size - pad_seq_size + 1) < max_seqlen else (pad_size - pad_seq_size +
+                                                                                    1)
+        print(f"padded cu_seqlens = {cu_seqlens}")
+    return packed_input_ids, cu_seqlens, max_seqlen, pad_size, pad_seq_size

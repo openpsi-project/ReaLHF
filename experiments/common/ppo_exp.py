@@ -195,6 +195,7 @@ class PPOExperiment(Experiment):
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
     # benchmark
+    hybrid_engine: bool = False
     benchmark: bool = False
 
     def __post_init__(self):

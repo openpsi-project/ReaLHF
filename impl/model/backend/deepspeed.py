@@ -41,6 +41,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     engine_type: str = "deepspeed"
     num_pipeline_stages: int = 1
     num_pipeline_micro_batches: Optional[int] = None
+    sequence_parallel: Optional[bool] = False
     # stream pipe engine require model configs
     max_seq_len: int = 512
     max_new_tokens: int = 512
@@ -134,6 +135,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             lr_scheduler=lr_scheduler,
             engine_type=self.engine_type,
             num_pipeline_micro_batches=self.num_pipeline_micro_batches,
+            sequence_parallel=self.sequence_parallel,
         )
 
         if self.engine_type == "pipe" or self.engine_type == "stream_pipe":

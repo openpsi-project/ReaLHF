@@ -329,44 +329,32 @@ class FlashMQATBlock(nn.Module):
 
         self.ckpt_attn = ckpt_attn
         self.ckpt_mlp = ckpt_mlp
+        self.ckpt_full = False
 
     def gradient_checkpointing_enable(self, attn: bool = True, mlp: bool = True):
-        self.ckpt_attn = attn
-        self.ckpt_mlp = mlp
+        # self.ckpt_attn = attn
+        # self.ckpt_mlp = mlp
+        self.ckpt_full = True
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
-        h = x.pp_input
-        if self.ckpt_attn:
-            attn_out, k, v = torch.utils.checkpoint.checkpoint(
-                self.attn,
-                h,
-                x.cu_seqlens,
-                y.k_cache,
-                y.v_cache,
-                y.cache_seqlens,
-                x.attention_mask,
-                x.max_seqlen,
-                use_reentrant=True,
-            )
+        pp_input = x.pp_input
+        cu_seqlens = x.cu_seqlens
+        k_cache = y.k_cache
+        v_cache = y.v_cache
+        cache_seqlens = y.cache_seqlens
+        max_seqlen = x.max_seqlen
+        attention_mask = x.attention_mask
+        if self.ckpt_full:
+            pp_output, k, v = torch.utils.checkpoint.checkpoint(self._forward, pp_input, cu_seqlens, k_cache,
+                                                                v_cache, cache_seqlens, max_seqlen,
+                                                                attention_mask
+                                                                # use_reentrant=True
+                                                                )
         else:
-            attn_out, k, v = self.attn(
-                hidden_states=h,
-                cu_seqlens=x.cu_seqlens,
-                max_seqlen=x.max_seqlen,
-                k_cache=y.k_cache,
-                v_cache=y.v_cache,
-                cache_seqlens=y.cache_seqlens,
-                attention_mask=x.attention_mask,
-            )
-        h = h + attn_out
-        if self.ckpt_mlp:
-            h = torch.utils.checkpoint.checkpoint(self.mlp, h, use_reentrant=True) + h
-        else:
-            h = self.mlp(h) + h
-        if self.output_layernorm:
-            h = self.ln_f(h)
-        x.pp_output = h
-        # Set kv cache during the first forward pass of generation.
+            pp_output, k, v = self._forward(pp_input, cu_seqlens, k_cache, v_cache, cache_seqlens, max_seqlen,
+                                            attention_mask)
+
+        x.pp_output = pp_output
         if x.store_kv_cache:
             if y.k_cache is None:
                 y.k_cache = k.detach()
@@ -375,6 +363,25 @@ class FlashMQATBlock(nn.Module):
             if y.cache_seqlens is None and x.cu_seqlens is not None:
                 y.cache_seqlens = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
         return x
+
+    def _forward(self, pp_input: torch.Tensor, cu_seqlens: torch.Tensor, k_cache: Optional[torch.Tensor],
+                 v_cache: Optional[torch.Tensor], cache_seqlens: Optional[torch.Tensor], max_seqlen: int,
+                 attention_mask: Optional[torch.Tensor]) -> PipeTransferData:
+        h = pp_input
+        attn_out, k, v = self.attn(
+            hidden_states=h,
+            cu_seqlens=cu_seqlens,
+            max_seqlen=max_seqlen,
+            k_cache=k_cache,
+            v_cache=v_cache,
+            cache_seqlens=cache_seqlens,
+            attention_mask=attention_mask,
+        )
+        h = h + attn_out
+        h = self.mlp(h) + h
+        if self.output_layernorm:
+            h = self.ln_f(h)
+        return h, k, v
 
 
 class VocabPositionEmbedding(nn.Module):
@@ -520,7 +527,7 @@ class FlashMQATBase(nn.Module):
 class OutputHead(nn.Linear):
     # TODO: do we need to care about the initialization scale?
 
-    def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
+    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
         return x
 
