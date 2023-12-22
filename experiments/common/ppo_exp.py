@@ -161,7 +161,7 @@ class PPOExperiment(Experiment):
     actor_zero_stage: int = 2
     actor_partition_method: Optional[str] = "parameters"
     offload_actor_param: bool = False
-    offload_actor_optimizer_state: bool = False
+    offload_actor_optimizer_states: bool = False
     # critic optimizer
     critic_lr: float = 5e-6
     critic_weight_decay: float = 0.0
@@ -418,6 +418,7 @@ class PPOExperiment(Experiment):
             is_rew_lora=self.is_rew_lora,
             rew_lora_path=self.rew_lora_path,
             v_head_path=self.rew_head_path,
+            sequence_parallel=False,
             dtype="bf16" if self.rew_enable_bf16 else "fp16",
         )
 
@@ -461,7 +462,7 @@ class PPOExperiment(Experiment):
                       num_pipeline_stages=self.actor_pp_size,
                       engine_type="pipe" if self.actor_pp_size > 1 else "deepspeed",
                       offload_param=self.offload_actor_param,
-                      offload_optimizer_state=self.offload_actor_optimizer_state,
+                      offload_optimizer_state=self.offload_actor_optimizer_states,
                       enable_hybrid_engine=self.hybrid_engine,
                       num_pipeline_micro_batches=self.actor_num_pipeline_micro_batches,
                       enable_fp16=self.actor_enable_fp16,

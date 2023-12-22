@@ -170,6 +170,13 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
     engine_type: str = "deepspeed"
     num_pipeline_stages: int = 1
     num_pipeline_micro_batches: Optional[int] = None
+    sequence_parallel: bool = False
+
+    def __post_init__(self):
+        if base.constants.model_parallel_world_size() == 1 and self.sequence_parallel:
+            logger.warning("Sequence parallel only works with tensor model parallelism, but currently "
+                           f"model_parallel_world_size = {base.constants.model_parallel_world_size()}. ")
+            self.sequence_parallel = False
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -184,6 +191,7 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
             config=ds_config,
             engine_type=self.engine_type,
             num_pipeline_micro_batches=self.num_pipeline_micro_batches,
+            sequence_parallel=self.sequence_parallel,
         )
         model.module = module
         return model
