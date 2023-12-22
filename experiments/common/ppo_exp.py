@@ -121,6 +121,7 @@ class PPOExperiment(Experiment):
     actor_enable_bf16: bool = False
     actor_gradient_checkpointing: bool = True
     actor_num_pipeline_micro_batches: Optional[int] = None
+    actor_use_sequence_parallel: bool = False
     # critic model
     critic_dp_size: int = 1
     critic_mp_size: int = 1
@@ -132,6 +133,7 @@ class PPOExperiment(Experiment):
     critic_enable_bf16: bool = False
     critic_gradient_checkpointing: bool = True
     critic_num_pipeline_micro_batches: Optional[int] = None
+    critic_use_sequence_parallel: bool = False
     # ref model
     ref_dp_size: int = 1
     offload_ref: bool = False
@@ -139,6 +141,7 @@ class PPOExperiment(Experiment):
     ref_mp_size: int = 1
     ref_pp_size: int = 1
     ref_num_pipeline_micro_batches: Optional[int] = None
+    ref_use_sequence_parallel: bool = False
     # reward model
     rew_dp_size: int = 1  # Since reward model is usually not large, we disable PP and TP for it.
     offload_reward: bool = False
@@ -347,19 +350,23 @@ class PPOExperiment(Experiment):
             else:
                 ref_model_type = "self"
 
-        actor_model = get_flash_mqat_model_config(model_path=self.sft_model_path,
-                                                  from_model_type=actor_model_type,
-                                                  tokenizer_path=self.tokenizer_path,
-                                                  pp_size=self.actor_pp_size,
-                                                  mp_size=self.actor_mp_size,
-                                                  dp_size=self.actor_dp_size,
-                                                  is_critic=False,
-                                                  use_lora=self.actor_use_lora,
-                                                  lora_dim=self.actor_lora_dim,
-                                                  lora_scaling=self.actor_lora_scaling,
-                                                  is_sft_lora=self.is_sft_lora,
-                                                  sft_lora_path=self.sft_lora_path,
-                                                  partition_method=self.actor_partition_method)
+        actor_model = get_flash_mqat_model_config(
+            model_path=self.sft_model_path,
+            from_model_type=actor_model_type,
+            tokenizer_path=self.tokenizer_path,
+            pp_size=self.actor_pp_size,
+            mp_size=self.actor_mp_size,
+            dp_size=self.actor_dp_size,
+            is_critic=False,
+            use_lora=self.actor_use_lora,
+            lora_dim=self.actor_lora_dim,
+            lora_scaling=self.actor_lora_scaling,
+            is_sft_lora=self.is_sft_lora,
+            sft_lora_path=self.sft_lora_path,
+            partition_method=self.actor_partition_method,
+            sequence_parallel=self.actor_use_sequence_parallel,
+            dtype="bf16" if self.actor_enable_bf16 else "fp16",
+        )
 
         ref_model = get_flash_mqat_model_config(
             model_path=self.sft_model_path,
@@ -374,6 +381,8 @@ class PPOExperiment(Experiment):
             lora_scaling=self.actor_lora_scaling,
             is_sft_lora=self.is_sft_lora,
             sft_lora_path=self.sft_lora_path,
+            sequence_parallel=self.ref_use_sequence_parallel,
+            dtype="bf16" if self.ref_enable_bf16 else "fp16",
         )
 
         if self.benchmark:
@@ -409,77 +418,79 @@ class PPOExperiment(Experiment):
             is_rew_lora=self.is_rew_lora,
             rew_lora_path=self.rew_lora_path,
             v_head_path=self.rew_head_path,
+            dtype="bf16" if self.rew_enable_bf16 else "fp16",
         )
 
-        critic_model = get_flash_mqat_model_config(model_path=self.rew_model_path,
-                                                   from_model_type=critic_from_type,
-                                                   tokenizer_path=self.tokenizer_path,
-                                                   pp_size=self.critic_pp_size,
-                                                   mp_size=self.critic_mp_size,
-                                                   dp_size=self.critic_dp_size,
-                                                   is_critic=True,
-                                                   use_lora=self.critic_use_lora,
-                                                   lora_dim=self.critic_lora_dim,
-                                                   lora_scaling=self.critic_lora_scaling,
-                                                   is_sft_lora=self.is_sft_lora,
-                                                   sft_lora_path=self.sft_lora_path,
-                                                   is_rew_lora=self.is_rew_lora,
-                                                   rew_lora_path=self.rew_lora_path,
-                                                   v_head_path=self.rew_head_path,
-                                                   partition_method=self.critic_partition_method
-                                                   # NOTE: critic is not scaled as rewards
-                                                   )
+        critic_model = get_flash_mqat_model_config(
+            model_path=self.rew_model_path,
+            from_model_type=critic_from_type,
+            tokenizer_path=self.tokenizer_path,
+            pp_size=self.critic_pp_size,
+            mp_size=self.critic_mp_size,
+            dp_size=self.critic_dp_size,
+            is_critic=True,
+            use_lora=self.critic_use_lora,
+            lora_dim=self.critic_lora_dim,
+            lora_scaling=self.critic_lora_scaling,
+            is_sft_lora=self.is_sft_lora,
+            sft_lora_path=self.sft_lora_path,
+            is_rew_lora=self.is_rew_lora,
+            rew_lora_path=self.rew_lora_path,
+            v_head_path=self.rew_head_path,
+            partition_method=self.critic_partition_method,
+            sequence_parallel=self.critic_use_sequence_parallel,
+            dtype="bf16" if self.critic_enable_bf16 else "fp16",
+            # NOTE: critic is not scaled as rewards
+        )
 
         # actor train backend
         actor_backend = ModelBackend(
             "ds_train",
-            args=dict(
-                optimizer_name="adam",
-                optimizer_config=dict(
-                    lr=self.actor_lr,
-                    weight_decay=self.actor_weight_decay,
-                    eps=self.actor_adam_eps,
-                    betas=self.actor_adam_betas,
-                ),
-                lr_scheduler_type=self.actor_lr_scheduler_type,
-                warmup_steps_proportion=self.actor_warmup_proportion,
-                min_lr_ratio=self.actor_min_lr_ratio,
-                zero_stage=min(1, self.actor_zero_stage) if self.actor_pp_size > 0 else 2,
-                gradient_checkpointing=self.actor_gradient_checkpointing,
-                num_pipeline_stages=self.actor_pp_size,
-                engine_type="pipe" if self.actor_pp_size > 1 else "deepspeed",
-                offload_param=self.offload_actor_param,
-                offload_optimizer_state=self.offload_actor_optimizer_state,
-                enable_hybrid_engine=self.hybrid_engine,
-                num_pipeline_micro_batches=self.actor_num_pipeline_micro_batches,
-                enable_fp16=self.actor_enable_fp16,
-                enable_bf16=self.actor_enable_bf16,
-            ),
+            args=dict(optimizer_name="adam",
+                      optimizer_config=dict(
+                          lr=self.actor_lr,
+                          weight_decay=self.actor_weight_decay,
+                          eps=self.actor_adam_eps,
+                          betas=self.actor_adam_betas,
+                      ),
+                      lr_scheduler_type=self.actor_lr_scheduler_type,
+                      warmup_steps_proportion=self.actor_warmup_proportion,
+                      min_lr_ratio=self.actor_min_lr_ratio,
+                      zero_stage=min(1, self.actor_zero_stage) if self.actor_pp_size > 0 else 2,
+                      gradient_checkpointing=self.actor_gradient_checkpointing,
+                      num_pipeline_stages=self.actor_pp_size,
+                      engine_type="pipe" if self.actor_pp_size > 1 else "deepspeed",
+                      offload_param=self.offload_actor_param,
+                      offload_optimizer_state=self.offload_actor_optimizer_state,
+                      enable_hybrid_engine=self.hybrid_engine,
+                      num_pipeline_micro_batches=self.actor_num_pipeline_micro_batches,
+                      enable_fp16=self.actor_enable_fp16,
+                      enable_bf16=self.actor_enable_bf16,
+                      sequence_parallel=self.actor_use_sequence_parallel),
         )
         # critic train backend
         critic_backend = ModelBackend(
             "ds_train",
-            args=dict(
-                optimizer_name="adam",
-                optimizer_config=dict(
-                    lr=self.critic_lr,
-                    weight_decay=self.critic_weight_decay,
-                    eps=self.critic_adam_eps,
-                    betas=self.critic_adam_betas,
-                ),
-                lr_scheduler_type=self.critic_lr_scheduler_type,
-                warmup_steps_proportion=self.critic_warmup_proportion,
-                min_lr_ratio=self.critic_min_lr_ratio,
-                zero_stage=min(1, self.critic_zero_stage) if self.critic_pp_size > 0 else 2,
-                gradient_checkpointing=self.critic_gradient_checkpointing,
-                num_pipeline_stages=self.critic_pp_size,
-                engine_type="pipe" if self.critic_pp_size > 1 else "deepspeed",
-                offload_param=self.offload_critic_param,
-                offload_optimizer_state=self.offload_critic_optimizer_states,
-                num_pipeline_micro_batches=self.critic_num_pipeline_micro_batches,
-                enable_fp16=self.critic_enable_fp16,
-                enable_bf16=self.critic_enable_bf16,
-            ),
+            args=dict(optimizer_name="adam",
+                      optimizer_config=dict(
+                          lr=self.critic_lr,
+                          weight_decay=self.critic_weight_decay,
+                          eps=self.critic_adam_eps,
+                          betas=self.critic_adam_betas,
+                      ),
+                      lr_scheduler_type=self.critic_lr_scheduler_type,
+                      warmup_steps_proportion=self.critic_warmup_proportion,
+                      min_lr_ratio=self.critic_min_lr_ratio,
+                      zero_stage=min(1, self.critic_zero_stage) if self.critic_pp_size > 0 else 2,
+                      gradient_checkpointing=self.critic_gradient_checkpointing,
+                      num_pipeline_stages=self.critic_pp_size,
+                      engine_type="pipe" if self.critic_pp_size > 1 else "deepspeed",
+                      offload_param=self.offload_critic_param,
+                      offload_optimizer_state=self.offload_critic_optimizer_states,
+                      num_pipeline_micro_batches=self.critic_num_pipeline_micro_batches,
+                      enable_fp16=self.critic_enable_fp16,
+                      enable_bf16=self.critic_enable_bf16,
+                      sequence_parallel=self.critic_use_sequence_parallel),
         )
 
         ref_backend = ModelBackend(
@@ -491,6 +502,7 @@ class PPOExperiment(Experiment):
                 enable_bf16=self.ref_enable_bf16,
                 engine_type="pipe" if self.ref_pp_size > 1 else "deepspeed",
                 num_pipeline_micro_batches=self.ref_num_pipeline_micro_batches,
+                sequence_parallel=self.ref_use_sequence_parallel,
             ),
         )
         rw_backend = ModelBackend(

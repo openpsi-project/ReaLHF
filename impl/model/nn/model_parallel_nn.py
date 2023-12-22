@@ -42,8 +42,6 @@ def make_causal_flash_mqat_parallel_pipe_module(
             layer_index=i,
             output_layernorm=(i == config.n_layers - 1),
             sequence_parallel=sequence_parallel,
-            ckpt_attn=(i > 0 and config.ckpt_attn),
-            ckpt_mlp=(i > 0 and config.ckpt_mlp),
             dtype=dtype,
             device=device,
         )

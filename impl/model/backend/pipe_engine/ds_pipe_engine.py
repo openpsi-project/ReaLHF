@@ -177,8 +177,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         """
         return self._force_grad_boundary
 
-    def gradient_checkpointing_enable(self):
-        self.module.gradient_checkpointing_enable()
+    def gradient_checkpointing_enable(self, attn: Optional[bool] = False, mlp: Optional[bool] = False):
+        self.module.gradient_checkpointing_enable(attn, mlp)
 
     def _prepare_input(self,
                        packed_input_ids: torch.Tensor,
@@ -543,9 +543,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
                 logits_mask = torch.stack(gen_logits_mask_ph, -2)
 
-            logger.info(f"gen_tokens shape {gen_tokens.shape} "
-                        f"log_probs shape {log_probs.shape} ")
-
+            # logger.info(f"gen_tokens shape {gen_tokens.shape} "
+            #             f"log_probs shape {log_probs.shape} ")
             if self.sequence_parallel:
                 pad_seq_size = self.tensor_buffer.get("pad_seq_size", mbid, remove=True)
                 gen_tokens = gen_tokens[:-pad_seq_size] if pad_seq_size > 0 else gen_tokens

@@ -40,8 +40,6 @@ class FlashMQATConfig:
     attn_pdrop: float = 0.1
     layer_norm_epsilon: float = 1e-5
     activation_function: str = "gelu"
-    ckpt_attn: bool = False
-    ckpt_mlp: bool = False
     scale_attn_by_inverse_layer_idx: bool = True
     # llama does not use attention bias and uses special MLP/LayerNorm layers
     use_attention_bias: bool = True
@@ -55,6 +53,9 @@ class FlashMQATConfig:
     rotary_scaling_type: Optional[str] = None
     # only used for debugging, True for GPT2
     fixed_abs_position_ids: bool = False
+    # deprecated, moved to backend config
+    ckpt_attn: bool = False
+    ckpt_mlp: bool = False
 
 
 class CausalSelfAttentionLayer(nn.Module):
@@ -269,8 +270,6 @@ class FlashMQATBlock(nn.Module):
         config: FlashMQATConfig,
         layer_index: int,
         output_layernorm: bool = False,
-        ckpt_attn: bool = False,
-        ckpt_mlp: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -327,14 +326,18 @@ class FlashMQATBlock(nn.Module):
                                       dtype=dtype,
                                       device=device)
 
-        self.ckpt_attn = ckpt_attn
-        self.ckpt_mlp = ckpt_mlp
+        self.ckpt_attn = False
+        self.ckpt_mlp = False
         self.ckpt_full = False
 
-    def gradient_checkpointing_enable(self, attn: bool = True, mlp: bool = True):
-        # self.ckpt_attn = attn
-        # self.ckpt_mlp = mlp
-        self.ckpt_full = True
+    def gradient_checkpointing_enable(self, attn: bool = False, mlp: bool = False):
+        """ Called by backend
+        """
+        if attn or mlp:
+            self.ckpt_attn = attn
+            self.ckpt_mlp = mlp
+        else:
+            self.ckpt_full = True
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         pp_input = x.pp_input
@@ -345,14 +348,28 @@ class FlashMQATBlock(nn.Module):
         max_seqlen = x.max_seqlen
         attention_mask = x.attention_mask
         if self.ckpt_full:
-            pp_output, k, v = torch.utils.checkpoint.checkpoint(self._forward, pp_input, cu_seqlens, k_cache,
-                                                                v_cache, cache_seqlens, max_seqlen,
-                                                                attention_mask
-                                                                # use_reentrant=True
-                                                                )
+            pp_output, k, v = torch.utils.checkpoint.checkpoint(
+                self._forward,
+                pp_input,
+                cu_seqlens,
+                k_cache,
+                v_cache,
+                cache_seqlens,
+                max_seqlen,
+                attention_mask,
+                False,
+                False,
+            )
         else:
-            pp_output, k, v = self._forward(pp_input, cu_seqlens, k_cache, v_cache, cache_seqlens, max_seqlen,
-                                            attention_mask)
+            pp_output, k, v = self._forward(pp_input,
+                                            cu_seqlens,
+                                            k_cache,
+                                            v_cache,
+                                            cache_seqlens,
+                                            max_seqlen,
+                                            attention_mask,
+                                            ckpt_attn=self.ckpt_attn,
+                                            ckpt_mlp=self.ckpt_mlp)
 
         x.pp_output = pp_output
         if x.store_kv_cache:
@@ -364,21 +381,43 @@ class FlashMQATBlock(nn.Module):
                 y.cache_seqlens = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
         return x
 
-    def _forward(self, pp_input: torch.Tensor, cu_seqlens: torch.Tensor, k_cache: Optional[torch.Tensor],
-                 v_cache: Optional[torch.Tensor], cache_seqlens: Optional[torch.Tensor], max_seqlen: int,
-                 attention_mask: Optional[torch.Tensor]) -> PipeTransferData:
+    def _forward(self,
+                 pp_input: torch.Tensor,
+                 cu_seqlens: torch.Tensor,
+                 k_cache: Optional[torch.Tensor],
+                 v_cache: Optional[torch.Tensor],
+                 cache_seqlens: Optional[torch.Tensor],
+                 max_seqlen: int,
+                 attention_mask: Optional[torch.Tensor],
+                 ckpt_attn: Optional[bool] = False,
+                 ckpt_mlp: Optional[bool] = False) -> PipeTransferData:
         h = pp_input
-        attn_out, k, v = self.attn(
-            hidden_states=h,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=max_seqlen,
-            k_cache=k_cache,
-            v_cache=v_cache,
-            cache_seqlens=cache_seqlens,
-            attention_mask=attention_mask,
-        )
+        if ckpt_attn:
+            attn_out, k, v = torch.utils.checkpoint.checkpoint(
+                self.attn,
+                h,
+                cu_seqlens,
+                k_cache,
+                v_cache,
+                cache_seqlens,
+                attention_mask,
+                max_seqlen,
+            )
+        else:
+            attn_out, k, v = self.attn(
+                hidden_states=h,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+                k_cache=k_cache,
+                v_cache=v_cache,
+                cache_seqlens=cache_seqlens,
+                attention_mask=attention_mask,
+            )
         h = h + attn_out
-        h = self.mlp(h) + h
+        if ckpt_mlp:
+            h = torch.utils.checkpoint.checkpoint(self.mlp, h) + h
+        else:
+            h = self.mlp(h) + h
         if self.output_layernorm:
             h = self.ln_f(h)
         return h, k, v
@@ -498,8 +537,6 @@ class FlashMQATBase(nn.Module):
                     config,
                     layer_index=i,
                     output_layernorm=(i == config.n_layers - 1),
-                    ckpt_attn=(i > 0 and config.ckpt_attn),
-                    ckpt_mlp=(i > 0 and config.ckpt_mlp),
                     dtype=dtype,
                     device=device,
                 ) for i in range(config.n_layers)
@@ -566,11 +603,11 @@ class FlashMQATModel(nn.Module):
     def to_layers(self) -> List[nn.Module]:
         return self.transformer.to_layers() + [self.head]
 
-    def gradient_checkpointing_enable(self):
+    def gradient_checkpointing_enable(self, attn: Optional[bool] = False, mlp: Optional[bool] = False):
         for l in self.transformer.h[1:]:
             # skip the first layer to enable lora together with grad checkpointing
             l: FlashMQATBlock
-            l.gradient_checkpointing_enable()
+            l.gradient_checkpointing_enable(attn, mlp)
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
         layers = self.to_layers()

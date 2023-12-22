@@ -34,7 +34,7 @@ MAX_NEW_TOKENS = 30
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
-USE_SEQ_PARALLEL = True
+USE_SEQ_PARALLEL = False
 
 
 def make_backend():
@@ -175,12 +175,12 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     if logits is not None:
         print(f"rank {rank} mp FIRST inference logits shape {logits.shape}")
 
-    # for i in range(10):
-    #     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
-    #     st = time.monotonic()
-    #     res = interface.inference(model, data)
-    #     logits = res['logits']
-    #     print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
+    for i in range(10):
+        data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
+        st = time.monotonic()
+        res = interface.inference(model, data)
+        logits = res['logits']
+        print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
 
     import base.constants
     if base.constants.pipe_parallel_rank() == NUM_PP - 1:
@@ -196,7 +196,7 @@ def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     res = interface.train_step(model, data)
     print(f"rank {rank} mp FIRST train time cost {time.monotonic() - st:.4f}, res {res}")
 
-    for _ in range(20):
+    for _ in range(10):
         st = time.monotonic()
         res = interface.train_step(model, data)
         print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
@@ -217,7 +217,7 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
               f"log probs shape {outputs['log_probs'].shape}")
 
     for i in range(10):
-        data = init_data(model.tokenizer, device, BATCH_SIZE + i, seed=seed + i)
+        data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
         st = time.monotonic()
         outputs = interface.generate(model, data, gconfig=gconfig)
         t = time.monotonic() - st
@@ -319,7 +319,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
     @torch.no_grad()
     def testInference(self):
         clear_name_resolve()
-        self.seed = 1
+        self.seed = random.randint(1, 10000)
         self.res_queue = mp.Queue(maxsize=128)
         setup_barrier(WORLD_SIZE)
         self.pipe_model_processes = [
@@ -416,7 +416,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
     def testGenerate(self):
         clear_name_resolve()
-        self.seed = random.randint(0, 10000)
+        self.seed = 1
         self.res_queue = mp.Queue(maxsize=128)
         setup_barrier(WORLD_SIZE)
         self.pipe_model_processes = [
@@ -429,5 +429,5 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testGenerate")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testTrainStep")
     # unittest.main(defaultTest="ModelParallelFlashMQATTest.testLinearAccordance")

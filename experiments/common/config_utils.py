@@ -10,6 +10,7 @@ def get_flash_mqat_model_config(
     pp_size: int,
     mp_size: int,
     dp_size: int,
+    sequence_parallel: bool,
     is_critic: bool,
     use_lora: bool,
     dtype: Optional[str] = None,
@@ -104,6 +105,7 @@ def get_flash_mqat_model_config(
                 args=dict(
                     model_path=model_path,
                     is_critic=is_critic,
+                    sequence_parallel=sequence_parallel,
                     init_critic_from_actor=init_critic_from_actor,
                     init_from_scratch=init_from_scratch,
                 ),
@@ -118,6 +120,7 @@ def get_flash_mqat_model_config(
                     num_pp=pp_size,
                     num_mp=mp_size,
                     num_dp=dp_size,
+                    sequence_parallel=sequence_parallel,
                     is_critic=is_critic,
                     partition_method=partition_method,
                     init_critic_from_actor=init_critic_from_actor,

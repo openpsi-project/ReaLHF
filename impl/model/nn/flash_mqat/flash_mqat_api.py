@@ -145,7 +145,7 @@ def make_flash_model(
     init_from_scratch: bool = False,
     v_head_path: Optional[str] = None,
 ) -> api.model.Model:
-    if dtype == "fp16":
+    if dtype == "fp16" or dtype == None:
         dtype = torch.float16
     elif dtype == "bf16":
         dtype = torch.bfloat16

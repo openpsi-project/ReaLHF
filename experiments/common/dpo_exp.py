@@ -65,6 +65,7 @@ class DPOExperiment(Experiment):
     beta: float = 0.1
 
     num_pipeline_micro_batches: Optional[int] = None
+    use_sequence_parallel: bool = False
     partition_method: Optional[str] = "parameters"
 
     def __post_init__(self):
@@ -145,6 +146,7 @@ class DPOExperiment(Experiment):
                 enable_fp16=self.enable_fp16,
                 enable_bf16=self.enable_bf16,
                 offload_optimizer_state=self.offload_optimizer,
+                use_sequence_parallel=self.use_sequence_parallel,
             ),
         )
         inf_backend = ModelBackend("ds_inference",
@@ -178,6 +180,7 @@ class DPOExperiment(Experiment):
             is_sft_lora=self.is_sft_lora,
             sft_lora_path=self.sft_lora_path,
             partition_method=self.partition_method,
+            use_sequence_parallel=self.use_sequence_parallel,
         )
 
         interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=True))

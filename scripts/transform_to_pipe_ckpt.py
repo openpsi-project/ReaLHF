@@ -37,8 +37,6 @@ def get_layer_specs(config: FlashMQATConfig, to_critic, is_mp):
                 config,
                 layer_index=i,
                 output_layernorm=(i == config.n_layers - 1),
-                ckpt_attn=(i > 0 and config.ckpt_attn),
-                ckpt_mlp=(i > 0 and config.ckpt_mlp),
                 dtype=None,
                 device=None,
             )
@@ -52,8 +50,6 @@ def get_layer_specs(config: FlashMQATConfig, to_critic, is_mp):
                 config,
                 layer_index=i,
                 output_layernorm=(i == config.n_layers - 1),
-                ckpt_attn=(i > 0 and config.ckpt_attn),
-                ckpt_mlp=(i > 0 and config.ckpt_mlp),
                 dtype=None,
                 device=None,
             )
