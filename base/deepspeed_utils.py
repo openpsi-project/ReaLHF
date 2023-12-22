@@ -6,11 +6,15 @@ from deepspeed.runtime.config import DeepSpeedConfig
 from deepspeed.runtime.engine import DeepSpeedEngine, DeepSpeedOptimizerCallable, DeepSpeedSchedulerCallable
 import deepspeed
 import torch
+import torch.distributed
 
 from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
 import base.constants
+import base.logging as logging
 
 DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU = 32  # A place-holder for inference.
+
+logger = logging.getLogger("DeepSpeed Utils")
 
 
 def get_train_ds_config(
@@ -76,7 +80,7 @@ def get_eval_ds_config(offload=False, stage=0, enable_fp16: bool = True, enable_
         "steps_per_print": 10,
         "zero_optimization": zero_opt_dict,
         "train_micro_batch_size_per_gpu": DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU,
-        "train_batch_size": torch.distributed.get_world_size() * DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU,
+        "train_batch_size": torch.distributed.get_world_size(group=base.constants.data_parallel_group()) * DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU,
         "fp16": {
             "enabled": enable_fp16,
         },
@@ -98,14 +102,16 @@ def get_optimizer_grouped_parameters(
     optimizer_grouped_parameters = [
         {
             "params": [
-                p for n, p in model.named_parameters()
+                p
+                for n, p in model.named_parameters()
                 if (not any(nd in n for nd in no_decay_name_list) and p.requires_grad)
             ],
             "weight_decay": weight_decay,
         },
         {
             "params": [
-                p for n, p in model.named_parameters()
+                p
+                for n, p in model.named_parameters()
                 if (any(nd in n for nd in no_decay_name_list) and p.requires_grad)
             ],
             "weight_decay": 0.0,
@@ -151,6 +157,7 @@ def deepspeed_initialize(
 
         # Restore zero.Init context if necessary
         zero.partition_parameters.restore_init_context()
+        logger.info(f"Deepspeed Engine initialze finished.")
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
     elif engine_type == "pipe":
         # mpu = model.mpu()
@@ -166,6 +173,7 @@ def deepspeed_initialize(
             lr_scheduler=lr_scheduler,
             dist_init_required=False,
         )
+        logger.info(f"Deepspeed Pipeline Engine initialze finished.")
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
     elif engine_type == "stream_pipe":
         # mpu = model.mpu()
