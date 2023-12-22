@@ -346,12 +346,12 @@ class PipelineModule(nn.Module):
         """
         return len(self.forward_funcs)
 
-    def gradient_checkpointing_enable(self):
+    def gradient_checkpointing_enable(self, attn=False, mlp=False):
         for layer in self.forward_funcs:
             try:
-                layer.gradient_checkpointing_enable()
+                layer.gradient_checkpointing_enable(attn, mlp)
             except AttributeError:
-                pass
+                logger.warning(f'Layer {layer} does not support gradient checkpointing, skipping ...')
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]):
         local_micro_offset = self.micro_offset + 1

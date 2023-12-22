@@ -35,8 +35,6 @@ def make_causal_flash_mqat_pipe_module(
             config,
             layer_index=i,
             output_layernorm=(i == config.n_layers - 1),
-            ckpt_attn=(i > 0 and config.ckpt_attn),
-            ckpt_mlp=(i > 0 and config.ckpt_mlp),
             dtype=dtype,
             device=device,
         )
@@ -87,6 +85,7 @@ def pipe_wrap_fn(
                                                     topology,
                                                     is_critic,
                                                     partition_method=partition_method,
+                                                    dtype=model.dtype,
                                                     device=model.device)
         if not init_from_scratch:
             process_memory_mb("before_load")

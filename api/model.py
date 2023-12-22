@@ -38,6 +38,7 @@ class Model:
     module: NeuralNetwork
     tokenizer: transformers.PreTrainedTokenizerFast
     device: Union[str, torch.device]
+    dtype: Optional[torch.dtype] = None
     version: ModelVersion = dataclasses.field(default_factory=ModelVersion)
     ft_spec: FinetuneSpec = None  # will be initialized by the backend
 

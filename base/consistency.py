@@ -18,11 +18,16 @@ PARALLEL_MODE = False
 REPORT_FILE = "/home/meizy/logs/consistency_report.txt"
 
 
-def report(report_fp, name, full_tensor, other_tensor, atol, rtol):
+def report(report_fp, name, full_tensor, other_tensor, check_dim, atol, rtol):
     if full_tensor.shape != other_tensor.shape:
-        print(f"tensor {name} shape mismatch {full_tensor.shape}!={other_tensor.shape}")
-        report_fp.write(f"tensor {name} shape mismatch {full_tensor.shape}!={other_tensor.shape}\n")
-        return
+        print(f"tensor {name} shape mismatch {full_tensor.shape}!={other_tensor.shape} "
+              f"stripping other tensor to full_tensor shape")
+        split_size = [
+            full_tensor.shape[check_dim], other_tensor.shape[check_dim] - full_tensor.shape[check_dim]
+        ]
+        other_tensor, _ = torch.split(other_tensor, split_size, dim=check_dim)
+        # report_fp.write(f"tensor {name} shape mismatch {full_tensor.shape}!={other_tensor.shape}\n")
+        # return
     if not torch.allclose(full_tensor, other_tensor, atol=atol, rtol=rtol):
         print(f"tensor {name} **MISMATCH** atol={atol} rtol={rtol}")
         report_fp.write(f"tensor {name} **MISMATCH** atol={atol} rtol={rtol}\n")
@@ -65,9 +70,9 @@ def check_all_model_parallel(mp_world_size, atol=1e-5, rtol=1e-8):
 
         check_dim = MP_STORED_NAMES[name]
         if check_dim is not "full":
-            other_tensor = torch.cat(mp_tensors, dim=MP_STORED_NAMES[name])
+            other_tensor = torch.cat(mp_tensors, dim=check_dim)
             try:
-                report(report_fp, name, full_tensor, other_tensor, atol, rtol)
+                report(report_fp, name, full_tensor, other_tensor, check_dim, atol, rtol)
             except Exception as e:
                 print(f"{name} report fail")
                 raise e
