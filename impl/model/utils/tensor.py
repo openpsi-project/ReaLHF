@@ -135,5 +135,4 @@ def pad_sequence_parallel_generate_input(packed_input_ids: torch.Tensor, cu_seql
         cu_seqlens = torch.cat([cu_seqlens, pad_cu_seqlens], dim=0)
         max_seqlen = max_seqlen if (pad_size - pad_seq_size + 1) < max_seqlen else (pad_size - pad_seq_size +
                                                                                     1)
-        print(f"padded cu_seqlens = {cu_seqlens}")
     return packed_input_ids, cu_seqlens, max_seqlen, pad_size, pad_seq_size
