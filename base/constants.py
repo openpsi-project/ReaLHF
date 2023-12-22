@@ -2,7 +2,6 @@
 import getpass
 
 from base.cluster import spec as cluster_spec
-from base.topology import PipelineParallelGrid
 
 # constants in experiment instance scope
 MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
@@ -22,7 +21,8 @@ _trial_name = None
 
 # constants in worker/process scope
 
-_grid: PipelineParallelGrid = None
+_grid = None  # PipelineParallelGrid, not type hint here to avoid circular import
+_pgroup = None  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
 
 # used only in scripts and tests
 _fake_mp_world_size = None
@@ -34,11 +34,35 @@ def set_grid(grid):
     _grid = grid
 
 
-def grid() -> PipelineParallelGrid:
+def grid():
     if _grid == None:
         raise RuntimeError("Global constant `grid` is accessed before set.")
     return _grid
 
+def set_parallelism_group(pgroup):
+    global _pgroup
+    _pgroup = pgroup
+
+def parallelism_group():
+    """Returns the 3D parallelism group of a specific model."""
+    if _pgroup == None:
+        raise RuntimeError("Global constant `parallelism_group` is accessed before set.")
+    return _pgroup
+
+def parallelism_group_size() -> int:
+    """The 3D parallelism group size of a specific model, normally dp_size * pp_size * mp_size."""
+    import torch.distributed as dist
+    return dist.get_world_size(group=parallelism_group())
+
+def parallelism_rank() -> int:
+    """Return the rank of a specific model in its 3D parallelism group."""
+    import torch.distributed as dist
+    return dist.get_rank(group=parallelism_group())
+
+def process_group_offset() -> int:
+    """Return the offset of the model's parallelism group w.r.t. the global process group (all models + master)."""
+    import torch.distributed as dist
+    return dist.get_global_rank(group=parallelism_group(), group_rank=0)
 
 def pipe_parallel_rank() -> int:
     return grid().get_pipe_parallel_rank()
