@@ -62,8 +62,6 @@ def setup_ddp(
     worker_index: int,
     peer_indices: Optional[List[int]] = None,
 ) -> Tuple[int, int, int, Optional[torch.distributed.ProcessGroup]]:
-    logger.info(f"Setup process group for worker_index={worker_index}")
-
     peers: List[int] = list(
         sorted(
             map(
@@ -119,11 +117,8 @@ def setup_ddp(
         logger.info(f"peer ranks {peer_ranks}")
         peer_group = torch.distributed.new_group(peer_ranks, backend="nccl")
     
-    torch.distributed.barrier()
+    logger.info(f"Setup process group for worker_index={worker_index}")
 
-    # FIXME: 
-    import time
-    time.sleep(10)
     return world_size, global_rank, local_gpu_id, peer_group
 
 
