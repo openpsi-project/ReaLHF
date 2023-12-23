@@ -60,10 +60,16 @@ class ModelWorker(worker_base.Worker):
 
         seeding.set_random_seed(cfg.seed)
 
-        # Reveal DDP identity of this worker to world.
-        gpu_utils.reveal_ddp_identity(
-            self.__experiment_name, self.__trial_name, self.model_name, self.__worker_index
+        self.__mw_id = config.ModelWorkerID(
+            self.config.model_name,
+            dp_rank=self.config.dp_rank,
+            mp_rank=self.config.mp_rank,
+            pp_rank=self.config.pp_rank,
         )
+
+        # Reveal DDP identity of this worker to world.
+        # NOTE: We include master worker in the process group, so the global rank is model_worker_index + 1
+        gpu_utils.reveal_ddp_identity(self.__experiment_name, self.__trial_name, self.__worker_index + 1)
         self.__ddp_env_resolved = False
 
         self.__clear_cache_frequency = base.timeutil.FrequencyControl(
@@ -84,23 +90,40 @@ class ModelWorker(worker_base.Worker):
             ),
         )
 
-        self.__world_size, self.__ddp_rank, local_gpu_id = gpu_utils.setup_ddp(
-            self.__experiment_name, self.__trial_name, self.model_name, self.__worker_index
+        base.constants.set_model_name(self.config.model_name)
+        self.__pg_info = gpu_utils.setup_ddp(
+            self.__experiment_name,
+            self.__trial_name,
+            self.__worker_index + 1,
+            mw_topos=self.config.mw_topos,
         )
+        for model_name_ in self.config.mw_topos:
+            base.constants.set_parallelism_group(
+                model_name_,
+                self.__pg_info.mw_groups[model_name_],
+            )
 
         logger.info(
             f"SetUp Information - Model worker index {self.__worker_index}"
-            f' type "{self.config.model_name}" located at {socket.gethostname()} GPU {local_gpu_id}.'
+            f' type "{self.config.model_name}" located at '
+            f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}."
         )
 
-        if self.config.backend.type_ in ["ds_train", "ds_inference"]:
-            self.logger.info("deepspeed init distributed on model worker")
-            deepspeed.init_distributed()
+        # if self.config.backend.type_ in ["ds_train", "ds_inference"]:
+        deepspeed.init_distributed()
+        self.logger.info("deepspeed init distributed on model worker")
         self.__device = torch.device("cuda:0")
 
-        self.__world_group = dist.new_group(ranks=range(self.__world_size))
-        self.__grid = PipelineParallelGrid(process_group=self.__world_group, topology=self.config.topo)
-        base.constants.set_grid(self.__grid)
+        offset = 1
+        for model_name_, topo_ in self.config.mw_topos.items():
+            grid = PipelineParallelGrid(
+                topology=topo_,
+                world_size=topo_.world_size(),
+                process_group=self.__pg_info.mw_groups[model_name_],
+                process_group_offset=offset,
+            )
+            base.constants.set_grid(model_name_, grid)
+            offset += topo_.world_size()
 
         self.__model = api.model.make_model(
             self.config.model,
@@ -147,14 +170,14 @@ class ModelWorker(worker_base.Worker):
 
             # NOTE: Here "model_parallel_group" is the group of model *AND* pipeline parallel, thanks to deepspeed.
             self._bgroup = base.constants.grid().get_model_parallel_group()
-            self._bsrc = dp_head_global_rank = self.config.topo.get_rank(
-                data=self._dp_rank, pipe=self._pp_size - 1, model=0
+            self._bsrc = dp_head_global_rank = (
+                self.config.topo.get_rank(data=self._dp_rank, pipe=self._pp_size - 1, model=0)
+                + base.constants.process_group_offset()
             )
             self.logger.info(
                 f"Get broadcast src global_rank={dp_head_global_rank} "
                 f"with dp_rank={self._dp_rank}, pp_rank={self._pp_size-1}, mp_rank=0"
             )
-            # self._bsrc = dist.get_group_rank(group=self._bgroup, global_rank=dp_head_global_rank)
 
             # DP head will receive data from the master, broadcast to all data parallel peers.
             # It will also return result back to master, while other workers in the data parallel group return None.
@@ -181,11 +204,12 @@ class ModelWorker(worker_base.Worker):
             else:
                 data = None
 
-        # self.logger.info(
-        #     f"my rank is dp={self._dp_rank}, mp={self._mp_rank}, pp={self._pp_rank}, "
-        #     f"my group rank is {dist.get_rank(group=self._bgroup)}, "
-        #     f"broadcasting source is {self._bsrc}, my data is {request.data}"
-        # )
+        self.logger.info(
+            f"my rank is dp={self._dp_rank}, mp={self._mp_rank}, pp={self._pp_rank}, global={dist.get_rank()}, "
+            f"my group rank is {dist.get_rank(group=self._bgroup)}, "
+            f"broadcasting source is {self._bsrc}, ranks in group are {dist.get_process_group_ranks(self._bgroup)}, "
+            f"my data is None? **{request.data is None}**"
+        )
         if not request.is_tensor:
             obj_lis = [data]
             dist.broadcast_object_list(obj_lis, src=self._bsrc, group=self._bgroup)
@@ -196,13 +220,13 @@ class ModelWorker(worker_base.Worker):
             data = namedarray.from_dict(data)
         request.data = data
         if self._is_dp_head:
-            self.logger.info(f"Model worker receive & broadcast time: {time.perf_counter() - btik}")
+            self.logger.info(f"Model {self.model_name} receive & broadcast time: {time.perf_counter() - btik}")
 
         tik = time.perf_counter()
         if self._is_dp_head:
             logger.info(f"Model worker {self.model_name} received request {request.handle_name}.")
         try:
-            worker_identifier = f"{self.model_name}_{self.__ddp_rank}"
+            worker_identifier = self.__mw_id
             if request.handle_name == "initialize":
                 self.__model = self.__backend.initialize(self.__model, request.data)
                 res = None

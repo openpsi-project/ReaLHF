@@ -5,11 +5,14 @@ import copy
 import getpass
 import os
 import time
+import deepspeed
 
 import colorama
 import numpy as np
 import torch
 
+import base.topology
+import base.constants
 from base.cluster import spec as cluster_spec
 from base.constants import MODEL_SAVE_ROOT
 import api.config as config_pkg
@@ -19,6 +22,7 @@ import api.model as model_api
 import base.dataparallel as dataparallel
 import base.logging as logging
 import base.namedarray as namedarray
+import base.gpu_utils as gpu_utils
 import base.timeutil
 import base.topology as topology
 import system.request_reply_stream as request_reply_stream
@@ -187,6 +191,12 @@ class MasterWorker(worker_base.Worker):
         )
         os.makedirs(self.MODEL_SAVE_ROOT, exist_ok=True)
 
+        gpu_utils.reveal_ddp_identity(
+            expr_name=self.config.worker_info.experiment_name,
+            trial_name=self.config.worker_info.trial_name,
+            worker_index=0,
+        )
+
         # Used only for benchmark
         self.__benchmark_steps = config.benchmark_steps
 
@@ -194,6 +204,7 @@ class MasterWorker(worker_base.Worker):
 
     def _poll(self):
         if not self.__initialized:
+            # Set up streams.
             self.__model_streams: Dict[
                 config_pkg.MasterStreamID, List[request_reply_stream.RequestReplyStream]
             ] = {
@@ -210,6 +221,34 @@ class MasterWorker(worker_base.Worker):
                     self.config.worker_info, self.config.data_stream, n_subscribers=1
                 )
             )
+
+            # Set up the global process group.
+            self.__pg_info = gpu_utils.setup_ddp(
+                expr_name=self.config.worker_info.experiment_name,
+                trial_name=self.config.worker_info.trial_name,
+                worker_index=0,
+                mw_topos=self.config.mw_topos,
+            )
+            for model_name_ in self.config.mw_topos:
+                base.constants.set_parallelism_group(
+                    model_name_,
+                    self.__pg_info.mw_groups[model_name_],
+                )
+            deepspeed.init_distributed()
+            self.logger.info("deepspeed init distributed on master worker")
+            self.__device = torch.device("cuda:0")
+
+            offset = 1
+            for model_name_, topo_ in self.config.mw_topos.items():
+                grid = base.topology.PipelineParallelGrid(
+                    topology=topo_,
+                    process_group=self.__pg_info.mw_groups[model_name_],
+                    world_size=topo_.world_size(),
+                    process_group_offset=offset,
+                )
+                base.constants.set_grid(model_name_, grid)
+                offset += topo_.world_size()
+
             # Request training specification from data workers, e.g. batch size and total train steps.
             self.__data_stream.post(request_reply_stream.Payload(handle_name="spec"))
             ft_specs: List[model_api.FinetuneSpec] = [self.__data_stream.poll(block=True).data]

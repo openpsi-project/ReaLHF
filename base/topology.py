@@ -296,12 +296,29 @@ class PipelineParallelGrid:
     for data_parallel_id = 1.
     """
 
-    def __init__(self, topology=None, process_group=None):
-        # TODO use process_group if provided
+    def __init__(
+        self,
+        topology=None,
+        process_group=None,
+        world_size=None,
+        process_group_offset=None,
+    ):
         from deepspeed import comm as dist
 
-        self.global_rank = dist.get_rank()
-        self.world_size = dist.get_world_size()
+        # NOTE: DeepSpeed will access *EVERY* attribute they defined. We need to remain
+        # the original semantics, so the attribute name may not truthfully mean what the attribute is.
+        # E.g., self.global_rank is not the global rank of the whole world including the master worker,
+        # but the rank in the 3D parallelism group of this specific model.
+
+        self.global_rank = dist.get_rank(group=process_group)
+
+        if world_size is not None:
+            assert process_group_offset is not None
+            self.world_size = world_size
+        else:
+            process_group_offset = dist.get_global_rank(group=process_group, group_rank=0)
+            self.world_size = dist.get_world_size(process_group)
+
         if topology is not None:
             if self.global_rank == 0:
                 print("Using topology:", topology)
@@ -319,7 +336,7 @@ class PipelineParallelGrid:
         self.pipe_parallel_size = max(self._topo.get_dim("pipe"), 1)
         self.model_parallel_size = max(self._topo.get_dim("model"), 1)
         self.slice_parallel_size = self.model_parallel_size
-        assert self._is_grid_valid(), "Invalid Grid"
+        assert self._is_grid_valid(), ("Invalid Grid", topology, self.world_size)
 
         self.stage_id = self.get_stage_id()
         self.data_parallel_id = self.get_data_parallel_id()
@@ -330,23 +347,28 @@ class PipelineParallelGrid:
         self.ds_model_rank = -1
         for dp in range(self.data_parallel_size):
             ranks = sorted(self._topo.get_axis_list(axis="data", idx=dp))
-            proc_group = dist.new_group(ranks=ranks)
+            proc_group = dist.new_group(ranks=[rank + process_group_offset for rank in ranks])
             if self.global_rank in ranks:
                 self.ds_model_proc_group = proc_group
                 self.ds_model_world_size = len(ranks)
                 self.ds_model_rank = ranks.index(self.global_rank)
                 logger.info(
-                    f"global_rank={self.global_rank} dp_rank={dp} building DeepSpeed model group "
+                    f"parallelism_rank={self.global_rank} (global_rank={dist.get_rank()}) "
+                    f"dp_rank={dp} building DeepSpeed model group "
                     f"(i.e., pipeline+model parallel group) with global ranks: {ranks}"
                 )
-        assert self.ds_model_rank > -1
-        assert self.ds_model_proc_group is not None
+        if self.global_rank != -1:
+            assert self.ds_model_rank > -1
+            assert self.ds_model_proc_group is not None
+        else:
+            assert self.ds_model_rank == -1
+            assert self.ds_model_proc_group is None
 
         # Create new ProcessGroup for gradient all-reduces - these are the data parallel groups
         self.dp_group = []
         self.dp_groups = self._topo.get_axis_comm_lists("data")
         for g in self.dp_groups:
-            proc_group = dist.new_group(ranks=g)
+            proc_group = dist.new_group(ranks=[x + process_group_offset for x in g])
             if self.global_rank in g:
                 self.dp_group = g
                 self.dp_proc_group = proc_group
@@ -364,11 +386,14 @@ class PipelineParallelGrid:
             if self.global_rank == 0:
                 # print(f'RANK={self.global_rank} building pipeline group: {ranks}')
                 pass
-            proc_group = dist.new_group(ranks=ranks)
+            proc_group = dist.new_group(ranks=[rank + process_group_offset for rank in ranks])
             if self.global_rank in ranks:
                 self.pp_group = ranks
                 self.pp_proc_group = proc_group
-        assert self.pp_proc_group is not None
+        if self.global_rank != -1:
+            assert self.pp_proc_group is not None
+        else:
+            assert self.pp_proc_group is None
 
         # Create new ProcessGroup for model (tensor-slicing) collectives
 
@@ -378,7 +403,7 @@ class PipelineParallelGrid:
         if self.model_parallel_size == 1:
             for group_rank in range(self.world_size):
                 group_rank = [group_rank]
-                group = dist.new_group(ranks=group_rank)
+                group = dist.new_group(ranks=[group_rank[0] + process_group_offset])
                 if group_rank[0] == self.global_rank:
                     self.slice_group = group_rank
                     self.slice_proc_group = group
@@ -387,15 +412,19 @@ class PipelineParallelGrid:
             self.mp_group = []
             self.model_groups = self._topo.get_axis_comm_lists("model")
             for g in self.model_groups:
-                proc_group = dist.new_group(ranks=g)
+                proc_group = dist.new_group(ranks=[x + process_group_offset for x in g])
                 if self.global_rank in g:
                     self.slice_group = g
                     self.slice_proc_group = proc_group
 
     def get_stage_id(self):
+        if self.global_rank == -1:
+            return -1
         return self._topo.get_coord(rank=self.global_rank).pipe
 
     def get_data_parallel_id(self):
+        if self.global_rank == -1:
+            return -1
         return self._topo.get_coord(rank=self.global_rank).data
 
     def _build_p2p_groups(self):
@@ -421,11 +450,13 @@ class PipelineParallelGrid:
         ranks = 1
         for ax in self._topo.get_axis_names():
             ranks *= self._topo.get_dim(ax)
-        return ranks == dist.get_world_size()
+        return ranks == self.world_size
 
     # returns the global rank of the process with the provided stage id
     # which has the same data_parallel_id as caller process
     def stage_to_global(self, stage_id, **kwargs):
+        if self.global_rank == -1:
+            return -1
         me = self._topo.get_coord(self.global_rank)
         transform = me._replace(pipe=stage_id, **kwargs)._asdict()
         return self._topo.get_rank(**transform)
@@ -475,6 +506,8 @@ class PipelineParallelGrid:
 
     # For Megatron-style tensor slicing
     def get_tensor_model_parallel_rank(self):
+        if self.global_rank == -1:
+            return -1
         if "model" in self._topo.get_axis_names():
             return self._topo.get_coord(rank=self.global_rank).model
         else:

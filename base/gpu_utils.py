@@ -7,11 +7,13 @@ import time
 
 import torch
 import torch.distributed
+import dataclasses
 
 import base.logging as logging
 import base.name_resolve as name_resolve
 import base.names as names
 import base.network as network
+import base.topology as topology
 
 logger = logging.getLogger("System-GPU", "system")
 
@@ -56,12 +58,26 @@ def reveal_ddp_identity(expr_name, trial_name, worker_index):
     # name_resolve.add_subentry(local_peer_name, peer_index, keepalive_ttl=30)
 
 
+@dataclasses.dataclass
+class NCCLProcessGroupInfo:
+    world_size: int
+    global_rank: int
+    local_gpu_id: int
+    # 3D parallelism groups of each model.
+    mw_groups: Dict[str, torch.distributed.ProcessGroup]
+    # 3D parallelism groups of each model, with master.
+    mas_mw_groups: Dict[str, torch.distributed.ProcessGroup]
+    # Group connecting each data parallel head
+    # (i.e., [mp=0,pp=pp_size-1,dp=i for i in range(dp_size)]) with master
+    mas_dp_head_groups: Dict[str, torch.distributed.ProcessGroup]
+
+
 def setup_ddp(
     expr_name: str,
     trial_name: str,
     worker_index: int,
-    peer_indices: Optional[List[int]] = None,
-) -> Tuple[int, int, int, Optional[torch.distributed.ProcessGroup]]:
+    mw_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
+) -> NCCLProcessGroupInfo:
     peers: List[int] = list(
         sorted(
             map(
@@ -76,8 +92,20 @@ def setup_ddp(
     world_size = len(peers)
     global_rank = peers.index(worker_index)
 
-    if peer_indices is not None:
-        peer_ranks = list(sorted([peers.index(x) for x in peer_indices]))
+    mw_ranks = {}
+    mw_head_ranks = {}
+    if mw_topos is not None:
+        offset = 1
+        for model_name, topo in mw_topos.items():
+            n_mw = topo.world_size()
+
+            mw_indices = list(range(offset, offset + n_mw))
+            mw_ranks[model_name] = list(sorted([peers.index(x) for x in mw_indices]))
+
+            dp_head_indices = [xx + offset for xx in topo.filter_match(pipe=topo.get_dim("pipe") - 1, model=0)]
+            mw_head_ranks[model_name] = [0] + [peers.index(x) for x in dp_head_indices]
+
+            offset += n_mw
 
     if "GPU_DEVICES_ISOLATED" not in os.environ and "RAY" not in os.environ["DLLM_MODE"]:
         raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
@@ -112,14 +140,28 @@ def setup_ddp(
 
     torch.distributed.init_process_group(**torch_dist_kwargs, group_name=GLOBAL_PROCESS_GROUP_NAME)
 
-    peer_group = None
-    if peer_indices is not None:
-        logger.info(f"peer ranks {peer_ranks}")
-        peer_group = torch.distributed.new_group(peer_ranks, backend="nccl")
-    
-    logger.info(f"Setup process group for worker_index={worker_index}")
+    mw_groups = {}
+    mas_mw_groups = {}
+    for model_name, ranks in mw_ranks.items():
+        mw_groups[model_name] = torch.distributed.new_group(ranks, backend="nccl")
+        mas_mw_groups[model_name] = torch.distributed.new_group([0] + ranks, backend="nccl")
+        logger.info("Created process group for model %s with ranks %s", model_name, ranks)
 
-    return world_size, global_rank, local_gpu_id, peer_group
+    mas_dp_head_groups = {}
+    for model_name, ranks in mw_head_ranks.items():
+        mas_dp_head_groups[model_name] = torch.distributed.new_group(ranks, backend="nccl")
+        logger.info("Created master-DP head group for model %s with ranks %s", model_name, ranks)
+
+    logger.info(f"Setup process group finishes for worker_index={worker_index}")
+
+    return NCCLProcessGroupInfo(
+        world_size=world_size,
+        global_rank=global_rank,
+        local_gpu_id=local_gpu_id,
+        mw_groups=mw_groups,
+        mas_mw_groups=mas_mw_groups,
+        mas_dp_head_groups=mas_dp_head_groups,
+    )
 
 
 def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment_name: str, trial_name: str):
