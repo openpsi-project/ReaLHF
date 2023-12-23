@@ -38,6 +38,7 @@ _LLM_ENVVARS = {
     # "TORCH_SHOW_CPP_STACKTRACES": "1",
     "CUDA_DEVICE_MAX_CONNECTIONS": str(1),
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
+    "CUDA_DEVICE_MAX_CONNECTIONS": "1",
     "PYTHONUSERBASE": "/nonsense",
 }
 for k, v in _LLM_ENVVARS.items():

@@ -138,12 +138,21 @@ def make_flash_model(
     device: torch.device,
     model_path: str,
     no_param_instantiation: bool = False,
-    dtype: Optional[torch.dtype] = None,
+    dtype: Optional[str] = None,  # here dtype is string because it is passed from config
+    # which do not import torch
     from_type: str = "starcoder",
     tokenizer_path: Optional[str] = None,
     init_from_scratch: bool = False,
     v_head_path: Optional[str] = None,
 ) -> api.model.Model:
+    if dtype == "fp16" or dtype == None:
+        dtype = torch.float16
+    elif dtype == "bf16":
+        dtype = torch.bfloat16
+    elif dtype == "fp32":
+        dtype == torch.float32
+    else:
+        raise NotImplementedError(f"Unsupported dtype {dtype}")
     is_critic = module_cls == DeepSpeedChatLikeFlashMQATCriticModel
     if from_type == "self":
         # Initialize from a self-trained model, e.g., PPO actor loading SFT model.
@@ -201,7 +210,7 @@ def make_flash_model(
             net.generate = functools.partial(module_cls.generate, net)
     if v_head_path is not None and not init_from_scratch:
         net.head.load_state_dict(torch.load(v_head_path, map_location="cpu"))
-    return api.model.Model(name, net, tokenizer, device)
+    return api.model.Model(name, net, tokenizer, device, dtype=dtype)
 
 
 api.model.register_model("flash_mqat_actor",

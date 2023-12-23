@@ -40,8 +40,6 @@ def make_causal_flash_mqat_pipe_module(
                                      config,
                                      layer_index=i,
                                      output_layernorm=(i == config.n_layers - 1),
-                                     ckpt_attn=(i > 0 and config.ckpt_attn),
-                                     ckpt_mlp=(i > 0 and config.ckpt_mlp),
                                      dtype=dtype,
                                      device=device)
         layer_specs.append(flash_mqat_block)

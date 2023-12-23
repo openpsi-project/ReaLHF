@@ -37,8 +37,6 @@ def get_layer_specs(config: FlashMQATConfig, to_critic, is_mp):
                 config,
                 layer_index=i,
                 output_layernorm=(i == config.n_layers - 1),
-                ckpt_attn=(i > 0 and config.ckpt_attn),
-                ckpt_mlp=(i > 0 and config.ckpt_mlp),
                 dtype=None,
                 device=None,
             )
@@ -52,8 +50,6 @@ def get_layer_specs(config: FlashMQATConfig, to_critic, is_mp):
                 config,
                 layer_index=i,
                 output_layernorm=(i == config.n_layers - 1),
-                ckpt_attn=(i > 0 and config.ckpt_attn),
-                ckpt_mlp=(i > 0 and config.ckpt_mlp),
                 dtype=None,
                 device=None,
             )
@@ -197,8 +193,8 @@ def main():
                         type=str,
                         default="/lustre/public/pretrained_model_weights/Llama-2-7b-hf")
     parser.add_argument("--model_type", type=str, default="llama")
-    parser.add_argument("--num_pp", type=int, default=8)
-    parser.add_argument("--num_mp", type=int, default=2)
+    parser.add_argument("--num_pp", type=int, default=4)
+    parser.add_argument("--num_mp", type=int, default=1)
     parser.add_argument("--num_shards", type=int, default=3)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--partition_method", type=str, default="parameters")
