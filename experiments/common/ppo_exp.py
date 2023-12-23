@@ -173,7 +173,7 @@ class PPOExperiment(Experiment):
     critic_zero_stage: int = 2
     critic_partition_method: Optional[str] = "parameters"
     offload_critic_param: bool = False
-    offload_critic_optimizer_state: bool = False
+    offload_critic_optimizer_states: bool = False
     # ppo
     rew_output_scaling: float = 1.0
     rew_output_bias: float = 0.0
