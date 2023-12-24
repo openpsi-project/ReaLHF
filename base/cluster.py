@@ -92,7 +92,7 @@ class QHClusterSpec(ClusterSpec):
 
     @property
     def default_mount(self) -> str:
-        return "/lustre:/lustre,/dev/infiniband:/dev/infiniband,/sys/class/infiniband_verbs:/sys/class/infiniband_verbs,/home/fw/tools/DeepSpeed-master:/DeepSpeed"
+        return "/lustre:/lustre,/dev/infiniband:/dev/infiniband,/sys/class/infiniband_verbs:/sys/class/infiniband_verbs"
 
 
 class YLClusterSpec(ClusterSpec):
