@@ -912,7 +912,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 if terminate_condition():
                     terminate_tensor = torch.tensor(1, dtype=torch.int32, device=self.device)
                 # all reduce terminate tensor from all ranks
-                dist.all_reduce(terminate_tensor)
+                dist.all_reduce(terminate_tensor, group=base.constants.parallelism_group())
                 if terminate_tensor.item() >= self.grid.get_data_parallel_world_size():
                     break
             # For each instruction in the step

@@ -33,7 +33,7 @@ class ParallelDataBroker:
                 res["cu_seqlens"] = torch.cat([input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)])
             return res
         else:
-            raise NotImplementedError()
+            raise NotImplementedError(f"Don't know how to gather data of type {[type(x) for x in src]}.")
 
     @abc.abstractstaticmethod
     def scatter_to(src: namedarray.NamedArray, n_dp: int) -> List[namedarray.NamedArray]:

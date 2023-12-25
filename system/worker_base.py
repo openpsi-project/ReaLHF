@@ -559,6 +559,9 @@ class Worker:
 
     def exit(self):
         self.logger.info("Exiting worker")
+        import torch.distributed as dist
+        if dist.is_initialized():
+            dist.destroy_process_group()
         self.__set_status(WorkerServerStatus.COMPLETED)
         self.__exiting = True
 
