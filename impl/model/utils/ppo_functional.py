@@ -46,7 +46,7 @@ def actor_loss_fn(
     old_logprobs: torch.FloatTensor,
     advantages: torch.FloatTensor,
     eps_clip: float,
-    loss_mask: Optional[torch.FloatTensor] = None,
+    loss_mask: Optional[torch.BoolTensor] = None,
 ) -> Tuple[torch.Tensor, Dict]:
     """Compute PPO actor loss function.
     
@@ -58,19 +58,22 @@ def actor_loss_fn(
         old_logprobs (torch.FloatTensor): Old log probabilities of actions.
         advantages (torch.FloatTensor): GAE (normalized) advantages.
         eps_clip (float): Clip ratio of PPO.
-        loss_mask (Optional[torch.FloatTensor], optional): Mask for loss computation.
+        loss_mask (Optional[torch.BoolTensor], optional): Mask for loss computation.
             1 if valid else 0. Defaults to None.
 
     Returns:
         Tuple[torch.Tensor, Dict]: Scalar loss and statistics.
     """
     # clone inference tensors
-    old_logprobs = old_logprobs.clone()
-    advantages = advantages.clone()
+    if old_logprobs.is_inference():
+        old_logprobs = old_logprobs.clone()
+    if advantages.is_inference():
+        advantages = advantages.clone()
 
     if loss_mask is not None:
+        loss_mask_count = loss_mask.count_nonzero()
         # For numerical stability.
-        ratio = torch.exp((logprobs - old_logprobs) * loss_mask)
+        ratio = torch.where(loss_mask, torch.exp(logprobs - old_logprobs), 0)
     else:
         ratio = torch.exp(logprobs - old_logprobs)
 
@@ -79,19 +82,19 @@ def actor_loss_fn(
     pg_loss2 = -advantages * clipped_ratio
 
     if loss_mask is not None:
-        pg_loss = (torch.max(pg_loss1, pg_loss2) * loss_mask).sum() / loss_mask.sum()
+        pg_loss = torch.where(loss_mask, torch.max(pg_loss1, pg_loss2), 0).sum() / loss_mask_count
     else:
         pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-    proportion_clipped = (pg_loss1 < pg_loss2)
+    clip_mask = (pg_loss1.detach() < pg_loss2.detach())
     if loss_mask is not None:
-        proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
-        importance_weight = (ratio.detach() * loss_mask).sum() / loss_mask.sum()
+        proportion_clipped = clip_mask.logical_and_(loss_mask).count_nonzero() / loss_mask_count
+        importance_weight = torch.where(loss_mask, ratio.detach(), 0).sum() / loss_mask_count
     else:
-        proportion_clipped = proportion_clipped.float().mean()
+        proportion_clipped = clip_mask.count_nonzero()
         importance_weight = ratio.detach().mean()
     # Remain torch.CudaTensor here for all-reduce after train step.
-    stat = dict(clip_ratio=proportion_clipped.detach(), importance_weight=importance_weight.detach())
+    stat = dict(clip_ratio=proportion_clipped, importance_weight=importance_weight)
 
     return pg_loss, stat
 
@@ -127,7 +130,8 @@ def critic_loss_fn(value: torch.FloatTensor,
     else:
         raise NotImplementedError(f"Unknown loss fn type: {loss_fn_type}")
 
-    target_value = target_value.clone()  # clone a inference tensor
+    if target_value.is_inference():
+        target_value = target_value.clone()  # clone a inference tensor
 
     # TODO: bf16 support for autocast
     with torch.autocast("cuda"):
@@ -140,16 +144,17 @@ def critic_loss_fn(value: torch.FloatTensor,
 
     value_loss = torch.max(value_loss_original, value_loss_clipped)
 
-    proportion_clipped = (value_loss_clipped > value_loss_original)
+    clip_mask = (value_loss_clipped.detach() > value_loss_original.detach())
     if loss_mask is not None:
-        proportion_clipped = (proportion_clipped.float() * loss_mask).sum() / loss_mask.sum()
+        mask_count = loss_mask.count_nonzero()
+        proportion_clipped = clip_mask.logical_and_(loss_mask).count_nonzero() / mask_count
     else:
-        proportion_clipped = proportion_clipped.float().mean()
+        proportion_clipped = clip_mask.count_nonzero()
 
-    stat = dict(clip_ratio=proportion_clipped.detach())
+    stat = dict(clip_ratio=proportion_clipped)
 
     if loss_mask is not None:
-        value_loss = (value_loss * loss_mask).sum() / loss_mask.sum()
+        value_loss = torch.where(loss_mask, value_loss, 0).sum() / mask_count
     else:
         value_loss = value_loss.mean()
 
@@ -245,7 +250,7 @@ def get_packed_rewards(
     ref_log_probs: torch.FloatTensor,
     reward_score: torch.FloatTensor,
     short1cu_seqlens: torch.IntTensor,
-    seq_no_eos_mask: torch.FloatTensor,
+    seq_no_eos_mask: torch.BoolTensor,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
     # Here log_probs/ref_log_probs is one-step shorter than packed_input_ids (the last step is removed),
     # so the log_probs at the EOS token is not included in this tensor.
@@ -253,7 +258,7 @@ def get_packed_rewards(
     tot_rewards = -kl_ctl * (log_probs - ref_log_probs)
     kl_rewards = tot_rewards.clone()
     reward_score = reward_score.clip(-clip_reward_value, clip_reward_value)
-    tot_rewards[short1cu_seqlens[1:] - 1] += reward_score * (1 - seq_no_eos_mask.float())
+    tot_rewards[short1cu_seqlens[1:] - 1] += torch.where(seq_no_eos_mask, 0, reward_score)
     return kl_rewards, tot_rewards
 
 

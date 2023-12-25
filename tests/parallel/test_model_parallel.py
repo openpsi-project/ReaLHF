@@ -2,6 +2,7 @@ import os
 import time
 import unittest
 
+from torch.profiler import profile, ProfilerActivity, record_function
 # import transformers
 import torch
 import torch.multiprocessing as mp
@@ -175,12 +176,22 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     if logits is not None:
         print(f"rank {rank} mp FIRST inference logits shape {logits.shape}")
 
-    for i in range(10):
-        data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
-        st = time.monotonic()
-        res = interface.inference(model, data)
-        logits = res['logits']
-        print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                 record_shapes=True,
+                 profile_memory=True,
+                 with_stack=True,
+                 with_flops=True) as prof:
+        for _ in range(10):
+            st = time.monotonic()
+            res = interface.inference(model, data)
+            logits = res['logits']
+            print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
+    prof.export_chrome_trace(f"mp{rank}_trace.json")
+    # for _ in range(10):
+    #     st = time.monotonic()
+    #     logits = model.module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
+    #                         max_seqlen=max_seqlen).logits.float()
+    #     print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
 
     import base.constants
     if base.constants.pipe_parallel_rank() == NUM_PP - 1:
@@ -369,12 +380,18 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
                                 max_seqlen=max_seqlen).logits.float()
         print(f"baseline FIRST inference time cost {time.monotonic() - st:.4f}")
 
-        # for _ in range(10):
-        #     st = time.monotonic()
-        #     r = self.baseline_model(packed_input_ids=packed_input_ids,
-        #                             cu_seqlens=cu_seqlens,
-        #                             max_seqlen=max_seqlen).logits.float()
-        #     print(f"baseline inference time cost {time.monotonic() - st:.4f}")
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                     record_shapes=True,
+                     profile_memory=True,
+                     with_stack=True,
+                     with_flops=True) as prof:
+            for _ in range(10):
+                st = time.monotonic()
+                r = self.baseline_model(packed_input_ids=packed_input_ids,
+                                        cu_seqlens=cu_seqlens,
+                                        max_seqlen=max_seqlen).logits.float()
+                print(f"baseline inference time cost {time.monotonic() - st:.4f}")
+        prof.export_chrome_trace("baseline_trace.json")
 
         print(f"diff: {r - res[0]}, max/correct_max {(r - res[0]).abs().max()}/{r.abs().max()}, "
               f" mean {(r - res[0]).abs().mean()},")
