@@ -32,8 +32,10 @@ def compute_packed_sft_loss(
         torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
         for i in range(cu_seqlens.shape[0] - 1)
     ])
-    loss_mask = 1 - prompt_mask[shift_one_indices].float()
-    loss = -(logprobs * loss_mask).sum() / loss_mask.sum()
+    prompt_mask = prompt_mask[shift_one_indices]
+    # float16 will overflow here
+    loss = -torch.where(prompt_mask, 0, logprobs.float()).sum() / (prompt_mask.numel() -
+                                                                   prompt_mask.count_nonzero())
     return loss, {"loss": loss.detach().cpu()}
 
 
@@ -61,7 +63,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                                          **loss_fn_kwargs)
         else:
             logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-                            max_seqlen=max_seqlen).logits.float()
+                            max_seqlen=max_seqlen).logits
             loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
             module.backward(loss)
             module.step()
@@ -110,7 +112,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
             else:
                 logits = module(packed_input_ids=packed_input_ids,
                                 cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen).logits.float()
+                                max_seqlen=max_seqlen).logits
                 loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
 
             if loss is not None:
@@ -141,11 +143,11 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         if isinstance(module, DeepSpeedPipelineEngine):
             logits = module.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
             if logits is not None:
-                logits = logits.float()
+                logits = logits
         else:
             logits = model.module(packed_input_ids=packed_input_ids,
                                   cu_seqlens=cu_seqlens,
-                                  max_seqlen=max_seqlen).logits.float()
+                                  max_seqlen=max_seqlen).logits
         return dict(logits=logits)
 
     # for testing only

@@ -143,10 +143,10 @@ class PackedGenScoringInterface(api.model.ModelInterface):
         logits = self.score_model(
             input_ids=score_encoding["input_ids"].cuda(),
             attention_mask=score_encoding["attention_mask"].cuda(),
-        ).logits.float()
+        ).logits
         # For IMDB, 0 is negative and 1 is positive. We record the probability of positive.
         probs = torch.softmax(logits, dim=-1)
-        score = probs[..., -1].contiguous()
+        score = probs[..., -1].contiguous().float()
 
         all_score = [torch.zeros_like(score) for _ in range(dist.get_world_size())]
         dist.all_gather(all_score, score)
