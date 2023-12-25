@@ -275,7 +275,7 @@ class PipelineModule(nn.Module):
                 # TODO: hack, find better solution
                 if layer_idx == self._num_layers - 1 and self.is_critic:
                     layer = LayerSpec(
-                        OutputHead,
+                        layer.typename,
                         self.config.hidden_dim,
                         1,
                         bias=False,

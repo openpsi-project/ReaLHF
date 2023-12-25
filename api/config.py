@@ -32,7 +32,6 @@ _LLM_ENVVARS = {
     # "NCCL_COMM_BLOCKING": "1",
     # "NCCL_BLOCKING_WAIT": "1",
     # "TORCH_SHOW_CPP_STACKTRACES": "1",
-    "CUDA_DEVICE_MAX_CONNECTIONS": str(1),
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
     "CUDA_DEVICE_MAX_CONNECTIONS": "1",
     "PYTHONUSERBASE": "/nonsense",
