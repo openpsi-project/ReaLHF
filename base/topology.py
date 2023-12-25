@@ -6,6 +6,10 @@
 from itertools import product as cartesian_product
 from typing import NamedTuple
 
+import base.logging as logging
+
+logger = logging.getLogger("Topology")
+
 
 class PipeDataModelProcessCoord(NamedTuple):
     pipe: int
@@ -26,7 +30,7 @@ PROCESS_COORD_REGISTRY = {
 
 
 class ProcessTopology:
-    """ Manages the mapping of n-dimensional Cartesian coordinates to linear
+    """Manages the mapping of n-dimensional Cartesian coordinates to linear
     indices. This mapping is used to map the rank of processes to the grid
     for various forms of parallelism.
 
@@ -52,7 +56,7 @@ class ProcessTopology:
 
         # This is actually a class that lets us hash {'row':3, 'col':2} mappings
         try:
-            self.ProcessCoord = PROCESS_COORD_REGISTRY['#'.join(axes)]
+            self.ProcessCoord = PROCESS_COORD_REGISTRY["#".join(axes)]
         except KeyError as e:
             raise KeyError(f"Corresponding coordinate namedtuple not implemented for axes {axes}. "
                            "Check base/topology.py and implement explicitly.") from e
@@ -76,17 +80,17 @@ class ProcessTopology:
             1
         """
         if len(coord_kwargs) != len(self.axes):
-            raise ValueError('get_rank() does not support slices. Use filter_match())')
+            raise ValueError("get_rank() does not support slices. Use filter_match())")
 
         key = self.ProcessCoord(**coord_kwargs)
-        assert key in self.mapping, f'key {coord_kwargs} invalid, mapping: {self.mapping}, key: {key}'
+        assert key in self.mapping, f"key {coord_kwargs} invalid, mapping: {self.mapping}, key: {key}"
         return self.mapping[key]
 
     def get_axis_names(self):
-        """Return a list of the axis names in the ordering of the topology. """
+        """Return a list of the axis names in the ordering of the topology."""
         return self.axes
 
-    def get_rank_repr(self, rank, omit_axes=['data', 'pipe'], inner_sep='_', outer_sep='-'):
+    def get_rank_repr(self, rank, omit_axes=["data", "pipe"], inner_sep="_", outer_sep="-"):
         """Return a string representation of a rank.
 
         This method is primarily used for checkpointing model data.
@@ -112,7 +116,7 @@ class ProcessTopology:
         names = []
         for ax in axes:
             ax_rank = getattr(self.get_coord(rank=rank), ax)
-            names.append(f'{ax}{inner_sep}{ax_rank:02d}')
+            names.append(f"{ax}{inner_sep}{ax_rank:02d}")
         return outer_sep.join(names)
 
     def get_dim(self, axis):
@@ -142,10 +146,10 @@ class ProcessTopology:
         for coord, idx in self.mapping.items():
             if idx == rank:
                 return coord
-        raise ValueError(f'rank {rank} not found in topology.')
+        raise ValueError(f"rank {rank} not found in topology.")
 
     def get_axis_comm_lists(self, axis):
-        """ Construct lists suitable for a communicator group along axis ``axis``.
+        """Construct lists suitable for a communicator group along axis ``axis``.
 
         Example:
             >>> topo = Topo(axes=['pipe', 'data', 'model'], dims=[2, 2, 2])
@@ -235,7 +239,7 @@ class ProcessTopology:
 
 
 def _prime_factors(N):
-    """ Returns the prime factorization of positive integer N. """
+    """Returns the prime factorization of positive integer N."""
     if N <= 0:
         raise ValueError("Values must be strictly positive.")
 
@@ -250,22 +254,22 @@ def _prime_factors(N):
 
 
 class PipeDataParallelTopology(ProcessTopology):
-    """ A topology specialization for hybrid data and pipeline parallelism.
+    """A topology specialization for hybrid data and pipeline parallelism.
 
-        Uses data parallelism on the last dimension to encourage gradient
-        reductions to use high-bandwidth intra-node links and lower-volume
-        pipeline communications to use low-bandwidth inter-node links.
+    Uses data parallelism on the last dimension to encourage gradient
+    reductions to use high-bandwidth intra-node links and lower-volume
+    pipeline communications to use low-bandwidth inter-node links.
     """
 
     def __init__(self, num_pp, num_dp):
-        super().__init__(axes=['pipe', 'data'], dims=[num_pp, num_dp])
+        super().__init__(axes=["pipe", "data"], dims=[num_pp, num_dp])
 
 
 class PipeModelDataParallelTopology(ProcessTopology):
-    """ A topology for hybrid pipeline, model, and data parallelism. """
+    """A topology for hybrid pipeline, model, and data parallelism."""
 
     def __init__(self, num_pp, num_mp, num_dp):
-        super().__init__(axes=['pipe', 'data', 'model'], dims=[num_pp, num_dp, num_mp])
+        super().__init__(axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp])
 
 
 class PipelineParallelGrid:
@@ -291,14 +295,32 @@ class PipelineParallelGrid:
     for data_parallel_id = 1.
     """
 
-    def __init__(self, topology=None, process_group=None):
-        # TODO use process_group if provided
+    def __init__(
+        self,
+        topology=None,
+        process_group=None,
+        world_size=None,
+        process_group_offset=None,
+    ):
         from deepspeed import comm as dist
-        self.global_rank = dist.get_rank()
-        self.world_size = dist.get_world_size()
+
+        # NOTE: DeepSpeed will access *EVERY* attribute they defined. We need to remain
+        # the original semantics, so the attribute name may not truthfully mean what the attribute is.
+        # E.g., self.global_rank is not the global rank of the whole world including the master worker,
+        # but the rank in the 3D parallelism group of this specific model.
+
+        self.global_rank = dist.get_rank(group=process_group)
+
+        if world_size is not None:
+            assert process_group_offset is not None
+            self.world_size = world_size
+        else:
+            process_group_offset = dist.get_global_rank(group=process_group, group_rank=0)
+            self.world_size = dist.get_world_size(process_group)
+
         if topology is not None:
             if self.global_rank == 0:
-                print('Using topology:', topology)
+                print("Using topology:", topology)
             self._topo = topology
         else:
             num_pp = 1
@@ -309,11 +331,11 @@ class PipelineParallelGrid:
                 else:
                     num_dp *= prime
             self._topo = PipeDataParallelTopology(num_dp=num_dp, num_pp=num_pp)
-        self.data_parallel_size = max(self._topo.get_dim('data'), 1)
-        self.pipe_parallel_size = max(self._topo.get_dim('pipe'), 1)
-        self.model_parallel_size = max(self._topo.get_dim('model'), 1)
+        self.data_parallel_size = max(self._topo.get_dim("data"), 1)
+        self.pipe_parallel_size = max(self._topo.get_dim("pipe"), 1)
+        self.model_parallel_size = max(self._topo.get_dim("model"), 1)
         self.slice_parallel_size = self.model_parallel_size
-        assert self._is_grid_valid(), "Invalid Grid"
+        assert self._is_grid_valid(), ("Invalid Grid", topology, self.world_size)
 
         self.stage_id = self.get_stage_id()
         self.data_parallel_id = self.get_data_parallel_id()
@@ -323,45 +345,52 @@ class PipelineParallelGrid:
         self.ds_model_proc_group = None
         self.ds_model_rank = -1
         for dp in range(self.data_parallel_size):
-            ranks = sorted(self._topo.get_axis_list(axis='data', idx=dp))
-            if self.global_rank == 0:
-                #print(f'RANK={self.global_rank} building DeepSpeed model group: {ranks}')
-                pass
-            proc_group = dist.new_group(ranks=ranks)
+            ranks = sorted(self._topo.get_axis_list(axis="data", idx=dp))
+            proc_group = dist.new_group(ranks=[rank + process_group_offset for rank in ranks])
             if self.global_rank in ranks:
                 self.ds_model_proc_group = proc_group
                 self.ds_model_world_size = len(ranks)
                 self.ds_model_rank = ranks.index(self.global_rank)
-        assert self.ds_model_rank > -1
-        assert self.ds_model_proc_group is not None
+                logger.info(f"parallelism_rank={self.global_rank} (global_rank={dist.get_rank()}) "
+                            f"dp_rank={dp} building DeepSpeed model group "
+                            f"(i.e., pipeline+model parallel group) with global ranks: {ranks}")
+        if self.global_rank != -1:
+            assert self.ds_model_rank > -1
+            assert self.ds_model_proc_group is not None
+        else:
+            assert self.ds_model_rank == -1
+            assert self.ds_model_proc_group is None
 
         # Create new ProcessGroup for gradient all-reduces - these are the data parallel groups
         self.dp_group = []
-        self.dp_groups = self._topo.get_axis_comm_lists('data')
+        self.dp_groups = self._topo.get_axis_comm_lists("data")
         for g in self.dp_groups:
-            proc_group = dist.new_group(ranks=g)
+            proc_group = dist.new_group(ranks=[x + process_group_offset for x in g])
             if self.global_rank in g:
                 self.dp_group = g
                 self.dp_proc_group = proc_group
 
-        self.is_first_stage = (self.stage_id == 0)
-        self.is_last_stage = (self.stage_id == (self.pipe_parallel_size - 1))
+        self.is_first_stage = self.stage_id == 0
+        self.is_last_stage = self.stage_id == (self.pipe_parallel_size - 1)
 
         self.p2p_groups = self._build_p2p_groups()
 
         # Create new ProcessGroup for pipeline collectives - these are pipe parallel groups
         self.pp_group = []
         self.pp_proc_group = None
-        self.pipe_groups = self._topo.get_axis_comm_lists('pipe')
+        self.pipe_groups = self._topo.get_axis_comm_lists("pipe")
         for ranks in self.pipe_groups:
             if self.global_rank == 0:
-                #print(f'RANK={self.global_rank} building pipeline group: {ranks}')
+                # print(f'RANK={self.global_rank} building pipeline group: {ranks}')
                 pass
-            proc_group = dist.new_group(ranks=ranks)
+            proc_group = dist.new_group(ranks=[rank + process_group_offset for rank in ranks])
             if self.global_rank in ranks:
                 self.pp_group = ranks
                 self.pp_proc_group = proc_group
-        assert self.pp_proc_group is not None
+        if self.global_rank != -1:
+            assert self.pp_proc_group is not None
+        else:
+            assert self.pp_proc_group is None
 
         # Create new ProcessGroup for model (tensor-slicing) collectives
 
@@ -371,31 +400,41 @@ class PipelineParallelGrid:
         if self.model_parallel_size == 1:
             for group_rank in range(self.world_size):
                 group_rank = [group_rank]
-                group = dist.new_group(ranks=group_rank)
+                group = dist.new_group(ranks=[group_rank[0] + process_group_offset])
                 if group_rank[0] == self.global_rank:
                     self.slice_group = group_rank
                     self.slice_proc_group = group
-            return
         else:
             self.mp_group = []
-            self.model_groups = self._topo.get_axis_comm_lists('model')
+            self.model_groups = self._topo.get_axis_comm_lists("model")
             for g in self.model_groups:
-                proc_group = dist.new_group(ranks=g)
+                proc_group = dist.new_group(ranks=[x + process_group_offset for x in g])
                 if self.global_rank in g:
                     self.slice_group = g
                     self.slice_proc_group = proc_group
 
+        dp_head_ranks = self._topo.filter_match(model=0, pipe=self._topo.get_dim("pipe") - 1)
+        dp_head_group = dist.new_group(ranks=[rank + process_group_offset for rank in dp_head_ranks])
+        if self.global_rank in dp_head_ranks:
+            self.dp_head_group = dp_head_group
+        else:
+            self.dp_head_group = None
+
     def get_stage_id(self):
+        if self.global_rank == -1:
+            return -1
         return self._topo.get_coord(rank=self.global_rank).pipe
 
     def get_data_parallel_id(self):
+        if self.global_rank == -1:
+            return -1
         return self._topo.get_coord(rank=self.global_rank).data
 
     def _build_p2p_groups(self):
         """Groups for sending and receiving activations and gradients across model
         parallel stages.
         """
-        comm_lists = self._topo.get_axis_comm_lists('pipe')
+        comm_lists = self._topo.get_axis_comm_lists("pipe")
         p2p_lists = []
         for rank in range(self.world_size):
             for l in comm_lists:
@@ -410,14 +449,17 @@ class PipelineParallelGrid:
 
     def _is_grid_valid(self):
         from deepspeed import comm as dist
+
         ranks = 1
         for ax in self._topo.get_axis_names():
             ranks *= self._topo.get_dim(ax)
-        return ranks == dist.get_world_size()
+        return ranks == self.world_size
 
-    #returns the global rank of the process with the provided stage id
-    #which has the same data_parallel_id as caller process
+    # returns the global rank of the process with the provided stage id
+    # which has the same data_parallel_id as caller process
     def stage_to_global(self, stage_id, **kwargs):
+        if self.global_rank == -1:
+            return -1
         me = self._topo.get_coord(self.global_rank)
         transform = me._replace(pipe=stage_id, **kwargs)._asdict()
         return self._topo.get_rank(**transform)
@@ -430,27 +472,27 @@ class PipelineParallelGrid:
         return self.global_rank
 
     def get_pipe_parallel_rank(self):
-        """ The stage of the pipeline this rank resides in. """
+        """The stage of the pipeline this rank resides in."""
         return self.get_stage_id()
 
     def get_pipe_parallel_world_size(self):
-        """ The number of stages in the pipeline. """
+        """The number of stages in the pipeline."""
         return self.pipe_parallel_size
 
     def get_pipe_parallel_group(self):
-        """ The group of ranks within the same pipeline. """
+        """The group of ranks within the same pipeline."""
         return self.pp_proc_group
 
     def get_data_parallel_rank(self):
-        """ Which pipeline this rank resides in. """
+        """Which pipeline this rank resides in."""
         return self.data_parallel_id
 
     def get_data_parallel_world_size(self):
-        """ The number of pipelines. """
+        """The number of pipelines."""
         return self.data_parallel_size
 
     def get_data_parallel_group(self):
-        """ The group of ranks within the same stage of all pipelines. """
+        """The group of ranks within the same stage of all pipelines."""
         return self.dp_proc_group
 
     # These are model parallel groups across all types of model parallelism.
@@ -467,7 +509,9 @@ class PipelineParallelGrid:
 
     # For Megatron-style tensor slicing
     def get_tensor_model_parallel_rank(self):
-        if 'model' in self._topo.get_axis_names():
+        if self.global_rank == -1:
+            return -1
+        if "model" in self._topo.get_axis_names():
             return self._topo.get_coord(rank=self.global_rank).model
         else:
             return 0

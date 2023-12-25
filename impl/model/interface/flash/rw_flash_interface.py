@@ -79,7 +79,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
             )
         #####################################################
 
-        return from_dict(dict(scores=chosen_end_scores.cpu()))
+        return from_dict(dict(scores=chosen_end_scores))
 
     def train_step(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))

@@ -87,7 +87,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
             offset += input_lens[2 * i + 1] - 1
         assert offset == sum(input_lens) - input_lens.shape[0], (offset, sum(input_lens), input_lens.shape)
 
-        return from_dict(dict(seqlogp=torch.stack(logprob_sum).cpu()))
+        return from_dict(dict(seqlogp=torch.stack(logprob_sum)))
 
     def train_step(self, model: api.model.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))

@@ -1,6 +1,19 @@
-from typing import Dict
+from typing import Dict, List, Tuple
 
 import numpy as np
+
+
+def shape_leq(shape1: Tuple, shape2: Tuple) -> bool:
+    assert len(shape1) == len(shape2)
+    return all(x1 <= x2 for x1, x2 in zip(shape1, shape2))
+
+
+def shape_union(*shapes: List[Tuple]) -> Tuple:
+    if len(shapes) == 1:
+        return shapes[0]
+    for s in shapes:
+        assert len(s) == len(shapes[0])
+    return tuple(max(*dims) for dims in zip(*shapes))
 
 
 def split_to_shapes(x: np.ndarray, shapes: Dict, axis: int = -1):

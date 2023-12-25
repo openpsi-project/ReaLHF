@@ -112,8 +112,10 @@ def _namedarray_iop(iop):
 
 
 def _numpy_dtype_to_str(dtype):
-    if dtype == np.uint8 or dtype == bool:
+    if dtype == np.uint8:
         return "uint8"
+    elif dtype == bool:
+        return "bool"
     elif dtype == np.float32:
         return "float32"
     elif dtype == np.float16:
