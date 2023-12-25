@@ -407,7 +407,6 @@ class PipelineParallelGrid:
                 if group_rank[0] == self.global_rank:
                     self.slice_group = group_rank
                     self.slice_proc_group = group
-            return
         else:
             self.mp_group = []
             self.model_groups = self._topo.get_axis_comm_lists("model")
@@ -416,6 +415,13 @@ class PipelineParallelGrid:
                 if self.global_rank in g:
                     self.slice_group = g
                     self.slice_proc_group = proc_group
+
+        dp_head_ranks = self._topo.filter_match(model=0, pipe=self._topo.get_dim("pipe") - 1)
+        dp_head_group = dist.new_group(ranks=[rank + process_group_offset for rank in dp_head_ranks])
+        if self.global_rank in dp_head_ranks:
+            self.dp_head_group = dp_head_group
+        else:
+            self.dp_head_group = None
 
     def get_stage_id(self):
         if self.global_rank == -1:

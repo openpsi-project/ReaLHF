@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Optional
 import asyncio
 import copy
 import getpass
@@ -10,7 +10,9 @@ import deepspeed
 import colorama
 import numpy as np
 import torch
+import torch.distributed
 
+import base.numpy_utils
 import base.topology
 import base.constants
 from base.cluster import spec as cluster_spec
@@ -55,7 +57,14 @@ def request_all(
     datas: List[namedarray.NamedArray],
 ):
     """Send request of `handle_type` to multiple streams. len(streams)==len(datas)"""
-    requests = [request_reply_stream.Payload(handle_name=handle_type, data=data) for data in datas]
+    requests = [
+        request_reply_stream.Payload(
+            handle_name=handle_type,
+            is_tensor=False,
+            data=data,
+        )
+        for data in datas
+    ]
     logging.getLogger("benchmark").debug(f"master worker #request_all# *end* time ${time.time_ns()}$")
     tik = time.perf_counter()
     for s, r in zip(streams, requests):
@@ -68,24 +77,19 @@ def request_all(
 
 def gather_all_replies(
     streams: List[request_reply_stream.RequestReplyStream],
-) -> List[List[namedarray.NamedArray]]:
+) -> List:
     """Collect responses from multiple streams. Blocking method."""
-    responses = [s.poll(block=True) for s in streams]
+    responses = [s.poll(block=True).data for s in streams]
     logging.getLogger("benchmark").debug(f"master worker #gather_all_replies# *end* time ${time.time_ns()}$")
     return responses
 
 
-async def parallel_rpc(
-    rpc_handle_name: str,
-    data: namedarray.NamedArray,
+async def _awaitable_response(
     stream: request_reply_stream.RequestReplyStream,
-):
-    req = request_reply_stream.Payload(handle_name=rpc_handle_name, data=data)
-    stream.post(req)
-
+) -> request_reply_stream.Payload:
     while True:
         try:
-            return stream.poll(block=False).data
+            return stream.poll(block=False)
         except request_reply_stream.NoMessage:
             await asyncio.sleep(0.01)
             continue
@@ -97,6 +101,10 @@ async def model_rpc_func(
     parent_rpc_names: List[str],
     data_registry: Dict[str, torch.Tensor],
     streams: List[request_reply_stream.RequestReplyStream],
+    mas_dp_head_group: torch.distributed.ProcessGroup,
+    scatter_buffer: Dict[str, List[torch.Tensor]],
+    gather_buffer: Dict[str, List[torch.Tensor]],
+    device: torch.device,
 ):
     num_dp = len(streams)
 
@@ -116,18 +124,108 @@ async def model_rpc_func(
         else:
             data[rpc_config.input_key_remap[k]] = data_registry[k]
     data = namedarray.from_dict(data)
-    data = dataparallel.get_broker(rpc_config.dp_broker_type).scatter_to(data, num_dp)
+    datas = dataparallel.get_broker(rpc_config.dp_broker_type).scatter_to(data, num_dp)
 
-    awaitables = []
-    for s, x in zip(streams, data):
-        awaitables.append(parallel_rpc(rpc_config.interface_type.value, x, s))
-    res = await asyncio.gather(*awaitables)
+    dtypes = {k: v.dtype for k, v in datas[0].items()}
+    all_shapes = [{k: v.shape for k, v in data.items()} for data in datas]
+    buf_shapes = {}
+    for k in dtypes:
+        buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s[k]) for s in all_shapes])
 
-    res = dataparallel.get_broker(rpc_config.dp_broker_type).gather_from(res)
+    for stream, shapes in zip(streams, all_shapes):
+        req = request_reply_stream.Payload(
+            handle_name=rpc_config.interface_type.value,
+            actual_shapes=shapes,
+            buf_shapes=buf_shapes,
+            dtypes=dtypes,
+            is_tensor=True,
+        )
+        stream.post(req)
+
+    # Expand scatter buffer if necessary
+    for k, buf_shape in buf_shapes.items():
+        if k not in scatter_buffer or (
+            k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k][0].shape)
+        ):
+            if k in scatter_buffer:
+                logger.info(
+                    f"Resize scatter buffer on master worker for {k}"f" from {scatter_buffer[k][0].shape} to {buf_shape}"
+                )
+            else:
+                logger.info(f"Create scatter buffer on master worker for {k} with shape {buf_shape}")
+            scatter_buffer[k] = [
+                torch.empty(buf_shape, dtype=dtypes[k], device=device) for _ in range(num_dp + 1)
+            ]
+
+    # Put data into scatter buffer
+    for i, data in enumerate(datas):
+        for k, v in data.items():
+            assert len(scatter_buffer[k]) == len(datas) + 1
+            s = tuple(slice(0, x) for x in v.shape)
+            scatter_buffer[k][i + 1][s] = data[k]
+
+    # Scatter data to DP head model workers.
+    for k in scatter_buffer:
+        torch.distributed.scatter(
+            scatter_buffer[k][0],
+            scatter_list=scatter_buffer[k],
+            src=0,
+            group=mas_dp_head_group,
+        )
+
+    responses = await asyncio.gather(*[_awaitable_response(s) for s in streams])
+
+    if responses[0].is_tensor:
+        all_buf_shapes = [response.buf_shapes for response in responses]
+        for buf_shapes in all_buf_shapes:
+            for k, v in buf_shapes.items():
+                assert buf_shapes[k] == all_buf_shapes[0][k]
+
+        # Expand gather buffer if necessary.
+        for k, buf_shape in buf_shapes.items():
+            if k not in gather_buffer or (
+                k in gather_buffer and not base.numpy_utils.shape_leq(buf_shape, gather_buffer[k][0].shape)
+            ):
+                if k in gather_buffer:
+                    logger.info(
+                        f"Resize gather buffer on master worker for {k} from {gather_buffer[k][0].shape} to {buf_shape}"
+                    )
+                else:
+                    logger.info(f"create gather buffer on master worker for {k} with shape {buf_shape}")
+                gather_buffer[k] = [
+                    torch.empty(buf_shape, dtype=responses[0].dtypes[k], device=device)
+                    for _ in range(num_dp + 1)
+                ]
+
+        for k in gather_buffer:
+            assert len(gather_buffer[k]) == len(datas) + 1
+            torch.distributed.gather(
+                gather_buffer[k][0],
+                gather_list=gather_buffer[k],
+                dst=0,
+                group=mas_dp_head_group,
+            )
+        all_res = []
+        for i, response in enumerate(responses):
+            res_ = {}
+            for k, vs in gather_buffer.items():
+                assert len(vs) == len(responses) + 1
+                v = vs[i + 1]
+                shape = response.actual_shapes[k]
+                s = tuple(slice(0, x) for x in shape)
+                res_[k] = v[s]
+            all_res.append(namedarray.from_dict(res_))
+        res = dataparallel.get_broker(rpc_config.dp_broker_type).gather_from(all_res)
+    else:
+        res = dataparallel.get_broker(rpc_config.dp_broker_type).gather_from(
+            [response.data for response in responses]
+        )
+
     if rpc_config.log_return_value:
         logger.info(f"RPC name {rpc_config.name} returns {res}")
 
     for k in rpc_config.output_data:
+        assert res[k].is_cuda, f"Output {k} returned by {rpc_config.name} is not on cuda"
         if k in rpc_config.output_key_remap:
             data_registry[rpc_config.output_key_remap[k]] = res[k]
         else:
@@ -202,92 +300,98 @@ class MasterWorker(worker_base.Worker):
 
         return config.worker_info
 
+    def __lazy_init(self):
+        # Set up streams.
+        self.__model_streams: Dict[
+            config_pkg.MasterStreamID, List[request_reply_stream.RequestReplyStream]
+        ] = {
+            k: request_reply_stream.make_master_stream(
+                self.config.worker_info,
+                v,
+                n_subscribers=self.__model_topos[k.model_name].get_dim("model")
+                * self.__model_topos[k.model_name].get_dim("pipe"),
+            )
+            for k, v in self.config.model_streams.items()
+        }
+        self.__data_stream: request_reply_stream.RequestReplyStream = request_reply_stream.make_master_stream(
+            self.config.worker_info,
+            self.config.data_stream,
+            n_subscribers=1,
+        )
+
+        # Set up the global process group.
+        self.__pg_info = gpu_utils.setup_ddp(
+            expr_name=self.config.worker_info.experiment_name,
+            trial_name=self.config.worker_info.trial_name,
+            worker_index=0,
+            mw_topos=self.config.mw_topos,
+        )
+        for model_name_ in self.config.mw_topos:
+            base.constants.set_parallelism_group(
+                model_name_,
+                self.__pg_info.mw_groups[model_name_],
+            )
+        deepspeed.init_distributed()
+        self.logger.info("deepspeed init distributed on master worker")
+        self.__device = torch.device("cuda:0")
+
+        offset = 1
+        for model_name_, topo_ in self.config.mw_topos.items():
+            grid = base.topology.PipelineParallelGrid(
+                topology=topo_,
+                process_group=self.__pg_info.mw_groups[model_name_],
+                world_size=topo_.world_size(),
+                process_group_offset=offset,
+            )
+            base.constants.set_grid(model_name_, grid)
+            offset += topo_.world_size()
+
+        # Request training specification from data workers, e.g. batch size and total train steps.
+        self.__data_stream.post(request_reply_stream.Payload(handle_name="spec"))
+        ft_specs: List[model_api.FinetuneSpec] = [self.__data_stream.poll(block=True).data]
+        if len(set(x.steps_per_epoch for x in ft_specs)) != 1:
+            raise RuntimeError(
+                f"steps_per_epoch not equal among data workers:"
+                f" {list(x.steps_per_epoch for x in ft_specs)}. "
+                "Consider launching less data workers."
+            )
+        ft_spec = ft_specs[0]
+        ft_spec.total_train_epochs = self.config.total_train_epochs
+        ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
+
+        batch_size = ft_spec.batch_size_per_device
+        logger.info(
+            "\n\n"
+            + "=" * 40
+            + f"\nTotal train epochs: {ft_spec.total_train_epochs}"
+            + f"\nTotal train steps: {ft_spec.total_train_steps}"
+            + f"\nSteps per epoch: {ft_spec.steps_per_epoch}"
+            + f"\nEffective batch size: {batch_size}\n"
+            + "=" * 40
+            + "\n"
+        )
+        logger.info(f"ft_spec = {ft_spec}")
+
+        model_ft_specs = []
+        for ms_id in self.__model_streams:
+            model_name = ms_id.model_name
+            num_dp = self.__model_topos[model_name].get_dim("data")
+            model_ft_spec = copy.deepcopy(ft_spec)
+            # FIXME: batch size returned by data workers may be the number of tokens, is this correct for deepspeed config?
+            model_ft_spec.batch_size_per_device = batch_size // num_dp
+            model_ft_specs.append(model_ft_spec)
+        request_all(list(self.__model_streams.values()), "initialize", model_ft_specs)
+        gather_all_replies(list(self.__model_streams.values()))
+
+        self._ft_spec = ft_spec
+
+        self.__scatter_buffers = {rpc.name: {} for rpc in self.__model_rpcs}
+        self.__gather_buffers = {rpc.name: {} for rpc in self.__model_rpcs}
+
     def _poll(self):
         if not self.__initialized:
-            # Set up streams.
-            self.__model_streams: Dict[
-                config_pkg.MasterStreamID, List[request_reply_stream.RequestReplyStream]
-            ] = {
-                k: request_reply_stream.make_master_stream(
-                    self.config.worker_info,
-                    v,
-                    n_subscribers=self.__model_topos[k.model_name].get_dim("model")
-                    * self.__model_topos[k.model_name].get_dim("pipe"),
-                )
-                for k, v in self.config.model_streams.items()
-            }
-            self.__data_stream: request_reply_stream.RequestReplyStream = (
-                request_reply_stream.make_master_stream(
-                    self.config.worker_info, self.config.data_stream, n_subscribers=1
-                )
-            )
-
-            # Set up the global process group.
-            self.__pg_info = gpu_utils.setup_ddp(
-                expr_name=self.config.worker_info.experiment_name,
-                trial_name=self.config.worker_info.trial_name,
-                worker_index=0,
-                mw_topos=self.config.mw_topos,
-            )
-            for model_name_ in self.config.mw_topos:
-                base.constants.set_parallelism_group(
-                    model_name_,
-                    self.__pg_info.mw_groups[model_name_],
-                )
-            deepspeed.init_distributed()
-            self.logger.info("deepspeed init distributed on master worker")
-            self.__device = torch.device("cuda:0")
-
-            offset = 1
-            for model_name_, topo_ in self.config.mw_topos.items():
-                grid = base.topology.PipelineParallelGrid(
-                    topology=topo_,
-                    process_group=self.__pg_info.mw_groups[model_name_],
-                    world_size=topo_.world_size(),
-                    process_group_offset=offset,
-                )
-                base.constants.set_grid(model_name_, grid)
-                offset += topo_.world_size()
-
-            # Request training specification from data workers, e.g. batch size and total train steps.
-            self.__data_stream.post(request_reply_stream.Payload(handle_name="spec"))
-            ft_specs: List[model_api.FinetuneSpec] = [self.__data_stream.poll(block=True).data]
-            if len(set(x.steps_per_epoch for x in ft_specs)) != 1:
-                raise RuntimeError(
-                    f"steps_per_epoch not equal among data workers:"
-                    f" {list(x.steps_per_epoch for x in ft_specs)}. "
-                    "Consider launching less data workers."
-                )
-            ft_spec = ft_specs[0]
-            ft_spec.total_train_epochs = self.config.total_train_epochs
-            ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
-
-            batch_size = ft_spec.batch_size_per_device
-            logger.info(
-                "\n\n"
-                + "=" * 40
-                + f"\nTotal train epochs: {ft_spec.total_train_epochs}"
-                + f"\nTotal train steps: {ft_spec.total_train_steps}"
-                + f"\nSteps per epoch: {ft_spec.steps_per_epoch}"
-                + f"\nEffective batch size: {batch_size}\n"
-                + "=" * 40
-                + "\n"
-            )
-            logger.info(f"ft_spec = {ft_spec}")
-
-            model_ft_specs = []
-            for ms_id in self.__model_streams:
-                model_name = ms_id.model_name
-                num_dp = self.__model_topos[model_name].get_dim("data")
-                model_ft_spec = copy.deepcopy(ft_spec)
-                # FIXME: batch size returned by data workers may be the number of tokens, is this correct for deepspeed config?
-                model_ft_spec.batch_size_per_device = batch_size // num_dp
-                model_ft_specs.append(model_ft_spec)
-            request_all(list(self.__model_streams.values()), "initialize", model_ft_specs)
-            gather_all_replies(list(self.__model_streams.values()))
-
+            self.__lazy_init()
             self.__initialized = True
-            self._ft_spec = ft_spec
             self._train_start_time = time.perf_counter()
 
         # fetch data from dataloader
@@ -313,7 +417,7 @@ class MasterWorker(worker_base.Worker):
             f"Fetch data time consumption: {time.perf_counter() - fetch_data_start:.3f}s."
         )
         for key, value in sample.items():
-            self._data_registry[key] = value
+            self._data_registry[key] = value.to(self.__device)
 
         # Evaluate if necessary.
         if should_eval:
@@ -348,11 +452,15 @@ class MasterWorker(worker_base.Worker):
 
             task = self.__event_loop.create_task(
                 model_rpc_func(
-                    rpc,
-                    futures,
-                    self.__rpc_parents[i],
-                    self._data_registry,
-                    list(concerned_streams.values()),
+                    rpc_config=rpc,
+                    rpc_futures=futures,
+                    parent_rpc_names=self.__rpc_parents[i],
+                    data_registry=self._data_registry,
+                    streams=list(concerned_streams.values()),
+                    mas_dp_head_group=self.__pg_info.mas_dp_head_groups[rpc.model_name],
+                    scatter_buffer=self.__scatter_buffers[rpc.name],
+                    gather_buffer=self.__gather_buffers[rpc.name],
+                    device=self.__device,
                 )
             )
             tasks.append(task)

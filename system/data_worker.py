@@ -12,7 +12,6 @@ DATA_WORKER_NAME = "_data_worker"
 
 
 class DataWorker(worker_base.Worker):
-
     def __init__(self, server=None):
         super().__init__(server)
         self.__initialized = False
@@ -34,9 +33,10 @@ class DataWorker(worker_base.Worker):
         return config.worker_info
 
     def __setup_stream(self):
-        self.__stream = request_reply_stream.make_worker_stream(self.config.worker_info,
-                                                                self.config.stream,
-                                                                is_dp_head=True)
+        self.__stream = request_reply_stream.make_worker_stream(
+            self.config.worker_info,
+            self.config.stream,
+        )
 
     def __setup_datasets(self):
         # initialize data sets
@@ -50,7 +50,8 @@ class DataWorker(worker_base.Worker):
                 self.config.worker_info.experiment_name,
                 self.config.worker_info.trial_name,
                 cache_root=(None if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
-            ) for d in self.config.datasets
+            )
+            for d in self.config.datasets
         ]
         if len(self.config.datasets) == 1:
             self.__dataset = datasets[0]

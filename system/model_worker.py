@@ -1,5 +1,6 @@
 import gc
 import socket
+from typing import Dict
 import time
 
 from deepspeed.accelerator import get_accelerator
@@ -19,6 +20,7 @@ import base.gpu_utils as gpu_utils
 import base.logging as logging
 import base.namedarray as namedarray
 import base.seeding as seeding
+import base.numpy_utils
 import base.timeutil
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
@@ -85,9 +87,6 @@ class ModelWorker(worker_base.Worker):
         self.__stream = request_reply_stream.make_worker_stream(
             self.config.worker_info,
             self.config.stream,
-            is_dp_head=(
-                self.config.mp_rank == 0 and self.config.pp_rank == self.config.topo.get_dim("pipe") - 1
-            ),
         )
 
         base.constants.set_model_name(self.config.model_name)
@@ -158,6 +157,10 @@ class ModelWorker(worker_base.Worker):
             eval_dataloader = None
         self.__eval_dataloader = eval_dataloader
 
+        # One for each RPC, e.g., generation and train_step use different buffers.
+        self.__scatter_buffers: Dict[Dict[str, torch.Tensor]] = {}
+        self.__gather_buffers: Dict[Dict[str, torch.Tensor]] = {}
+
     def _poll(self):
         if not self.__ddp_env_resolved:
             self.__lazy_setup()
@@ -183,66 +186,83 @@ class ModelWorker(worker_base.Worker):
             # It will also return result back to master, while other workers in the data parallel group return None.
             self._is_dp_head = self._mp_rank == 0 and self._pp_rank == self._pp_size - 1
 
+        recv_tik = time.perf_counter()
         try:
             request: request_reply_stream.Payload = self.__stream.poll()
         except request_reply_stream.NoMessage:
             return worker_base.PollResult(0, 0)
 
-        btik = time.perf_counter()
-        if self._is_dp_head:
-            if request.is_tensor:
-                assert isinstance(request.data, namedarray.NamedArray)
-                data = {k: v.cuda() for k, v in request.data.to_dict().items()}
-            else:
-                data = request.data
-        else:
-            if request.is_tensor:
-                data = {
-                    k: torch.empty(shape, dtype=_str_to_torch_dtype(dtype), device=self.__device)
-                    for (k, shape), dtype in zip(request.shapes.items(), request.dtypes.values())
-                }
-            else:
-                data = None
+        if request.handle_name not in self.__gather_buffers:
+            self.__gather_buffers[request.handle_name] = {}
+        if request.handle_name not in self.__scatter_buffers:
+            self.__scatter_buffers[request.handle_name] = {}
 
-        self.logger.info(
-            f"my rank is dp={self._dp_rank}, mp={self._mp_rank}, pp={self._pp_rank}, global={dist.get_rank()}, "
-            f"my group rank is {dist.get_rank(group=self._bgroup)}, "
-            f"broadcasting source is {self._bsrc}, ranks in group are {dist.get_process_group_ranks(self._bgroup)}, "
-            f"my data is None? **{request.data is None}**"
-        )
-        if not request.is_tensor:
-            obj_lis = [data]
-            dist.broadcast_object_list(obj_lis, src=self._bsrc, group=self._bgroup)
-            data = obj_lis[0]
-        else:
-            for k in data:
-                dist.broadcast(data[k], src=self._bsrc, group=self._bgroup)
+        gather_buffer = self.__gather_buffers[request.handle_name]
+        scatter_buffer = self.__scatter_buffers[request.handle_name]
+
+        data = request.data
+        if request.is_tensor:
+            assert data is None
+
+            # Maybe create or extend the size of scatter buffer.
+            for (k, buf_shape), dtype in zip(request.buf_shapes.items(), request.dtypes.values()):
+                if k not in scatter_buffer or (
+                    k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k].shape)
+                ):
+                    if self._is_dp_head:
+                        if k in scatter_buffer:
+                            logger.info(
+                                f"Resizing scatter buffer key {k} "
+                                f"from {scatter_buffer[k].shape} to {buf_shape}"
+                            )
+                        else:
+                            logger.info(f"Create scatter buffer key {k} with shape {buf_shape}")
+                    scatter_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
+
+            if self._is_dp_head:
+                # Receive from the master worker
+                for k in request.buf_shapes:
+                    dist.scatter(
+                        scatter_buffer[k],
+                        scatter_list=None,
+                        src=0,
+                        group=self.__pg_info.mas_dp_head_groups[self.model_name],
+                    )
+            # Broadcast to the DP group / receive from the DP head
+            for k in request.buf_shapes:
+                dist.broadcast(scatter_buffer[k], src=self._bsrc, group=self._bgroup)
+
+            # Slice the array to get the actual data
+            data = {}
+            for k, target_shape in request.actual_shapes.items():
+                s = tuple(slice(0, target_size) for target_size in target_shape)
+                data[k] = scatter_buffer[k][s]
             data = namedarray.from_dict(data)
-        request.data = data
+
         if self._is_dp_head:
-            self.logger.info(f"Model {self.model_name} receive & broadcast time: {time.perf_counter() - btik}")
+            self.logger.info(
+                f"Model {self.model_name} receive request {request.handle_name} time: {time.perf_counter() - recv_tik}"
+            )
 
         tik = time.perf_counter()
-        if self._is_dp_head:
-            logger.info(f"Model worker {self.model_name} received request {request.handle_name}.")
         try:
             worker_identifier = self.__mw_id
             if request.handle_name == "initialize":
-                self.__model = self.__backend.initialize(self.__model, request.data)
+                self.__model = self.__backend.initialize(self.__model, data)
                 res = None
             elif request.handle_name == "save":
-                res = self.__interface.save(self.__model, request.data)  # -> None
+                res = self.__interface.save(self.__model, data)  # -> None
             elif request.handle_name == "inference":
                 time_mark(f"{self.model_name}_inference_start", worker_identifier)
-                res = self.__interface.inference(self.__model, request.data)  # -> NamedArray
+                res = self.__interface.inference(self.__model, data)  # -> NamedArray
                 time_mark(f"{self.model_name}_inference_end", worker_identifier)
             elif request.handle_name == "train_step":
                 time_mark(f"{self.model_name}_train_start", worker_identifier)
-                res = self.__interface.train_step(self.__model, request.data)  # -> Dict
+                res = self.__interface.train_step(self.__model, data)  # -> Dict
                 time_mark(f"{self.model_name}_train_end", worker_identifier)
             elif request.handle_name == "generate":
                 time_mark(f"{self.model_name}_generate_start", worker_identifier)
-                res = self.__interface.generate(self.__model, request.data)  # -> NamedArray
+                res = self.__interface.generate(self.__model, data)  # -> NamedArray
                 time_mark(f"{self.model_name}_generate_end", worker_identifier)
             elif request.handle_name == "evaluate":
                 res = self.__interface.evaluate(self.__model, self.__eval_dataloader)  # -> Dict
@@ -260,10 +280,64 @@ class ModelWorker(worker_base.Worker):
 
         if self._is_dp_head:
             # Discard returned data if not DP head.
-            reply = request_reply_stream.Payload(
-                request_id=request.request_id, handle_name=request.handle_name, data=res
-            )
+            if isinstance(res, namedarray.NamedArray):
+                shapes = {k: v.shape for k, v in res.items()}
+                dtypes = {k: v.dtype for k, v in res.items()}
+
+                all_shapes = [None for _ in range(self.config.topo.get_dim("data"))]
+                dist.all_gather_object(
+                    all_shapes,
+                    shapes,
+                    group=base.constants.grid().dp_head_group,
+                )
+                buf_shapes = {}
+                for k in shapes:
+                    buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s[k]) for s in all_shapes])
+
+                # Expand buffer shape if necessary.
+                for (k, dtype), buf_shape in zip(dtypes.items(), buf_shapes.values()):
+                    if k not in gather_buffer or (
+                        k in gather_buffer
+                        and not base.numpy_utils.shape_leq(buf_shape, gather_buffer[k].shape)
+                    ):
+                        if self._is_dp_head:
+                            if k in gather_buffer:
+                                logger.info(
+                                    f"Resizing gather buffer key {k} from {gather_buffer[k].shape} to {buf_shape}"
+                                )
+                            else:
+                                logger.info(f"Create gather buffer key {k} with shape {buf_shape}")
+                        gather_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
+
+                reply = request_reply_stream.Payload(
+                    request_id=request.request_id,
+                    handle_name=request.handle_name,
+                    is_tensor=True,
+                    actual_shapes=shapes,
+                    buf_shapes=buf_shapes,
+                    dtypes=dtypes,
+                )
+            else:
+                reply = request_reply_stream.Payload(
+                    request_id=request.request_id,
+                    handle_name=request.handle_name,
+                    is_tensor=False,
+                    data=res,
+                )
+
             self.__stream.post(reply)
+
+            if reply.is_tensor:
+                # Copy data to the gather buffer.
+                for k, v in res.items():
+                    s = tuple(slice(0, size) for size in v.shape)
+                    gather_buffer[k][s] = v
+                    dist.gather(
+                        gather_buffer[k],
+                        gather_list=None,
+                        dst=0,
+                        group=self.__pg_info.mas_dp_head_groups[self.model_name],
+                    )
 
         if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
             # following huggingface trl # ALWAYS COST 0.3+ SEC
@@ -289,5 +363,5 @@ class ModelWorker(worker_base.Worker):
         )
         blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
 
-        sample_count = request.data.length(0) if isinstance(request.data, namedarray.NamedArray) else 1
+        sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
         return worker_base.PollResult(sample_count=sample_count, batch_count=1)
