@@ -12,6 +12,7 @@ DATA_WORKER_NAME = "_data_worker"
 
 
 class DataWorker(worker_base.Worker):
+
     def __init__(self, server=None):
         super().__init__(server)
         self.__initialized = False
@@ -50,8 +51,7 @@ class DataWorker(worker_base.Worker):
                 self.config.worker_info.experiment_name,
                 self.config.worker_info.trial_name,
                 cache_root=(None if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
-            )
-            for d in self.config.datasets
+            ) for d in self.config.datasets
         ]
         if len(self.config.datasets) == 1:
             self.__dataset = datasets[0]

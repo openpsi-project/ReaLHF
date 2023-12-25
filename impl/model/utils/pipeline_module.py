@@ -482,7 +482,8 @@ class PipelineModule(nn.Module):
                             tied_ranks.append(self._grid.stage_to_global(stage_id=s, data=dp, model=mp))
                         else:
                             tied_ranks.append(self._grid.stage_to_global(stage_id=s, data=dp))
-                    group = dist.new_group(ranks=[rank + base.constants.process_group_offset() for rank in tied_ranks])
+                    group = dist.new_group(
+                        ranks=[rank + base.constants.process_group_offset() for rank in tied_ranks])
 
                     # Record this tied module if we own a local copy of it.
                     if self.global_rank in tied_ranks:
@@ -499,7 +500,8 @@ class PipelineModule(nn.Module):
                                 for p in self.tied_modules[key].parameters():
                                     p.ds_pipe_replicated = True
         if len(tied_comms) > 0:
-            raise NotImplementedError("Tied weights require dist.new_group of a specific model, which are not supported!")
+            raise NotImplementedError(
+                "Tied weights require dist.new_group of a specific model, which are not supported!")
         return tied_comms
 
     def partitions(self):

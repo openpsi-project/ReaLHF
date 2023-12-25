@@ -1,7 +1,7 @@
 # Request-reply stream between model workers and the master worker.
 # The stream is composed of a pair of ZMQ sockets, one PUSH and one PULL, for asynchronous communication,
 # i.e., the model worker can buffer requests from the master and execute them in any order under the hood.
-from typing import Dict, List, Optional, Union, Any
+from typing import Any, Dict, List, Optional, Union
 import asyncio
 import dataclasses
 import pickle
@@ -52,6 +52,7 @@ class Payload:
 
 
 class RequestReplyStream:
+
     def post(self, payload: Payload):
         raise NotImplementedError()
 
@@ -91,6 +92,7 @@ class RequestReplyStream:
 
 
 class IpRequestClient(RequestReplyStream):
+
     def __init__(self):
         self._context = zmq.Context.instance(io_threads=ZMQ_IO_THREADS)
 
@@ -129,6 +131,7 @@ class IpRequestClient(RequestReplyStream):
 
 
 class IpReplyServer(RequestReplyStream):
+
     def __init__(self):
         self._context = zmq.Context.instance(io_threads=ZMQ_IO_THREADS)
 
@@ -168,6 +171,7 @@ class IpReplyServer(RequestReplyStream):
 
 
 class NameResolvingRequstClient(IpRequestClient):
+
     def __init__(
         self,
         experiment_name: str,
@@ -195,16 +199,11 @@ class NameResolvingRequstClient(IpRequestClient):
         logger.info(f"Get master receive address: {master_recv_address} from {master_recv_name}")
 
         # master needs to wait all peers (subscribers) to connect
-        while (
-            len(
+        while (len(
                 name_resolve.get_subtree(
-                    names.request_reply_stream(
-                        experiment_name, trial_name, PUBSUB_BARRIER_NAME.format(name=push_stream_name)
-                    )
-                )
-            )
-            < n_subscribers
-        ):
+                    names.request_reply_stream(experiment_name, trial_name,
+                                               PUBSUB_BARRIER_NAME.format(name=push_stream_name))))
+               < n_subscribers):
             time.sleep(0.1)
         logger.info(
             f"Master discovered all {n_subscribers} "
@@ -213,6 +212,7 @@ class NameResolvingRequstClient(IpRequestClient):
 
 
 class NameResolvingReplyServer(IpReplyServer):
+
     def __init__(
         self,
         experiment_name: str,
@@ -237,9 +237,8 @@ class NameResolvingReplyServer(IpReplyServer):
         logger.info(f"Get worker receive address: {master_send_addr} from {recv_name}")
 
         name_resolve.add_subentry(
-            name=names.request_reply_stream(
-                experiment_name, trial_name, PUBSUB_BARRIER_NAME.format(name=pull_stream_name)
-            ),
+            name=names.request_reply_stream(experiment_name, trial_name,
+                                            PUBSUB_BARRIER_NAME.format(name=pull_stream_name)),
             value=self.address,
             keepalive_ttl=60,
         )

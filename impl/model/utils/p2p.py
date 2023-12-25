@@ -6,10 +6,10 @@ import typing
 from deepspeed import comm as dist
 from deepspeed.accelerator import get_accelerator
 from deepspeed.git_version_info import torch_info
-
 # To query whether we have send/recv support
 from packaging.version import Version
 import torch
+
 from base.constants import process_group_offset
 
 _groups = None
@@ -57,19 +57,16 @@ def init_process_groups(grid):
 
     if not can_send_recv():
         # _groups = [dist.new_group(ranks=[g + process_group_offset() for g in group]) for group in _grid.p2p_groups]
-        raise NotImplementedError(
-            "Cannot use send/recv with torch version < 1.8." f" PyTorch version {Version(torch.__version__)}."
-        )
+        raise NotImplementedError("Cannot use send/recv with torch version < 1.8."
+                                  f" PyTorch version {Version(torch.__version__)}.")
 
 
 def _is_valid_send_recv(src_stage, dest_stage):
     first_stage = 0
     last_stage = _grid.pipe_parallel_size - 1
-    assert (
-        abs(src_stage - dest_stage) == 1
-        or (src_stage == first_stage and dest_stage == last_stage)
-        or (src_stage == last_stage and dest_stage == first_stage)
-    ), "Functionality currently limited to send and receive between adjacent ranks only"
+    assert (abs(src_stage - dest_stage) == 1 or (src_stage == first_stage and dest_stage == last_stage)
+            or (src_stage == last_stage and dest_stage == first_stage)
+            ), "Functionality currently limited to send and receive between adjacent ranks only"
 
 
 def send(tensor, dest_stage, async_op=False):
@@ -206,12 +203,8 @@ def _get_send_recv_group(src_stage, dest_stage):
     first_stage = 0
     last_stage = _grid.pipe_parallel_size - 1
 
-    if (
-        src_stage == first_stage
-        and dest_stage == last_stage
-        or dest_stage == first_stage
-        and src_stage == last_stage
-    ):
+    if (src_stage == first_stage and dest_stage == last_stage
+            or dest_stage == first_stage and src_stage == last_stage):
         stage_id = last_stage
     elif src_stage > dest_stage:
         stage_id = dest_stage
@@ -322,9 +315,10 @@ def recv_tensor_meta(send_stage: int, require_grad=False) -> torch.Tensor:
     recv_shape = torch.LongTensor([1] * recv_ndims).cuda()
     recv(recv_shape, send_stage)
     recv_shape = recv_shape.tolist()
-    buffer = torch.zeros(
-        recv_shape, dtype=recv_dtype, device=torch.cuda.current_device(), requires_grad=require_grad
-    )
+    buffer = torch.zeros(recv_shape,
+                         dtype=recv_dtype,
+                         device=torch.cuda.current_device(),
+                         requires_grad=require_grad)
     return buffer
 
 
@@ -335,8 +329,8 @@ def allocate_buffers(shapes_and_dtypes, requires_grad=False):
             buffer.append(None)
         else:
             buffer.append(
-                torch.zeros(
-                    shape, dtype=dtype, requires_grad=requires_grad, device=torch.cuda.current_device()
-                )
-            )
+                torch.zeros(shape,
+                            dtype=dtype,
+                            requires_grad=requires_grad,
+                            device=torch.cuda.current_device()))
     return buffer

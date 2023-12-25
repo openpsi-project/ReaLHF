@@ -10,12 +10,8 @@ import os
 import sys
 
 from base.cluster import spec as cluster_spec
-from base.constants import (
-    DATASET_CACHE_PATH,
-    PYTORCH_KERNEL_CACHE_PATH,
-    TORCH_EXTENSIONS_DIR,
-    TRITON_CACHE_PATH,
-)
+from base.constants import (DATASET_CACHE_PATH, PYTORCH_KERNEL_CACHE_PATH, TORCH_EXTENSIONS_DIR,
+                            TRITON_CACHE_PATH)
 import api.dfg
 import base.topology
 
@@ -66,27 +62,33 @@ class Scheduling:
 
     @staticmethod
     def master_worker_default(**kwargs):
-        return Scheduling(
-            **{"cpu": 16, "gpu": 1, "mem": 20 * 1024, "container_image": _LLM_GPU_IMAGE, **kwargs}
-        )
+        return Scheduling(**{
+            "cpu": 16,
+            "gpu": 1,
+            "mem": 20 * 1024,
+            "container_image": _LLM_GPU_IMAGE,
+            **kwargs
+        })
 
     @staticmethod
     def data_worker_default(**kwargs):
-        return Scheduling(
-            **{"cpu": 4, "gpu": 0, "mem": 20 * 1024, "container_image": _LLM_CPU_IMAGE, **kwargs}
-        )
+        return Scheduling(**{
+            "cpu": 4,
+            "gpu": 0,
+            "mem": 20 * 1024,
+            "container_image": _LLM_CPU_IMAGE,
+            **kwargs
+        })
 
     @staticmethod
     def model_worker_default(**kwargs):
-        return Scheduling(
-            **{
-                "cpu": 2,
-                "gpu": 1,
-                "mem": 60 * 1024,
-                "container_image": _LLM_GPU_IMAGE,
-                **kwargs,
-            }
-        )
+        return Scheduling(**{
+            "cpu": 2,
+            "gpu": 1,
+            "mem": 60 * 1024,
+            "container_image": _LLM_GPU_IMAGE,
+            **kwargs,
+        })
 
 
 @dataclasses.dataclass
@@ -105,8 +107,7 @@ class WorkerInformation:
     host_key: Optional[str] = None  # Worker will update and keep this key alive.
     watch_keys: Union[str, List[str]] = None  # Worker will exit if all of the watching keys are gone.
     wandb_entity: Optional[
-        str
-    ] = None  # wandb_{config} are optional. They overwrite system wandb_configuration.
+        str] = None  # wandb_{config} are optional. They overwrite system wandb_configuration.
     wandb_project: Optional[str] = None
     wandb_job_type: Optional[str] = None
     wandb_group: Optional[str] = None
@@ -180,8 +181,7 @@ class ModelWorker:
     mp_rank: int = 0
     pp_rank: int = 0
     topo: Optional[base.topology.PipeModelDataParallelTopology] = dataclasses.field(
-        default_factory=lambda x: base.topology.PipeModelDataParallelTopology(1, 1, 1)
-    )
+        default_factory=lambda x: base.topology.PipeModelDataParallelTopology(1, 1, 1))
     # evaluation
     eval_datasets: Optional[List[Dataset]] = None
     eval_dataloader: Optional[DataLoader] = None
@@ -236,12 +236,8 @@ class ModelWorkerID:
     def __eq__(self, other):
         # Compare the key attribute for equality
         if isinstance(other, ModelWorkerID):
-            return (
-                self.model_name == other.model_name
-                and self.dp_rank == other.dp_rank
-                and self.mp_rank == other.mp_rank
-                and self.pp_rank == other.pp_rank
-            )
+            return (self.model_name == other.model_name and self.dp_rank == other.dp_rank
+                    and self.mp_rank == other.mp_rank and self.pp_rank == other.pp_rank)
         return False
 
 
@@ -344,16 +340,13 @@ class ExperimentConfig:
             mw_topos[model_name] = mws[0].topo
             ranks = [mw.topo.get_rank(pipe=mw.pp_rank, model=mw.mp_rank, data=mw.dp_rank) for mw in mws]
             # Sanity check of parallelism ranks.
-            if set(ranks) != set(list(range(len(mws)))) or any(
-                mw.topo.world_size() != len(mws) for mw in mws
-            ):
-                raise ValueError(
-                    f"Parallelism rank check failed: model name {model_name}, "
-                    f"parallelism ranks pipe={[mw.pp_rank for mw in mws]}, "
-                    f"model={[mw.mp_rank for mw in mws]}, "
-                    f"data={[mw.dp_rank for mw in mws]}, "
-                    f"flattened ranks {ranks}."
-                )
+            if set(ranks) != set(list(range(len(mws)))) or any(mw.topo.world_size() != len(mws)
+                                                               for mw in mws):
+                raise ValueError(f"Parallelism rank check failed: model name {model_name}, "
+                                 f"parallelism ranks pipe={[mw.pp_rank for mw in mws]}, "
+                                 f"model={[mw.mp_rank for mw in mws]}, "
+                                 f"data={[mw.dp_rank for mw in mws]}, "
+                                 f"flattened ranks {ranks}.")
             model_topos[model_name] = topo = mws[0].topo
 
             # Set stream for model workers.
@@ -363,16 +356,14 @@ class ExperimentConfig:
                     pp_rank=mw.pp_rank,
                     mp_rank=mw.mp_rank,
                     dp_rank=mw.dp_rank,
-                )
-                for mw in mws
+                ) for mw in mws
             ]
             for dp_i in range(topo.get_dim("data")):
                 master_stream_id = MasterStreamID(model_name, dp_i)
                 model_streams[master_stream_id] = RequestReplyStream(
                     push_stream_name=str(master_stream_id),
                     pull_stream_name=str(
-                        ModelWorkerID(model_name, pp_rank=topo.get_dim("pipe") - 1, mp_rank=0, dp_rank=dp_i)
-                    ),
+                        ModelWorkerID(model_name, pp_rank=topo.get_dim("pipe") - 1, mp_rank=0, dp_rank=dp_i)),
                 )
             for mw, model_id in zip(mws, model_stream_ids):
                 mw.stream = RequestReplyStream(
@@ -474,7 +465,8 @@ def dataclass_to_dict(dc):
         root_name = dc.__class__.__name__
         dc = dict(
             config_class=root_name,
-            config_value={k.name: dataclass_to_dict(getattr(dc, k.name)) for k in dataclasses.fields(dc)},
+            config_value={k.name: dataclass_to_dict(getattr(dc, k.name))
+                          for k in dataclasses.fields(dc)},
         )
     else:
         raise f"{dc} of type {type(dc)} cannot be parse to dict."
@@ -486,9 +478,10 @@ def config_to_dataclass(config: Union[List, Dict]):
         return [config_to_dataclass(c) for c in config]
     elif isinstance(config, dict):
         if "config_class" in config.keys():
-            return getattr(sys.modules[__name__], config["config_class"])(
-                **{k: config_to_dataclass(v) for k, v in config["config_value"].items()}
-            )
+            return getattr(sys.modules[__name__], config["config_class"])(**{
+                k: config_to_dataclass(v)
+                for k, v in config["config_value"].items()
+            })
         else:
             return config
     elif isinstance(config, (str, int, float)) or config is None:

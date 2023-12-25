@@ -5,6 +5,7 @@
 
 from itertools import product as cartesian_product
 from typing import NamedTuple
+
 import base.logging as logging
 
 logger = logging.getLogger("Topology")
@@ -57,10 +58,8 @@ class ProcessTopology:
         try:
             self.ProcessCoord = PROCESS_COORD_REGISTRY["#".join(axes)]
         except KeyError as e:
-            raise KeyError(
-                f"Corresponding coordinate namedtuple not implemented for axes {axes}. "
-                "Check base/topology.py and implement explicitly."
-            ) from e
+            raise KeyError(f"Corresponding coordinate namedtuple not implemented for axes {axes}. "
+                           "Check base/topology.py and implement explicitly.") from e
 
         self.mapping = {}
         ranges = [range(d) for d in dims]
@@ -352,11 +351,9 @@ class PipelineParallelGrid:
                 self.ds_model_proc_group = proc_group
                 self.ds_model_world_size = len(ranks)
                 self.ds_model_rank = ranks.index(self.global_rank)
-                logger.info(
-                    f"parallelism_rank={self.global_rank} (global_rank={dist.get_rank()}) "
-                    f"dp_rank={dp} building DeepSpeed model group "
-                    f"(i.e., pipeline+model parallel group) with global ranks: {ranks}"
-                )
+                logger.info(f"parallelism_rank={self.global_rank} (global_rank={dist.get_rank()}) "
+                            f"dp_rank={dp} building DeepSpeed model group "
+                            f"(i.e., pipeline+model parallel group) with global ranks: {ranks}")
         if self.global_rank != -1:
             assert self.ds_model_rank > -1
             assert self.ds_model_proc_group is not None

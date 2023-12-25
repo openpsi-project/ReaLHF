@@ -1,5 +1,5 @@
 # log format constants
-from typing import Dict, Any
+from typing import Any, Dict
 import copy
 import getpass
 

@@ -1,4 +1,4 @@
-from typing import Dict, Tuple, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -33,6 +33,6 @@ def split_to_shapes(x: np.ndarray, shapes: Dict, axis: int = -1):
     accum_split_lengths = [sum(split_lengths[:i]) for i in range(1, len(split_lengths))]
     splitted_x = np.split(x, accum_split_lengths, axis)
     return {
-        k: x.reshape(*x.shape[:axis], *shape, *x.shape[axis + 1 :])
+        k: x.reshape(*x.shape[:axis], *shape, *x.shape[axis + 1:])
         for x, (k, shape) in zip(splitted_x, shapes.items())
     }
