@@ -1,8 +1,8 @@
 import os
 import time
 import unittest
-from torch.profiler import profile, ProfilerActivity, record_function
 
+from torch.profiler import profile, ProfilerActivity, record_function
 # import transformers
 import torch
 import torch.multiprocessing as mp
@@ -381,10 +381,10 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
         print(f"baseline FIRST inference time cost {time.monotonic() - st:.4f}")
 
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                 record_shapes=True,
-                 profile_memory=True,
-                 with_stack=True,
-                 with_flops=True) as prof:
+                     record_shapes=True,
+                     profile_memory=True,
+                     with_stack=True,
+                     with_flops=True) as prof:
             for _ in range(10):
                 st = time.monotonic()
                 r = self.baseline_model(packed_input_ids=packed_input_ids,

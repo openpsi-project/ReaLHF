@@ -34,7 +34,8 @@ def compute_packed_sft_loss(
     ])
     prompt_mask = prompt_mask[shift_one_indices]
     # float16 will overflow here
-    loss = -torch.where(prompt_mask, 0, logprobs.float()).sum() / (prompt_mask.numel() - prompt_mask.count_nonzero())
+    loss = -torch.where(prompt_mask, 0, logprobs.float()).sum() / (prompt_mask.numel() -
+                                                                   prompt_mask.count_nonzero())
     return loss, {"loss": loss.detach().cpu()}
 
 

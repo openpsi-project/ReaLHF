@@ -25,7 +25,7 @@ def _paired_rw_loss_from_model_outputs(
 ):
     scores = scores[cu_seqlens[1:] - 1].view(-1, 2).float()
     loss = -(torch.nn.functional.logsigmoid(scores[:, 0] - scores[:, 1]) * group_factor).sum()
-    correct_predictions = (scores[:, 0] > scores[:, 1]).count_nonzero().detach()
+    correct_predictions = (scores[:, 0] > scores[:, 1]).count_nonzero().detach().float()
     return loss, dict(
         loss=loss.cpu(),
         correct_predictions=correct_predictions.cpu(),

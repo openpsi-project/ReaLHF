@@ -116,7 +116,7 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
 @torch.no_grad()
 def masked_normalization(
     x: torch.Tensor,
-    mask: Optional[torch.BoolTensor]=None,
+    mask: Optional[torch.BoolTensor] = None,
     dim=None,
     inplace=False,
     unbiased=False,
