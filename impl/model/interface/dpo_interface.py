@@ -27,8 +27,8 @@ class DirectPreferenceOptimizationInterface(api.model.ModelInterface):
         attention_mask: torch.BoolTensor = torch.cat([data['pos_attention_mask'], data['neg_attention_mask']],
                                                      dim=0)
 
-        logits: torch.FloatTensor = module(input_ids=input_ids, attention_mask=attention_mask).logits.float()
-        logp = gather_shifted_log_probs(logits, input_ids)
+        logits: torch.FloatTensor = module(input_ids=input_ids, attention_mask=attention_mask).logits
+        logp = gather_shifted_log_probs(logits, input_ids).float()
 
         logp_mask = attention_mask.clone()
         for i, prompt_len in enumerate(data['prompt_lens']):
@@ -47,8 +47,8 @@ class DirectPreferenceOptimizationInterface(api.model.ModelInterface):
         input_ids: torch.LongTensor = torch.cat([data['pos_input_ids'], data['neg_input_ids']], dim=0)
         attention_mask: torch.BoolTensor = torch.cat([data['pos_attention_mask'], data['neg_attention_mask']],
                                                      dim=0)
-        logits: torch.FloatTensor = module(input_ids=input_ids, attention_mask=attention_mask).logits.float()
-        logp = gather_shifted_log_probs(logits, input_ids)
+        logits: torch.FloatTensor = module(input_ids=input_ids, attention_mask=attention_mask).logits
+        logp = gather_shifted_log_probs(logits, input_ids).float()
 
         logp_mask = attention_mask.clone()
         for i, prompt_len in enumerate(data['prompt_lens']):
