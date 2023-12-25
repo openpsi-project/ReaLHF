@@ -27,14 +27,14 @@ def compute_packed_sft_loss(
     **kwargs,
 ) -> torch.Tensor:
     # **kwargs is used to ensure the correctness of invoking this function
-    # NOTE: since there's no additional loss computation upon logits, we don't need to convert it to float32
     logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
     shift_one_indices = torch.cat([
         torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
         for i in range(cu_seqlens.shape[0] - 1)
     ])
     prompt_mask = prompt_mask[shift_one_indices]
-    loss = -torch.where(prompt_mask, 0, logprobs).sum() / (prompt_mask.numel() - prompt_mask.count_nonzero())
+    # float16 will overflow here
+    loss = -torch.where(prompt_mask, 0, logprobs.float()).sum() / (prompt_mask.numel() - prompt_mask.count_nonzero())
     return loss, {"loss": loss.detach().cpu()}
 
 
