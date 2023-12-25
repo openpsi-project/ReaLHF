@@ -149,7 +149,8 @@ async def model_rpc_func(
         ):
             if k in scatter_buffer:
                 logger.info(
-                    f"Resize scatter buffer on master worker for {k}"f" from {scatter_buffer[k][0].shape} to {buf_shape}"
+                    f"Resize scatter buffer on master worker for {k}"
+                    f" from {scatter_buffer[k][0].shape} to {buf_shape}"
                 )
             else:
                 logger.info(f"Create scatter buffer on master worker for {k} with shape {buf_shape}")
@@ -175,6 +176,7 @@ async def model_rpc_func(
 
     responses = await asyncio.gather(*[_awaitable_response(s) for s in streams])
 
+    recv_tik = time.perf_counter()
     if responses[0].is_tensor:
         all_buf_shapes = [response.buf_shapes for response in responses]
         for buf_shapes in all_buf_shapes:
@@ -220,6 +222,7 @@ async def model_rpc_func(
         res = dataparallel.get_broker(rpc_config.dp_broker_type).gather_from(
             [response.data for response in responses]
         )
+    logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
 
     if rpc_config.log_return_value:
         logger.info(f"RPC name {rpc_config.name} returns {res}")
