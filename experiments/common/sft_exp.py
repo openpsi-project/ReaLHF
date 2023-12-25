@@ -30,6 +30,7 @@ class SFTExperiment(Experiment):
     lora_scaling: float = 32.0
     lora_dim: int = 32
     enable_fp16: bool = True
+    enable_bf16: bool = False
     gradient_checkpointing: bool = True
     # dataset
     max_seqlen: int = 1024
@@ -46,9 +47,11 @@ class SFTExperiment(Experiment):
     adam_eps: float = 1e-5
     min_lr_ratio: float = 0.0
     zero_stage: int = 2
+    offload_optimizer: bool = False
     partition_method: Optional[str] = "parameters"
 
     num_pipeline_micro_batches: Optional[int] = None
+    use_sequence_parallel: bool = False
 
     def __post_init__(self):
         if self.model_type == "gpt2" and self.max_seqlen > 1024:
@@ -57,6 +60,8 @@ class SFTExperiment(Experiment):
             raise ValueError("pp_size, dp_size and mp_size must be positive integers.")
         if self.pp_size > 1 and self.use_lora:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
+        # if self.enable_bf16 and (self.pp_size > 1 or self.mp_size):
+        #     raise ValueError("Use bf16 with pipeline parallel or model parallel is not supported.")
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -122,11 +127,14 @@ class SFTExperiment(Experiment):
                 warmup_steps_proportion=self.warmup_proportion,
                 min_lr_ratio=self.min_lr_ratio,
                 zero_stage=self.zero_stage if self.pp_size == 1 else min(self.zero_stage, 1),
-                enable_fp16=self.enable_fp16,
                 gradient_checkpointing=self.gradient_checkpointing,
                 num_pipeline_stages=self.pp_size,
                 engine_type="pipe" if self.pp_size > 1 else "deepspeed",
                 num_pipeline_micro_batches=self.num_pipeline_micro_batches,
+                offload_optimizer_state=self.offload_optimizer,
+                enable_bf16=self.enable_bf16,
+                enable_fp16=self.enable_fp16,
+                sequence_parallel=self.use_sequence_parallel,
             ),
         )
 
@@ -137,11 +145,13 @@ class SFTExperiment(Experiment):
             pp_size=self.pp_size,
             mp_size=self.mp_size,
             dp_size=self.dp_size,
+            sequence_parallel=self.use_sequence_parallel,
             is_critic=False,
             use_lora=self.use_lora,
             lora_dim=self.lora_dim,
             lora_scaling=self.lora_scaling,
             partition_method=self.partition_method,
+            dtype="bf16" if self.enable_bf16 else "fp16",
         )
 
         interface = ModelInterface("flash_sft")

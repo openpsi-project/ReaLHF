@@ -23,7 +23,8 @@ def setup_barrier(world_size):
 
 def setup_gpu(rank, world_size):
     os.environ["DLLM_MODE"] = "LOCAL"
-    # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+    os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
     BARRIER.wait()
     base.gpu_utils.isolate_cuda_device(WORKER_TYPE, rank, world_size, EXPR_NAME, TRIAL_NAME)

@@ -27,6 +27,7 @@ class ParallelismConfig:
     model_parallel_size: int = 1
     pipeline_parallel_size: int = 1
     data_parallel_size: int = 1
+    use_sequence_parallel: bool = False
 
 
 @dataclasses.dataclass
@@ -45,21 +46,24 @@ class ModelConfig:
         type (str): Model type. Please check SUPPORTED_MODELS. `saved` means loading a saved customized model,
             while others mean converting a HuggingFace model to our customized model.
         path (str): Model path, the directory instead of the file.
+                    If None, model should be ref or reward models in PPO, and path is automatically set to actor/critic path.
         lora (bool): Whether to use LoRA.
         lora_dim (int): LoRA dimension.
         lora_scaling (float): LoRA scaling factor.
         gradient_checkpointing (bool): Whether to use gradient checkpointing of MLP inside each block.
         enable_fp16 (bool): Whether to use fp16.
+        enable_bf16 (bool): Whether to use bf16.
         parallel (ParallelismConfig): Parallelism configuration.
         partition_method (str): Partition method for modules using pipeline parallel. 
                                 Support "uniform", "parameters" and "parameters_balanced".
+        num_pipeline_micro_batches (int): Number of micro batches for pipeline parallelism.
     """
 
     type: str = dataclasses.field(
         metadata={"choices": SUPPORTED_MODELS},
         default="llama",
     )
-    path: str = "/lustre/fw/pretrained/llama-7b/"
+    path: Optional[str] = None
     base_model_path: Optional[str] = None
     tokenizer_path: Optional[str] = None
     lora: bool = False
@@ -67,8 +71,17 @@ class ModelConfig:
     lora_scaling: float = 32.0
     gradient_checkpointing: bool = False
     enable_fp16: bool = True
+    enable_bf16: bool = False
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
     partition_method: Optional[str] = "parameters"
+    num_pipeline_micro_batches: Optional[int] = None
+
+    def __post_init__(self):
+        if self.enable_bf16 and self.enable_fp16:
+            raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
+        if self.enable_bf16 and (self.parallel.model_parallel_size > 1
+                                 or self.parallel.pipeline_parallel_size > 1):
+            raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
 
 
 @dataclasses.dataclass
@@ -110,6 +123,7 @@ class OptimizerConfig:
         default="cosine",
     )
     warmup_steps_proportion: float = 0.02
+    offload: bool = False
 
 
 @dataclasses.dataclass
@@ -482,35 +496,40 @@ def run_sft(args: SFTConfig):
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
 
-    exp_fn = functools.partial(SFTExperiment,
-                               seed=args.seed,
-                               total_train_epochs=args.train_epochs,
-                               model_type=args.model.type,
-                               model_path=args.model.path,
-                               dp_size=args.model.parallel.data_parallel_size,
-                               mp_size=args.model.parallel.model_parallel_size,
-                               pp_size=args.model.parallel.pipeline_parallel_size,
-                               use_lora=args.model.lora,
-                               lora_scaling=args.model.lora_scaling,
-                               lora_dim=args.model.lora_dim,
-                               enable_fp16=args.model.enable_fp16,
-                               gradient_checkpointing=args.model.gradient_checkpointing,
-                               max_seqlen=args.dataset.max_seqlen,
-                               train_dataset_path=args.dataset.train_path,
-                               valid_dataset_path=args.dataset.valid_path,
-                               train_tokens_per_batch=args.dataset.train_tokens_per_batch,
-                               valid_tokens_per_batch=args.dataset.valid_tokens_per_batch,
-                               lr=args.optimizer.lr,
-                               weight_decay=args.optimizer.weight_decay,
-                               adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
-                               lr_scheduler_type=args.optimizer.lr_scheduler_type,
-                               warmup_proportion=args.optimizer.warmup_steps_proportion,
-                               adam_eps=args.optimizer.eps,
-                               min_lr_ratio=args.optimizer.min_lr_ratio,
-                               zero_stage=args.optimizer.zero_stage,
-                               save_freq_steps=args.save_freq,
-                               eval_freq_epochs=args.eval_freq,
-                               partition_method=args.model.partition_method)
+    exp_fn = functools.partial(
+        SFTExperiment,
+        seed=args.seed,
+        total_train_epochs=args.train_epochs,
+        model_type=args.model.type,
+        model_path=args.model.path,
+        dp_size=args.model.parallel.data_parallel_size,
+        mp_size=args.model.parallel.model_parallel_size,
+        pp_size=args.model.parallel.pipeline_parallel_size,
+        use_lora=args.model.lora,
+        lora_scaling=args.model.lora_scaling,
+        lora_dim=args.model.lora_dim,
+        enable_fp16=args.model.enable_fp16,
+        enable_bf16=args.model.enable_bf16,
+        offload_optimizer=args.optimizer.offload,
+        gradient_checkpointing=args.model.gradient_checkpointing,
+        max_seqlen=args.dataset.max_seqlen,
+        train_dataset_path=args.dataset.train_path,
+        valid_dataset_path=args.dataset.valid_path,
+        train_tokens_per_batch=args.dataset.train_tokens_per_batch,
+        valid_tokens_per_batch=args.dataset.valid_tokens_per_batch,
+        lr=args.optimizer.lr,
+        weight_decay=args.optimizer.weight_decay,
+        adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
+        lr_scheduler_type=args.optimizer.lr_scheduler_type,
+        warmup_proportion=args.optimizer.warmup_steps_proportion,
+        adam_eps=args.optimizer.eps,
+        min_lr_ratio=args.optimizer.min_lr_ratio,
+        zero_stage=args.optimizer.zero_stage,
+        save_freq_steps=args.save_freq,
+        eval_freq_epochs=args.eval_freq,
+        partition_method=args.model.partition_method,
+        use_sequence_parallel=args.model.parallel.use_sequence_parallel,
+    )
 
     os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
     with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
@@ -585,6 +604,8 @@ def run_rw(args: RWConfig):
                                lora_scaling=args.model.lora_scaling,
                                lora_dim=args.model.lora_dim,
                                enable_fp16=args.model.enable_fp16,
+                               enable_bf16=args.model.enable_bf16,
+                               offload_optimizer=args.optimizer.offload,
                                gradient_checkpointing=args.model.gradient_checkpointing,
                                max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
                                max_seqlen=args.dataset.max_seqlen,
@@ -670,6 +691,16 @@ def run_ppo(args: PPOConfig):
             "If you insist in using PP, please ensure that (1) there are enough GPUs for your experiment "
             "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
         )
+    if args.ref.parallel.pipeline_parallel_size > 1:
+        logger.warning(
+            "Pipeline parallel of the reference model is enabled. Please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
+    if args.ref.parallel.model_parallel_size > 1:
+        logger.warning(
+            "Model parallel of the reference model is enabled. Please ensure that (1) there are enough GPUs for your experiment "
+            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
+        )
     if args.is_sft_lora and (args.actor.base_model_path == args.actor.path or args.sft_lora_path is None):
         raise ValueError(
             "sft_lora_path and actor.base_model_path must be specified if the SFT model was trained with LoRA."
@@ -707,8 +738,12 @@ def run_ppo(args: PPOConfig):
         actor_lora_scaling=args.actor.lora_scaling,
         actor_lora_dim=args.actor.lora_dim,
         actor_enable_fp16=args.actor.enable_fp16,
+        actor_enable_bf16=args.actor.enable_bf16,
+        offload_actor_optimizer_states=args.actor_optimizer.offload,
         actor_gradient_checkpointing=args.actor.gradient_checkpointing,
         actor_partition_method=args.actor.partition_method,
+        actor_num_pipeline_micro_batches=args.actor.num_pipeline_micro_batches,
+        actor_use_sequence_parallel=args.actor.parallel.use_sequence_parallel,
         # critic
         critic_dp_size=args.critic.parallel.data_parallel_size,
         critic_mp_size=args.critic.parallel.model_parallel_size,
@@ -717,11 +752,21 @@ def run_ppo(args: PPOConfig):
         critic_lora_scaling=args.critic.lora_scaling,
         critic_lora_dim=args.critic.lora_dim,
         critic_enable_fp16=args.critic.enable_fp16,
+        critic_enable_bf16=args.critic.enable_bf16,
+        offload_critic_optimizer_states=args.critic_optimizer.offload,
         critic_gradient_checkpointing=args.critic.gradient_checkpointing,
         critic_partition_method=args.critic.partition_method,
+        critic_num_pipeline_micro_batches=args.critic.num_pipeline_micro_batches,
+        critic_use_sequence_parallel=args.critic.parallel.use_sequence_parallel,
         # rew & ref
         ref_dp_size=args.ref.parallel.data_parallel_size,
+        ref_pp_size=args.ref.parallel.pipeline_parallel_size,
+        ref_mp_size=args.ref.parallel.model_parallel_size,
         rew_dp_size=args.rew.parallel.data_parallel_size,
+        ref_num_pipeline_micro_batches=args.ref.num_pipeline_micro_batches,
+        ref_use_sequence_parallel=args.ref.parallel.use_sequence_parallel,
+        ref_enable_bf16=args.ref.enable_bf16,
+        rew_enable_bf16=args.rew.enable_bf16,
         # dataset
         max_prompt_len=args.dataset.max_prompt_len,
         batch_size=args.dataset.batch_size,
@@ -840,6 +885,8 @@ def run_dpo(args: DPOConfig):
                                lora_scaling=args.model.lora_scaling,
                                lora_dim=args.model.lora_dim,
                                enable_fp16=args.model.enable_fp16,
+                               enable_bf16=args.model.enable_bf16,
+                               offload_optimizer=args.optimizer.offload,
                                gradient_checkpointing=args.model.gradient_checkpointing,
                                max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
                                max_seqlen=args.dataset.max_seqlen,

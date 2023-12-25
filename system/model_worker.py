@@ -87,6 +87,10 @@ class ModelWorker(worker_base.Worker):
             deepspeed.init_distributed()
         self.__device = torch.device("cuda:0")
 
+        self.__world_group = dist.new_group(ranks=range(self.__world_size))
+        self.__grid = PipelineParallelGrid(process_group=self.__world_group, topology=self.config.topo)
+        base.constants.set_grid(self.__grid)
+
         self.__model = api.model.make_model(
             self.config.model,
             name=self.model_name,
@@ -94,10 +98,6 @@ class ModelWorker(worker_base.Worker):
         )
         self.__interface = api.model.make_interface(self.config.interface)
         self.__backend = api.model.make_backend(self.config.backend)
-
-        self.__world_group = dist.new_group(ranks=range(self.__world_size))
-        self.__grid = PipelineParallelGrid(process_group=self.__world_group, topology=self.config.topo)
-        base.constants.set_grid(self.__grid)
 
         if self.config.eval_datasets is not None and self.config.eval_dataloader is not None:
             eval_datasets = [

@@ -13,11 +13,16 @@ import base.constants
 DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU = 32  # A place-holder for inference.
 
 
-def get_train_ds_config(offload_param: bool = False,
-                        offload_optimizer_state: bool = False,
-                        enable_fp16: bool = True,
-                        stage: int = 2,
-                        **kwargs):
+def get_train_ds_config(
+    offload_param: bool = False,
+    offload_optimizer_state: bool = False,
+    enable_fp16: bool = True,
+    enable_bf16: bool = False,
+    stage: int = 2,
+    **kwargs,
+):
+    if enable_bf16 and enable_fp16:
+        raise ValueError("Cannot enable both fp16 and bf16 at the same time.")
     zero_opt_dict = {
         "stage": stage,
         "overlap_comm": True,
@@ -33,7 +38,7 @@ def get_train_ds_config(offload_param: bool = False,
         "stage3_param_persistence_threshold": 1e4,
         "stage3_max_live_parameters": 3e7,
         "stage3_prefetch_bucket_size": 3e7,
-        "memory_efficient_linear": False
+        "memory_efficient_linear": False,
     }
     return {
         "steps_per_print": 100,
@@ -43,6 +48,12 @@ def get_train_ds_config(offload_param: bool = False,
             "loss_scale_window": 40,
             "initial_scale_power": 12,
         },
+        "bf16": {
+            "enabled": enable_bf16,
+        },
+        "data_types": {
+            "grad_accum_dtype": "fp32" if enable_bf16 else "fp16",
+        },
         "gradient_clipping": 1.0,
         "prescale_gradients": False,
         "gradient_predevide_factor": 1.0,
@@ -51,7 +62,9 @@ def get_train_ds_config(offload_param: bool = False,
     }
 
 
-def get_eval_ds_config(offload=False, stage=0, enable_fp16: bool = True, **kwargs):
+def get_eval_ds_config(offload=False, stage=0, enable_fp16: bool = True, enable_bf16: bool = False, **kwargs):
+    if enable_bf16 and enable_fp16:
+        raise ValueError("Cannot enable both fp16 and bf16 at the same time.")
     device = "cpu" if offload else "none"
     zero_opt_dict = {
         "stage": stage,
@@ -60,7 +73,7 @@ def get_eval_ds_config(offload=False, stage=0, enable_fp16: bool = True, **kwarg
             "device": device,
             "pin_memory": True,
         },
-        "memory_efficient_linear": False
+        "memory_efficient_linear": False,
     }
     return {
         "steps_per_print": 10,
@@ -70,10 +83,13 @@ def get_eval_ds_config(offload=False, stage=0, enable_fp16: bool = True, **kwarg
         "fp16": {
             "enabled": enable_fp16,
         },
+        "bf16": {
+            "enabled": enable_bf16,
+        },
         "gradient_clipping": 1.0,
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
-        **kwargs
+        **kwargs,
     }
 
 
@@ -109,7 +125,8 @@ def deepspeed_initialize(
     model_parameters: Optional[torch.nn.Module] = None,
     lr_scheduler: Optional[Union[torch.optim.lr_scheduler._LRScheduler, DeepSpeedSchedulerCallable]] = None,
     mpu=None,
-    num_pipeline_micro_batches: int = None,
+    num_pipeline_micro_batches: Optional[int] = None,
+    sequence_parallel: Optional[bool] = None,
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
     if mpu is None:
@@ -119,6 +136,7 @@ def deepspeed_initialize(
         zero.partition_parameters.shutdown_init_context()
 
         from deepspeed import comm as dist
+
         deepspeed.dist = dist
 
         config_class = DeepSpeedConfig(config, mpu)
@@ -141,27 +159,32 @@ def deepspeed_initialize(
     elif engine_type == "pipe":
         # mpu = model.mpu()
         config_class = DeepSpeedConfig(config, mpu)
-        engine = DeepSpeedPipelineEngine(num_micro_batches=num_pipeline_micro_batches,
-                                         model=model,
-                                         args=None,
-                                         config=config,
-                                         config_class=config_class,
-                                         mpu=mpu,
-                                         optimizer=optimizer,
-                                         lr_scheduler=lr_scheduler,
-                                         dist_init_required=False)
+        engine = DeepSpeedPipelineEngine(
+            num_micro_batches=num_pipeline_micro_batches,
+            sequence_parallel=sequence_parallel,
+            model=model,
+            args=None,
+            config=config,
+            config_class=config_class,
+            mpu=mpu,
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+            dist_init_required=False,
+        )
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
     elif engine_type == "stream_pipe":
         # mpu = model.mpu()
         config_class = DeepSpeedConfig(config, mpu)
-        engine = StreamPipeEngine(model=model,
-                                  args=None,
-                                  config=config,
-                                  config_class=config_class,
-                                  mpu=mpu,
-                                  optimizer=optimizer,
-                                  lr_scheduler=lr_scheduler,
-                                  dist_init_required=False)
+        engine = StreamPipeEngine(
+            model=model,
+            args=None,
+            config=config,
+            config_class=config_class,
+            mpu=mpu,
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+            dist_init_required=False,
+        )
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
 
     return tuple(return_items)

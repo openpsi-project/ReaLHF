@@ -9,6 +9,7 @@ import torch
 from base.constants import data_parallel_world_size, model_parallel_world_size, pipe_parallel_world_size
 from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
 import api.model
+import base.constants
 import base.deepspeed_utils as deepspeed_utils
 import base.logging as logging
 
@@ -27,6 +28,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     offload_param: bool = False
     offload_optimizer_state: bool = False
     enable_fp16: bool = True
+    enable_bf16: bool = False
     zero_stage: int = 2
     # hybrid engine args
     enable_hybrid_engine: bool = False
@@ -40,12 +42,20 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     engine_type: str = "deepspeed"
     num_pipeline_stages: int = 1
     num_pipeline_micro_batches: Optional[int] = None
+    sequence_parallel: bool = False
+    # selective gradient ckpt, only effective when gradient_checkpointing is True
+    ckpt_attn: bool = False  # checkpoint attn only
+    ckpt_mlp: bool = False  # checkpoint mlp only
     # stream pipe engine require model configs
     max_seq_len: int = 512
     max_new_tokens: int = 512
     max_mb_size: int = 32
 
     def __post_init__(self):
+        if base.constants.model_parallel_world_size() == 1 and self.sequence_parallel:
+            logger.warning("Sequence parallel only works with tensor model parallelism, but currently "
+                           f"model_parallel_world_size = {base.constants.model_parallel_world_size()}. ")
+            self.sequence_parallel = False
         if self.engine_type == "pipe" or self.engine_type == "stream_pipe":
             assert self.zero_stage < 2
             assert self.enable_hybrid_engine is False
@@ -80,6 +90,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             offload_param=self.offload_param,
             offload_optimizer_state=self.offload_optimizer_state,
             stage=self.zero_stage,
+            enable_bf16=self.enable_bf16,
             enable_fp16=self.enable_fp16,
             hybrid_engine_args=hybrid_engine_args,
             **self.additional_ds_config,
@@ -132,6 +143,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             lr_scheduler=lr_scheduler,
             engine_type=self.engine_type,
             num_pipeline_micro_batches=self.num_pipeline_micro_batches,
+            sequence_parallel=self.sequence_parallel,
         )
 
         if self.engine_type == "pipe" or self.engine_type == "stream_pipe":
@@ -141,7 +153,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
                         f"pipe id = {module.stage_id}; dp id = {module.dp_id};")
 
         if self.gradient_checkpointing:
-            module.gradient_checkpointing_enable()
+            module.gradient_checkpointing_enable(self.ckpt_attn, self.ckpt_mlp)
 
         model.module = module
         return model
@@ -152,16 +164,35 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
     offload: bool = False
     zero_stage: int = 0
     enable_fp16: bool = True
+    enable_bf16: bool = False
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
+    # pipeline inference
+    engine_type: str = "deepspeed"
+    num_pipeline_stages: int = 1
+    num_pipeline_micro_batches: Optional[int] = None
+    sequence_parallel: bool = False
+
+    def __post_init__(self):
+        if base.constants.model_parallel_world_size() == 1 and self.sequence_parallel:
+            logger.warning("Sequence parallel only works with tensor model parallelism, but currently "
+                           f"model_parallel_world_size = {base.constants.model_parallel_world_size()}. ")
+            self.sequence_parallel = False
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
         module = model.module
         ds_config = deepspeed_utils.get_eval_ds_config(offload=self.offload,
                                                        stage=self.zero_stage,
+                                                       enable_bf16=self.enable_bf16,
                                                        enable_fp16=self.enable_fp16,
                                                        **self.additional_ds_config)
-        module, *_ = deepspeed_utils.deepspeed_initialize(model=module, config=ds_config)
+        module, *_ = deepspeed_utils.deepspeed_initialize(
+            model=module,
+            config=ds_config,
+            engine_type=self.engine_type,
+            num_pipeline_micro_batches=self.num_pipeline_micro_batches,
+            sequence_parallel=self.sequence_parallel,
+        )
         model.module = module
         return model
 

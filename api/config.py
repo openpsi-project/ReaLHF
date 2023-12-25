@@ -26,6 +26,7 @@ _LLM_ENVVARS = {
     # "CUDA_LAUNCH_BLOCKING": "1",
     # "TORCH_USE_CUDA_DSA": "1",
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
+    "CUDA_DEVICE_MAX_CONNECTIONS": "1",
     "PYTHONUSERBASE": "/nonsense",
 }
 for k, v in _LLM_ENVVARS.items():
@@ -157,7 +158,7 @@ class ModelBackend:
 class RequestReplyStream:
     push_stream_name: str
     pull_stream_name: str
-    serialization_method: str = "tensor_compress"
+    serialization_method: str = "pickle_compress"
 
 
 @dataclasses.dataclass
