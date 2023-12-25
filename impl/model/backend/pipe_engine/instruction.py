@@ -11,8 +11,21 @@ class PipeInstruction:
     All keyword arguments are stored as members similar to a ``namedtuple``. These are
     then accessible to the :class:`PipeEngine` during execution.
 
-    Args:
-        kwargs (optional): keyword arguments to store as members
+    Each instruction has following attributes: 
+    1. stage_id: pipeline stage that the instruction should be executed by.
+    2. micro_batch_id: the ID of data micro batch that this instruction should be executed on.
+    3. step_id: usually used by generation schedules, identical to generation token id.
+    4. priority: priority of the instruction, higher priority instructions should be scheduled first in 
+                 the dynamic schedule.
+    5. deps: list of instructions that this instruction depends on.
+
+    Note:: The dependency between instructions should follows rules for simplicity:
+    Instructions are classified into two types: 1. compute instructions, 2. communication instructions.
+    For compute instructions, their dependency should only be other instructions that has the same 
+    stage_id. For communication instructions, they should appear in pairs with their communication target stage.
+    For example, SendActivation(stage_id=0, micro_batch_id=M) should appear in pairs with 
+    RecvActivation(stage_id=1, micro_batch_id=M). They should have the same dependency. 
+    
     """
 
     def __init__(self,
