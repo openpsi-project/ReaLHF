@@ -144,5 +144,5 @@ def create_hf_nn(
 
 def get_all_reduce_mean(tensor, group=None):
     torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.SUM, group=group)
-    tensor = tensor / torch.distributed.get_world_size()
+    tensor = tensor / torch.distributed.get_world_size(group=group)
     return tensor

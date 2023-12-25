@@ -65,7 +65,7 @@ class LayerSpec:
             raise RuntimeError('LayerSpec only supports torch.nn.Module types.')
 
         if dist.is_initialized():
-            self.global_rank = dist.get_rank()
+            self.global_rank = base.constants.parallelism_rank()
         else:
             self.global_rank = -1
 
@@ -167,7 +167,7 @@ class PipelineModule(nn.Module):
         self.seed_layers = seed_layers
         self.seed_fn = seed_fn
         self.base_seed = base_seed
-        if dist.get_rank() == 0:
+        if base.constants.parallelism_rank() == 0:
             try:
                 seed_str = self.seed_fn.__name__
             except AttributeError:
@@ -175,11 +175,12 @@ class PipelineModule(nn.Module):
             print(f'SEED_LAYERS={self.seed_layers} BASE_SEED={self.base_seed} SEED_FN={seed_str}')
 
         # Setup world info
-        self.world_group = dist.new_group(ranks=range(dist.get_world_size()))
+        self.world_group = base.constants.parallelism_group()
+        logger.info(f'Ranks in world group: {torch.distributed.get_process_group_ranks(self.world_group)}')
         self.global_rank = dist.get_rank(group=self.world_group)
         self.world_size = dist.get_world_size(group=self.world_group)
         self.local_rank = int(os.environ.get("LOCAL_RANK", None))
-        print("GPU rank info:", self.world_group, self.global_rank, self.world_size, self.local_rank)
+        logger.info(("GPU rank info:", self.world_group, self.global_rank, self.world_size, self.local_rank))
         assert self.local_rank != None
 
         if topology:
@@ -197,9 +198,6 @@ class PipelineModule(nn.Module):
                 self._topo = topology
 
         # Construct communicators for pipeline topology
-        self._grid = PipelineParallelGrid(process_group=self.world_group, topology=self._topo)
-        base.constants.set_grid(self._grid)
-
         self._grid = base.constants.grid()
 
         self.stage_id = self._topo.get_coord(self.global_rank).pipe
@@ -346,18 +344,18 @@ class PipelineModule(nn.Module):
         """
         return len(self.forward_funcs)
 
-    def gradient_checkpointing_enable(self):
+    def gradient_checkpointing_enable(self, attn=False, mlp=False):
         for layer in self.forward_funcs:
             try:
-                layer.gradient_checkpointing_enable()
+                layer.gradient_checkpointing_enable(attn, mlp)
             except AttributeError:
-                pass
+                logger.warning(f'Layer {layer} does not support gradient checkpointing, skipping ...')
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]):
         local_micro_offset = self.micro_offset + 1
 
         for idx, (layer, y) in enumerate(zip(self.forward_funcs, ys)):
-            time_mark(f"layer_{idx}_start", dist.get_rank())
+            time_mark(f"layer_{idx}_start", dist.get_rank(group=self.world_group))
             self.curr_layer = idx + self._local_start
             if self.seed_layers:
                 new_seed = (self.base_seed * local_micro_offset) + self.curr_layer
@@ -369,7 +367,7 @@ class PipelineModule(nn.Module):
             x = layer(x, y)
             x.pp_input = x.pp_output
             x.pp_output = None
-            time_mark(f"layer_{idx}_end", dist.get_rank())
+            time_mark(f"layer_{idx}_end", dist.get_rank(group=self.world_group))
 
         return x, ys
 
@@ -452,7 +450,7 @@ class PipelineModule(nn.Module):
         for key, comm in self.tied_comms.items():
             dist.broadcast(
                 getattr(comm['module'], comm['weight_attr']),
-                src=min(comm['ranks']),
+                src=min(comm['ranks']) + base.constants.process_group_offset(),
                 group=comm['group'],
             )
 
@@ -484,7 +482,8 @@ class PipelineModule(nn.Module):
                             tied_ranks.append(self._grid.stage_to_global(stage_id=s, data=dp, model=mp))
                         else:
                             tied_ranks.append(self._grid.stage_to_global(stage_id=s, data=dp))
-                    group = dist.new_group(ranks=tied_ranks)
+                    group = dist.new_group(
+                        ranks=[rank + base.constants.process_group_offset() for rank in tied_ranks])
 
                     # Record this tied module if we own a local copy of it.
                     if self.global_rank in tied_ranks:
@@ -500,11 +499,9 @@ class PipelineModule(nn.Module):
                             if self.global_rank != tied_ranks[0]:
                                 for p in self.tied_modules[key].parameters():
                                     p.ds_pipe_replicated = True
-        '''
         if len(tied_comms) > 0:
-            print(f'RANK={self.global_rank} tied_comms={tied_comms}')
-        '''
-
+            raise NotImplementedError(
+                "Tied weights require dist.new_group of a specific model, which are not supported!")
         return tied_comms
 
     def partitions(self):

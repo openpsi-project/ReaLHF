@@ -10,14 +10,26 @@ from deepspeed.git_version_info import torch_info
 from packaging.version import Version
 import torch
 
+from base.constants import process_group_offset
+
 _groups = None
 _grid = None
 
 _async = []
 
 ID_TO_DTYPE = [
-    torch.float32, torch.float64, torch.complex64, torch.complex128, torch.float16, torch.bfloat16,
-    torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.bool
+    torch.float32,
+    torch.float64,
+    torch.complex64,
+    torch.complex128,
+    torch.float16,
+    torch.bfloat16,
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.bool,
 ]
 DTYPE_TO_ID = {dtype: id_ for id_, dtype in enumerate(ID_TO_DTYPE)}
 
@@ -27,33 +39,38 @@ def _tensor_bytes(tensor):
 
 
 def can_send_recv() -> bool:
-    torch_version = Version(torch_info['version'])
-    sendrecv_min = Version('1.8')
+    # torch_version = Version(torch_info["version"])
+    torch_version = Version(torch.__version__)
+    sendrecv_min = Version("1.8")
     return torch_version >= sendrecv_min
 
 
-#initializes adjacent process groups
-#run this only after deepspeed.init_distributed() has been called
+# initializes adjacent process groups
+# run this only after deepspeed.init_distributed() has been called
 def init_process_groups(grid):
+    if grid.pipe_parallel_size <= 1:
+        return
     global _groups, _grid
     _grid = grid
 
     assert _grid.pipe_parallel_size > 1, "There is no pipeline parallelism"
 
     if not can_send_recv():
-        _groups = [dist.new_group(ranks=group) for group in _grid.p2p_groups]
+        # _groups = [dist.new_group(ranks=[g + process_group_offset() for g in group]) for group in _grid.p2p_groups]
+        raise NotImplementedError("Cannot use send/recv with torch version < 1.8."
+                                  f" PyTorch version {Version(torch.__version__)}.")
 
 
 def _is_valid_send_recv(src_stage, dest_stage):
     first_stage = 0
     last_stage = _grid.pipe_parallel_size - 1
-    assert abs(src_stage-dest_stage) == 1 or \
-        (src_stage == first_stage and dest_stage == last_stage) or \
-        (src_stage == last_stage and dest_stage == first_stage), \
-    "Functionality currently limited to send and receive between adjacent ranks only"
+    assert (abs(src_stage - dest_stage) == 1 or (src_stage == first_stage and dest_stage == last_stage)
+            or (src_stage == last_stage and dest_stage == first_stage)
+            ), "Functionality currently limited to send and receive between adjacent ranks only"
 
 
 def send(tensor, dest_stage, async_op=False):
+    # NOTE: The input is the stage id rather than the global rank
     global _groups
     assert async_op == False, "Doesn't support async_op true"
     src_stage = _grid.get_stage_id()
@@ -62,19 +79,19 @@ def send(tensor, dest_stage, async_op=False):
     dest_rank = _grid.stage_to_global(stage_id=dest_stage)
     if async_op:
         global _async
-        op = dist.isend(tensor, dest_rank)
+        op = dist.isend(tensor, dest_rank + process_group_offset())
         _async.append(op)
     else:
-
         if can_send_recv():
-            return dist.send(tensor, dest_rank)
+            return dist.send(tensor, dest_rank + process_group_offset())
         else:
             group = _get_send_recv_group(src_stage, dest_stage)
             src_rank = _grid.stage_to_global(stage_id=src_stage)
-            return dist.broadcast(tensor, src_rank, group=group, async_op=async_op)
+            return dist.broadcast(tensor, src_rank + process_group_offset(), group=group, async_op=async_op)
 
 
 def recv(tensor, src_stage, async_op=False):
+    # NOTE: The input is the stage id rather than the global rank
     global _groups
     assert async_op == False, "Doesn't support async_op true"
     dest_stage = _grid.get_stage_id()
@@ -84,14 +101,14 @@ def recv(tensor, src_stage, async_op=False):
 
     if async_op:
         global _async
-        op = dist.irecv(tensor, src_rank)
+        op = dist.irecv(tensor, src_rank + process_group_offset())
         _async.append(op)
     else:
         if can_send_recv():
-            return dist.recv(tensor, src_rank)
+            return dist.recv(tensor, src_rank + process_group_offset())
         else:
             group = _get_send_recv_group(src_stage, dest_stage)
-            return dist.broadcast(tensor, src_rank, group=group, async_op=async_op)
+            return dist.broadcast(tensor, src_rank + process_group_offset(), group=group, async_op=async_op)
 
 
 def wait():
@@ -115,15 +132,20 @@ def send_obj(msg: typing.Any, dest: int):
         msg (typing.Any): The object to send.
         dest (int): Destination rank.
     """
-    # serialize the message
-    msg = pickle.dumps(msg)
-    # construct a tensor to send
-    msg = torch.ByteTensor(torch.ByteStorage.from_buffer(msg)).to(get_accelerator().device_name())
+    # # serialize the message
+    # msg = pickle.dumps(msg)
+    # # construct a tensor to send
+    # msg = torch.ByteTensor(torch.ByteStorage.from_buffer(msg)).to(get_accelerator().device_name())
 
-    # Send meta and message
-    length_tensor = torch.tensor([len(msg)], dtype=torch.long).to(get_accelerator().device_name())
-    dist.send(length_tensor, dst=dest)
-    dist.send(msg, dst=dest)
+    # # Send meta and message
+    # length_tensor = torch.tensor([len(msg)], dtype=torch.long).to(get_accelerator().device_name())
+    # dist.send(length_tensor, dst=dest)
+    # dist.send(msg, dst=dest)
+
+    # NOTE: We have changed the ranks in the process group,
+    # and the arguments of this function should be change correspondingly.
+    # The use case of this function is not clear. Pass for now
+    raise RuntimeError("commented")
 
 
 def recv_obj(sender: int) -> typing.Any:
@@ -135,41 +157,46 @@ def recv_obj(sender: int) -> typing.Any:
     Args:
         sender (int): The rank sending the message.
     """
-    # Get message meta
-    length = torch.tensor([0], dtype=torch.long).to(get_accelerator().device_name())
-    dist.recv(length, src=sender)
+    # # Get message meta
+    # length = torch.tensor([0], dtype=torch.long).to(get_accelerator().device_name())
+    # dist.recv(length, src=sender)
 
-    # Receive and deserialize
-    msg = torch.empty(length.item(), dtype=torch.uint8).to(get_accelerator().device_name())
-    dist.recv(msg, src=sender)
+    # # Receive and deserialize
+    # msg = torch.empty(length.item(), dtype=torch.uint8).to(get_accelerator().device_name())
+    # dist.recv(msg, src=sender)
 
-    msg = pickle.loads(msg.cpu().numpy().tobytes())
+    # msg = pickle.loads(msg.cpu().numpy().tobytes())
 
-    def _to(x):
-        """Recursively move to the current device."""
-        if torch.is_tensor(x):
-            return x.to(get_accelerator().device_name())
-        if isinstance(x, (tuple, list)):
-            ret = [_to(x_) for x_ in x]
-            if isinstance(x, tuple):
-                ret = tuple(ret)
-            return ret
-        # handle kwargs
-        if isinstance(x, dict):
-            ret = dict()
-            for key, val in x.items():
-                ret[_to(key)] = _to(val)
-            return ret
+    # def _to(x):
+    #     """Recursively move to the current device."""
+    #     if torch.is_tensor(x):
+    #         return x.to(get_accelerator().device_name())
+    #     if isinstance(x, (tuple, list)):
+    #         ret = [_to(x_) for x_ in x]
+    #         if isinstance(x, tuple):
+    #             ret = tuple(ret)
+    #         return ret
+    #     # handle kwargs
+    #     if isinstance(x, dict):
+    #         ret = dict()
+    #         for key, val in x.items():
+    #             ret[_to(key)] = _to(val)
+    #         return ret
 
-        # Anything else is a no-op
-        return x
+    #     # Anything else is a no-op
+    #     return x
 
-    msg = _to(msg)
-    return msg
+    # msg = _to(msg)
+    # return msg
+
+    # NOTE: We have changed the ranks in the process group,
+    # and the arguments of this function should be change correspondingly.
+    # The use case of this function is not clear. Pass for now
+    raise RuntimeError("commented")
 
 
 def _get_send_recv_group(src_stage, dest_stage):
-    '''the group id is always the smaller rank unless its a wrap around'''
+    """the group id is always the smaller rank unless its a wrap around"""
 
     stage_id = None
 
@@ -183,17 +210,17 @@ def _get_send_recv_group(src_stage, dest_stage):
         stage_id = dest_stage
     else:
         stage_id = src_stage
-    '''group_id corresponds to group of [group_id, group_id+1]
+    """group_id corresponds to group of [group_id, group_id+1]
      unless group_id is the rank of the last stage
      in which case group_id corresponds to group[group_id-num_stages+1, group_id]
-     '''
+     """
     group_id = _grid.stage_to_global(stage_id=stage_id)
 
     return _groups[group_id]
 
 
 def send_tensor_tuple_meta(tensor_tuple, recv_stage):
-    """ Communicate metadata about upcoming p2p transfers.
+    """Communicate metadata about upcoming p2p transfers.
 
     Metadata is communicated in this order:
         * num_tensors in tuple
@@ -217,7 +244,7 @@ def send_tensor_tuple_meta(tensor_tuple, recv_stage):
 
 
 def send_tensor_meta(tensor: torch.Tensor, recv_stage: int):
-    """ Communicate metadata about upcoming p2p transfers.
+    """Communicate metadata about upcoming p2p transfers.
 
     Metadata is communicated in this order:
         * ndims

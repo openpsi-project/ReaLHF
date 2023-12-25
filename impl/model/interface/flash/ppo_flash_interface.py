@@ -249,7 +249,7 @@ class PackedActorInterface(api.model.ModelInterface):
             packed_logits_mask=packed_logits_mask.bool() if packed_logits_mask is not None else None,
             prompt_mask=prompt_mask,
         )
-        return recursive_apply(from_dict(res), lambda x: x.cpu())
+        return from_dict(res)
 
     @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
@@ -274,7 +274,7 @@ class PackedActorInterface(api.model.ModelInterface):
             packed_logits_mask = data["packed_logits_mask"]
             logits.masked_fill_(packed_logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
-        return from_dict(dict(logprobs=logprobs.cpu()))
+        return from_dict(dict(logprobs=logprobs))
 
     def train_step(self, model: api.model.Model, data_: NamedArray) -> Dict:
         module = model.module
@@ -422,7 +422,7 @@ class PackedActorInterface(api.model.ModelInterface):
             train_stats: Dict[str, torch.Tensor] = dict(train_stats, **global_stats)
             for k, v in train_stats.items():
                 v = v.detach() / self.n_minibatches
-                train_stats[k] = api.huggingface.get_all_reduce_mean(v, group=data_parallel_group()).item()
+                train_stats[k] = v.item()
 
         return dict(train_stats)
 
@@ -538,7 +538,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                                                cu_seqlens=cu_seqlens,
                                                max_seqlen=max_seqlen)
         scores = scores.squeeze(-1)
-        return from_dict(dict(scores=scores.cpu()))
+        return from_dict(dict(scores=scores))
 
     def train_step(self, model: api.model.Model, data_: NamedArray) -> Dict:
         module = model.module
@@ -678,7 +678,7 @@ class PackedCriticInterface(api.model.ModelInterface):
             train_stats: Dict[str, torch.Tensor] = dict(train_stats, **global_stats)
             for k, v in train_stats.items():
                 v = v.detach() / self.n_minibatches
-                train_stats[k] = api.huggingface.get_all_reduce_mean(v, group=data_parallel_group()).item()
+                train_stats[k] = v.item()
 
         return dict(train_stats)
 

@@ -21,15 +21,21 @@ MODEL_TYPE = "llama"
 if MODEL_TYPE == "llama":
     if NUM_PP == 1:
         SUFFIX = f"_{NUM_MP}mp_{NUM_SHARDS}s"
+    elif NUM_MP == 1:
+        SUFFIX = f"_{NUM_PP}pp_{NUM_SHARDS}s"
     elif NUM_PP > 1:
         SUFFIX = f"_{NUM_PP}pp_{NUM_MP}mp_{NUM_SHARDS}s"
     # BASELINE_MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 128
+BATCH_SIZE = 512
 MIN_NEW_TOKENS = 10
-MAX_NEW_TOKENS = 128
+MAX_NEW_TOKENS = 30
+
+USE_GRADIENT_CHECKPOINTING = True
+USE_BF16 = False
+USE_SEQ_PARALLEL = False
 
 
 def make_backend():
@@ -44,20 +50,29 @@ def make_backend():
                     warmup_steps_proportion=0.0,
                     min_lr_ratio=0.0,
                     # TODO: test zero_stage = 2 or 3 later
-                    zero_stage=1)))
+                    gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
+                    zero_stage=1,
+                    enable_fp16=not USE_BF16,
+                    enable_bf16=USE_BF16,
+                )))
     elif NUM_PP > 1:
         return api.model.make_backend(
             config_package.ModelBackend(type_='ds_train',
-                                        args=dict(optimizer_name='adam',
-                                                  optimizer_config=dict(lr=1e-5,
-                                                                        weight_decay=0.0,
-                                                                        betas=(0.9, 0.95)),
-                                                  warmup_steps_proportion=0.0,
-                                                  min_lr_ratio=0.0,
-                                                  zero_stage=1,
-                                                  engine_type="pipe",
-                                                  num_pipeline_stages=NUM_PP,
-                                                  num_pipeline_micro_batches=NUM_PP * 4)))
+                                        args=dict(
+                                            optimizer_name='adam',
+                                            optimizer_config=dict(lr=1e-5,
+                                                                  weight_decay=0.0,
+                                                                  betas=(0.9, 0.95)),
+                                            warmup_steps_proportion=0.0,
+                                            min_lr_ratio=0.0,
+                                            zero_stage=1,
+                                            engine_type="pipe",
+                                            gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
+                                            num_pipeline_stages=NUM_PP,
+                                            enable_fp16=not USE_BF16,
+                                            enable_bf16=USE_BF16,
+                                            sequence_parallel=USE_SEQ_PARALLEL,
+                                        )))
 
 
 def make_interface():
@@ -75,12 +90,27 @@ def make_model(device):
                                             tokenizer_path=MODEL_PARALLEL_PATH,
                                             init_from_scratch=True,
                                             no_param_instantiation=True,
+                                            dtype="bf16" if USE_BF16 else "fp16",
                                         ))
+    assert NUM_PP > 1 or NUM_MP > 1, "can not test model without mp or dp"
     if NUM_PP == 1:
         model_config.wrappers += [
             config_package.ModelWrapper("model_parallel",
                                         args=dict(
                                             model_path=MODEL_PARALLEL_PATH,
+                                            sequence_parallel=USE_SEQ_PARALLEL,
+                                            is_critic=False,
+                                            init_critic_from_actor=False,
+                                            init_from_scratch=False,
+                                        ))
+        ]
+    elif NUM_MP == 1:
+        model_config.wrappers += [
+            config_package.ModelWrapper("pipe",
+                                        args=dict(
+                                            model_path=MODEL_PARALLEL_PATH,
+                                            num_pp=NUM_PP,
+                                            num_dp=NUM_DP,
                                             is_critic=False,
                                             init_critic_from_actor=False,
                                             init_from_scratch=False,
@@ -94,6 +124,7 @@ def make_model(device):
                                             num_pp=NUM_PP,
                                             num_mp=NUM_MP,
                                             num_dp=NUM_DP,
+                                            sequence_parallel=USE_SEQ_PARALLEL,
                                             is_critic=False,
                                             init_critic_from_actor=False,
                                             init_from_scratch=False,
@@ -140,7 +171,10 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     #                       max_seqlen=max_seqlen).logits.float()
     res = interface.inference(model, data)
     logits = res['logits']
-    print(f"rank {rank} mp FIRST inference time cost {time.monotonic() - st:.4f}")
+    print(f"rank {rank} mp FIRST inference "
+          f"time cost {time.monotonic() - st:.4f}")
+    if logits is not None:
+        print(f"rank {rank} mp FIRST inference logits shape {logits.shape}")
 
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                  record_shapes=True,
@@ -173,7 +207,7 @@ def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     res = interface.train_step(model, data)
     print(f"rank {rank} mp FIRST train time cost {time.monotonic() - st:.4f}, res {res}")
 
-    for _ in range(20):
+    for _ in range(10):
         st = time.monotonic()
         res = interface.train_step(model, data)
         print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
@@ -193,7 +227,8 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
         print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
               f"log probs shape {outputs['log_probs'].shape}")
 
-    for _ in range(3):
+    for i in range(10):
+        data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
         st = time.monotonic()
         outputs = interface.generate(model, data, gconfig=gconfig)
         t = time.monotonic() - st
@@ -295,7 +330,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
     @torch.no_grad()
     def testInference(self):
         clear_name_resolve()
-        self.seed = 1
+        self.seed = random.randint(1, 10000)
         self.res_queue = mp.Queue(maxsize=128)
         setup_barrier(WORLD_SIZE)
         self.pipe_model_processes = [
@@ -310,6 +345,8 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
         for p in self.pipe_model_processes:
             p.join()
+
+        print(f"res[0] shape {res[0].shape}")
 
     @torch.no_grad()
     def testInferenceAccordance(self):
@@ -356,7 +393,8 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
                 print(f"baseline inference time cost {time.monotonic() - st:.4f}")
         prof.export_chrome_trace("baseline_trace.json")
 
-        print(f"diff: {r - res[0]}, {(r - res[0]).abs().max()}, mean {(r - res[0]).abs().mean()}")
+        print(f"diff: {r - res[0]}, max/correct_max {(r - res[0]).abs().max()}/{r.abs().max()}, "
+              f" mean {(r - res[0]).abs().mean()},")
 
         # import base.consistency
         # base.consistency.check_all_model_parallel(NUM_MP)
@@ -395,7 +433,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
     def testGenerate(self):
         clear_name_resolve()
-        self.seed = random.randint(0, 10000)
+        self.seed = 1
         self.res_queue = mp.Queue(maxsize=128)
         setup_barrier(WORLD_SIZE)
         self.pipe_model_processes = [
