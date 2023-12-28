@@ -119,13 +119,15 @@ class EngineScheduleController:
             for sched in self.schedules:
                 index = sched.index
                 sched = sched.schedule
-                inst: PipeInstruction = sched.post_one_ready(stage)
+                inst, end = sched.post_one_ready(stage)
+                inst: PipeInstruction
                 # print(f"stage {stage} sched {index} inst {inst}")
                 if inst:
                     # print(f"posting {inst}")
                     msg = [
-                        str(stage).encode(encoding="utf-8"),
-                        str(index).encode(encoding="utf-8"),
+                        int.to_bytes(stage, 4, byteorder="big"),
+                        int.to_bytes(index, 4, byteorder="big"),
+                        int.to_bytes(int(end), 4, byteorder="big"),
                         inst.encode()
                     ]
                     # print(f"posting msg {msg}")
@@ -148,9 +150,9 @@ class EngineScheduleController:
             try:
                 stage_id, sched_index, signal_code, *insts = self.signal_socket.recv_multipart(
                     flags=zmq.NOBLOCK)
-                stage_id = int(stage_id.decode(encoding="utf-8"))
-                sched_index = int(sched_index.decode(encoding="utf-8"))
-                signal_code = int(signal_code.decode(encoding="utf-8"))
+                stage_id = int.from_bytes(stage_id, byteorder="big")
+                sched_index = int.from_bytes(sched_index, byteorder="big")
+                signal_code = int.from_bytes(signal_code, byteorder="big")
 
                 assert stage_id not in self.waiting_stages
                 self.waiting_stages.append(stage_id)
@@ -235,23 +237,24 @@ class EngineScheduleClient:
         """Called by engine in every run step, check instruction from controller.
         """
         try:
-            stage_id, sched_index, encoded = self.instruction_socket.recv_multipart(flags=zmq.NOBLOCK)
-            stage_id = int(stage_id.decode(encoding="utf-8"))
-            sched_index = int(sched_index.decode(encoding="utf-8"))
+            stage_id, sched_index, end, encoded = self.instruction_socket.recv_multipart(flags=zmq.NOBLOCK)
+            stage_id = int.from_bytes(stage_id, byteorder="big")
+            sched_index = int.from_bytes(sched_index, byteorder="big")
+            end = bool(int.from_bytes(end, byteorder="big"))
             assert stage_id == self.stage_id
             inst = PipeInstruction.decode(encoded)
             self.last_inst = inst
             self.last_inst_sched = sched_index
-            return sched_index, inst
+            return sched_index, inst, end
         except zmq.ZMQError:
             return None
 
     def post_result(self, signal: int):
         assert self.last_inst is not None and self.last_inst_sched is not None
         msg = [
-            str(self.stage_id).encode(encoding="utf-8"),
-            str(self.last_inst_sched).encode(encoding="utf-8"),
-            str(signal).encode(encoding="utf-8"),
+            int.to_bytes(self.stage_id, 4, byteorder="big"),
+            int.to_bytes(self.last_inst_sched, 4, byteorder="big"),
+            int.to_bytes(signal, 4, byteorder="big"),
             self.last_inst.encode()
         ]
         self.signal_socket.send_multipart(msg)

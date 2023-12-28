@@ -37,11 +37,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     This engine is created by ``deepspeed.initialize()`` when a :class:`PipelineModule`
     is provided.
     """
-    ID_TO_DTYPE = [
-        torch.float32, torch.float64, torch.complex64, torch.complex128, torch.float16, torch.bfloat16,
-        torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.bool
-    ]
-    DTYPE_TO_ID = {dtype: id_ for id_, dtype in enumerate(ID_TO_DTYPE)}
 
     def __init__(self, num_micro_batches=None, sequence_parallel=False, *super_args, **super_kwargs):
         super().__init__(*super_args, **super_kwargs)
@@ -701,7 +696,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def __maybe_genstep(self, x: PipeTransferData, ys: List[PipeCacheData], mbid: int, is_first_step: bool):
         if not (self._generate_mode and self.is_last_stage()):
-            return
+            return False
 
         logits = x.pp_input
         if is_first_step:
@@ -722,6 +717,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.tensor_buffer.get("gen_logprob_ph", mbid).append(logprob)
         self.tensor_buffer.get("gen_logits_mask_ph", mbid).append(logits_mask)
         self.tensor_buffer.put("next_tokens_to_send", mbid, next_tokens)
+
+        # terminate condition
+        end = all([self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)])
+        return end
 
     def __maybe_calculate_loss(self, x: PipeTransferData, mbid: int):
         if self.is_last_stage() and self._compute_loss:

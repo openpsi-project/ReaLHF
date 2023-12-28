@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from enum import IntEnum
+from typing import Tuple
 import copy
 import time
 
@@ -95,7 +96,7 @@ class DynamicPipeSchedule(ABC):
             self.__executed.add(inst)
         self.__update_ready()
 
-    def post_one_ready(self, stage_id: Optional[int]) -> PipeInstruction:
+    def post_one_ready(self, stage_id: Optional[int]) -> Tuple[PipeInstruction, bool]:
         """Called by controller to retrieve one ready instruction. 
         If there is one ready instruction for stage id, move it from ready to inflight set 
         and return this instruction.
@@ -106,7 +107,7 @@ class DynamicPipeSchedule(ABC):
             self.__init_inst_set()
             self.__initialized = True
         if self.__terminated:
-            return None
+            return None, False
         bind_insts = self.__bind_insts[stage_id]
         if len(bind_insts) > 0:
             # there is a binded instruction queued for this stage
@@ -115,7 +116,10 @@ class DynamicPipeSchedule(ABC):
                 # assert self.__executed.contain(inst) or self.__inflight.contain(inst)
                 self.__ready.remove(inst)
                 self.__inflight.add(inst)
-                return inst
+                end = False
+                if len(self.__ready) + len(self.__not_ready) == 0:
+                    end = True
+                return inst, end
         # no binded instruction, find another ready instruction
         insts = self.__ready.find(stage_id=stage_id)
         if len(insts) > 0:
@@ -125,7 +129,10 @@ class DynamicPipeSchedule(ABC):
             if inst.bind:
                 other_stage_id = inst.bind.stage_id
                 self.__bind_insts[other_stage_id].append(inst)
-            return inst
+            end = False
+            if len(self.__ready) + len(self.__not_ready) == 0:
+                end = True
+            return inst, end
         else:
             not_ready = self.__not_ready.find(stage_id=stage_id)
             in_flight = self.__inflight.find(stage_id=stage_id)
@@ -135,7 +142,7 @@ class DynamicPipeSchedule(ABC):
                     self.__not_ready.add(new_instructions)
                     self.__update_ready()
                     return self.post_one_ready(stage_id)
-        return None
+        return None, False
 
     def _is_update_ready(self, inst: PipeInstruction):
         """ check if an instruction is ready but not put into ready set
