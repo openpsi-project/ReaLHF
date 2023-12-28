@@ -247,12 +247,9 @@ class AsyncIOSequenceBuffer:
                 & self._ready_for_rpcs[:, rpc_idx]
                 & ~self._completed_rpc[:, rpc_idx]
             )[0]
-            print(self._is_idle)
-            print(len(ready_indices), rpc.min_n_seqs)
             if len(ready_indices) < rpc.min_n_seqs:
                 return False
             seqlens = self.__buffer._get_seqlen(ready_indices)
-            print(seqlens.sum(), rpc.min_n_tokens)
             if seqlens.sum() < rpc.min_n_tokens:
                 return False
             return True

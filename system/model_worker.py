@@ -185,6 +185,12 @@ class ModelWorker(worker_base.Worker):
         except request_reply_stream.NoMessage:
             return worker_base.PollResult(0, 0)
 
+        # ACK message to indicate ready to run dist.scatter
+        if request.is_tensor and self._is_dp_head:
+            assert request.ack_reply_id is not None
+            ack = request_reply_stream.Payload(handle_name=request.handle_name, request_id=request.ack_reply_id)
+            self.__stream.post(ack)
+        
         if request.handle_name not in self.__gather_buffers:
             self.__gather_buffers[request.handle_name] = {}
         if request.handle_name not in self.__scatter_buffers:

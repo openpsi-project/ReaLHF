@@ -36,6 +36,7 @@ class Payload:
     is_tensor: bool = False
 
     request_id: uuid.UUID = None
+    ack_reply_id: uuid.UUID = None
 
     send_time: float = None
 
@@ -52,6 +53,8 @@ class Payload:
     def __post_init__(self):
         if self.request_id is None:
             self.request_id = uuid.uuid4()
+        if self.ack_reply_id is None:
+            self.ack_reply_id = uuid.uuid4()
 
 
 class RequestReplyStream:

@@ -157,9 +157,6 @@ class RPCCorountineControl:
     stop: asyncio.Event
     # does not exceed #max_concurrent_calls
     can_do_rpc: asyncio.Semaphore
-    # synchronize NCCL calls, similar to action/observation buffer in RL env ring
-    can_gather: asyncio.Semaphore
-    can_scatter: asyncio.Semaphore
     # for synchronizing req ids between req and reply coroutines
     request_queue: asyncio.Queue
     # for counting the number of finished training steps
@@ -214,9 +211,8 @@ async def scatter_tensor_to_mws(
             s = tuple(slice(0, x) for x in v.shape)
             scatter_buffer[k][i + 1][s] = data[k]
 
-    await ctrl.can_scatter.acquire()
-
     request_ids = []
+    ack_ids = []
     for stream, shapes, buffer_indices, seqlens in zip(streams, all_shapes, all_buffer_indices, all_seqlens):
         req = request_reply_stream.Payload(
             handle_name=rpc.interface_type.value,
@@ -228,6 +224,15 @@ async def scatter_tensor_to_mws(
             seqlens=seqlens,
         )
         request_ids.append(stream.post(req))
+        ack_ids.append(req.ack_reply_id)
+
+    # Wait for the ack message from model worker
+    await asyncio.gather(
+        *[
+            _awaitable_response(s, pattern=create_exact_match_pattern([ack_id]))
+            for s, ack_id in zip(streams, ack_ids)
+        ]
+    )
 
     # Scatter data to DP head model workers.
     for k in scatter_buffer:
@@ -237,7 +242,6 @@ async def scatter_tensor_to_mws(
             src=0,
             group=mas_dp_head_group,
         )
-    ctrl.can_gather.release()
 
     return request_ids
 
@@ -308,7 +312,6 @@ async def gather_tensor_from_mws(
     dp_size: int,
     ctrl: RPCCorountineControl,
 ) -> namedarray.NamedArray:
-    await ctrl.can_gather.acquire()
     responses = await asyncio.gather(
         *[
             _awaitable_response(s, pattern=create_exact_match_pattern([req_id]))
@@ -366,7 +369,6 @@ async def gather_tensor_from_mws(
         res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(
             [response.data for response in responses]
         )
-    ctrl.can_scatter.release()
     logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
     return responses, rpc.remap_output_keys(res)
 
@@ -666,9 +668,6 @@ class MasterWorker(worker_base.Worker):
 
         logger.info(f"Creating asyncio coroutines...")
 
-        model_can_scatter = {model_name: asyncio.Semaphore(1) for model_name in self.config.model_topos}
-        model_can_gather = {model_name: asyncio.Semaphore(1) for model_name in self.config.model_topos}
-
         coroutine_tasks = []
         for rpc in self.__model_rpcs:
             concerned_streams = [v for k, v in self.__model_streams.items() if k.model_name == rpc.model_name]
@@ -679,8 +678,6 @@ class MasterWorker(worker_base.Worker):
             ctrl = RPCCorountineControl(
                 stop=self.__stop_ctl,
                 can_do_rpc=rpc_count,
-                can_scatter=model_can_scatter[rpc.model_name],
-                can_gather=model_can_gather[rpc.model_name],
                 request_queue=request_queue,
                 train_count=self.__train_count,
                 fetch_data_queue=self.__fetch_data_queue,
