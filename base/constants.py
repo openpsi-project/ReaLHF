@@ -21,6 +21,25 @@ QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()
 _experiment_name = None
 _trial_name = None
 
+
+def set_experiment_trial_names(expr_name: str, trial_name: str):
+    global _experiment_name, _trial_name
+    _experiment_name = expr_name
+    _trial_name = trial_name
+
+
+def experiment_name():
+    if _experiment_name == None:
+        raise RuntimeError("Global constant `experiment_name` is accessed before set.")
+    return _experiment_name
+
+
+def trial_name():
+    if _trial_name == None:
+        raise RuntimeError("Global constant `trial_name` is accessed before set.")
+    return _trial_name
+
+
 # constants in worker/process scope
 
 _model_name: str = None
@@ -35,6 +54,10 @@ _fake_mp_rank = None
 def set_model_name(model_name: str):
     global _model_name
     _model_name = copy.deepcopy(model_name)
+
+
+def model_name():
+    return _model_name
 
 
 def set_grid(model_name: str, grid):
@@ -143,3 +166,11 @@ def set_fake_mp_rank(rank):
     # used only in scripts and tests
     global _fake_mp_rank
     _fake_mp_rank = rank
+
+
+def set_fake_grid(model_name, rank, topo):
+    # used only in scripts and tests
+    from base.topology import FakeGrid
+
+    global _grids
+    _grids[model_name] = FakeGrid(rank=rank, topo=topo)

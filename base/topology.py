@@ -521,3 +521,50 @@ class PipelineParallelGrid:
 
     def get_tensor_model_parallel_group(self):
         return self.slice_proc_group
+
+
+class FakeGrid:
+    """ Used for testing dynamic scheduling in none-GPU environment.
+    """
+
+    def __init__(self, rank: int, topo: PipeModelDataParallelTopology):
+        self.rank = rank
+        self._topo = topo
+
+        self.data_parallel_size = max(self._topo.get_dim("data"), 1)
+        self.pipe_parallel_size = max(self._topo.get_dim("pipe"), 1)
+        self.model_parallel_size = max(self._topo.get_dim("model"), 1)
+
+        self.coord: PipeDataModelProcessCoord = self._topo.get_coord(self.rank)
+        self.dp_id = self.coord.data
+        self.pp_id = self.coord.pipe
+        self.mp_id = self.coord.model
+
+        self.world_size = self.data_parallel_size * self.pipe_parallel_size * self.model_parallel_size
+
+    def get_pipe_parallel_group(self):
+        raise RuntimeError("No groups in fake grid.")
+
+    def get_pipe_parallel_world_size(self):
+        return self.pipe_parallel_size
+
+    def get_pipe_parallel_rank(self):
+        return self.pp_id
+
+    def get_data_parallel_group(self):
+        raise RuntimeError("No groups in fake grid.")
+
+    def get_data_parallel_world_size(self):
+        return self.data_parallel_size
+
+    def get_data_parallel_rank(self):
+        return self.dp_id
+
+    def get_tensor_model_parallel_group(self):
+        raise RuntimeError("No groups in fake grid.")
+
+    def get_tensor_model_parallel_world_size(self):
+        return self.model_parallel_size
+
+    def get_tensor_model_parallel_rank(self):
+        return self.mp_id

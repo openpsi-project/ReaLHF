@@ -1,5 +1,7 @@
+from collections import defaultdict
 from enum import IntEnum
-from typing import List
+from typing import List, Optional, Set, Union
+import sys
 
 from deepspeed.runtime.utils import call_to_str
 
@@ -18,25 +20,24 @@ class PipeInstruction:
     4. priority: priority of the instruction, higher priority instructions should be scheduled first in 
                  the dynamic schedule.
     5. deps: list of instructions that this instruction depends on.
-
-    Note:: The dependency between instructions should follows rules for simplicity:
-    Instructions are classified into two types: 1. compute instructions, 2. communication instructions.
-    For compute instructions, their dependency should only be other instructions that has the same 
-    stage_id. For communication instructions, they should appear in pairs with their communication target stage.
-    For example, SendActivation(stage_id=0, micro_batch_id=M) should appear in pairs with 
-    RecvActivation(stage_id=1, micro_batch_id=M). They should have the same dependency. 
+    6. bind: Instruction that this instruction is binded with. Binded instructions are send/recv instructions 
+             that should appear in pair, belong to different (adjancent) stages and have the same micro_batch_id.
+             Two binded instructions should have the same dependency list. This feature is used to avoid NCCL
+             communication deadlock.
     
     """
 
     def __init__(self,
                  stage_id: int,
                  micro_batch_id: int,
-                 deps: List['PipeInstruction'] = None,
+                 deps: List['PipeInstruction'] = [],
+                 bind: Optional['PipeInstruction'] = None,
                  step_id: int = 0,
                  **kwargs):
         self.stage_id = stage_id
         self.micro_batch_id = micro_batch_id
         self.deps = deps
+        self.bind = bind
         self.name = self.__class__.__name__
         self.step_id = step_id
 
@@ -46,13 +47,37 @@ class PipeInstruction:
             setattr(self, key, val)
 
     def __repr__(self):
-        return call_to_str(self.name, self.args, self.kwargs)
+        return f"{self.name}{self.args}"
+        # return call_to_str(self.name, self.args, self.kwargs)
 
     def __eq__(self, other: 'PipeInstruction'):
         return self.stage_id == other.stage_id and \
                self.micro_batch_id == other.micro_batch_id and \
                self.step_id == other.step_id and \
                self.name == other.name
+
+    def __lt__(self, other: 'PipeInstruction'):
+        # order by stage_id, micro_batch_id, step_id
+        # used to sort finded results in InstructionSet
+        return self.stage_id < other.stage_id or \
+               (self.stage_id == other.stage_id and self.micro_batch_id < other.micro_batch_id) or \
+               (self.stage_id == other.stage_id and self.micro_batch_id == other.micro_batch_id and self.step_id < other.step_id)
+
+    def encode_str(self):
+        return f"{self.name};{self.stage_id};{self.micro_batch_id};{self.step_id}"
+
+    def encode(self):
+        return self.encode_str().encode(encoding="utf-8")
+
+    @classmethod
+    def decode(cls, encoded: Union[bytes, str]) -> 'PipeInstruction':
+        if isinstance(encoded, bytes):
+            s = encoded.decode(encoding="utf-8")
+        else:
+            s = encoded
+        cls_name, stage_id, micro_batch_id, step_id = s.split(";")
+        cls_ = getattr(sys.modules[__name__], cls_name)
+        return cls_(stage_id=int(stage_id), micro_batch_id=int(micro_batch_id), step_id=int(step_id))
 
 
 class OptimizerStep(PipeInstruction):
@@ -123,38 +148,109 @@ class RecvNextTokens(PipeInstruction):
     pass
 
 
-class InstructionType(IntEnum):
-    FORWARD_PASS = 1
-    BACKWARD_PASS = 2
-    SEND_ACTIVATION = 3
-    RECV_ACTIVATION = 4
-    SEND_GRAD = 5
-    RECV_GRAD = 6
-    REDUCE_GRADS = 7
-    OPTIMIZER_STEP = 8
-    SEND_NEXT_TOKENS = 9
-    RECV_NEXT_TOKENS = 10
+class InstructionSet:
+    """ A set of instructions that can be indexed by stage_id, micro_batch_id and step_id.
+    Instructions are stored in their string representation, dependency of instructions are stored 
+    separately, update only when new instruction has a different dependency with length > 0.
+    """
 
+    def __init__(self, max_size=None):
+        # TODO: check performance, if slow or memory consuming
+        # use a large dict that record number of steps instead.
+        self.__stage_sets = defaultdict(set)
+        self.__mbid_sets = defaultdict(set)
+        self.__name_sets = defaultdict(set)
+        self.__step_sets = defaultdict(set)
+        self.__deps_storage = dict()
+        self.__bind_storage = dict()
+        self.size = 0
+        self.max_size = max_size  # maximum number of instructions in the set
 
-INSTRUCTION_TYPE_TO_CLASS = {
-    InstructionType.FORWARD_PASS: ForwardPass,
-    InstructionType.BACKWARD_PASS: BackwardPass,
-    InstructionType.SEND_ACTIVATION: SendActivation,
-    InstructionType.RECV_ACTIVATION: RecvActivation,
-    InstructionType.SEND_GRAD: SendGrad,
-    InstructionType.RECV_GRAD: RecvGrad,
-    InstructionType.REDUCE_GRADS: ReduceGrads,
-    InstructionType.OPTIMIZER_STEP: OptimizerStep,
-    InstructionType.SEND_NEXT_TOKENS: SendNextTokens,
-    InstructionType.RECV_NEXT_TOKENS: RecvNextTokens,
-}
+    def add(self, inst: Union[List[PipeInstruction], PipeInstruction]):
+        """ Add one or multiple instructions to the set.
+        """
+        if isinstance(inst, list):
+            [self.add(x) for x in inst]
+        else:
+            if self.max_size is not None:
+                if self.size >= self.max_size:
+                    raise RuntimeError(
+                        f"InstructionSet size {self.size} exceeds maximum size {self.max_size}.")
+            s = inst.encode_str()
+            if len(inst.deps) > 0:
+                self.__deps_storage[s] = inst.deps
+            if inst.bind is not None:
+                self.__bind_storage[s] = inst.bind
 
-INSTRUCTION_CLASS_TO_TYPE = {v: k for k, v in INSTRUCTION_TYPE_TO_CLASS.items()}
+            self.__stage_sets[inst.stage_id].add(s)
+            self.__mbid_sets[inst.micro_batch_id].add(s)
+            self.__name_sets[inst.name].add(s)
+            self.__step_sets[inst.step_id].add(s)
+            self.size += 1
 
+    def contain(self, inst: PipeInstruction):
+        """ Check if the set contains the instruction.
+        """
+        s = inst.encode_str()
+        return s in self.__stage_sets[inst.stage_id]
 
-def instruction_to_type(instruction: PipeInstruction) -> InstructionType:
-    return INSTRUCTION_CLASS_TO_TYPE[type(instruction)]
+    def remove(self, inst: Union[List[PipeInstruction], PipeInstruction]):
+        """ Remove one or multiple instructions from the set.
+        """
+        if isinstance(inst, list):
+            [self.remove(x) for x in inst]
+        else:
+            s = inst.encode_str()
+            if self.contain(inst):
+                self.__stage_sets[inst.stage_id].remove(s)
+                self.__mbid_sets[inst.micro_batch_id].remove(s)
+                self.__name_sets[inst.name].remove(s)
+                self.__step_sets[inst.step_id].remove(s)
+                if s in self.__deps_storage:
+                    self.__deps_storage.pop(s)
+                if s in self.__bind_storage:
+                    self.__bind_storage.pop(s)
+                self.size -= 1
+            else:
+                raise KeyError(f"Instruction {inst} not in set.")
 
+    def find(
+        self,
+        stage_id: Optional[int] = None,
+        micro_batch_id: Optional[int] = None,
+        name: Optional[str] = None,
+        step_id: Optional[int] = None,
+    ) -> List[PipeInstruction]:
+        """ Find all instructions in set that satisfies arguments as a list.
+        """
+        related_sets: List[Set] = []
+        if stage_id is not None:
+            related_sets.append(self.__stage_sets[stage_id])
+        if micro_batch_id is not None:
+            related_sets.append(self.__mbid_sets[micro_batch_id])
+        if name is not None:
+            related_sets.append(self.__name_sets[name])
+        if step_id is not None:
+            related_sets.append(self.__step_sets[step_id])
 
-def type_to_instruction(instruction_type: InstructionType) -> PipeInstruction:
-    return INSTRUCTION_TYPE_TO_CLASS[instruction_type]
+        if len(related_sets) > 0:
+            res_set = related_sets[0].intersection(*related_sets)
+        else:
+            res_set = set().union(*[s for s in self.__stage_sets.values()])
+
+        res_list = list(res_set)
+        res = []
+        for s in res_list:
+            r = PipeInstruction.decode(s)
+            deps = self.__deps_storage.get(s, None)
+            if deps is not None:
+                r.deps = deps
+            bind = self.__bind_storage.get(s, None)
+            if bind is not None:
+                r.bind = bind
+            res.append(r)
+        res.sort()
+        return res
+
+    def __len__(self):
+        return self.size
