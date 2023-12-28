@@ -1,13 +1,15 @@
+from dataclasses import dataclass, field
 from typing import *
 import asyncio
-import api.dfg
-import base.namedarray as namedarray
-from dataclasses import dataclass, field
-import time
 import bisect
+import time
+
 import numpy as np
+
+import api.dfg
 import base.dataparallel as dataparallel
 import base.logging as logging
+import base.namedarray as namedarray
 
 logger = logging.getLogger("buffer")
 
@@ -24,15 +26,11 @@ class _ReplayEntry:
 
 
 def _get_seqlen_from_sample(sample: namedarray.NamedArray) -> int:
-    assert (
-        "input_lens" in sample.keys()
-        or "cu_seqlens" in sample.keys()
-        or "prompt_cu_seqlens" in sample.keys()
-        or "prompt_lens" in sample.keys()
-    ), (
-        list(sample.keys()),
-        sample,
-    )
+    assert ("input_lens" in sample.keys() or "cu_seqlens" in sample.keys()
+            or "prompt_cu_seqlens" in sample.keys() or "prompt_lens" in sample.keys()), (
+                list(sample.keys()),
+                sample,
+            )
     if "input_lens" in sample.keys():
         return sample["input_lens"].item()
     elif "cu_seqlens" in sample.keys():
@@ -126,6 +124,7 @@ class SequenceSample:
 
 
 class AsyncIOSequenceBuffer:
+
     def __init__(
         self,
         rpcs: List[api.dfg.ModelRPC],
@@ -158,8 +157,7 @@ class AsyncIOSequenceBuffer:
         rpc_data_keys = list(set().union(*[rpc.input_data for rpc in rpcs]))
         # We can efficiently compute whether an RPC is ready using this mask
         self._rpc_key_mask = np.stack(
-            [np.array([k in rpc.input_data for k in rpc_data_keys], dtype=bool) for rpc in rpcs], axis=1
-        )
+            [np.array([k in rpc.input_data for k in rpc_data_keys], dtype=bool) for rpc in rpcs], axis=1)
         self._rpc_names = [rpc.name for rpc in rpcs]
 
         # The internal buffer implementation.
@@ -175,9 +173,8 @@ class AsyncIOSequenceBuffer:
         return len(self._rpc_names)
 
     def _assert_valid_indicator(self):
-        assert (
-            self._is_being_put + self._is_being_amended + self._is_being_read + self._is_idle
-        ).sum() == self._buf_size
+        assert (self._is_being_put + self._is_being_amended + self._is_being_read +
+                self._is_idle).sum() == self._buf_size
         assert (self._is_empty.sum() + self._buf_size) == self.__max_size
         assert ((self._n_amenders > 0) == self._is_being_amended).all()
         assert (self._n_amenders >= 0).all()
@@ -215,8 +212,7 @@ class AsyncIOSequenceBuffer:
     async def amend_batch(self, indices: List[int], new_datas: List[namedarray.NamedArray]):
         async with self._lock:
             await self._lock.wait_for(
-                lambda: (self._is_idle[indices] | self._is_being_amended[indices]).all(),
-            )
+                lambda: (self._is_idle[indices] | self._is_being_amended[indices]).all(),)
             self._assert_valid_indicator()
             self._is_idle[indices] = False
             self._is_being_amended[indices] = True
@@ -242,11 +238,9 @@ class AsyncIOSequenceBuffer:
         rpc_idx = self._rpc_names.index(rpc.name)
 
         def _can_do_rpc() -> bool:
-            ready_indices = np.nonzero(
-                (self._is_idle | self._is_being_read)
-                & self._ready_for_rpcs[:, rpc_idx]
-                & ~self._completed_rpc[:, rpc_idx]
-            )[0]
+            ready_indices = np.nonzero((self._is_idle | self._is_being_read)
+                                       & self._ready_for_rpcs[:, rpc_idx]
+                                       & ~self._completed_rpc[:, rpc_idx])[0]
             if len(ready_indices) < rpc.min_n_seqs:
                 return False
             seqlens = self.__buffer._get_seqlen(ready_indices)
@@ -270,11 +264,9 @@ class AsyncIOSequenceBuffer:
             # await self._lock.wait_for(_can_do_rpc)
             self._assert_valid_indicator()
 
-            ready_indices = np.nonzero(
-                (self._is_idle | self._is_being_read)
-                & self._ready_for_rpcs[:, rpc_idx]
-                & ~self._completed_rpc[:, rpc_idx]
-            )[0]
+            ready_indices = np.nonzero((self._is_idle | self._is_being_read)
+                                       & self._ready_for_rpcs[:, rpc_idx]
+                                       & ~self._completed_rpc[:, rpc_idx])[0]
             seqlens = self.__buffer._get_seqlen(ready_indices)
 
             token_cumsum = np.cumsum(seqlens, axis=0)
@@ -283,8 +275,7 @@ class AsyncIOSequenceBuffer:
             if len(token_intervals) < 1:
                 raise RuntimeError(
                     "No valid token intervals found. Please set a smaller min_n_tokens and a larger max_n_tokens. "
-                    f"Current values min_n_tokens={rpc.min_n_tokens}, max_n_tokens={rpc.max_n_tokens}."
-                )
+                    f"Current values min_n_tokens={rpc.min_n_tokens}, max_n_tokens={rpc.max_n_tokens}.")
             token_start, token_end = token_intervals[0], token_intervals[-1]
 
             n_seqs_cumsum = np.arange(1, len(ready_indices) + 1)
@@ -293,13 +284,11 @@ class AsyncIOSequenceBuffer:
             n_seqs_start, n_seqs_end = n_seqs_intervals[0], n_seqs_intervals[-1]
 
             if token_start > n_seqs_end or token_end < n_seqs_start:
-                raise RuntimeError(
-                    "Tokens and n_seqs interval are not overlapped. "
-                    f"Please set proper batch sizes in RPC {rpc.name}."
-                )
+                raise RuntimeError("Tokens and n_seqs interval are not overlapped. "
+                                   f"Please set proper batch sizes in RPC {rpc.name}.")
 
-            indices = ready_indices[: min(token_end, n_seqs_end) + 1]
-            seqlens = seqlens[: min(token_end, n_seqs_end) + 1]
+            indices = ready_indices[:min(token_end, n_seqs_end) + 1]
+            seqlens = seqlens[:min(token_end, n_seqs_end) + 1]
             assert rpc.min_n_tokens <= seqlens.sum() <= rpc.max_n_tokens
             assert rpc.min_n_seqs <= len(indices) <= rpc.max_n_seqs
 
@@ -315,8 +304,7 @@ class AsyncIOSequenceBuffer:
         if len(pop_indices) > 0:
             self.__buffer.pop_batch(pop_indices)
         data = dataparallel.PackedParallelDataBroker.gather_from(
-            [rpc.remap_input_keys(x.sample) for x in entries]
-        )
+            [rpc.remap_input_keys(x.sample) for x in entries])
 
         async with self._lock:
             self._n_readers[indices] -= 1

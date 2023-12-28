@@ -201,7 +201,7 @@ class PackedActorInterface(api.model.ModelInterface):
             prompt_len, gen_len = prompt_lengths[i].item(), gen_lengths[i].item()
 
             # Prompts are left-padded. Besides, prompt_log_probs is one-step shorter than prompts.
-            prompts_list.append(packed_prompts[cu_seqlens[i]:cu_seqlens[i+1]])
+            prompts_list.append(packed_prompts[cu_seqlens[i]:cu_seqlens[i + 1]])
             prompt_log_probs_list.append(logprobs.new_zeros(prompt_len - 1))
             if logits_mask is not None:
                 prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len - 1, logits_mask.shape[-1])))

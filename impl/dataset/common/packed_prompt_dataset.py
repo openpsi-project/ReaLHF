@@ -13,6 +13,7 @@ logger = logging.getLogger("Packed Prompt Dataset")
 
 
 class PackedPromptDataset(torch.utils.data.IterableDataset):
+
     def __init__(
         self,
         util: api.data.DatasetUtility,
@@ -38,8 +39,7 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
             max_length = n_tokens_per_batch
         if max_length > n_tokens_per_batch:
             raise ValueError(
-                f"max_length ({max_length}) must be smaller than n_tokens_per_batch ({n_tokens_per_batch})."
-            )
+                f"max_length ({max_length}) must be smaller than n_tokens_per_batch ({n_tokens_per_batch}).")
         self.max_length = max_length
 
         self.util = util
@@ -74,9 +74,8 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
             return_attention_mask=False,
         )
 
-        start, end = min_abs_diff_partition(np.array(all_prompt_encodings["length"]), util.world_size)[
-            util.ddp_rank
-        ]
+        start, end = min_abs_diff_partition(np.array(all_prompt_encodings["length"]),
+                                            util.world_size)[util.ddp_rank]
 
         prompt_lengths = all_prompt_encodings["length"][start:end]
         prompts = all_prompt_encodings["input_ids"][start:end]
@@ -99,13 +98,11 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
 
         self._shuffle()
         assert all(seq <= self.n_tokens_per_batch for seq in self.prompt_lengths)
-        self.__batch_indices = ffd_with_result_unsorted(
-            np.array(self.prompt_lengths), self.n_tokens_per_batch
-        )
+        self.__batch_indices = ffd_with_result_unsorted(np.array(self.prompt_lengths),
+                                                        self.n_tokens_per_batch)
         self.__batch_indices = list(filter(lambda x: len(x) >= self.min_seqs_per_batch, self.__batch_indices))
         tokens_in_batches = sum(
-            [sum([self.prompt_lengths[i] for i in indices]) for indices in self.__batch_indices]
-        )
+            [sum([self.prompt_lengths[i] for i in indices]) for indices in self.__batch_indices])
         tokens_in_dataset = sum(self.prompt_lengths)
         if tokens_in_batches < 0.5 * tokens_in_dataset:
             raise ValueError(
@@ -121,8 +118,7 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
 
     def _shuffle(self):
         shuffle_indices = api.data.get_shuffle_indices(
-            self.util.seed + self.shuffle_cnt * 7 + self.util.ddp_rank * 3, len(self.prompt_lengths)
-        )
+            self.util.seed + self.shuffle_cnt * 7 + self.util.ddp_rank * 3, len(self.prompt_lengths))
 
         self.prompt_lengths = [self.prompt_lengths[i] for i in shuffle_indices]
         self.prompts = [self.prompts[i] for i in shuffle_indices]
@@ -148,13 +144,11 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
             )
         self._shuffle()
         assert all(seq <= self.n_tokens_per_batch for seq in self.prompt_lengths)
-        self.__batch_indices = ffd_with_result_unsorted(
-            np.array(self.prompt_lengths), self.n_tokens_per_batch
-        )
+        self.__batch_indices = ffd_with_result_unsorted(np.array(self.prompt_lengths),
+                                                        self.n_tokens_per_batch)
         self.__batch_indices = list(filter(lambda x: len(x) >= self.min_seqs_per_batch, self.__batch_indices))
         tokens_in_batches = sum(
-            [sum([self.prompt_lengths[i] for i in indices]) for indices in self.__batch_indices]
-        )
+            [sum([self.prompt_lengths[i] for i in indices]) for indices in self.__batch_indices])
         tokens_in_dataset = sum(self.prompt_lengths)
         if tokens_in_batches < 0.5 * tokens_in_dataset:
             raise ValueError(

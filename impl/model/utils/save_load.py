@@ -7,8 +7,8 @@ import re
 from safetensors import safe_open
 from safetensors.torch import save_file as save_safetensors_file
 import torch
-import transformers
 import tqdm
+import transformers
 
 from base.monitor import process_memory_mb
 import api.model
@@ -54,12 +54,10 @@ def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
     tokenizer = model.tokenizer
     logger.info(f"saving the model for epoch {model.version.epoch} step {model.version.epoch_step}...")
     os.makedirs(
-        os.path.abspath(
-            os.path.join(
-                output_dir,
-                f"epoch{model.version.epoch}step{model.version.epoch_step}",
-            )
-        ),
+        os.path.abspath(os.path.join(
+            output_dir,
+            f"epoch{model.version.epoch}step{model.version.epoch_step}",
+        )),
         exist_ok=True,
     )
     if not is_lora_model(module):
@@ -71,9 +69,8 @@ def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
         )
         return
     lora_sd = get_lora_state_dict(module)
-    save_to_disk(
-        lora_sd, os.path.join(output_dir, f"epoch{model.version.epoch}step{model.version.epoch_step}")
-    )
+    save_to_disk(lora_sd, os.path.join(output_dir,
+                                       f"epoch{model.version.epoch}step{model.version.epoch_step}"))
 
 
 def save_pipeline_model(model: api.model.Model, output_dir: str):
@@ -102,8 +99,7 @@ def split_state_dict_into_shards(state_dict: Dict, n_shards: int, verbose: bool 
     shard_size_list[-1] = shard_size + extra
     start, shards = 0, []
     for i, size in enumerate(
-        tqdm.tqdm(shard_size_list, desc=f"Splitting state dict into {len(shard_size_list)} shards...")
-    ):
+            tqdm.tqdm(shard_size_list, desc=f"Splitting state dict into {len(shard_size_list)} shards...")):
         shard = {}
         for j in range(start, start + size):
             shard[keys[j]] = state_dict[keys[j]]
@@ -115,13 +111,13 @@ def split_state_dict_into_shards(state_dict: Dict, n_shards: int, verbose: bool 
 
 
 def save_to_disk(
-    state_dict: Dict[str, torch.Tensor],
-    output_dir: str,
-    output_fn: Optional[str] = None,
-    save_type: str = "pt",
-    n_shards: Optional[int] = None,
-    no_shard_suffix: bool = False,
-    max_shard_size_byte: int = int(1e10),
+        state_dict: Dict[str, torch.Tensor],
+        output_dir: str,
+        output_fn: Optional[str] = None,
+        save_type: str = "pt",
+        n_shards: Optional[int] = None,
+        no_shard_suffix: bool = False,
+        max_shard_size_byte: int = int(1e10),
 ):
     os.makedirs(output_dir, exist_ok=True)
     if n_shards is None:
@@ -171,9 +167,9 @@ def save_to_disk(
         raise NotImplementedError(f"save_type {save_type} is not supported")
 
 
-def load_from_safetensors(
-    model_dir: str, ext: str = ".safetensors", pattern: Optional[str] = None
-) -> Tuple[Dict, int]:
+def load_from_safetensors(model_dir: str,
+                          ext: str = ".safetensors",
+                          pattern: Optional[str] = None) -> Tuple[Dict, int]:
     state_dict = {}
     cnt = 0
     for fn in os.listdir(model_dir):
@@ -216,9 +212,9 @@ def load_from_disk(
         if any(fn.endswith(".DLLMbin") for fn in fns):
             state_dict, n_shards = load_from_pytorch(model_dir, ext=".DLLMbin", pattern=fn_pattern)
         elif any(fn.endswith(".DLLMsafetensors") for fn in fns):
-            state_dict, n_shards = load_from_safetensors(
-                model_dir, ext=".DLLMsafetensors", pattern=fn_pattern
-            )
+            state_dict, n_shards = load_from_safetensors(model_dir,
+                                                         ext=".DLLMsafetensors",
+                                                         pattern=fn_pattern)
         elif any(fn.endswith(".bin") for fn in fns):
             state_dict, n_shards = load_from_pytorch(model_dir, pattern=fn_pattern)
         elif any(fn.endswith(".safetensors") for fn in fns):
@@ -280,8 +276,7 @@ def load_from_disk(
                     c_attn_key = f"{i}.attn.c_attn.linear.weight"
                     if q_key in state_dict:
                         state_dict[c_attn_key] = torch.cat(
-                            [state_dict[q_key], state_dict[k_key], state_dict[v_key]], dim=0
-                        )
+                            [state_dict[q_key], state_dict[k_key], state_dict[v_key]], dim=0)
                         state_dict.pop(q_key)
                         state_dict.pop(k_key)
                         state_dict.pop(v_key)

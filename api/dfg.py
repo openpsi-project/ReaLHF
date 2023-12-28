@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import Callable, Dict, List, Optional, Tuple
 import dataclasses
 import enum
 
@@ -44,8 +44,7 @@ class ModelRPC:
                 "The maximum batch size of the source node in the dataflow graph is too large. "
                 f"The maximum number of sequences is {self.max_n_seqs} > budget {int(1e4)} and "
                 f"the maximum number of tokens is {self.max_n_tokens} > budget {int(1e8)}. "
-                "Please set a smaller value."
-            )
+                "Please set a smaller value.")
 
     @property
     def name(self):
@@ -107,12 +106,10 @@ def build_graph(rpcs: List[ModelRPC]) -> Tuple[List[ModelRPC], List[List[Tuple[s
                         children[j].append(rpc.name)
                     edges[i][j] = (*edges[i][j], k)
                     logger.info(
-                        f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`."
-                    )
+                        f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`.")
     for i, rpc in enumerate(rpcs):
         logger.info(
-            f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }."
-        )
+            f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }.")
     for rpc, p, c in zip(rpcs, parents, children):
         rpc.parents = p
         rpc.children = c

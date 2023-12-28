@@ -2,20 +2,23 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Union
 import asyncio
 import copy
+import dataclasses
 import getpass
+import os
 import re
 import sys
 import threading
-import uuid
-import os
 import time
-import dataclasses
+import uuid
+
 import colorama
 import deepspeed
 import numpy as np
 import torch
 import torch.distributed
 
+from base.asyncio_utils import raise_asyncio_exception, setup_run_until_complete, teardown_run_util_complete
+from base.buffer import AsyncIOSequenceBuffer
 from base.cluster import spec as cluster_spec
 from base.constants import MODEL_SAVE_ROOT
 import api.config as config_pkg
@@ -33,29 +36,18 @@ import base.topology
 import base.topology as topology
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
-from base.buffer import AsyncIOSequenceBuffer
-from base.asyncio_utils import setup_run_until_complete, teardown_run_util_complete, raise_asyncio_exception
 
 logger = logging.getLogger("master worker", "system")
 blogger = logging.getLogger("benchmark")
 
 
 class ExperimentComplete(Exception):
+
     def __init__(self, message):
-        disclaimer = (
-            colorama.Fore.GREEN
-            + "\033[1m"
-            + "<This is not an error. It is just a way to stop the experiment.> "
-        )
-        super().__init__(
-            disclaimer
-            + colorama.Style.RESET_ALL
-            + colorama.Fore.YELLOW
-            + colorama.Style.BRIGHT
-            + "\033[1m"
-            + message
-            + colorama.Style.RESET_ALL
-        )
+        disclaimer = (colorama.Fore.GREEN + "\033[1m" +
+                      "<This is not an error. It is just a way to stop the experiment.> ")
+        super().__init__(disclaimer + colorama.Style.RESET_ALL + colorama.Fore.YELLOW +
+                         colorama.Style.BRIGHT + "\033[1m" + message + colorama.Style.RESET_ALL)
 
 
 def request_all(
@@ -70,8 +62,7 @@ def request_all(
             handle_name=handle_type,
             is_tensor=False,
             data=data,
-        )
-        for data in datas
+        ) for data in datas
     ]
     if verbose:
         blogger.debug(f"master worker #request_all# *end* time ${time.time_ns()}$")
@@ -80,9 +71,8 @@ def request_all(
         s.post(r)
     t = time.perf_counter() - tik
     if verbose:
-        blogger.debug(
-            f'Request "{handle_type}" time in total: ' f"{t:.4f}s, {t / len(requests):.4f}s per request"
-        )
+        blogger.debug(f'Request "{handle_type}" time in total: '
+                      f"{t:.4f}s, {t / len(requests):.4f}s per request")
     return [r.request_id for r in requests]
 
 
@@ -110,12 +100,10 @@ async def gather_all_replies(
     verbose: bool = True,
 ) -> List:
     """Collect responses from multiple streams. Blocking method."""
-    responses = await asyncio.gather(
-        *[
-            _awaitable_response(s, pattern=create_exact_match_pattern([req_id]))
-            for s, req_id in zip(streams, request_ids)
-        ]
-    )
+    responses = await asyncio.gather(*[
+        _awaitable_response(s, pattern=create_exact_match_pattern([req_id]))
+        for s, req_id in zip(streams, request_ids)
+    ])
     if verbose:
         blogger.debug(f"master worker #gather_all_replies# *end* time ${time.time_ns()}$")
     return responses
@@ -147,9 +135,9 @@ def split_packed_batch_into_seqs(
 
     partitions = [(i, i + 1) for i in range(input_lens.shape[0])]
     sample["input_lens"] = input_lens
-    return dataparallel.PackedParallelDataBroker.scatter_to(
-        sample, n_dp=len(input_lens), partitions=partitions
-    )
+    return dataparallel.PackedParallelDataBroker.scatter_to(sample,
+                                                            n_dp=len(input_lens),
+                                                            partitions=partitions)
 
 
 @dataclasses.dataclass
@@ -188,18 +176,14 @@ async def scatter_tensor_to_mws(
 
     # Expand scatter buffer if necessary
     for k, buf_shape in buf_shapes.items():
-        if k not in scatter_buffer or (
-            k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k][0].shape)
-        ):
+        if k not in scatter_buffer or (k in scatter_buffer and
+                                       not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k][0].shape)):
             if k in scatter_buffer:
-                logger.info(
-                    f"Resize RPC *{rpc.name}* scatter buffer on master worker for {k}"
-                    f" from {scatter_buffer[k][0].shape} to {buf_shape}"
-                )
+                logger.info(f"Resize RPC *{rpc.name}* scatter buffer on master worker for {k}"
+                            f" from {scatter_buffer[k][0].shape} to {buf_shape}")
             else:
                 logger.info(
-                    f"Create RPC *{rpc.name}* scatter buffer on master worker for {k} with shape {buf_shape}"
-                )
+                    f"Create RPC *{rpc.name}* scatter buffer on master worker for {k} with shape {buf_shape}")
             scatter_buffer[k] = [
                 torch.empty(buf_shape, dtype=dtypes[k], device=device) for _ in range(len(datas) + 1)
             ]
@@ -227,12 +211,10 @@ async def scatter_tensor_to_mws(
         ack_ids.append(req.ack_reply_id)
 
     # Wait for the ack message from model worker
-    await asyncio.gather(
-        *[
-            _awaitable_response(s, pattern=create_exact_match_pattern([ack_id]))
-            for s, ack_id in zip(streams, ack_ids)
-        ]
-    )
+    await asyncio.gather(*[
+        _awaitable_response(s, pattern=create_exact_match_pattern([ack_id]))
+        for s, ack_id in zip(streams, ack_ids)
+    ])
 
     # Scatter data to DP head model workers.
     for k in scatter_buffer:
@@ -273,8 +255,8 @@ async def model_rpc_request_func(
         all_seqlens = []
         offset = 0
         for n_seq in n_seqs:
-            all_buffer_indices.append(sample.indices[offset : offset + n_seq])
-            all_seqlens.append(sample.seqlens[offset : offset + n_seq])
+            all_buffer_indices.append(sample.indices[offset:offset + n_seq])
+            all_seqlens.append(sample.seqlens[offset:offset + n_seq])
             offset += n_seq
 
         # sanity check for pipeline parallel
@@ -284,8 +266,7 @@ async def model_rpc_request_func(
         except Exception as e:
             raise RuntimeError(
                 f"Data in each data parallel rank cannot be "
-                f"partitioned further into {pp_size} mini-batches for pipeline parallel. Exiting."
-            ) from e
+                f"partitioned further into {pp_size} mini-batches for pipeline parallel. Exiting.") from e
 
         # send partitioned data to model workers
         req_ids = await scatter_tensor_to_mws(
@@ -312,12 +293,10 @@ async def gather_tensor_from_mws(
     dp_size: int,
     ctrl: RPCCorountineControl,
 ) -> namedarray.NamedArray:
-    responses = await asyncio.gather(
-        *[
-            _awaitable_response(s, pattern=create_exact_match_pattern([req_id]))
-            for s, req_id in zip(streams, req_ids)
-        ]
-    )
+    responses = await asyncio.gather(*[
+        _awaitable_response(s, pattern=create_exact_match_pattern([req_id]))
+        for s, req_id in zip(streams, req_ids)
+    ])
 
     recv_tik = time.perf_counter()
 
@@ -329,9 +308,8 @@ async def gather_tensor_from_mws(
 
         # Expand gather buffer if necessary.
         for k, buf_shape in buf_shapes.items():
-            if k not in gather_buffer or (
-                k in gather_buffer and not base.numpy_utils.shape_leq(buf_shape, gather_buffer[k][0].shape)
-            ):
+            if k not in gather_buffer or (k in gather_buffer and not base.numpy_utils.shape_leq(
+                    buf_shape, gather_buffer[k][0].shape)):
                 if k in gather_buffer:
                     logger.info(
                         f"Resize RPC *{rpc.name}* gather buffer on master worker for {k} from {gather_buffer[k][0].shape} to {buf_shape}"
@@ -367,9 +345,8 @@ async def gather_tensor_from_mws(
         res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(all_res)
     else:
         res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(
-            [response.data for response in responses]
-        )
-    logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
+            [response.data for response in responses])
+    # logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
     return responses, rpc.remap_output_keys(res)
 
 
@@ -417,9 +394,7 @@ async def model_rpc_reply_func(
             xs = split_packed_batch_into_seqs(res, input_lens=seqlens)
             await buffer.amend_batch(buffer_indices, xs)
 
-        logger.info(
-            f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - tik:.4f}s."
-        )
+        logger.info(f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - tik:.4f}s.")
 
 
 async def load_data_func(
@@ -461,8 +436,7 @@ async def load_data_func(
             buffer.lock.notify(buffer.n_rpcs)
 
         blogger.info(
-            f"Filling data finished. Time consumption: {time.perf_counter() - fetch_data_start:.3f}s."
-        )
+            f"Filling data finished. Time consumption: {time.perf_counter() - fetch_data_start:.3f}s.")
 
 
 async def model_eval_thread_func(
@@ -473,9 +447,8 @@ async def model_eval_thread_func(
     while not stop_ctl.is_set():
         epoch, epoch_step = await eval_queue.get()
         all_model_streams = list(model_streams.values())
-        eval_stats = dataparallel.ParallelDataBroker.gather_from(
-            await group_rpc_blocked(all_model_streams, "evaluate", [None for _ in all_model_streams])
-        )
+        eval_stats = dataparallel.ParallelDataBroker.gather_from(await group_rpc_blocked(
+            all_model_streams, "evaluate", [None for _ in all_model_streams]))
         logger.info(f"Evaluation results at epoch {epoch + 1} step {epoch_step + 1}: {eval_stats}")
 
 
@@ -563,17 +536,16 @@ class MasterWorker(worker_base.Worker):
 
     def __lazy_init(self):
         # Set up streams.
-        self.__model_streams: Dict[
-            config_pkg.MasterStreamID, List[request_reply_stream.RequestReplyStream]
-        ] = {
-            k: request_reply_stream.make_master_stream(
-                self.config.worker_info,
-                v,
-                n_subscribers=self.__model_topos[k.model_name].get_dim("model")
-                * self.__model_topos[k.model_name].get_dim("pipe"),
-            )
-            for k, v in self.config.model_streams.items()
-        }
+        self.__model_streams: Dict[config_pkg.MasterStreamID,
+                                   List[request_reply_stream.RequestReplyStream]] = {
+                                       k: request_reply_stream.make_master_stream(
+                                           self.config.worker_info,
+                                           v,
+                                           n_subscribers=self.__model_topos[k.model_name].get_dim("model") *
+                                           self.__model_topos[k.model_name].get_dim("pipe"),
+                                       )
+                                       for k, v in self.config.model_streams.items()
+                                   }
         self.__data_stream: request_reply_stream.RequestReplyStream = request_reply_stream.make_master_stream(
             self.config.worker_info,
             self.config.data_stream,
@@ -611,11 +583,9 @@ class MasterWorker(worker_base.Worker):
         self.__data_stream.post(request_reply_stream.Payload(handle_name="spec"))
         ft_specs: List[model_api.FinetuneSpec] = [self.__data_stream.poll(block=True).data]
         if len(set(x.steps_per_epoch for x in ft_specs)) != 1:
-            raise RuntimeError(
-                f"steps_per_epoch not equal among data workers:"
-                f" {list(x.steps_per_epoch for x in ft_specs)}. "
-                "Consider launching less data workers."
-            )
+            raise RuntimeError(f"steps_per_epoch not equal among data workers:"
+                               f" {list(x.steps_per_epoch for x in ft_specs)}. "
+                               "Consider launching less data workers.")
         ft_spec = ft_specs[0]
         ft_spec.total_train_epochs = self.config.total_train_epochs
         ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
@@ -644,8 +614,7 @@ class MasterWorker(worker_base.Worker):
             model_ft_spec.batch_size_per_device = batch_size // num_dp
             model_ft_specs.append(model_ft_spec)
         _task = event_loop.create_task(
-            group_rpc_blocked(list(self.__model_streams.values()), "initialize", model_ft_specs)
-        )
+            group_rpc_blocked(list(self.__model_streams.values()), "initialize", model_ft_specs))
         event_loop.run_until_complete(asyncio.gather(_task))
 
         self.__scatter_buffers = {rpc.name: {} for rpc in self.__model_rpcs}
@@ -695,8 +664,7 @@ class MasterWorker(worker_base.Worker):
                     device=self.__device,
                     topo=self.__model_topos[rpc.model_name],
                     ctrl=ctrl,
-                )
-            )
+                ))
             rely_task = event_loop.create_task(
                 model_rpc_reply_func(
                     rpc=rpc,
@@ -707,8 +675,7 @@ class MasterWorker(worker_base.Worker):
                     device=self.__device,
                     topo=self.__model_topos[rpc.model_name],
                     ctrl=ctrl,
-                )
-            )
+                ))
             coroutine_tasks += [request_task, rely_task]
 
         load_data_task = event_loop.create_task(
@@ -717,23 +684,20 @@ class MasterWorker(worker_base.Worker):
                 data_streams=[self.__data_stream],
                 fetch_ctl=self.__fetch_data_queue,
                 stop_ctl=self.__stop_ctl,
-            )
-        )
+            ))
         eval_task = event_loop.create_task(
             model_eval_thread_func(
                 model_streams=self.__model_streams,
                 eval_queue=self.__eval_queue,
                 stop_ctl=self.__stop_ctl,
-            )
-        )
+            ))
         save_task = event_loop.create_task(
             model_save_thread_func(
                 model_streams=self.__model_streams,
                 model_save_root=self.MODEL_SAVE_ROOT,
                 save_queue=self.__save_queue,
                 stop_ctl=self.__stop_ctl,
-            )
-        )
+            ))
         coroutine_tasks += [load_data_task, eval_task, save_task]
 
         # self.__event_loop = event_loop

@@ -1,5 +1,6 @@
 from typing import Dict
 import gc
+import queue
 import socket
 import time
 
@@ -153,50 +154,49 @@ class ModelWorker(worker_base.Worker):
             eval_dataloader = None
         self.__eval_dataloader = eval_dataloader
 
+        self._mp_rank = base.constants.model_parallel_rank()
+        self._pp_rank = base.constants.pipe_parallel_rank()
+        self._dp_rank = base.constants.data_parallel_rank()
+        self._pp_size = base.constants.pipe_parallel_world_size()
+
+        # NOTE: Here "model_parallel_group" is the group of model *AND* pipeline parallel, thanks to deepspeed.
+        self._bgroup = base.constants.grid().get_model_parallel_group()
+        self._bsrc = dp_head_global_rank = (
+            self.config.topo.get_rank(data=self._dp_rank, pipe=self._pp_size - 1, model=0) +
+            base.constants.process_group_offset())
+        self.logger.info(f"Get broadcast src global_rank={dp_head_global_rank} "
+                         f"with dp_rank={self._dp_rank}, pp_rank={self._pp_size-1}, mp_rank=0")
+
+        # DP head will receive data from the master, broadcast to all data parallel peers.
+        # It will also return result back to master, while other workers in the data parallel group return None.
+        self._is_dp_head = self._mp_rank == 0 and self._pp_rank == self._pp_size - 1
+
         # One for each RPC, e.g., generation and train_step use different buffers.
         self.__scatter_buffers: Dict[Dict[str, torch.Tensor]] = {}
         self.__gather_buffers: Dict[Dict[str, torch.Tensor]] = {}
 
-    def _poll(self):
-        if not self.__ddp_env_resolved:
-            self.__lazy_setup()
-            self.__ddp_env_resolved = True
+        self.__request_queue = queue.Queue(maxsize=8)
+        self.__reply_queue = queue.Queue(maxsize=8)
 
-            self._mp_rank = base.constants.model_parallel_rank()
-            self._pp_rank = base.constants.pipe_parallel_rank()
-            self._dp_rank = base.constants.data_parallel_rank()
-            self._pp_size = base.constants.pipe_parallel_world_size()
-
-            # NOTE: Here "model_parallel_group" is the group of model *AND* pipeline parallel, thanks to deepspeed.
-            self._bgroup = base.constants.grid().get_model_parallel_group()
-            self._bsrc = dp_head_global_rank = (
-                self.config.topo.get_rank(data=self._dp_rank, pipe=self._pp_size - 1, model=0) +
-                base.constants.process_group_offset())
-            self.logger.info(f"Get broadcast src global_rank={dp_head_global_rank} "
-                             f"with dp_rank={self._dp_rank}, pp_rank={self._pp_size-1}, mp_rank=0")
-
-            # DP head will receive data from the master, broadcast to all data parallel peers.
-            # It will also return result back to master, while other workers in the data parallel group return None.
-            self._is_dp_head = self._mp_rank == 0 and self._pp_rank == self._pp_size - 1
-
+    def __maybe_receive_request(self):
         recv_tik = time.perf_counter()
         try:
             request: request_reply_stream.Payload = self.__stream.poll()
         except request_reply_stream.NoMessage:
-            return worker_base.PollResult(0, 0)
+            return
 
         # ACK message to indicate ready to run dist.scatter
         if request.is_tensor and self._is_dp_head:
             assert request.ack_reply_id is not None
-            ack = request_reply_stream.Payload(handle_name=request.handle_name, request_id=request.ack_reply_id)
+            ack = request_reply_stream.Payload(handle_name=request.handle_name,
+                                               request_id=request.ack_reply_id)
             self.__stream.post(ack)
-        
+
         if request.handle_name not in self.__gather_buffers:
             self.__gather_buffers[request.handle_name] = {}
         if request.handle_name not in self.__scatter_buffers:
             self.__scatter_buffers[request.handle_name] = {}
 
-        gather_buffer = self.__gather_buffers[request.handle_name]
         scatter_buffer = self.__scatter_buffers[request.handle_name]
 
         data = request.data
@@ -240,6 +240,16 @@ class ModelWorker(worker_base.Worker):
                 f"Model {self.model_name} receive request {request.handle_name} time: {time.perf_counter() - recv_tik}"
             )
 
+        self.__request_queue.put_nowait((request, data))
+
+    def __model_poll_step(self) -> worker_base.PollResult:
+        # TODO: Duck implementation. We should pass request/reply queue to the engine and call engine.poll().
+        try:
+            request, data = self.__request_queue.get_nowait()
+        except queue.Empty:
+            return worker_base.PollResult(0, 0)
+
+        request: request_reply_stream.Payload
         tik = time.perf_counter()
         try:
             worker_identifier = self.__mw_id
@@ -267,71 +277,94 @@ class ModelWorker(worker_base.Worker):
         except RuntimeError as e:
             # We may print some info here.
             raise e
-
         if self._is_dp_head:
             blogger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
                          f" in ${time.perf_counter() - tik:.4f}$s")
+        self.__reply_queue.put_nowait((request, res))
 
-        if self._is_dp_head:
+        sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
+        return worker_base.PollResult(sample_count=sample_count, batch_count=1)
+
+    def __maybe_post_response(self):
+        try:
+            request, res = self.__reply_queue.get_nowait()
+        except queue.Empty:
+            return
+
+        request: request_reply_stream.Payload
+        gather_buffer = self.__gather_buffers[request.handle_name]
+
+        if not self._is_dp_head:
             # Discard returned data if not DP head.
-            if isinstance(res, namedarray.NamedArray):
-                shapes = {k: v.shape for k, v in res.items()}
-                dtypes = {k: v.dtype for k, v in res.items()}
+            return
 
-                all_shapes = [None for _ in range(self.config.topo.get_dim("data"))]
-                dist.all_gather_object(
-                    all_shapes,
-                    shapes,
-                    group=base.constants.grid().dp_head_group,
+        if isinstance(res, namedarray.NamedArray):
+            shapes = {k: v.shape for k, v in res.items()}
+            dtypes = {k: v.dtype for k, v in res.items()}
+
+            all_shapes = [None for _ in range(self.config.topo.get_dim("data"))]
+            dist.all_gather_object(
+                all_shapes,
+                shapes,
+                group=base.constants.grid().dp_head_group,
+            )
+            buf_shapes = {}
+            for k in shapes:
+                buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s[k]) for s in all_shapes])
+
+            # Expand buffer shape if necessary.
+            for (k, dtype), buf_shape in zip(dtypes.items(), buf_shapes.values()):
+                if k not in gather_buffer or (k in gather_buffer and not base.numpy_utils.shape_leq(
+                        buf_shape, gather_buffer[k].shape)):
+                    if k in gather_buffer:
+                        logger.info(
+                            f"Resizing gather buffer key {k} from {gather_buffer[k].shape} to {buf_shape}")
+                    else:
+                        logger.info(f"Create gather buffer key {k} with shape {buf_shape}")
+                    gather_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
+
+            reply = request_reply_stream.Payload(
+                request_id=request.request_id,
+                handle_name=request.handle_name,
+                is_tensor=True,
+                actual_shapes=shapes,
+                buf_shapes=buf_shapes,
+                dtypes=dtypes,
+                seqlens=request.seqlens,
+                buffer_indices=request.buffer_indices,
+            )
+        else:
+            reply = request_reply_stream.Payload(
+                request_id=request.request_id,
+                handle_name=request.handle_name,
+                is_tensor=False,
+                data=res,
+            )
+
+        self.__stream.post(reply)
+
+        if reply.is_tensor:
+            # Copy data to the gather buffer.
+            for k, v in res.items():
+                s = tuple(slice(0, size) for size in v.shape)
+                gather_buffer[k][s] = v
+                dist.gather(
+                    gather_buffer[k],
+                    gather_list=None,
+                    dst=0,
+                    group=self.__pg_info.mas_dp_head_groups[self.model_name],
                 )
-                buf_shapes = {}
-                for k in shapes:
-                    buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s[k]) for s in all_shapes])
 
-                # Expand buffer shape if necessary.
-                for (k, dtype), buf_shape in zip(dtypes.items(), buf_shapes.values()):
-                    if k not in gather_buffer or (k in gather_buffer and not base.numpy_utils.shape_leq(
-                            buf_shape, gather_buffer[k].shape)):
-                        if self._is_dp_head:
-                            if k in gather_buffer:
-                                logger.info(
-                                    f"Resizing gather buffer key {k} from {gather_buffer[k].shape} to {buf_shape}"
-                                )
-                            else:
-                                logger.info(f"Create gather buffer key {k} with shape {buf_shape}")
-                        gather_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
+    def _poll(self):
+        if not self.__ddp_env_resolved:
+            self.__lazy_setup()
+            self.__ddp_env_resolved = True
 
-                reply = request_reply_stream.Payload(
-                    request_id=request.request_id,
-                    handle_name=request.handle_name,
-                    is_tensor=True,
-                    actual_shapes=shapes,
-                    buf_shapes=buf_shapes,
-                    dtypes=dtypes,
-                    seqlens=request.seqlens,
-                    buffer_indices=request.buffer_indices,
-                )
-            else:
-                reply = request_reply_stream.Payload(
-                    request_id=request.request_id,
-                    handle_name=request.handle_name,
-                    is_tensor=False,
-                    data=res,
-                )
+        self.__maybe_receive_request()
 
-            self.__stream.post(reply)
+        r = self.__model_poll_step()
 
-            if reply.is_tensor:
-                # Copy data to the gather buffer.
-                for k, v in res.items():
-                    s = tuple(slice(0, size) for size in v.shape)
-                    gather_buffer[k][s] = v
-                    dist.gather(
-                        gather_buffer[k],
-                        gather_list=None,
-                        dst=0,
-                        group=self.__pg_info.mas_dp_head_groups[self.model_name],
-                    )
+        self.__maybe_post_response()
 
         if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
             # following huggingface trl # ALWAYS COST 0.3+ SEC
@@ -344,14 +377,13 @@ class ModelWorker(worker_base.Worker):
                 blogger.debug(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
 
         # logging gpu/cpu stats
-        # self.print_monitor_info()
-        tik = time.perf_counter()
-        blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
-            self.model_name,
-            round(get_accelerator().memory_allocated() / 1024**3, 2),
-            round(get_accelerator().max_memory_allocated() / 1024**3, 2),
-        )))
-        blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
+        if r.sample_count > 0:
+            tik = time.perf_counter()
+            blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
+                self.model_name,
+                round(get_accelerator().memory_allocated() / 1024**3, 2),
+                round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+            )))
+            blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
 
-        sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
-        return worker_base.PollResult(sample_count=sample_count, batch_count=1)
+        return r

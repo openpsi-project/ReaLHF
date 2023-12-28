@@ -1,8 +1,8 @@
+from asyncio.base_events import _run_until_complete_cb
 import asyncio
+import dataclasses
 import sys
 import threading
-from asyncio.base_events import _run_until_complete_cb
-import dataclasses
 
 
 @dataclasses.dataclass
