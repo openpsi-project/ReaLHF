@@ -21,8 +21,8 @@ rollout = ModelRPC(
         "prompt_mask",
     ],
     dp_broker_type="packed",
-    min_n_seqs=256,
-    max_n_seqs=257,
+    min_n_seqs=64,
+    max_n_seqs=65,
     max_concurrent_calls=1,
 )
 inf_reward = ModelRPC(
@@ -33,6 +33,7 @@ inf_reward = ModelRPC(
     output_data=["scores"],
     output_key_remap={"scores": "rewards"},
     dp_broker_type="packed",
+    min_n_seqs=64,
 )
 
 inf_ref_logits = ModelRPC(
@@ -46,6 +47,7 @@ inf_ref_logits = ModelRPC(
     output_data=["logprobs"],
     output_key_remap={"logprobs": "packed_ref_logprobs"},
     dp_broker_type="packed",
+    min_n_seqs=64,
 )
 
 inf_values = ModelRPC(
@@ -55,8 +57,7 @@ inf_values = ModelRPC(
     output_data=["scores"],
     output_key_remap={"scores": "values"},
     dp_broker_type="packed",
-    min_n_seqs=31,
-    max_n_seqs=33,
+    min_n_seqs=64,
 )
 
 train_actor = ModelRPC(
@@ -75,8 +76,7 @@ train_actor = ModelRPC(
     ],
     log_return_value=True,
     dp_broker_type="packed",
-    min_n_seqs=31,
-    max_n_seqs=33,
+    min_n_tokens=10240,
 )
 
 train_critic = ModelRPC(
@@ -94,8 +94,7 @@ train_critic = ModelRPC(
     ],
     dp_broker_type="packed",
     log_return_value=True,
-    min_n_seqs=31,
-    max_n_seqs=33,
+    min_n_tokens=10240,
 )
 
 @dataclasses.dataclass
@@ -576,7 +575,7 @@ class PPOExperiment(Experiment):
                 dp_rank=actor_topo.get_coord(i).data,
                 pp_rank=actor_topo.get_coord(i).pipe,
                 mp_rank=actor_topo.get_coord(i).model,
-                cuda_cache_cleanliness=(not self.benchmark),
+                cuda_cache_cleanliness=False,
             ) for i in range(self.n_actors)
         ] + [
             ModelWorker(
@@ -589,7 +588,7 @@ class PPOExperiment(Experiment):
                 dp_rank=critic_topo.get_coord(i).data,
                 pp_rank=critic_topo.get_coord(i).pipe,
                 mp_rank=critic_topo.get_coord(i).model,
-                cuda_cache_cleanliness=(not self.benchmark),
+                cuda_cache_cleanliness=False,
             ) for i in range(self.n_critics)
         ] + [
             ModelWorker(
@@ -602,7 +601,7 @@ class PPOExperiment(Experiment):
                 pp_rank=rw_topo.get_coord(i).pipe,
                 mp_rank=rw_topo.get_coord(i).model,
                 topo=rw_topo,
-                cuda_cache_cleanliness=(not self.benchmark),
+                cuda_cache_cleanliness=False,
             ) for i in range(self.n_rewards)
         ] + [
             ModelWorker(
@@ -615,7 +614,7 @@ class PPOExperiment(Experiment):
                 pp_rank=ref_topo.get_coord(i).pipe,
                 mp_rank=ref_topo.get_coord(i).model,
                 topo=ref_topo,
-                cuda_cache_cleanliness=(not self.benchmark),
+                cuda_cache_cleanliness=False,
             ) for i in range(self.n_refs)
         ])
 

@@ -299,7 +299,7 @@ async def model_rpc_request_func(
             device=device,
             ctrl=ctrl,
         )
-        await ctrl.request_queue.put(req_ids)
+        await ctrl.request_queue.put((req_ids, time.perf_counter()))
 
 
 async def gather_tensor_from_mws(
@@ -385,7 +385,7 @@ async def model_rpc_reply_func(
 ):
     dp_size = topo.get_dim("data")
     while not ctrl.stop.is_set():
-        req_ids = await ctrl.request_queue.get()
+        req_ids, tik = await ctrl.request_queue.get()
 
         responses, res = await gather_tensor_from_mws(
             streams=streams,
@@ -413,12 +413,12 @@ async def model_rpc_reply_func(
                 seqlens = res["cu_seqlens"][1:] - res["cu_seqlens"][:-1]
             else:
                 seqlens = torch.from_numpy(np.concatenate([r.seqlens for r in responses]))
-            buffer_indices = sum([r.buffer_indices for r in responses])
+            buffer_indices = torch.from_numpy(np.concatenate([r.buffer_indices for r in responses]))
             xs = split_packed_batch_into_seqs(res, input_lens=seqlens)
             await buffer.amend_batch(buffer_indices, xs)
 
         logger.info(
-            f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - responses[0].send_time:.4f}s."
+            f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - tik:.4f}s."
         )
 
 
