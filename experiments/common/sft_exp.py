@@ -11,6 +11,8 @@ sft = ModelRPC(
     input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
     dp_broker_type="packed",
     log_return_value=True,
+    min_n_tokens=100000,
+    max_n_tokens=131072,
 )
 
 
@@ -172,7 +174,7 @@ class SFTExperiment(Experiment):
                 mp_rank=coord.model,
                 eval_datasets=[dataset],
                 eval_dataloader=eval_dataloader,
-                cuda_cache_cleanliness=True,
+                cuda_cache_cleanliness=False,
                 cuda_cache_clear_freq=1,
             )
             model_worker.append(mw)

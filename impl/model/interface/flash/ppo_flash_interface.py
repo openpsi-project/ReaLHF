@@ -156,16 +156,15 @@ class PackedActorInterface(api.model.ModelInterface):
         module.eval()
 
         data = recursive_apply(data, lambda x: x.to(model.device))
-        prompts: torch.LongTensor = data["prompts"]
-        prompt_att_mask: torch.BoolTensor = data["prompt_att_mask"]
-        bs, prompt_max_len = prompts.shape[:2]
+        packed_prompts = data["packed_prompts"]
+        cu_seqlens = data["prompt_cu_seqlens"]
+        prompt_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
+        bs = prompt_lengths.shape[0]
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            packed_input_ids, _, cu_seqlens, _ = unpad_input(prompts, prompt_att_mask)
-
             res = module.generate(
                 tokenizer=model.tokenizer,
-                packed_input_ids=packed_input_ids,
+                packed_input_ids=packed_prompts,
                 cu_seqlens=cu_seqlens,
                 gconfig=GenerationConfig(**self.generation_config),
             )
@@ -178,8 +177,9 @@ class PackedActorInterface(api.model.ModelInterface):
             module = module.module
             gen_res = module.generate(
                 tokenizer=model.tokenizer,
-                input_ids=prompts,
-                attention_mask=prompt_att_mask,
+                packed_input_ids=packed_prompts,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=int(max(prompt_lengths)),
                 gconfig=GenerationConfig(**self.generation_config),
             )
             gen_tokens = gen_res.sequences
@@ -193,8 +193,6 @@ class PackedActorInterface(api.model.ModelInterface):
         gen_lengths = (gen_tokens != pad_token_id).logical_and(gen_tokens != eos_token_id).sum(dim=-1) + 1
         gen_lengths = gen_lengths.clip(max=gen_tokens.shape[-1])
 
-        prompt_lengths = prompt_att_mask.sum(1)
-
         # TODO: refactor the following whole bunch of sh*t.
         # Pack generated sequences and logprobs.
         prompts_list, prompt_log_probs_list, prompt_logits_mask_list = [], [], []
@@ -203,7 +201,7 @@ class PackedActorInterface(api.model.ModelInterface):
             prompt_len, gen_len = prompt_lengths[i].item(), gen_lengths[i].item()
 
             # Prompts are left-padded. Besides, prompt_log_probs is one-step shorter than prompts.
-            prompts_list.append(prompts[i, prompt_max_len - prompt_len:])
+            prompts_list.append(packed_prompts[cu_seqlens[i]:cu_seqlens[i + 1]])
             prompt_log_probs_list.append(logprobs.new_zeros(prompt_len - 1))
             if logits_mask is not None:
                 prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len - 1, logits_mask.shape[-1])))

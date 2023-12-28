@@ -11,7 +11,7 @@ logger = logging.getLogger("PPO exp", "colored")
 rollout = ModelRPC(
     "actor",
     ModelInterfaceType.GENERATE,
-    input_data=["prompts", "prompt_att_mask"],
+    input_data=["packed_prompts", "prompt_cu_seqlens"],
     output_data=[
         "seq_no_eos_mask",
         "packed_seq",
@@ -20,6 +20,10 @@ rollout = ModelRPC(
         "packed_logits_mask",
         "prompt_mask",
     ],
+    dp_broker_type="packed",
+    min_n_seqs=64,
+    max_n_seqs=65,
+    max_concurrent_calls=1,
 )
 inf_reward = ModelRPC(
     "reward",
@@ -29,6 +33,7 @@ inf_reward = ModelRPC(
     output_data=["scores"],
     output_key_remap={"scores": "rewards"},
     dp_broker_type="packed",
+    min_n_seqs=64,
 )
 
 inf_ref_logits = ModelRPC(
@@ -42,6 +47,7 @@ inf_ref_logits = ModelRPC(
     output_data=["logprobs"],
     output_key_remap={"logprobs": "packed_ref_logprobs"},
     dp_broker_type="packed",
+    min_n_seqs=64,
 )
 
 inf_values = ModelRPC(
@@ -51,6 +57,7 @@ inf_values = ModelRPC(
     output_data=["scores"],
     output_key_remap={"scores": "values"},
     dp_broker_type="packed",
+    min_n_seqs=64,
 )
 
 train_actor = ModelRPC(
@@ -69,6 +76,7 @@ train_actor = ModelRPC(
     ],
     log_return_value=True,
     dp_broker_type="packed",
+    min_n_tokens=10240,
 )
 
 train_critic = ModelRPC(
@@ -86,6 +94,7 @@ train_critic = ModelRPC(
     ],
     dp_broker_type="packed",
     log_return_value=True,
+    min_n_tokens=10240,
 )
 
 
@@ -308,21 +317,14 @@ class PPOExperiment(Experiment):
 
     def initial_setup(self) -> ExperimentConfig:
         dataset = Dataset(
-            "prompt",
+            "packed_prompt",
             args=dict(
                 dataset_path=self.dataset_path,
-                max_prompt_len=self.max_prompt_len,
-                pad_to_max_length=False,  # since we only have one dataloader, it's ok to use without padding
+                n_tokens_per_batch=65536,
+                max_length=self.max_prompt_len,
             ),
         )
-        dataloader = DataLoader(
-            "default",
-            args=dict(
-                shuffle=True,
-                drop_last=True,
-                batch_size=self.batch_size,
-            ),
-        )
+        dataloader = DataLoader("iterable_dataset_loader")
         data_worker = [
             DataWorker(
                 tokenizer_name_or_path=self.tokenizer_path,
@@ -574,7 +576,7 @@ class PPOExperiment(Experiment):
                 dp_rank=actor_topo.get_coord(i).data,
                 pp_rank=actor_topo.get_coord(i).pipe,
                 mp_rank=actor_topo.get_coord(i).model,
-                cuda_cache_cleanliness=(not self.benchmark),
+                cuda_cache_cleanliness=False,
             ) for i in range(self.n_actors)
         ] + [
             ModelWorker(
@@ -587,7 +589,7 @@ class PPOExperiment(Experiment):
                 dp_rank=critic_topo.get_coord(i).data,
                 pp_rank=critic_topo.get_coord(i).pipe,
                 mp_rank=critic_topo.get_coord(i).model,
-                cuda_cache_cleanliness=(not self.benchmark),
+                cuda_cache_cleanliness=False,
             ) for i in range(self.n_critics)
         ] + [
             ModelWorker(
@@ -600,7 +602,7 @@ class PPOExperiment(Experiment):
                 pp_rank=rw_topo.get_coord(i).pipe,
                 mp_rank=rw_topo.get_coord(i).model,
                 topo=rw_topo,
-                cuda_cache_cleanliness=(not self.benchmark),
+                cuda_cache_cleanliness=False,
             ) for i in range(self.n_rewards)
         ] + [
             ModelWorker(
@@ -613,7 +615,7 @@ class PPOExperiment(Experiment):
                 pp_rank=ref_topo.get_coord(i).pipe,
                 mp_rank=ref_topo.get_coord(i).model,
                 topo=ref_topo,
-                cuda_cache_cleanliness=(not self.benchmark),
+                cuda_cache_cleanliness=False,
             ) for i in range(self.n_refs)
         ])
 

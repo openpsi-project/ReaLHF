@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Union
 import asyncio
 import dataclasses
 import pickle
+import re
 import socket
 import time
 import uuid
@@ -34,7 +35,8 @@ class Payload:
     handle_name: str
     is_tensor: bool = False
 
-    request_id: Optional[str] = None
+    request_id: uuid.UUID = None
+    ack_reply_id: uuid.UUID = None
 
     send_time: float = None
 
@@ -45,18 +47,28 @@ class Payload:
     dtypes: Optional[Dict[str, str]] = None
     buf_shapes: Optional[Dict[str, List[int]]] = None
     actual_shapes: Optional[Dict[str, List[int]]] = None
+    buffer_indices: Optional[List[int]] = None
+    seqlens: Optional[List[int]] = None
 
     def __post_init__(self):
         if self.request_id is None:
-            self.request_id = str(uuid.uuid4())
+            self.request_id = uuid.uuid4()
+        if self.ack_reply_id is None:
+            self.ack_reply_id = uuid.uuid4()
 
 
 class RequestReplyStream:
 
-    def post(self, payload: Payload):
+    def post(self, payload: Payload) -> uuid.UUID:
         raise NotImplementedError()
 
-    def poll(self, block: bool = False) -> Payload:
+    def post_batch(self, payloads: List[Payload]) -> List[uuid.UUID]:
+        raise NotImplementedError()
+
+    def poll(self, pattern: re.Pattern | None = None, block: bool = False) -> Payload:
+        raise NotImplementedError()
+
+    def poll_batch(self, pattern: re.Pattern | None = None, block: bool = False) -> List[Payload]:
         raise NotImplementedError()
 
     @property
@@ -102,13 +114,15 @@ class IpRequestClient(RequestReplyStream):
         # self._send_socket.setsockopt(zmq.LINGER, 0)
         self._send_address = f"{host_ip}:{send_port}"
 
+        self._response_buffer: Dict[uuid.UUID, Payload] = {}
+
     def accept(self, server_addr: str):
         recv_socket = self.context.socket(zmq.PULL)
         recv_socket.connect(f"tcp://{server_addr}")
         recv_socket.setsockopt(zmq.LINGER, 0)
         self._recv_socket = recv_socket
 
-    def post(self, payload: Payload):
+    def post(self, payload: Payload) -> uuid.UUID:
         assert payload.request_id is not None and payload.handle_name is not None
         if payload.is_tensor:
             assert payload.data is None
@@ -119,15 +133,67 @@ class IpRequestClient(RequestReplyStream):
         self.send_socket.send(pickle.dumps(payload))
         return payload.request_id
 
-    def poll(self, block: bool = False) -> Payload:
+    def poll(self, pattern: re.Pattern | None = None, block: bool = False) -> Payload:
+        payloads = self.poll_batch(pattern=pattern, block=block)
+        for p in payloads[1:]:
+            self._response_buffer[p.request_id] = p
+        return payloads[0]
+
+    def poll_batch(self, pattern: re.Pattern | None = None, block: bool = False) -> List[Payload]:
+        """Collect responses that match some pattern from the stream.
+
+        This function may NOT actually pull from the stream. It may fetch something
+        from the buffer, which records mismatched responses.
+
+        Args:
+            pattern (Optional[re.Pattern], optional): Only responses with this
+                specific regex pattern will be returned.
+                None means no pattern specified. Defaults to None.
+            block (bool, optional): Whether to block to receive a
+                response (with the given pattern). Defaults to False.
+        """
+        if not block:
+            return self._poll_batch_nonblock(pattern)
+        else:
+            while True:
+                try:
+                    return self._poll_batch_nonblock(pattern)
+                except NoMessage:
+                    time.sleep(0.05)
+
+    def _poll_batch_nonblock(self, pattern: Optional[re.Pattern] = None) -> List[Payload]:
+        # Check whether there's response in the buffer.
+        # If so, return immediately.
+        if pattern is None:
+            pattern = re.compile(".*")
+
+        payloads = []
+        for req_id, p in self._response_buffer.items():
+            if pattern.match(str(req_id)):
+                payloads.append(p)
+        for p in payloads:
+            self._response_buffer.pop(p.request_id)
+        if len(payloads) > 0:
+            return payloads
+
+        # Otherwise, pull from the socket.
         try:
-            p_bytes = self.recv_socket.recv(flags=0 if block else zmq.NOBLOCK)
+            p_bytes = self.recv_socket.recv(flags=zmq.NOBLOCK)
         except zmq.ZMQError:
             raise NoMessage()
-
         payload: Payload = pickle.loads(p_bytes)
         # logger.info(f"Payload transfer time: {time.monotonic() - payload.send_time:.4f}s")
-        return payload
+        self._response_buffer[payload.request_id] = payload
+
+        payloads = []
+        for req_id, p in self._response_buffer.items():
+            if pattern.match(str(req_id)):
+                payloads.append(p)
+        for p in payloads:
+            self._response_buffer.pop(p.request_id)
+        if len(payloads) > 0:
+            return payloads
+        raise NoMessage()
 
 
 class IpReplyServer(RequestReplyStream):
@@ -148,7 +214,7 @@ class IpReplyServer(RequestReplyStream):
         recv_socket.setsockopt(zmq.LINGER, 0)
         self._recv_socket = recv_socket
 
-    def post(self, payload: Payload):
+    def post(self, payload: Payload) -> uuid.UUID:
         assert payload.request_id is not None and payload.handle_name is not None
         if payload.is_tensor:
             assert payload.data is None
