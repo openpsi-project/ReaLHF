@@ -7,6 +7,9 @@ import time
 import bisect
 import numpy as np
 import base.dataparallel as dataparallel
+import base.logging as logging
+
+logger = logging.getLogger("buffer")
 
 
 class BufferFull(Exception):
@@ -17,30 +20,30 @@ class BufferFull(Exception):
 class _ReplayEntry:
     reuses_left: int
     receive_time: float
-    sample: Dict[str, Any]
+    sample: namedarray.NamedArray
 
 
-def _get_seqlen_from_sample(sample: Dict[str, Any]) -> int:
+def _get_seqlen_from_sample(sample: namedarray.NamedArray) -> int:
     assert (
-        "input_lens" in sample
-        or "cu_seqlens" in sample
-        or "prompt_cu_seqlens" in sample
-        or "prompt_lens" in sample
+        "input_lens" in sample.keys()
+        or "cu_seqlens" in sample.keys()
+        or "prompt_cu_seqlens" in sample.keys()
+        or "prompt_lens" in sample.keys()
     ), (
         list(sample.keys()),
         sample,
     )
-    if "input_lens" in sample:
+    if "input_lens" in sample.keys():
         return sample["input_lens"].item()
-    elif "cu_seqlens" in sample:
+    elif "cu_seqlens" in sample.keys():
         return int(sample["cu_seqlens"][1] - 1)
     # NOTE: The order matters. We should first try to get the length of the generated text rather than prompts.
-    elif "prompt_lens" in sample:
+    elif "prompt_lens" in sample.keys():
         return sample["prompt_lens"].item()
-    elif "prompt_cu_seqlens" in sample:
+    elif "prompt_cu_seqlens" in sample.keys():
         return int(sample["prompt_cu_seqlens"][1] - 1)
     else:
-        raise NotImplementedError()
+        return None
 
 
 class _TensorDictSequenceBuffer:
@@ -72,12 +75,12 @@ class _TensorDictSequenceBuffer:
     def _update_has_keys(self, indices: List[int]):
         for idx in indices:
             x = self.__storage[idx].sample
-            self.__has_keys[idx] = [k in x and x[k] is not None for k in self.__keys]
+            self.__has_keys[idx] = [k in x.keys() and x[k] is not None for k in self.__keys]
 
     def _get_has_keys(self, indices):
         return self.__has_keys[indices, :]
 
-    def put_batch(self, indices: List[int], xs: List[Dict[str, Any]]):
+    def put_batch(self, indices: List[int], xs: List[namedarray.NamedArray]):
         assert len(indices) == len(xs)
         # Can be parallelized.
         for idx, x in zip(indices, xs):
@@ -87,11 +90,13 @@ class _TensorDictSequenceBuffer:
                 receive_time=time.time(),
             )
 
-    def amend_batch(self, indices: List[int], new_datas: Dict[str, Any]):
+    def amend_batch(self, indices: List[int], new_datas: namedarray.NamedArray):
         assert len(indices) == len(new_datas)
         # Can be parallelized.
         for idx, new_data in zip(indices, new_datas):
-            self.__storage[idx].sample.update(new_data)
+            d = self.__storage[idx].sample.to_dict()
+            d.update(new_data)
+            self.__storage[idx].sample = namedarray.from_dict(d)
 
     def get_batch(self, indices: List[int]) -> List[_ReplayEntry]:
         # Can be parallelized.
@@ -164,7 +169,7 @@ class AsyncIOSequenceBuffer:
     @property
     def lock(self):
         return self._lock
-    
+
     @property
     def n_rpcs(self):
         return len(self._rpc_names)
@@ -181,7 +186,7 @@ class AsyncIOSequenceBuffer:
         assert (self._is_empty[:, None] * self._ready_for_rpcs).sum() == 0
         assert (self._is_empty[:, None] * self._completed_rpc).sum() == 0
 
-    async def put_batch(self, samples: List[Dict[str, Any]]):
+    async def put_batch(self, samples: List[namedarray.NamedArray]):
         async with self._lock:
             self._assert_valid_indicator()
             n = len(samples)
@@ -196,7 +201,7 @@ class AsyncIOSequenceBuffer:
         async with self._lock:
             self.__buffer._update_has_keys(indices)
             self.__buffer._update_seqlen(indices)
-            
+
             has_keys = self.__buffer._get_has_keys(indices)  # [bs, #keys]
             rpc_key_mask = self._rpc_key_mask  # [#keys, #rpcs]
             self._ready_for_rpcs[indices] = (has_keys[:, :, None] >= rpc_key_mask[None, :, :]).all(axis=1)
@@ -207,7 +212,7 @@ class AsyncIOSequenceBuffer:
             self._buf_size += len(samples)
             self._n_tokens += self.__buffer._get_seqlen(indices).sum()
 
-    async def amend_batch(self, indices: List[int], new_datas: List[Dict[str, Any]]):
+    async def amend_batch(self, indices: List[int], new_datas: List[namedarray.NamedArray]):
         async with self._lock:
             await self._lock.wait_for(
                 lambda: (self._is_idle[indices] | self._is_being_amended[indices]).all(),
@@ -218,10 +223,10 @@ class AsyncIOSequenceBuffer:
             self._n_amenders[indices] += 1
         self.__buffer.amend_batch(indices, new_datas)
         async with self._lock:
-            self._n_tokens -= self.__buffer._get_seqlen(indices)
+            self._n_tokens -= self.__buffer._get_seqlen(indices).sum()
             self.__buffer._update_has_keys(indices)
             self.__buffer._update_seqlen(indices)
-            self._n_tokens += self.__buffer._get_seqlen(indices)
+            self._n_tokens += self.__buffer._get_seqlen(indices).sum()
 
             has_keys = self.__buffer._get_has_keys(indices)  # [bs, #keys]
             rpc_key_mask = self._rpc_key_mask  # [#keys, #rpcs]
@@ -279,8 +284,10 @@ class AsyncIOSequenceBuffer:
             token_valid_mask = (token_cumsum >= rpc.min_n_tokens) & (token_cumsum <= rpc.max_n_tokens)
             token_intervals = token_valid_mask.nonzero()[0]
             if len(token_intervals) < 1:
-                raise RuntimeError("No valid token intervals found. Please set a smaller min_n_tokens and a larger max_n_tokens. "
-                                   f"Current values min_n_tokens={rpc.min_n_tokens}, max_n_tokens={rpc.max_n_tokens}.")
+                raise RuntimeError(
+                    "No valid token intervals found. Please set a smaller min_n_tokens and a larger max_n_tokens. "
+                    f"Current values min_n_tokens={rpc.min_n_tokens}, max_n_tokens={rpc.max_n_tokens}."
+                )
             token_start, token_end = token_intervals[0], token_intervals[-1]
 
             n_seqs_cumsum = np.arange(1, len(ready_indices) + 1)

@@ -92,28 +92,43 @@ def create_exact_match_pattern(string_list: List[Union[uuid.UUID, str]]) -> re.P
     return re.compile(pattern)
 
 
-def gather_all_replies(
+async def _awaitable_response(
+    stream: request_reply_stream.RequestReplyStream,
+    pattern: re.Pattern | None,
+) -> request_reply_stream.Payload:
+    while True:
+        try:
+            return stream.poll(pattern=pattern, block=False)
+        except request_reply_stream.NoMessage:
+            await asyncio.sleep(0.01)
+            continue
+
+
+async def gather_all_replies(
     streams: List[request_reply_stream.RequestReplyStream],
     request_ids: List[str],
     verbose: bool = True,
 ) -> List:
     """Collect responses from multiple streams. Blocking method."""
-    responses = [
-        s.poll(pattern=create_exact_match_pattern([req_id]), block=True).data
-        for s, req_id in zip(streams, request_ids)
-    ]
+    responses = await asyncio.gather(
+        *[
+            _awaitable_response(s, pattern=create_exact_match_pattern([req_id]))
+            for s, req_id in zip(streams, request_ids)
+        ]
+    )
     if verbose:
         blogger.debug(f"master worker #gather_all_replies# *end* time ${time.time_ns()}$")
     return responses
 
 
-def group_rpc_blocked(
+async def group_rpc_blocked(
     streams: List[request_reply_stream.RequestReplyStream],
     handle_type: str,
     datas: List[namedarray.NamedArray],
     verbose: bool = True,
 ) -> List[namedarray.NamedArray]:
-    return gather_all_replies(streams, request_all(streams, handle_type, datas, verbose=verbose))
+    payloads = await gather_all_replies(streams, request_all(streams, handle_type, datas, verbose=verbose))
+    return [p.data for p in payloads]
 
 
 def split_packed_batch_into_seqs(
@@ -137,7 +152,27 @@ def split_packed_batch_into_seqs(
     )
 
 
-def scatter_tensor_to_mws(
+@dataclasses.dataclass
+class RPCCorountineControl:
+    stop: asyncio.Event
+    # does not exceed #max_concurrent_calls
+    can_do_rpc: asyncio.Semaphore
+    # synchronize NCCL calls, similar to action/observation buffer in RL env ring
+    can_gather: asyncio.Semaphore
+    can_scatter: asyncio.Semaphore
+    # for synchronizing req ids between req and reply coroutines
+    request_queue: asyncio.Queue
+    # for counting the number of finished training steps
+    # one training step corresponds to traversal of the whole DFG
+    train_count: asyncio.Queue
+    # for loading data
+    fetch_data_queue: asyncio.Queue
+    # for save and eval model
+    eval_queue: asyncio.Queue
+    save_queue: asyncio.Queue
+
+
+async def scatter_tensor_to_mws(
     datas: List[namedarray.NamedArray],
     rpc: api.dfg.ModelRPC,
     streams: List[request_reply_stream.RequestReplyStream],
@@ -146,12 +181,40 @@ def scatter_tensor_to_mws(
     mas_dp_head_group: torch.distributed.ProcessGroup,
     scatter_buffer: Dict[str, List[torch.Tensor]],
     device: torch.device,
+    ctrl: RPCCorountineControl,
 ) -> List[uuid.UUID]:
     dtypes = {k: v.dtype for k, v in datas[0].items()}
     all_shapes = [{k: v.shape for k, v in data.items()} for data in datas]
     buf_shapes = {}
     for k in dtypes:
         buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s[k]) for s in all_shapes])
+
+    # Expand scatter buffer if necessary
+    for k, buf_shape in buf_shapes.items():
+        if k not in scatter_buffer or (
+            k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k][0].shape)
+        ):
+            if k in scatter_buffer:
+                logger.info(
+                    f"Resize RPC *{rpc.name}* scatter buffer on master worker for {k}"
+                    f" from {scatter_buffer[k][0].shape} to {buf_shape}"
+                )
+            else:
+                logger.info(
+                    f"Create RPC *{rpc.name}* scatter buffer on master worker for {k} with shape {buf_shape}"
+                )
+            scatter_buffer[k] = [
+                torch.empty(buf_shape, dtype=dtypes[k], device=device) for _ in range(len(datas) + 1)
+            ]
+
+    # Put data into scatter buffer
+    for i, data in enumerate(datas):
+        for k, v in data.items():
+            assert len(scatter_buffer[k]) == len(datas) + 1
+            s = tuple(slice(0, x) for x in v.shape)
+            scatter_buffer[k][i + 1][s] = data[k]
+
+    await ctrl.can_scatter.acquire()
 
     request_ids = []
     for stream, shapes, buffer_indices, seqlens in zip(streams, all_shapes, all_buffer_indices, all_seqlens):
@@ -166,29 +229,6 @@ def scatter_tensor_to_mws(
         )
         request_ids.append(stream.post(req))
 
-    # Expand scatter buffer if necessary
-    for k, buf_shape in buf_shapes.items():
-        if k not in scatter_buffer or (
-            k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k][0].shape)
-        ):
-            if k in scatter_buffer:
-                logger.info(
-                    f"Resize scatter buffer on master worker for {k}"
-                    f" from {scatter_buffer[k][0].shape} to {buf_shape}"
-                )
-            else:
-                logger.info(f"Create scatter buffer on master worker for {k} with shape {buf_shape}")
-            scatter_buffer[k] = [
-                torch.empty(buf_shape, dtype=dtypes[k], device=device) for _ in range(len(datas) + 1)
-            ]
-
-    # Put data into scatter buffer
-    for i, data in enumerate(datas):
-        for k, v in data.items():
-            assert len(scatter_buffer[k]) == len(datas) + 1
-            s = tuple(slice(0, x) for x in v.shape)
-            scatter_buffer[k][i + 1][s] = data[k]
-
     # Scatter data to DP head model workers.
     for k in scatter_buffer:
         torch.distributed.scatter(
@@ -197,6 +237,7 @@ def scatter_tensor_to_mws(
             src=0,
             group=mas_dp_head_group,
         )
+    ctrl.can_gather.release()
 
     return request_ids
 
@@ -208,22 +249,17 @@ async def model_rpc_request_func(
     mas_dp_head_group: torch.distributed.ProcessGroup,
     scatter_buffer: Dict[str, List[torch.Tensor]],
     device: torch.device,
-    stop_ctl: asyncio.Event,
-    nccl_lock: asyncio.Lock,
-    rpc_count: asyncio.Semaphore,
     topo: base.topology.PipeModelDataParallelTopology,
-    request_queue: asyncio.Queue,
+    ctrl: RPCCorountineControl,
 ):
     dp_size = topo.get_dim("data")
     mp_size = topo.get_dim("model")
     pp_size = topo.get_dim("pipe")
     assert dp_size == len(streams)
 
-    while not stop_ctl.is_set():
-        await rpc_count.acquire()
-        print(f"rpc {rpc.name} wants to get something from buffer")
+    while not ctrl.stop.is_set():
+        await ctrl.can_do_rpc.acquire()
         sample = await buffer.get_batch_for_rpc(rpc)
-        print(f"rpc {rpc.name} gets something from buffer")
         datas, n_seqs = dataparallel.get_broker(rpc.dp_broker_type).scatter_to(
             sample.data,
             dp_size,
@@ -248,82 +284,91 @@ async def model_rpc_request_func(
             ) from e
 
         # send partitioned data to model workers
-        async with nccl_lock:
-            req_ids = scatter_tensor_to_mws(
-                datas=datas,
-                rpc=rpc,
-                streams=streams,
-                all_buffer_indices=all_buffer_indices,
-                all_seqlens=all_seqlens,
-                mas_dp_head_group=mas_dp_head_group,
-                scatter_buffer=scatter_buffer,
-                device=device,
-            )
-        await request_queue.put(req_ids)
-        print("rpc request func put req_ids into request_queue")
+        req_ids = await scatter_tensor_to_mws(
+            datas=datas,
+            rpc=rpc,
+            streams=streams,
+            all_buffer_indices=all_buffer_indices,
+            all_seqlens=all_seqlens,
+            mas_dp_head_group=mas_dp_head_group,
+            scatter_buffer=scatter_buffer,
+            device=device,
+            ctrl=ctrl,
+        )
+        await ctrl.request_queue.put(req_ids)
 
 
-def gather_tensor_from_mws(
-    responses: List[request_reply_stream.Payload],
+async def gather_tensor_from_mws(
+    streams: List[request_reply_stream.RequestReplyStream],
+    req_ids: List[uuid.UUID],
     rpc: api.dfg.ModelRPC,
     mas_dp_head_group: torch.distributed.ProcessGroup,
     gather_buffer: Dict[str, List[torch.Tensor]],
     device: torch.device,
     dp_size: int,
+    ctrl: RPCCorountineControl,
 ) -> namedarray.NamedArray:
-    all_buf_shapes = [response.buf_shapes for response in responses]
-    for buf_shapes in all_buf_shapes:
-        for k, v in buf_shapes.items():
-            assert buf_shapes[k] == all_buf_shapes[0][k]
+    await ctrl.can_gather.acquire()
+    responses = await asyncio.gather(
+        *[
+            _awaitable_response(s, pattern=create_exact_match_pattern([req_id]))
+            for s, req_id in zip(streams, req_ids)
+        ]
+    )
 
-    # Expand gather buffer if necessary.
-    for k, buf_shape in buf_shapes.items():
-        if k not in gather_buffer or (
-            k in gather_buffer and not base.numpy_utils.shape_leq(buf_shape, gather_buffer[k][0].shape)
-        ):
-            if k in gather_buffer:
-                logger.info(
-                    f"Resize gather buffer on master worker for {k} from {gather_buffer[k][0].shape} to {buf_shape}"
-                )
-            else:
-                logger.info(f"create gather buffer on master worker for {k} with shape {buf_shape}")
-            gather_buffer[k] = [
-                torch.empty(buf_shape, dtype=responses[0].dtypes[k], device=device)
-                for _ in range(dp_size + 1)
-            ]
+    recv_tik = time.perf_counter()
 
-    for k in gather_buffer:
-        assert len(gather_buffer[k]) == dp_size + 1
-        torch.distributed.gather(
-            gather_buffer[k][0],
-            gather_list=gather_buffer[k],
-            dst=0,
-            group=mas_dp_head_group,
+    if responses[0].is_tensor:
+        all_buf_shapes = [response.buf_shapes for response in responses]
+        for buf_shapes in all_buf_shapes:
+            for k, v in buf_shapes.items():
+                assert buf_shapes[k] == all_buf_shapes[0][k]
+
+        # Expand gather buffer if necessary.
+        for k, buf_shape in buf_shapes.items():
+            if k not in gather_buffer or (
+                k in gather_buffer and not base.numpy_utils.shape_leq(buf_shape, gather_buffer[k][0].shape)
+            ):
+                if k in gather_buffer:
+                    logger.info(
+                        f"Resize RPC *{rpc.name}* gather buffer on master worker for {k} from {gather_buffer[k][0].shape} to {buf_shape}"
+                    )
+                else:
+                    logger.info(
+                        f"Create RPC *{rpc.name}* gather buffer on master worker for {k} with shape {buf_shape}"
+                    )
+                gather_buffer[k] = [
+                    torch.empty(buf_shape, dtype=responses[0].dtypes[k], device=device)
+                    for _ in range(dp_size + 1)
+                ]
+
+        for k in gather_buffer:
+            assert len(gather_buffer[k]) == dp_size + 1
+            torch.distributed.gather(
+                gather_buffer[k][0],
+                gather_list=gather_buffer[k],
+                dst=0,
+                group=mas_dp_head_group,
+            )
+
+        all_res = []
+        for i, response in enumerate(responses):
+            res_ = {}
+            for k, vs in gather_buffer.items():
+                assert len(vs) == len(responses) + 1
+                v = vs[i + 1]
+                shape = response.actual_shapes[k]
+                s = tuple(slice(0, x) for x in shape)
+                res_[k] = v[s]
+            all_res.append(namedarray.from_dict(res_))
+        res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(all_res)
+    else:
+        res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(
+            [response.data for response in responses]
         )
-    all_res = []
-    for i, response in enumerate(responses):
-        res_ = {}
-        for k, vs in gather_buffer.items():
-            assert len(vs) == len(responses) + 1
-            v = vs[i + 1]
-            shape = response.actual_shapes[k]
-            s = tuple(slice(0, x) for x in shape)
-            res_[k] = v[s]
-        all_res.append(namedarray.from_dict(res_))
-    res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(all_res)
-    return rpc.remap_output_keys(res)
-
-
-async def _awaitable_response(
-    stream: request_reply_stream.RequestReplyStream,
-    pattern: re.Pattern | None,
-) -> request_reply_stream.Payload:
-    while True:
-        try:
-            return stream.poll(pattern=pattern, block=False)
-        except request_reply_stream.NoMessage:
-            await asyncio.sleep(0.01)
-            continue
+    ctrl.can_scatter.release()
+    logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
+    return responses, rpc.remap_output_keys(res)
 
 
 async def model_rpc_reply_func(
@@ -333,51 +378,39 @@ async def model_rpc_reply_func(
     mas_dp_head_group: torch.distributed.ProcessGroup,
     gather_buffer: Dict[str, List[torch.Tensor]],
     device: torch.device,
-    stop_ctl: asyncio.Event,
-    rpc_count: asyncio.Semaphore,
-    train_count: asyncio.Queue,
-    nccl_lock: asyncio.Lock,
     topo: base.topology.PipeModelDataParallelTopology,
-    reqeust_queue: asyncio.Queue,
+    ctrl: RPCCorountineControl,
 ):
     dp_size = topo.get_dim("data")
-    while not stop_ctl.is_set():
-        req_ids = await reqeust_queue.get()
-        print("request_queue get req_ids")
-        async with nccl_lock:
-            responses = await asyncio.gather(
-                *[
-                    _awaitable_response(s, pattern=create_exact_match_pattern([req_id]))
-                    for s, req_id in zip(streams, req_ids)
-                ]
-            )
-            recv_tik = time.perf_counter()
-            if responses[0].is_tensor:
-                res = gather_tensor_from_mws(
-                    responses=responses,
-                    rpc=rpc,
-                    mas_dp_head_group=mas_dp_head_group,
-                    gather_buffer=gather_buffer,
-                    device=device,
-                    dp_size=dp_size,
-                )
-            else:
-                res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(
-                    [response.data for response in responses]
-                )
-            logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
+    while not ctrl.stop.is_set():
+        req_ids = await ctrl.request_queue.get()
+
+        responses, res = await gather_tensor_from_mws(
+            streams=streams,
+            req_ids=req_ids,
+            rpc=rpc,
+            mas_dp_head_group=mas_dp_head_group,
+            gather_buffer=gather_buffer,
+            device=device,
+            dp_size=dp_size,
+            ctrl=ctrl,
+        )
 
         if rpc.log_return_value:
             logger.info(f"RPC name {rpc.name} returns {res}")
 
-        rpc_count.release()
-        print(f"realse RPC {rpc.name} counter")
+        ctrl.can_do_rpc.release()
 
         if rpc.is_dst:
-            await train_count.put(1)
+            await ctrl.train_count.put(1)
         else:
             assert responses[0].is_tensor
-            seqlens = sum([r.seqlens for r in responses], start=[])
+            if "input_lens" in res:
+                seqlens = res["input_lens"]
+            elif "cu_seqlens" in res:
+                seqlens = res["cu_seqlens"][1:] - res["cu_seqlens"][:-1]
+            else:
+                seqlens = torch.from_numpy(np.concatenate([r.seqlens for r in responses]))
             buffer_indices = sum([r.buffer_indices for r in responses])
             xs = split_packed_batch_into_seqs(res, input_lens=seqlens)
             await buffer.amend_batch(buffer_indices, xs)
@@ -400,7 +433,7 @@ async def load_data_func(
         fetch_data_start = time.perf_counter()
         cur_epoch = latest_epoch = None
         while cur_epoch is None or cur_epoch == latest_epoch:
-            data_batches: List[data_api.DataBatch] = group_rpc_blocked(
+            data_batches: List[data_api.DataBatch] = await group_rpc_blocked(
                 data_streams,
                 "fetch",
                 [None for _ in data_streams],
@@ -439,7 +472,7 @@ async def model_eval_thread_func(
         epoch, epoch_step = await eval_queue.get()
         all_model_streams = list(model_streams.values())
         eval_stats = dataparallel.ParallelDataBroker.gather_from(
-            group_rpc_blocked(all_model_streams, "evaluate", [None for _ in all_model_streams])
+            await group_rpc_blocked(all_model_streams, "evaluate", [None for _ in all_model_streams])
         )
         logger.info(f"Evaluation results at epoch {epoch + 1} step {epoch_step + 1}: {eval_stats}")
 
@@ -455,7 +488,7 @@ async def model_save_thread_func(
         dp0streams = {k: v for k, v in model_streams.items() if k.dp_rank == 0}
         assert len(dp0streams) > 0
         model_save_dirs = [os.path.join(model_save_root, k.model_name) for k in dp0streams]
-        group_rpc_blocked(list(dp0streams.values()), "save", model_save_dirs)
+        await group_rpc_blocked(list(dp0streams.values()), "save", model_save_dirs)
         logger.info(f"Save models at epoch {epoch + 1} step {epoch_step + 1}.")
 
 
@@ -598,6 +631,9 @@ class MasterWorker(worker_base.Worker):
         # )
         # logger.info(f"ft_spec = {ft_spec}")
 
+        event_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(event_loop)
+
         model_ft_specs = []
         for ms_id in self.__model_streams:
             model_name = ms_id.model_name
@@ -605,41 +641,53 @@ class MasterWorker(worker_base.Worker):
             model_ft_spec = copy.deepcopy(ft_spec)
             model_ft_spec.batch_size_per_device = batch_size // num_dp
             model_ft_specs.append(model_ft_spec)
-        group_rpc_blocked(list(self.__model_streams.values()), "initialize", model_ft_specs)
+        _task = event_loop.create_task(
+            group_rpc_blocked(list(self.__model_streams.values()), "initialize", model_ft_specs)
+        )
+        event_loop.run_until_complete(asyncio.gather(_task))
 
         self.__scatter_buffers = {rpc.name: {} for rpc in self.__model_rpcs}
         self.__gather_buffers = {rpc.name: {} for rpc in self.__model_rpcs}
 
-        self.__fetch_ctl = asyncio.Queue(1)
+        self.__fetch_data_queue = asyncio.Queue(1)
         self.__fetch_master_ctl = asyncio.Queue(1)
         self.__eval_queue = asyncio.Queue(1)
         self.__save_queue = asyncio.Queue(1)
         self.__stop_ctl = asyncio.Event()
-        self.__nccl_lock = asyncio.Lock()
-
         self.__train_count = asyncio.Queue(maxsize=len(self.__rpc_dsts))
-        self.__rpc_counts = {
-            rpc.name: asyncio.Semaphore(rpc.max_concurrent_calls) for rpc in self.__model_rpcs
-        }
-        self.__rpc_req_rep_queues = {
-            rpc.name: asyncio.Queue(rpc.max_concurrent_calls) for rpc in self.__model_rpcs
-        }
 
         # NOTE: we don't set a maximum buffer size here because we want to keep all data in the buffer
         self.__seqbuffer = AsyncIOSequenceBuffer(
             self.__model_rpcs,
             max_size=int(1e6),
-            fetch_ctl=self.__fetch_ctl,
+            fetch_ctl=self.__fetch_data_queue,
             fetch_master_ctl=self.__fetch_master_ctl,
         )
 
         logger.info(f"Creating asyncio coroutines...")
 
-        event_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(event_loop)
+        model_can_scatter = {model_name: asyncio.Semaphore(1) for model_name in self.config.model_topos}
+        model_can_gather = {model_name: asyncio.Semaphore(1) for model_name in self.config.model_topos}
+
         coroutine_tasks = []
         for rpc in self.__model_rpcs:
             concerned_streams = [v for k, v in self.__model_streams.items() if k.model_name == rpc.model_name]
+
+            rpc_count = asyncio.Semaphore(rpc.max_concurrent_calls)
+            request_queue = asyncio.Queue(rpc.max_concurrent_calls)
+
+            ctrl = RPCCorountineControl(
+                stop=self.__stop_ctl,
+                can_do_rpc=rpc_count,
+                can_scatter=model_can_scatter[rpc.model_name],
+                can_gather=model_can_gather[rpc.model_name],
+                request_queue=request_queue,
+                train_count=self.__train_count,
+                fetch_data_queue=self.__fetch_data_queue,
+                eval_queue=self.__eval_queue,
+                save_queue=self.__save_queue,
+            )
+
             request_task = event_loop.create_task(
                 model_rpc_request_func(
                     rpc=rpc,
@@ -648,11 +696,8 @@ class MasterWorker(worker_base.Worker):
                     mas_dp_head_group=self.__pg_info.mas_dp_head_groups[rpc.model_name],
                     scatter_buffer=self.__scatter_buffers[rpc.name],
                     device=self.__device,
-                    stop_ctl=self.__stop_ctl,
-                    nccl_lock=self.__nccl_lock,
-                    rpc_count=self.__rpc_counts[rpc.name],
                     topo=self.__model_topos[rpc.model_name],
-                    request_queue=self.__rpc_req_rep_queues[rpc.name],
+                    ctrl=ctrl,
                 )
             )
             rely_task = event_loop.create_task(
@@ -663,12 +708,8 @@ class MasterWorker(worker_base.Worker):
                     mas_dp_head_group=self.__pg_info.mas_dp_head_groups[rpc.model_name],
                     gather_buffer=self.__gather_buffers[rpc.name],
                     device=self.__device,
-                    stop_ctl=self.__stop_ctl,
-                    rpc_count=self.__rpc_counts[rpc.name],
-                    train_count=self.__train_count,
-                    nccl_lock=self.__nccl_lock,
                     topo=self.__model_topos[rpc.model_name],
-                    reqeust_queue=self.__rpc_req_rep_queues[rpc.name],
+                    ctrl=ctrl,
                 )
             )
             coroutine_tasks += [request_task, rely_task]
@@ -677,7 +718,7 @@ class MasterWorker(worker_base.Worker):
             load_data_func(
                 buffer=self.__seqbuffer,
                 data_streams=[self.__data_stream],
-                fetch_ctl=self.__fetch_ctl,
+                fetch_ctl=self.__fetch_data_queue,
                 stop_ctl=self.__stop_ctl,
             )
         )

@@ -302,6 +302,8 @@ class ModelWorker(worker_base.Worker):
                     actual_shapes=shapes,
                     buf_shapes=buf_shapes,
                     dtypes=dtypes,
+                    seqlens=request.seqlens,
+                    buffer_indices=request.buffer_indices,
                 )
             else:
                 reply = request_reply_stream.Payload(
