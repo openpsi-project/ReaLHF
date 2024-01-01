@@ -13,23 +13,20 @@ from impl.model.utils.data import DuckGenerationOutput, PipeCacheData, PipeTrans
 from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormColumnLinear,
                                                      LayerNormParallelMLP, LlamaLayerNormParallelMLP,
                                                      ParallelEmbedding, RowParallelLinear)
-from impl.model.utils.modules import LlamaRMSNorm
+from impl.model.utils.modules import LlamaRMSNorm, RotaryEmbedding
 from impl.model.utils.tensor import pad_sequence_parallel_input
 import base.constants
 import base.logging as logging
+from impl.model.utils.save_load import load_from_disk, save_to_disk
+import impl.model.utils.model_parallel.mappings as tensor_parallel
 
 try:
     from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
                             flash_attn_with_kvcache)
-    from flash_attn.layers.rotary import RotaryEmbedding
 except ModuleNotFoundError:
     pass
 
-from base.monitor import gpu_memory_mb
-from impl.model.utils.save_load import load_from_disk, save_to_disk
-import impl.model.utils.model_parallel.mappings as tensor_parallel
 
-# rom impl.model.utils.random import get_cuda_rng_tracker
 
 logger = logging.getLogger("ParallelFlashMQAT")
 
@@ -284,6 +281,13 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         max_seqlen: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # input hidden_states shape: [bs, seq, hidden_dim]/[total_seqlen, hidden_dim]
+
+        # NOTE: we must ensure the passed-in argument is an interger
+        # if we convert the argument to implicitly when calling rotary embedding or flash-attn,
+        # aten::item will be called, which will cause a device-host sync and slow down performance.
+        assert max_seqlen is None or isinstance(max_seqlen, int), type(max_seqlen)
+        assert cu_seqlens is None or cu_seqlens.dtype == torch.int32
+        
         # default upcast, scale
         if self.scale_attn_by_inverse_layer_idx:
             unscale = self.layer_index + 1

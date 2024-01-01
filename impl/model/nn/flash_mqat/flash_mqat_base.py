@@ -11,14 +11,13 @@ import transformers
 
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import torch_attn_func
-from impl.model.utils.modules import LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
+from impl.model.utils.modules import LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm, RotaryEmbedding
 from impl.model.utils.save_load import load_from_disk, save_to_disk
 import base.logging as logging
 
 try:
     from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
                             flash_attn_with_kvcache)
-    from flash_attn.layers.rotary import RotaryEmbedding
 except ModuleNotFoundError:
     pass
 import base.logging as logging
@@ -150,6 +149,13 @@ class CausalSelfAttentionLayer(nn.Module):
         max_seqlen: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # input shape: [bs, seq, hidden_dim]
+
+        # NOTE: we must ensure the passed-in argument is an interger
+        # if we convert the argument to implicitly when calling rotary embedding or flash-attn,
+        # aten::item will be called, which will cause a device-host sync and slow down performance.
+        assert max_seqlen is None or isinstance(max_seqlen, int), type(max_seqlen)
+        assert cu_seqlens is None or cu_seqlens.dtype == torch.int32
+        
         # default upcast, scale
         if self.scale_attn_by_inverse_layer_idx:
             unscale = self.layer_index + 1
