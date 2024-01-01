@@ -261,3 +261,83 @@ def torch_attn_func(
     output = torch.matmul(scores, v)  # (bs, nq, seqlen, head_dim)
     output = output.transpose(1, 2).contiguous()
     return output
+
+
+def rotate_half(x: torch.HalfTensor, interleaved: bool = False):
+    if not interleaved:
+        x1, x2 = x.chunk(2, dim=-1)
+        return torch.cat((-x2, x1), dim=-1)
+    else:
+        x1, x2 = x[..., ::2], x[..., 1::2]
+        # return rearrange(torch.stack((-x2, x1), dim=-1), "... d two -> ... (d two)", two=2)
+        return torch.stack((-x2, x1), dim=-1).flatten(start_dim=-2)
+
+
+@torch.jit.script
+def compute_varlen_rotary_indices(
+    total_seqlen: int,
+    cu_seqlens: torch.IntTensor,
+    seqlen_offsets: Optional[torch.IntTensor] = None,
+) -> torch.IntTensor:
+    indexing_t = torch.arange(total_seqlen, dtype=torch.long, device=cu_seqlens.device).unsqueeze_(0)
+    indexing_t = (cu_seqlens[:-1].unsqueeze(1) <= indexing_t) & (indexing_t < cu_seqlens[1:].unsqueeze(1))
+    indices = indexing_t.cumsum(1) - 1
+    if seqlen_offsets is not None:
+        indices += seqlen_offsets.unsqueeze(1)
+    return torch.where(indexing_t, indices, 0).sum(0)
+
+
+# @torch.jit.script
+def apply_rotary_varlen(
+    x: torch.HalfTensor,
+    cos: torch.HalfTensor,
+    sin: torch.HalfTensor,
+    cu_seqlens: torch.IntTensor,
+    interleaved: bool,
+    seqlen_offsets: Optional[torch.IntTensor] = None,
+    rotary_indices: Optional[torch.LongTensor] = None,
+) -> Tuple[torch.HalfTensor, torch.LongTensor]:
+    if rotary_indices is None:
+        rotary_indices = compute_varlen_rotary_indices(x.shape[0], cu_seqlens, seqlen_offsets)
+
+    ro_dim = cos.shape[-1] * 2
+    assert ro_dim <= x.shape[-1]
+    cos = cos[rotary_indices]
+    sin = sin[rotary_indices]
+    if not interleaved:
+        cos = cos[:, None, None, :].repeat(1, 1, 2, 1).flatten(start_dim=-2)
+        sin = sin[:, None, None, :].repeat(1, 1, 2, 1).flatten(start_dim=-2)
+    else:
+        cos = cos[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
+        sin = sin[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
+
+    # cos = repeat(cos, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
+    # sin = repeat(sin, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
+    return torch.cat(
+        [x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]],
+        dim=-1,
+    )
+
+
+def apply_rotary(
+    x: torch.HalfTensor,
+    cos: torch.HalfTensor,
+    sin: torch.HalfTensor,
+    interleaved: bool = False,
+):
+    """
+    x: (batch_size, seqlen, nheads, headdim)
+    cos, sin: (seqlen, rotary_dim / 2) or (batch_size, seqlen, rotary_dim / 2)
+    """
+    ro_dim = cos.shape[-1] * 2
+    assert ro_dim <= x.shape[-1]
+    if not interleaved:
+        cos = cos[:, None, None, :].repeat(1, 1, 2, 1).flatten(start_dim=-2)
+        sin = sin[:, None, None, :].repeat(1, 1, 2, 1).flatten(start_dim=-2)
+    else:
+        cos = cos[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
+        sin = sin[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
+    return torch.cat(
+        [x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]],
+        dim=-1,
+    )

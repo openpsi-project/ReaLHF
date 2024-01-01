@@ -301,17 +301,15 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         q: torch.Tensor = self.q_attn(hidden_states)
         k: torch.Tensor = self.k_attn(hidden_states)
         v: torch.Tensor = self.v_attn(hidden_states)
-        kv = torch.cat([k, v], dim=-1)
-
-        q = q.view(*q.shape[:-1], self.nq // self.mp_worldsize, self.d)
-        kv = kv.view(*kv.shape[:-1], 2, self.nkv // self.mp_worldsize, self.d)
+        qk = torch.cat([q, k], dim=-1)
+        
+        qk = qk.view(*qk.shape[:-1], (self.nq + self.nkv) // self.mp_worldsize, self.d)
+        v = v.view(*v.shape[:-1], self.nkv // self.mp_worldsize, self.d)
 
         if self.apply_rotary and k_cache is None:
             # otherwise, we input rotary cos/sin directly into flash_attn_with_kvcache
-            q, kv = self.rotary_emb(
-                q,
-                kv,
-                seqlen_offset=0,
+            qk = self.rotary_emb(
+                qk,
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             )
@@ -322,7 +320,7 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         else:
             rotary_cos = rotary_sin = None
 
-        k, v = kv.unbind(dim=-3)
+        q, k = qk.split((self.nq // self.mp_worldsize, self.nkv // self.mp_worldsize), dim=-2)
 
         if k_cache is not None and len(q.shape) == 4:
             # k_cache/v_cache shape: [bs, max_seq, n_kv_heads, head_dim]
@@ -351,7 +349,7 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
             hidden_states = flash_attn_varlen_func_with_kvcache(
                 q=q,
                 cu_seqlens_q=cu_seqlens,
-                max_seqlen_q=int(max_seqlen),
+                max_seqlen_q=max_seqlen,
                 k_cache=k_cache,
                 v_cache=v_cache,
                 cache_seqlens=cache_seqlens,
@@ -371,10 +369,10 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
                 q,
                 k,
                 v,
-                cu_seqlens.int(),
-                cu_seqlens.int(),
-                int(max_seqlen),
-                int(max_seqlen),
+                cu_seqlens,
+                cu_seqlens,
+                max_seqlen,
+                max_seqlen,
                 dropout_p=self.applied_attn_pdrop,
                 softmax_scale=scale_factor,
                 causal=True,
