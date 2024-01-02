@@ -6,7 +6,6 @@ import copy
 import time
 
 from impl.model.backend.pipe_engine.instruction import *
-from impl.model.backend.pipe_engine.instruction import InstructionSet
 
 check_count = 0
 check_times = 0
@@ -39,11 +38,14 @@ class DynamicPipeSchedule(ABC):
         self.__ready: InstructionSet = InstructionSet()
 
         self.__initialized = False
-        self.__terminated = False
+        self.__terminated = False  # terminate the schedule, used to avoid duplicated terminate
 
     def __init_inst_set(self):
         self.__not_ready.add(self.init_instructions())
         self.__bind_insts = defaultdict(list)
+
+        self.__stage_terminated = defaultdict(lambda: False)  # stage terminate,
+        # avoid execute instruction after stage executed EndSchedule
         self.__update_ready()
 
     @abstractmethod
@@ -89,11 +91,15 @@ class DynamicPipeSchedule(ABC):
         1. Move executed instructions from ready to executed. 
         2. Update, move ready instructions from not_ready to ready.
         """
-        if self.__terminated:
-            return
         for inst in insts:
+            if self.__stage_terminated[inst.stage_id]:
+                raise RuntimeError("Cannot execute an already terminated schedule.")
             self.__inflight.remove(inst)
             self.__executed.add(inst)
+            # print(f"executed {inst}")
+            # print(f"executed {insts}, inflight length {len(self.__inflight)}")
+            if inst.name == "EndSchedule":
+                self.__stage_terminated[inst.stage_id] = True
         self.__update_ready()
 
     def post_one_ready(self, stage_id: Optional[int]) -> Tuple[PipeInstruction, bool]:
@@ -106,20 +112,36 @@ class DynamicPipeSchedule(ABC):
         if not self.__initialized:
             self.__init_inst_set()
             self.__initialized = True
-        if self.__terminated:
+        if self.__stage_terminated[stage_id]:
             return None, False
+            # raise RuntimeError("Cannot post ready instruction from an already terminated schedule.")
+
+        # nothing to do for this schedule, terminate
+        if len(self.__ready) + len(self.__not_ready) + len(self.__inflight) == 0 \
+            and not self.__terminated:
+            self.terminate()
+
+        # check binded instructions
         bind_insts = self.__bind_insts[stage_id]
         if len(bind_insts) > 0:
+            # print(f"binded insts for stage {stage_id}: {bind_insts}")
             # there is a binded instruction queued for this stage
             inst = bind_insts.pop(0)
             if self.__ready.contain(inst):
                 # assert self.__executed.contain(inst) or self.__inflight.contain(inst)
                 self.__ready.remove(inst)
                 self.__inflight.add(inst)
-                end = False
-                if len(self.__ready) + len(self.__not_ready) == 0:
-                    end = True
-                return inst, end
+                # print(f"binded execute inst {inst}")
+                return inst, False
+            else:
+                if inst.name == "EndSchedule":
+                    # only end schedule with endschedule instruction
+                    self.__inflight.add(inst)
+                    return inst, True
+                elif not (self.__executed.contain(inst) or self.__inflight.contain(inst)):
+                    raise RuntimeError(
+                        f"Binded instruction {inst} for stage {stage_id} is not ready or does not exist.")
+
         # no binded instruction, find another ready instruction
         insts = self.__ready.find(stage_id=stage_id)
         if len(insts) > 0:
@@ -128,11 +150,11 @@ class DynamicPipeSchedule(ABC):
             self.__inflight.add(inst)
             if inst.bind:
                 other_stage_id = inst.bind.stage_id
-                self.__bind_insts[other_stage_id].append(inst)
-            end = False
-            if len(self.__ready) + len(self.__not_ready) == 0:
-                end = True
-            return inst, end
+                self.__bind_insts[other_stage_id].append(inst.bind)
+                # print(f"bind inst {inst.bind} for stage {other_stage_id}")
+            # end = False
+            # print(f"normal execute inst {inst}")
+            return inst, False
         else:
             not_ready = self.__not_ready.find(stage_id=stage_id)
             in_flight = self.__inflight.find(stage_id=stage_id)
@@ -161,7 +183,15 @@ class DynamicPipeSchedule(ABC):
         return update_ready
 
     def terminate(self):
-        self.__terminated = True
+        """ Called by controller to terminate the schedule, force execute end schedule instruction for all stages
+        Move all instructions from ready to executed.
+        """
+        if self.__terminated:
+            raise RuntimeError("Cannot terminate an already terminated schedule.")
+
+        for i in range(self.num_stages):
+            self.__bind_insts[i].append(EndSchedule(stage_id=i, micro_batch_id=0))
+            self.__terminated = True
 
 
 class InferenceSchedule(DynamicPipeSchedule):
@@ -444,24 +474,3 @@ class Train1F1BSchedule(DynamicPipeSchedule):
                     insts.append(OptimizerStep(stage_id=s, micro_batch_id=0, deps=optimize_deps))
 
         return insts
-
-
-class ScheduleType(IntEnum):
-    TRAIN_1F1B = 0
-    INFERENCE = 2
-
-
-SCHEDULE_TYPE_TO_CLS = {
-    ScheduleType.TRAIN_1F1B: Train1F1BSchedule,
-    ScheduleType.INFERENCE: InferenceSchedule,
-}
-
-SCHEDULE_CLS_TO_TYPE = {v: k for k, v in SCHEDULE_TYPE_TO_CLS.items()}
-
-
-def type_to_schedule(schedule_type: ScheduleType) -> DynamicPipeSchedule:
-    return SCHEDULE_TYPE_TO_CLS[schedule_type]
-
-
-def schedule_to_type(schedule_cls: DynamicPipeSchedule) -> ScheduleType:
-    return SCHEDULE_CLS_TO_TYPE[schedule_cls]

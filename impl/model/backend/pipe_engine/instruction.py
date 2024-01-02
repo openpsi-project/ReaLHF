@@ -148,6 +148,11 @@ class RecvNextTokens(PipeInstruction):
     pass
 
 
+class EndSchedule(PipeInstruction):
+    """ Force terminate schedule.
+    """
+
+
 class InstructionSet:
     """ A set of instructions that can be indexed by stage_id, micro_batch_id and step_id.
     Instructions are stored in their string representation, dependency of instructions are stored 

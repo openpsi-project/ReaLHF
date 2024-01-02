@@ -62,30 +62,25 @@ def main(rank):
     instructions = defaultdict(list)
     while True:
         if rank == 0 and not started:
-            sched = GenerationSchedule(num_micro_batches=NUM_PP,
-                                       num_stages=NUM_PP,
-                                       num_steps=100,
-                                       steps_per_update=5)
+            sched = Train1F1BSchedule(num_micro_batches=NUM_PP * 2, num_stages=NUM_PP)
             controller.issue_schedule(sched, 10)
             started = True
 
-        if rank == 0 and train_started is False:
-            sched = Train1F1BSchedule(num_micro_batches=NUM_PP * 2, num_stages=NUM_PP)
-            controller.issue_schedule(sched, 99)
-            train_started = True
+        # if rank == 0 and train_started is False:
+        #     sched = Train1F1BSchedule(num_micro_batches=NUM_PP * 2, num_stages=NUM_PP)
+        #     controller.issue_schedule(sched, 99)
+        #     train_started = True
+        sched_id, inst, end = client.poll_instruction()
 
-        r = client.poll_instruction()
-
-        if r is not None:
-            sched_id, inst = r
+        if sched_id is not None:
             # fake execute
-            # rank_print(rank, f"Client polled sched_id: instruction {sched_id}:{inst}")
+            rank_print(rank, f"Client polled sched_id: instruction {sched_id}:{inst}")
             # if inst.name in ["ForwardPass", "BackwardPass", "ReduceGrads", "OptimizerStep"]:
             #     instructions[sched_id].append(inst)
             # time.sleep(0.01)
 
             client.post_result(0)
-            # rank_print(rank, "Client posted result")
+            rank_print(rank, "Client posted result")
             last_recv_time = time.monotonic()
 
         count += 1

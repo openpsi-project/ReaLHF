@@ -162,10 +162,11 @@ def deepspeed_initialize(
         zero.partition_parameters.restore_init_context()
         logger.info(f"Deepspeed Engine initialze finished.")
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
-    elif engine_type == "pipe":
+    elif engine_type == "pipe" or engine_type == "stream_pipe":
         # mpu = model.mpu()
         config_class = DeepSpeedConfig(config, mpu)
-        engine = DeepSpeedPipelineEngine(
+        engine_cls = DeepSpeedPipelineEngine if engine_type == "pipe" else StreamPipeEngine
+        engine = engine_cls(
             num_micro_batches=num_pipeline_micro_batches,
             sequence_parallel=sequence_parallel,
             model=model,
@@ -178,20 +179,6 @@ def deepspeed_initialize(
             dist_init_required=False,
         )
         logger.info(f"Deepspeed Pipeline Engine initialze finished.")
-        return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
-    elif engine_type == "stream_pipe":
-        # mpu = model.mpu()
-        config_class = DeepSpeedConfig(config, mpu)
-        engine = StreamPipeEngine(
-            model=model,
-            args=None,
-            config=config,
-            config_class=config_class,
-            mpu=mpu,
-            optimizer=optimizer,
-            lr_scheduler=lr_scheduler,
-            dist_init_required=False,
-        )
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
 
     return tuple(return_items)

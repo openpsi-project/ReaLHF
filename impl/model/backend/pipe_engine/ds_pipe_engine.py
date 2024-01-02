@@ -243,6 +243,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # pre allocate receive buffers and pre store other information
         for mbid, batch in enumerate(batches):
             if self._train_mode:
+                # print(f"tensor buffer alloc {mbid} {(mb_seq_lens[mbid], self.hidden_dim)}")
                 activation_shape = (mb_seq_lens[mbid], self.hidden_dim)
                 self.tensor_buffer.alloc("activation",
                                          mbid,
@@ -509,11 +510,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             return all([self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)])
 
         self._exec_schedule(sched, terminate_condition)
-        r = self.__maybe_gather_generate_outputs()
+        r = self._maybe_gather_generate_outputs()
         self._post_generate()
         return r
 
-    def __maybe_gather_generate_outputs(self):
+    def _maybe_gather_generate_outputs(self):
         if not self.is_last_stage():
             return None
 
@@ -855,6 +856,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         self._force_grad_boundary = False
 
+    def _exec_end_schedule(self, stage_id: int, micro_batch_id: int, step_id: int):
+        """ Used in StreamPipeEngine to force end the schedule. Do nothing. 
+        """
+        pass
+
     def _zero_grads(self, inputs):
         if isinstance(inputs, torch.Tensor):
             if inputs.grad is not None:
@@ -891,6 +897,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         schedule.RecvGrad: _exec_recv_grads,
         schedule.SendNextTokens: _exec_send_next_tokens,
         schedule.RecvNextTokens: _exec_recv_next_tokens,
+        schedule.EndSchedule: _exec_end_schedule,
     }
 
     def _exec_schedule(self, pipe_schedule, terminate_condition=None):
