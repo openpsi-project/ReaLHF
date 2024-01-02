@@ -30,7 +30,7 @@ def setup_gpu(rank, world_size):
     base.gpu_utils.isolate_cuda_device(WORKER_TYPE, rank, world_size, EXPR_NAME, TRIAL_NAME)
     print(f"rank {rank} isolated cuda device")
     BARRIER.wait()
-    base.gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME,  rank)
+    base.gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME, rank)
     print(f"rank {rank} revealed ddp identity")
     BARRIER.wait()
     info = base.gpu_utils.setup_ddp(EXPR_NAME, TRIAL_NAME, rank)

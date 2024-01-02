@@ -1,5 +1,6 @@
 from typing import Dict
 import gc
+import itertools
 import socket
 import time
 
@@ -190,8 +191,8 @@ class ModelWorker(worker_base.Worker):
         if request.handle_name not in self.__scatter_buffers:
             self.__scatter_buffers[request.handle_name] = {}
 
-        gather_buffer = self.__gather_buffers[request.handle_name]
-        scatter_buffer = self.__scatter_buffers[request.handle_name]
+        gather_buffer: Dict[str, torch.Tensor] = self.__gather_buffers[request.handle_name]
+        scatter_buffer: Dict[str, torch.Tensor] = self.__scatter_buffers[request.handle_name]
 
         data = request.data
         if request.is_tensor:
@@ -199,15 +200,21 @@ class ModelWorker(worker_base.Worker):
 
             # Maybe create or extend the size of scatter buffer.
             for (k, buf_shape), dtype in zip(request.buf_shapes.items(), request.dtypes.values()):
-                if k not in scatter_buffer or (k in scatter_buffer and not base.numpy_utils.shape_leq(
-                        buf_shape, scatter_buffer[k].shape)):
+                if k not in scatter_buffer:
                     if self._is_dp_head:
-                        if k in scatter_buffer:
-                            logger.info(f"Resizing scatter buffer key {k} "
-                                        f"from {scatter_buffer[k].shape} to {buf_shape}")
-                        else:
-                            logger.info(f"Create scatter buffer key {k} with shape {buf_shape}")
+                        logger.info(f"Create scatter buffer key {k} with shape {buf_shape}")
                     scatter_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
+                elif k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape,
+                                                                            scatter_buffer[k].shape):
+                    if self._is_dp_head:
+                        logger.info(f"Resizing scatter buffer key {k} "
+                                    f"from {scatter_buffer[k].shape} to {buf_shape}")
+                    padding = tuple(
+                        itertools.chain.from_iterable(
+                            reversed([(0, target_size - current_size)
+                                      for target_size, current_size in zip(buf_shape, scatter_buffer[k].shape)
+                                      ])))
+                    scatter_buffer[k] = torch.nn.functional.pad(scatter_buffer[k], padding, "constant", 0)
 
             if self._is_dp_head:
                 # Receive from the master worker
@@ -284,16 +291,23 @@ class ModelWorker(worker_base.Worker):
 
                 # Expand buffer shape if necessary.
                 for (k, dtype), buf_shape in zip(dtypes.items(), buf_shapes.values()):
-                    if k not in gather_buffer or (k in gather_buffer and not base.numpy_utils.shape_leq(
-                            buf_shape, gather_buffer[k].shape)):
+                    if k not in gather_buffer:
                         if self._is_dp_head:
-                            if k in gather_buffer:
-                                logger.info(
-                                    f"Resizing gather buffer key {k} from {gather_buffer[k].shape} to {buf_shape}"
-                                )
-                            else:
-                                logger.info(f"Create gather buffer key {k} with shape {buf_shape}")
+                            logger.info(f"Create gather buffer key {k} with shape {buf_shape}")
                         gather_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
+                    elif k in gather_buffer and not base.numpy_utils.shape_leq(
+                            buf_shape, gather_buffer[k].shape):
+                        if self._is_dp_head:
+                            logger.info(
+                                f"Resizing gather buffer key {k} from {gather_buffer[k].shape} to {buf_shape}"
+                            )
+                        padding = tuple(
+                            itertools.chain.from_iterable(
+                                reversed([
+                                    (0, target_size - current_size)
+                                    for target_size, current_size in zip(buf_shape, gather_buffer[k].shape)
+                                ])))
+                        gather_buffer[k] = torch.nn.functional.pad(gather_buffer[k], padding, "constant", 0)
 
                 reply = request_reply_stream.Payload(
                     request_id=request.request_id,
