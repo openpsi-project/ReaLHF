@@ -359,7 +359,7 @@ def convert_state_dict_parallel_llama(state_dict: Dict,
     # keys used to identify modules
     embedding_keys = [".wte"]  # dim=0 no bias
     column_linear_keys = [
-        ".attn.q_attn", ".attn.k_attn", ".attn.v_attn", ".mlp.c_fc", ".mlp.gate_proj", ".mlp.up_proj"
+        ".attn.q_attn", ".attn.k_attn", ".attn.v_attn", ".mlp.c_fc", ".mlp.gate_proj", ".mlp.up_proj", "head.weight",
     ]  # dim=0 + partition bias
     row_linear_keys = [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
 

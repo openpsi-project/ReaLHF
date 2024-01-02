@@ -31,7 +31,8 @@ def get_activation_fn(activation_function: str) -> Callable:
     if activation_function == "gelu":
         return nn.functional.gelu
     elif activation_function == "gelu_new":
-        from impl.model.utils.activations import new_gelu_activation
+        from impl.model.utils.modules.activations import new_gelu_activation
+
         return new_gelu_activation
     elif activation_function == "silu":
         return nn.SiLU()
@@ -54,14 +55,15 @@ class ParallelEmbedding(torch.nn.Module):
     """
 
     def __init__(
-            self,
-            num_embeddings: int,
-            embedding_dim: int,
-            init_method=init.xavier_normal_,
-            # params_dtype: torch.dtype=torch.float32,
-            perform_initialization: bool = True,
-            dtype: Optional[torch.dtype] = None,
-            device: Optional[Union[str, torch.device]] = None):
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        init_method=init.xavier_normal_,
+        # params_dtype: torch.dtype=torch.float32,
+        perform_initialization: bool = True,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
         super(ParallelEmbedding, self).__init__()
         # Keep the input dimensions.
         self.num_embeddings = num_embeddings
@@ -69,18 +71,15 @@ class ParallelEmbedding(torch.nn.Module):
         # Set the detauls for compatibility.
         self.padding_idx = None
         self.max_norm = None
-        self.norm_type = 2.
+        self.norm_type = 2.0
         self.scale_grad_by_freq = False
         self.sparse = False
         self._weight = None
         self.tensor_model_parallel_size = model_parallel_world_size()
         # Divide the weight matrix along the vocaburaly dimension.
-        self.vocab_start_index, self.vocab_end_index = \
-            VocabUtility.vocab_range_from_global_vocab_size(
-                self.num_embeddings, model_parallel_rank(),
-                self.tensor_model_parallel_size)
-        self.num_embeddings_per_partition = self.vocab_end_index - \
-            self.vocab_start_index
+        self.vocab_start_index, self.vocab_end_index = VocabUtility.vocab_range_from_global_vocab_size(
+            self.num_embeddings, model_parallel_rank(), self.tensor_model_parallel_size)
+        self.num_embeddings_per_partition = self.vocab_end_index - self.vocab_start_index
 
         logger.debug(
             f"ParallelEmbedding: num_embeddings={num_embeddings}, per_partition={self.num_embeddings_per_partition}, embedding_dim={embedding_dim},"
@@ -94,8 +93,7 @@ class ParallelEmbedding(torch.nn.Module):
     def forward(self, input_) -> torch.Tensor:
         if self.tensor_model_parallel_size > 1:
             # Build the mask.
-            input_mask = (input_ < self.vocab_start_index) | \
-                         (input_ >= self.vocab_end_index)
+            input_mask = (input_ < self.vocab_start_index) | (input_ >= self.vocab_end_index)
             # Mask the input.
             masked_input = input_.clone() - self.vocab_start_index
             masked_input[input_mask] = 0
@@ -103,8 +101,15 @@ class ParallelEmbedding(torch.nn.Module):
             masked_input = input_
             # Get the embeddings.
 
-        output_parallel = F.embedding(masked_input, self.weight, self.padding_idx, self.max_norm,
-                                      self.norm_type, self.scale_grad_by_freq, self.sparse)
+        output_parallel = F.embedding(
+            masked_input,
+            self.weight,
+            self.padding_idx,
+            self.max_norm,
+            self.norm_type,
+            self.scale_grad_by_freq,
+            self.sparse,
+        )
         # Mask the output embedding.
         if self.tensor_model_parallel_size > 1:
             output_parallel[input_mask, :] = 0.0
@@ -128,7 +133,8 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
         ctx.sequence_parallel = sequence_parallel
 
         if sequence_parallel:
-            assert not ctx.async_grad_allreduce, "async_grad_allreduce and sequence_parallel can not be both True"
+            assert (not ctx.async_grad_allreduce
+                    ), "async_grad_allreduce and sequence_parallel can not be both True"
             world_size = model_parallel_world_size()
             dim_size = list(input.size())
             dim_size[0] = dim_size[0] * world_size
@@ -295,7 +301,7 @@ def linear_with_grad_accumulation_and_async_allreduce(
     ]
 
     if not linear_with_grad_accumulation_and_async_allreduce.warned:
-        if os.environ.get('CUDA_DEVICE_MAX_CONNECTIONS') != "1":
+        if os.environ.get("CUDA_DEVICE_MAX_CONNECTIONS") != "1":
             if sequence_parallel:
                 warnings.warn("When using sequence parallelism it is recommended to set the "
                               "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
@@ -391,22 +397,20 @@ class ColumnParallelLinear(torch.nn.Module):
             with torch.no_grad():
                 self.bias.zero_()
         else:
-            self.register_parameter('bias', None)
+            self.register_parameter("bias", None)
 
-        self.async_tensor_model_parallel_allreduce = (async_tensor_model_parallel_allreduce
-                                                      and world_size > 1)
+        self.async_tensor_model_parallel_allreduce = async_tensor_model_parallel_allreduce and world_size > 1
         self.sequence_parallel = sequence_parallel
 
         if gradient_accumulation_fusion:
             if not _grad_accum_fusion_available:
-                raise RuntimeError(
-                    "ColumnParallelLinear was called with gradient_accumulation_fusion set "
-                    "to True but the custom CUDA extension fused_weight_gradient_mlp_cuda "
-                    "module is not found. To use gradient_accumulation_fusion you must "
-                    "install APEX with --cpp_ext and --cuda_ext. For example: "
-                    "pip install --global-option=\"--cpp_ext\" --global-option=\"--cuda_ext .\" "
-                    "Note that the extension requires CUDA>=11. Otherwise, you must turn off "
-                    "gradient accumulation fusion.")
+                raise RuntimeError("ColumnParallelLinear was called with gradient_accumulation_fusion set "
+                                   "to True but the custom CUDA extension fused_weight_gradient_mlp_cuda "
+                                   "module is not found. To use gradient_accumulation_fusion you must "
+                                   "install APEX with --cpp_ext and --cuda_ext. For example: "
+                                   'pip install --global-option="--cpp_ext" --global-option="--cuda_ext ." '
+                                   "Note that the extension requires CUDA>=11. Otherwise, you must turn off "
+                                   "gradient accumulation fusion.")
         self.gradient_accumulation_fusion = gradient_accumulation_fusion
 
         if self.async_tensor_model_parallel_allreduce and self.sequence_parallel:
@@ -425,8 +429,7 @@ class ColumnParallelLinear(torch.nn.Module):
         """
         bias = self.bias if not self.skip_bias_add else None
 
-        if self.async_tensor_model_parallel_allreduce \
-            or self.sequence_parallel:
+        if self.async_tensor_model_parallel_allreduce or self.sequence_parallel:
             input_parallel = input_
         else:
             input_parallel = copy_to_tensor_model_parallel_region(input_)
@@ -527,13 +530,13 @@ class RowParallelLinear(torch.nn.Module):
             _initialize_affine_weight_gpu(self.weight, init_method, partition_dim=1, stride=stride)
         if bias:
             self.bias = Parameter(torch.empty(self.output_size, device=device, dtype=dtype))
-            setattr(self.bias, 'sequence_parallel', False)
+            setattr(self.bias, "sequence_parallel", False)
 
             # Always initialize bias to zero.
             with torch.no_grad():
                 self.bias.zero_()
         else:
-            self.register_parameter('bias', None)
+            self.register_parameter("bias", None)
 
     def forward(self, input_) -> torch.Tensor:
         """Forward of RowParallelLinear
@@ -591,13 +594,15 @@ class LayerNormColumnLinear(nn.Module):
         elif layer_norm_type == "rms":
             layer_norm_fn = LlamaRMSNorm
         self.ln = layer_norm_fn(input_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.linear = ColumnParallelLinear(input_dim,
-                                           output_dim,
-                                           async_tensor_model_parallel_allreduce=not sequence_parallel,
-                                           sequence_parallel=sequence_parallel,
-                                           bias=use_attention_bias,
-                                           dtype=dtype,
-                                           device=device)
+        self.linear = ColumnParallelLinear(
+            input_dim,
+            output_dim,
+            async_tensor_model_parallel_allreduce=not sequence_parallel,
+            sequence_parallel=sequence_parallel,
+            bias=use_attention_bias,
+            dtype=dtype,
+            device=device,
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear(self.ln(x))
@@ -621,12 +626,14 @@ class LayerNormParallelMLP(nn.Module):
             dtype = torch.float16
 
         self.ln = nn.LayerNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.c_fc = ColumnParallelLinear(hidden_dim,
-                                         intermediate_dim,
-                                         async_tensor_model_parallel_allreduce=not sequence_parallel,
-                                         sequence_parallel=sequence_parallel,
-                                         dtype=dtype,
-                                         device=device)
+        self.c_fc = ColumnParallelLinear(
+            hidden_dim,
+            intermediate_dim,
+            async_tensor_model_parallel_allreduce=not sequence_parallel,
+            sequence_parallel=sequence_parallel,
+            dtype=dtype,
+            device=device,
+        )
         self.c_proj = RowParallelLinear(intermediate_dim,
                                         hidden_dim,
                                         sequence_parallel=sequence_parallel,
@@ -661,28 +668,201 @@ class LlamaLayerNormParallelMLP(nn.Module):
         self.hidden_size = hidden_dim
         self.intermediate_size = intermediate_dim
         self.ln = LlamaRMSNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.gate_proj = ColumnParallelLinear(self.hidden_size,
-                                              self.intermediate_size,
-                                              async_tensor_model_parallel_allreduce=not sequence_parallel,
-                                              sequence_parallel=sequence_parallel,
-                                              bias=False,
-                                              dtype=dtype,
-                                              device=device)
-        self.up_proj = ColumnParallelLinear(self.hidden_size,
-                                            self.intermediate_size,
-                                            async_tensor_model_parallel_allreduce=not sequence_parallel,
-                                            sequence_parallel=sequence_parallel,
-                                            bias=False,
-                                            dtype=dtype,
-                                            device=device)
-        self.down_proj = RowParallelLinear(self.intermediate_size,
-                                           self.hidden_size,
-                                           sequence_parallel=sequence_parallel,
-                                           bias=False,
-                                           dtype=dtype,
-                                           device=device)
+        self.gate_proj = ColumnParallelLinear(
+            self.hidden_size,
+            self.intermediate_size,
+            async_tensor_model_parallel_allreduce=not sequence_parallel,
+            sequence_parallel=sequence_parallel,
+            bias=False,
+            dtype=dtype,
+            device=device,
+        )
+        self.up_proj = ColumnParallelLinear(
+            self.hidden_size,
+            self.intermediate_size,
+            async_tensor_model_parallel_allreduce=not sequence_parallel,
+            sequence_parallel=sequence_parallel,
+            bias=False,
+            dtype=dtype,
+            device=device,
+        )
+        self.down_proj = RowParallelLinear(
+            self.intermediate_size,
+            self.hidden_size,
+            sequence_parallel=sequence_parallel,
+            bias=False,
+            dtype=dtype,
+            device=device,
+        )
         self.act_fn = get_activation_fn(activation_function)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.ln(x)
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+
+
+def parallel_lm_logits(
+    input_: torch.HalfTensor,
+    word_embeddings_weight: torch.HalfTensor,
+    parallel_output: bool = False,
+    async_tensor_model_parallel_allreduce: bool = False,
+    sequence_parallel: bool = False,
+    gradient_accumulation_fusion: bool = False,
+    bias=None,
+):
+    """LM logits using word embedding weights."""
+    # Parallel logits.
+    if async_tensor_model_parallel_allreduce or sequence_parallel:
+        input_parallel = input_
+        model_parallel = model_parallel_world_size() > 1
+        async_grad_allreduce = (async_tensor_model_parallel_allreduce and model_parallel
+                                and not sequence_parallel)
+    else:
+        input_parallel = copy_to_tensor_model_parallel_region(input_)
+        async_grad_allreduce = False
+
+    # Matrix multiply.
+    logits_parallel = linear_with_grad_accumulation_and_async_allreduce(
+        input=input_parallel,
+        weight=word_embeddings_weight,
+        bias=bias,
+        gradient_accumulation_fusion=gradient_accumulation_fusion,
+        async_grad_allreduce=async_grad_allreduce,
+        sequence_parallel=sequence_parallel,
+    )
+    # Gather if needed.
+
+    if parallel_output:
+        return logits_parallel
+
+    return gather_from_tensor_model_parallel_region(logits_parallel)
+
+
+class _VocabParallelCrossEntropy(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, vocab_parallel_logits, target, label_smoothing=0.0):
+        # Maximum value along vocab dimension across all GPUs.
+        logits_max = torch.max(vocab_parallel_logits, dim=-1)[0]
+        torch.distributed.all_reduce(logits_max,
+                                     op=torch.distributed.ReduceOp.MAX,
+                                     group=model_parallel_group())
+        # Subtract the maximum value.
+        vocab_parallel_logits = vocab_parallel_logits - logits_max.unsqueeze(dim=-1)
+
+        # Get the partition's vocab indecies
+        get_vocab_range = VocabUtility.vocab_range_from_per_partition_vocab_size
+        partition_vocab_size = vocab_parallel_logits.size()[-1]
+        rank = model_parallel_rank()
+        world_size = model_parallel_world_size()
+        vocab_start_index, vocab_end_index = get_vocab_range(partition_vocab_size, rank, world_size)
+
+        # Create a mask of valid vocab ids (1 means it needs to be masked).
+        target_mask = (target < vocab_start_index) | (target >= vocab_end_index)
+        masked_target = target.clone() - vocab_start_index
+        masked_target[target_mask] = 0
+
+        # Get predicted-logits = logits[target].
+        # For Simplicity, we convert logits to a 2-D tensor with size
+        # [*, partition-vocab-size] and target to a 1-D tensor of size [*].
+        logits_2d = vocab_parallel_logits.view(-1, partition_vocab_size)
+        masked_target_1d = masked_target.view(-1)
+        arange_1d = torch.arange(start=0, end=logits_2d.size()[0], device=logits_2d.device)
+        predicted_logits_1d = logits_2d[arange_1d, masked_target_1d]
+        predicted_logits_1d = predicted_logits_1d.clone().contiguous()
+        predicted_logits = predicted_logits_1d.view_as(target)
+        predicted_logits[target_mask] = 0.0
+        # All reduce is needed to get the chunks from other GPUs.
+        torch.distributed.all_reduce(
+            predicted_logits,
+            op=torch.distributed.ReduceOp.SUM,
+            group=model_parallel_group(),
+        )
+
+        # Sum of exponential of logits along vocab dimension across all GPUs.
+        exp_logits = vocab_parallel_logits
+        torch.exp(vocab_parallel_logits, out=exp_logits)
+        sum_exp_logits = exp_logits.sum(dim=-1)
+        torch.distributed.all_reduce(
+            sum_exp_logits,
+            op=torch.distributed.ReduceOp.SUM,
+            group=model_parallel_group(),
+        )
+
+        # Loss = log(sum(exp(logits))) - predicted-logit.
+        loss = torch.log(sum_exp_logits) - predicted_logits
+
+        # Normalize and optionally smooth logits
+        exp_logits.div_(sum_exp_logits.unsqueeze(dim=-1))
+
+        vocab_size = exp_logits.size(-1)
+        if label_smoothing > 0:
+            """
+            We'd like to assign 1 / (K - 1) probability mass to every index that is not the ground truth.
+            = (1 - alpha) * y_gt + alpha * mean(y_{i for i != gt})
+            = (1 - alpha) * y_gt + (alpha / (K - 1)) * \sum_{i != gt} y_i
+            = ((K - 1) * (1 - alpha) / (K - 1)) * y_gt + (alpha / (K - 1)) * \sum_{i != gt} y_i
+            = (K * (1 - alpha) - 1) / (K - 1)) * y_gt  + (alpha / (K - 1)) * \sum_{i} y_i
+            = (1 - (alpha * K) / (K - 1)) * y_gt + ( (alpha * K) / (K - 1) ) * \sum_{i} y_i / K
+            From: https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/common/losses/smoothed_cross_entropy.py
+            """
+            assert 1.0 > label_smoothing > 0.0
+            smoothing = label_smoothing * vocab_size / (vocab_size - 1)
+
+            # Exp logits at this point are normalized probabilities. So we can just take the log to get log-probs.
+            log_probs = torch.log(exp_logits)
+            mean_log_probs = log_probs.mean(dim=-1)
+            loss = (1.0 - smoothing) * loss - smoothing * mean_log_probs
+
+        ctx.label_smoothing, ctx.vocab_size = label_smoothing, vocab_size
+
+        # Store softmax, target-mask and masked-target for backward pass.
+        ctx.save_for_backward(exp_logits, target_mask, masked_target_1d)
+
+        return loss
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Retreive tensors from the forward path.
+        softmax, target_mask, masked_target_1d = ctx.saved_tensors
+        label_smoothing, vocab_size = ctx.label_smoothing, ctx.vocab_size
+
+        # All the inputs have softmax as thier gradient.
+        grad_input = softmax
+        # For simplicity, work with the 2D gradient.
+        partition_vocab_size = softmax.size()[-1]
+        grad_2d = grad_input.view(-1, partition_vocab_size)
+
+        # Add the gradient from matching classes.
+        arange_1d = torch.arange(start=0, end=grad_2d.size()[0], device=grad_2d.device)
+
+        softmax_update = 1.0 - target_mask.view(-1).float()
+
+        if label_smoothing > 0:
+            smoothing = label_smoothing * vocab_size / (vocab_size - 1)
+            grad_2d[arange_1d, masked_target_1d] -= (1.0 - smoothing) * softmax_update
+            average_grad = 1 / vocab_size
+            grad_2d[arange_1d, :] -= smoothing * average_grad
+        else:
+            grad_2d[arange_1d, masked_target_1d] -= softmax_update
+
+        # Finally elementwise multiplication with the output gradients.
+        grad_input.mul_(grad_output.unsqueeze(dim=-1))
+
+        return grad_input, None, None
+
+
+def vocab_parallel_cross_entropy(vocab_parallel_logits, target, label_smoothing=0.0):
+    """
+    Performs cross entropy loss when logits are split across tensor parallel ranks
+
+    Arguments:
+        vocab_parallel_logits: logits split across tensor parallel ranks
+                               dimension is [sequence_length, batch_size, hidden_size]
+
+        target: correct vocab ids of dimseion [sequence_length, micro_batch_size]
+
+        lobal_smoothing: smoothing factor, must be in range [0.0, 1.0)
+                         default is no smoothing (=0.0)
+    """
+    return _VocabParallelCrossEntropy.apply(vocab_parallel_logits, target, label_smoothing)

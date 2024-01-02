@@ -138,7 +138,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(device))
         packed_input_ids: torch.Tensor = data['packed_input_ids']
         cu_seqlens: torch.Tensor = data['cu_seqlens']
-        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
+        max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
 
         if isinstance(module, DeepSpeedPipelineEngine):
             logits = module.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)

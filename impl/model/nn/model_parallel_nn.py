@@ -7,7 +7,8 @@ from base.topology import PipeModelDataParallelTopology
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel, OutputHead
 from impl.model.nn.flash_mqat.flash_mqat_parallel import (ModelParallelModule, ParallelFlashMQATBlock,
                                                           ParallelVocabPositionEmbedding,
-                                                          SequenceParallelOutputHead)
+                                                          SequenceParallelActorHead,
+                                                          SequenceParallelCriticHead)
 from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
@@ -47,7 +48,12 @@ def make_causal_flash_mqat_parallel_pipe_module(
         )
         layer_specs.append(flash_mqat_block)
 
-    head_cls = SequenceParallelOutputHead if sequence_parallel else OutputHead
+    if is_critic and sequence_parallel:
+        head_cls = SequenceParallelCriticHead
+    elif not is_critic:
+        head_cls = SequenceParallelActorHead
+    else:
+        head_cls = OutputHead
     head = LayerSpec(
         head_cls,
         config.hidden_dim,

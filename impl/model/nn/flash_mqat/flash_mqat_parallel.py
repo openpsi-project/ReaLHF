@@ -12,12 +12,12 @@ from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATM
 from impl.model.utils.data import DuckGenerationOutput, PipeCacheData, PipeTransferData
 from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormColumnLinear,
                                                      LayerNormParallelMLP, LlamaLayerNormParallelMLP,
-                                                     ParallelEmbedding, RowParallelLinear)
+                                                     parallel_lm_logits, ParallelEmbedding, RowParallelLinear)
 from impl.model.utils.modules import LlamaRMSNorm, RotaryEmbedding
+from impl.model.utils.save_load import load_from_disk, save_to_disk
 from impl.model.utils.tensor import pad_sequence_parallel_input
 import base.constants
 import base.logging as logging
-from impl.model.utils.save_load import load_from_disk, save_to_disk
 import impl.model.utils.model_parallel.mappings as tensor_parallel
 
 try:
@@ -25,8 +25,6 @@ try:
                             flash_attn_with_kvcache)
 except ModuleNotFoundError:
     pass
-
-
 
 logger = logging.getLogger("ParallelFlashMQAT")
 
@@ -189,25 +187,28 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
             device=device,
         )
         self.mp_worldsize = base.constants.model_parallel_world_size()
-        assert n_q_heads % self.mp_worldsize == 0, f"n_q_heads {n_q_heads} must be divisible by "\
-                                                    f"mp_worldsize {self.mp_worldsize}"
-        if n_kv_heads > 1 and \
-            n_kv_heads % self.mp_worldsize == 0:
+        assert n_q_heads % self.mp_worldsize == 0, (f"n_q_heads {n_q_heads} must be divisible by "
+                                                    f"mp_worldsize {self.mp_worldsize}")
+        if n_kv_heads > 1 and n_kv_heads % self.mp_worldsize == 0:
             # split model parallel among heads if possible
-            self.k_attn = ColumnParallelLinear(hidden_dim,
-                                               head_dim * n_kv_heads,
-                                               bias=use_attention_bias,
-                                               async_tensor_model_parallel_allreduce=not sequence_parallel,
-                                               sequence_parallel=sequence_parallel,
-                                               dtype=dtype,
-                                               device=device)
-            self.v_attn = ColumnParallelLinear(hidden_dim,
-                                               head_dim * n_kv_heads,
-                                               bias=use_attention_bias,
-                                               async_tensor_model_parallel_allreduce=not sequence_parallel,
-                                               sequence_parallel=sequence_parallel,
-                                               dtype=dtype,
-                                               device=device)
+            self.k_attn = ColumnParallelLinear(
+                hidden_dim,
+                head_dim * n_kv_heads,
+                bias=use_attention_bias,
+                async_tensor_model_parallel_allreduce=not sequence_parallel,
+                sequence_parallel=sequence_parallel,
+                dtype=dtype,
+                device=device,
+            )
+            self.v_attn = ColumnParallelLinear(
+                hidden_dim,
+                head_dim * n_kv_heads,
+                bias=use_attention_bias,
+                async_tensor_model_parallel_allreduce=not sequence_parallel,
+                sequence_parallel=sequence_parallel,
+                dtype=dtype,
+                device=device,
+            )
         else:
             if n_kv_heads > 1:
                 logger.warning(f"Cannot split {n_kv_heads} kv heads evenly among "
@@ -224,12 +225,14 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
                                     dtype=dtype,
                                     device=device)
 
-        self.c_proj = RowParallelLinear(hidden_dim,
-                                        hidden_dim,
-                                        bias=use_attention_bias,
-                                        sequence_parallel=sequence_parallel,
-                                        dtype=dtype,
-                                        device=device)
+        self.c_proj = RowParallelLinear(
+            hidden_dim,
+            hidden_dim,
+            bias=use_attention_bias,
+            sequence_parallel=sequence_parallel,
+            dtype=dtype,
+            device=device,
+        )
         self.resid_dropout = nn.Dropout(resid_pdrop)
 
         self.attn_pdrop = attn_pdrop
@@ -287,7 +290,7 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         # aten::item will be called, which will cause a device-host sync and slow down performance.
         assert max_seqlen is None or isinstance(max_seqlen, int), type(max_seqlen)
         assert cu_seqlens is None or cu_seqlens.dtype == torch.int32
-        
+
         # default upcast, scale
         if self.scale_attn_by_inverse_layer_idx:
             unscale = self.layer_index + 1
@@ -302,7 +305,7 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         k: torch.Tensor = self.k_attn(hidden_states)
         v: torch.Tensor = self.v_attn(hidden_states)
         qk = torch.cat([q, k], dim=-1)
-        
+
         qk = qk.view(*qk.shape[:-1], (self.nq + self.nkv) // self.mp_worldsize, self.d)
         v = v.view(*v.shape[:-1], self.nkv // self.mp_worldsize, self.d)
 
@@ -464,8 +467,7 @@ class ParallelFlashMQATBlock(nn.Module):
         self.ckpt_full = False
 
     def gradient_checkpointing_enable(self, attn: bool = False, mlp: bool = False):
-        """ Called by backend
-        """
+        """Called by backend"""
         if attn or mlp:
             self.ckpt_attn = attn
             self.ckpt_mlp = mlp
@@ -494,15 +496,17 @@ class ParallelFlashMQATBlock(nn.Module):
                 False,
             )
         else:
-            pp_output, k, v = self._forward(pp_input,
-                                            cu_seqlens,
-                                            k_cache,
-                                            v_cache,
-                                            cache_seqlens,
-                                            max_seqlen,
-                                            attention_mask,
-                                            ckpt_attn=self.ckpt_attn,
-                                            ckpt_mlp=self.ckpt_mlp)
+            pp_output, k, v = self._forward(
+                pp_input,
+                cu_seqlens,
+                k_cache,
+                v_cache,
+                cache_seqlens,
+                max_seqlen,
+                attention_mask,
+                ckpt_attn=self.ckpt_attn,
+                ckpt_mlp=self.ckpt_mlp,
+            )
 
         x.pp_output = pp_output
         if x.store_kv_cache:
@@ -514,16 +518,18 @@ class ParallelFlashMQATBlock(nn.Module):
                 y.cache_seqlens = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
         return x
 
-    def _forward(self,
-                 pp_input: torch.Tensor,
-                 cu_seqlens: torch.Tensor,
-                 k_cache: Optional[torch.Tensor],
-                 v_cache: Optional[torch.Tensor],
-                 cache_seqlens: Optional[torch.Tensor],
-                 max_seqlen: int,
-                 attention_mask: Optional[torch.Tensor],
-                 ckpt_attn: Optional[bool] = False,
-                 ckpt_mlp: Optional[bool] = False) -> PipeTransferData:
+    def _forward(
+        self,
+        pp_input: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        k_cache: Optional[torch.Tensor],
+        v_cache: Optional[torch.Tensor],
+        cache_seqlens: Optional[torch.Tensor],
+        max_seqlen: int,
+        attention_mask: Optional[torch.Tensor],
+        ckpt_attn: Optional[bool] = False,
+        ckpt_mlp: Optional[bool] = False,
+    ) -> PipeTransferData:
         h = pp_input
         if ckpt_attn:
             attn_out, k, v = torch.utils.checkpoint.checkpoint(self.attn, h, cu_seqlens, k_cache, v_cache,
@@ -548,11 +554,28 @@ class ParallelFlashMQATBlock(nn.Module):
         return h, k, v
 
 
-class SequenceParallelOutputHead(nn.Linear):
+class SequenceParallelCriticHead(nn.Linear):
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         all_gather_buffer = tensor_parallel.gather_from_sequence_parallel_region(x.pp_input)
         x.pp_output = nn.functional.linear(all_gather_buffer, self.weight, self.bias)
+        return x
+
+
+class SequenceParallelActorHead(ColumnParallelLinear):
+
+    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
+        x.pp_output = parallel_lm_logits(
+            x.pp_input,
+            self.weight,
+            parallel_output=True,
+            async_tensor_model_parallel_allreduce=self.async_tensor_model_parallel_allreduce,
+            sequence_parallel=self.sequence_parallel,
+            gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+            bias=self.bias,
+        )
+        # NOTE: the output is not the whole logits, but the logits for a part of tokens due to ColumnParallelLinear.
+        # (However, data along the batch dim is all-gathered. No sequence parallel any more.)
         return x
 
 
@@ -604,7 +627,7 @@ class ParallelFlashMQATBase(nn.Module):
 
 
 class ModelParallelModule(nn.Module):
-    """ TODO: change into lower level module substitution
+    """TODO: change into lower level module substitution
     Currently only substitute FlashMQATModel into a ParallelFlashMQATBase
     """
 
@@ -625,10 +648,24 @@ class ModelParallelModule(nn.Module):
                                                         sequence_parallel=sequence_parallel,
                                                         dtype=dtype,
                                                         device=device)  # overwrite
-        if sequence_parallel:
-            self.module.head = SequenceParallelOutputHead(
+        if self.is_critic and sequence_parallel:
+            # Critic, we only replace the head when using sequence_parallel,
+            # as we need to gather input along the batch dim.
+            self.module.head = SequenceParallelCriticHead(
                 config.hidden_dim,
-                1 if self.is_critic else config.vocab_size,
+                1,
+                bias=False,
+                device=device,
+                dtype=dtype,
+            )
+        elif not self.is_critic:
+            # Actor. No matter sequence parallel or not, we replace the head
+            # to output logits of partial tokens.
+            self.module.head = SequenceParallelActorHead(
+                config.hidden_dim,
+                config.vocab_size,
+                sequence_parallel=sequence_parallel,
+                async_tensor_model_parallel_allreduce=not sequence_parallel,
                 bias=False,
                 device=device,
                 dtype=dtype,
@@ -636,14 +673,16 @@ class ModelParallelModule(nn.Module):
 
         self.num_checkpoint_shards = 1
 
-    def forward(self,
-                input_ids: Optional[torch.Tensor] = None,
-                attention_mask: Optional[torch.Tensor] = None,
-                packed_input_ids: Optional[torch.Tensor] = None,
-                cu_seqlens: Optional[torch.Tensor] = None,
-                max_seqlen: Optional[int] = None):
-        assert packed_input_ids is not None and cu_seqlens is not None, \
-               "Model parallel module only accept packed inputs."
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        packed_input_ids: Optional[torch.Tensor] = None,
+        cu_seqlens: Optional[torch.Tensor] = None,
+        max_seqlen: Optional[int] = None,
+    ):
+        assert (packed_input_ids is not None
+                and cu_seqlens is not None), "Model parallel module only accept packed inputs."
         pad_size = 0
         if self.sequence_parallel:
             packed_input_ids, cu_seqlens, max_seqlen, pad_size = pad_sequence_parallel_input(
@@ -671,8 +710,8 @@ class ModelParallelModule(nn.Module):
                                               fn_pattern=r".*" + f"-pp-00-mp-{mp_rank:02d}-" + r"s-(\d{2}).*",
                                               return_n_shards=True)
 
-        if init_critic_from_actor and f'{self.config.n_layers + 1}.weight' in state_dict:
-            state_dict.pop(f'{self.config.n_layers + 1}.weight')
+        if init_critic_from_actor and f"{self.config.n_layers + 1}.weight" in state_dict:
+            state_dict.pop(f"{self.config.n_layers + 1}.weight")
             self.module.load_state_dict(state_dict, strict=False)
         else:
             self.module.load_state_dict(state_dict, strict=True)
@@ -683,8 +722,10 @@ class ModelParallelModule(nn.Module):
         if dp_rank > 0:  # only save on dp_rank = 0
             return
 
-        save_to_disk(self.module.state_dict(),
-                     save_dir,
-                     output_fn=f"pytorch_model-pp-00-mp-{mp_rank:02d}-s-" + "{shard:02d}.bin",
-                     save_type="pt",
-                     n_shards=self.num_checkpoint_shards)
+        save_to_disk(
+            self.module.state_dict(),
+            save_dir,
+            output_fn=f"pytorch_model-pp-00-mp-{mp_rank:02d}-s-" + "{shard:02d}.bin",
+            save_type="pt",
+            n_shards=self.num_checkpoint_shards,
+        )
