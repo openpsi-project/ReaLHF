@@ -12,8 +12,8 @@ import api.config as config_package
 
 # TODO: organize parallel testing codes, merge pipe_parallel_test.py and model_parallel_test.py
 
-NUM_MP = 4
-NUM_PP = 2
+NUM_MP = 1
+NUM_PP = 4
 NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
