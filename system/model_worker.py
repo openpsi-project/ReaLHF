@@ -1,8 +1,8 @@
 from typing import Dict
 import gc
+import itertools
 import socket
 import time
-import itertools
 
 from deepspeed.accelerator import get_accelerator
 import deepspeed
@@ -39,6 +39,7 @@ def _str_to_torch_dtype(dtype: str):
 
 
 class ModelWorker(worker_base.Worker):
+
     def __init__(self, server=None):
         super().__init__(server)
         self.config = None
@@ -76,8 +77,7 @@ class ModelWorker(worker_base.Worker):
         self.__ddp_env_resolved = False
 
         self.__clear_cache_frequency = base.timeutil.FrequencyControl(
-            frequency_steps=self.config.cuda_cache_clear_freq
-        )
+            frequency_steps=self.config.cuda_cache_clear_freq)
 
         r = self.config.worker_info
         r.model_name = cfg.model_name
@@ -103,11 +103,9 @@ class ModelWorker(worker_base.Worker):
                 self.__pg_info.mw_groups[model_name_],
             )
 
-        logger.info(
-            f"SetUp Information - Model worker index {self.__worker_index}"
-            f' type "{self.config.model_name}" located at '
-            f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}."
-        )
+        logger.info(f"SetUp Information - Model worker index {self.__worker_index}"
+                    f' type "{self.config.model_name}" located at '
+                    f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}.")
 
         # if self.config.backend.type_ in ["ds_train", "ds_inference"]:
         deepspeed.init_distributed()
@@ -143,11 +141,9 @@ class ModelWorker(worker_base.Worker):
                     self.__model.tokenizer,
                     self.config.worker_info.experiment_name,
                     self.config.worker_info.trial_name,
-                    cache_root=(
-                        None if not self.config.use_dataset_cache else self.config.dataset_cahce_root
-                    ),
-                )
-                for d in self.config.eval_datasets
+                    cache_root=(None
+                                if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
+                ) for d in self.config.eval_datasets
             ]
             if len(eval_datasets) > 1:
                 eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
@@ -175,13 +171,10 @@ class ModelWorker(worker_base.Worker):
             # NOTE: Here "model_parallel_group" is the group of model *AND* pipeline parallel, thanks to deepspeed.
             self._bgroup = base.constants.grid().get_model_parallel_group()
             self._bsrc = dp_head_global_rank = (
-                self.config.topo.get_rank(data=self._dp_rank, pipe=self._pp_size - 1, model=0)
-                + base.constants.process_group_offset()
-            )
-            self.logger.info(
-                f"Get broadcast src global_rank={dp_head_global_rank} "
-                f"with dp_rank={self._dp_rank}, pp_rank={self._pp_size-1}, mp_rank=0"
-            )
+                self.config.topo.get_rank(data=self._dp_rank, pipe=self._pp_size - 1, model=0) +
+                base.constants.process_group_offset())
+            self.logger.info(f"Get broadcast src global_rank={dp_head_global_rank} "
+                             f"with dp_rank={self._dp_rank}, pp_rank={self._pp_size-1}, mp_rank=0")
 
             # DP head will receive data from the master, broadcast to all data parallel peers.
             # It will also return result back to master, while other workers in the data parallel group return None.
@@ -211,24 +204,16 @@ class ModelWorker(worker_base.Worker):
                     if self._is_dp_head:
                         logger.info(f"Create scatter buffer key {k} with shape {buf_shape}")
                     scatter_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
-                elif k in scatter_buffer and not base.numpy_utils.shape_leq(
-                    buf_shape, scatter_buffer[k].shape
-                ):
+                elif k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape,
+                                                                            scatter_buffer[k].shape):
                     if self._is_dp_head:
-                        logger.info(
-                            f"Resizing scatter buffer key {k} "
-                            f"from {scatter_buffer[k].shape} to {buf_shape}"
-                        )
+                        logger.info(f"Resizing scatter buffer key {k} "
+                                    f"from {scatter_buffer[k].shape} to {buf_shape}")
                     padding = tuple(
                         itertools.chain.from_iterable(
-                            reversed(
-                                [
-                                    (0, target_size - current_size)
-                                    for target_size, current_size in zip(buf_shape, scatter_buffer[k].shape)
-                                ]
-                            )
-                        )
-                    )
+                            reversed([(0, target_size - current_size)
+                                      for target_size, current_size in zip(buf_shape, scatter_buffer[k].shape)
+                                      ])))
                     scatter_buffer[k] = torch.nn.functional.pad(scatter_buffer[k], padding, "constant", 0)
 
             if self._is_dp_head:
@@ -285,10 +270,8 @@ class ModelWorker(worker_base.Worker):
             raise e
 
         if self._is_dp_head:
-            blogger.info(
-                f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
-                f" in ${time.perf_counter() - tik:.4f}$s"
-            )
+            blogger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
+                         f" in ${time.perf_counter() - tik:.4f}$s")
 
         if self._is_dp_head:
             # Discard returned data if not DP head.
@@ -313,24 +296,17 @@ class ModelWorker(worker_base.Worker):
                             logger.info(f"Create gather buffer key {k} with shape {buf_shape}")
                         gather_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
                     elif k in gather_buffer and not base.numpy_utils.shape_leq(
-                        buf_shape, gather_buffer[k].shape
-                    ):
+                            buf_shape, gather_buffer[k].shape):
                         if self._is_dp_head:
                             logger.info(
                                 f"Resizing gather buffer key {k} from {gather_buffer[k].shape} to {buf_shape}"
                             )
                         padding = tuple(
                             itertools.chain.from_iterable(
-                                reversed(
-                                    [
-                                        (0, target_size - current_size)
-                                        for target_size, current_size in zip(
-                                            buf_shape, gather_buffer[k].shape
-                                        )
-                                    ]
-                                )
-                            )
-                        )
+                                reversed([
+                                    (0, target_size - current_size)
+                                    for target_size, current_size in zip(buf_shape, gather_buffer[k].shape)
+                                ])))
                         gather_buffer[k] = torch.nn.functional.pad(gather_buffer[k], padding, "constant", 0)
 
                 reply = request_reply_stream.Payload(
@@ -376,15 +352,11 @@ class ModelWorker(worker_base.Worker):
         # logging gpu/cpu stats
         # self.print_monitor_info()
         tik = time.perf_counter()
-        blogger.debug(
-            (
-                "Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
-                    self.model_name,
-                    round(get_accelerator().memory_allocated() / 1024**3, 2),
-                    round(get_accelerator().max_memory_allocated() / 1024**3, 2),
-                )
-            )
-        )
+        blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
+            self.model_name,
+            round(get_accelerator().memory_allocated() / 1024**3, 2),
+            round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+        )))
         blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
 
         sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
