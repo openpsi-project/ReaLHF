@@ -30,10 +30,11 @@ def setup_gpu(rank, world_size):
     base.gpu_utils.isolate_cuda_device(WORKER_TYPE, rank, world_size, EXPR_NAME, TRIAL_NAME)
     print(f"rank {rank} isolated cuda device")
     BARRIER.wait()
-    base.gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME, MODEL_NAME, rank)
+    base.gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME, rank)
     print(f"rank {rank} revealed ddp identity")
     BARRIER.wait()
-    world_size, ddp_rank, local_gpu_id = base.gpu_utils.setup_ddp(EXPR_NAME, TRIAL_NAME, MODEL_NAME, rank)
+    info = base.gpu_utils.setup_ddp(EXPR_NAME, TRIAL_NAME, rank)
+    world_size = info.world_size
     device = torch.device('cuda', 0)
     print(f"rank {rank} setup ddp")
     import deepspeed
@@ -88,9 +89,11 @@ def init_global_constants(num_dp, num_mp, num_pp):
     ws = num_dp * num_mp * num_pp
     import torch.distributed as dist
     wg = dist.new_group(ranks=range(ws))
-    grid = PipelineParallelGrid(process_group=ws, topology=topo)
     import base.constants
-    base.constants.set_grid(grid)
+    base.constants.set_model_name(MODEL_NAME)
+    base.constants.set_parallelism_group(model_name=MODEL_NAME, pgroup=wg)
+    grid = PipelineParallelGrid(process_group=wg, topology=topo)
+    base.constants.set_grid(model_name=MODEL_NAME, grid=grid)
 
 
 def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
@@ -109,7 +112,7 @@ def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
         packed_input_ids=packed_input_ids,
         cu_seqlens=cu_seqlens,
         prompts=input_ids,
-        prompt_mask=prompt_mask,
+        prompt_mask=prompt_mask.bool(),
         prompt_att_mask=attention_mask,
     )
     return data
