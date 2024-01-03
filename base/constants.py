@@ -5,17 +5,6 @@ import getpass
 
 from base.cluster import spec as cluster_spec
 
-try:
-    import torch
-    torch._C._jit_set_profiling_executor(True)
-    torch._C._jit_set_profiling_mode(True)
-    torch._C._jit_override_can_fuse_on_cpu(False)
-    torch._C._jit_override_can_fuse_on_gpu(False)
-    torch._C._jit_set_texpr_fuser_enabled(False)
-    torch._C._jit_set_nvfuser_enabled(True)
-    torch._C._debug_set_autodiff_subgraph_inlining(False)
-except ModuleNotFoundError:
-    pass
 
 # constants in experiment instance scope
 MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
