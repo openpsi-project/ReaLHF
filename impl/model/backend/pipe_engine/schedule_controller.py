@@ -138,16 +138,17 @@ class EngineScheduleController:
                     inst: PipeInstruction
                     self.__inst_queues[stage_id].append((prior_sched, inst))
                     bind = inst.bind
-                    if bind:
-                        bind_stage_ri = ri[bind.stage_id]
-                        self.__inst_queues[bind.stage_id].append((prior_sched, bind))
-                        found = False
-                        for bind_inst in bind_stage_ri:
-                            if bind_inst == bind:
-                                found = True
-                                bind_stage_ri.remove(bind_inst)
-                        if not found:
-                            raise RuntimeError(f"Binded instruction {bind} of {inst} not ready.")
+                    if len(bind) > 0:
+                        for b in bind:
+                            bind_stage_ri = ri[b.stage_id]
+                            self.__inst_queues[b.stage_id].append((prior_sched, b))
+                            found = False
+                            for bind_inst in bind_stage_ri:
+                                if bind_inst == b:
+                                    found = True
+                                    bind_stage_ri.remove(bind_inst)
+                            if not found:
+                                raise RuntimeError(f"Binded instruction {bind} of {inst} not ready.")
                 else:
                     sched.update(stage_id)
 

@@ -278,13 +278,13 @@ class InferenceSchedule(DynamicPipeSchedule):
                 insts.append(ForwardPass(stage_id=s, micro_batch_id=m, deps=fwd_deps))
                 if s < self.num_stages - 1:
                     snd_deps = [ForwardPass(stage_id=s, micro_batch_id=m)]
-                    snd_bind = RecvActivation(stage_id=s + 1, micro_batch_id=m)
+                    snd_bind = [RecvActivation(stage_id=s + 1, micro_batch_id=m)]
                     # if m > 0:
                     #     snd_deps.append(SendActivation(stage_id=s, micro_batch_id=m - 1))
                     insts.append(SendActivation(stage_id=s, micro_batch_id=m, deps=snd_deps, bind=snd_bind))
                 if s > 0:
                     rcv_deps = [ForwardPass(stage_id=s - 1, micro_batch_id=m)]
-                    rcv_bind = SendActivation(stage_id=s - 1, micro_batch_id=m)
+                    rcv_bind = [SendActivation(stage_id=s - 1, micro_batch_id=m)]
                     # if m > 0:
                     #     rcv_deps.append(RecvActivation(stage_id=s, micro_batch_id=m - 1))
                     insts.append(RecvActivation(stage_id=s, micro_batch_id=m, deps=rcv_deps, bind=rcv_bind))
@@ -367,19 +367,19 @@ class GenerationSchedule(DynamicPipeSchedule):
 
             if s < self.num_stages - 1:
                 snd_deps = [ForwardPass(stage_id=s, micro_batch_id=m, step_id=t)]
-                snd_bind = RecvActivation(stage_id=s + 1, micro_batch_id=m, step_id=t)
+                snd_bind = [RecvActivation(stage_id=s + 1, micro_batch_id=m, step_id=t)]
                 insts.append(
                     SendActivation(stage_id=s, micro_batch_id=m, step_id=t, deps=snd_deps, bind=snd_bind))
 
             if s > 0:
                 rcv_deps = [ForwardPass(stage_id=s - 1, micro_batch_id=m, step_id=t)]
-                rcv_bind = SendActivation(stage_id=s - 1, micro_batch_id=m, step_id=t)
+                rcv_bind = [SendActivation(stage_id=s - 1, micro_batch_id=m, step_id=t)]
                 insts.append(
                     RecvActivation(stage_id=s, micro_batch_id=m, step_id=t, deps=rcv_deps, bind=rcv_bind))
 
             if s == self.num_stages - 1:
                 snd_deps = [ForwardPass(stage_id=s, micro_batch_id=m, step_id=t)]
-                snd_bind = RecvNextTokens(stage_id=0, micro_batch_id=m, step_id=t)
+                snd_bind = [RecvNextTokens(stage_id=0, micro_batch_id=m, step_id=t)]
                 insts.append(
                     SendNextTokens(stage_id=self.num_stages - 1,
                                    micro_batch_id=m,
@@ -389,7 +389,7 @@ class GenerationSchedule(DynamicPipeSchedule):
 
             if s == 0:
                 rcv_deps = [ForwardPass(stage_id=self.num_stages - 1, micro_batch_id=m, step_id=t)]
-                rcv_bind = SendNextTokens(stage_id=self.num_stages - 1, micro_batch_id=m, step_id=t)
+                rcv_bind = [SendNextTokens(stage_id=self.num_stages - 1, micro_batch_id=m, step_id=t)]
                 insts.append(
                     RecvNextTokens(stage_id=0, micro_batch_id=m, step_id=t, deps=rcv_deps, bind=rcv_bind))
 
@@ -471,7 +471,7 @@ class Train1F1BSchedule(DynamicPipeSchedule):
                     snd_act_deps = [ForwardPass(stage_id=s, micro_batch_id=m)]
                     # if m > 0:
                     #     snd_act_deps.append(SendActivation(stage_id=s, micro_batch_id=m - 1))
-                    snd_act_bind = RecvActivation(stage_id=s + 1, micro_batch_id=m)
+                    snd_act_bind = [RecvActivation(stage_id=s + 1, micro_batch_id=m)]
                     insts.append(
                         SendActivation(stage_id=s, micro_batch_id=m, deps=snd_act_deps, bind=snd_act_bind))
 
@@ -479,7 +479,7 @@ class Train1F1BSchedule(DynamicPipeSchedule):
                     rcv_act_deps = [ForwardPass(stage_id=s - 1, micro_batch_id=m)]
                     # if m > 0:
                     #     rcv_act_deps.append(RecvActivation(stage_id=s, micro_batch_id=m - 1))
-                    rcv_act_bind = SendActivation(stage_id=s - 1, micro_batch_id=m)
+                    rcv_act_bind = [SendActivation(stage_id=s - 1, micro_batch_id=m)]
                     insts.append(
                         RecvActivation(stage_id=s, micro_batch_id=m, deps=rcv_act_deps, bind=rcv_act_bind))
 
@@ -495,7 +495,7 @@ class Train1F1BSchedule(DynamicPipeSchedule):
                     snd_grad_deps = [BackwardPass(stage_id=s, micro_batch_id=m)]
                     # if m > 0:
                     #     snd_grad_deps.append(SendGrad(stage_id=s, micro_batch_id=m - 1))
-                    snd_grad_bind = RecvGrad(stage_id=s - 1, micro_batch_id=m)
+                    snd_grad_bind = [RecvGrad(stage_id=s - 1, micro_batch_id=m)]
                     insts.append(
                         SendGrad(stage_id=s, micro_batch_id=m, deps=snd_grad_deps, bind=snd_grad_bind))
 
@@ -503,7 +503,7 @@ class Train1F1BSchedule(DynamicPipeSchedule):
                     rcv_grad_deps = [BackwardPass(stage_id=s + 1, micro_batch_id=m)]
                     # if m > 0:
                     #     rcv_grad_deps.append(RecvGrad(stage_id=s, micro_batch_id=m - 1))
-                    rcv_grad_bind = SendGrad(stage_id=s + 1, micro_batch_id=m)
+                    rcv_grad_bind = [SendGrad(stage_id=s + 1, micro_batch_id=m)]
                     insts.append(
                         RecvGrad(stage_id=s, micro_batch_id=m, deps=rcv_grad_deps, bind=rcv_grad_bind))
 
@@ -520,6 +520,10 @@ class Train1F1BSchedule(DynamicPipeSchedule):
                     optimize_deps = [
                         ReduceGrads(stage_id=i, micro_batch_id=0) for i in range(self.num_micro_batches)
                     ]
-                    insts.append(OptimizerStep(stage_id=s, micro_batch_id=0, deps=optimize_deps))
+                    bind_stages = [i for i in range(self.num_stages)]
+                    bind_stages.remove(s)
+                    optimize_bind = [OptimizerStep(stage_id=s, micro_batch_id=0) for s in bind_stages]
+                    insts.append(
+                        OptimizerStep(stage_id=s, micro_batch_id=0, deps=optimize_deps, bind=optimize_bind))
 
         return insts

@@ -31,7 +31,7 @@ class PipeInstruction:
                  stage_id: int,
                  micro_batch_id: int,
                  deps: List['PipeInstruction'] = [],
-                 bind: Optional['PipeInstruction'] = None,
+                 bind: List['PipeInstruction'] = [],
                  step_id: int = 0,
                  **kwargs):
         self.stage_id = stage_id
