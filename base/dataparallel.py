@@ -72,8 +72,8 @@ class PackedParallelDataBroker(ParallelDataBroker):
 
         partitions = datapack.min_abs_diff_partition(src["input_lens"].cpu().numpy().astype(np.int64), n_dp)
 
-        input_lens: List[torch.IntTensor] = [src["input_lens"][start:end] for start, end in partitions]
-        cu_seqlens = [torch.cat([x.new_zeros(1), torch.cumsum(x, dim=0)]) for x in input_lens]
+        input_lens: List[torch.IntTensor] = [src["input_lens"][start:end].int() for start, end in partitions]
+        cu_seqlens = [torch.cat([x.new_zeros(1), torch.cumsum(x, dim=0)]).int() for x in input_lens]
         batch_sizes = [cu_seqlen.shape[0] - 1 for cu_seqlen in cu_seqlens]
 
         offsets = torch.tensor([sum(x) for x in input_lens], dtype=torch.int32).cumsum(0)
@@ -81,9 +81,11 @@ class PackedParallelDataBroker(ParallelDataBroker):
 
         # These are used by log probabilities, which are one-step shorter than packed inputed ids.
         short1input_lens = [x - 1 for x in input_lens]
-        short1cu_seqlens = [torch.cat([x.new_zeros(1), torch.cumsum(x, dim=0)]) for x in short1input_lens]
+        short1cu_seqlens = [
+            torch.cat([x.new_zeros(1), torch.cumsum(x, dim=0)]).int() for x in short1input_lens
+        ]
         short1offsets = torch.tensor([sum(x) for x in short1input_lens], dtype=torch.int32).cumsum(0)
-        short1offsets = torch.cat([short1offsets.new_zeros(1), short1offsets[:-1]])
+        short1offsets = torch.cat([short1offsets.new_zeros(1), short1offsets[:-1]]).int()
 
         splitted_data = [collections.defaultdict() for _ in range(n_dp)]
         for k, v in src.items():

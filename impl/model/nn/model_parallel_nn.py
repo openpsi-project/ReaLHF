@@ -22,6 +22,7 @@ def make_causal_flash_mqat_parallel_pipe_module(
     topology: PipeModelDataParallelTopology,
     is_critic: bool = False,
     sequence_parallel: bool = False,
+    gradient_accumulation_fusion: bool = True,
     partition_method: str = "parameters",
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
@@ -43,6 +44,7 @@ def make_causal_flash_mqat_parallel_pipe_module(
             layer_index=i,
             output_layernorm=(i == config.n_layers - 1),
             sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
             dtype=dtype,
             device=device,
         )
@@ -54,17 +56,32 @@ def make_causal_flash_mqat_parallel_pipe_module(
         head_cls = SequenceParallelActorHead
     else:
         head_cls = OutputHead
-    head = LayerSpec(
-        head_cls,
-        config.hidden_dim,
-        # 1 if is_critic else config.vocab_size,
-        # here preserve the original head for critic and swap it in pipeline modules
-        # to preserve same pipe stage division.
-        config.vocab_size,
-        bias=False,
-        device=device,
-        dtype=dtype,
-    )
+    if isinstance(head_cls, SequenceParallelActorHead):
+        head = LayerSpec(
+            head_cls,
+            config.hidden_dim,
+            # 1 if is_critic else config.vocab_size,
+            # here preserve the original head for critic and swap it in pipeline modules
+            # to preserve same pipe stage division.
+            config.vocab_size,
+            sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+            bias=False,
+            device=device,
+            dtype=dtype,
+        )
+    else:
+        head = LayerSpec(
+            head_cls,
+            config.hidden_dim,
+            # 1 if is_critic else config.vocab_size,
+            # here preserve the original head for critic and swap it in pipeline modules
+            # to preserve same pipe stage division.
+            config.vocab_size,
+            bias=False,
+            device=device,
+            dtype=dtype,
+        )
 
     layer_specs.append(head)
 
@@ -90,6 +107,7 @@ def model_pipe_wrap_fn(
     num_dp: int,
     is_critic: bool,
     sequence_parallel: bool = False,
+    gradient_accumulation_fusion: bool = True,
     partition_method: str = "parameters",
     init_critic_from_actor: bool = False,
     init_from_scratch: bool = False,
@@ -102,13 +120,15 @@ def model_pipe_wrap_fn(
                                f"pipeline module, provided type {type(model.module)}")
         config = model.module.config
         topology = PipeModelDataParallelTopology(num_pp=num_pp, num_mp=num_mp, num_dp=num_dp)
-        module = make_causal_flash_mqat_parallel_pipe_module(config,
-                                                             topology,
-                                                             is_critic,
-                                                             sequence_parallel=sequence_parallel,
-                                                             partition_method=partition_method,
-                                                             dtype=model.dtype,
-                                                             device=model.device)
+        module = make_causal_flash_mqat_parallel_pipe_module(
+            config,
+            topology,
+            is_critic,
+            sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+            partition_method=partition_method,
+            dtype=model.dtype,
+            device=model.device)
         if not init_from_scratch:
             process_memory_mb("before_load")
             module.load(model_path, init_critic_from_actor=init_critic_from_actor)
@@ -126,6 +146,7 @@ def model_parallel_wrap_fn(
     model_path: str,
     is_critic: bool,
     sequence_parallel: bool = False,
+    gradient_accumulation_fusion: bool = True,
     init_critic_from_actor: bool = False,
     init_from_scratch: bool = False,
 ):
@@ -138,6 +159,7 @@ def model_parallel_wrap_fn(
         module = ModelParallelModule(model.module,
                                      config,
                                      sequence_parallel=sequence_parallel,
+                                     gradient_accumulation_fusion=gradient_accumulation_fusion,
                                      dtype=model.dtype,
                                      device=model.device)
         if not init_from_scratch:

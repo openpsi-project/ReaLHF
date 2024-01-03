@@ -74,6 +74,70 @@ def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor
     return log_probs_labels.squeeze(-1)
 
 
+def build_shift_one_indices(x: torch.HalfTensor, cu_seqlens: torch.IntTensor) -> torch.IntTensor:
+    """Build indices for shifting labels/input_ids one step to the left.
+
+    Equivalent to:
+    ```
+    shift_one_indices = torch.cat([
+        torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
+        for i in range(cu_seqlens.shape[0] - 1)
+    ])
+    ```
+    but the above implementaion will implicitly convert a tensor (cu_seqlens[i]) to an integer,
+    which will cause a cuda device sync and slow down performance.
+
+    Args:
+        x (torch.HalfTensor): Shape [total_seqlen]. This tensor is required to get
+            total_seqlen from its shape. Computing total_seqlen from cu_seqlens will implicitly cause
+            a cuda device sync.
+        cu_seqlens (torch.IntTensor): Shape [bs + 1]. Indices marking the start
+            and end of each sequences.
+
+    Returns:
+        torch.IntTensor: Shape [tot_seqlen - bs]. Indices for shifting labels/input_ids
+            one step to the left.
+    """
+    total_seqlen = x.shape[0]
+    bs = cu_seqlens.shape[0] - 1
+    short1lens = cu_seqlens[1:] - cu_seqlens[:-1] - 1
+    short1cu_seqlens = torch.nn.functional.pad(short1lens.cumsum(0), (1, 0), value=0)
+    indexing_t = torch.arange(total_seqlen - bs, dtype=torch.long, device=cu_seqlens.device)
+    return indexing_t + (indexing_t.unsqueeze(0) >= short1cu_seqlens[:-1].unsqueeze(1)).sum(0)
+
+
+def build_leave_one_indices(x: torch.HalfTensor, cu_seqlens: torch.IntTensor) -> torch.IntTensor:
+    """Build indices for leaving one token out at the end of each sequence.
+
+    Equivalent to:
+    ```
+    leave_one_indices = torch.cat([
+        torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
+        for i in range(cu_seqlens.shape[0] - 1)
+    ])
+    ```
+    but the above implementaion will implicitly convert a tensor (cu_seqlens[i]) to an integer,
+    which will cause a cuda device sync and slow down performance.
+
+    Args:
+        x (torch.HalfTensor): Shape [total_seqlen]. This tensor is required to get
+            total_seqlen from its shape. Computing total_seqlen from cu_seqlens will implicitly cause
+            a cuda device sync.
+        cu_seqlens (torch.IntTensor): Shape [bs + 1]. Indices marking the start
+            and end of each sequences.
+
+    Returns:
+        torch.IntTensor: Shape [tot_seqlen - bs]. Indices for shifting labels/input_ids
+            one step to the left.
+    """
+    total_seqlen = x.shape[0]
+    bs = cu_seqlens.shape[0] - 1
+    short1lens = cu_seqlens[1:] - cu_seqlens[:-1] - 1
+    short1cu_seqlens = torch.nn.functional.pad(short1lens.cumsum(0), (1, 0), value=0)
+    indexing_t = torch.arange(total_seqlen - bs, dtype=torch.long, device=cu_seqlens.device)
+    return indexing_t + (indexing_t.unsqueeze(0) >= short1cu_seqlens[:-1].unsqueeze(1)).sum(0) - 1
+
+
 def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch.Tensor,
                                     labels: torch.LongTensor) -> torch.FloatTensor:
     """Gather log probs from packed input_ids and logits.
@@ -90,10 +154,7 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
         torch.FloatTensor: Log probability with shape [tot_seqlen - #seqs].
     """
     logits_shape = logits.shape
-    leave_one_indices = torch.cat([
-        torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
-        for i in range(cu_seqlens.shape[0] - 1)
-    ])
+    leave_one_indices = build_leave_one_indices(logits, cu_seqlens)
     # shift_one_indices = torch.cat([
     #     torch.arange(cu_seqlens[i] + 1 , cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
     #     for i in range(cu_seqlens.shape[0] - 1)
