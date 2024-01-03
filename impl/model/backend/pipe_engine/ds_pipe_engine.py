@@ -114,6 +114,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._train_mode = False  # for train_batch()
         self._inference_mode = True  # for evaluate() and forward()
 
+        self._first_token = False
+
         self._post_init_logging()
 
     def _post_init_logging(self):
@@ -242,15 +244,16 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         # pre allocate receive buffers and pre store other information
         for mbid, batch in enumerate(batches):
+            # print(f"tensor buffer alloc {mbid} {(mb_seq_lens[mbid], self.hidden_dim)}")
+            activation_shape = (mb_seq_lens[mbid], self.hidden_dim)
+            self.tensor_buffer.alloc("activation",
+                                     mbid,
+                                     activation_shape,
+                                     self.dtype,
+                                     self.device,
+                                     require_grads=self._train_mode)
+
             if self._train_mode:
-                # print(f"tensor buffer alloc {mbid} {(mb_seq_lens[mbid], self.hidden_dim)}")
-                activation_shape = (mb_seq_lens[mbid], self.hidden_dim)
-                self.tensor_buffer.alloc("activation",
-                                         mbid,
-                                         activation_shape,
-                                         self.dtype,
-                                         self.device,
-                                         require_grads=True)
                 self.tensor_buffer.alloc("grad", mbid, activation_shape, self.dtype, self.device)
             others_cache = dict(cu_seqlens=batch[0].cu_seqlens,
                                 max_seqlen=batch[0].max_seqlen,
@@ -268,6 +271,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._train_mode = False
         self._inference_mode = False
         self._compute_loss = False
+        self._first_token = True
 
     def _pre_generate(self):
         self.kv_cache_reserved = []  # ids of micro batches that have reserved kv cache
@@ -284,6 +288,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             self.tensor_buffer.put("gen_token_ph", mbid, [])
             self.tensor_buffer.put("gen_logprob_ph", mbid, [])
             self.tensor_buffer.put("gen_logits_mask_ph", mbid, [])
+            self.tensor_buffer.put("first_token", mbid, True)
 
     def _post_generate(self):
         # clear tensors
@@ -774,18 +779,39 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                                                      micro_batch_id,
                                                      remove=not self._train_mode)
         # send_pipe_transfer_data(x, self.next_stage)
-        if not self._train_mode:
-            p2p.send_tensor_meta(x.pp_input, self.next_stage)
+        # if not self._train_mode:
+        #     # self.rank_print(f"send tensor meta START {micro_batch_id}, {x.pp_input.shape}")
+        #     p2p.send_tensor_meta(x.pp_input, self.next_stage)
+        #     # self.rank_print(f"send tensor meta DONE {micro_batch_id}, {x.pp_input.shape}")
+        # self.rank_print(f"send tensor START {micro_batch_id}, {x.pp_input.shape}")
         p2p.send(x.pp_input, self.next_stage)
+        # self.rank_print(f"send tensor DONE {micro_batch_id}, {x.pp_input.shape}")
 
     def _exec_recv_activations(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert not self.is_first_stage()
-        if not self._train_mode:
-            buf = p2p.recv_tensor_meta(self.prev_stage)
-        else:
-            buf = self.tensor_buffer.get("activation", micro_batch_id, remove=False)
+        # if not self._train_mode:
+        #     # self.rank_print(f"recv tensor meta START {micro_batch_id}")
+        #     buf = p2p.recv_tensor_meta(self.prev_stage)
+        #     # self.rank_print(f"recv tensor meta DONE {micro_batch_id}, {buf.shape}")
+        # else:
+        buf = self.tensor_buffer.get("activation", micro_batch_id, remove=False)
+        if self._generate_mode:
+            ft = self.tensor_buffer.get("first_token", micro_batch_id, remove=False)
+            if ft:
+                bs = self.tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
+                act_shape = (bs, 1, self.hidden_dim)
+                self.tensor_buffer.alloc("activation",
+                                         micro_batch_id,
+                                         act_shape,
+                                         self.dtype,
+                                         self.device,
+                                         require_grads=False)
+                # self.rank_print(f"changed activation buffer mb {micro_batch_id} into shape {act_shape}")
+                self.tensor_buffer.put("first_token", micro_batch_id, False)
         others = self.tensor_buffer.get("pipe_transfer_infos", micro_batch_id, remove=False)
+        # self.rank_print(f"recv tensor START {micro_batch_id}, {buf.shape}")
         p2p.recv(buf, self.prev_stage)
+        # self.rank_print(f"recv tensor DONE {micro_batch_id}, {buf.shape}")
         x = PipeTransferData(pp_input=buf, **others)
         # x = recv_pipe_transfer_data(buf, self.prev_stage, others)
         self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
@@ -839,7 +865,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         lr_kwargs = None
         if self.version_steps is not None:
             lr_kwargs = {'epoch': self.version_steps}
+        # self.rank_print("before take model step")
         self._take_model_step(lr_kwargs=lr_kwargs)
+        # self.rank_print("after take model step")
 
         # sync loss scale across pipeline stages
         if not self.bfloat16_enabled():
@@ -854,12 +882,14 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             )
             self.optimizer.loss_scaler.cur_scale = min(total_scale_cuda[0].item(), 8192)
 
+        # self.rank_print("after sync loss scale")
+
         self._force_grad_boundary = False
 
     def _exec_end_schedule(self, stage_id: int, micro_batch_id: int, step_id: int):
         """ Used in StreamPipeEngine to force end the schedule. Do nothing. 
         """
-        pass
+        return True
 
     def _zero_grads(self, inputs):
         if isinstance(inputs, torch.Tensor):
@@ -946,3 +976,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 # logger.info(f"rank {self.global_rank} complete cmd: {cmd}")
             self.step_count += 1
         self.sched_count += 1
+
+    def rank_print(self, *args, **kwargs):
+        print(f"Rank {self.global_rank}: ", *args, **kwargs)

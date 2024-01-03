@@ -62,14 +62,18 @@ def main(rank):
     instructions = defaultdict(list)
     while True:
         if rank == 0 and not started:
-            sched = Train1F1BSchedule(num_micro_batches=NUM_PP * 2, num_stages=NUM_PP)
+            sched = GenerationSchedule(num_micro_batches=NUM_PP * 2,
+                                       num_stages=NUM_PP,
+                                       num_steps=100,
+                                       steps_per_update=5)
             controller.issue_schedule(sched, 10)
             started = True
 
-        # if rank == 0 and train_started is False:
-        #     sched = Train1F1BSchedule(num_micro_batches=NUM_PP * 2, num_stages=NUM_PP)
-        #     controller.issue_schedule(sched, 99)
-        #     train_started = True
+        if rank == 0 and train_started is False:
+            sched = Train1F1BSchedule(num_micro_batches=NUM_PP * 2, num_stages=NUM_PP)
+            controller.issue_schedule(sched, 99)
+            train_started = True
+
         sched_id, inst, end = client.poll_instruction()
 
         if sched_id is not None:
@@ -79,12 +83,13 @@ def main(rank):
             #     instructions[sched_id].append(inst)
             # time.sleep(0.01)
 
-            client.post_result(0)
+            sig = 1 if inst.name == "EndSchedule" else 0
+            client.post_result(sig)
             rank_print(rank, "Client posted result")
             last_recv_time = time.monotonic()
 
         count += 1
-        if time.monotonic() - st > 10:
+        if time.monotonic() - st > 20:
             # for sched_id, insts in instructions.items():
             #     rank_print(rank, f"Schedule {sched_id} instructions: {insts}; time elapsed {last_recv_time-st}")
             rank_print(rank, f"time elapsed {last_recv_time - st}")

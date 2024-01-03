@@ -1,3 +1,4 @@
+from collections import defaultdict
 from types import MethodType
 from typing import Callable, List, Optional, Tuple
 import dataclasses
@@ -68,8 +69,10 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         self.train_priority = 2
         self.generate_priority = 0
 
+        self.train_sched_id = 0
         # debug
         self.run_count = 0
+        self.executed = []
 
     def _forward_collect_result(self):
         logits = None
@@ -181,7 +184,10 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                     loss_fn: Callable,
                     input_lens_for_partition: Optional[torch.Tensor] = None,
                     **loss_fn_kwargs) -> EngineFuture:
-        sched = Train1F1BSchedule(num_micro_batches=self.num_micro_batches, num_stages=self.num_stages)
+        sched = Train1F1BSchedule(num_micro_batches=self.num_micro_batches,
+                                  num_stages=self.num_stages,
+                                  sched_id=self.train_sched_id)
+        self.train_sched_id += 1
         sched_index, f = self.start_schedule(sched, self.train_priority)
         self.set_state_mapping[sched_index] = self._set_train_batch_states
         self.result_collect_mapping[sched_index] = self._train_batch_collect_result
@@ -206,7 +212,8 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         sched = GenerationSchedule(num_micro_batches=self.num_micro_batches,
                                    num_stages=self.num_stages,
                                    num_steps=gconfig.max_new_tokens,
-                                   steps_per_update=5)
+                                   steps_per_update=5,
+                                   sched_id=99)
         sched_index, f = self.start_schedule(sched, self.generate_priority)
         # TODO: states: current_config, tokenizer, terminate_condition()
         self.set_state_mapping[sched_index] = self._set_generate_states
@@ -248,22 +255,25 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
 
         sched_id, cmd, sched_end = self.engine_client.poll_instruction()
         if sched_id is not None:
-            print(
-                f"Rank {self.global_rank}: received instruction sched id {sched_id} cmd {cmd} end {sched_end}"
-            )
+            # self.rank_print(
+            #     f"received instruction sched id {sched_id} cmd {cmd} end {sched_end}"
+            # )
             # sched_id, cmd, sched_end = r
             self.set_tensor_buffer(sched_id)
-            print(f"Rank {self.global_rank}: setting tensor buffer for schedule {sched_id}")
+            # self.rank_print(f"setting tensor buffer for schedule {sched_id}")
             self.set_state_mapping[sched_id]()
-            print(f"Rank {self.global_rank}: setting state for schedule {sched_id}")
+            # self.rank_print(f"setting state for schedule {sched_id}")
 
             if type(cmd) not in self._INSTRUCTION_MAP:
                 raise RuntimeError(f'{self.__class__.__name__} does not understand instruction {repr(cmd)}')
 
             try:
                 self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
-                print(f"Rank {self.global_rank}: executing cmd {cmd} of sched {sched_id}")
+                self.rank_print(f"START cmd {cmd} of sched {sched_id}")
+                # self.executed.append((sched_id, cmd))
+                # self.print_executed()
                 exec_end = self._exec_instr(*cmd.args, **cmd.kwargs)
+                self.rank_print(f"END cmd {cmd} of sched {sched_id}")
             except Exception as e:
                 logger.error(f"Rank {self.global_rank} Exception {e} in cmd {cmd}")
                 raise e
@@ -271,8 +281,8 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
             signal_code = 1 if exec_end else 0
             self.engine_client.post_result(signal_code)
 
-            if sched_end:
-                print(f"end sched id {sched_id}")
+            if exec_end:
+                # print(f"end sched id {sched_id}")
                 self.end_schedule(sched_id)
                 res = self.result_collect_mapping[sched_id]()
                 self.future_mapping[sched_id].set_result(res)
@@ -286,6 +296,12 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         # self.run_count += 1
         # if self.run_count % 10000 == 0:
         #     logger.info("Rank {} run count {}".format(self.global_rank, self.run_count))
+
+    def print_executed(self):
+        s = f"Rank {self.global_rank}: "
+        for sched_id, cmd in self.executed:
+            s += f"S{sched_id}::{cmd} - "
+        print(s)
 
     def stop_controller(self):
         if self.engine_controller is not None:

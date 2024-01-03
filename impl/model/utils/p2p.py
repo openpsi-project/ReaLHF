@@ -300,6 +300,7 @@ def recv_tensor_meta(send_stage: int, require_grad=False) -> torch.Tensor:
     """Receive metadata about upcoming p2p transfers and return allocated buffers.
 
     Metadata is communicated in this order:
+        * dtype
         * ndims
         * shape
 

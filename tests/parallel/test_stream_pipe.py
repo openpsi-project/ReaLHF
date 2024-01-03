@@ -16,12 +16,10 @@ parser.add_argument("--num_pp", type=int, default=4)
 parser.add_argument("--num_dp", type=int, default=1)
 parser.add_argument("--num_shards", type=int, default=3)
 parser.add_argument("--model_type", type=str, default="llama")
-parser.add_argument("--baseline_model_path",
-                    type=str,
-                    default="/lustre/public/pretrained_model_weights/Llama-2-7b-hf")
+parser.add_argument("--baseline_model_path", type=str, default="/home/meizy/models/test/Llama-2-4l")
 parser.add_argument("--batch_size", type=int, default=128)
 parser.add_argument("--min_new_tokens", type=int, default=10)
-parser.add_argument("--max_new_tokens", type=int, default=30)
+parser.add_argument("--max_new_tokens", type=int, default=100)
 parser.add_argument("--use_gradient_checkpointing", action="store_true")
 parser.add_argument("--use_bf16", action="store_true")
 parser.add_argument("--use_sequence_parallel", action="store_true")
@@ -37,7 +35,7 @@ if args.model_type == "llama":
     elif args.num_pp > 1:
         suffix = f"_{args.num_pp}pp_{args.num_mp}mp_{args.num_shards}s"
     setattr(args, "model_parallel_path",
-            "/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf" + suffix)
+            "/lustre/public/pretrained_model_weights/sharded/Llama-2-4l" + suffix)
 
 
 def init_handles(rank, args):
@@ -116,7 +114,7 @@ def run_generate(rank, seed):
             engine.run()
 
         res = interface.postprocess_generate(model, data, future)
-        print(f"rank {rank} mp generate time cost {time.monotonic() - st:.4f}, res {res}")
+        print(f"rank {rank} mp generate time cost {time.monotonic() - st:.4f}")
 
     if len(res) > 0:
         print(f"generate result gen_tokens shape{res['gen_tokens'].shape}, "
@@ -131,7 +129,7 @@ def run_mixed(rank, seed):
     from impl.model.backend.pipe_engine.stream_pipe_engine import StreamPipeEngine
     assert isinstance(engine, StreamPipeEngine)
 
-    train_data = init_data(model.tokenizer, device, args.batch_size, seed=seed)
+    train_datas = [init_data(model.tokenizer, device, args.batch_size, seed=seed + i) for i in range(1)]
     gen_data = init_data(model.tokenizer, device, args.batch_size, seed=seed + 100)
 
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
@@ -139,19 +137,37 @@ def run_mixed(rank, seed):
 
     st = time.monotonic()
     gf, _ = interface.generate(model, gen_data, gconfig=gconfig)
-    tf, _ = interface.train_step(model, train_data)
+    tfs = []
+    for train_data in train_datas:
+        tf, _ = interface.train_step(model, train_data)
+        tfs.append(tf)
 
-    while not gf.done() or not tf.done():
+    while not gf.done() or not all([tf.done() for tf in tfs]):
         engine.run()
 
     gres = interface.postprocess_generate(model, gen_data, gf)
-    tres = interface.postprocess_train_step(model, train_data, tf)
+    tress = []
+    for tf, train_data in zip(tfs, train_datas):
+        tres = interface.postprocess_train_step(model, train_data, tf)
+        tress.append(tres)
+    print(f"first mixed time cost {time.monotonic() - st:.4f}")
+
+    # for _ in range(10):
+    #     st = time.monotonic()
+    #     gf, _ = interface.generate(model, gen_data, gconfig=gconfig)
+    #     tf, _ = interface.train_step(model, train_data)
+
+    #     while not gf.done() or not tf.done():
+    #         engine.run()
+
+    #     gres = interface.postprocess_generate(model, gen_data, gf)
+    #     tres = interface.postprocess_train_step(model, train_data, tf)
+    #     print(f"mixed time cost {time.monotonic() - st:.4f}")
 
     if len(gres) > 0:
         print(f"generate result gen_tokens shape{gres['gen_tokens'].shape}, "
               f"log probs shape {gres['log_probs'].shape}")
-    print(f"tres {tres}")
-    print(f"mixed time cost {time.monotonic() - st:.4f}")
+    print(f"tres {tress}")
 
     engine.stop_controller()
 

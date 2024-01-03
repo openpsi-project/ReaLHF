@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from enum import IntEnum
-from typing import Tuple
+from typing import Dict, Tuple
 import copy
 import time
 
@@ -25,7 +25,11 @@ class DynamicPipeSchedule(ABC):
                         scheduled first in the centralized controller.
     """
 
-    def __init__(self, num_micro_batches: int, num_stages: int, num_steps: Optional[int] = 0):
+    def __init__(self,
+                 num_micro_batches: int,
+                 num_stages: int,
+                 num_steps: Optional[int] = 0,
+                 sched_id: int = 0):
         super().__init__()
         self.num_micro_batches = num_micro_batches
         self.num_stages = num_stages
@@ -39,12 +43,13 @@ class DynamicPipeSchedule(ABC):
 
         self.__initialized = False
         self.__terminated = False  # terminate the schedule, used to avoid duplicated terminate
+        self.__end_schedule_sent = False
+        self.__sched_id = sched_id
 
     def __init_inst_set(self):
+        # print("init inst set")
         self.__not_ready.add(self.init_instructions())
-        self.__bind_insts = defaultdict(list)
 
-        self.__stage_terminated = defaultdict(lambda: False)  # stage terminate,
         # avoid execute instruction after stage executed EndSchedule
         self.__update_ready()
 
@@ -65,18 +70,6 @@ class DynamicPipeSchedule(ABC):
         """
         return []
 
-    @property
-    def not_ready_instructions(self) -> InstructionSet:
-        """ Generate and return not executed instructions for all pipeline stages
-        """
-        return self.__not_ready.find()
-
-    @property
-    def ready_instructions(self) -> InstructionSet:
-        """ Return ready instructions for all pipeline stages
-        """
-        return self.__ready.find()
-
     def __update_ready(self):
         """ Update ready instructions from not_ready to ready
         """
@@ -91,80 +84,130 @@ class DynamicPipeSchedule(ABC):
         1. Move executed instructions from ready to executed. 
         2. Update, move ready instructions from not_ready to ready.
         """
+        if self.__terminated:
+            raise RuntimeError("Cannot execute an already terminated schedule.")
         for inst in insts:
-            if self.__stage_terminated[inst.stage_id]:
-                raise RuntimeError("Cannot execute an already terminated schedule.")
-            self.__inflight.remove(inst)
-            self.__executed.add(inst)
-            # print(f"executed {inst}")
-            # print(f"executed {insts}, inflight length {len(self.__inflight)}")
-            if inst.name == "EndSchedule":
-                self.__stage_terminated[inst.stage_id] = True
+            if inst.name != "EndSchedule":
+                self.__inflight.remove(inst)
+                self.__executed.add(inst)
         self.__update_ready()
 
-    def post_one_ready(self, stage_id: Optional[int]) -> Tuple[PipeInstruction, bool]:
-        """Called by controller to retrieve one ready instruction. 
-        If there is one ready instruction for stage id, move it from ready to inflight set 
-        and return this instruction.
-        Otherwise, if there is no instruction ready for this stage or the schedule is terminated, 
-        return None
+    def all_executed(self):
+        return len(self.__ready) + len(self.__not_ready) + len(self.__inflight) == 0
+
+    def ready(self) -> Dict[int, List[PipeInstruction]]:
+        """ Called by controller, return a dict that contains mapping from stage_id to 
+        ready instructions and enqueue all of them 
         """
+        if self.__terminated:
+            raise RuntimeError("Cannot get ready instructions from terminated schedule.")
         if not self.__initialized:
             self.__init_inst_set()
             self.__initialized = True
-        if self.__stage_terminated[stage_id]:
-            return None, False
-            # raise RuntimeError("Cannot post ready instruction from an already terminated schedule.")
 
-        # nothing to do for this schedule, terminate
-        if len(self.__ready) + len(self.__not_ready) + len(self.__inflight) == 0 \
-            and not self.__terminated:
-            self.terminate()
+        r = dict()
+        if self.all_executed() and not self.__end_schedule_sent:
+            for i in range(self.num_stages):
+                inst = EndSchedule(stage_id=i, micro_batch_id=0)
+                r[i] = [inst]
+            self.__end_schedule_sent = True
+            return r
 
-        # check binded instructions
-        bind_insts = self.__bind_insts[stage_id]
-        if len(bind_insts) > 0:
-            # print(f"binded insts for stage {stage_id}: {bind_insts}")
-            # there is a binded instruction queued for this stage
-            inst = bind_insts.pop(0)
-            if self.__ready.contain(inst):
-                # assert self.__executed.contain(inst) or self.__inflight.contain(inst)
+        for i in range(self.num_stages):
+            r[i] = self.__ready.find(stage_id=i)
+            for inst in r[i]:
                 self.__ready.remove(inst)
                 self.__inflight.add(inst)
-                # print(f"binded execute inst {inst}")
-                return inst, False
-            else:
-                if inst.name == "EndSchedule":
-                    # only end schedule with endschedule instruction
-                    self.__inflight.add(inst)
-                    return inst, True
-                elif not (self.__executed.contain(inst) or self.__inflight.contain(inst)):
-                    raise RuntimeError(
-                        f"Binded instruction {inst} for stage {stage_id} is not ready or does not exist.")
+        return r
 
-        # no binded instruction, find another ready instruction
-        insts = self.__ready.find(stage_id=stage_id)
-        if len(insts) > 0:
-            inst = insts[0]
-            self.__ready.remove(inst)
-            self.__inflight.add(inst)
-            if inst.bind:
-                other_stage_id = inst.bind.stage_id
-                self.__bind_insts[other_stage_id].append(inst.bind)
-                # print(f"bind inst {inst.bind} for stage {other_stage_id}")
-            # end = False
-            # print(f"normal execute inst {inst}")
-            return inst, False
-        else:
-            not_ready = self.__not_ready.find(stage_id=stage_id)
-            in_flight = self.__inflight.find(stage_id=stage_id)
-            if len(not_ready) == 0 and len(in_flight) == 0:
-                new_instructions = self.update_instructions()
-                if len(new_instructions) > 0:
-                    self.__not_ready.add(new_instructions)
-                    self.__update_ready()
-                    return self.post_one_ready(stage_id)
-        return None, False
+    # def enqueue(self, insts: List[PipeInstruction]):
+    #     """ mark instructions inflight
+    #     """
+    #     for inst in insts:
+    #         self.__ready.remove(inst)
+    #         self.__inflight.add(inst)
+
+    def update(self, stage_id):
+        """ Called by controller to find new instructions for some stage_id
+        """
+        if self.__terminated:
+            raise RuntimeError("Cannot update an already terminated schedule.")
+        not_ready = self.__not_ready.find(stage_id=stage_id)
+        in_flight = self.__inflight.find(stage_id=stage_id)
+        if len(not_ready) == 0 and len(in_flight) == 0:
+            new_instructions = self.update_instructions()
+            if len(new_instructions) > 0:
+                self.__not_ready.add(new_instructions)
+                self.__update_ready()
+                return True
+        return False
+
+    # def post_one_ready(self, stage_id: Optional[int]) -> Tuple[PipeInstruction, bool]:
+    #     """Called by controller to retrieve one ready instruction.
+    #     If there is one ready instruction for stage id, move it from ready to inflight set
+    #     and return this instruction.
+    #     Otherwise, if there is no instruction ready for this stage or the schedule is terminated,
+    #     return None
+    #     """
+    #     if not self.__initialized:
+    #         self.__init_inst_set()
+    #         self.__initialized = True
+    #     if self.__stage_terminated[stage_id]:
+    #         return None, False
+    #         # raise RuntimeError("Cannot post ready instruction from an already terminated schedule.")
+
+    #     # nothing to do for this schedule, terminate
+    #     if len(self.__ready) + len(self.__not_ready) + len(self.__inflight) == 0 \
+    #         and not self.__terminated:
+    #         self.terminate()
+
+    #     # check binded instructions
+    #     bind_insts = self.__bind_insts[stage_id]
+    #     if len(bind_insts) > 0:
+    #         print(f"binded insts for stage {stage_id}: {bind_insts}")
+    #         # there is a binded instruction queued for this stage
+    #         inst = bind_insts.pop(0)
+    #         if self.__ready.contain(inst):
+    #             # assert self.__executed.contain(inst) or self.__inflight.contain(inst)
+    #             self.__ready.remove(inst)
+    #             self.__inflight.add(inst)
+    #             print(f"Rank {stage_id} sched_id {self.__sched_id}: binded execute inst {inst}, left binded {bind_insts}")
+    #             return inst, False
+    #         else:
+    #             if inst.name == "EndSchedule":
+    #                 # only end schedule with endschedule instruction
+    #                 self.__inflight.add(inst)
+    #                 return inst, True
+    #             elif not (self.__executed.contain(inst) or self.__inflight.contain(inst)):
+    #                 raise RuntimeError(
+    #                     f"Binded instruction {inst} for stage {stage_id} is not ready or does not exist.")
+    #             else:
+    #                 print(f"Rank {stage_id} sched_id {self.__sched_id}: binded instruction {inst} is already executed or in flight, "
+    #                       f"left binded {bind_insts}")
+
+    #     # no binded instruction, find another ready instruction
+    #     insts = self.__ready.find(stage_id=stage_id)
+    #     if len(insts) > 0:
+    #         inst = insts[0]
+    #         self.__ready.remove(inst)
+    #         self.__inflight.add(inst)
+    #         if inst.bind:
+    #             other_stage_id = inst.bind.stage_id
+    #             self.__bind_insts[other_stage_id].append(inst.bind)
+    #             print(f"Rank {stage_id} sched_id {self.__sched_id}: bind inst {inst} + {inst.bind} for stage {other_stage_id}")
+    #         # end = False
+    #         print(f"Rank {stage_id} sched_id {self.__sched_id}: normal execute inst {inst}, binded list {self.__bind_insts[stage_id]}")
+    #         return inst, False
+    #     else:
+    #         not_ready = self.__not_ready.find(stage_id=stage_id)
+    #         in_flight = self.__inflight.find(stage_id=stage_id)
+    #         if len(not_ready) == 0 and len(in_flight) == 0:
+    #             new_instructions = self.update_instructions()
+    #             if len(new_instructions) > 0:
+    #                 self.__not_ready.add(new_instructions)
+    #                 self.__update_ready()
+    #                 return self.post_one_ready(stage_id)
+    #     return None, False
 
     def _is_update_ready(self, inst: PipeInstruction):
         """ check if an instruction is ready but not put into ready set
@@ -189,9 +232,10 @@ class DynamicPipeSchedule(ABC):
         if self.__terminated:
             raise RuntimeError("Cannot terminate an already terminated schedule.")
 
-        for i in range(self.num_stages):
-            self.__bind_insts[i].append(EndSchedule(stage_id=i, micro_batch_id=0))
-            self.__terminated = True
+        self.__terminated = True
+        # for i in range(self.num_stages):
+        #     self.__bind_insts[i].append(EndSchedule(stage_id=i, micro_batch_id=0))
+        #     self.__terminated = True
 
 
 class InferenceSchedule(DynamicPipeSchedule):
@@ -466,11 +510,16 @@ class Train1F1BSchedule(DynamicPipeSchedule):
                 if m == 0:
                     # reduce grad
                     reduce_grads_deps = [BackwardPass(stage_id=s, micro_batch_id=i) \
-                                            for i in range(self.num_micro_batches)]
+                                                for i in range(self.num_micro_batches)]
+                    if s > 0:
+                        reduce_grads_deps.extend([SendGrad(stage_id=s, micro_batch_id=i) \
+                                                        for i in range(self.num_micro_batches)])
                     insts.append(ReduceGrads(stage_id=s, micro_batch_id=0, deps=reduce_grads_deps))
 
                     # optimizer step
-                    optimize_deps = [ReduceGrads(stage_id=s, micro_batch_id=0)]
+                    optimize_deps = [
+                        ReduceGrads(stage_id=i, micro_batch_id=0) for i in range(self.num_micro_batches)
+                    ]
                     insts.append(OptimizerStep(stage_id=s, micro_batch_id=0, deps=optimize_deps))
 
         return insts

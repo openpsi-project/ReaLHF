@@ -197,7 +197,7 @@ def main():
     parser.add_argument("--num_mp", type=int, default=1)
     parser.add_argument("--num_shards", type=int, default=3)
     parser.add_argument("--output_dir", type=str, default=None)
-    parser.add_argument("--partition_method", type=str, default="parameters")
+    parser.add_argument("--partition_method", type=str, default="parameters_balanced")
     parser.add_argument(
         "--to_critic",
         action="store_true",
