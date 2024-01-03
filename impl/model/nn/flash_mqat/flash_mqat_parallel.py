@@ -5,6 +5,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
+import torch.distributed as dist
 
 from impl.model.nn.flash_mqat.flash_mqat_api import (DeepSpeedChatLikeFlashMQATCriticModel,
                                                      HuggingfaceLikeFlashMQATForCausalLM)
@@ -12,7 +13,8 @@ from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATM
 from impl.model.utils.data import DuckGenerationOutput, PipeCacheData, PipeTransferData
 from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormColumnLinear,
                                                      LayerNormParallelMLP, LlamaLayerNormParallelMLP,
-                                                     parallel_lm_logits, ParallelEmbedding, RowParallelLinear)
+                                                     parallel_lm_logits, ParallelEmbedding, RowParallelLinear,
+                                                     merged_linear_with_grad_accumulation_and_async_allreduce)
 from impl.model.utils.modules import LlamaRMSNorm, RotaryEmbedding
 from impl.model.utils.save_load import load_from_disk, save_to_disk
 from impl.model.utils.tensor import pad_sequence_parallel_input
@@ -224,6 +226,12 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
                                     bias=use_attention_bias,
                                     dtype=dtype,
                                     device=device)
+            dist.all_reduce(self.k_attn.weight.data, op=dist.ReduceOp.SUM, group=base.constants.model_parallel_group())
+            if use_attention_bias:
+                dist.all_reduce(self.k_attn.bias.data, op=dist.ReduceOp.SUM, group=base.constants.model_parallel_group())
+            dist.all_reduce(self.v_attn.weight.data, op=dist.ReduceOp.SUM, group=base.constants.model_parallel_group())
+            if use_attention_bias:
+                dist.all_reduce(self.v_attn.bias.data, op=dist.ReduceOp.SUM, group=base.constants.model_parallel_group())
 
         self.c_proj = RowParallelLinear(
             hidden_dim,
@@ -301,13 +309,28 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         scale_factor /= self.d**0.5
 
         hidden_states = self.ln(hidden_states)
-        q: torch.Tensor = self.q_attn(hidden_states)
-        k: torch.Tensor = self.k_attn(hidden_states)
-        v: torch.Tensor = self.v_attn(hidden_states)
+        
+        _gradient_accumulation_fusion=self.q_attn.gradient_accumulation_fusion
+        _async_grad_allreduce=self.q_attn.async_tensor_model_parallel_allreduce
+        _sequence_parallel=self.q_attn.sequence_parallel
+        _is_w_parallel=[True, isinstance(self.k_attn, ColumnParallelLinear), isinstance(self.v_attn, ColumnParallelLinear)]
+        q, k, v = merged_linear_with_grad_accumulation_and_async_allreduce(
+            hidden_states, 
+            _gradient_accumulation_fusion,
+            _async_grad_allreduce,
+            _sequence_parallel,
+            _is_w_parallel,
+            self.q_attn.weight, self.q_attn.bias, self.k_attn.weight, self.k_attn.bias,
+            self.v_attn.weight, self.v_attn.bias
+        )
         qk = torch.cat([q, k], dim=-1)
 
-        qk = qk.view(*qk.shape[:-1], (self.nq + self.nkv) // self.mp_worldsize, self.d)
-        v = v.view(*v.shape[:-1], self.nkv // self.mp_worldsize, self.d)
+        if isinstance(self.k_attn, ColumnParallelLinear):
+            qk = qk.view(*qk.shape[:-1], (self.nq + self.nkv) // self.mp_worldsize, self.d)
+            v = v.view(*v.shape[:-1], self.nkv // self.mp_worldsize, self.d)
+        else:
+            qk = qk.view(*qk.shape[:-1], self.nq // self.mp_worldsize + self.nkv, self.d)
+            v = v.view(*v.shape[:-1], self.nkv, self.d)
 
         if self.apply_rotary and k_cache is None:
             # otherwise, we input rotary cos/sin directly into flash_attn_with_kvcache
@@ -323,7 +346,10 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         else:
             rotary_cos = rotary_sin = None
 
-        q, k = qk.split((self.nq // self.mp_worldsize, self.nkv // self.mp_worldsize), dim=-2)
+        if isinstance(self.k_attn, ColumnParallelLinear):
+            q, k = qk.split((self.nq // self.mp_worldsize, self.nkv // self.mp_worldsize), dim=-2)
+        else:
+            q, k = qk.split((self.nq // self.mp_worldsize, self.nkv), dim=-2)
 
         if k_cache is not None and len(q.shape) == 4:
             # k_cache/v_cache shape: [bs, max_seq, n_kv_heads, head_dim]
