@@ -26,6 +26,7 @@ def get_activation_fn(activation_function: str) -> Callable:
 
 
 class LayerNormLinear(nn.Module):
+
     def __init__(
         self,
         input_dim: int,
@@ -53,6 +54,7 @@ class LayerNormLinear(nn.Module):
 
 
 class LayerNormMLP(nn.Module):
+
     def __init__(
         self,
         hidden_dim: int,
@@ -82,6 +84,7 @@ class LayerNormMLP(nn.Module):
 
 
 class LlamaLayerNormMLP(nn.Module):
+
     def __init__(
         self,
         hidden_dim: int,
@@ -97,15 +100,21 @@ class LlamaLayerNormMLP(nn.Module):
         self.hidden_size = hidden_dim
         self.intermediate_size = intermediate_dim
         self.ln = LlamaRMSNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.gate_proj = nn.Linear(
-            self.hidden_size, self.intermediate_size, bias=False, dtype=dtype, device=device
-        )
-        self.up_proj = nn.Linear(
-            self.hidden_size, self.intermediate_size, bias=False, dtype=dtype, device=device
-        )
-        self.down_proj = nn.Linear(
-            self.intermediate_size, self.hidden_size, bias=False, dtype=dtype, device=device
-        )
+        self.gate_proj = nn.Linear(self.hidden_size,
+                                   self.intermediate_size,
+                                   bias=False,
+                                   dtype=dtype,
+                                   device=device)
+        self.up_proj = nn.Linear(self.hidden_size,
+                                 self.intermediate_size,
+                                 bias=False,
+                                 dtype=dtype,
+                                 device=device)
+        self.down_proj = nn.Linear(self.intermediate_size,
+                                   self.hidden_size,
+                                   bias=False,
+                                   dtype=dtype,
+                                   device=device)
         self.act_fn = get_activation_fn(activation_function)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -114,6 +123,7 @@ class LlamaLayerNormMLP(nn.Module):
 
 
 class LlamaRMSNorm(nn.Module):
+
     def __init__(
         self,
         hidden_size: int,

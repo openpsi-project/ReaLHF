@@ -5,7 +5,6 @@ import getpass
 
 from base.cluster import spec as cluster_spec
 
-
 # constants in experiment instance scope
 MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
 LOG_ROOT = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}"

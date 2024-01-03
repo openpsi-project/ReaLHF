@@ -657,6 +657,12 @@ class ParallelFlashMQATBase(nn.Module):
         return [self.embedding_layer] + list(self.h)
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
+        ############## FIXME: we should ensure this outside the model ##############
+        if x.max_seqlen is not None:
+            x.max_seqlen = int(x.max_seqlen)
+        if x.cu_seqlens is not None:
+            x.cu_seqlens = x.cu_seqlens.int()
+        ############## FIXME: we should ensure this outside the model ##############
         layers = self.to_layers()
         assert len(ys) == len(layers), (len(ys), len(layers))
         raw_pp_input = x.pp_input

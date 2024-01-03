@@ -1,10 +1,10 @@
 # Copyright (c) 2023, Tri Dao.
 
+from typing import Literal, Optional, Tuple, Union
 import math
-from typing import Optional, Tuple, Union, Literal
 
-import torch
 from einops import rearrange, repeat
+import torch
 
 try:
     from flash_attn.ops.triton.rotary import apply_rotary
@@ -13,6 +13,7 @@ except ModuleNotFoundError:
 
 
 class ApplyRotaryEmb(torch.autograd.Function):
+
     @staticmethod
     def forward(
         ctx,
@@ -162,21 +163,15 @@ class RotaryEmbedding(torch.nn.Module):
         self._sin_k_cached = None
 
     def _compute_inv_freq(self, device=None):
-        return 1.0 / (
-            self.base ** (torch.arange(0, self.dim, 2, device=device, dtype=torch.float32) / self.dim)
-        )
+        return 1.0 / (self.base
+                      **(torch.arange(0, self.dim, 2, device=device, dtype=torch.float32) / self.dim))
 
     def _update_cos_sin_cache(self, seqlen, device=None, dtype=None):
         # Reset the tables if the sequence length has changed,
         # if we're on a new device (possibly due to tracing for instance),
         # or if we're switching from inference mode to training
-        if (
-            seqlen > self._seq_len_cached
-            or self._cos_cached is None
-            or self._cos_cached.device != device
-            or self._cos_cached.dtype != dtype
-            or (self.training and self._cos_cached.is_inference())
-        ):
+        if (seqlen > self._seq_len_cached or self._cos_cached is None or self._cos_cached.device != device
+                or self._cos_cached.dtype != dtype or (self.training and self._cos_cached.is_inference())):
             self._seq_len_cached = seqlen
             # We want fp32 here, not self.inv_freq.dtype, since the model could be loaded in bf16
             # And the output of arange can be quite large, so bf16 would lose a lot of precision.
@@ -198,10 +193,9 @@ class RotaryEmbedding(torch.nn.Module):
                 if self.scale_type == "linear":
                     t = t / self.scale_factor
                 elif self.scale_type == "dynamic":
-                    base = self.base * (
-                        (self.scale_factor * seqlen / self._seq_len_cached) - (self.scale_factor - 1)
-                    ) ** (self.dim / (self.dim - 2))
-                    inv_freq = 1.0 / (base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim))
+                    base = self.base * ((self.scale_factor * seqlen / self._seq_len_cached) -
+                                        (self.scale_factor - 1))**(self.dim / (self.dim - 2))
+                    inv_freq = 1.0 / (base**(torch.arange(0, self.dim, 2).float().to(device) / self.dim))
                     self.register_buffer("inv_freq", inv_freq, persistent=False)
                 else:
                     raise NotImplementedError("Unsupported scale type", self.scale_type)

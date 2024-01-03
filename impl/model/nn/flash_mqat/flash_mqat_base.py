@@ -11,7 +11,8 @@ import transformers
 
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import torch_attn_func
-from impl.model.utils.modules import LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm, RotaryEmbedding
+from impl.model.utils.modules import (LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm,
+                                      RotaryEmbedding)
 from impl.model.utils.save_load import load_from_disk, save_to_disk
 import base.logging as logging
 
@@ -155,7 +156,7 @@ class CausalSelfAttentionLayer(nn.Module):
         # aten::item will be called, which will cause a device-host sync and slow down performance.
         assert max_seqlen is None or isinstance(max_seqlen, int), type(max_seqlen)
         assert cu_seqlens is None or cu_seqlens.dtype == torch.int32
-        
+
         # default upcast, scale
         if self.scale_attn_by_inverse_layer_idx:
             unscale = self.layer_index + 1
@@ -552,6 +553,12 @@ class FlashMQATBase(nn.Module):
         return [self.embedding_layer] + list(self.h)
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
+        ############## FIXME: we should ensure this outside the model ##############
+        if x.max_seqlen is not None:
+            x.max_seqlen = int(x.max_seqlen)
+        if x.cu_seqlens is not None:
+            x.cu_seqlens = x.cu_seqlens.int()
+        ############## FIXME: we should ensure this outside the model ##############
         layers = self.to_layers()
         assert len(ys) == len(layers), (len(ys), len(layers))
         raw_pp_input = x.pp_input

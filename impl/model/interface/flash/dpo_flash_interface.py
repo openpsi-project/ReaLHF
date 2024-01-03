@@ -62,7 +62,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
 
         input_lens: torch.IntTensor = data["pair_input_lens"]
         prompt_lens: torch.IntTensor = data["prompt_lens"]
-        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)])
+        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)]).int()
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
@@ -95,7 +95,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
         input_lens: torch.Tensor = data["pair_input_lens"]
         prompt_lens: torch.IntTensor = data["prompt_lens"]
-        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0)
+        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
         module = model.module

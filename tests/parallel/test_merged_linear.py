@@ -14,9 +14,11 @@ torchrun --standalone --nnodes=1 --nproc-per-node=8 --module \
 """
 import os
 import time
+
 import torch
-import torch.profiler
 import torch.distributed
+import torch.profiler
+
 import base.namedarray
 
 batch_size = 8
@@ -48,15 +50,10 @@ def main(rank: int = None, world_size: int = None):
 
     deepspeed.init_distributed()
 
-    from .test_model_parallel import (
-        init_global_constants,
-        NUM_MP,
-    )
-    from impl.model.utils.model_parallel.modules import (
-        ColumnParallelLinear,
-        merged_linear_with_grad_accumulation_and_async_allreduce,
-    )
+    from .test_model_parallel import init_global_constants, NUM_MP
     from impl.model.utils.model_parallel.mappings import gather_from_tensor_model_parallel_region
+    from impl.model.utils.model_parallel.modules import (
+        ColumnParallelLinear, merged_linear_with_grad_accumulation_and_async_allreduce)
 
     NUM_PP = NUM_DP = 1
     init_global_constants(NUM_DP, NUM_MP, NUM_PP)
@@ -84,9 +81,8 @@ def main(rank: int = None, world_size: int = None):
             device=device,
         )
     else:
-        kv_attn = torch.nn.Linear(hidden_dim, head_dim * n_kv_heads, bias=use_bias).to(
-            device=device, dtype=dtype
-        )
+        kv_attn = torch.nn.Linear(hidden_dim, head_dim * n_kv_heads, bias=use_bias).to(device=device,
+                                                                                       dtype=dtype)
         torch.distributed.all_reduce(kv_attn.weight.data)
         if kv_attn.bias is not None:
             torch.distributed.all_reduce(kv_attn.bias.data)

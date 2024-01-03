@@ -47,8 +47,8 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
     @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_input_ids: torch.Tensor = data["packed_input_ids"].squeeze()
-        cu_seqlens: torch.Tensor = data["cu_seqlens"].squeeze()
+        packed_input_ids: torch.Tensor = data["packed_input_ids"]
+        cu_seqlens: torch.Tensor = data["cu_seqlens"].int()
 
         module: deepspeed.DeepSpeedEngine = model.module
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
@@ -87,7 +87,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
         input_lens: torch.Tensor = data["pair_input_lens"]
         group_factor: torch.Tensor = data["group_factor"]
-        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0)
+        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
         module = model.module
@@ -166,7 +166,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
             packed_input_ids: torch.Tensor = data["packed_input_ids"]
             input_lens: torch.Tensor = data["pair_input_lens"]
             group_factor: torch.Tensor = data["group_factor"]
-            cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0)
+            cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
             max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
             if isinstance(model, DeepSpeedPipelineEngine):

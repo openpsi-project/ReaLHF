@@ -14,6 +14,7 @@ logger = logging.getLogger("Modules")
 
 
 class ExponentialRunningMeanStd(nn.Module):
+
     def __init__(self, beta=0.999, epsilon=1e-5, high_precision=True):
         super().__init__()
         self.__beta = beta
@@ -22,12 +23,10 @@ class ExponentialRunningMeanStd(nn.Module):
         self.__dtype = torch.float64 if high_precision else torch.float32
 
         self.__mean = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"), requires_grad=False)
-        self.__mean_sq = nn.Parameter(
-            torch.zeros((1,), dtype=self.__dtype, device="cuda"), requires_grad=False
-        )
-        self.__debiasing_term = nn.Parameter(
-            torch.zeros((1,), dtype=self.__dtype, device="cuda"), requires_grad=False
-        )
+        self.__mean_sq = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"),
+                                      requires_grad=False)
+        self.__debiasing_term = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"),
+                                             requires_grad=False)
 
         self.reset_parameters()
 
@@ -86,15 +85,15 @@ class ExponentialRunningMeanStd(nn.Module):
 
 
 class MovingAverageRunningMeanStd(nn.Module):
+
     def __init__(self, high_precision=True):
         super().__init__()
 
         self.__dtype = torch.float64 if high_precision else torch.float32
 
         self.__mean = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"), requires_grad=False)
-        self.__mean_sq = nn.Parameter(
-            torch.zeros((1,), dtype=self.__dtype, device="cuda"), requires_grad=False
-        )
+        self.__mean_sq = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"),
+                                      requires_grad=False)
         self.__accum_denominator = 0
 
         self.reset_parameters()
@@ -127,12 +126,10 @@ class MovingAverageRunningMeanStd(nn.Module):
             dist.all_reduce(x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group())
             dist.all_reduce(x_sum_sq, op=dist.ReduceOp.SUM, group=data_parallel_group())
 
-        self.__mean.data[:] = (self.__accum_denominator * self.__mean.data[:] + x_sum) / (
-            self.__accum_denominator + factor
-        )
-        self.__mean_sq.data[:] = (self.__accum_denominator * self.__mean_sq.data[:] + x_sum_sq) / (
-            self.__accum_denominator + factor
-        )
+        self.__mean.data[:] = (self.__accum_denominator * self.__mean.data[:] +
+                               x_sum) / (self.__accum_denominator + factor)
+        self.__mean_sq.data[:] = (self.__accum_denominator * self.__mean_sq.data[:] +
+                                  x_sum_sq) / (self.__accum_denominator + factor)
         self.__accum_denominator += factor
 
     @torch.no_grad()
@@ -153,6 +150,7 @@ class MovingAverageRunningMeanStd(nn.Module):
 
 
 class PopArtValueHead(nn.Module):
+
     def __init__(
         self,
         input_dim,
