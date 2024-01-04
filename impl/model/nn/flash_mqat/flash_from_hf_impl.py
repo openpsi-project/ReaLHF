@@ -259,7 +259,6 @@ def to_llama_state_dict(state_dict: Dict, config: FlashMQATConfig) -> Dict:
                 k = k.replace(k1, k2)
             new_state_dict[k] = v
         state_dict = new_state_dict
-    print(list(state_dict.keys()))
     for i in range(config.n_layers):
         w = state_dict[f"model.layers.{i}.self_attn.c_attn.linear.weight"]
         nq = config.hidden_dim // config.head_dim
@@ -320,6 +319,9 @@ def convert_config_parallel_llama(hf_config: transformers.LlamaConfig) -> FlashM
     )
 
 
+# TODO: add a function to merge back from model parallel state dict
+
+
 def convert_state_dict_parallel_llama(state_dict: Dict,
                                       config: FlashMQATConfig,
                                       load_model_parallel_as_list=False) -> Dict:
@@ -359,7 +361,13 @@ def convert_state_dict_parallel_llama(state_dict: Dict,
     # keys used to identify modules
     embedding_keys = [".wte"]  # dim=0 no bias
     column_linear_keys = [
-        ".attn.q_attn", ".attn.k_attn", ".attn.v_attn", ".mlp.c_fc", ".mlp.gate_proj", ".mlp.up_proj"
+        ".attn.q_attn",
+        ".attn.k_attn",
+        ".attn.v_attn",
+        ".mlp.c_fc",
+        ".mlp.gate_proj",
+        ".mlp.up_proj",
+        "head.weight",
     ]  # dim=0 + partition bias
     row_linear_keys = [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
 

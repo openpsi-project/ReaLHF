@@ -13,6 +13,7 @@ def get_flash_mqat_model_config(
     is_critic: bool,
     use_lora: bool,
     sequence_parallel: bool = False,
+    gradient_accumulation_fusion: bool = False,
     dtype: Optional[str] = None,
     lora_dim: Optional[int] = None,
     lora_scaling: Optional[float] = None,
@@ -25,6 +26,8 @@ def get_flash_mqat_model_config(
     v_head_path: Optional[str] = None,
     partition_method: Optional[str] = "parameters",
 ):
+    if gradient_accumulation_fusion:
+        raise RuntimeError("gradient_accumulation_fusion is not supported yet")
     if (use_lora or is_sft_lora or is_rew_lora) and pp_size > 1:
         raise NotImplementedError("LORA is not supported in pipeline model")
     model = Model(
@@ -106,6 +109,7 @@ def get_flash_mqat_model_config(
                     model_path=model_path,
                     is_critic=is_critic,
                     sequence_parallel=sequence_parallel,
+                    gradient_accumulation_fusion=gradient_accumulation_fusion,
                     init_critic_from_actor=init_critic_from_actor,
                     init_from_scratch=init_from_scratch,
                 ),
@@ -121,6 +125,7 @@ def get_flash_mqat_model_config(
                     num_mp=mp_size,
                     num_dp=dp_size,
                     sequence_parallel=sequence_parallel,
+                    gradient_accumulation_fusion=gradient_accumulation_fusion,
                     is_critic=is_critic,
                     partition_method=partition_method,
                     init_critic_from_actor=init_critic_from_actor,

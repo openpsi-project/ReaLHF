@@ -3,6 +3,7 @@ import functools
 import os
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.utils.checkpoint
 
@@ -10,26 +11,23 @@ from impl.model.nn.flash_mqat.flash_mqat_api import (DeepSpeedChatLikeFlashMQATC
                                                      HuggingfaceLikeFlashMQATForCausalLM)
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel
 from impl.model.utils.data import DuckGenerationOutput, PipeCacheData, PipeTransferData
-from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormColumnLinear,
-                                                     LayerNormParallelMLP, LlamaLayerNormParallelMLP,
-                                                     ParallelEmbedding, RowParallelLinear)
-from impl.model.utils.modules import LlamaRMSNorm
+from impl.model.utils.functional import compute_varlen_position_indices
+from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormParallelMLP,
+                                                     LlamaLayerNormParallelMLP,
+                                                     merged_linear_with_grad_accumulation_and_async_allreduce,
+                                                     parallel_lm_logits, ParallelEmbedding, RowParallelLinear)
+from impl.model.utils.modules import LlamaRMSNorm, RotaryEmbedding
+from impl.model.utils.save_load import load_from_disk, save_to_disk
 from impl.model.utils.tensor import pad_sequence_parallel_input
 import base.constants
 import base.logging as logging
+import impl.model.utils.model_parallel.mappings as tensor_parallel
 
 try:
     from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
                             flash_attn_with_kvcache)
-    from flash_attn.layers.rotary import RotaryEmbedding
 except ModuleNotFoundError:
     pass
-
-from base.monitor import gpu_memory_mb
-from impl.model.utils.save_load import load_from_disk, save_to_disk
-import impl.model.utils.model_parallel.mappings as tensor_parallel
-
-# rom impl.model.utils.random import get_cuda_rng_tracker
 
 logger = logging.getLogger("ParallelFlashMQAT")
 
@@ -86,22 +84,24 @@ class ParallelVocabPositionEmbedding(nn.Module):
                 y.position_ids = y.position_ids.repeat(batch_size, 1)
         elif y.position_ids is None:
             # packed_input_ids is given
-            lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
-            if y.cache_seqlens is None:
-                y.position_ids = torch.cat(
-                    [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
-                assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
-            else:
-                y.position_ids = torch.cat([
-                    torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) + cache_len
-                    for l, cache_len in zip(lengths, y.cache_seqlens)
-                ])
+            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0],
+                                                             cu_seqlens=x.cu_seqlens,
+                                                             seqlen_offsets=y.cache_seqlens)
+            # lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
+            # if y.cache_seqlens is None:
+            #     y.position_ids = torch.cat(
+            #         [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
+            #     assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
+            # else:
+            #     y.position_ids = torch.cat([
+            #         torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) + cache_len
+            #         for l, cache_len in zip(lengths, y.cache_seqlens)
+            #     ])
             if x.max_seqlen > self.n_positions:
                 raise ValueError(f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions}).")
             assert y.position_ids.shape == y.input_ids.shape, (
                 y.position_ids.shape,
                 y.input_ids.shape,
-                lengths,
                 x.cu_seqlens,
             )
 
@@ -164,6 +164,7 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         rotary_scaling_type: Optional[str] = None,
         # parallel settings
         sequence_parallel: Optional[bool] = False,
+        gradient_accumulation_fusion: bool = True,
         # device and dtype
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
@@ -188,29 +189,35 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
             bias=use_attention_bias,
             async_tensor_model_parallel_allreduce=not sequence_parallel,
             sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
             dtype=dtype,
             device=device,
         )
         self.mp_worldsize = base.constants.model_parallel_world_size()
-        assert n_q_heads % self.mp_worldsize == 0, f"n_q_heads {n_q_heads} must be divisible by "\
-                                                    f"mp_worldsize {self.mp_worldsize}"
-        if n_kv_heads > 1 and \
-            n_kv_heads % self.mp_worldsize == 0:
+        assert n_q_heads % self.mp_worldsize == 0, (f"n_q_heads {n_q_heads} must be divisible by "
+                                                    f"mp_worldsize {self.mp_worldsize}")
+        if n_kv_heads > 1 and n_kv_heads % self.mp_worldsize == 0:
             # split model parallel among heads if possible
-            self.k_attn = ColumnParallelLinear(hidden_dim,
-                                               head_dim * n_kv_heads,
-                                               bias=use_attention_bias,
-                                               async_tensor_model_parallel_allreduce=not sequence_parallel,
-                                               sequence_parallel=sequence_parallel,
-                                               dtype=dtype,
-                                               device=device)
-            self.v_attn = ColumnParallelLinear(hidden_dim,
-                                               head_dim * n_kv_heads,
-                                               bias=use_attention_bias,
-                                               async_tensor_model_parallel_allreduce=not sequence_parallel,
-                                               sequence_parallel=sequence_parallel,
-                                               dtype=dtype,
-                                               device=device)
+            self.k_attn = ColumnParallelLinear(
+                hidden_dim,
+                head_dim * n_kv_heads,
+                bias=use_attention_bias,
+                async_tensor_model_parallel_allreduce=not sequence_parallel,
+                sequence_parallel=sequence_parallel,
+                gradient_accumulation_fusion=gradient_accumulation_fusion,
+                dtype=dtype,
+                device=device,
+            )
+            self.v_attn = ColumnParallelLinear(
+                hidden_dim,
+                head_dim * n_kv_heads,
+                bias=use_attention_bias,
+                async_tensor_model_parallel_allreduce=not sequence_parallel,
+                sequence_parallel=sequence_parallel,
+                gradient_accumulation_fusion=gradient_accumulation_fusion,
+                dtype=dtype,
+                device=device,
+            )
         else:
             if n_kv_heads > 1:
                 logger.warning(f"Cannot split {n_kv_heads} kv heads evenly among "
@@ -226,13 +233,30 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
                                     bias=use_attention_bias,
                                     dtype=dtype,
                                     device=device)
+            dist.all_reduce(self.k_attn.weight.data,
+                            op=dist.ReduceOp.SUM,
+                            group=base.constants.model_parallel_group())
+            if use_attention_bias:
+                dist.all_reduce(self.k_attn.bias.data,
+                                op=dist.ReduceOp.SUM,
+                                group=base.constants.model_parallel_group())
+            dist.all_reduce(self.v_attn.weight.data,
+                            op=dist.ReduceOp.SUM,
+                            group=base.constants.model_parallel_group())
+            if use_attention_bias:
+                dist.all_reduce(self.v_attn.bias.data,
+                                op=dist.ReduceOp.SUM,
+                                group=base.constants.model_parallel_group())
 
-        self.c_proj = RowParallelLinear(hidden_dim,
-                                        hidden_dim,
-                                        bias=use_attention_bias,
-                                        sequence_parallel=sequence_parallel,
-                                        dtype=dtype,
-                                        device=device)
+        self.c_proj = RowParallelLinear(
+            hidden_dim,
+            hidden_dim,
+            bias=use_attention_bias,
+            sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+            dtype=dtype,
+            device=device,
+        )
         self.resid_dropout = nn.Dropout(resid_pdrop)
 
         self.attn_pdrop = attn_pdrop
@@ -284,6 +308,13 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         max_seqlen: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # input hidden_states shape: [bs, seq, hidden_dim]/[total_seqlen, hidden_dim]
+
+        # NOTE: we must ensure the passed-in argument is an interger
+        # if we convert the argument to implicitly when calling rotary embedding or flash-attn,
+        # aten::item will be called, which will cause a device-host sync and slow down performance.
+        assert max_seqlen is None or isinstance(max_seqlen, int), type(max_seqlen)
+        assert cu_seqlens is None or cu_seqlens.dtype == torch.int32
+
         # default upcast, scale
         if self.scale_attn_by_inverse_layer_idx:
             unscale = self.layer_index + 1
@@ -294,20 +325,32 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         scale_factor /= self.d**0.5
 
         hidden_states = self.ln(hidden_states)
-        q: torch.Tensor = self.q_attn(hidden_states)
-        k: torch.Tensor = self.k_attn(hidden_states)
-        v: torch.Tensor = self.v_attn(hidden_states)
-        kv = torch.cat([k, v], dim=-1)
 
-        q = q.view(*q.shape[:-1], self.nq // self.mp_worldsize, self.d)
-        kv = kv.view(*kv.shape[:-1], 2, self.nkv // self.mp_worldsize, self.d)
+        _gradient_accumulation_fusion = self.q_attn.gradient_accumulation_fusion
+        _async_grad_allreduce = self.q_attn.async_tensor_model_parallel_allreduce
+        _sequence_parallel = self.q_attn.sequence_parallel
+        _is_w_parallel = [
+            True,
+            isinstance(self.k_attn, ColumnParallelLinear),
+            isinstance(self.v_attn, ColumnParallelLinear)
+        ]
+        q, k, v = merged_linear_with_grad_accumulation_and_async_allreduce(
+            hidden_states, _gradient_accumulation_fusion, _async_grad_allreduce, _sequence_parallel,
+            _is_w_parallel, self.q_attn.weight, self.q_attn.bias, self.k_attn.weight, self.k_attn.bias,
+            self.v_attn.weight, self.v_attn.bias)
+        qk = torch.cat([q, k], dim=-1)
+
+        if isinstance(self.k_attn, ColumnParallelLinear):
+            qk = qk.view(*qk.shape[:-1], (self.nq + self.nkv) // self.mp_worldsize, self.d)
+            v = v.view(*v.shape[:-1], self.nkv // self.mp_worldsize, self.d)
+        else:
+            qk = qk.view(*qk.shape[:-1], self.nq // self.mp_worldsize + self.nkv, self.d)
+            v = v.view(*v.shape[:-1], self.nkv, self.d)
 
         if self.apply_rotary and k_cache is None:
             # otherwise, we input rotary cos/sin directly into flash_attn_with_kvcache
-            q, kv = self.rotary_emb(
-                q,
-                kv,
-                seqlen_offset=0,
+            qk = self.rotary_emb(
+                qk,
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             )
@@ -318,7 +361,10 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
         else:
             rotary_cos = rotary_sin = None
 
-        k, v = kv.unbind(dim=-3)
+        if isinstance(self.k_attn, ColumnParallelLinear):
+            q, k = qk.split((self.nq // self.mp_worldsize, self.nkv // self.mp_worldsize), dim=-2)
+        else:
+            q, k = qk.split((self.nq // self.mp_worldsize, self.nkv), dim=-2)
 
         if k_cache is not None and len(q.shape) == 4:
             # k_cache/v_cache shape: [bs, max_seq, n_kv_heads, head_dim]
@@ -347,7 +393,7 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
             hidden_states = flash_attn_varlen_func_with_kvcache(
                 q=q,
                 cu_seqlens_q=cu_seqlens,
-                max_seqlen_q=int(max_seqlen),
+                max_seqlen_q=max_seqlen,
                 k_cache=k_cache,
                 v_cache=v_cache,
                 cache_seqlens=cache_seqlens,
@@ -367,10 +413,10 @@ class ParallelCausalSelfAttentionLayer(nn.Module):
                 q,
                 k,
                 v,
-                cu_seqlens.int(),
-                cu_seqlens.int(),
-                int(max_seqlen),
-                int(max_seqlen),
+                cu_seqlens,
+                cu_seqlens,
+                max_seqlen,
+                max_seqlen,
                 dropout_p=self.applied_attn_pdrop,
                 softmax_scale=scale_factor,
                 causal=True,
@@ -398,6 +444,7 @@ class ParallelFlashMQATBlock(nn.Module):
         layer_index: int,
         output_layernorm: bool = False,
         sequence_parallel: Optional[bool] = False,
+        gradient_accumulation_fusion: bool = True,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -422,6 +469,7 @@ class ParallelFlashMQATBlock(nn.Module):
             rotary_scaling=config.rotary_scaling,
             rotary_scaling_type=config.rotary_scaling_type,
             sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
             dtype=dtype,
             device=device,
         )
@@ -433,6 +481,7 @@ class ParallelFlashMQATBlock(nn.Module):
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
                 sequence_parallel=sequence_parallel,
+                gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
             )
@@ -443,6 +492,7 @@ class ParallelFlashMQATBlock(nn.Module):
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
                 sequence_parallel=sequence_parallel,
+                gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
             )
@@ -462,8 +512,7 @@ class ParallelFlashMQATBlock(nn.Module):
         self.ckpt_full = False
 
     def gradient_checkpointing_enable(self, attn: bool = False, mlp: bool = False):
-        """ Called by backend
-        """
+        """Called by backend"""
         if attn or mlp:
             self.ckpt_attn = attn
             self.ckpt_mlp = mlp
@@ -492,15 +541,17 @@ class ParallelFlashMQATBlock(nn.Module):
                 False,
             )
         else:
-            pp_output, k, v = self._forward(pp_input,
-                                            cu_seqlens,
-                                            k_cache,
-                                            v_cache,
-                                            cache_seqlens,
-                                            max_seqlen,
-                                            attention_mask,
-                                            ckpt_attn=self.ckpt_attn,
-                                            ckpt_mlp=self.ckpt_mlp)
+            pp_output, k, v = self._forward(
+                pp_input,
+                cu_seqlens,
+                k_cache,
+                v_cache,
+                cache_seqlens,
+                max_seqlen,
+                attention_mask,
+                ckpt_attn=self.ckpt_attn,
+                ckpt_mlp=self.ckpt_mlp,
+            )
 
         x.pp_output = pp_output
         if x.store_kv_cache:
@@ -512,16 +563,18 @@ class ParallelFlashMQATBlock(nn.Module):
                 y.cache_seqlens = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
         return x
 
-    def _forward(self,
-                 pp_input: torch.Tensor,
-                 cu_seqlens: torch.Tensor,
-                 k_cache: Optional[torch.Tensor],
-                 v_cache: Optional[torch.Tensor],
-                 cache_seqlens: Optional[torch.Tensor],
-                 max_seqlen: int,
-                 attention_mask: Optional[torch.Tensor],
-                 ckpt_attn: Optional[bool] = False,
-                 ckpt_mlp: Optional[bool] = False) -> PipeTransferData:
+    def _forward(
+        self,
+        pp_input: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        k_cache: Optional[torch.Tensor],
+        v_cache: Optional[torch.Tensor],
+        cache_seqlens: Optional[torch.Tensor],
+        max_seqlen: int,
+        attention_mask: Optional[torch.Tensor],
+        ckpt_attn: Optional[bool] = False,
+        ckpt_mlp: Optional[bool] = False,
+    ) -> PipeTransferData:
         h = pp_input
         if ckpt_attn:
             attn_out, k, v = torch.utils.checkpoint.checkpoint(self.attn, h, cu_seqlens, k_cache, v_cache,
@@ -546,11 +599,28 @@ class ParallelFlashMQATBlock(nn.Module):
         return h, k, v
 
 
-class SequenceParallelOutputHead(nn.Linear):
+class SequenceParallelCriticHead(nn.Linear):
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         all_gather_buffer = tensor_parallel.gather_from_sequence_parallel_region(x.pp_input)
         x.pp_output = nn.functional.linear(all_gather_buffer, self.weight, self.bias)
+        return x
+
+
+class SequenceParallelActorHead(ColumnParallelLinear):
+
+    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
+        x.pp_output = parallel_lm_logits(
+            x.pp_input,
+            self.weight,
+            parallel_output=True,
+            async_tensor_model_parallel_allreduce=self.async_tensor_model_parallel_allreduce,
+            sequence_parallel=self.sequence_parallel,
+            gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+            bias=self.bias,
+        )
+        # NOTE: the output is not the whole logits, but the logits for a part of tokens due to ColumnParallelLinear.
+        # (However, data along the batch dim is all-gathered. No sequence parallel any more.)
         return x
 
 
@@ -560,6 +630,7 @@ class ParallelFlashMQATBase(nn.Module):
         self,
         config: FlashMQATConfig,
         sequence_parallel: Optional[bool] = False,
+        gradient_accumulation_fusion: bool = True,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -579,6 +650,7 @@ class ParallelFlashMQATBase(nn.Module):
                 layer_index=i,
                 output_layernorm=(i == config.n_layers - 1),
                 sequence_parallel=sequence_parallel,
+                gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
             ) for i in range(config.n_layers)
@@ -588,6 +660,12 @@ class ParallelFlashMQATBase(nn.Module):
         return [self.embedding_layer] + list(self.h)
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
+        ############## FIXME: we should ensure this outside the model ##############
+        if x.max_seqlen is not None:
+            x.max_seqlen = int(x.max_seqlen)
+        if x.cu_seqlens is not None:
+            x.cu_seqlens = x.cu_seqlens.int()
+        ############## FIXME: we should ensure this outside the model ##############
         layers = self.to_layers()
         assert len(ys) == len(layers), (len(ys), len(layers))
         raw_pp_input = x.pp_input
@@ -602,7 +680,7 @@ class ParallelFlashMQATBase(nn.Module):
 
 
 class ModelParallelModule(nn.Module):
-    """ TODO: change into lower level module substitution
+    """TODO: change into lower level module substitution
     Currently only substitute FlashMQATModel into a ParallelFlashMQATBase
     """
 
@@ -611,6 +689,7 @@ class ModelParallelModule(nn.Module):
         module: Union[HuggingfaceLikeFlashMQATForCausalLM, DeepSpeedChatLikeFlashMQATCriticModel],
         config: FlashMQATConfig,
         sequence_parallel: Optional[bool] = False,
+        gradient_accumulation_fusion: bool = True,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -619,14 +698,31 @@ class ModelParallelModule(nn.Module):
         self.is_critic = module.is_critic
         self.sequence_parallel = sequence_parallel
         self.module = module
-        self.module.transformer = ParallelFlashMQATBase(config,
-                                                        sequence_parallel=sequence_parallel,
-                                                        dtype=dtype,
-                                                        device=device)  # overwrite
-        if sequence_parallel:
-            self.module.head = SequenceParallelOutputHead(
+        self.module.transformer = ParallelFlashMQATBase(
+            config,
+            sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+            dtype=dtype,
+            device=device)  # overwrite
+        if self.is_critic and sequence_parallel:
+            # Critic, we only replace the head when using sequence_parallel,
+            # as we need to gather input along the batch dim.
+            self.module.head = SequenceParallelCriticHead(
                 config.hidden_dim,
-                1 if self.is_critic else config.vocab_size,
+                1,
+                bias=False,
+                device=device,
+                dtype=dtype,
+            )
+        elif not self.is_critic:
+            # Actor. No matter sequence parallel or not, we replace the head
+            # to output logits of partial tokens.
+            self.module.head = SequenceParallelActorHead(
+                config.hidden_dim,
+                config.vocab_size,
+                sequence_parallel=sequence_parallel,
+                async_tensor_model_parallel_allreduce=not sequence_parallel,
+                gradient_accumulation_fusion=gradient_accumulation_fusion,
                 bias=False,
                 device=device,
                 dtype=dtype,
@@ -634,14 +730,16 @@ class ModelParallelModule(nn.Module):
 
         self.num_checkpoint_shards = 1
 
-    def forward(self,
-                input_ids: Optional[torch.Tensor] = None,
-                attention_mask: Optional[torch.Tensor] = None,
-                packed_input_ids: Optional[torch.Tensor] = None,
-                cu_seqlens: Optional[torch.Tensor] = None,
-                max_seqlen: Optional[int] = None):
-        assert packed_input_ids is not None and cu_seqlens is not None, \
-               "Model parallel module only accept packed inputs."
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        packed_input_ids: Optional[torch.Tensor] = None,
+        cu_seqlens: Optional[torch.Tensor] = None,
+        max_seqlen: Optional[int] = None,
+    ):
+        assert (packed_input_ids is not None
+                and cu_seqlens is not None), "Model parallel module only accept packed inputs."
         pad_size = 0
         if self.sequence_parallel:
             packed_input_ids, cu_seqlens, max_seqlen, pad_size = pad_sequence_parallel_input(
@@ -669,8 +767,8 @@ class ModelParallelModule(nn.Module):
                                               fn_pattern=r".*" + f"-pp-00-mp-{mp_rank:02d}-" + r"s-(\d{2}).*",
                                               return_n_shards=True)
 
-        if init_critic_from_actor and f'{self.config.n_layers + 1}.weight' in state_dict:
-            state_dict.pop(f'{self.config.n_layers + 1}.weight')
+        if init_critic_from_actor and f"{self.config.n_layers + 1}.weight" in state_dict:
+            state_dict.pop(f"{self.config.n_layers + 1}.weight")
             self.module.load_state_dict(state_dict, strict=False)
         else:
             self.module.load_state_dict(state_dict, strict=True)
@@ -681,8 +779,10 @@ class ModelParallelModule(nn.Module):
         if dp_rank > 0:  # only save on dp_rank = 0
             return
 
-        save_to_disk(self.module.state_dict(),
-                     save_dir,
-                     output_fn=f"pytorch_model-pp-00-mp-{mp_rank:02d}-s-" + "{shard:02d}.bin",
-                     save_type="pt",
-                     n_shards=self.num_checkpoint_shards)
+        save_to_disk(
+            self.module.state_dict(),
+            save_dir,
+            output_fn=f"pytorch_model-pp-00-mp-{mp_rank:02d}-s-" + "{shard:02d}.bin",
+            save_type="pt",
+            n_shards=self.num_checkpoint_shards,
+        )

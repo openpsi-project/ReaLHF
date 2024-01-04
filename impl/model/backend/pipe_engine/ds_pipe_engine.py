@@ -211,11 +211,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         mb_seq_lens = []
 
         def input_to_pipe_model_input(input: NamedArray, mbid: int):
-            max_seqlen = torch.tensor(int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))).cuda()
+            max_seqlen = int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))
             store_kv_cache = self._generate_mode
 
-            cu_seqlens = input.cu_seqlens.to(self.device)
-            packed_input_ids = input.packed_input_ids.to(self.device)
+            cu_seqlens = input.cu_seqlens
+            packed_input_ids = input.packed_input_ids
 
             # sequence parallel input padding
             if self.sequence_parallel:
@@ -230,7 +230,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                                                                                                             max_seqlen)
                     self.tensor_buffer.put("pad_size", mbid, pad_size)
                     self.tensor_buffer.put("pad_seq_size", mbid, pad_seq_size)
-            x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=store_kv_cache)
+            x = PipeTransferData(cu_seqlens=cu_seqlens.int(),
+                                 max_seqlen=int(max_seqlen),
+                                 store_kv_cache=store_kv_cache)
             if self.is_first_stage():
                 ys = [PipeCacheData(input_ids=packed_input_ids)
                       ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
@@ -250,7 +252,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         # pre allocate receive buffers and pre store other information
         for mbid, batch in enumerate(batches):
-            if self._train_mode:
+            if self._train_mode or self._inference_mode:
                 activation_shape = (mb_seq_lens[mbid], self.hidden_dim)
                 self.tensor_buffer.alloc("activation",
                                          mbid,
@@ -258,9 +260,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                                          self.dtype,
                                          self.device,
                                          require_grads=True)
-                self.tensor_buffer.alloc("grad", mbid, activation_shape, self.dtype, self.device)
-            others_cache = dict(cu_seqlens=batch[0].cu_seqlens,
-                                max_seqlen=batch[0].max_seqlen,
+                if self._train_mode:
+                    self.tensor_buffer.alloc("grad", mbid, activation_shape, self.dtype, self.device)
+            others_cache = dict(cu_seqlens=batch[0].cu_seqlens.int(),
+                                max_seqlen=int(batch[0].max_seqlen),
                                 store_kv_cache=batch[0].store_kv_cache)
             self.tensor_buffer.put("pipe_transfer_infos", mbid, others_cache)
 
@@ -777,13 +780,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                                                      micro_batch_id,
                                                      remove=not self._train_mode)
         # send_pipe_transfer_data(x, self.next_stage)
-        if not self._train_mode:
+        if not self._train_mode and not self._inference_mode:
             p2p.send_tensor_meta(x.pp_input, self.next_stage)
         p2p.send(x.pp_input, self.next_stage)
 
     def _exec_recv_activations(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert not self.is_first_stage()
-        if not self._train_mode:
+        if not self._train_mode and not self._inference_mode:
             buf = p2p.recv_tensor_meta(self.prev_stage)
         else:
             buf = self.tensor_buffer.get("activation", micro_batch_id, remove=False)

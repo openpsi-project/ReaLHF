@@ -10,15 +10,15 @@ import torch.utils.checkpoint
 import transformers
 
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-from impl.model.utils.functional import torch_attn_func
-from impl.model.utils.modules import LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
+from impl.model.utils.functional import compute_varlen_position_indices, torch_attn_func
+from impl.model.utils.modules import (LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm,
+                                      RotaryEmbedding)
 from impl.model.utils.save_load import load_from_disk, save_to_disk
 import base.logging as logging
 
 try:
     from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
                             flash_attn_with_kvcache)
-    from flash_attn.layers.rotary import RotaryEmbedding
 except ModuleNotFoundError:
     pass
 import base.logging as logging
@@ -150,6 +150,13 @@ class CausalSelfAttentionLayer(nn.Module):
         max_seqlen: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # input shape: [bs, seq, hidden_dim]
+
+        # NOTE: we must ensure the passed-in argument is an interger
+        # if we convert the argument to implicitly when calling rotary embedding or flash-attn,
+        # aten::item will be called, which will cause a device-host sync and slow down performance.
+        assert max_seqlen is None or isinstance(max_seqlen, int), type(max_seqlen)
+        assert cu_seqlens is None or cu_seqlens.dtype == torch.int32
+
         # default upcast, scale
         if self.scale_attn_by_inverse_layer_idx:
             unscale = self.layer_index + 1
@@ -160,16 +167,14 @@ class CausalSelfAttentionLayer(nn.Module):
         scale_factor /= self.d**0.5
 
         qkv: torch.Tensor = self.c_attn(hidden_states)
-        q, kv = torch.split(qkv, (self.d * self.nq, 2 * self.d * self.nkv), dim=-1)
-        q = q.view(*q.shape[:-1], self.nq, self.d)
-        kv = kv.view(*kv.shape[:-1], 2, self.nkv, self.d)
+        qk, v = torch.split(qkv, (self.d * (self.nq + self.nkv), self.d * self.nkv), dim=-1)
+        qk = qk.view(*qk.shape[:-1], self.nq + self.nkv, self.d)
+        v = v.view(*v.shape[:-1], self.nkv, self.d)
 
         if self.apply_rotary and k_cache is None:
             # otherwise, we input rotary cos/sin directly into flash_attn_with_kvcache
-            q, kv = self.rotary_emb(
-                q,
-                kv,
-                seqlen_offset=0,
+            qk = self.rotary_emb(
+                qk,
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             )
@@ -180,7 +185,7 @@ class CausalSelfAttentionLayer(nn.Module):
         else:
             rotary_cos = rotary_sin = None
 
-        k, v = kv.unbind(dim=-3)
+        q, k = qk.split((self.nq, self.nkv), dim=-2)
 
         if str(qkv.device) == "cpu":
             # Use vanilla pytorch attention, for debugging.
@@ -221,7 +226,7 @@ class CausalSelfAttentionLayer(nn.Module):
             hidden_states = flash_attn_varlen_func_with_kvcache(
                 q=q,
                 cu_seqlens_q=cu_seqlens,
-                max_seqlen_q=int(max_seqlen),
+                max_seqlen_q=max_seqlen,
                 k_cache=k_cache,
                 v_cache=v_cache,
                 cache_seqlens=cache_seqlens,
@@ -236,15 +241,15 @@ class CausalSelfAttentionLayer(nn.Module):
             )
         elif cu_seqlens is not None:
             assert max_seqlen is not None
-            assert len(qkv.shape) == 2
+            assert len(q.shape) == 3
             hidden_states = flash_attn_varlen_func(
                 q,
                 k,
                 v,
-                cu_seqlens.int(),
-                cu_seqlens.int(),
-                int(max_seqlen),
-                int(max_seqlen),
+                cu_seqlens,
+                cu_seqlens,
+                max_seqlen,
+                max_seqlen,
                 dropout_p=self.applied_attn_pdrop,
                 softmax_scale=scale_factor,
                 causal=True,
@@ -471,22 +476,24 @@ class VocabPositionEmbedding(nn.Module):
                 y.position_ids = y.position_ids.repeat(batch_size, 1)
         elif y.position_ids is None:
             # packed_input_ids is given
-            lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
-            if y.cache_seqlens is None:
-                y.position_ids = torch.cat(
-                    [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
-                assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
-            else:
-                y.position_ids = torch.cat([
-                    torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) + cache_len
-                    for l, cache_len in zip(lengths, y.cache_seqlens)
-                ])
+            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0],
+                                                             cu_seqlens=x.cu_seqlens,
+                                                             seqlen_offsets=y.cache_seqlens)
+            # lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
+            # if y.cache_seqlens is None:
+            #     y.position_ids = torch.cat(
+            #         [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
+            #     assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
+            # else:
+            #     y.position_ids = torch.cat([
+            #         torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) + cache_len
+            #         for l, cache_len in zip(lengths, y.cache_seqlens)
+            #     ])
             if x.max_seqlen > self.n_positions:
                 raise ValueError(f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions}).")
             assert y.position_ids.shape == y.input_ids.shape, (
                 y.position_ids.shape,
                 y.input_ids.shape,
-                lengths,
                 x.cu_seqlens,
             )
 
@@ -548,6 +555,12 @@ class FlashMQATBase(nn.Module):
         return [self.embedding_layer] + list(self.h)
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
+        ############## FIXME: we should ensure this outside the model ##############
+        if x.max_seqlen is not None:
+            x.max_seqlen = int(x.max_seqlen)
+        if x.cu_seqlens is not None:
+            x.cu_seqlens = x.cu_seqlens.int()
+        ############## FIXME: we should ensure this outside the model ##############
         layers = self.to_layers()
         assert len(ys) == len(layers), (len(ys), len(layers))
         raw_pp_input = x.pp_input
