@@ -247,7 +247,8 @@ class VocabPositionEmbedding(nn.Module):
         if model_parallel:
             embed_cls = ParallelEmbedding
         else:
-            assert not self.sequence_parallel
+            if self.sequence_parallel:
+                raise RuntimeError("sequence_parallel can only be used when model parallel size > 1.")
             embed_cls = nn.Embedding
 
         self.wte = embed_cls(config.vocab_size, config.hidden_dim, dtype=dtype, device=device)
@@ -488,6 +489,16 @@ class FlashMQATModel(nn.Module):
             l.gradient_checkpointing_enable(attn, mlp)
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
+        if self.config.sequence_parallel:
+            from impl.model.utils.tensor import pad_sequence_parallel_input
+            _packed_input_ids = ys[0].input_ids
+            _cu_seqlens = x.cu_seqlens
+            _max_seqlen = x.max_seqlen
+            packed_input_ids, cu_seqlens, max_seqlen, pad_size = pad_sequence_parallel_input(
+                ys[0].input_ids, x.cu_seqlens, x.max_seqlen)
+            ys[0].input_ids = packed_input_ids
+            x.cu_seqlens = cu_seqlens
+            x.max_seqlen = max_seqlen
         layers = self.to_layers()
         assert len(ys) == len(layers)
         raw_pp_input = x.pp_input
@@ -498,6 +509,11 @@ class FlashMQATModel(nn.Module):
         # pp_output is the output of this pipeline stage.
         # In the first stage, pp_input is None.
         x.pp_input = raw_pp_input
+        if self.config.sequence_parallel and pad_size > 0:
+            x.pp_output = x.pp_output[:-pad_size]
+            ys[0].input_ids = _packed_input_ids
+            x.cu_seqlens = _cu_seqlens
+            x.max_seqlen = _max_seqlen
         return x
 
     @staticmethod
@@ -542,8 +558,12 @@ class FlashMQATModel(nn.Module):
         state_dict = super().state_dict()
         return FlashMQATModel.map_to_pipe_state_dict(self.config, state_dict)
 
-    def load_state_dict(self, state_dict):
-        return super().load_state_dict(FlashMQATModel.from_pipe_state_dict(self.config, state_dict))
+    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
+        return super().load_state_dict(
+            FlashMQATModel.from_pipe_state_dict(self.config, state_dict),
+            strict=strict,
+            assign=assign,
+        )
 
     # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
     def _config_from_hf_template(
@@ -619,8 +639,10 @@ class FlashMQATModel(nn.Module):
             else:
                 state_dict = state_dict_converter(state_dict, config)
 
-        return config, FlashMQATModel.map_to_pipe_state_dict(config,
-                                                             state_dict) if state_dict is not None else None
+        return (
+            config,
+            FlashMQATModel.map_to_pipe_state_dict(config, state_dict) if state_dict is not None else None,
+        )
 
     # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
     def _from_hf_template(
@@ -638,23 +660,30 @@ class FlashMQATModel(nn.Module):
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
-        if base.constants.model_parallel_world_size() > 1 and not no_param_instantiation:
+        if base.constants.pipe_parallel_world_size() > 1 and not no_param_instantiation:
             raise RuntimeError(
-                "`from_$\{huggingface_model\}` can only be called without model and pipeline parallelism. "
-                "To use HuggingFace models with 3D parallel, "
-                "use `scripts/transform_to_pipe_ckpt.py` to split the checkpoint first.")
-        config, state_dict = FlashMQATModel._config_and_param_from_hf_template(
-            config_converter=config_converter,
-            state_dict_converter=state_dict_converter,
-            from_model=from_model,
-            model_path=model_path,
-            is_critic=is_critic,
-            init_from_scratch=init_from_scratch,
-            force_load_from_hf_pretrained=force_load_from_hf_pretrained,
-            no_param_instantiation=no_param_instantiation,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-        )
+                "`from_$\{huggingface_model\}` can only be called without pipeline parallelism.")
+        if base.constants.model_parallel_world_size() > 1:
+            config = FlashMQATModel._config_from_hf_template(
+                config_converter=config_converter,
+                model_path=model_path,
+                is_critic=is_critic,
+                sequence_parallel=sequence_parallel,
+                gradient_accumulation_fusion=gradient_accumulation_fusion,
+            )
+        else:
+            config, state_dict = FlashMQATModel._config_and_param_from_hf_template(
+                config_converter=config_converter,
+                state_dict_converter=state_dict_converter,
+                from_model=from_model,
+                model_path=model_path,
+                is_critic=is_critic,
+                init_from_scratch=init_from_scratch,
+                force_load_from_hf_pretrained=force_load_from_hf_pretrained,
+                no_param_instantiation=no_param_instantiation,
+                sequence_parallel=sequence_parallel,
+                gradient_accumulation_fusion=gradient_accumulation_fusion,
+            )
         model = cls(
             config=config,
             dtype=dtype,
@@ -662,9 +691,12 @@ class FlashMQATModel(nn.Module):
             no_param_instantiation=no_param_instantiation,
         )
         if not init_from_scratch and not no_param_instantiation:
-            if is_critic:
-                state_dict["head.weight"] = model.state_dict()["head.weight"]
-            model.load_state_dict(state_dict)
+            if base.constants.model_parallel_world_size() > 1:
+                model.load(model_path, init_critic_from_actor=is_critic)
+            else:
+                if is_critic:
+                    state_dict["head.weight"] = model.state_dict()["head.weight"]
+                model.load_state_dict(state_dict)
         return model
 
     # Template function used for FlashMQAT to HF models, similar to C++ template but is ugly in python.
