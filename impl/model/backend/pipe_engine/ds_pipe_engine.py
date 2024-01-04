@@ -230,7 +230,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                                                                                                             max_seqlen)
                     self.tensor_buffer.put("pad_size", mbid, pad_size)
                     self.tensor_buffer.put("pad_seq_size", mbid, pad_seq_size)
-            x = PipeTransferData(cu_seqlens=cu_seqlens.int(), max_seqlen=int(max_seqlen), store_kv_cache=store_kv_cache)
+            x = PipeTransferData(cu_seqlens=cu_seqlens.int(),
+                                 max_seqlen=int(max_seqlen),
+                                 store_kv_cache=store_kv_cache)
             if self.is_first_stage():
                 ys = [PipeCacheData(input_ids=packed_input_ids)
                       ] + [PipeCacheData() for _ in range(self.num_layers - 1)]

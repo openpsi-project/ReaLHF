@@ -2,18 +2,18 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 import dataclasses
 import queue
 
-import base.constants
 import torch
+import torch.distributed
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
-import torch.distributed
 
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import mask_eos_token
 from impl.model.utils.logits_warper import top_k_top_p_logits
+import base.constants
 import base.logging as logging
 
 try:

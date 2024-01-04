@@ -91,8 +91,7 @@ def make_backend():
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
                 ),
-            )
-        )
+            ))
     elif NUM_PP > 1:
         return api.model.make_backend(
             config_package.ModelBackend(
@@ -110,8 +109,7 @@ def make_backend():
                     enable_bf16=USE_BF16,
                     sequence_parallel=USE_SEQ_PARALLEL,
                 ),
-            )
-        )
+            ))
 
 
 def make_interface():
@@ -219,7 +217,7 @@ def make_batch(tokenizer, device, seed=373):
     dp_worldsize = base.constants.data_parallel_world_size()
     random.seed(seed)
     whole_batch = [random_sentence(min_len=seqlen, max_len=seqlen) for _ in range(batch_size)]
-    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank : batch_size // dp_worldsize * (dp_rank + 1)]
+    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank:batch_size // dp_worldsize * (dp_rank + 1)]
     return make_input(tokenizer, device, dp_batch)
 
 
@@ -265,13 +263,13 @@ def main(rank: int = None, world_size: int = None):
         p.export_chrome_trace(os.path.join(dirname, f"rank{rank}.json"))
 
     with torch.profiler.profile(
-        activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-        record_shapes=True,
-        profile_memory=True,
-        with_stack=True,
-        schedule=s,
-        on_trace_ready=trace_handler,
-        with_flops=True,
+            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+            schedule=s,
+            on_trace_ready=trace_handler,
+            with_flops=True,
     ) as prof:
         for _ in range(10):
             torch.cuda.synchronize()

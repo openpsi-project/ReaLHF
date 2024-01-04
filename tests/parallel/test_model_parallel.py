@@ -2,10 +2,10 @@ import os
 import time
 import unittest
 
-import torch.distributed
 from torch.profiler import profile, ProfilerActivity, record_function
 # import transformers
 import torch
+import torch.distributed
 import torch.multiprocessing as mp
 
 from tests.parallel.utils import *

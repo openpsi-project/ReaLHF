@@ -68,7 +68,7 @@ def get_layer_specs(config: FlashMQATConfig, to_critic, is_mp):
     return layer_specs
 
 
-def count_layer_params(num_layers:int, state_dict_list: List[Dict[str, torch.Tensor]]) -> List[int]:
+def count_layer_params(num_layers: int, state_dict_list: List[Dict[str, torch.Tensor]]) -> List[int]:
     param_counts = []
     for i in range(num_layers):
         cnt = 0
@@ -78,7 +78,7 @@ def count_layer_params(num_layers:int, state_dict_list: List[Dict[str, torch.Ten
                     cnt += v.numel()
         param_counts.append(cnt)
     print(f"Count layer paramters: {param_counts}")
-    return param_counts 
+    return param_counts
     # param_counts = [0] * len(layer_specs)
     # for idx, layer in enumerate(layer_specs):
     #     if isinstance(layer, LayerSpec):

@@ -246,7 +246,13 @@ def load_from_disk(model_dir: str,
             # TODO: merge into one state dict, temp solution
             embedding_keys = [".wte"]  # dim=0 no bias
             column_linear_keys = [
-                ".attn.q_attn", ".attn.k_attn", ".attn.v_attn", ".mlp.c_fc", ".mlp.gate_proj", ".mlp.up_proj", f"{max_layers}.weight",
+                ".attn.q_attn",
+                ".attn.k_attn",
+                ".attn.v_attn",
+                ".mlp.c_fc",
+                ".mlp.gate_proj",
+                ".mlp.up_proj",
+                f"{max_layers}.weight",
             ]  # dim=0 + partition bias
             row_linear_keys = [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
             state_dict = dict()
@@ -254,7 +260,8 @@ def load_from_disk(model_dir: str,
                 i = int(k.split(".")[0])
                 if any([ek in k for ek in embedding_keys]) and "weight" in k:
                     state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
-                elif any([ck in k for ck in column_linear_keys]) and state_dicts[0][k].shape[0] > 1:  # exclude critic head
+                elif any([ck in k for ck in column_linear_keys
+                          ]) and state_dicts[0][k].shape[0] > 1:  # exclude critic head
                     state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
                 elif any([rk in k for rk in row_linear_keys]) and "weight" in k:
                     state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=1)

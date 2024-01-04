@@ -318,7 +318,9 @@ def convert_config_parallel_llama(hf_config: transformers.LlamaConfig) -> FlashM
         rotary_scaling_type=None if hf_config.rope_scaling is None else hf_config.rope_scaling["type"],
     )
 
+
 # TODO: add a function to merge back from model parallel state dict
+
 
 def convert_state_dict_parallel_llama(state_dict: Dict,
                                       config: FlashMQATConfig,

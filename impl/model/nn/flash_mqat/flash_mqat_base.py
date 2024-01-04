@@ -10,7 +10,7 @@ import torch.utils.checkpoint
 import transformers
 
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-from impl.model.utils.functional import torch_attn_func, compute_varlen_position_indices
+from impl.model.utils.functional import compute_varlen_position_indices, torch_attn_func
 from impl.model.utils.modules import (LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm,
                                       RotaryEmbedding)
 from impl.model.utils.save_load import load_from_disk, save_to_disk
@@ -476,7 +476,9 @@ class VocabPositionEmbedding(nn.Module):
                 y.position_ids = y.position_ids.repeat(batch_size, 1)
         elif y.position_ids is None:
             # packed_input_ids is given
-            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0], cu_seqlens=x.cu_seqlens, seqlen_offsets=y.cache_seqlens)
+            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0],
+                                                             cu_seqlens=x.cu_seqlens,
+                                                             seqlen_offsets=y.cache_seqlens)
             # lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             # if y.cache_seqlens is None:
             #     y.position_ids = torch.cat(

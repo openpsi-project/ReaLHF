@@ -11,12 +11,12 @@ from impl.model.nn.flash_mqat.flash_mqat_api import (DeepSpeedChatLikeFlashMQATC
                                                      HuggingfaceLikeFlashMQATForCausalLM)
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel
 from impl.model.utils.data import DuckGenerationOutput, PipeCacheData, PipeTransferData
+from impl.model.utils.functional import compute_varlen_position_indices
 from impl.model.utils.model_parallel.modules import (ColumnParallelLinear, LayerNormParallelMLP,
                                                      LlamaLayerNormParallelMLP,
                                                      merged_linear_with_grad_accumulation_and_async_allreduce,
                                                      parallel_lm_logits, ParallelEmbedding, RowParallelLinear)
 from impl.model.utils.modules import LlamaRMSNorm, RotaryEmbedding
-from impl.model.utils.functional import compute_varlen_position_indices
 from impl.model.utils.save_load import load_from_disk, save_to_disk
 from impl.model.utils.tensor import pad_sequence_parallel_input
 import base.constants
@@ -84,7 +84,9 @@ class ParallelVocabPositionEmbedding(nn.Module):
                 y.position_ids = y.position_ids.repeat(batch_size, 1)
         elif y.position_ids is None:
             # packed_input_ids is given
-            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0], cu_seqlens=x.cu_seqlens, seqlen_offsets=y.cache_seqlens)
+            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0],
+                                                             cu_seqlens=x.cu_seqlens,
+                                                             seqlen_offsets=y.cache_seqlens)
             # lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             # if y.cache_seqlens is None:
             #     y.position_ids = torch.cat(

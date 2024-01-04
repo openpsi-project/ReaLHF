@@ -161,7 +161,7 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
         # However, if we input random token IDs, parallel cross entropy can produce VERY different results than the normal
         # torch.gather based version (e.g., the maximum absolute different can reach ~50).
         from impl.model.utils.model_parallel.modules import vocab_parallel_cross_entropy
-        
+
         logprobs = -vocab_parallel_cross_entropy(logits, labels)[leave_one_indices]
         ########### sanity check ###########
         # world_size = base.constants.model_parallel_world_size()
