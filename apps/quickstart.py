@@ -73,7 +73,7 @@ class ModelConfig:
     enable_fp16: bool = True
     enable_bf16: bool = False
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
-    partition_method: Optional[str] = "parameters"
+    partition_method: Optional[str] = "parameters_balanced"
     num_pipeline_micro_batches: Optional[int] = None
 
     def __post_init__(self):

@@ -56,7 +56,7 @@ class PairedRWExperiment(Experiment):
     min_lr_ratio: float = 0.0
     zero_stage: int = 2
     offload_optimizer: bool = False
-    partition_method: Optional[str] = "parameters"
+    partition_method: Optional[str] = "parameters_balanced"
 
     num_pipeline_micro_batches: Optional[int] = None
 

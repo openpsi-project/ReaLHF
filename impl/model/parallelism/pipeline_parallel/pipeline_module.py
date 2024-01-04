@@ -142,7 +142,7 @@ class PipelineModule(nn.Module):
                  seed_fn=None,
                  base_seed=1234,
                  is_critic=False,
-                 partition_method='parameters',
+                 partition_method="parameters_balanced",
                  config: Optional[FlashMQATConfig] = None,
                  dtype=None,
                  device=None,
@@ -371,7 +371,7 @@ class PipelineModule(nn.Module):
 
         return x, ys
 
-    def _partition_layers(self, method='parameters'):
+    def _partition_layers(self, method='parameters_balanced'):
         num_stages = self._topo.get_dim('pipe')
         stage_id = self._topo.get_coord(self.global_rank).pipe
 

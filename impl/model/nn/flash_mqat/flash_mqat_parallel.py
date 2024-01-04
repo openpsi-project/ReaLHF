@@ -91,7 +91,7 @@ def mp_partition_flash_mqat_state_dict(
 
 def make_causal_flash_mqat_pipe_module(
     config: FlashMQATConfig,
-    partition_method: str = "parameters",
+    partition_method: str = "parameters_balanced",
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
     output_layer_specs_only: bool = False,
@@ -168,7 +168,7 @@ def make_causal_flash_mqat_pipe_module(
 
 def pipe_wrap_fn(
     model_path: str,
-    partition_method: str = "parameters",
+    partition_method: str = "parameters_balanced",
     init_critic_from_actor: bool = False,
     init_from_scratch: bool = False,
 ):

@@ -159,7 +159,7 @@ class PPOExperiment(Experiment):
     actor_adam_eps: float = 1e-5
     actor_min_lr_ratio: float = 0.0
     actor_zero_stage: int = 2
-    actor_partition_method: Optional[str] = "parameters"
+    actor_partition_method: Optional[str] = "parameters_balanced"
     offload_actor_param: bool = False
     offload_actor_optimizer_states: bool = False
     # critic optimizer
@@ -171,7 +171,7 @@ class PPOExperiment(Experiment):
     critic_adam_eps: float = 1e-5
     critic_min_lr_ratio: float = 0.0
     critic_zero_stage: int = 2
-    critic_partition_method: Optional[str] = "parameters"
+    critic_partition_method: Optional[str] = "parameters_balanced"
     offload_critic_param: bool = False
     offload_critic_optimizer_states: bool = False
     # ppo

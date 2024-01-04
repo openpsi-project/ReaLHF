@@ -66,7 +66,7 @@ class DPOExperiment(Experiment):
 
     num_pipeline_micro_batches: Optional[int] = None
     use_sequence_parallel: bool = False
-    partition_method: Optional[str] = "parameters"
+    partition_method: Optional[str] = "parameters_balanced"
 
     def __post_init__(self):
         if self.pp_size < 1 or self.dp_size < 1 or self.mp_size < 1:

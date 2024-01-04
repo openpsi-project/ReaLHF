@@ -8,8 +8,7 @@ import torch.nn as nn
 
 from base.datapack import partition_balanced as true_partition_balanced
 from impl.model.nn.flash_mqat.flash_mqat_base import *
-from impl.model.nn.flash_mqat.flash_mqat_parallel import mp_partition_flash_mqat_state_dict
-from impl.model.nn.pipe_nn import make_causal_flash_mqat_pipe_module
+from impl.model.nn.flash_mqat.flash_mqat_parallel import mp_partition_flash_mqat_state_dict, make_causal_flash_mqat_pipe_module
 from impl.model.parallelism.pipeline_parallel.pipeline_module import LayerSpec
 from impl.model.utils.save_load import save_to_disk
 import base.constants
@@ -181,6 +180,7 @@ def main():
         output_dir = os.path.join(default_save_root, output_dir)
     else:
         output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
 
     # TODO: load and process full statedict by shard for large model that can not fit into memory
     cfg = None
