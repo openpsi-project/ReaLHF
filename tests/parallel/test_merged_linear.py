@@ -55,7 +55,7 @@ def main(rank: int = None, world_size: int = None):
     from impl.model.parallelism.model_parallel.modules import (
         ColumnParallelLinear, merged_linear_with_grad_accumulation_and_async_allreduce)
 
-    NUM_MP=8
+    NUM_MP = 8
     NUM_PP = NUM_DP = 1
     init_global_constants(NUM_DP, NUM_MP, NUM_PP)
 

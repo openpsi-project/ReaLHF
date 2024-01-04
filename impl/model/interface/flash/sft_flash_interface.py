@@ -64,8 +64,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 **loss_fn_kwargs,
             )
         else:
-            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-                            max_seqlen=max_seqlen)
+            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
             loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
             module.backward(loss)
             module.step()

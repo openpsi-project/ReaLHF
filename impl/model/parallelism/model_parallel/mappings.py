@@ -2,8 +2,8 @@
 
 import torch
 
-from base.constants import *
 from .utils import split_tensor_along_last_dim
+from base.constants import *
 
 
 def _reduce(input_):

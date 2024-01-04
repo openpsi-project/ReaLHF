@@ -4,19 +4,15 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 
-from impl.model.utils.functional import torch_attn_func
-from .rotary import RotaryEmbedding
 from .mlp import LayerNormQKVLinear
+from .rotary import RotaryEmbedding
 from impl.model.parallelism.model_parallel.modules import RowParallelLinear
+from impl.model.utils.functional import torch_attn_func
 import base.logging as logging
 
 try:
-    from flash_attn import (
-        flash_attn_func,
-        flash_attn_varlen_func,
-        flash_attn_varlen_func_with_kvcache,
-        flash_attn_with_kvcache,
-    )
+    from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
+                            flash_attn_with_kvcache)
 except ModuleNotFoundError:
     pass
 import base.logging as logging
@@ -25,6 +21,7 @@ logger = logging.getLogger("Attention")
 
 
 class CausalSelfAttentionLayer(nn.Module):
+
     def __init__(
         self,
         hidden_dim: int,

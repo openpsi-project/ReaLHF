@@ -4,7 +4,6 @@ import time
 import unittest
 
 from torch.profiler import profile, ProfilerActivity, record_function
-
 # import transformers
 import torch
 import torch.distributed
@@ -60,8 +59,7 @@ def make_backend():
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
                 ),
-            )
-        )
+            ))
     elif NUM_PP > 1:
         return api.model.make_backend(
             config_package.ModelBackend(
@@ -80,8 +78,7 @@ def make_backend():
                     sequence_parallel=USE_SEQ_PARALLEL,
                     num_pipeline_micro_batches=NUM_PP,
                 ),
-            )
-        )
+            ))
 
 
 def make_interface():
@@ -129,9 +126,9 @@ def init_handles(rank):
     init_global_constants(NUM_DP, NUM_MP, NUM_PP)
     torch_dist_rank = torch.distributed.get_rank()
     cuda_visible = os.environ["CUDA_VISIBLE_DEVICES"]
-    print(
-        f"PROCESS RANK: {rank}; \n" f"TORCH DIST RANK: {torch_dist_rank}; \n" f"CUDA VISIBLE: {cuda_visible}"
-    )
+    print(f"PROCESS RANK: {rank}; \n"
+          f"TORCH DIST RANK: {torch_dist_rank}; \n"
+          f"CUDA VISIBLE: {cuda_visible}")
 
     model = make_model(device)
     backend = make_backend()
@@ -158,7 +155,8 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     st = time.monotonic()
     res = interface.inference(model, data)
     logits = res["logits"]
-    print(f"rank {rank} mp FIRST inference " f"time cost {time.monotonic() - st:.4f}")
+    print(f"rank {rank} mp FIRST inference "
+          f"time cost {time.monotonic() - st:.4f}")
     if logits is not None:
         print(f"rank {rank} mp FIRST inference logits shape {logits.shape}")
 
@@ -204,10 +202,8 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
     t = time.monotonic() - st
     print(f"rank {rank} mp FIRST generate time cost {t:.4f}")
     if len(outputs) > 0:
-        print(
-            f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
-            f"log probs shape {outputs['log_probs'].shape}"
-        )
+        print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
+              f"log probs shape {outputs['log_probs'].shape}")
 
     # for i in range(10):
     #     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
@@ -270,6 +266,7 @@ def run_linear(rank: int, res_queue: mp.Queue, seed: int):
 
 
 class ModelParallelFlashMQATTest(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         clear_name_resolve()
@@ -304,9 +301,9 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
         deepspeed.init_distributed()
         init_global_constants(1, 1, 1, model_name="baseline")
-        self.baseline_model = getattr(FlashMQATModel, f"from_{MODEL_TYPE}")(
-            model_path=BASELINE_MODEL_PATH, dtype=dtype, device=device
-        )
+        self.baseline_model = getattr(FlashMQATModel, f"from_{MODEL_TYPE}")(model_path=BASELINE_MODEL_PATH,
+                                                                            dtype=dtype,
+                                                                            device=device)
         self.baseline_model.forward = functools.partial(forward_helper, self.baseline_model)
         self.baseline_model.generate = functools.partial(generate_helper, self.baseline_model)
 
@@ -372,21 +369,19 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
         self.baseline_model.eval()
 
         st = time.monotonic()
-        r = self.baseline_model(
-            packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
-        ).float()
+        r = self.baseline_model(packed_input_ids=packed_input_ids,
+                                cu_seqlens=cu_seqlens,
+                                max_seqlen=max_seqlen).float()
         print(f"baseline FIRST inference time cost {time.monotonic() - st:.4f}")
 
         st = time.monotonic()
-        r = self.baseline_model(
-            packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
-        ).float()
+        r = self.baseline_model(packed_input_ids=packed_input_ids,
+                                cu_seqlens=cu_seqlens,
+                                max_seqlen=max_seqlen).float()
         print(f"baseline inference time cost {time.monotonic() - st:.4f}")
 
-        print(
-            f"diff: {r - res[0]}, max/correct_max {(r - res[0]).abs().max()}/{r.abs().max()}, "
-            f" mean {(r - res[0]).abs().mean()},"
-        )
+        print(f"diff: {r - res[0]}, max/correct_max {(r - res[0]).abs().max()}/{r.abs().max()}, "
+              f" mean {(r - res[0]).abs().mean()},")
 
         # import base.consistency
         # base.consistency.check_all_model_parallel(NUM_MP)

@@ -81,10 +81,12 @@ def forward_helper(
         scores = pad_input(scores, indices, batch_size, seqlen)
     return scores
 
+
 def add_helper_functions(m: FlashMQATModel):
     m.forward = functools.partial(forward_helper, m)
     m.generate = functools.partial(generate_helper, m)
     return m
+
 
 def make_flash_model(
     name: str,

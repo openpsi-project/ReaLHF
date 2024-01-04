@@ -97,8 +97,7 @@ class PackedGenScoringInterface(api.model.ModelInterface):
         attention_mask = torch.cat([prompt_att_mask, seq_att_mask], 1)
 
         # Compute the log probability outputed by the SFT model
-        sft_model_logits = self.sft_model(input_ids=seq, attention_mask=attention_mask,
-                                          padding_side=None)
+        sft_model_logits = self.sft_model(input_ids=seq, attention_mask=attention_mask, padding_side=None)
         sft_seqlogp = []
         for i in range(prompts.shape[0]):
             logits_ = sft_model_logits[i][prompt_lens[i] - 1:-1]
