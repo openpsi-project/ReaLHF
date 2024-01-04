@@ -239,20 +239,22 @@ def load_from_disk(model_dir: str,
                 fn_pattern = r".*" + r"pp-(\d{2})" + f"-mp-{mp_rank:02d}-" + r"s-(\d{2}).*"
                 sd, n_shards = load_model_dir_fn_pattern(model_dir, fn_pattern)
                 state_dicts.append(sd)
-            # TODO: merge into one state dict, temp solution
-            embedding_keys = [".wte"]  # dim=0 no bias
-            column_linear_keys = [
-                ".attn.q_attn", ".attn.k_attn", ".attn.v_attn", ".mlp.c_fc", ".mlp.gate_proj", ".mlp.up_proj"
-            ]  # dim=0 + partition bias
-            row_linear_keys = [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
-            state_dict = dict()
             max_layers = 0
             for k in state_dicts[0].keys():
                 i = int(k.split(".")[0])
                 max_layers = i if i > max_layers else max_layers
+            # TODO: merge into one state dict, temp solution
+            embedding_keys = [".wte"]  # dim=0 no bias
+            column_linear_keys = [
+                ".attn.q_attn", ".attn.k_attn", ".attn.v_attn", ".mlp.c_fc", ".mlp.gate_proj", ".mlp.up_proj", f"{max_layers}.weight",
+            ]  # dim=0 + partition bias
+            row_linear_keys = [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
+            state_dict = dict()
+            for k in state_dicts[0].keys():
+                i = int(k.split(".")[0])
                 if any([ek in k for ek in embedding_keys]) and "weight" in k:
                     state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
-                elif any([ck in k for ck in column_linear_keys]):
+                elif any([ck in k for ck in column_linear_keys]) and state_dicts[0][k].shape[0] > 1:  # exclude critic head
                     state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
                 elif any([rk in k for rk in row_linear_keys]) and "weight" in k:
                     state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=1)

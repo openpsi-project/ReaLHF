@@ -259,7 +259,6 @@ def to_llama_state_dict(state_dict: Dict, config: FlashMQATConfig) -> Dict:
                 k = k.replace(k1, k2)
             new_state_dict[k] = v
         state_dict = new_state_dict
-    print(list(state_dict.keys()))
     for i in range(config.n_layers):
         w = state_dict[f"model.layers.{i}.self_attn.c_attn.linear.weight"]
         nq = config.hidden_dim // config.head_dim
@@ -319,6 +318,7 @@ def convert_config_parallel_llama(hf_config: transformers.LlamaConfig) -> FlashM
         rotary_scaling_type=None if hf_config.rope_scaling is None else hf_config.rope_scaling["type"],
     )
 
+# TODO: add a function to merge back from model parallel state dict
 
 def convert_state_dict_parallel_llama(state_dict: Dict,
                                       config: FlashMQATConfig,

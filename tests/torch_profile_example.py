@@ -25,16 +25,16 @@ import base.gpu_utils
 import base.namedarray
 
 batch_size = 6
-n_minibatches = 3
+# n_minibatches = 3
 seqlen = 4096
 vocab_size = 32000
 
 MODEL_NAME = "default"
 
 # parallelism config
-NUM_MP = 8
-NUM_PP = 1
-NUM_DP = 1
+NUM_MP = 2
+NUM_PP = 2
+NUM_DP = 2
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
@@ -45,12 +45,11 @@ if MODEL_TYPE == "llama":
         SUFFIX = f"_{NUM_PP}pp_{NUM_SHARDS}s"
     elif NUM_PP > 1:
         SUFFIX = f"_{NUM_PP}pp_{NUM_MP}mp_{NUM_SHARDS}s"
-    # BASELINE_MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
-    # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
-    BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
-    MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-13b-hf{SUFFIX}"
+    BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
+    MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
 
 ## performance related config
+FORWARD_ONLY = True
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
 USE_SEQ_PARALLEL = True
@@ -87,7 +86,8 @@ def make_backend():
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
                 ),
-            ))
+            )
+        )
     elif NUM_PP > 1:
         return api.model.make_backend(
             config_package.ModelBackend(
@@ -105,14 +105,16 @@ def make_backend():
                     enable_bf16=USE_BF16,
                     sequence_parallel=USE_SEQ_PARALLEL,
                 ),
-            ))
+            )
+        )
 
 
 def make_interface():
     import api.model
 
     return api.model.make_interface(
-        config_package.ModelInterface(type_="flash_sft", args=dict(n_minibatches=n_minibatches)))
+        config_package.ModelInterface(type_="flash_sft", args=dict())
+    )
 
 
 def make_model(device):
@@ -214,7 +216,7 @@ def make_batch(tokenizer, device, seed=373):
     dp_worldsize = base.constants.data_parallel_world_size()
     random.seed(seed)
     whole_batch = [random_sentence(min_len=seqlen, max_len=seqlen) for _ in range(batch_size)]
-    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank:batch_size // dp_worldsize * (dp_rank + 1)]
+    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank : batch_size // dp_worldsize * (dp_rank + 1)]
     return make_input(tokenizer, device, dp_batch)
 
 
@@ -252,22 +254,31 @@ def main(rank: int = None, world_size: int = None):
 
     s = torch.profiler.schedule(skip_first=1, warmup=1, active=2, repeat=1, wait=0)
 
+    if FORWARD_ONLY:
+        dirname = f"./trace_result/fwd_mp{NUM_MP}pp{NUM_PP}_local"
+    else:
+        dirname = f"./trace_result/fwdbwd_mp{NUM_MP}pp{NUM_PP}_local"
+    os.makedirs(dirname, exist_ok=True)
+
     def trace_handler(p):
-        p.export_chrome_trace(f"./trace_result/fwdbwd_mp{NUM_MP}pp{NUM_PP}_local/mp{rank}_trace.json")
+        p.export_chrome_trace(os.path.join(dirname, f"mp{rank}_trace.json"))
 
     with torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-            record_shapes=True,
-            profile_memory=True,
-            with_stack=True,
-            schedule=s,
-            on_trace_ready=trace_handler,
-            with_flops=True,
+        activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+        schedule=s,
+        on_trace_ready=trace_handler,
+        with_flops=True,
     ) as prof:
         for _ in range(10):
             torch.cuda.synchronize()
             st = time.monotonic()
-            res = interface.train_step(model, data)
+            if FORWARD_ONLY:
+                res = interface.inference(model, data)
+            else:
+                res = interface.train_step(model, data)
             torch.cuda.synchronize()
             prof.step()
 

@@ -6,6 +6,7 @@ import torch.distributed as dist
 import transformers
 
 from base.constants import data_parallel_group
+import base.constants
 import base.logging as logging
 
 logger = logging.getLogger("Modeling Functional Utils")
@@ -153,13 +154,38 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
     Returns:
         torch.FloatTensor: Log probability with shape [tot_seqlen - #seqs].
     """
-    logits_shape = logits.shape
+    labels = torch.nn.functional.pad(labels[1:], (0, 1), value=0)
     leave_one_indices = build_leave_one_indices(logits, cu_seqlens)
+    if base.constants.model_parallel_world_size() > 1:
+        # NOTE: logprobs is freaking sensitive to input_ids. If the input sequence is a natural sequence, everything will be fine.
+        # However, if we input random token IDs, parallel cross entropy can produce VERY different results than the normal
+        # torch.gather based version (e.g., the maximum absolute different can reach ~50).
+        from impl.model.utils.model_parallel.modules import vocab_parallel_cross_entropy
+        
+        logprobs = -vocab_parallel_cross_entropy(logits, labels)[leave_one_indices]
+        ########### sanity check ###########
+        # world_size = base.constants.model_parallel_world_size()
+        # dim_size = [logits.shape[1] * world_size, logits.shape[0]]
+        # all_gather_buffer = torch.zeros(*dim_size, dtype=logits.dtype, device=logits.device)
+        # torch.distributed._all_gather_base(
+        #     all_gather_buffer,
+        #     logits.transpose(0, 1).contiguous(),
+        #     group=base.constants.model_parallel_group(),
+        # )
+        # logits2 = all_gather_buffer.transpose(0, 1).contiguous()
+        # logprobs2 = gather_packed_shifted_log_probs(logits2, cu_seqlens, packed_input_ids).float()
+        # assert torch.allclose(logprobs, logprobs2, atol=2e-2), (
+        #     (logprobs - logprobs2).abs().max(),
+        #     logprobs,
+        #     logprobs2,
+        # )
+        ########### sanity check ###########
+        return logprobs
+    logits_shape = logits.shape
     # shift_one_indices = torch.cat([
     #     torch.arange(cu_seqlens[i] + 1 , cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
     #     for i in range(cu_seqlens.shape[0] - 1)
     # ])
-    labels = torch.nn.functional.pad(labels[1:], (0, 1), value=0)
     # shift labels one step to the left and pad it to match the shape of logits
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
     log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
@@ -335,7 +361,7 @@ def rotate_half(x: torch.HalfTensor, interleaved: bool = False):
 
 
 @torch.jit.script
-def compute_varlen_rotary_indices(
+def compute_varlen_position_indices(
     total_seqlen: int,
     cu_seqlens: torch.IntTensor,
     seqlen_offsets: Optional[torch.IntTensor] = None,
@@ -359,7 +385,7 @@ def apply_rotary_varlen(
     rotary_indices: Optional[torch.LongTensor] = None,
 ) -> Tuple[torch.HalfTensor, torch.LongTensor]:
     if rotary_indices is None:
-        rotary_indices = compute_varlen_rotary_indices(x.shape[0], cu_seqlens, seqlen_offsets)
+        rotary_indices = compute_varlen_position_indices(x.shape[0], cu_seqlens, seqlen_offsets)
 
     ro_dim = cos.shape[-1] * 2
     assert ro_dim <= x.shape[-1]

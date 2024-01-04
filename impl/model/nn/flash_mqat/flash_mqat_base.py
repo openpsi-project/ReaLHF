@@ -10,7 +10,7 @@ import torch.utils.checkpoint
 import transformers
 
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-from impl.model.utils.functional import torch_attn_func
+from impl.model.utils.functional import torch_attn_func, compute_varlen_position_indices
 from impl.model.utils.modules import (LayerNormLinear, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm,
                                       RotaryEmbedding)
 from impl.model.utils.save_load import load_from_disk, save_to_disk
@@ -476,22 +476,22 @@ class VocabPositionEmbedding(nn.Module):
                 y.position_ids = y.position_ids.repeat(batch_size, 1)
         elif y.position_ids is None:
             # packed_input_ids is given
-            lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
-            if y.cache_seqlens is None:
-                y.position_ids = torch.cat(
-                    [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
-                assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
-            else:
-                y.position_ids = torch.cat([
-                    torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) + cache_len
-                    for l, cache_len in zip(lengths, y.cache_seqlens)
-                ])
+            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0], cu_seqlens=x.cu_seqlens, seqlen_offsets=y.cache_seqlens)
+            # lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
+            # if y.cache_seqlens is None:
+            #     y.position_ids = torch.cat(
+            #         [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
+            #     assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
+            # else:
+            #     y.position_ids = torch.cat([
+            #         torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) + cache_len
+            #         for l, cache_len in zip(lengths, y.cache_seqlens)
+            #     ])
             if x.max_seqlen > self.n_positions:
                 raise ValueError(f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions}).")
             assert y.position_ids.shape == y.input_ids.shape, (
                 y.position_ids.shape,
                 y.input_ids.shape,
-                lengths,
                 x.cu_seqlens,
             )
 

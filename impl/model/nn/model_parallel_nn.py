@@ -56,7 +56,7 @@ def make_causal_flash_mqat_parallel_pipe_module(
         head_cls = SequenceParallelActorHead
     else:
         head_cls = OutputHead
-    if isinstance(head_cls, SequenceParallelActorHead):
+    if head_cls == SequenceParallelActorHead:
         head = LayerSpec(
             head_cls,
             config.hidden_dim,
@@ -65,6 +65,7 @@ def make_causal_flash_mqat_parallel_pipe_module(
             # to preserve same pipe stage division.
             config.vocab_size,
             sequence_parallel=sequence_parallel,
+            async_tensor_model_parallel_allreduce=not sequence_parallel,
             gradient_accumulation_fusion=gradient_accumulation_fusion,
             bias=False,
             device=device,
