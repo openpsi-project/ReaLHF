@@ -19,8 +19,8 @@ from base.monitor import time_mark
 from base.namedarray import NamedArray
 from base.topology import PipelineParallelGrid
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig, genstep
+from impl.model.parallelism.pipeline_parallel.pipeline_module import PipelineError, PipelineModule
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-from impl.model.utils.pipeline_module import PipelineError, PipelineModule
 from impl.model.utils.tensor import pad_sequence_parallel_generate_input, pad_sequence_parallel_input
 from impl.model.utils.tensor_storage import recv_grad, send_grad, TensorBuffer
 import base.constants

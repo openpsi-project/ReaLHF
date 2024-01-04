@@ -66,7 +66,7 @@ def genstep(
     """
     # FIXME: sampled tokens is absolutely wrong when using model parallel
     # if base.constants.model_parallel_world_size() > 1:
-    #     from impl.model.utils.model_parallel.mappings import gather_from_tensor_model_parallel_region
+    #     from impl.model.parallelism.model_parallel.mappings import gather_from_tensor_model_parallel_region
     #     next_token_logits = gather_from_tensor_model_parallel_region(next_token_logits)
 
     unfinished_sequences = unfinished_sequences.bool()

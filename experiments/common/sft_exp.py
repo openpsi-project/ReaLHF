@@ -139,19 +139,17 @@ class SFTExperiment(Experiment):
         )
 
         model = get_flash_mqat_model_config(
+            from_type="hf_as_actor",
             model_path=model_path,
-            from_model_type=self.model_type,
+            hf_model_type=self.model_type,
             tokenizer_path=model_path,
-            pp_size=self.pp_size,
-            mp_size=self.mp_size,
-            dp_size=self.dp_size,
+            use_pipe=(self.pp_size > 1),
+            dtype="bf16" if self.enable_bf16 else "fp16",
             sequence_parallel=self.use_sequence_parallel,
-            is_critic=False,
+            partition_method=self.partition_method,
             use_lora=self.use_lora,
             lora_dim=self.lora_dim,
             lora_scaling=self.lora_scaling,
-            partition_method=self.partition_method,
-            dtype="bf16" if self.enable_bf16 else "fp16",
         )
 
         interface = ModelInterface("flash_sft")

@@ -11,11 +11,14 @@ import torch.nn.functional as F
 import torch.nn.init as init
 
 from base.constants import *
-from impl.model.utils.model_parallel.mappings import *
-from impl.model.utils.model_parallel.utils import (_initialize_affine_weight_cpu,
-                                                   _initialize_affine_weight_gpu, divide,
-                                                   set_tensor_model_parallel_attributes, VocabUtility)
-from impl.model.utils.modules import LlamaRMSNorm
+from .mappings import *
+from .utils import (
+    _initialize_affine_weight_cpu,
+    _initialize_affine_weight_gpu,
+    divide,
+    set_tensor_model_parallel_attributes,
+    VocabUtility,
+)
 
 _grad_accum_fusion_available = True
 try:
@@ -79,15 +82,18 @@ class ParallelEmbedding(torch.nn.Module):
         self.tensor_model_parallel_size = model_parallel_world_size()
         # Divide the weight matrix along the vocaburaly dimension.
         self.vocab_start_index, self.vocab_end_index = VocabUtility.vocab_range_from_global_vocab_size(
-            self.num_embeddings, model_parallel_rank(), self.tensor_model_parallel_size)
+            self.num_embeddings, model_parallel_rank(), self.tensor_model_parallel_size
+        )
         self.num_embeddings_per_partition = self.vocab_end_index - self.vocab_start_index
 
         logger.debug(
             f"ParallelEmbedding: num_embeddings={num_embeddings}, per_partition={self.num_embeddings_per_partition}, embedding_dim={embedding_dim},"
-            f"tp_rank={model_parallel_rank()},tp_world_size={model_parallel_world_size()}")
+            f"tp_rank={model_parallel_rank()},tp_world_size={model_parallel_world_size()}"
+        )
         # Allocate weights and initialize.
         self.weight = Parameter(
-            torch.empty(self.num_embeddings_per_partition, self.embedding_dim, device=device, dtype=dtype))
+            torch.empty(self.num_embeddings_per_partition, self.embedding_dim, device=device, dtype=dtype)
+        )
         if perform_initialization:
             _initialize_affine_weight_gpu(self.weight, init_method, partition_dim=0, stride=1)
 
@@ -124,8 +130,9 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
 
     @staticmethod
     @custom_fwd
-    def forward(ctx, input, weight, bias, gradient_accumulation_fusion, async_grad_allreduce,
-                sequence_parallel):
+    def forward(
+        ctx, input, weight, bias, gradient_accumulation_fusion, async_grad_allreduce, sequence_parallel
+    ):
         # disable sequence parallel for now for it requires a global buffer
         ctx.save_for_backward(input, weight)
         ctx.use_bias = bias is not None
@@ -134,8 +141,9 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
         ctx.sequence_parallel = sequence_parallel
 
         if sequence_parallel:
-            assert (not ctx.async_grad_allreduce
-                    ), "async_grad_allreduce and sequence_parallel can not be both True"
+            assert (
+                not ctx.async_grad_allreduce
+            ), "async_grad_allreduce and sequence_parallel can not be both True"
             world_size = model_parallel_world_size()
             dim_size = list(input.size())
             dim_size[0] = dim_size[0] * world_size
@@ -163,10 +171,9 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
             dim_size[0] = dim_size[0] * world_size
 
             all_gather_buffer = torch.empty(*dim_size, dtype=input.dtype, device=torch.cuda.current_device())
-            handle = torch.distributed._all_gather_base(all_gather_buffer,
-                                                        input,
-                                                        group=model_parallel_group(),
-                                                        async_op=True)
+            handle = torch.distributed._all_gather_base(
+                all_gather_buffer, input, group=model_parallel_group(), async_op=True
+            )
 
             # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
             # gather is scheduled before the input gradient computation
@@ -196,25 +203,25 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
         if ctx.sequence_parallel:
             assert not ctx.async_grad_allreduce
             dim_size = list(input.size())
-            sub_grad_input = torch.empty(dim_size,
-                                         dtype=input.dtype,
-                                         device=torch.cuda.current_device(),
-                                         requires_grad=False)
+            sub_grad_input = torch.empty(
+                dim_size, dtype=input.dtype, device=torch.cuda.current_device(), requires_grad=False
+            )
             # reduce_scatter
-            handle = torch.distributed._reduce_scatter_base(sub_grad_input,
-                                                            grad_input,
-                                                            group=model_parallel_group(),
-                                                            async_op=True)
+            handle = torch.distributed._reduce_scatter_base(
+                sub_grad_input, grad_input, group=model_parallel_group(), async_op=True
+            )
             # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
             # reduce scatter is scheduled before the weight gradient computation
 
         if ctx.gradient_accumulation_fusion:
             if weight.main_grad.dtype == torch.float32:
-                fused_weight_gradient_mlp_cuda.wgrad_gemm_accum_fp32(total_input, grad_output,
-                                                                     weight.main_grad)
+                fused_weight_gradient_mlp_cuda.wgrad_gemm_accum_fp32(
+                    total_input, grad_output, weight.main_grad
+                )
             elif weight.main_grad.dtype in (torch.float16, torch.bfloat16):
-                fused_weight_gradient_mlp_cuda.wgrad_gemm_accum_fp16(total_input, grad_output,
-                                                                     weight.main_grad)
+                fused_weight_gradient_mlp_cuda.wgrad_gemm_accum_fp16(
+                    total_input, grad_output, weight.main_grad
+                )
             else:
                 raise RuntimeError("Unsupported gradient type for gradient accumulation fusion")
             grad_weight = None
@@ -304,15 +311,19 @@ def linear_with_grad_accumulation_and_async_allreduce(
     if not linear_with_grad_accumulation_and_async_allreduce.warned:
         if os.environ.get("CUDA_DEVICE_MAX_CONNECTIONS") != "1":
             if sequence_parallel:
-                warnings.warn("When using sequence parallelism it is recommended to set the "
-                              "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
-                              "maximum speedup")
+                warnings.warn(
+                    "When using sequence parallelism it is recommended to set the "
+                    "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
+                    "maximum speedup"
+                )
                 linear_with_grad_accumulation_and_async_allreduce.warned = True
 
             if async_grad_allreduce:
-                warnings.warn("When using async grad allreduce it is recommended to set the "
-                              "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
-                              "maximum speedup")
+                warnings.warn(
+                    "When using async grad allreduce it is recommended to set the "
+                    "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
+                    "maximum speedup"
+                )
                 linear_with_grad_accumulation_and_async_allreduce.warned = True
 
     return LinearWithGradAccumulationAndAsyncCommunication.apply(*args)
@@ -322,11 +333,11 @@ linear_with_grad_accumulation_and_async_allreduce.warned = False
 
 
 class MergedLinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
-
     @staticmethod
     @custom_fwd
-    def forward(ctx, input, gradient_accumulation_fusion, async_grad_allreduce, sequence_parallel,
-                is_w_parallel, *wbs):
+    def forward(
+        ctx, input, gradient_accumulation_fusion, async_grad_allreduce, sequence_parallel, is_w_parallel, *wbs
+    ):
         # disable sequence parallel for now for it requires a global buffer
         assert len(wbs) % 2 == 0
         weights = wbs[::2]
@@ -341,8 +352,9 @@ class MergedLinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Funct
         ctx.sequence_parallel = sequence_parallel
 
         if sequence_parallel:
-            assert (not ctx.async_grad_allreduce
-                    ), "async_grad_allreduce and sequence_parallel can not be both True"
+            assert (
+                not ctx.async_grad_allreduce
+            ), "async_grad_allreduce and sequence_parallel can not be both True"
             world_size = model_parallel_world_size()
             dim_size = list(input.size())
             dim_size[0] = dim_size[0] * world_size
@@ -376,10 +388,9 @@ class MergedLinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Funct
             dim_size[0] = dim_size[0] * world_size
 
             all_gather_buffer = torch.empty(*dim_size, dtype=input.dtype, device=torch.cuda.current_device())
-            handle = torch.distributed._all_gather_base(all_gather_buffer,
-                                                        input,
-                                                        group=model_parallel_group(),
-                                                        async_op=True)
+            handle = torch.distributed._all_gather_base(
+                all_gather_buffer, input, group=model_parallel_group(), async_op=True
+            )
 
             # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
             # gather is scheduled before the input gradient computation
@@ -412,26 +423,26 @@ class MergedLinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Funct
         if ctx.sequence_parallel:
             assert not ctx.async_grad_allreduce
             dim_size = list(input.size())
-            sub_grad_input = torch.empty(dim_size,
-                                         dtype=input.dtype,
-                                         device=torch.cuda.current_device(),
-                                         requires_grad=False)
+            sub_grad_input = torch.empty(
+                dim_size, dtype=input.dtype, device=torch.cuda.current_device(), requires_grad=False
+            )
             # reduce_scatter
-            handle = torch.distributed._reduce_scatter_base(sub_grad_input,
-                                                            grad_input,
-                                                            group=model_parallel_group(),
-                                                            async_op=True)
+            handle = torch.distributed._reduce_scatter_base(
+                sub_grad_input, grad_input, group=model_parallel_group(), async_op=True
+            )
             # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
             # reduce scatter is scheduled before the weight gradient computation
 
         if ctx.gradient_accumulation_fusion:
             for weight, grad_output in zip(weights, grads):
                 if weight.main_grad.dtype == torch.float32:
-                    fused_weight_gradient_mlp_cuda.wgrad_gemm_accum_fp32(total_input, grad_output,
-                                                                         weight.main_grad)
+                    fused_weight_gradient_mlp_cuda.wgrad_gemm_accum_fp32(
+                        total_input, grad_output, weight.main_grad
+                    )
                 elif weight.main_grad.dtype in (torch.float16, torch.bfloat16):
-                    fused_weight_gradient_mlp_cuda.wgrad_gemm_accum_fp16(total_input, grad_output,
-                                                                         weight.main_grad)
+                    fused_weight_gradient_mlp_cuda.wgrad_gemm_accum_fp16(
+                        total_input, grad_output, weight.main_grad
+                    )
                 else:
                     raise RuntimeError("Unsupported gradient type for gradient accumulation fusion")
             gws = [None for _ in weights]
@@ -474,15 +485,19 @@ def merged_linear_with_grad_accumulation_and_async_allreduce(
     if not merged_linear_with_grad_accumulation_and_async_allreduce.warned:
         if os.environ.get("CUDA_DEVICE_MAX_CONNECTIONS") != "1":
             if sequence_parallel:
-                warnings.warn("When using sequence parallelism it is recommended to set the "
-                              "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
-                              "maximum speedup")
+                warnings.warn(
+                    "When using sequence parallelism it is recommended to set the "
+                    "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
+                    "maximum speedup"
+                )
                 merged_linear_with_grad_accumulation_and_async_allreduce.warned = True
 
             if async_grad_allreduce:
-                warnings.warn("When using async grad allreduce it is recommended to set the "
-                              "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
-                              "maximum speedup")
+                warnings.warn(
+                    "When using async grad allreduce it is recommended to set the "
+                    "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
+                    "maximum speedup"
+                )
                 merged_linear_with_grad_accumulation_and_async_allreduce.warned = True
 
     return MergedLinearWithGradAccumulationAndAsyncCommunication.apply(*args)
@@ -557,7 +572,8 @@ class ColumnParallelLinear(torch.nn.Module):
         #     f"ColumnLinear: input_size={input_size}, output_size={output_size}, output_size_per_partition={self.output_size_per_partition}"
         # )
         self.weight = Parameter(
-            torch.empty(self.output_size_per_partition, self.input_size, device=device, dtype=dtype))
+            torch.empty(self.output_size_per_partition, self.input_size, device=device, dtype=dtype)
+        )
         if perform_initialization:
             _initialize_affine_weight_gpu(self.weight, init_method, partition_dim=0, stride=stride)
 
@@ -575,18 +591,22 @@ class ColumnParallelLinear(torch.nn.Module):
 
         if gradient_accumulation_fusion:
             if not _grad_accum_fusion_available:
-                raise RuntimeError("ColumnParallelLinear was called with gradient_accumulation_fusion set "
-                                   "to True but the custom CUDA extension fused_weight_gradient_mlp_cuda "
-                                   "module is not found. To use gradient_accumulation_fusion you must "
-                                   "install APEX with --cpp_ext and --cuda_ext. For example: "
-                                   'pip install --global-option="--cpp_ext" --global-option="--cuda_ext ." '
-                                   "Note that the extension requires CUDA>=11. Otherwise, you must turn off "
-                                   "gradient accumulation fusion.")
+                raise RuntimeError(
+                    "ColumnParallelLinear was called with gradient_accumulation_fusion set "
+                    "to True but the custom CUDA extension fused_weight_gradient_mlp_cuda "
+                    "module is not found. To use gradient_accumulation_fusion you must "
+                    "install APEX with --cpp_ext and --cuda_ext. For example: "
+                    'pip install --global-option="--cpp_ext" --global-option="--cuda_ext ." '
+                    "Note that the extension requires CUDA>=11. Otherwise, you must turn off "
+                    "gradient accumulation fusion."
+                )
         self.gradient_accumulation_fusion = gradient_accumulation_fusion
 
         if self.async_tensor_model_parallel_allreduce and self.sequence_parallel:
-            raise RuntimeError("`async_tensor_model_parallel_allreduce` and `sequence_parallel` "
-                               "cannot be enabled at the same time.")
+            raise RuntimeError(
+                "`async_tensor_model_parallel_allreduce` and `sequence_parallel` "
+                "cannot be enabled at the same time."
+            )
 
     def forward(self, input_) -> torch.Tensor:
         """Forward of ColumnParallelLinear
@@ -696,7 +716,8 @@ class RowParallelLinear(torch.nn.Module):
         # we allocate the transpose.
         # Initialize weight.
         self.weight = Parameter(
-            torch.empty(self.output_size, self.input_size_per_partition, device=device, dtype=dtype))
+            torch.empty(self.output_size, self.input_size_per_partition, device=device, dtype=dtype)
+        )
         if perform_initialization:
             _initialize_affine_weight_gpu(self.weight, init_method, partition_dim=1, stride=stride)
         if bias:
@@ -744,158 +765,6 @@ class RowParallelLinear(torch.nn.Module):
         return output
 
 
-class LayerNormColumnLinear(nn.Module):
-
-    def __init__(
-        self,
-        input_dim: int,
-        output_dim: int,
-        layer_norm_epsilon: float,
-        use_attention_bias: bool,
-        sequence_parallel: Optional[bool] = False,
-        gradient_accumulation_fusion: bool = True,
-        layer_norm_type: Optional[str] = None,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
-    ):
-        super().__init__()
-        if dtype is None:
-            dtype = torch.float16
-        if layer_norm_type is None:
-            layer_norm_fn = nn.LayerNorm
-        elif layer_norm_type == "rms":
-            layer_norm_fn = LlamaRMSNorm
-        self.ln = layer_norm_fn(input_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.linear = ColumnParallelLinear(
-            input_dim,
-            output_dim,
-            async_tensor_model_parallel_allreduce=not sequence_parallel,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-            bias=use_attention_bias,
-            dtype=dtype,
-            device=device,
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.linear(self.ln(x))
-
-
-class LayerNormParallelMLP(nn.Module):
-
-    def __init__(
-        self,
-        hidden_dim: int,
-        intermediate_dim: int,
-        resid_pdrop: float,
-        activation_function: str,
-        layer_norm_epsilon: float,
-        sequence_parallel: Optional[bool] = False,
-        gradient_accumulation_fusion: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[str, torch.device]] = None,
-    ):
-        super().__init__()
-        if dtype is None:
-            dtype = torch.float16
-
-        self.ln = nn.LayerNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.c_fc = ColumnParallelLinear(
-            hidden_dim,
-            intermediate_dim,
-            async_tensor_model_parallel_allreduce=not sequence_parallel,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-            dtype=dtype,
-            device=device,
-        )
-        self.c_proj = RowParallelLinear(intermediate_dim,
-                                        hidden_dim,
-                                        sequence_parallel=sequence_parallel,
-                                        gradient_accumulation_fusion=gradient_accumulation_fusion,
-                                        dtype=dtype,
-                                        device=device)
-        self.act = get_activation_fn(activation_function)
-        self.dropout = nn.Dropout(resid_pdrop)
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.ln(hidden_states)
-        hidden_states, _ = self.c_fc(hidden_states)
-        hidden_states = self.act(hidden_states)
-        hidden_states, _ = self.c_proj(hidden_states)
-        return self.dropout(hidden_states)
-
-
-class LlamaLayerNormParallelMLP(nn.Module):
-
-    def __init__(
-        self,
-        hidden_dim: int,
-        intermediate_dim: int,
-        activation_function: str,
-        layer_norm_epsilon: float,
-        sequence_parallel: Optional[bool] = False,
-        gradient_accumulation_fusion: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[str, torch.device]] = None,
-    ):
-        super().__init__()
-        if dtype is None:
-            dtype = torch.float16
-        self.hidden_size = hidden_dim
-        self.intermediate_size = intermediate_dim
-        self.ln = LlamaRMSNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.gate_proj = ColumnParallelLinear(
-            self.hidden_size,
-            self.intermediate_size,
-            async_tensor_model_parallel_allreduce=not sequence_parallel,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-            bias=False,
-            dtype=dtype,
-            device=device,
-        )
-        self.up_proj = ColumnParallelLinear(
-            self.hidden_size,
-            self.intermediate_size,
-            async_tensor_model_parallel_allreduce=not sequence_parallel,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-            bias=False,
-            dtype=dtype,
-            device=device,
-        )
-        self.down_proj = RowParallelLinear(
-            self.intermediate_size,
-            self.hidden_size,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-            bias=False,
-            dtype=dtype,
-            device=device,
-        )
-        self.act_fn = get_activation_fn(activation_function)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.ln(x)
-        _gradient_accumulation_fusion = self.gate_proj.gradient_accumulation_fusion
-        _async_grad_allreduce = self.gate_proj.async_tensor_model_parallel_allreduce
-        _sequence_parallel = self.gate_proj.sequence_parallel
-        _is_w_parallel = [True, True]
-        gate, upproj = merged_linear_with_grad_accumulation_and_async_allreduce(
-            x,
-            _gradient_accumulation_fusion,
-            _async_grad_allreduce,
-            _sequence_parallel,
-            _is_w_parallel,
-            self.gate_proj.weight,
-            self.gate_proj.bias,
-            self.up_proj.weight,
-            self.up_proj.bias,
-        )
-        return self.down_proj(self.act_fn(gate) * upproj)
-
-
 def parallel_lm_logits(
     input_: torch.HalfTensor,
     word_embeddings_weight: torch.HalfTensor,
@@ -910,8 +779,9 @@ def parallel_lm_logits(
     if async_tensor_model_parallel_allreduce or sequence_parallel:
         input_parallel = input_
         model_parallel = model_parallel_world_size() > 1
-        async_grad_allreduce = (async_tensor_model_parallel_allreduce and model_parallel
-                                and not sequence_parallel)
+        async_grad_allreduce = (
+            async_tensor_model_parallel_allreduce and model_parallel and not sequence_parallel
+        )
     else:
         input_parallel = copy_to_tensor_model_parallel_region(input_)
         async_grad_allreduce = False
@@ -934,14 +804,13 @@ def parallel_lm_logits(
 
 
 class _VocabParallelCrossEntropy(torch.autograd.Function):
-
     @staticmethod
     def forward(ctx, vocab_parallel_logits, target, label_smoothing=0.0):
         # Maximum value along vocab dimension across all GPUs.
         logits_max = torch.max(vocab_parallel_logits, dim=-1)[0]
-        torch.distributed.all_reduce(logits_max,
-                                     op=torch.distributed.ReduceOp.MAX,
-                                     group=model_parallel_group())
+        torch.distributed.all_reduce(
+            logits_max, op=torch.distributed.ReduceOp.MAX, group=model_parallel_group()
+        )
         # Subtract the maximum value.
         vocab_parallel_logits = vocab_parallel_logits - logits_max.unsqueeze(dim=-1)
 

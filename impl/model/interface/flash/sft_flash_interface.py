@@ -8,9 +8,9 @@ import tqdm
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+from impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
 from impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
                                          gather_packed_shifted_log_probs)
-from impl.model.utils.model_parallel.modules import vocab_parallel_cross_entropy
 from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
 import api.data
 import api.model

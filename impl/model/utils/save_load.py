@@ -78,7 +78,7 @@ def save_pipeline_model(model: api.model.Model, output_dir: str):
     output_dir = os.path.join(output_dir, sub_folder)
     os.makedirs(output_dir, exist_ok=True)
     module.save(output_dir)
-    output_config_file = os.path.join(output_dir, "config.json")
+    output_config_file = os.path.join(output_dir, "flash_mqat_config.json")
     config = dataclasses.asdict(module.config)
     with open(output_config_file, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=4)

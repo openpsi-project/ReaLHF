@@ -51,8 +51,8 @@ def main(rank: int = None, world_size: int = None):
     deepspeed.init_distributed()
 
     from .test_model_parallel import init_global_constants, NUM_MP
-    from impl.model.utils.model_parallel.mappings import gather_from_tensor_model_parallel_region
-    from impl.model.utils.model_parallel.modules import (
+    from impl.model.parallelism.model_parallel.mappings import gather_from_tensor_model_parallel_region
+    from impl.model.parallelism.model_parallel.modules import (
         ColumnParallelLinear, merged_linear_with_grad_accumulation_and_async_allreduce)
 
     NUM_PP = NUM_DP = 1
