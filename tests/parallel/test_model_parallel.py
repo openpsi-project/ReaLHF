@@ -12,8 +12,8 @@ import api.config as config_package
 
 # TODO: organize parallel testing codes, merge pipe_parallel_test.py and model_parallel_test.py
 
-NUM_MP = 1
-NUM_PP = 4
+NUM_MP = 4
+NUM_PP = 2
 NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
@@ -35,7 +35,7 @@ MAX_NEW_TOKENS = 30
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
-USE_SEQ_PARALLEL = False
+USE_SEQ_PARALLEL = True
 
 
 def make_backend():
@@ -72,6 +72,7 @@ def make_backend():
                                             enable_fp16=not USE_BF16,
                                             enable_bf16=USE_BF16,
                                             sequence_parallel=USE_SEQ_PARALLEL,
+                                            num_pipeline_micro_batches=NUM_PP,
                                         )))
 
 
@@ -176,23 +177,17 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     if logits is not None:
         print(f"rank {rank} mp FIRST inference logits shape {logits.shape}")
 
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                 record_shapes=True,
-                 profile_memory=True,
-                 with_stack=True,
-                 with_flops=True) as prof:
-        for _ in range(10):
-            st = time.monotonic()
-            res = interface.inference(model, data)
-            logits = res['logits']
-            print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
-    prof.export_chrome_trace(f"mp{rank}_trace.json")
-    # for _ in range(10):
-    #     st = time.monotonic()
-    #     logits = model.module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-    #                         max_seqlen=max_seqlen).logits.float()
-    #     print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
-
+    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    #              record_shapes=True,
+    #              profile_memory=True,
+    #              with_stack=True,
+    #              with_flops=True) as prof:
+    #     for _ in range(10):
+    #         st = time.monotonic()
+    #         res = interface.inference(model, data)
+    #         logits = res['logits']
+    #         print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
+    # prof.export_chrome_trace(f"mp{rank}_trace.json")
     import base.constants
     if base.constants.pipe_parallel_rank() == NUM_PP - 1:
         res_queue.put(logits)
@@ -207,10 +202,10 @@ def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     res = interface.train_step(model, data)
     print(f"rank {rank} mp FIRST train time cost {time.monotonic() - st:.4f}, res {res}")
 
-    for _ in range(10):
-        st = time.monotonic()
-        res = interface.train_step(model, data)
-        print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
+    # for _ in range(3):
+    #     st = time.monotonic()
+    #     res = interface.train_step(model, data)
+    #     print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
 
 
 def run_generate(rank: int, res_queue: mp.Queue, seed: int):
@@ -227,15 +222,15 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
         print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
               f"log probs shape {outputs['log_probs'].shape}")
 
-    for i in range(10):
-        data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
-        st = time.monotonic()
-        outputs = interface.generate(model, data, gconfig=gconfig)
-        t = time.monotonic() - st
-        print(f"rank {rank} mp generate time cost {t:.4f}")
-        if len(outputs) > 0:
-            print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
-                  f"log probs shape {outputs['log_probs'].shape}")
+    # for i in range(10):
+    #     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
+    #     st = time.monotonic()
+    #     outputs = interface.generate(model, data, gconfig=gconfig)
+    #     t = time.monotonic() - st
+    #     print(f"rank {rank} mp generate time cost {t:.4f}")
+    #     if len(outputs) > 0:
+    #         print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
+    #               f"log probs shape {outputs['log_probs'].shape}")
 
 
 def run_linear(rank: int, res_queue: mp.Queue, seed: int):
@@ -446,5 +441,5 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testTrainStep")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testInference")
     # unittest.main(defaultTest="ModelParallelFlashMQATTest.testLinearAccordance")
