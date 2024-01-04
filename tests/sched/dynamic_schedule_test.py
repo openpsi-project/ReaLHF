@@ -61,13 +61,13 @@ def main(rank):
     st = time.monotonic()
     instructions = defaultdict(list)
     while True:
-        if rank == 0 and not started:
-            sched = GenerationSchedule(num_micro_batches=NUM_PP * 2,
-                                       num_stages=NUM_PP,
-                                       num_steps=100,
-                                       steps_per_update=5)
-            controller.issue_schedule(sched, 10)
-            started = True
+        # if rank == 0 and not started:
+        #     sched = GenerationSchedule(num_micro_batches=NUM_PP * 2,
+        #                                num_stages=NUM_PP,
+        #                                num_steps=100,
+        #                                steps_per_update=5)
+        #     controller.issue_schedule(sched, 10)
+        #     started = True
 
         if rank == 0 and train_started is False:
             sched = Train1F1BSchedule(num_micro_batches=NUM_PP * 2, num_stages=NUM_PP)

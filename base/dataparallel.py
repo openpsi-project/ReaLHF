@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Union
 import abc
 import collections
 
@@ -28,23 +28,15 @@ class ParallelDataBroker:
                 input_lens = torch.cat([x["input_lens"] for x in src], dim=0)
             elif "cu_seqlens" in src[0]:
                 input_lens = torch.cat([x["cu_seqlens"][1:] - x["cu_seqlens"][:-1] for x in src], dim=0)
-            elif "prompt_lens" in src[0]:
-                input_lens = torch.cat([x["prompt_lens"] for x in src], dim=0)
-            elif "prompt_cu_seqlens" in src[0]:
-                input_lens = torch.cat(
-                    [x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1] for x in src], dim=0)
             res = namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
             if "cu_seqlens" in src[0] and len(src[0]["cu_seqlens"].shape) == 1:
                 res["cu_seqlens"] = torch.cat([input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)])
-            elif "prompt_cu_seqlens" in src[0] and len(src[0]["prompt_cu_seqlens"].shape) == 1:
-                res["prompt_cu_seqlens"] = torch.cat(
-                    [input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)])
             return res
         else:
-            raise NotImplementedError()
+            raise NotImplementedError(f"Don't know how to gather data of type {[type(x) for x in src]}.")
 
     @abc.abstractstaticmethod
-    def scatter_to(src: namedarray.NamedArray, n_dp: int, return_sizes=False) -> List[namedarray.NamedArray]:
+    def scatter_to(src: namedarray.NamedArray, n_dp: int) -> List[namedarray.NamedArray]:
         """Scatter the input of a data-parallel model RPC."""
         pass
 
@@ -56,14 +48,11 @@ class PaddedBatchParallelDataBroker(ParallelDataBroker):
         return ParallelDataBroker.gather_from(src)
 
     @staticmethod
-    def scatter_to(src: namedarray.NamedArray, n_dp: int, return_sizes=False) -> List[namedarray.NamedArray]:
+    def scatter_to(src: namedarray.NamedArray, n_dp: int) -> List[namedarray.NamedArray]:
         datas = namedarray.split(src, n_dp)
         for x in datas:
             x.register_metadata(**src.metadata)
-        if not return_sizes:
-            return datas
-        else:
-            return datas, [x.length(0) for x in datas]
+        return datas
 
 
 class PackedParallelDataBroker(ParallelDataBroker):
@@ -73,39 +62,20 @@ class PackedParallelDataBroker(ParallelDataBroker):
         return ParallelDataBroker.gather_from(src)
 
     @staticmethod
-    def scatter_to(src: namedarray.NamedArray,
-                   n_dp: int,
-                   return_sizes=False,
-                   partitions: Optional[List[Tuple[int, int]]] = None) -> List[namedarray.NamedArray]:
+    def scatter_to(src: namedarray.NamedArray, n_dp: int) -> List[namedarray.NamedArray]:
         if "input_lens" not in src:
             if "cu_seqlens" in src:
-                raw_input_lens = src["cu_seqlens"][1:] - src["cu_seqlens"][:-1]
-            elif "prompt_lens" in src or "prompt_cu_seqlens" in src:
-                if "prompt_lens" in src:
-                    raw_input_lens = src["prompt_lens"]
-                else:
-                    raw_input_lens = src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1]
+                src["input_lens"] = src["cu_seqlens"][1:] - src["cu_seqlens"][:-1]
             else:
-                raise RuntimeError("input_lens/cu_seqlens/prompt_lens/prompt_cu_seqlens "
-                                   "must be in the return data when using packed data broker. "
+                raise RuntimeError("input_lens must be in the return data when using packed data broker. "
                                    f"Current keys: {list(src.keys())}.")
-        else:
-            raw_input_lens = src["input_lens"]
 
-        if partitions is None:
-            partitions = datapack.min_abs_diff_partition(raw_input_lens.cpu().numpy().astype(np.int64), n_dp)
-
-        input_lens: List[torch.IntTensor] = [raw_input_lens[start:end] for start, end in partitions]
-        cu_seqlens = [torch.nn.functional.pad(x.cumsum(dim=0), (1, 0), value=0) for x in input_lens]
+        partitions = datapack.min_abs_diff_partition(src["input_lens"].cpu().numpy().astype(np.int64), n_dp)
 
         batch_sizes = [cu_seqlen.shape[0] - 1 for cu_seqlen in cu_seqlens]
 
-        partitioned_lengths = torch.tensor([x.sum() for x in input_lens],
-                                           dtype=torch.int32,
-                                           device=input_lens[0].device)
-        offsets = torch.nn.functional.pad(partitioned_lengths.cumsum(0), (1, 0), value=0)[:-1]
-        # offsets = torch.tensor([sum(x) for x in input_lens], dtype=torch.int32).cumsum(0)
-        # offsets = torch.cat([offsets.new_zeros(1), offsets[:-1]])
+        offsets = torch.tensor([sum(x) for x in input_lens], dtype=torch.int32).cumsum(0)
+        offsets = torch.cat([offsets.new_zeros(1), offsets[:-1]])
 
         # These are used by log probabilities, which are one-step shorter than packed inputed ids.
         short1input_lens = [x - 1 for x in input_lens]
@@ -132,9 +102,9 @@ class PackedParallelDataBroker(ParallelDataBroker):
                 # so we must enumerate each possible key and deal with them separately, etc.
                 if v is None:
                     sp[k] = None
-                elif k in ["prompt_lens", "input_lens"]:
+                elif k == "input_lens":
                     sp[k] = input_lens[i]
-                elif k in ["prompt_cu_seqlens", "cu_seqlens"]:
+                elif k == "cu_seqlens":
                     sp[k] = cu_seqlens[i]
                 elif k in ["pair_input_lens", "pair_ref_seqlogp"]:
                     start, end = partitions[i]
@@ -149,7 +119,6 @@ class PackedParallelDataBroker(ParallelDataBroker):
                         "packed_input_ids",
                         "values",
                         "logits_mask",
-                        "packed_prompts",
                 ]:
                     sp[k] = v[offsets[i]:offsets[i] + cu_seqlens[i][-1]]
                 elif k in [
@@ -172,10 +141,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
         splitted_data = [namedarray.from_dict(dict(x)) for x in splitted_data]
         for x in splitted_data:
             x.register_metadata(**src.metadata)
-        if return_sizes:
-            return splitted_data, batch_sizes
-        else:
-            return splitted_data
+        return splitted_data
 
 
 def get_broker(type_: str) -> ParallelDataBroker:

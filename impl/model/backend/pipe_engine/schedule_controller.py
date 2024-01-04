@@ -262,8 +262,9 @@ class EngineScheduleController:
                 completed += len(insts)
                 if signal_code == 1:  # terminate
                     this_prior_sched.terminate_signal_count += 1
+                    sched.terminate_stage(stage_id)
                     # print(f"{this_prior_sched.index} count = {this_prior_sched.terminate_signal_count}")
-                    if this_prior_sched.terminate_signal_count == self.num_stages:
+                    if this_prior_sched.terminate_signal_count >= self.num_stages:
                         sched.terminate()
                         self.schedules.remove(this_prior_sched)
                         # print(f"removed sched {this_prior_sched.index}, schedules {len(self.schedules)}")

@@ -269,11 +269,11 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
 
             try:
                 self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
-                self.rank_print(f"START cmd {cmd} of sched {sched_id}")
+                # self.rank_print(f"START cmd {cmd} of sched {sched_id}")
                 # self.executed.append((sched_id, cmd))
                 # self.print_executed()
                 exec_end = self._exec_instr(*cmd.args, **cmd.kwargs)
-                self.rank_print(f"END cmd {cmd} of sched {sched_id}")
+                # self.rank_print(f"END cmd {cmd} of sched {sched_id}, END {exec_end}")
             except Exception as e:
                 logger.error(f"Rank {self.global_rank} Exception {e} in cmd {cmd}")
                 raise e
@@ -281,14 +281,14 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
             signal_code = 1 if exec_end else 0
             self.engine_client.post_result(signal_code)
 
-            if exec_end:
+            if exec_end and sched_id in self.active_schedules:
                 # print(f"end sched id {sched_id}")
                 self.end_schedule(sched_id)
                 res = self.result_collect_mapping[sched_id]()
                 self.future_mapping[sched_id].set_result(res)
-                gpu_memory_mb(f"before clear tensor buffer {sched_id}")
+                # gpu_memory_mb(f"before clear tensor buffer {sched_id}")
                 self.clear_tensor_buffer(sched_id)
-                gpu_memory_mb(f"after clear tensor buffer {sched_id}")
+                # gpu_memory_mb(f"after clear tensor buffer {sched_id}")
                 # gc.collect()
                 # torch.cuda.empty_cache()
                 # gc.collect()

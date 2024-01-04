@@ -47,8 +47,8 @@ class DynamicPipeSchedule(ABC):
         self.__sched_id = sched_id
 
     def __init_inst_set(self):
-        # print("init inst set")
         self.__not_ready.add(self.init_instructions())
+        self.__stage_terminated = {stage_id: False for stage_id in range(self.num_stages)}
 
         # avoid execute instruction after stage executed EndSchedule
         self.__update_ready()
@@ -108,13 +108,17 @@ class DynamicPipeSchedule(ABC):
         r = dict()
         if self.all_executed() and not self.__end_schedule_sent:
             for i in range(self.num_stages):
-                inst = EndSchedule(stage_id=i, micro_batch_id=0)
-                r[i] = [inst]
+                if self.__stage_terminated[i]:
+                    r[i] = []
+                else:
+                    inst = EndSchedule(stage_id=i, micro_batch_id=0)
+                    r[i] = [inst]
             self.__end_schedule_sent = True
             return r
 
         for i in range(self.num_stages):
             r[i] = self.__ready.find(stage_id=i)
+            # print(f"not ready: {self.__not_ready.find(stage_id=i)}")
             for inst in r[i]:
                 self.__ready.remove(inst)
                 self.__inflight.add(inst)
@@ -225,6 +229,21 @@ class DynamicPipeSchedule(ABC):
         #     print(f"executed {self.__executed.find()}")
         return update_ready
 
+    def terminate_stage(self, stage_id):
+        if self.__stage_terminated[stage_id]:
+            raise RuntimeError("Cannot terminate an already terminated stage.")
+
+        ready_list = self.__ready.find(stage_id=stage_id)
+        self.__ready.remove(ready_list)
+        not_ready_list = self.__not_ready.find(stage_id=stage_id)
+        self.__not_ready.remove(not_ready_list)
+        inflight_list = self.__inflight.find(stage_id=stage_id)
+        assert len(inflight_list) == 0
+
+        self.__executed.add(ready_list + not_ready_list)
+
+        self.__stage_terminated[stage_id] = True
+
     def terminate(self):
         """ Called by controller to terminate the schedule, force execute end schedule instruction for all stages
         Move all instructions from ready to executed.
@@ -232,6 +251,8 @@ class DynamicPipeSchedule(ABC):
         if self.__terminated:
             raise RuntimeError("Cannot terminate an already terminated schedule.")
 
+        assert all([self.__stage_terminated[stage_id] for stage_id in range(self.num_stages)]), \
+               "Schedule terminate called before stage terminate"
         self.__terminated = True
         # for i in range(self.num_stages):
         #     self.__bind_insts[i].append(EndSchedule(stage_id=i, micro_batch_id=0))
@@ -377,7 +398,7 @@ class GenerationSchedule(DynamicPipeSchedule):
                 insts.append(
                     RecvActivation(stage_id=s, micro_batch_id=m, step_id=t, deps=rcv_deps, bind=rcv_bind))
 
-            if s == self.num_stages - 1:
+            if s == self.num_stages - 1 and t < self.num_steps - 1:
                 snd_deps = [ForwardPass(stage_id=s, micro_batch_id=m, step_id=t)]
                 snd_bind = [RecvNextTokens(stage_id=0, micro_batch_id=m, step_id=t)]
                 insts.append(
@@ -387,7 +408,7 @@ class GenerationSchedule(DynamicPipeSchedule):
                                    deps=snd_deps,
                                    bind=snd_bind))
 
-            if s == 0:
+            if s == 0 and t < self.num_steps - 1:
                 rcv_deps = [ForwardPass(stage_id=self.num_stages - 1, micro_batch_id=m, step_id=t)]
                 rcv_bind = [SendNextTokens(stage_id=self.num_stages - 1, micro_batch_id=m, step_id=t)]
                 insts.append(
@@ -518,7 +539,7 @@ class Train1F1BSchedule(DynamicPipeSchedule):
 
                     # optimizer step
                     optimize_deps = [
-                        ReduceGrads(stage_id=i, micro_batch_id=0) for i in range(self.num_micro_batches)
+                        ReduceGrads(stage_id=i, micro_batch_id=0) for i in range(self.num_stages)
                     ]
                     bind_stages = [i for i in range(self.num_stages)]
                     bind_stages.remove(s)
