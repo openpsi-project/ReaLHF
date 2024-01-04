@@ -8,7 +8,7 @@ OMP_NUM_THREADS=8 \
 MASTER_ADDR=localhost \
 MASTER_PORT=7777 \
 torchrun --standalone --nnodes=1 --nproc-per-node=8 --module \
-    tests.parallel.test_double_linear
+    tests.parallel.test_merged_linear
 ```
 
 """
@@ -50,11 +50,12 @@ def main(rank: int = None, world_size: int = None):
 
     deepspeed.init_distributed()
 
-    from .test_model_parallel import init_global_constants, NUM_MP
+    from .test_model_parallel import init_global_constants
     from impl.model.parallelism.model_parallel.mappings import gather_from_tensor_model_parallel_region
     from impl.model.parallelism.model_parallel.modules import (
         ColumnParallelLinear, merged_linear_with_grad_accumulation_and_async_allreduce)
 
+    NUM_MP=8
     NUM_PP = NUM_DP = 1
     init_global_constants(NUM_DP, NUM_MP, NUM_PP)
 

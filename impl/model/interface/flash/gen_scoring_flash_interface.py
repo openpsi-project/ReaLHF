@@ -98,7 +98,7 @@ class PackedGenScoringInterface(api.model.ModelInterface):
 
         # Compute the log probability outputed by the SFT model
         sft_model_logits = self.sft_model(input_ids=seq, attention_mask=attention_mask,
-                                          padding_side=None).logits
+                                          padding_side=None)
         sft_seqlogp = []
         for i in range(prompts.shape[0]):
             logits_ = sft_model_logits[i][prompt_lens[i] - 1:-1]
@@ -143,7 +143,7 @@ class PackedGenScoringInterface(api.model.ModelInterface):
         logits = self.score_model(
             input_ids=score_encoding["input_ids"].cuda(),
             attention_mask=score_encoding["attention_mask"].cuda(),
-        ).logits
+        )
         # For IMDB, 0 is negative and 1 is positive. We record the probability of positive.
         probs = torch.softmax(logits, dim=-1)
         score = probs[..., -1].contiguous().float()

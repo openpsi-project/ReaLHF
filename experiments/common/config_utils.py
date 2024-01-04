@@ -109,11 +109,11 @@ def get_flash_mqat_model_config(
     if use_pipe:
         model.wrappers += [
             ModelWrapper(
-                "pipe",
+                "pipe_flash_mqat",
                 args=dict(
                     model_path=model_path,
                     partition_method=partition_method,
-                    init_from_scatch=pipe_init_from_scratch,
+                    init_from_scratch=pipe_init_from_scratch,
                     init_critic_from_actor=pipe_init_critic_from_actor,
                 ),
             )

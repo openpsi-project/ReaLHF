@@ -82,7 +82,6 @@ def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
     dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank:batch_size // dp_worldsize * (dp_rank + 1)]
     return make_input(tokenizer, device, dp_batch)
 
-
 def init_global_constants(num_dp, num_mp, num_pp, model_name=None):
     if model_name is None:
         model_name = MODEL_NAME
@@ -96,6 +95,7 @@ def init_global_constants(num_dp, num_mp, num_pp, model_name=None):
     base.constants.set_parallelism_group(model_name=model_name, pgroup=wg)
     grid = PipelineParallelGrid(process_group=wg, topology=topo)
     base.constants.set_grid(model_name=model_name, grid=grid)
+
 
 
 def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):

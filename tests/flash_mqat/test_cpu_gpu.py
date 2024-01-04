@@ -1,26 +1,42 @@
 import unittest
+import os
 
-try:
-    from flash_attn.bert_padding import pad_input, unpad_input
-except ModuleNotFoundError:
-    pass
+
 
 import torch
 import transformers
 
+from tests.utils import init_global_constants
 from impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig, vanilla_cpu_generate,
                                                      vanilla_packed_generate)
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
 from impl.model.utils.functional import gather_shifted_log_probs
 import api.huggingface
 
-torch.random.manual_seed(0)
+try:
+    from flash_attn.bert_padding import pad_input, unpad_input
+except ModuleNotFoundError:
+    pass
 
+torch.random.manual_seed(0)
+torch.cuda.set_device(0)
+torch.distributed.init_process_group(
+    rank=0,
+    world_size=1,
+    backend="nccl",
+    init_method="tcp://localhost:7778",
+)
+os.environ["LOCAL_RANK"] = str(0)
+import deepspeed
+
+deepspeed.init_distributed()
+init_global_constants(1, 1, 1)
 
 class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        
         cls.bs = bs = 7
         cls.device = device = "cuda"
         cls.dtype = dtype = torch.float16
@@ -95,6 +111,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        
         cls.bs = bs = 7
         cls.device = device = "cpu"
         cls.dtype = dtype = torch.float32

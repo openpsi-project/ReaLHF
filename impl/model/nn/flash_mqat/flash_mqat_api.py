@@ -68,7 +68,7 @@ def forward_helper(
     if packed_input_ids is None and attention_mask is not None:
         build_packed = True
         packed_input_ids, indices, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
-        batch_size, seqlen = input_ids
+        batch_size, seqlen = input_ids.shape[:2]
     if packed_input_ids is not None:
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
         ys = [PipeCacheData(input_ids=packed_input_ids)
@@ -81,6 +81,10 @@ def forward_helper(
         scores = pad_input(scores, indices, batch_size, seqlen)
     return scores
 
+def add_helper_functions(m: FlashMQATModel):
+    m.forward = functools.partial(forward_helper, m)
+    m.generate = functools.partial(generate_helper, m)
+    return m
 
 def make_flash_model(
     name: str,
@@ -230,8 +234,7 @@ def make_flash_model(
     if tokenizer is None:
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
 
-    m.forward = functools.partial(forward_helper, m)
-    m.generate = functools.partial(generate_helper, m)
+    m = add_helper_functions(m)
     return api.model.Model(name, m, tokenizer, device, dtype=dtype)
 
 

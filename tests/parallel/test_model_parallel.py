@@ -9,7 +9,7 @@ import torch
 import torch.distributed
 import torch.multiprocessing as mp
 
-from tests.parallel.utils import *
+from tests.utils import *
 import api.config as config_package
 
 # TODO: organize parallel testing codes, merge pipe_parallel_test.py and model_parallel_test.py

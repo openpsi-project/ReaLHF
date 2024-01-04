@@ -1,20 +1,35 @@
 import itertools
 import unittest
+import os
 
-import pytest
 import torch
 import transformers
 
+from tests.utils import *
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_api import HuggingfaceLikeFlashMQATForCausalLM
+from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
 import api.huggingface
 
+torch.cuda.manual_seed_all(1)
+
 
 class LlamaFlashMQATForwardTest(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls):
+        torch.cuda.set_device(0)
+        torch.distributed.init_process_group(
+            rank=0,
+            world_size=1,
+            backend="nccl",
+            init_method="tcp://localhost:7778",
+        )
+        os.environ["LOCAL_RANK"] = str(0)
+        import deepspeed
+
+        deepspeed.init_distributed()
+        init_global_constants(1, 1, 1)
+
         hf_path = "/lustre/public/pretrained_model_weights/deepseek-coder-6.7b-base"
         # hf_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
         # hf_path = "/lustre/public/pretrained_model_weights/codellama-13B"
@@ -32,12 +47,14 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.llama: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(hf_config).to(
-            dtype=torch.float16, device=device)
+            dtype=torch.float16, device=device
+        )
         cls.llama.eval()
 
-        cls.hf_like_model = HuggingfaceLikeFlashMQATForCausalLM.from_llama(from_model=cls.llama,
-                                                                           dtype=torch.float16,
-                                                                           device=device)
+        cls.hf_like_model = FlashMQATModel.from_llama(
+            from_model=cls.llama, dtype=torch.float16, device=device
+        )
+        cls.hf_like_model = add_helper_functions(cls.hf_like_model)
         cls.hf_like_model.eval()
         cls.config = cls.hf_like_model.config
 
@@ -53,7 +70,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         x2 = self.hf_like_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
-        ).logits
+        )
         if with_mask:
             x1 = x1 * attention_mask.unsqueeze(-1)
             x2 = x2 * attention_mask.unsqueeze(-1)
@@ -70,8 +87,9 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         input_ids = torch.randint(0, self.config.vocab_size, (self.bs, max_prompt_len)).to(self.device)
         input_lens = torch.randint(1, max_prompt_len, (self.bs,), dtype=torch.long).to(self.device)
         if with_mask:
-            attention_mask = torch.arange(max_prompt_len - 1, -1, -1,
-                                          device=self.device).unsqueeze(0) < input_lens.unsqueeze(1)
+            attention_mask = torch.arange(max_prompt_len - 1, -1, -1, device=self.device).unsqueeze(
+                0
+            ) < input_lens.unsqueeze(1)
         else:
             attention_mask = None
 
@@ -86,8 +104,9 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
             eos_token_id=self.tokenizer.eos_token_id,
         )
 
-        new_tokens = self.hf_like_model.generate(self.tokenizer, input_ids, attention_mask,
-                                                 gconfig=gconfig).sequences
+        new_tokens = self.hf_like_model.generate(
+            self.tokenizer, input_ids, attention_mask, gconfig=gconfig
+        ).sequences
 
         assert torch.allclose(seq[:, max_prompt_len:], new_tokens), (
             seq,

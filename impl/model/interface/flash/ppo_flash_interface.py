@@ -268,7 +268,7 @@ class PackedActorInterface(api.model.ModelInterface):
             logits = res
         else:
             res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            logits = res.logits
+            logits = res
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             packed_logits_mask = data["packed_logits_mask"]
@@ -390,7 +390,7 @@ class PackedActorInterface(api.model.ModelInterface):
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=cu_seqlens,
                     max_seqlen=max_seqlen,
-                ).logits
+                )
                 loss, stats = _ppo_actor_loss_from_model_outputs(
                     logits=output,
                     packed_input_ids=data["packed_seq"],

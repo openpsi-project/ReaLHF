@@ -74,7 +74,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
         else:
             logits: torch.FloatTensor = module(packed_input_ids=data["packed_input_ids"],
                                                cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits
+                                               max_seqlen=max_seqlen)
 
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_input_ids"]).float()
 
@@ -118,7 +118,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
         else:
             logits: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
                                                cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits
+                                               max_seqlen=max_seqlen)
 
             loss, stats = _dpo_loss_from_model_outputs(
                 logits=logits,

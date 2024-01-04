@@ -65,7 +65,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
             )
         else:
             logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-                            max_seqlen=max_seqlen).logits
+                            max_seqlen=max_seqlen)
             loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
             module.backward(loss)
             module.step()
@@ -114,7 +114,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
             else:
                 logits = module(packed_input_ids=packed_input_ids,
                                 cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen).logits
+                                max_seqlen=max_seqlen)
                 loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
 
             if loss is not None:
@@ -147,7 +147,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         else:
             logits = model.module(packed_input_ids=packed_input_ids,
                                   cu_seqlens=cu_seqlens,
-                                  max_seqlen=max_seqlen).logits
+                                  max_seqlen=max_seqlen)
         return dict(logits=logits)
 
     # for testing only
