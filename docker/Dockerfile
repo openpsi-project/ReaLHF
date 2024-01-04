@@ -28,6 +28,9 @@ ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 
 # Add an ARG to force a rebuild of the image from this point.
 ARG INCUBATOR_VER=unknown
+COPY transformer_engine-1.1.0+cf6fc89-cp310-cp310-linux_x86_64.whl /TransformerEngine/dist/transformer_engine-1.1.0+cf6fc89-cp310-cp310-linux_x86_64.whl
+RUN pip3 uninstall transformer_engine -y && pip3 install /TransformerEngine/dist/transformer_engine-1.1.0+cf6fc89-cp310-cp310-linux_x86_64.whl
+
 RUN pip3 install -U transformers -i https://pypi.tuna.tsinghua.edu.cn/simple
 COPY flash_attn-2.3.6-cp310-cp310-linux_x86_64.whl /flash_attn-2.3.6-cp310-cp310-linux_x86_64.whl
 RUN pip3 uninstall flash_attn -y && pip3 install /flash_attn-2.3.6-cp310-cp310-linux_x86_64.whl

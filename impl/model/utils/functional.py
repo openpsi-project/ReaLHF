@@ -360,6 +360,7 @@ def rotate_half(x: torch.HalfTensor, interleaved: bool = False):
         return torch.stack((-x2, x1), dim=-1).flatten(start_dim=-2)
 
 
+@torch.no_grad()
 @torch.jit.script
 def compute_varlen_position_indices(
     total_seqlen: int,

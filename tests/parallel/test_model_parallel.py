@@ -2,6 +2,7 @@ import os
 import time
 import unittest
 
+import torch.distributed
 from torch.profiler import profile, ProfilerActivity, record_function
 # import transformers
 import torch
@@ -12,8 +13,8 @@ import api.config as config_package
 
 # TODO: organize parallel testing codes, merge pipe_parallel_test.py and model_parallel_test.py
 
-NUM_MP = 8
-NUM_PP = 1
+NUM_MP = 2
+NUM_PP = 2
 NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
@@ -27,8 +28,8 @@ if MODEL_TYPE == "llama":
         SUFFIX = f"_{NUM_PP}pp_{NUM_MP}mp_{NUM_SHARDS}s"
     # BASELINE_MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
-    BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
-    MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-13b-hf{SUFFIX}"
+    BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
+    MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
 BATCH_SIZE = 512
 MIN_NEW_TOKENS = 10
 MAX_NEW_TOKENS = 30
@@ -176,17 +177,13 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     if logits is not None:
         print(f"rank {rank} mp FIRST inference logits shape {logits.shape}")
 
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                 record_shapes=True,
-                 profile_memory=True,
-                 with_stack=True,
-                 with_flops=True) as prof:
-        for _ in range(10):
-            st = time.monotonic()
-            res = interface.inference(model, data)
-            logits = res['logits']
-            print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
-    prof.export_chrome_trace(f"mp{rank}_trace.json")
+    st = time.monotonic()
+    res = interface.inference(model, data)
+    logits = res['logits']
+    if logits is not None:
+        from impl.model.utils.model_parallel.mappings import gather_from_tensor_model_parallel_region
+        logits = gather_from_tensor_model_parallel_region(logits)
+        print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
     # for _ in range(10):
     #     st = time.monotonic()
     #     logits = model.module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
@@ -310,8 +307,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
         if MODEL_TYPE == "llama":
             self.baseline_model = HuggingfaceLikeFlashMQATForCausalLM.from_llama(
-                model_path=BASELINE_MODEL_PATH,)
-        self.baseline_model.to(dtype=dtype, device=device)
+                model_path=BASELINE_MODEL_PATH, dtype=dtype, device=device)
 
     def testTrainStep(self):
         clear_name_resolve()
@@ -370,8 +366,8 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
         self.init_baseline_model()
         data = init_data(self.tokenizer, self.device, BATCH_SIZE, seed=self.seed, dp_rank=0, num_dp=1)
         packed_input_ids = data['packed_input_ids']
-        cu_seqlens = data['cu_seqlens']
-        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
+        cu_seqlens = data['cu_seqlens'].int()
+        max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
         self.baseline_model.eval()
 
         st = time.monotonic()
@@ -380,18 +376,11 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
                                 max_seqlen=max_seqlen).logits.float()
         print(f"baseline FIRST inference time cost {time.monotonic() - st:.4f}")
 
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                     record_shapes=True,
-                     profile_memory=True,
-                     with_stack=True,
-                     with_flops=True) as prof:
-            for _ in range(10):
-                st = time.monotonic()
-                r = self.baseline_model(packed_input_ids=packed_input_ids,
-                                        cu_seqlens=cu_seqlens,
-                                        max_seqlen=max_seqlen).logits.float()
-                print(f"baseline inference time cost {time.monotonic() - st:.4f}")
-        prof.export_chrome_trace("baseline_trace.json")
+        st = time.monotonic()
+        r = self.baseline_model(packed_input_ids=packed_input_ids,
+                                cu_seqlens=cu_seqlens,
+                                max_seqlen=max_seqlen).logits.float()
+        print(f"baseline inference time cost {time.monotonic() - st:.4f}")
 
         print(f"diff: {r - res[0]}, max/correct_max {(r - res[0]).abs().max()}/{r.abs().max()}, "
               f" mean {(r - res[0]).abs().mean()},")
@@ -446,5 +435,5 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testTrainStep")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testInferenceAccordance")
     # unittest.main(defaultTest="ModelParallelFlashMQATTest.testLinearAccordance")

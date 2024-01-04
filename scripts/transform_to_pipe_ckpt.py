@@ -68,31 +68,41 @@ def get_layer_specs(config: FlashMQATConfig, to_critic, is_mp):
     return layer_specs
 
 
-def count_layer_params(layer_specs):
-    param_counts = [0] * len(layer_specs)
-    for idx, layer in enumerate(layer_specs):
-        if isinstance(layer, LayerSpec):
-            l = layer.build()
-            params = filter(lambda p: p.requires_grad, l.parameters())
-            param_counts[idx] = sum(p.numel() for p in params)
-        elif isinstance(layer, nn.Module):
-            params = filter(lambda p: p.requires_grad, layer.parameters())
-            param_counts[idx] = sum(p.numel() for p in params)
-        print(f"count_layer_params build layer {layer.typename.__name__}")
-    return param_counts
+def count_layer_params(num_layers:int, state_dict_list: List[Dict[str, torch.Tensor]]) -> List[int]:
+    param_counts = []
+    for i in range(num_layers):
+        cnt = 0
+        for sd in state_dict_list:
+            for k, v in sd.items():
+                if k.startswith(f"{str(i)}."):
+                    cnt += v.numel()
+        param_counts.append(cnt)
+    print(f"Count layer paramters: {param_counts}")
+    return param_counts 
+    # param_counts = [0] * len(layer_specs)
+    # for idx, layer in enumerate(layer_specs):
+    #     if isinstance(layer, LayerSpec):
+    #         l = layer.build()
+    #         params = filter(lambda p: p.requires_grad, l.parameters())
+    #         param_counts[idx] = sum(p.numel() for p in params)
+    #     elif isinstance(layer, nn.Module):
+    #         params = filter(lambda p: p.requires_grad, layer.parameters())
+    #         param_counts[idx] = sum(p.numel() for p in params)
+    #     print(f"count_layer_params build layer {layer.typename.__name__}")
+    # return param_counts
 
 
-def partition_layers(layer_specs, num_stages, method="uniform"):
+def partition_layers(layer_specs, state_dict_list, num_stages, method="uniform"):
     # Each stage gets a simple uniform number of layers.
     parts = None
+    num_layers = len(layer_specs)
     if method == "uniform":
-        num_layers = len(layer_specs)
         parts = ds_utils.partition_uniform(num_items=num_layers, num_parts=num_stages)
     elif method == "parameters":
-        param_counts = count_layer_params(layer_specs)
+        param_counts = count_layer_params(num_layers, state_dict_list)
         parts = ds_utils.partition_balanced(weights=param_counts, num_parts=num_stages)
     elif method == "parameters_balanced":
-        param_counts = count_layer_params(layer_specs)
+        param_counts = count_layer_params(num_layers, state_dict_list)
         import numpy as np
         param_counts = np.array(param_counts)
         parts = true_partition_balanced(nums=param_counts, k=num_stages)
@@ -193,8 +203,8 @@ def main():
                         type=str,
                         default="/lustre/public/pretrained_model_weights/Llama-2-13b-hf")
     parser.add_argument("--model_type", type=str, default="llama")
-    parser.add_argument("--num_pp", type=int, default=1)
-    parser.add_argument("--num_mp", type=int, default=8)
+    parser.add_argument("--num_pp", type=int, default=2)
+    parser.add_argument("--num_mp", type=int, default=2)
     parser.add_argument("--num_shards", type=int, default=3)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--partition_method", type=str, default="parameters_balanced")
@@ -245,6 +255,7 @@ def main():
             state_dict_list = [fit_state_dict_to_critic(len(layer_specs), sd) for sd in state_dict_list]
         print("loaded full state_dict")
         stage_to_layer_idx = partition_layers(layer_specs,
+                                              state_dict_list,
                                               num_stages=args.num_pp,
                                               method=args.partition_method)
         stage_to_state_dict_list = [

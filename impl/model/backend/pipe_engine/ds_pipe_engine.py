@@ -211,11 +211,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         mb_seq_lens = []
 
         def input_to_pipe_model_input(input: NamedArray, mbid: int):
-            max_seqlen = torch.tensor(int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))).cuda()
+            max_seqlen = int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))
             store_kv_cache = self._generate_mode
 
-            cu_seqlens = input.cu_seqlens.to(self.device)
-            packed_input_ids = input.packed_input_ids.to(self.device)
+            cu_seqlens = input.cu_seqlens
+            packed_input_ids = input.packed_input_ids
 
             # sequence parallel input padding
             if self.sequence_parallel:

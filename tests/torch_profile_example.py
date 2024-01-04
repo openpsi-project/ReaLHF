@@ -24,10 +24,12 @@ import api.config as config_package
 import base.gpu_utils
 import base.namedarray
 
-batch_size = 6
 # n_minibatches = 3
 seqlen = 4096
 vocab_size = 32000
+
+batch_size_tokens = 65536
+batch_size = batch_size_tokens // seqlen
 
 MODEL_NAME = "default"
 
@@ -35,21 +37,24 @@ MODEL_NAME = "default"
 NUM_MP = 2
 NUM_PP = 2
 NUM_DP = 2
+assert batch_size >= NUM_DP
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
 if MODEL_TYPE == "llama":
-    if NUM_PP == 1:
+    if NUM_PP == 1 and NUM_MP == 1:
+        SUFFIX = ""
+    elif NUM_PP == 1:
         SUFFIX = f"_{NUM_MP}mp_{NUM_SHARDS}s"
     elif NUM_MP == 1:
         SUFFIX = f"_{NUM_PP}pp_{NUM_SHARDS}s"
     elif NUM_PP > 1:
         SUFFIX = f"_{NUM_PP}pp_{NUM_MP}mp_{NUM_SHARDS}s"
-    BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
-    MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
+    MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-13b-hf{SUFFIX}"
 
 ## performance related config
-FORWARD_ONLY = True
+PROFILE_INTERFACE_TYPE = "train_step"
+SHORTNAME = {"inference": "fwd", "train_step": "fwdbwd", "generate": "gen"}
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
 USE_SEQ_PARALLEL = True
@@ -112,9 +117,7 @@ def make_backend():
 def make_interface():
     import api.model
 
-    return api.model.make_interface(
-        config_package.ModelInterface(type_="flash_sft", args=dict())
-    )
+    return api.model.make_interface(config_package.ModelInterface(type_="flash_sft", args=dict()))
 
 
 def make_model(device):
@@ -254,14 +257,12 @@ def main(rank: int = None, world_size: int = None):
 
     s = torch.profiler.schedule(skip_first=1, warmup=1, active=2, repeat=1, wait=0)
 
-    if FORWARD_ONLY:
-        dirname = f"./trace_result/fwd_mp{NUM_MP}pp{NUM_PP}_local"
-    else:
-        dirname = f"./trace_result/fwdbwd_mp{NUM_MP}pp{NUM_PP}_local"
+    dirname = f"./trace_result/{SHORTNAME[PROFILE_INTERFACE_TYPE]}_mp{NUM_MP}pp{NUM_PP}_local"
     os.makedirs(dirname, exist_ok=True)
 
-    def trace_handler(p):
-        p.export_chrome_trace(os.path.join(dirname, f"mp{rank}_trace.json"))
+    def trace_handler(p: torch.profiler._KinetoProfile):
+        print(p.key_averages(group_by_input_shape=True).table(sort_by="cuda_memory_usage", row_limit=20))
+        p.export_chrome_trace(os.path.join(dirname, f"rank{rank}.json"))
 
     with torch.profiler.profile(
         activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
@@ -275,10 +276,7 @@ def main(rank: int = None, world_size: int = None):
         for _ in range(10):
             torch.cuda.synchronize()
             st = time.monotonic()
-            if FORWARD_ONLY:
-                res = interface.inference(model, data)
-            else:
-                res = interface.train_step(model, data)
+            res = getattr(interface, PROFILE_INTERFACE_TYPE)(model, data)
             torch.cuda.synchronize()
             prof.step()
 
