@@ -129,7 +129,10 @@ def run_mixed(rank, seed):
     from impl.model.backend.pipe_engine.stream_pipe_engine import StreamPipeEngine
     assert isinstance(engine, StreamPipeEngine)
 
-    train_datas = [init_data(model.tokenizer, device, args.batch_size, seed=seed + i) for i in range(1)]
+    train_iters = 10
+    train_datas = [
+        init_data(model.tokenizer, device, args.batch_size, seed=seed + i) for i in range(train_iters)
+    ]
     gen_data = init_data(model.tokenizer, device, args.batch_size, seed=seed + 100)
 
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
@@ -137,12 +140,16 @@ def run_mixed(rank, seed):
 
     st = time.monotonic()
     gf, _ = interface.generate(model, gen_data, gconfig=gconfig)
+    # for train_data in train_datas:
     tfs = []
-    for train_data in train_datas:
-        tf, _ = interface.train_step(model, train_data)
+    for i in range(train_iters):
+        tf, _ = interface.train_step(model, train_datas[i])
         tfs.append(tf)
 
-    while not gf.done() or not all([tf.done() for tf in tfs]):
+        while not tf.done():
+            engine.run()
+
+    while not gf.done():
         engine.run()
 
     gres = interface.postprocess_generate(model, gen_data, gf)
@@ -151,18 +158,6 @@ def run_mixed(rank, seed):
         tres = interface.postprocess_train_step(model, train_data, tf)
         tress.append(tres)
     print(f"first mixed time cost {time.monotonic() - st:.4f}")
-
-    # for _ in range(10):
-    #     st = time.monotonic()
-    #     gf, _ = interface.generate(model, gen_data, gconfig=gconfig)
-    #     tf, _ = interface.train_step(model, train_data)
-
-    #     while not gf.done() or not tf.done():
-    #         engine.run()
-
-    #     gres = interface.postprocess_generate(model, gen_data, gf)
-    #     tres = interface.postprocess_train_step(model, train_data, tf)
-    #     print(f"mixed time cost {time.monotonic() - st:.4f}")
 
     if len(gres) > 0:
         print(f"generate result gen_tokens shape{gres['gen_tokens'].shape}, "
