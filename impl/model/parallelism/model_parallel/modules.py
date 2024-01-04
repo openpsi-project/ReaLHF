@@ -30,7 +30,7 @@ def get_activation_fn(activation_function: str) -> Callable:
     if activation_function == "gelu":
         return nn.functional.gelu
     elif activation_function == "gelu_new":
-        from impl.model.utils.modules.activations import new_gelu_activation
+        from impl.model.modules.activations import new_gelu_activation
 
         return new_gelu_activation
     elif activation_function == "silu":

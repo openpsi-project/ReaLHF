@@ -13,7 +13,7 @@ from impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear,
                                                            ParallelEmbedding)
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import compute_varlen_position_indices
-from impl.model.utils.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
+from impl.model.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
 from impl.model.utils.save_load import load_from_disk, save_to_disk
 import base.constants
 import base.logging as logging

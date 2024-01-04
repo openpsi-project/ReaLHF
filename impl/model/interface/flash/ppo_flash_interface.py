@@ -131,7 +131,7 @@ class PackedActorInterface(api.model.ModelInterface):
         else:
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
         if self.value_norm:
-            from impl.model.utils.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
+            from impl.model.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
 
             if self.value_norm_type == "exp":
                 self.rms = ExponentialRunningMeanStd(beta=self.value_norm_beta, epsilon=self.value_norm_eps)
@@ -501,7 +501,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         else:
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
         if self.value_norm:
-            from impl.model.utils.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
+            from impl.model.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
 
             if self.value_norm_type == "exp":
                 self.rms = ExponentialRunningMeanStd(beta=self.value_norm_beta, epsilon=self.value_norm_eps)
