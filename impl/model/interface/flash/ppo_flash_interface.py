@@ -222,7 +222,7 @@ class PackedActorInterface(api.model.ModelInterface):
         seq_lengths = prompt_lengths + gen_lengths
         cu_seqlens = torch.cat(
             [torch.zeros(1, dtype=torch.long, device=seq_lengths.device),
-             seq_lengths.cumsum(0)])
+             seq_lengths.cumsum(0)]).int()
         packed_logprobs = torch.cat(
             list(itertools.chain.from_iterable(zip(prompt_log_probs_list, gen_log_probs_list))))
         assert packed_seq.shape[0] == packed_logprobs.shape[0] + bs, (
@@ -257,7 +257,7 @@ class PackedActorInterface(api.model.ModelInterface):
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
 
-        cu_seqlens = data["cu_seqlens"]
+        cu_seqlens = data["cu_seqlens"].int()
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
@@ -286,7 +286,7 @@ class PackedActorInterface(api.model.ModelInterface):
         old_logp: torch.FloatTensor = data_["packed_logprobs"].float()
         ref_logp: torch.FloatTensor = data_["packed_ref_logprobs"].float()
         prompt_mask = data_["prompt_mask"]
-        cu_seqlens = data_["cu_seqlens"]
+        cu_seqlens = data_["cu_seqlens"].int()
         reward_score = data_["rewards"].float()
         values = data_["values"].float()
         seq_no_eos_mask = data_["seq_no_eos_mask"]
@@ -351,7 +351,7 @@ class PackedActorInterface(api.model.ModelInterface):
                 old_logp=old_logp,
                 ppo_loss_mask=loss_mask,
                 packed_seq=data_["packed_seq"],
-                cu_seqlens=data_["cu_seqlens"],
+                cu_seqlens=data_["cu_seqlens"].int(),
                 kl_rewards=kl_rewards,
                 logits_mask=data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None,
             ))
@@ -525,7 +525,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
 
-        cu_seqlens = data["cu_seqlens"]
+        cu_seqlens = data["cu_seqlens"].int()
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
@@ -550,7 +550,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         old_logp = data_["packed_logprobs"].float()
         ref_logp = data_["packed_ref_logprobs"].float()
         prompt_mask = data_["prompt_mask"]
-        cu_seqlens = data_["cu_seqlens"]
+        cu_seqlens = data_["cu_seqlens"].int()
         reward_score = data_["rewards"].float()
         values = data_["values"].float()
         seq_no_eos_mask = data_["seq_no_eos_mask"]

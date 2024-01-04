@@ -215,7 +215,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         packed_input_ids = torch.cat([input_ids[i, :input_len[i]] for i in range(bs)])
         cu_seqlens = torch.cat(
             [torch.tensor([0], dtype=torch.long, device=device),
-             torch.cumsum(input_len, dim=0)])
+             torch.cumsum(input_len, dim=0)]).to(torch.int32)
         max_seqlen = int(input_len.max().item())
         total_seqlen = input_len.sum()
 

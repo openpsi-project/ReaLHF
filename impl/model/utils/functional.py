@@ -6,6 +6,7 @@ import torch.distributed as dist
 import transformers
 
 from base.constants import data_parallel_group
+import base.constants
 import base.logging as logging
 
 logger = logging.getLogger("Modeling Functional Utils")
@@ -74,6 +75,70 @@ def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor
     return log_probs_labels.squeeze(-1)
 
 
+def build_shift_one_indices(x: torch.HalfTensor, cu_seqlens: torch.IntTensor) -> torch.IntTensor:
+    """Build indices for shifting labels/input_ids one step to the left.
+
+    Equivalent to:
+    ```
+    shift_one_indices = torch.cat([
+        torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
+        for i in range(cu_seqlens.shape[0] - 1)
+    ])
+    ```
+    but the above implementaion will implicitly convert a tensor (cu_seqlens[i]) to an integer,
+    which will cause a cuda device sync and slow down performance.
+
+    Args:
+        x (torch.HalfTensor): Shape [total_seqlen]. This tensor is required to get
+            total_seqlen from its shape. Computing total_seqlen from cu_seqlens will implicitly cause
+            a cuda device sync.
+        cu_seqlens (torch.IntTensor): Shape [bs + 1]. Indices marking the start
+            and end of each sequences.
+
+    Returns:
+        torch.IntTensor: Shape [tot_seqlen - bs]. Indices for shifting labels/input_ids
+            one step to the left.
+    """
+    total_seqlen = x.shape[0]
+    bs = cu_seqlens.shape[0] - 1
+    short1lens = cu_seqlens[1:] - cu_seqlens[:-1] - 1
+    short1cu_seqlens = torch.nn.functional.pad(short1lens.cumsum(0), (1, 0), value=0)
+    indexing_t = torch.arange(total_seqlen - bs, dtype=torch.long, device=cu_seqlens.device)
+    return indexing_t + (indexing_t.unsqueeze(0) >= short1cu_seqlens[:-1].unsqueeze(1)).sum(0)
+
+
+def build_leave_one_indices(x: torch.HalfTensor, cu_seqlens: torch.IntTensor) -> torch.IntTensor:
+    """Build indices for leaving one token out at the end of each sequence.
+
+    Equivalent to:
+    ```
+    leave_one_indices = torch.cat([
+        torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
+        for i in range(cu_seqlens.shape[0] - 1)
+    ])
+    ```
+    but the above implementaion will implicitly convert a tensor (cu_seqlens[i]) to an integer,
+    which will cause a cuda device sync and slow down performance.
+
+    Args:
+        x (torch.HalfTensor): Shape [total_seqlen]. This tensor is required to get
+            total_seqlen from its shape. Computing total_seqlen from cu_seqlens will implicitly cause
+            a cuda device sync.
+        cu_seqlens (torch.IntTensor): Shape [bs + 1]. Indices marking the start
+            and end of each sequences.
+
+    Returns:
+        torch.IntTensor: Shape [tot_seqlen - bs]. Indices for shifting labels/input_ids
+            one step to the left.
+    """
+    total_seqlen = x.shape[0]
+    bs = cu_seqlens.shape[0] - 1
+    short1lens = cu_seqlens[1:] - cu_seqlens[:-1] - 1
+    short1cu_seqlens = torch.nn.functional.pad(short1lens.cumsum(0), (1, 0), value=0)
+    indexing_t = torch.arange(total_seqlen - bs, dtype=torch.long, device=cu_seqlens.device)
+    return indexing_t + (indexing_t.unsqueeze(0) >= short1cu_seqlens[:-1].unsqueeze(1)).sum(0) - 1
+
+
 def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch.Tensor,
                                     labels: torch.LongTensor) -> torch.FloatTensor:
     """Gather log probs from packed input_ids and logits.
@@ -89,16 +154,38 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
     Returns:
         torch.FloatTensor: Log probability with shape [tot_seqlen - #seqs].
     """
+    labels = torch.nn.functional.pad(labels[1:], (0, 1), value=0)
+    leave_one_indices = build_leave_one_indices(logits, cu_seqlens)
+    if base.constants.model_parallel_world_size() > 1:
+        # NOTE: logprobs is freaking sensitive to input_ids. If the input sequence is a natural sequence, everything will be fine.
+        # However, if we input random token IDs, parallel cross entropy can produce VERY different results than the normal
+        # torch.gather based version (e.g., the maximum absolute different can reach ~50).
+        from impl.model.utils.model_parallel.modules import vocab_parallel_cross_entropy
+
+        logprobs = -vocab_parallel_cross_entropy(logits, labels)[leave_one_indices]
+        ########### sanity check ###########
+        # world_size = base.constants.model_parallel_world_size()
+        # dim_size = [logits.shape[1] * world_size, logits.shape[0]]
+        # all_gather_buffer = torch.zeros(*dim_size, dtype=logits.dtype, device=logits.device)
+        # torch.distributed._all_gather_base(
+        #     all_gather_buffer,
+        #     logits.transpose(0, 1).contiguous(),
+        #     group=base.constants.model_parallel_group(),
+        # )
+        # logits2 = all_gather_buffer.transpose(0, 1).contiguous()
+        # logprobs2 = gather_packed_shifted_log_probs(logits2, cu_seqlens, packed_input_ids).float()
+        # assert torch.allclose(logprobs, logprobs2, atol=2e-2), (
+        #     (logprobs - logprobs2).abs().max(),
+        #     logprobs,
+        #     logprobs2,
+        # )
+        ########### sanity check ###########
+        return logprobs
     logits_shape = logits.shape
-    leave_one_indices = torch.cat([
-        torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
-        for i in range(cu_seqlens.shape[0] - 1)
-    ])
     # shift_one_indices = torch.cat([
     #     torch.arange(cu_seqlens[i] + 1 , cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
     #     for i in range(cu_seqlens.shape[0] - 1)
     # ])
-    labels = torch.nn.functional.pad(labels[1:], (0, 1), value=0)
     # shift labels one step to the left and pad it to match the shape of logits
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
     log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
@@ -261,3 +348,84 @@ def torch_attn_func(
     output = torch.matmul(scores, v)  # (bs, nq, seqlen, head_dim)
     output = output.transpose(1, 2).contiguous()
     return output
+
+
+def rotate_half(x: torch.HalfTensor, interleaved: bool = False):
+    if not interleaved:
+        x1, x2 = x.chunk(2, dim=-1)
+        return torch.cat((-x2, x1), dim=-1)
+    else:
+        x1, x2 = x[..., ::2], x[..., 1::2]
+        # return rearrange(torch.stack((-x2, x1), dim=-1), "... d two -> ... (d two)", two=2)
+        return torch.stack((-x2, x1), dim=-1).flatten(start_dim=-2)
+
+
+@torch.no_grad()
+@torch.jit.script
+def compute_varlen_position_indices(
+    total_seqlen: int,
+    cu_seqlens: torch.IntTensor,
+    seqlen_offsets: Optional[torch.IntTensor] = None,
+) -> torch.IntTensor:
+    indexing_t = torch.arange(total_seqlen, dtype=torch.long, device=cu_seqlens.device).unsqueeze_(0)
+    indexing_t = (cu_seqlens[:-1].unsqueeze(1) <= indexing_t) & (indexing_t < cu_seqlens[1:].unsqueeze(1))
+    indices = indexing_t.cumsum(1) - 1
+    if seqlen_offsets is not None:
+        indices += seqlen_offsets.unsqueeze(1)
+    return torch.where(indexing_t, indices, 0).sum(0)
+
+
+# @torch.jit.script
+def apply_rotary_varlen(
+    x: torch.HalfTensor,
+    cos: torch.HalfTensor,
+    sin: torch.HalfTensor,
+    cu_seqlens: torch.IntTensor,
+    interleaved: bool,
+    seqlen_offsets: Optional[torch.IntTensor] = None,
+    rotary_indices: Optional[torch.LongTensor] = None,
+) -> Tuple[torch.HalfTensor, torch.LongTensor]:
+    if rotary_indices is None:
+        rotary_indices = compute_varlen_position_indices(x.shape[0], cu_seqlens, seqlen_offsets)
+
+    ro_dim = cos.shape[-1] * 2
+    assert ro_dim <= x.shape[-1]
+    cos = cos[rotary_indices]
+    sin = sin[rotary_indices]
+    if not interleaved:
+        cos = cos[:, None, None, :].repeat(1, 1, 2, 1).flatten(start_dim=-2)
+        sin = sin[:, None, None, :].repeat(1, 1, 2, 1).flatten(start_dim=-2)
+    else:
+        cos = cos[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
+        sin = sin[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
+
+    # cos = repeat(cos, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
+    # sin = repeat(sin, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
+    return torch.cat(
+        [x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]],
+        dim=-1,
+    )
+
+
+def apply_rotary(
+    x: torch.HalfTensor,
+    cos: torch.HalfTensor,
+    sin: torch.HalfTensor,
+    interleaved: bool = False,
+):
+    """
+    x: (batch_size, seqlen, nheads, headdim)
+    cos, sin: (seqlen, rotary_dim / 2) or (batch_size, seqlen, rotary_dim / 2)
+    """
+    ro_dim = cos.shape[-1] * 2
+    assert ro_dim <= x.shape[-1]
+    if not interleaved:
+        cos = cos[:, None, None, :].repeat(1, 1, 2, 1).flatten(start_dim=-2)
+        sin = sin[:, None, None, :].repeat(1, 1, 2, 1).flatten(start_dim=-2)
+    else:
+        cos = cos[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
+        sin = sin[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
+    return torch.cat(
+        [x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]],
+        dim=-1,
+    )

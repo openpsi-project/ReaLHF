@@ -5,6 +5,7 @@ import unittest
 from torch.profiler import profile, ProfilerActivity, record_function
 # import transformers
 import torch
+import torch.distributed
 import torch.multiprocessing as mp
 
 from tests.parallel.utils import *
@@ -12,8 +13,8 @@ import api.config as config_package
 
 # TODO: organize parallel testing codes, merge pipe_parallel_test.py and model_parallel_test.py
 
-NUM_MP = 4
-NUM_PP = 2
+NUM_MP = 2
+NUM_PP = 4
 NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
@@ -36,6 +37,7 @@ MAX_NEW_TOKENS = 30
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
 USE_SEQ_PARALLEL = True
+GRADIENT_ACCUMULATION_FUSION = False
 
 
 def make_backend():
@@ -100,6 +102,7 @@ def make_model(device):
                                         args=dict(
                                             model_path=MODEL_PARALLEL_PATH,
                                             sequence_parallel=USE_SEQ_PARALLEL,
+                                            gradient_accumulation_fusion=GRADIENT_ACCUMULATION_FUSION,
                                             is_critic=False,
                                             init_critic_from_actor=False,
                                             init_from_scratch=False,
@@ -126,6 +129,7 @@ def make_model(device):
                                             num_mp=NUM_MP,
                                             num_dp=NUM_DP,
                                             sequence_parallel=USE_SEQ_PARALLEL,
+                                            gradient_accumulation_fusion=GRADIENT_ACCUMULATION_FUSION,
                                             is_critic=False,
                                             init_critic_from_actor=False,
                                             init_from_scratch=False,
@@ -177,17 +181,19 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     if logits is not None:
         print(f"rank {rank} mp FIRST inference logits shape {logits.shape}")
 
-    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-    #              record_shapes=True,
-    #              profile_memory=True,
-    #              with_stack=True,
-    #              with_flops=True) as prof:
-    #     for _ in range(10):
-    #         st = time.monotonic()
-    #         res = interface.inference(model, data)
-    #         logits = res['logits']
-    #         print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
-    # prof.export_chrome_trace(f"mp{rank}_trace.json")
+    st = time.monotonic()
+    res = interface.inference(model, data)
+    logits = res['logits']
+    if logits is not None:
+        from impl.model.utils.model_parallel.mappings import gather_from_tensor_model_parallel_region
+        logits = gather_from_tensor_model_parallel_region(logits)
+        print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
+    # for _ in range(10):
+    #     st = time.monotonic()
+    #     logits = model.module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
+    #                         max_seqlen=max_seqlen).logits.float()
+    #     print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
+
     import base.constants
     if base.constants.pipe_parallel_rank() == NUM_PP - 1:
         res_queue.put(logits)
@@ -305,8 +311,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
         if MODEL_TYPE == "llama":
             self.baseline_model = HuggingfaceLikeFlashMQATForCausalLM.from_llama(
-                model_path=BASELINE_MODEL_PATH,)
-        self.baseline_model.to(dtype=dtype, device=device)
+                model_path=BASELINE_MODEL_PATH, dtype=dtype, device=device)
 
     def testTrainStep(self):
         clear_name_resolve()
@@ -365,8 +370,8 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
         self.init_baseline_model()
         data = init_data(self.tokenizer, self.device, BATCH_SIZE, seed=self.seed, dp_rank=0, num_dp=1)
         packed_input_ids = data['packed_input_ids']
-        cu_seqlens = data['cu_seqlens']
-        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
+        cu_seqlens = data['cu_seqlens'].int()
+        max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
         self.baseline_model.eval()
 
         st = time.monotonic()
@@ -375,18 +380,11 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
                                 max_seqlen=max_seqlen).logits.float()
         print(f"baseline FIRST inference time cost {time.monotonic() - st:.4f}")
 
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                     record_shapes=True,
-                     profile_memory=True,
-                     with_stack=True,
-                     with_flops=True) as prof:
-            for _ in range(10):
-                st = time.monotonic()
-                r = self.baseline_model(packed_input_ids=packed_input_ids,
-                                        cu_seqlens=cu_seqlens,
-                                        max_seqlen=max_seqlen).logits.float()
-                print(f"baseline inference time cost {time.monotonic() - st:.4f}")
-        prof.export_chrome_trace("baseline_trace.json")
+        st = time.monotonic()
+        r = self.baseline_model(packed_input_ids=packed_input_ids,
+                                cu_seqlens=cu_seqlens,
+                                max_seqlen=max_seqlen).logits.float()
+        print(f"baseline inference time cost {time.monotonic() - st:.4f}")
 
         print(f"diff: {r - res[0]}, max/correct_max {(r - res[0]).abs().max()}/{r.abs().max()}, "
               f" mean {(r - res[0]).abs().mean()},")
@@ -441,5 +439,4 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testInference")
-    # unittest.main(defaultTest="ModelParallelFlashMQATTest.testLinearAccordance")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testTrainStep")

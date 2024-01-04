@@ -228,19 +228,15 @@ def send_tensor_tuple_meta(tensor_tuple, recv_stage):
             * ndims
             * shape
     """
-    count_tensor = torch.LongTensor(data=[len(tensor_tuple)]).cuda()
+    device = torch.cuda.current_device()
+    count_tensor = torch.tensor([len(tensor_tuple)], dtype=torch.long, device=device)
     send(count_tensor, recv_stage)
     for idx, tensor in enumerate(tensor_tuple):
         if isinstance(tensor, torch.Tensor):
-            send_shape = torch.LongTensor(data=tensor.size()).cuda()
-            send_ndims = torch.LongTensor(data=[len(tensor.size())]).cuda()
-            send_dtype = torch.LongTensor(data=[DTYPE_TO_ID[tensor.dtype]]).cuda()
-            send(send_dtype, recv_stage)
-            send(send_ndims, recv_stage)
-            send(send_shape, recv_stage)
+            send_tensor_meta(tensor, recv_stage)
         elif tensor is None:
-            send_dtype = torch.LongTensor(data=[-1]).cuda()
-            send(send_dtype, recv_stage)
+            send_ndims_dtype = torch.tensor(data=[-1, -1], device=device, dtype=torch.long)
+            send(send_ndims_dtype, recv_stage)
 
 
 def send_tensor_meta(tensor: torch.Tensor, recv_stage: int):
@@ -251,11 +247,12 @@ def send_tensor_meta(tensor: torch.Tensor, recv_stage: int):
         * shape
     """
     if isinstance(tensor, torch.Tensor):
-        send_shape = torch.LongTensor(data=tensor.size()).cuda()
-        send_ndims = torch.LongTensor(data=[len(tensor.size())]).cuda()
-        send_dtype = torch.LongTensor(data=[DTYPE_TO_ID[tensor.dtype]]).cuda()
-        send(send_dtype, recv_stage)
-        send(send_ndims, recv_stage)
+        device = torch.cuda.current_device()
+        send_ndims_dtype = torch.tensor([len(tensor.size()), DTYPE_TO_ID[tensor.dtype]],
+                                        dtype=torch.long,
+                                        device=device)
+        send_shape = torch.tensor(tensor.size(), dtype=torch.long, device=device)
+        send(send_ndims_dtype, recv_stage)
         send(send_shape, recv_stage)
     else:
         raise ValueError("tensor is not a torch.Tensor")
@@ -273,21 +270,20 @@ def recv_tensor_tuple_meta(send_stage):
     Returns:
         Allocated buffer for receiving from send_stage.
     """
-    count_tensor = torch.LongTensor(data=[0]).cuda()
+    device = torch.cuda.current_device()
+    count_tensor = torch.empty(1, dtype=torch.long, device=device)
     recv(count_tensor, send_stage)
     num_tensors = count_tensor.item()
     recv_shapes_and_dtypes = []
     for idx in range(num_tensors):
-        recv_dtype = torch.LongTensor(data=[0]).cuda()
-        recv(recv_dtype, send_stage)
-        if recv_dtype.item() == -1:
+        recv_ndims_dtype = torch.empty(2, dtype=torch.long, device=device)
+        recv(recv_ndims_dtype, send_stage)
+        if recv_ndims_dtype[-1] == -1:
             recv_shapes_and_dtypes.append((None, None))
         else:
-            recv_dtype = ID_TO_DTYPE[recv_dtype.item()]
-            recv_ndims = torch.LongTensor(data=[0]).cuda()
-            recv(recv_ndims, send_stage)
-            recv_ndims = recv_ndims.item()
-            recv_shape = torch.LongTensor([1] * recv_ndims).cuda()
+            recv_dtype = ID_TO_DTYPE[recv_ndims_dtype[1].item()]
+            recv_ndims = recv_ndims_dtype[0].item()
+            recv_shape = torch.empty(recv_ndims, dtype=torch.long, device=device)
             recv(recv_shape, send_stage)
             recv_shapes_and_dtypes.append((recv_shape.tolist(), recv_dtype))
 
@@ -306,19 +302,15 @@ def recv_tensor_meta(send_stage: int, require_grad=False) -> torch.Tensor:
     Returns:
         Allocated buffer for receiving from send_stage.
     """
-    recv_dtype = torch.LongTensor(data=[0]).cuda()
-    recv(recv_dtype, send_stage)
-    recv_dtype = ID_TO_DTYPE[recv_dtype.item()]
-    recv_ndims = torch.LongTensor(data=[0]).cuda()
-    recv(recv_ndims, send_stage)
-    recv_ndims = recv_ndims.item()
-    recv_shape = torch.LongTensor([1] * recv_ndims).cuda()
+    device = torch.cuda.current_device()
+    recv_ndims_dtype = torch.empty(2, dtype=torch.long, device=device)
+    recv(recv_ndims_dtype, send_stage)
+    recv_dtype = ID_TO_DTYPE[recv_ndims_dtype[1].item()]
+    recv_ndims = recv_ndims_dtype[0].item()
+    recv_shape = torch.empty(recv_ndims, dtype=torch.long, device=device)
     recv(recv_shape, send_stage)
     recv_shape = recv_shape.tolist()
-    buffer = torch.zeros(recv_shape,
-                         dtype=recv_dtype,
-                         device=torch.cuda.current_device(),
-                         requires_grad=require_grad)
+    buffer = torch.zeros(recv_shape, dtype=recv_dtype, device=device, requires_grad=require_grad)
     return buffer
 
 
