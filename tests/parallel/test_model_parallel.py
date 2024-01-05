@@ -12,7 +12,6 @@ import torch.multiprocessing as mp
 from tests.utils import *
 import api.config as config_package
 
-
 NUM_MP = 2
 NUM_PP = 4
 NUM_DP = 1

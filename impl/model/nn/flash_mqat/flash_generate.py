@@ -101,8 +101,13 @@ def genstep(
         if base.constants.model_parallel_rank() > 0:
             logprob[:] = 0
             next_tokens[:] = 0
-        handle = torch.distributed.all_reduce(logprob, torch.distributed.ReduceOp.SUM, async_op=True, group=base.constants.model_parallel_group())
-        torch.distributed.all_reduce(next_tokens, torch.distributed.ReduceOp.SUM, group=base.constants.model_parallel_group())
+        handle = torch.distributed.all_reduce(logprob,
+                                              torch.distributed.ReduceOp.SUM,
+                                              async_op=True,
+                                              group=base.constants.model_parallel_group())
+        torch.distributed.all_reduce(next_tokens,
+                                     torch.distributed.ReduceOp.SUM,
+                                     group=base.constants.model_parallel_group())
 
     if tokenizer.eos_token_id is not None:
         if tokenizer.pad_token_id is None:

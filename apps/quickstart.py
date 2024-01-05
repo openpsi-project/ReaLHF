@@ -1,4 +1,4 @@
-from typing import Optional, Callable
+from typing import Callable, Optional
 import argparse
 import dataclasses
 import datetime
@@ -15,7 +15,7 @@ import hydra
 
 from base.cluster import spec as cluster_spec
 from base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
-from experiments.common import PPOConfig, DPOConfig, SFTConfig, RWConfig
+from experiments.common import DPOConfig, PPOConfig, RWConfig, SFTConfig
 import api.config
 
 cs = ConfigStore.instance()
@@ -42,15 +42,12 @@ def kind_reminder(config_name, logger, args):
         f"Model checkpoints will be saved to {os.path.join(MODEL_SAVE_ROOT, args.experiment_name, args.trial_name)}"
     )
     for k, v in args.items():
-        if hasattr(v, "parallel") and (
-            v.parallel.pipeline_parallel_size > 1 or v.parallel.model_parallel_size > 1
-        ):
-            logger.warning(
-                f"Detected model named '{k}' enables pipeline parallel or model parallel. "
-                "Please ensure that (1) there are enough GPUs for your experiment "
-                "and (2) the model checkpoint has been converted into "
-                "shards using scripts/transform_to_pipe_ckpt.py."
-            )
+        if hasattr(v, "parallel") and (v.parallel.pipeline_parallel_size > 1
+                                       or v.parallel.model_parallel_size > 1):
+            logger.warning(f"Detected model named '{k}' enables pipeline parallel or model parallel. "
+                           "Please ensure that (1) there are enough GPUs for your experiment "
+                           "and (2) the model checkpoint has been converted into "
+                           "shards using scripts/transform_to_pipe_ckpt.py.")
         if hasattr(v, "parallel") and v.base_model_path is None:
             logger.warning(
                 f"Detected `base_model_path` of model named '{k}' is not specified. Using `path` as `base_model_path`."
@@ -62,22 +59,16 @@ def kind_reminder(config_name, logger, args):
             )
             v.tokenizer_path = v.base_model_path
 
-    slurm_available = (
-        int(
-            subprocess.run(
-                "squeue",
-                shell=True,
-                stdout=open(os.devnull, "wb"),
-                stderr=open(os.devnull, "wb"),
-            ).returncode
-        )
-        == 0
-    )
+    slurm_available = (int(
+        subprocess.run(
+            "squeue",
+            shell=True,
+            stdout=open(os.devnull, "wb"),
+            stderr=open(os.devnull, "wb"),
+        ).returncode) == 0)
     if slurm_available:
-        logger.warning(
-            "Slurm is available. You probably run the system on ctrl nodes. "
-            "Using slurm to launch remote workers."
-        )
+        logger.warning("Slurm is available. You probably run the system on ctrl nodes. "
+                       "Using slurm to launch remote workers.")
     else:
         logger.warning("Slurm is not available. Using local mode.")
     mode = "slurm" if slurm_available else "local"
@@ -85,6 +76,7 @@ def kind_reminder(config_name, logger, args):
 
 
 def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
+
     @hydra.main(version_base=None, config_name=config_name)
     def run(args):
         # NOTE: we import logging here to avoid hydra logging overwrite
