@@ -9,7 +9,7 @@ from base.monitor import process_memory_mb
 from base.topology import PipeDataParallelTopology
 from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, OutputHead,
                                                       VocabPositionEmbedding)
-from impl.model.utils.pipeline_module import LayerSpec, PipelineModule
+from impl.model.parallelism.pipeline_parallel.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
 import base.logging as logging

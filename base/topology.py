@@ -395,23 +395,13 @@ class PipelineParallelGrid:
         # Create new ProcessGroup for model (tensor-slicing) collectives
 
         # Short circuit case without model parallelism.
-        # TODO: it would be nice if topology had bcast semantics to avoid this branching
-        # case?
-        if self.model_parallel_size == 1:
-            for group_rank in range(self.world_size):
-                group_rank = [group_rank]
-                group = dist.new_group(ranks=[group_rank[0] + process_group_offset])
-                if group_rank[0] == self.global_rank:
-                    self.slice_group = group_rank
-                    self.slice_proc_group = group
-        else:
-            self.mp_group = []
-            self.model_groups = self._topo.get_axis_comm_lists("model")
-            for g in self.model_groups:
-                proc_group = dist.new_group(ranks=[x + process_group_offset for x in g])
-                if self.global_rank in g:
-                    self.slice_group = g
-                    self.slice_proc_group = proc_group
+        self.mp_group = []
+        self.model_groups = self._topo.get_axis_comm_lists("model")
+        for g in self.model_groups:
+            proc_group = dist.new_group(ranks=[x + process_group_offset for x in g])
+            if self.global_rank in g:
+                self.slice_group = g
+                self.slice_proc_group = proc_group
 
         dp_head_ranks = self._topo.filter_match(model=0, pipe=self._topo.get_dim("pipe") - 1)
         dp_head_group = dist.new_group(ranks=[rank + process_group_offset for rank in dp_head_ranks])

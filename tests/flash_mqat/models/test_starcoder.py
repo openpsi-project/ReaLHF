@@ -1,9 +1,5 @@
+import os
 import unittest
-
-try:
-    from flash_attn.bert_padding import pad_input, unpad_input
-except ModuleNotFoundError:
-    pass
 
 import torch
 import transformers
@@ -12,13 +8,28 @@ from impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig,
                                                      vanilla_packed_generate)
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
 from impl.model.utils.functional import gather_shifted_log_probs
+from tests.utils import *
 import api.huggingface
+
+torch.cuda.manual_seed_all(0)
 
 
 class FlashMQATStarCoderCPUTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        torch.cuda.set_device(0)
+        torch.distributed.init_process_group(
+            rank=0,
+            world_size=1,
+            backend="nccl",
+            init_method="tcp://localhost:7778",
+        )
+        os.environ["LOCAL_RANK"] = str(0)
+        import deepspeed
+
+        deepspeed.init_distributed()
+        init_global_constants(1, 1, 1)
         cls.bs = bs = 3
         cls.device = device = "cpu"
         cls.dtype = dtype = torch.float32

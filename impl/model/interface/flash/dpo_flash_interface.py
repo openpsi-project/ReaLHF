@@ -8,7 +8,6 @@ import tqdm
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.utils.functional import gather_packed_shifted_log_probs
-from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
 import api.model
 import base.logging as logging
 import impl.model.utils.dpo_functional as dpo_functional
@@ -74,7 +73,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
         else:
             logits: torch.FloatTensor = module(packed_input_ids=data["packed_input_ids"],
                                                cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits
+                                               max_seqlen=max_seqlen)
 
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_input_ids"]).float()
 
@@ -118,7 +117,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
         else:
             logits: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
                                                cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits
+                                               max_seqlen=max_seqlen)
 
             loss, stats = _dpo_loss_from_model_outputs(
                 logits=logits,
@@ -144,10 +143,12 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
     def save(self, model: api.model.Model, output_dir):
         if not self.enable_save:
             return
-        if isinstance(model.module, DeepSpeedPipelineEngine):
-            save_pipeline_model(model, output_dir)
-        else:
-            save_hf_or_lora_model(model, output_dir)
+        model.module.save(
+            output_dir,
+            epoch=model.version.epoch,
+            epoch_step=model.version.epoch_step,
+            global_step=model.version.global_step,
+        )
 
 
 api.model.register_interface("flash_dpo", PackedDirectPerferenceOptimizationInterface)

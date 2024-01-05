@@ -8,10 +8,10 @@ import tqdm
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+from impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
 from impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
                                          gather_packed_shifted_log_probs)
-from impl.model.utils.model_parallel.modules import vocab_parallel_cross_entropy
-from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
+from impl.model.utils.save_load import save_hf_or_lora_model
 import api.data
 import api.model
 import base.constants
@@ -64,8 +64,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 **loss_fn_kwargs,
             )
         else:
-            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-                            max_seqlen=max_seqlen).logits
+            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
             loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
             module.backward(loss)
             module.step()
@@ -81,10 +80,10 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         return res
 
     def save(self, model: api.model.Model, save_dir: str):
-        if isinstance(model.module, DeepSpeedPipelineEngine):
-            save_pipeline_model(model, save_dir)
-        else:
-            save_hf_or_lora_model(model, save_dir)
+        model.module.save(save_dir,
+                          epoch=model.version.epoch,
+                          epoch_step=model.version.epoch_step,
+                          global_step=model.version.global_step)
 
     @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
@@ -114,7 +113,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
             else:
                 logits = module(packed_input_ids=packed_input_ids,
                                 cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen).logits
+                                max_seqlen=max_seqlen)
                 loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
 
             if loss is not None:
@@ -147,7 +146,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         else:
             logits = model.module(packed_input_ids=packed_input_ids,
                                   cu_seqlens=cu_seqlens,
-                                  max_seqlen=max_seqlen).logits
+                                  max_seqlen=max_seqlen)
         return dict(logits=logits)
 
     # for testing only

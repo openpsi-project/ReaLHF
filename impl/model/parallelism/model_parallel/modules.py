@@ -10,12 +10,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 
+from .mappings import *
+from .utils import (_initialize_affine_weight_cpu, _initialize_affine_weight_gpu, divide,
+                    set_tensor_model_parallel_attributes, VocabUtility)
 from base.constants import *
-from impl.model.utils.model_parallel.mappings import *
-from impl.model.utils.model_parallel.utils import (_initialize_affine_weight_cpu,
-                                                   _initialize_affine_weight_gpu, divide,
-                                                   set_tensor_model_parallel_attributes, VocabUtility)
-from impl.model.utils.modules import LlamaRMSNorm
 
 _grad_accum_fusion_available = True
 try:
@@ -32,7 +30,7 @@ def get_activation_fn(activation_function: str) -> Callable:
     if activation_function == "gelu":
         return nn.functional.gelu
     elif activation_function == "gelu_new":
-        from impl.model.utils.modules.activations import new_gelu_activation
+        from impl.model.modules.activations import new_gelu_activation
 
         return new_gelu_activation
     elif activation_function == "silu":
@@ -742,158 +740,6 @@ class RowParallelLinear(torch.nn.Module):
             output_ = reduce_from_tensor_model_parallel_region(output_parallel)
         output = output_ + self.bias if self.bias is not None else output_
         return output
-
-
-class LayerNormColumnLinear(nn.Module):
-
-    def __init__(
-        self,
-        input_dim: int,
-        output_dim: int,
-        layer_norm_epsilon: float,
-        use_attention_bias: bool,
-        sequence_parallel: Optional[bool] = False,
-        gradient_accumulation_fusion: bool = True,
-        layer_norm_type: Optional[str] = None,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
-    ):
-        super().__init__()
-        if dtype is None:
-            dtype = torch.float16
-        if layer_norm_type is None:
-            layer_norm_fn = nn.LayerNorm
-        elif layer_norm_type == "rms":
-            layer_norm_fn = LlamaRMSNorm
-        self.ln = layer_norm_fn(input_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.linear = ColumnParallelLinear(
-            input_dim,
-            output_dim,
-            async_tensor_model_parallel_allreduce=not sequence_parallel,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-            bias=use_attention_bias,
-            dtype=dtype,
-            device=device,
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.linear(self.ln(x))
-
-
-class LayerNormParallelMLP(nn.Module):
-
-    def __init__(
-        self,
-        hidden_dim: int,
-        intermediate_dim: int,
-        resid_pdrop: float,
-        activation_function: str,
-        layer_norm_epsilon: float,
-        sequence_parallel: Optional[bool] = False,
-        gradient_accumulation_fusion: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[str, torch.device]] = None,
-    ):
-        super().__init__()
-        if dtype is None:
-            dtype = torch.float16
-
-        self.ln = nn.LayerNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.c_fc = ColumnParallelLinear(
-            hidden_dim,
-            intermediate_dim,
-            async_tensor_model_parallel_allreduce=not sequence_parallel,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-            dtype=dtype,
-            device=device,
-        )
-        self.c_proj = RowParallelLinear(intermediate_dim,
-                                        hidden_dim,
-                                        sequence_parallel=sequence_parallel,
-                                        gradient_accumulation_fusion=gradient_accumulation_fusion,
-                                        dtype=dtype,
-                                        device=device)
-        self.act = get_activation_fn(activation_function)
-        self.dropout = nn.Dropout(resid_pdrop)
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.ln(hidden_states)
-        hidden_states, _ = self.c_fc(hidden_states)
-        hidden_states = self.act(hidden_states)
-        hidden_states, _ = self.c_proj(hidden_states)
-        return self.dropout(hidden_states)
-
-
-class LlamaLayerNormParallelMLP(nn.Module):
-
-    def __init__(
-        self,
-        hidden_dim: int,
-        intermediate_dim: int,
-        activation_function: str,
-        layer_norm_epsilon: float,
-        sequence_parallel: Optional[bool] = False,
-        gradient_accumulation_fusion: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[str, torch.device]] = None,
-    ):
-        super().__init__()
-        if dtype is None:
-            dtype = torch.float16
-        self.hidden_size = hidden_dim
-        self.intermediate_size = intermediate_dim
-        self.ln = LlamaRMSNorm(hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device)
-        self.gate_proj = ColumnParallelLinear(
-            self.hidden_size,
-            self.intermediate_size,
-            async_tensor_model_parallel_allreduce=not sequence_parallel,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-            bias=False,
-            dtype=dtype,
-            device=device,
-        )
-        self.up_proj = ColumnParallelLinear(
-            self.hidden_size,
-            self.intermediate_size,
-            async_tensor_model_parallel_allreduce=not sequence_parallel,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-            bias=False,
-            dtype=dtype,
-            device=device,
-        )
-        self.down_proj = RowParallelLinear(
-            self.intermediate_size,
-            self.hidden_size,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-            bias=False,
-            dtype=dtype,
-            device=device,
-        )
-        self.act_fn = get_activation_fn(activation_function)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.ln(x)
-        _gradient_accumulation_fusion = self.gate_proj.gradient_accumulation_fusion
-        _async_grad_allreduce = self.gate_proj.async_tensor_model_parallel_allreduce
-        _sequence_parallel = self.gate_proj.sequence_parallel
-        _is_w_parallel = [True, True]
-        gate, upproj = merged_linear_with_grad_accumulation_and_async_allreduce(
-            x,
-            _gradient_accumulation_fusion,
-            _async_grad_allreduce,
-            _sequence_parallel,
-            _is_w_parallel,
-            self.gate_proj.weight,
-            self.gate_proj.bias,
-            self.up_proj.weight,
-            self.up_proj.bias,
-        )
-        return self.down_proj(self.act_fn(gate) * upproj)
 
 
 def parallel_lm_logits(

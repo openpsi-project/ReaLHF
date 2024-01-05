@@ -237,7 +237,7 @@ def main(rank: int = None, world_size: int = None):
 
     deepspeed.init_distributed()
 
-    from .parallel.utils import init_global_constants
+    from .utils import init_global_constants
 
     init_global_constants(NUM_DP, NUM_MP, NUM_PP)
 
