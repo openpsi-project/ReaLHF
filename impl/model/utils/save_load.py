@@ -17,6 +17,7 @@ import base.logging as logging
 logger = logging.getLogger("Model Save")
 
 
+################################ these functions are currently not used ################################
 def save_hf_format(
     model: transformers.PreTrainedModel,
     tokenizer: transformers.PreTrainedTokenizerFast,
@@ -53,12 +54,10 @@ def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
     tokenizer = model.tokenizer
     logger.info(f"saving the model for epoch {model.version.epoch} step {model.version.epoch_step}...")
     os.makedirs(
-        os.path.abspath(
-            os.path.join(
-                output_dir,
-                f"epoch{model.version.epoch}step{model.version.epoch_step}",
-            )
-        ),
+        os.path.abspath(os.path.join(
+            output_dir,
+            f"epoch{model.version.epoch}step{model.version.epoch_step}",
+        )),
         exist_ok=True,
     )
     if not is_lora_model(module):
@@ -70,21 +69,11 @@ def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
         )
         return
     lora_sd = get_lora_state_dict(module)
-    save_to_disk(
-        lora_sd, os.path.join(output_dir, f"epoch{model.version.epoch}step{model.version.epoch_step}")
-    )
+    save_to_disk(lora_sd, os.path.join(output_dir,
+                                       f"epoch{model.version.epoch}step{model.version.epoch_step}"))
 
 
-def save_pipeline_model(model: api.model.Model, output_dir: str):
-    module = model.module
-    sub_folder = f"epoch{model.version.epoch}step{model.version.epoch_step}"
-    output_dir = os.path.join(output_dir, sub_folder)
-    os.makedirs(output_dir, exist_ok=True)
-    module.save(output_dir)
-    output_config_file = os.path.join(output_dir, "flash_mqat_config.json")
-    config = dataclasses.asdict(module.config)
-    with open(output_config_file, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=4)
+################################ these functions are currently not used ################################
 
 
 def split_state_dict_into_shards(state_dict: Dict, n_shards: int) -> Dict:
@@ -111,13 +100,13 @@ def split_state_dict_into_shards(state_dict: Dict, n_shards: int) -> Dict:
 
 
 def save_to_disk(
-    state_dict: Dict[str, torch.Tensor],
-    output_dir: str,
-    output_fn: Optional[str] = None,
-    save_type: str = "pt",
-    n_shards: Optional[int] = None,
-    no_shard_suffix: bool = False,
-    max_shard_size_byte: int = int(1e10),
+        state_dict: Dict[str, torch.Tensor],
+        output_dir: str,
+        output_fn: Optional[str] = None,
+        save_type: str = "pt",
+        n_shards: Optional[int] = None,
+        no_shard_suffix: bool = False,
+        max_shard_size_byte: int = int(1e10),
 ):
     os.makedirs(output_dir, exist_ok=True)
     if n_shards is None:
@@ -167,9 +156,9 @@ def save_to_disk(
         raise NotImplementedError(f"save_type {save_type} is not supported")
 
 
-def load_from_safetensors(
-    model_dir: str, ext: str = ".safetensors", pattern: Optional[str] = None
-) -> Tuple[Dict, int]:
+def load_from_safetensors(model_dir: str,
+                          ext: str = ".safetensors",
+                          pattern: Optional[str] = None) -> Tuple[Dict, int]:
     state_dict = {}
     cnt = 0
     for fn in os.listdir(model_dir):
@@ -237,9 +226,9 @@ def load_from_disk(
         if any(fn.endswith(".DLLMbin") for fn in fns):
             state_dict, n_shards = load_from_pytorch(model_dir, ext=".DLLMbin", pattern=fn_pattern)
         elif any(fn.endswith(".DLLMsafetensors") for fn in fns):
-            state_dict, n_shards = load_from_safetensors(
-                model_dir, ext=".DLLMsafetensors", pattern=fn_pattern
-            )
+            state_dict, n_shards = load_from_safetensors(model_dir,
+                                                         ext=".DLLMsafetensors",
+                                                         pattern=fn_pattern)
         elif any(fn.endswith(".bin") for fn in fns):
             state_dict, n_shards = load_from_pytorch(model_dir, pattern=fn_pattern)
         # Load safetensors whenever possible, which is extremely fast.

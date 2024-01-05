@@ -11,7 +11,7 @@ from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
 from impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
                                          gather_packed_shifted_log_probs)
-from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
+from impl.model.utils.save_load import save_hf_or_lora_model
 import api.data
 import api.model
 import base.constants
@@ -80,10 +80,10 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         return res
 
     def save(self, model: api.model.Model, save_dir: str):
-        if isinstance(model.module, DeepSpeedPipelineEngine):
-            save_pipeline_model(model, save_dir)
-        else:
-            save_hf_or_lora_model(model, save_dir)
+        model.module.save(save_dir,
+                          epoch=model.version.epoch,
+                          epoch_step=model.version.epoch_step,
+                          global_step=model.version.global_step)
 
     @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:

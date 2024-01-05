@@ -196,15 +196,11 @@ def make_causal_flash_mqat_pipe_module(
 
     layer_specs.append(head)
 
-    def compute_loss(output, label):
-        return output.loss
-
     if output_layer_specs_only:
         return layer_specs
 
     return PipelineModule(
         layers=layer_specs,
-        loss_fn=compute_loss,
         is_critic=config.is_critic,
         partition_method=partition_method,
         topology=base.constants.grid()._topo,

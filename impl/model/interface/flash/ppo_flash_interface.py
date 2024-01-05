@@ -12,7 +12,6 @@ from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngin
 from impl.model.backend.pipe_engine.stream_pipe_engine import StreamPipeEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
-from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
 import api.huggingface
 import api.model
 import base.logging as logging
@@ -144,10 +143,10 @@ class PackedActorInterface(api.model.ModelInterface):
     def save(self, model: api.model.Model, save_dir: str):
         if not self.enable_save:
             return
-        if isinstance(model.module, DeepSpeedPipelineEngine):
-            save_pipeline_model(model, save_dir)
-        else:
-            save_hf_or_lora_model(model, save_dir)
+        model.module.save(save_dir,
+                          epoch=model.version.epoch,
+                          epoch_step=model.version.epoch_step,
+                          global_step=model.version.global_step)
 
     @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
@@ -514,10 +513,10 @@ class PackedCriticInterface(api.model.ModelInterface):
     def save(self, model: api.model.Model, save_dir: str):
         if not self.enable_save:
             return
-        if isinstance(model.module, DeepSpeedPipelineEngine):
-            save_pipeline_model(model, save_dir)
-        else:
-            save_hf_or_lora_model(model, save_dir)
+        model.module.save(save_dir,
+                          epoch=model.version.epoch,
+                          epoch_step=model.version.epoch_step,
+                          global_step=model.version.global_step)
 
     @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
