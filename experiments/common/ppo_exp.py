@@ -3,7 +3,7 @@ import functools
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
-from experiments.common.config_utils import get_flash_mqat_model_config
+from .config_model import ModelConfig, OptimizerConfig, get_flash_mqat_model_config
 import base.logging as logging
 
 logger = logging.getLogger("PPO exp", "colored")
@@ -88,7 +88,62 @@ train_critic = ModelRPC(
     log_return_value=True,
 )
 
+@dataclasses.dataclass
+class PPOHyperparmetersConfig:
+    """Configuration of PPO hyperparameters.
 
+    Args:
+        max_new_tokens (int): Maximum number of new tokens to generate in each iteration.
+        min_new_tokens (int): Minimum number of new tokens to generate in each iteration.
+        greedy (bool): Whether to use greedy decoding. PPO may not work if set to True.
+        top_p (float): Top-p sampling ratio.
+        top_k (float): Top-k sampling ratio.
+        temperature (float): Sampling temperature.
+        ppo_n_minibatches (int): Number of minibatches in each PPO update.
+        kl_ctl (float): Coefficient of KL divergence rewards.
+        discount (float): Discount factor.
+        gae_lambda (float): Lambda factor in GAE.
+        eps_clip (float): PPO clipping factor.
+        value_eps_clip (float): PPO value clipping factor.
+        max_reward_clip (float): Maximum reward value.
+        reward_output_scaling (float): Scaling factor of the reward model output.
+        reward_output_bias (float): Bias of the reward model output.
+            The number outputed by the reward model will be
+            CLIP((x - bias) * scaling, -max_reward_clip, max_reward_clip).
+        early_stop_imp_ratio (float): PPO update will be early stopped if importance ratio
+            exceeds this maximum value.
+        use_adaptive_kl_ctl (bool): Whether to use adaptive KL divergence coefficient.
+        adv_norm (bool): Whether use advantage normalization.
+        value_norm (bool): Whether to denormalize valued and normalize return predictions.
+        value_norm_type (str): Type of value normalization. Either exponential moving average or moving average.
+        value_norm_beta (float): Exponential decay factor in exponential moving average.
+        value_norm_eps (float): Epsilon factor in the denominator of exponential moving average.
+    """
+
+    max_new_tokens: int = 512
+    min_new_tokens: int = 10
+    greedy: bool = False
+    top_p: float = 1.0
+    top_k: int = 200
+    temperature: float = 1.0
+    ppo_n_minibatches: int = 4
+    kl_ctl: float = 0.1
+    discount: float = 1.0
+    gae_lambda: float = 1.0
+    eps_clip: float = 0.2
+    value_eps_clip: float = 0.2
+    max_reward_clip: float = 20.0
+    reward_output_scaling: float = 1.0
+    reward_output_bias: float = 0.0
+    early_stop_imp_ratio: float = 5.0
+    use_adaptive_kl_ctl: bool = False
+    adv_norm: bool = False
+    value_norm: bool = False
+    value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
+    value_norm_beta: float = 0.99995
+    value_norm_eps: float = 1e-5
+    _configuration_name: str = "Proximal Policy Optimization"
+    
 @dataclasses.dataclass
 class PPOExperiment(Experiment):
     sft_model_path: Optional[str] = None

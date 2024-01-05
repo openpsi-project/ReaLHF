@@ -220,6 +220,7 @@ def load_from_disk(model_dir: str,
 
     # Load safetensors whenever possible, which is extremely fast.
     fns = list(os.listdir(model_dir))
+    # TODO: use a common merge from MP function
     if load_all_mp_ranks:
         # transform mp state dicts to full pp statedict
         state_dicts = []

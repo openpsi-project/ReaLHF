@@ -396,7 +396,7 @@ class FlashMQATBase(nn.Module):
         x.pp_input = raw_pp_input
         return x
 
-
+# TODO: implement a customized output head class, merging the following 3 cases
 class OutputHead(nn.Linear):
     # TODO: do we need to care about the initialization scale?
 

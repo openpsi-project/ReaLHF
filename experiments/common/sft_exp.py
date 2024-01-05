@@ -3,7 +3,10 @@ import dataclasses
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
-from experiments.common.config_utils import get_flash_mqat_model_config
+
+from .config_model import ModelConfig, OptimizerConfig, get_flash_mqat_model_config
+from .config_dataset import PromptAnswerDatasetConfig
+from omegaconf import MISSING
 
 sft = ModelRPC(
     "default",
@@ -15,53 +18,37 @@ sft = ModelRPC(
 
 
 @dataclasses.dataclass
-class SFTExperiment(Experiment):
+class SFTConfig(Experiment):
+    _configuration_name: str = "Supervised-Finetuning"
+
+    experiment_name: str = MISSING
+    trial_name: str = MISSING
+    trace: bool = False
     seed: int = 1
     total_train_epochs: int = 1
-    save_freq_steps: int = 50
-    eval_freq_epochs: int = 1
-    # model
-    model_type: str = "gpt2"
-    model_path: str = "/lustre/fw/pretrained/gpt2/"
-    dp_size: int = 1
-    mp_size: int = 1
-    pp_size: int = 1
-    use_lora: bool = False
-    lora_scaling: float = 32.0
-    lora_dim: int = 32
-    enable_fp16: bool = True
-    enable_bf16: bool = False
-    gradient_checkpointing: bool = True
-    # dataset
-    max_seqlen: int = 1024
-    train_tokens_per_batch: int = 16384
-    valid_tokens_per_batch: int = 16384
-    train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/sft_pos-train.jsonl"
-    valid_dataset_path: str = "/lustre/fw/datasets/imdb/rl/sft_pos-valid.jsonl"
-    # optimizer
-    lr: float = 2.5e-4
-    weight_decay: float = 0.05
-    adam_betas: tuple = (0.9, 0.95)
-    lr_scheduler_type: str = "cosine"
-    warmup_proportion: float = 0.02
-    adam_eps: float = 1e-5
-    min_lr_ratio: float = 0.0
-    zero_stage: int = 2
-    offload_optimizer: bool = False
-    partition_method: Optional[str] = "parameters_balanced"
-
-    num_pipeline_micro_batches: Optional[int] = None
-    use_sequence_parallel: bool = False
+    save_freq_steps: Optional[int] = 50
+    eval_freq_epochs: Optional[int] = 1
+    model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
+    optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
+    dataset: PromptAnswerDatasetConfig = dataclasses.field(default_factory=PromptAnswerDatasetConfig)
 
     def __post_init__(self):
-        if self.model_type == "gpt2" and self.max_seqlen > 1024:
+        if self.model.type == "gpt2" and self.dataset.max_seqlen > 1024:
             raise ValueError("GPT2 only supports max seqlen of 1024")
-        if self.pp_size < 1 or self.dp_size < 1 or self.mp_size < 1:
+        if (
+            self.model.parallel.pipeline_parallel_size < 1
+            or self.model.parallel.data_parallel_size < 1
+            or self.model.parallel.model_parallel_size < 1
+        ):
             raise ValueError("pp_size, dp_size and mp_size must be positive integers.")
-        if self.pp_size > 1 and self.use_lora:
+        if self.model.parallel.pipeline_parallel_size > 1 and self.model.lora is not None:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
-        # if self.enable_bf16 and (self.pp_size > 1 or self.mp_size):
-        #     raise ValueError("Use bf16 with pipeline parallel or model parallel is not supported.")
+
+        self.world_size = (
+            self.model.parallel.pipeline_parallel_size
+            * self.model.parallel.data_parallel_size
+            * self.model.parallel.model_parallel_size
+        )
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -77,7 +64,7 @@ class SFTExperiment(Experiment):
                 scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
             ),
             model_worker=TasksGroup(
-                count=self.dp_size * self.pp_size * self.mp_size,
+                count=self.world_size,
                 scheduling=Scheduling.model_worker_default(
                     cpu=4,
                     gpu=1,
@@ -88,21 +75,21 @@ class SFTExperiment(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = self.model_path
+        model_path = self.model.path
 
         dataset = Dataset(
             "packed_prompt_answer",
             args=dict(
-                n_tokens_per_batch=self.train_tokens_per_batch,
-                min_seqs_per_batch=self.train_tokens_per_batch // self.max_seqlen,
-                max_length=self.max_seqlen,
-                dataset_path=self.train_dataset_path,
+                n_tokens_per_batch=self.dataset.train_tokens_per_batch,
+                min_seqs_per_batch=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+                max_length=self.dataset.max_seqlen,
+                dataset_path=self.dataset.train_path,
             ),
         )
         dataloader = eval_dataloader = DataLoader("iterable_dataset_loader")
         data_worker = [
             DataWorker(
-                tokenizer_name_or_path=self.model_path,
+                tokenizer_name_or_path=self.model.path,
                 datasets=[dataset],
                 dataloader=dataloader,
                 seed=self.seed,
@@ -110,53 +97,63 @@ class SFTExperiment(Experiment):
         ]
 
         eval_dataset = copy.deepcopy(dataset)
-        eval_dataset.args["dataset_path"] = self.valid_dataset_path
-        eval_dataset.args["n_tokens_per_batch"] = self.valid_tokens_per_batch
+        eval_dataset.args["dataset_path"] = self.dataset.valid_path
+        eval_dataset.args["n_tokens_per_batch"] = self.dataset.valid_tokens_per_batch
 
         backend = ModelBackend(
             "ds_train",
             args=dict(
                 optimizer_name="adam",
                 optimizer_config=dict(
-                    lr=self.lr,
-                    weight_decay=self.weight_decay,
-                    eps=self.adam_eps,
-                    betas=self.adam_betas,
+                    lr=self.optimizer.lr,
+                    weight_decay=self.optimizer.weight_decay,
+                    eps=self.optimizer.eps,
+                    betas=(self.optimizer.beta1, self.optimizer.beta2),
                 ),
-                lr_scheduler_type=self.lr_scheduler_type,
-                warmup_steps_proportion=self.warmup_proportion,
-                min_lr_ratio=self.min_lr_ratio,
-                zero_stage=self.zero_stage if self.pp_size == 1 else min(self.zero_stage, 1),
-                gradient_checkpointing=self.gradient_checkpointing,
-                num_pipeline_stages=self.pp_size,
-                engine_type="pipe" if self.pp_size > 1 else "deepspeed",
-                num_pipeline_micro_batches=self.num_pipeline_micro_batches,
-                offload_optimizer_state=self.offload_optimizer,
-                enable_bf16=self.enable_bf16,
-                enable_fp16=self.enable_fp16,
-                sequence_parallel=self.use_sequence_parallel,
+                lr_scheduler_type=self.optimizer.lr_scheduler_type,
+                warmup_steps_proportion=self.optimizer.warmup_steps_proportion,
+                min_lr_ratio=self.optimizer.min_lr_ratio,
+                zero_stage=self.optimizer.zero_stage
+                if self.model.parallel.pipeline_parallel_size == 1
+                else min(self.optimizer.zero_stage, 1),
+                gradient_checkpointing=self.model.gradient_checkpointing,
+                num_pipeline_stages=self.model.parallel.pipeline_parallel_size,
+                engine_type="pipe" if self.model.parallel.pipeline_parallel_size > 1 else "deepspeed",
+                num_pipeline_micro_batches=self.model.parallel.num_pipeline_micro_batches,
+                offload_optimizer_state=self.optimizer.offload,
+                enable_bf16=self.model.enable_bf16,
+                enable_fp16=self.model.enable_fp16,
+                sequence_parallel=self.model.parallel.use_sequence_parallel,
             ),
         )
 
         model = get_flash_mqat_model_config(
             from_type="hf_as_actor",
             model_path=model_path,
-            hf_model_type=self.model_type,
+            hf_model_type=self.model.type,
             tokenizer_path=model_path,
-            use_pipe=(self.pp_size > 1),
-            dtype="bf16" if self.enable_bf16 else "fp16",
-            sequence_parallel=self.use_sequence_parallel,
-            partition_method=self.partition_method,
-            use_lora=self.use_lora,
-            lora_dim=self.lora_dim,
-            lora_scaling=self.lora_scaling,
+            use_pipe=(self.model.parallel.pipeline_parallel_size > 1),
+            dtype="bf16" if self.model.enable_bf16 else "fp16",
+            sequence_parallel=self.model.parallel.use_sequence_parallel,
+            partition_method=self.model.parallel.partition_method,
+            lora=self.model.lora,
         )
 
         interface = ModelInterface("flash_sft")
 
-        topo = PipeModelDataParallelTopology(self.pp_size, self.mp_size, self.dp_size)
+        # NOTE: The dims of the parallelism grid is [pipline, data, model]
+        # i.e., model parallelism is scheduled as close as possible in a single node.
+        # This may seem incorrect according the class name "PipeModelDataParallelTopology",
+        # but after you inspect the code, you will find that the class name actually
+        # should be "PipeDataModelParallelTopology". Thank you DeepSpeed!
+        topo = PipeModelDataParallelTopology(
+            self.model.parallel.pipeline_parallel_size,
+            self.model.parallel.model_parallel_size,
+            self.model.parallel.data_parallel_size,
+        )
+
         model_worker = []
-        for i in range(self.pp_size * self.dp_size * self.mp_size):
+        for i in range(self.world_size):
             coord = topo.get_coord(i)
             mw = ModelWorker(
                 seed=self.seed,

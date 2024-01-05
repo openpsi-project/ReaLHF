@@ -6,7 +6,7 @@ import random
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
-from experiments.common.config_utils import get_flash_mqat_model_config
+from .config_model import ModelConfig, OptimizerConfig, get_flash_mqat_model_config
 
 rw_modeling = ModelRPC(
     "default",

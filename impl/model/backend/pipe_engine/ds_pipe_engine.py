@@ -100,7 +100,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # storages
         self.tensor_buffer = TensorBuffer()
 
-        # TODO: add activation checkpoints
         # schedule execution states
         self.tokenizer = None
         self.current_gconfig = None
