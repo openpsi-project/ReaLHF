@@ -24,7 +24,7 @@ from base.monitor import process_memory_mb, time_mark
 from base.topology import PipeDataParallelTopology, PipelineParallelGrid, PipeModelDataParallelTopology
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, OutputHead
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-from impl.model.utils.save_load import load_from_disk, save_to_disk
+from impl.model.utils.save_load import load_from_disk, save_to_disk, get_ckpt_spec
 import base.constants
 import base.logging as logging
 
@@ -83,14 +83,9 @@ class LayerSpec:
 
 
 class TiedLayerSpec(LayerSpec):
-
-    def __init__(self,
-                 key,
-                 typename,
-                 *module_args,
-                 forward_fn=None,
-                 tied_weight_attr="weight",
-                 **module_kwargs):
+    def __init__(
+        self, key, typename, *module_args, forward_fn=None, tied_weight_attr="weight", **module_kwargs
+    ):
         super().__init__(typename, *module_args, **module_kwargs)
         self.key = key
         self.forward_fn = forward_fn
@@ -232,7 +227,7 @@ class PipelineModule(nn.Module):
     def _build(self):
         specs = self._layer_specs
 
-        for local_idx, layer in enumerate(specs[self._local_start:self._local_stop]):
+        for local_idx, layer in enumerate(specs[self._local_start : self._local_stop]):
             layer_idx = local_idx + self._local_start
             if self.seed_layers:
                 if self.seed_fn:
@@ -269,7 +264,14 @@ class PipelineModule(nn.Module):
             elif isinstance(layer, LayerSpec):
                 # substitute output head if self.is_critic=True
                 if layer_idx == self._num_layers - 1 and self.is_critic:
-                    layer = LayerSpec(layer.typename, *layer.module_args, **layer.module_kwargs)
+                    layer = LayerSpec(
+                        layer.typename,
+                        self.config.hidden_dim,
+                        1,
+                        bias=False,
+                        device=self.device,
+                        dtype=self.dtype,
+                    )
                 module = layer.build()
                 name = str(layer_idx)
                 self.forward_funcs.append(module)
@@ -375,7 +377,8 @@ class PipelineModule(nn.Module):
                 "method 'parameters' does not partition parameters to each stage evenly, "
                 "preserving the option as default due to checkpoints already partitioned in this way."
                 "Update to use 'parameters_balanced' option instead!"
-                "Change the option both in model partition script and pipe/pipe+model model wrapper configs!")
+                "Change the option both in model partition script and pipe/pipe+model model wrapper configs!"
+            )
             param_counts = self._count_layer_params()
             self.parts = ds_utils.partition_balanced(weights=param_counts, num_parts=num_stages)
         elif method == "parameters_balanced":
@@ -466,7 +469,8 @@ class PipelineModule(nn.Module):
                         else:
                             tied_ranks.append(self._grid.stage_to_global(stage_id=s, data=dp))
                     group = dist.new_group(
-                        ranks=[rank + base.constants.process_group_offset() for rank in tied_ranks])
+                        ranks=[rank + base.constants.process_group_offset() for rank in tied_ranks]
+                    )
 
                     # Record this tied module if we own a local copy of it.
                     if self.global_rank in tied_ranks:
@@ -484,7 +488,8 @@ class PipelineModule(nn.Module):
                                     p.ds_pipe_replicated = True
         if len(tied_comms) > 0:
             raise NotImplementedError(
-                "Tied weights require dist.new_group of a specific model, which are not supported!")
+                "Tied weights require dist.new_group of a specific model, which are not supported!"
+            )
         return tied_comms
 
     def partitions(self):
@@ -552,10 +557,14 @@ class PipelineModule(nn.Module):
         )
 
     def load(self, load_dir, init_critic_from_actor: bool = False):
+        ckpt_spec = get_ckpt_spec(load_dir)
+        assert ckpt_spec.pp_size == base.constants.pipe_parallel_world_size()
+        assert ckpt_spec.mp_size == base.constants.model_parallel_world_size()
         state_dict, n_shards = load_from_disk(
             load_dir,
-            fn_pattern=r".*" +
-            f"-pp-{self.stage_id:02d}-mp-{self._grid.get_tensor_model_parallel_rank():02d}-" + r"s-(\d{2}).*",
+            fn_pattern=r".*"
+            + f"-pp-{self.stage_id:02d}-mp-{self._grid.get_tensor_model_parallel_rank():02d}-"
+            + r"s-(\d{2}).*",
             return_n_shards=True,
         )
 

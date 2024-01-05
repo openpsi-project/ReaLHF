@@ -209,7 +209,7 @@ def get_ckpt_spec(model_dir: str):
         pp_rank = int(fn.split("-")[2])
         if pp_rank > max_pp_rank:
             max_pp_rank = pp_rank
-        n_shard = int(fn.split("-")[6])
+        n_shard = int(fn.split("-")[6].split('.')[0])
         if n_shard > max_n_shard:
             max_n_shard = n_shard
     return CheckpointSpec(max_mp_rank + 1, max_pp_rank + 1, max_n_shard + 1)

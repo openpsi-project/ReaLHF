@@ -186,7 +186,8 @@ def get_flash_mqat_model_config(
         pipe_init_from_scratch = from_type == "random_actor" or from_type == "random_critic"
         pipe_init_critic_from_actor = from_type == "actor_as_critic"
         with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
-            is_critic = json.load(f)["is_critic"]
+            original_is_critic = json.load(f)["is_critic"]
+        is_critic = original_is_critic or from_type == "actor_as_critic"
         from_type = "empty_critic" if is_critic else "empty_actor"
 
     model = Model(

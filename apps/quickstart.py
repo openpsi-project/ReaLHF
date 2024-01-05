@@ -26,36 +26,7 @@ def _dumb_identity(x):
     return x
 
 
-@dataclasses.dataclass
-class RWConfig:
-    """Experiment configuration for paired-comparison reward modeling.
 
-    Args:
-        experiment_name (str): Experiment name. **This will be automatically filled**.
-        trial_name (str): Trial name. **This will be automatically filled**.
-        trace (bool): Whether to enable viztracer tracing.
-        train_epochs (int): Number of training epochs.
-        eval_freq (int): Evaluation frequency in terms of *epochs8.
-        save_freq (int): Checkpoint saving frequency in terms of *training steps*.
-        seed (int): Random seed.
-        model (ModelConfig): Model configuration. Should be initialized with a SFT model.
-        optimizer (OptimizerConfig): Optimizer configuration.
-        dataset (PromptAnswerDatasetConfig): Dataset configuration.
-    """
-
-    experiment_name: str = MISSING
-    trial_name: str = MISSING
-    trace: bool = False
-    train_epochs: int = 1
-    eval_freq: Optional[int] = 1
-    save_freq: Optional[int] = 50
-    seed: int = 42
-    is_sft_lora: bool = False
-    sft_lora_path: Optional[str] = None
-    model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
-    optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
-    dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
-    _configuration_name: str = "Paired Comparison Reward Modeling"
 
 
 @dataclasses.dataclass
@@ -247,6 +218,12 @@ def kind_reminder(config_name, logger, args):
                 "and (2) the model checkpoint has been converted into "
                 "shards using scripts/transform_to_pipe_ckpt.py."
             )
+        if hasattr(v, "parallel") and v.base_model_path is None:
+            logger.warning(f"Detected `base_model_path` of model named '{k}' is not specified. Using `path` as `base_model_path`.")
+            v.base_model_path = v.path
+        if hasattr(v, "parallel") and v.tokenizer_path is None:
+            logger.warning(f"Detected `tokenizer_path` of model named '{k}' is not specified. Using `base_model_path` as `tokenizer_path`.")
+            v.tokenizer_path = v.base_model_path
 
     slurm_available = (
         int(
@@ -305,99 +282,6 @@ def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
     return run
 
 
-@hydra.main(version_base=None, config_name="rw")
-def run_rw(args: RWConfig):
-    # NOTE: we import logging here to avoid hydra logging overwrite
-    import base.logging as logging
-
-    logger = logging.getLogger("quickstart", "colored")
-
-    exp_name = args.experiment_name
-    if args.trial_name == MISSING:
-        args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
-    else:
-        trial_name = args.trial_name
-    from apps.main import main_start, main_stop
-    from experiments.common.rw_exp import PairedRWExperiment
-
-    mode = kind_reminder(logger, args)
-
-    if args.model.base_model_path is None:
-        logger.warning("`base_model_path` is not specified. Using `path` as `base_model_path`.")
-        args.model.base_model_path = args.model.path
-    if args.model.tokenizer_path is None:
-        logger.warning("`tokenizer_path` is not specified. Using `base_model_path` as `tokenizer_path`.")
-        args.model.tokenizer_path = args.model.base_model_path
-
-    if args.model.parallel.pipeline_parallel_size > 1:
-        logger.critical(
-            "Pipeline parallel is enabled when training the reward model. **This is usually unnecessary.** "
-            "The reward model should not be large and using DeepSpeed ZeRO-2 data parallel is usually sufficient. "
-            "If you insist in using PP, please ensure that (1) there are enough GPUs for your experiment "
-            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
-        )
-    if args.model.parallel.model_parallel_size > 1:
-        logger.critical(
-            "Model parallel is enabled when training the reward model. **This is usually unnecessary.** "
-            "The reward model should not be large and using DeepSpeed ZeRO-2 data parallel is usually sufficient. "
-            "If you insist in using PP, please ensure that (1) there are enough GPUs for your experiment "
-            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
-        )
-    if args.is_sft_lora and (args.model.base_model_path == args.model.path or args.sft_lora_path is None):
-        raise ValueError(
-            "model.base_model_path and sft_lora_path must be specified for RW experiment if SFT was trained with LoRA."
-            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
-        )
-
-    exp_fn = functools.partial(
-        PairedRWExperiment,
-        model_path=args.model.path,
-        tokenizer_path=args.model.tokenizer_path,
-        seed=args.seed,
-        total_train_epochs=args.train_epochs,
-        save_freq_steps=args.save_freq,
-        eval_freq_epochs=args.eval_freq,
-        is_sft_lora=args.is_sft_lora,
-        base_model_type=args.model.type,
-        sft_lora_path=args.sft_lora_path,
-        dp_size=args.model.parallel.data_parallel_size,
-        mp_size=args.model.parallel.model_parallel_size,
-        pp_size=args.model.parallel.pipeline_parallel_size,
-        use_lora=args.model.lora,
-        lora_scaling=args.model.lora_scaling,
-        lora_dim=args.model.lora_dim,
-        enable_fp16=args.model.enable_fp16,
-        enable_bf16=args.model.enable_bf16,
-        offload_optimizer=args.optimizer.offload,
-        gradient_checkpointing=args.model.gradient_checkpointing,
-        max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
-        max_seqlen=args.dataset.max_seqlen,
-        train_dataset_path=args.dataset.train_path,
-        valid_dataset_path=args.dataset.valid_path,
-        train_tokens_per_batch=args.dataset.train_tokens_per_batch,
-        valid_tokens_per_batch=args.dataset.valid_tokens_per_batch,
-        lr=args.optimizer.lr,
-        weight_decay=args.optimizer.weight_decay,
-        adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
-        lr_scheduler_type=args.optimizer.lr_scheduler_type,
-        warmup_proportion=args.optimizer.warmup_steps_proportion,
-        adam_eps=args.optimizer.eps,
-        min_lr_ratio=args.optimizer.min_lr_ratio,
-        zero_stage=args.optimizer.zero_stage,
-        partition_method=args.model.partition_method,
-    )
-
-    os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
-    with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
-        pickle.dump((exp_name, exp_fn), f)
-    api.config.register_experiment(exp_name, exp_fn)
-
-    try:
-        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
-    except Exception as e:
-        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
-        logger.warning("Exception occurred. Stopping all workers.")
-        raise e
 
 
 @hydra.main(version_base=None, config_name="ppo")
@@ -691,7 +575,7 @@ def run_dpo(args: DPOConfig):
 
 
 run_sft = build_quickstart_entry_point("sft", SFTConfig)
-cs.store(name="rw", node=RWConfig)
+run_rw = build_quickstart_entry_point("rw", RWConfig)
 cs.store(name="ppo", node=PPOConfig)
 cs.store(name="dpo", node=DPOConfig)
 

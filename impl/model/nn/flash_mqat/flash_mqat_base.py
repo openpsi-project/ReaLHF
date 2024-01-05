@@ -595,7 +595,6 @@ class FlashMQATModel(nn.Module):
         sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         force_load_from_hf_pretrained: bool = False,
-        load_model_parallel_as_list: bool = False,
     ) -> Tuple[FlashMQATConfig, Optional[Dict]]:
         if not init_from_scratch and not no_param_instantiation:
             assert state_dict_converter is not None
@@ -631,11 +630,7 @@ class FlashMQATModel(nn.Module):
                           if not init_from_scratch and not no_param_instantiation else None)
 
         if not init_from_scratch and not no_param_instantiation:
-            if load_model_parallel_as_list:
-                # here state_dict_converter is for parallel mqat models
-                state_dict = state_dict_converter(state_dict, config, load_model_parallel_as_list)
-            else:
-                state_dict = state_dict_converter(state_dict, config)
+            state_dict = state_dict_converter(state_dict, config)
 
         return (
             config,
