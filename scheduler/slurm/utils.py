@@ -561,7 +561,6 @@ def get_all_node_resources() -> Dict[str, SlurmResource]:
     available in the slurm cluster. 
     Return a list of SlurmResource
     """
-    # TODO: refactor this with "scontrol show -o node"
     o = subprocess.check_output(["scontrol", "show", "node"]).decode("utf-8")
     nodes = o.split("\n\n")
     all_rres = {}
