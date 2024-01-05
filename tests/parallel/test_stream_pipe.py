@@ -151,6 +151,16 @@ def run_train_batch(rank, seed):
                         output_file=f"/home/meizy/logs/viztracer/trace{rank}.json")
     tracer.start()
 
+    os.environ["DLLM_TRACE"] = "1"
+    tracer = get_tracer(tracer_entries=int(2e6),
+                        max_stack_depth=10,
+                        ignore_c_function=False,
+                        ignore_frozen=True,
+                        log_async=True,
+                        min_duration=10,
+                        output_file=f"/home/meizy/logs/viztracer/trace{rank}.json")
+    tracer.start()
+
     st = time.monotonic()
     future, data = interface.train_step(model, data, num_micro_batches=2 * NUM_PP)
 
@@ -187,6 +197,17 @@ def run_generate(rank, seed):
     # engine.enable_async_p2p()
 
     # os.environ["DLLM_TRACE"] = "1"
+    tracer = get_tracer(
+        tracer_entries=int(2e6),
+        # max_stack_depth=10,
+        ignore_c_function=False,
+        ignore_frozen=True,
+        log_async=True,
+        min_duration=20,
+        output_file=f"/home/meizy/logs/viztracer/trace{rank}.json")
+    tracer.start()
+
+    os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(
         tracer_entries=int(2e6),
         # max_stack_depth=10,

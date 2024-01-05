@@ -966,7 +966,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                               identifier=str(self.global_rank),
                               step=self.sched_count)
                     self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
-                    self._exec_instr(*cmd.args, **cmd.kwargs)
+                    self._exec_instr(*cmd.args)
                     time_mark(name=f"{cmd_type_string}_end",
                               identifier=str(self.global_rank),
                               step=self.sched_count)

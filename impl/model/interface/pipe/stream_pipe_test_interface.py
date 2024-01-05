@@ -23,7 +23,10 @@ logger = logging.getLogger("StreamPipeTestInterface")
 @dataclasses.dataclass
 class StreamPipeTestInterface(api.model.ModelInterface):
 
-    def train_step(self, model: api.model.Model, data: NamedArray) -> Tuple[EngineFuture, NamedArray]:
+    def train_step(self,
+                   model: api.model.Model,
+                   data: NamedArray,
+                   num_micro_batches: Optional[int] = None) -> Tuple[EngineFuture, NamedArray]:
         module = model.module
         assert isinstance(module, StreamPipeEngine)
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -42,6 +45,7 @@ class StreamPipeTestInterface(api.model.ModelInterface):
         future = module.train_batch(packed_input_ids=packed_input_ids,
                                     cu_seqlens=cu_seqlens,
                                     loss_fn=compute_packed_sft_loss,
+                                    num_micro_batches=num_micro_batches,
                                     **loss_fn_kwargs)
 
         return future, data
@@ -61,8 +65,11 @@ class StreamPipeTestInterface(api.model.ModelInterface):
         return res
 
     @torch.no_grad()
-    def generate(self, model: api.model.Model, data: NamedArray,
-                 gconfig: GenerationConfig) -> Tuple[EngineFuture, NamedArray]:
+    def generate(self,
+                 model: api.model.Model,
+                 data: NamedArray,
+                 gconfig: GenerationConfig,
+                 num_micro_batches: Optional[int] = None) -> Tuple[EngineFuture, NamedArray]:
         module = model.module
         assert isinstance(module, StreamPipeEngine)
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -79,6 +86,7 @@ class StreamPipeTestInterface(api.model.ModelInterface):
             packed_input_ids=packed_input_ids,
             cu_seqlens=cu_seqlens,
             gconfig=gconfig,
+            num_micro_batches=num_micro_batches,
         )
         return future, data
 

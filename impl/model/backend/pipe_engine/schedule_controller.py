@@ -113,8 +113,9 @@ class EngineScheduleController:
         try:
             sched, priority = self.__schedule_queue.get(block=False)
             self.__issue_schedule(sched, priority)
+            return True
         except queue.Empty:
-            pass
+            return False
 
     def __check_terminate(self):
         try:
@@ -177,57 +178,6 @@ class EngineScheduleController:
                 posted += 1
         return posted
 
-    # def post_instructions(self):
-    #     """Called by engine in every run step, check ready instructions and send **one** ready
-    #     instruction with highest priority to all engines.
-
-    #     Note: Binded instructions must be handled. Once one instruction is posted, its binded counterpart
-    #     must be posted next for its corresponding stage.
-    #     """
-    #     instruction_posted = 0
-
-    #     def check_schedule_and_post(prior_sched: PrioritizedSchedule, stage: int, add_bind: bool):
-    #         """ Check ready instruction in schedule, if there is any ready, post it and return True,
-    #         else return False.
-    #         """
-    #         index = prior_sched.index
-    #         sched = prior_sched.schedule
-    #         inst, end = sched.post_one_ready(stage)
-    #         inst: PipeInstruction
-
-    #         if inst:
-    #             # print(f"posting {inst}")
-    #             msg = [
-    #                 int.to_bytes(stage, 4, byteorder="big"),
-    #                 int.to_bytes(index, 4, byteorder="big"),
-    #                 int.to_bytes(int(end), 4, byteorder="big"),
-    #                 inst.encode()
-    #             ]
-    #             # print(f"posting msg {msg}")
-    #             self.instruction_socket.send_multipart(msg)
-    #             # print(f"posting {inst} done")
-    #             self.waiting_stages.remove(stage)
-    #             if inst.bind and add_bind:
-    #                 self.__binded_schedule[inst.bind.stage_id] = prior_sched
-    #             return True
-    #         return False
-
-    #     for stage in self.waiting_stages:
-    #         if stage in self.__binded_schedule:
-    #             prior_sched = self.__binded_schedule.pop(stage)
-    #             posted = check_schedule_and_post(prior_sched, stage, add_bind=False)
-    #             if posted:
-    #                 instruction_posted += 1
-    #                 continue
-
-    #         for prior_sched in self.schedules:
-    #             posted = check_schedule_and_post(prior_sched, stage, add_bind=True)
-    #             if posted:
-    #                 instruction_posted += 1
-    #                 break
-
-    #     return instruction_posted
-
     def poll_results(self):
         """Called by engine in every run step, check signals for instruction complete and 
         schedule stop. Check signal from all sources until nothing to receivce.
@@ -280,18 +230,20 @@ class EngineScheduleController:
         self.__init_sockets()
         self.__init_storage()
         # self.__binded_schedule = dict()
-        # tracer = get_tracer(
-        #         tracer_entries=int(2e6),
-        #         # max_stack_depth=10,
-        #         ignore_c_function=False,
-        #         ignore_frozen=True,
-        #         log_async=True,
-        #         min_duration=10,
-        #         output_file=f"/home/meizy/logs/viztracer/trace0.json")
-        # tracer.start()
+        import os
+        os.environ["DLLM_TRACE"] = "1"
+        tracer = get_tracer(
+            tracer_entries=int(2e6),
+            # max_stack_depth=10,
+            ignore_c_function=False,
+            ignore_frozen=True,
+            log_async=True,
+            min_duration=5,
+            output_file=f"/home/meizy/logs/viztracer/controller.json")
+        tracer.start()
 
         while not self.__terminated:
-            self.__check_and_issue_schedule()
+            sched_issued = self.__check_and_issue_schedule()
             posted = self.post_instructions()
             # if posted > 0:
             #     print(f"schedule_controller.py: Posted {posted} instructions")
@@ -299,11 +251,12 @@ class EngineScheduleController:
             polled = self.poll_results()
             # if polled > 0:
             #     print(f"Polled {polled} results")
-            self.update_instruction_queues()
+            if polled > 0 or sched_issued:
+                self.update_instruction_queues()
             self.__posted += posted
             self.__polled += polled
             self.__check_terminate()
-        # tracer.save()
+        tracer.save()
 
 
 class EngineScheduleClient:

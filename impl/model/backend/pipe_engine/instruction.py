@@ -32,19 +32,14 @@ class PipeInstruction:
                  micro_batch_id: int,
                  deps: List['PipeInstruction'] = [],
                  bind: List['PipeInstruction'] = [],
-                 step_id: int = 0,
-                 **kwargs):
+                 step_id: int = 0):
         self.stage_id = stage_id
         self.micro_batch_id = micro_batch_id
         self.deps = deps
         self.bind = bind
         self.name = self.__class__.__name__
         self.step_id = step_id
-
         self.args = (stage_id, micro_batch_id, step_id)
-        self.kwargs = kwargs
-        for key, val in self.kwargs.items():
-            setattr(self, key, val)
 
     def __repr__(self):
         return f"{self.name}{self.args}"
@@ -162,13 +157,18 @@ class InstructionSet:
     def __init__(self, max_size=None):
         # TODO: check performance, if slow or memory consuming
         # use a large dict that record number of steps instead.
+        self.__storage = dict()
         self.__stage_sets = defaultdict(set)
         self.__mbid_sets = defaultdict(set)
         self.__name_sets = defaultdict(set)
         self.__step_sets = defaultdict(set)
-        self.__deps_storage = dict()
-        self.__bind_storage = dict()
-        self.size = 0
+        # self.__deps_storage = dict()
+        # self.__bind_storage = dict()
+        self.__size = 0
+        self.__stage_sizes = defaultdict(int)
+        self.__mbid_sizes = defaultdict(int)
+        self.__name_sizes = defaultdict(int)
+        self.__step_sizes = defaultdict(int)
         self.max_size = max_size  # maximum number of instructions in the set
 
     def add(self, inst: Union[List[PipeInstruction], PipeInstruction]):
@@ -182,16 +182,22 @@ class InstructionSet:
                     raise RuntimeError(
                         f"InstructionSet size {self.size} exceeds maximum size {self.max_size}.")
             s = inst.encode_str()
-            if len(inst.deps) > 0:
-                self.__deps_storage[s] = inst.deps
-            if inst.bind is not None:
-                self.__bind_storage[s] = inst.bind
+            # if len(inst.deps) > 0:
+            #     self.__deps_storage[s] = inst.deps
+            # if inst.bind is not None:
+            #     self.__bind_storage[s] = inst.bind
+            self.__storage[s] = inst
 
             self.__stage_sets[inst.stage_id].add(s)
             self.__mbid_sets[inst.micro_batch_id].add(s)
             self.__name_sets[inst.name].add(s)
             self.__step_sets[inst.step_id].add(s)
-            self.size += 1
+            self.__stage_sizes[inst.stage_id] += 1
+            self.__mbid_sizes[inst.micro_batch_id] += 1
+            self.__name_sizes[inst.name] += 1
+            self.__step_sizes[inst.step_id] += 1
+
+            self.__size += 1
 
     def contain(self, inst: PipeInstruction):
         """ Check if the set contains the instruction.
@@ -211,21 +217,25 @@ class InstructionSet:
                 self.__mbid_sets[inst.micro_batch_id].remove(s)
                 self.__name_sets[inst.name].remove(s)
                 self.__step_sets[inst.step_id].remove(s)
-                if s in self.__deps_storage:
-                    self.__deps_storage.pop(s)
-                if s in self.__bind_storage:
-                    self.__bind_storage.pop(s)
-                self.size -= 1
+                # if s in self.__deps_storage:
+                #     self.__deps_storage.pop(s)
+                # if s in self.__bind_storage:
+                #     self.__bind_storage.pop(s)
+                self.__storage.pop(s)
+                self.__size -= 1
+                self.__stage_sizes[inst.stage_id] -= 1
+                self.__mbid_sizes[inst.micro_batch_id] -= 1
+                self.__name_sizes[inst.name] -= 1
+                self.__step_sizes[inst.step_id] -= 1
             else:
                 raise KeyError(f"Instruction {inst} not in set.")
 
-    def find(
-        self,
-        stage_id: Optional[int] = None,
-        micro_batch_id: Optional[int] = None,
-        name: Optional[str] = None,
-        step_id: Optional[int] = None,
-    ) -> List[PipeInstruction]:
+    def find(self,
+             stage_id: Optional[int] = None,
+             micro_batch_id: Optional[int] = None,
+             name: Optional[str] = None,
+             step_id: Optional[int] = None,
+             unmutable_result: bool = False) -> List[PipeInstruction]:
         """ Find all instructions in set that satisfies arguments as a list.
         """
         related_sets: List[Set] = []
@@ -240,22 +250,42 @@ class InstructionSet:
 
         if len(related_sets) > 0:
             res_set = related_sets[0].intersection(*related_sets)
+            return [self.__storage[r] for r in res_set]
+        if unmutable_result:
+            return self.__storage.values()
         else:
-            res_set = set().union(*[s for s in self.__stage_sets.values()])
+            return list(self.__storage.values())
+        # res_set = set().union(*[s for s in self.__stage_sets.values()])
 
-        res_list = list(res_set)
-        res = []
-        for s in res_list:
-            r = PipeInstruction.decode(s)
-            deps = self.__deps_storage.get(s, None)
-            if deps is not None:
-                r.deps = deps
-            bind = self.__bind_storage.get(s, None)
-            if bind is not None:
-                r.bind = bind
-            res.append(r)
-        res.sort()
-        return res
+        # res_list = list(res_set)
+        # for s in res_list:
+        #     r = PipeInstruction.decode(s)
+        #     deps = self.__deps_storage.get(s, None)
+        #     if deps is not None:
+        #         r.deps = deps
+        #     bind = self.__bind_storage.get(s, None)
+        #     if bind is not None:
+        #         r.bind = bind
+        #     res.append(r)
+        # res.sort()
+        # return res
 
     def __len__(self):
-        return self.size
+        return self.__size
+
+    def size(self,
+             stage_id: Optional[int] = None,
+             micro_batch_id: Optional[int] = None,
+             name: Optional[str] = None,
+             step_id: Optional[int] = None):
+        assert sum([x is not None for x in [stage_id, micro_batch_id, name, step_id]]) <= 1, \
+               "length method for instruction set can only take one constraint argument."
+        if stage_id:
+            return self.__stage_sizes[stage_id]
+        if micro_batch_id:
+            return self.__mbid_sizes[micro_batch_id]
+        if name:
+            return self.__name_sizes[name]
+        if step_id:
+            return self.__step_sizes[step_id]
+        return self.__size
