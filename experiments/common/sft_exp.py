@@ -1,12 +1,12 @@
 import dataclasses
 
+from omegaconf import MISSING
+
+from .config_dataset import PromptAnswerDatasetConfig
+from .config_model import get_flash_mqat_model_config, ModelConfig, OptimizerConfig
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
-
-from .config_model import ModelConfig, OptimizerConfig, get_flash_mqat_model_config
-from .config_dataset import PromptAnswerDatasetConfig
-from omegaconf import MISSING
 
 sft = ModelRPC(
     "default",
@@ -29,26 +29,14 @@ class SFTConfig(Experiment):
     save_freq_steps: Optional[int] = 50
     eval_freq_epochs: Optional[int] = 1
     model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
-    optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
     dataset: PromptAnswerDatasetConfig = dataclasses.field(default_factory=PromptAnswerDatasetConfig)
 
     def __post_init__(self):
         if self.model.type == "gpt2" and self.dataset.max_seqlen > 1024:
             raise ValueError("GPT2 only supports max seqlen of 1024")
-        if (
-            self.model.parallel.pipeline_parallel_size < 1
-            or self.model.parallel.data_parallel_size < 1
-            or self.model.parallel.model_parallel_size < 1
-        ):
-            raise ValueError("pp_size, dp_size and mp_size must be positive integers.")
-        if self.model.parallel.pipeline_parallel_size > 1 and self.model.lora is not None:
-            raise ValueError("Use LoRA with pipeline parallel is not supported.")
 
-        self.world_size = (
-            self.model.parallel.pipeline_parallel_size
-            * self.model.parallel.data_parallel_size
-            * self.model.parallel.model_parallel_size
-        )
+        self.world_size = (self.model.parallel.pipeline_parallel_size *
+                           self.model.parallel.data_parallel_size * self.model.parallel.model_parallel_size)
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -105,22 +93,21 @@ class SFTConfig(Experiment):
             args=dict(
                 optimizer_name="adam",
                 optimizer_config=dict(
-                    lr=self.optimizer.lr,
-                    weight_decay=self.optimizer.weight_decay,
-                    eps=self.optimizer.eps,
-                    betas=(self.optimizer.beta1, self.optimizer.beta2),
+                    lr=self.model.optimizer.lr,
+                    weight_decay=self.model.optimizer.weight_decay,
+                    eps=self.model.optimizer.eps,
+                    betas=(self.model.optimizer.beta1, self.model.optimizer.beta2),
                 ),
-                lr_scheduler_type=self.optimizer.lr_scheduler_type,
-                warmup_steps_proportion=self.optimizer.warmup_steps_proportion,
-                min_lr_ratio=self.optimizer.min_lr_ratio,
-                zero_stage=self.optimizer.zero_stage
-                if self.model.parallel.pipeline_parallel_size == 1
-                else min(self.optimizer.zero_stage, 1),
+                lr_scheduler_type=self.model.optimizer.lr_scheduler_type,
+                warmup_steps_proportion=self.model.optimizer.warmup_steps_proportion,
+                min_lr_ratio=self.model.optimizer.min_lr_ratio,
+                zero_stage=self.model.optimizer.zero_stage if self.model.parallel.pipeline_parallel_size == 1
+                else min(self.model.optimizer.zero_stage, 1),
                 gradient_checkpointing=self.model.gradient_checkpointing,
                 num_pipeline_stages=self.model.parallel.pipeline_parallel_size,
                 engine_type="pipe" if self.model.parallel.pipeline_parallel_size > 1 else "deepspeed",
                 num_pipeline_micro_batches=self.model.parallel.num_pipeline_micro_batches,
-                offload_optimizer_state=self.optimizer.offload,
+                offload_optimizer_state=self.model.optimizer.offload,
                 enable_bf16=self.model.enable_bf16,
                 enable_fp16=self.model.enable_fp16,
                 sequence_parallel=self.model.parallel.use_sequence_parallel,

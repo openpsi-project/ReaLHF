@@ -1,10 +1,16 @@
 import dataclasses
 import functools
 
+from omegaconf import MISSING
+
+from .config_dataset import PairedComparisonDatasetConfig
+from .config_model import get_flash_mqat_model_config, ModelConfig, OptimizerConfig
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
-from .config_model import ModelConfig, OptimizerConfig, get_flash_mqat_model_config
+import base.logging as logging
+
+logger = logging.getLogger("DPO Experiment")
 
 ref_inf = ModelRPC(
     "ref",
@@ -24,61 +30,32 @@ dpo = ModelRPC(
 
 
 @dataclasses.dataclass
-class DPOExperiment(Experiment):
-    model_path: str  # Must be SFT model path
-    tokenizer_path: str  # Since we use SFT model, we need to specify HF tokenizer path
-
+class DPOConfig(Experiment):
+    experiment_name: str = MISSING
+    trial_name: str = MISSING
+    trace: bool = False
     seed: int = 1
     total_train_epochs: int = 1
-    save_freq_steps: int = 20
-    is_sft_pipe: bool = False
+    save_freq_steps: Optional[int] = 20
     is_sft_lora: bool = False
-    base_model_type: Optional[str] = None
     sft_lora_path: Optional[str] = None
-    # model
-    dp_size: int = 1
-    mp_size: int = 1
-    pp_size: int = 1
-    use_lora: bool = False
-    lora_scaling: float = 32.0
-    lora_dim: int = 32
-    enable_fp16: bool = True
-    enable_bf16: bool = False
-    offload_optimizer: bool = False
-    gradient_checkpointing: bool = True
-    # dataset
-    max_pairs_per_prompt: int = 2
-    max_seqlen: int = 1024
-    # NOTE: DPO does not support evaluation because we can't compute reference logp when training the actor.
-    train_tokens_per_batch: int = 16384
-    train_dataset_path: str = "/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl"
-    # optimizer
-    lr: float = 2.5e-4
-    weight_decay: float = 0.05
-    adam_betas: tuple = (0.9, 0.95)
-    lr_scheduler_type: str = "cosine"
-    warmup_proportion: float = 0.02
-    adam_eps: float = 1e-5
-    min_lr_ratio: float = 0.0
-    zero_stage: int = 2
-    # dpo
+    actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
+    ref: ModelConfig = dataclasses.field(default_factory=ModelConfig)
+    dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
     beta: float = 0.1
 
-    num_pipeline_micro_batches: Optional[int] = None
-    use_sequence_parallel: bool = False
-    partition_method: Optional[str] = "parameters_balanced"
-
     def __post_init__(self):
-        if self.pp_size < 1 or self.dp_size < 1 or self.mp_size < 1:
-            raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
-        if self.pp_size > 1 and self.use_lora:
-            raise ValueError("Use LoRA with pipeline parallel is not supported.")
-        if self.is_sft_lora and (self.sft_lora_path is None or self.base_model_type is None):
+        if self.is_sft_lora and (self.sft_lora_path is None or self.actor.type is None):
             raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
-        if self.enable_bf16 and (self.pp_size > 1 or self.mp_size):
-            raise ValueError("Use bf16 with pipeline parallel or model parallel is not supported.")
-
-        self.n_actors = int(self.dp_size * self.pp_size * self.mp_size)
+        if self.actor.base_model_path != self.ref.base_model_path:
+            raise ValueError("actor and ref must use the same base model.")
+        if self.dataset.valid_path is not None:
+            logger.warning(
+                "DPO does not support validation because we can't compute reference logps during training.")
+        self.n_actors = int(self.actor.parallel.pipeline_parallel_size *
+                            self.actor.parallel.data_parallel_size * self.actor.parallel.model_parallel_size)
+        self.n_refs = int(self.ref.parallel.pipeline_parallel_size * self.ref.parallel.data_parallel_size *
+                          self.ref.parallel.model_parallel_size)
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -94,7 +71,7 @@ class DPOExperiment(Experiment):
                 scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
             ),
             model_worker=TasksGroup(
-                count=self.n_actors + 1,
+                count=self.n_actors + self.n_refs,
                 scheduling=Scheduling.model_worker_default(
                     cpu=4,
                     gpu=1,
@@ -108,17 +85,16 @@ class DPOExperiment(Experiment):
         dataset = Dataset(
             "packed_rw_pair",
             args=dict(
-                n_tokens_per_batch=self.train_tokens_per_batch,
-                max_length=self.max_seqlen,
-                max_pairs_per_prompt=self.max_pairs_per_prompt,
-                dataset_path=self.train_dataset_path,
+                n_tokens_per_batch=self.dataset.train_tokens_per_batch,
+                max_length=self.dataset.max_seqlen,
+                max_pairs_per_prompt=self.dataset.max_pairs_per_prompt,
+                dataset_path=self.dataset.train_path,
             ),
         )
-
         dataloader = DataLoader("iterable_dataset_loader")
         data_worker = [
             DataWorker(
-                tokenizer_name_or_path=self.tokenizer_path,
+                tokenizer_name_or_path=self.actor.base_model_path,
                 datasets=[dataset],
                 dataloader=dataloader,
                 seed=self.seed,
@@ -130,73 +106,85 @@ class DPOExperiment(Experiment):
             args=dict(
                 optimizer_name="adam",
                 optimizer_config=dict(
-                    lr=self.lr,
-                    weight_decay=self.weight_decay,
-                    eps=self.adam_eps,
-                    betas=self.adam_betas,
+                    lr=self.actor.optimizer.lr,
+                    weight_decay=self.actor.optimizer.weight_decay,
+                    eps=self.actor.optimizer.eps,
+                    betas=(self.actor.optimizer.beta1, self.actor.optimizer.beta2),
                 ),
-                lr_scheduler_type=self.lr_scheduler_type,
-                warmup_steps_proportion=self.warmup_proportion,
-                min_lr_ratio=self.min_lr_ratio,
-                zero_stage=self.zero_stage if self.pp_size == 1 else min(self.zero_stage, 1),
-                gradient_checkpointing=self.gradient_checkpointing,
-                num_pipeline_stages=self.pp_size,
-                engine_type="pipe" if self.pp_size > 1 else "deepspeed",
-                num_pipeline_micro_batches=self.num_pipeline_micro_batches,
-                enable_fp16=self.enable_fp16,
-                enable_bf16=self.enable_bf16,
-                offload_optimizer_state=self.offload_optimizer,
-                sequence_parallel=self.use_sequence_parallel,
+                lr_scheduler_type=self.actor.optimizer.lr_scheduler_type,
+                warmup_steps_proportion=self.actor.optimizer.warmup_steps_proportion,
+                min_lr_ratio=self.actor.optimizer.min_lr_ratio,
+                zero_stage=self.actor.optimizer.zero_stage if self.actor.parallel.pipeline_parallel_size == 1
+                else min(self.actor.optimizer.zero_stage, 1),
+                gradient_checkpointing=self.actor.gradient_checkpointing,
+                num_pipeline_stages=self.actor.parallel.pipeline_parallel_size,
+                engine_type="pipe" if self.actor.parallel.pipeline_parallel_size > 1 else "deepspeed",
+                num_pipeline_micro_batches=self.actor.parallel.num_pipeline_micro_batches,
+                offload_optimizer_state=self.actor.optimizer.offload,
+                enable_bf16=self.actor.enable_bf16,
+                enable_fp16=self.actor.enable_fp16,
+                sequence_parallel=self.actor.parallel.use_sequence_parallel,
             ),
         )
-        inf_backend = ModelBackend("ds_inference",
-                                   args=dict(enable_fp16=(not self.enable_fp16),
-                                             enable_bf16=self.enable_bf16))
+        inf_backend = ModelBackend(
+            "ds_inference",
+            args=dict(
+                enable_fp16=(not self.ref.enable_bf16),
+                zero_stage=3 if self.ref.offload else 0,
+                offload=self.ref.offload,
+                enable_bf16=self.ref.enable_bf16,
+                engine_type="pipe" if self.ref.parallel.pipeline_parallel_size > 1 else "deepspeed",
+                num_pipeline_micro_batches=self.ref.parallel.num_pipeline_micro_batches,
+                sequence_parallel=self.ref.parallel.use_sequence_parallel,
+            ),
+        )
 
         # We should merge pipeline model weights for the reference model to load.
         ref_model = get_flash_mqat_model_config(
-            model_path=self.model_path,
-            from_model_type=("pipe" if self.is_sft_pipe else "self")
-            if not self.is_sft_lora else self.base_model_type,
-            tokenizer_path=self.tokenizer_path,
-            pp_size=1,
-            mp_size=1,
-            dp_size=1,
-            is_critic=False,
-            use_lora=False,
-            partition_method=self.partition_method,
+            from_type="self",
+            model_path=self.ref.path,
+            hf_model_type=self.ref.type,
+            tokenizer_path=self.ref.base_model_path,
+            use_pipe=self.ref.parallel.pipeline_parallel_size > 1,
+            dtype="bf16" if self.ref.enable_bf16 else "fp16",
+            sequence_parallel=self.ref.parallel.use_sequence_parallel,
+            partition_method=self.ref.parallel.partition_method,
         )
         model = get_flash_mqat_model_config(
-            model_path=self.model_path,
-            from_model_type="self" if not self.is_sft_lora else self.base_model_type,
-            tokenizer_path=self.tokenizer_path,
-            pp_size=self.pp_size,
-            mp_size=self.mp_size,
-            dp_size=self.dp_size,
-            is_critic=False,
-            use_lora=self.use_lora,
-            lora_dim=self.lora_dim,
-            lora_scaling=self.lora_scaling,
-            is_sft_lora=self.is_sft_lora,
-            sft_lora_path=self.sft_lora_path,
-            partition_method=self.partition_method,
-            sequence_parallel=self.use_sequence_parallel,
+            from_type="self",
+            model_path=self.actor.path,
+            hf_model_type=self.actor.type,
+            tokenizer_path=self.actor.base_model_path,
+            use_pipe=self.actor.parallel.pipeline_parallel_size > 1,
+            dtype="bf16" if self.actor.enable_bf16 else "fp16",
+            sequence_parallel=self.actor.parallel.use_sequence_parallel,
+            partition_method=self.actor.parallel.partition_method,
+            lora=self.actor.lora,
         )
 
-        interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=True))
-        ref_interface = ModelInterface("flash_dpo", args=dict(beta=0.1, enable_save=False))
+        interface = ModelInterface("flash_dpo", args=dict(beta=self.beta, enable_save=True))
+        ref_interface = ModelInterface("flash_dpo", args=dict(beta=self.beta, enable_save=False))
 
-        topo = PipeModelDataParallelTopology(self.pp_size, self.mp_size, self.dp_size)
+        actor_topo = PipeModelDataParallelTopology(
+            self.actor.parallel.pipeline_parallel_size,
+            self.actor.parallel.model_parallel_size,
+            self.actor.parallel.data_parallel_size,
+        )
+        ref_topo = PipeModelDataParallelTopology(
+            self.ref.parallel.pipeline_parallel_size,
+            self.ref.parallel.model_parallel_size,
+            self.ref.parallel.data_parallel_size,
+        )
         model_worker = []
-        for i in range(self.pp_size * self.dp_size * self.mp_size):
-            coord = topo.get_coord(i)
+        for i in range(self.n_actors):
+            coord = actor_topo.get_coord(i)
             mw = ModelWorker(
                 seed=self.seed,
                 model=model,
                 backend=train_backend,
                 interface=interface,
                 model_name="actor",
-                topo=topo,
+                topo=actor_topo,
                 dp_rank=coord.data,
                 pp_rank=coord.pipe,
                 mp_rank=coord.model,
@@ -204,19 +192,22 @@ class DPOExperiment(Experiment):
                 cuda_cache_clear_freq=1,
             )
             model_worker.append(mw)
-
-        model_worker += [
-            ModelWorker(
+        for i in range(self.n_refs):
+            coord = ref_topo.get_coord(i)
+            mw = ModelWorker(
                 seed=self.seed,
                 model=ref_model,
                 backend=inf_backend,
                 interface=ref_interface,
                 model_name="ref",
-                topo=PipeModelDataParallelTopology(1, 1, 1),
+                topo=ref_topo,
+                dp_rank=coord.data,
+                pp_rank=coord.pipe,
+                mp_rank=coord.model,
                 cuda_cache_cleanliness=True,
-                cuda_cache_clear_freq=60,
+                cuda_cache_clear_freq=1,
             )
-        ]
+            model_worker.append(mw)
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,

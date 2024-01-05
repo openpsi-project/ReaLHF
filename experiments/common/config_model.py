@@ -1,7 +1,8 @@
 from typing import *
 import dataclasses
-from api.config import *
 import json
+
+from api.config import *
 
 SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "deepseek", "codellama"]
 
@@ -28,12 +29,13 @@ class ParallelismConfig:
     num_pipeline_micro_batches: Optional[int] = None
 
     def __post_init__(self):
+        if self.pipeline_parallel_size < 1 or self.data_parallel_size < 1 or self.model_parallel_size < 1:
+            raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
         if self.use_sequence_parallel and self.model_parallel_size <= 1:
             raise ValueError("Sequence parallelism requires model parallelism.")
         if self.num_pipeline_micro_batches is not None and (
-            self.num_pipeline_micro_batches < self.pipeline_parallel_size
-            or self.num_pipeline_micro_batches % self.pipeline_parallel_size != 0
-        ):
+                self.num_pipeline_micro_batches < self.pipeline_parallel_size
+                or self.num_pipeline_micro_batches % self.pipeline_parallel_size != 0):
             raise ValueError(
                 f"Invalid num_pipeline_micro_batches: {self.num_pipeline_micro_batches} with {self.pipeline_parallel_size} stages"
             )
@@ -50,53 +52,6 @@ class LoRAConfig:
 
     dim: int = 32
     scaling: float = 32.0
-
-
-@dataclasses.dataclass
-class ModelConfig:
-    """Model configuration.
-
-    We use customized model class, i.e., impl.nn.model.flash_mqat, instead of HuggingFace's.
-    This class enables 3D parallelism and flash-attention for better scalibility.
-    The model uses no-pad flash-attn to save GPU memory, i.e., input sequences are packed into
-    a single 1D tensor. The price is that we need to convert each HuggingFace model of interest
-    to this customized model manually.
-
-    If you find that the model of your interest is not supported, please reach out @fuwei for help.
-
-    Args:
-        type (str): Model type. Please check SUPPORTED_MODELS.
-        path (str): Model checkpoint path, the directory instead of the file.
-        base_model_path (str): HuggingFace model checkpoint path. Used for loading tokenizer and HuggingFace config.
-        lora (bool): Whether to use LoRA.
-        lora_dim (int): LoRA dimension.
-        lora_scaling (float): LoRA scaling factor.
-        gradient_checkpointing (bool): Whether to use gradient checkpointing of MLP inside each block.
-        enable_fp16 (bool): Whether to use fp16.
-        enable_bf16 (bool): Whether to use bf16. Mutual exclusive with fp16.
-        parallel (ParallelismConfig): Parallelism configuration.
-    """
-
-    type: str = dataclasses.field(
-        metadata={"choices": SUPPORTED_MODELS},
-        default="llama",
-    )
-    path: Optional[str] = None
-    base_model_path: Optional[str] = None
-    tokenizer_path: Optional[str] = None
-    lora: Optional[LoRAConfig] = None
-    gradient_checkpointing: bool = False
-    enable_fp16: bool = True
-    enable_bf16: bool = False
-    parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
-
-    def __post_init__(self):
-        if self.enable_bf16 and self.enable_fp16:
-            raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
-        if self.enable_bf16 and (
-            self.parallel.model_parallel_size > 1 or self.parallel.pipeline_parallel_size > 1
-        ):
-            raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
 
 
 @dataclasses.dataclass
@@ -145,6 +100,58 @@ class OptimizerConfig:
             raise ValueError(f"Invalid min_lr_ratio: {self.min_lr_ratio}")
         if self.warmup_steps_proportion < 0.0 or self.warmup_steps_proportion > 1.0:
             raise ValueError(f"Invalid warmup_steps_proportion: {self.warmup_steps_proportion}")
+
+
+@dataclasses.dataclass
+class ModelConfig:
+    """Model configuration.
+
+    We use customized model class, i.e., impl.nn.model.flash_mqat, instead of HuggingFace's.
+    This class enables 3D parallelism and flash-attention for better scalibility.
+    The model uses no-pad flash-attn to save GPU memory, i.e., input sequences are packed into
+    a single 1D tensor. The price is that we need to convert each HuggingFace model of interest
+    to this customized model manually.
+
+    If you find that the model of your interest is not supported, please reach out @fuwei for help.
+
+    Args:
+        type (str): Model type. Please check SUPPORTED_MODELS.
+        path (str): Model checkpoint path, the directory instead of the file.
+        base_model_path (str): HuggingFace model checkpoint path. Used for loading tokenizer and HuggingFace config.
+        lora (bool): Whether to use LoRA.
+        lora_dim (int): LoRA dimension.
+        lora_scaling (float): LoRA scaling factor.
+        gradient_checkpointing (bool): Whether to use gradient checkpointing of MLP inside each block.
+        enable_fp16 (bool): Whether to use fp16.
+        enable_bf16 (bool): Whether to use bf16. Mutual exclusive with fp16.
+        parallel (ParallelismConfig): Parallelism configuration.
+    """
+
+    type: str = dataclasses.field(
+        metadata={"choices": SUPPORTED_MODELS},
+        default="llama",
+    )
+    path: Optional[str] = None
+    base_model_path: Optional[str] = None
+    tokenizer_path: Optional[str] = None
+    lora: Optional[LoRAConfig] = None
+    gradient_checkpointing: bool = False
+    enable_fp16: bool = True
+    enable_bf16: bool = False
+    offload: bool = False
+    parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
+
+    def __post_init__(self):
+        if self.enable_bf16 and self.enable_fp16:
+            raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
+        if self.enable_bf16 and (self.parallel.model_parallel_size > 1
+                                 or self.parallel.pipeline_parallel_size > 1):
+            raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
+        if self.parallel.pipeline_parallel_size > 1 and self.lora is not None:
+            raise ValueError("Use LoRA with pipeline parallel is not supported.")
+        if self.offload and not self.optimizer.zero_stage != 3:
+            raise ValueError("offload model is only supported when zero stage=3.")
 
 
 def get_flash_mqat_model_config(

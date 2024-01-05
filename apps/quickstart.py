@@ -15,18 +15,10 @@ import hydra
 
 from base.cluster import spec as cluster_spec
 from base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
-import api.config
 from experiments.common import *
-
+import api.config
 
 cs = ConfigStore.instance()
-
-
-def _dumb_identity(x):
-    return x
-
-
-
 
 
 @dataclasses.dataclass
@@ -87,26 +79,22 @@ class PPOConfig:
     ref: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     rew: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
-    actor_optimizer: OptimizerConfig = dataclasses.field(
-        default_factory=functools.partial(
-            OptimizerConfig,
-            lr=9.65e-6,
-            weight_decay=0.0,
-            eps=1e-5,
-            lr_scheduler_type="linear",
-            warmup_steps_proportion=0.075,
-        )
-    )
-    critic_optimizer: OptimizerConfig = dataclasses.field(
-        default_factory=functools.partial(
-            OptimizerConfig,
-            lr=5e-6,
-            weight_decay=0.0,
-            eps=1e-5,
-            lr_scheduler_type="linear",
-            warmup_steps_proportion=0.075,
-        )
-    )
+    actor_optimizer: OptimizerConfig = dataclasses.field(default_factory=functools.partial(
+        OptimizerConfig,
+        lr=9.65e-6,
+        weight_decay=0.0,
+        eps=1e-5,
+        lr_scheduler_type="linear",
+        warmup_steps_proportion=0.075,
+    ))
+    critic_optimizer: OptimizerConfig = dataclasses.field(default_factory=functools.partial(
+        OptimizerConfig,
+        lr=5e-6,
+        weight_decay=0.0,
+        eps=1e-5,
+        lr_scheduler_type="linear",
+        warmup_steps_proportion=0.075,
+    ))
     max_new_tokens: int = 512
     min_new_tokens: int = 10
     greedy: bool = False
@@ -132,60 +120,18 @@ class PPOConfig:
     _configuration_name: str = "Proximal Policy Optimization"
 
     def __post_init__(self):
-        if (
-            self.actor.path != self.ref.path
-            or self.actor.base_model_path != self.ref.base_model_path
-            or self.actor.type != self.ref.type
-        ):
+        if (self.actor.path != self.ref.path or self.actor.base_model_path != self.ref.base_model_path
+                or self.actor.type != self.ref.type):
             raise ValueError("actor and ref must be the same model.")
-        if (
-            self.critic.path != self.rew.path
-            or self.critic.base_model_path != self.rew.base_model_path
-            or self.critic.type != self.rew.type
-        ):
+        if (self.critic.path != self.rew.path or self.critic.base_model_path != self.rew.base_model_path
+                or self.critic.type != self.rew.type):
             raise ValueError("critic and rew must be the same model.")
         if self.actor.tokenizer_path != self.critic.tokenizer_path:
             raise ValueError(
                 f"`actor` and `critic` must use the same tokenizer. "
                 "It is possible that you are using the same base model with different sizes "
                 "(e.g., LLaMa 13b as the actor and 7b as the critic). They have the same "
-                "tokenizer but different model paths. Please specify the tokenizer path manually."
-            )
-
-
-@dataclasses.dataclass
-class DPOConfig:
-    """Experiment configuration for direct preference optimization.
-
-    Args:
-        experiment_name (str): Experiment name. **This will be automatically filled**.
-        trial_name (str): Trial name. **This will be automatically filled**.
-        trace (bool): Whether to enable viztracer tracing.
-        train_epochs (int): Number of training epochs.
-        eval_freq (int): Evaluation frequency in terms of *epochs8.
-        save_freq (int): Checkpoint saving frequency in terms of *training steps*.
-        seed (int): Random seed.
-        model (ModelConfig): Model model configuration. Should be initialized with a SFT model.
-            It is also used as the reference model.
-        optimizer (OptimizerConfig): Optimizer configuration.
-        dataset (PromptAnswerDatasetConfig): Dataset configuration.
-        beta (float): KL coefficient in the DPO paper. The same meaning as `kl_ctl` in PPO config.
-    """
-
-    experiment_name: str = MISSING
-    trial_name: str = MISSING
-    trace: bool = False
-    train_epochs: int = 1
-    save_freq: Optional[int] = 50
-    seed: int = 42
-    is_sft_pipe: bool = False
-    is_sft_lora: bool = False
-    sft_lora_path: Optional[str] = None
-    model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
-    dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
-    optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
-    beta: float = 0.1
-    _configuration_name: str = "Direct Preference Optimization"
+                "tokenizer but different model paths. Please specify the tokenizer path manually.")
 
 
 @dataclasses.dataclass
@@ -209,38 +155,33 @@ def kind_reminder(config_name, logger, args):
         f"Model checkpoints will be saved to {os.path.join(MODEL_SAVE_ROOT, args.experiment_name, args.trial_name)}"
     )
     for k, v in args.items():
-        if hasattr(v, "parallel") and (
-            v.parallel.pipeline_parallel_size > 1 or v.parallel.model_parallel_size > 1
-        ):
-            logger.warning(
-                f"Detected model named '{k}' enables pipeline parallel or model parallel. "
-                "Please ensure that (1) there are enough GPUs for your experiment "
-                "and (2) the model checkpoint has been converted into "
-                "shards using scripts/transform_to_pipe_ckpt.py."
-            )
+        if hasattr(v, "parallel") and (v.parallel.pipeline_parallel_size > 1
+                                       or v.parallel.model_parallel_size > 1):
+            logger.warning(f"Detected model named '{k}' enables pipeline parallel or model parallel. "
+                           "Please ensure that (1) there are enough GPUs for your experiment "
+                           "and (2) the model checkpoint has been converted into "
+                           "shards using scripts/transform_to_pipe_ckpt.py.")
         if hasattr(v, "parallel") and v.base_model_path is None:
-            logger.warning(f"Detected `base_model_path` of model named '{k}' is not specified. Using `path` as `base_model_path`.")
+            logger.warning(
+                f"Detected `base_model_path` of model named '{k}' is not specified. Using `path` as `base_model_path`."
+            )
             v.base_model_path = v.path
         if hasattr(v, "parallel") and v.tokenizer_path is None:
-            logger.warning(f"Detected `tokenizer_path` of model named '{k}' is not specified. Using `base_model_path` as `tokenizer_path`.")
+            logger.warning(
+                f"Detected `tokenizer_path` of model named '{k}' is not specified. Using `base_model_path` as `tokenizer_path`."
+            )
             v.tokenizer_path = v.base_model_path
 
-    slurm_available = (
-        int(
-            subprocess.run(
-                "squeue",
-                shell=True,
-                stdout=open(os.devnull, "wb"),
-                stderr=open(os.devnull, "wb"),
-            ).returncode
-        )
-        == 0
-    )
+    slurm_available = (int(
+        subprocess.run(
+            "squeue",
+            shell=True,
+            stdout=open(os.devnull, "wb"),
+            stderr=open(os.devnull, "wb"),
+        ).returncode) == 0)
     if slurm_available:
-        logger.warning(
-            "Slurm is available. You probably run the system on ctrl nodes. "
-            "Using slurm to launch remote workers."
-        )
+        logger.warning("Slurm is available. You probably run the system on ctrl nodes. "
+                       "Using slurm to launch remote workers.")
     else:
         logger.warning("Slurm is not available. Using local mode.")
     mode = "slurm" if slurm_available else "local"
@@ -248,6 +189,7 @@ def kind_reminder(config_name, logger, args):
 
 
 def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
+
     @hydra.main(version_base=None, config_name=config_name)
     def run(args):
         # NOTE: we import logging here to avoid hydra logging overwrite
@@ -280,8 +222,6 @@ def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
 
     cs.store(name=config_name, node=exp_cls)
     return run
-
-
 
 
 @hydra.main(version_base=None, config_name="ppo")
@@ -352,17 +292,12 @@ def run_ppo(args: PPOConfig):
     if args.is_sft_lora and (args.actor.base_model_path == args.actor.path or args.sft_lora_path is None):
         raise ValueError(
             "sft_lora_path and actor.base_model_path must be specified if the SFT model was trained with LoRA."
-            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
-        )
-    if args.is_rew_lora and (
-        args.critic.base_model_path == args.critic.path
-        or args.rew_lora_path is None
-        or args.rew_head_path is None
-    ):
+            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model.")
+    if args.is_rew_lora and (args.critic.base_model_path == args.critic.path or args.rew_lora_path is None
+                             or args.rew_head_path is None):
         raise ValueError(
             "rew_lora_path and critic.base_model_path must be specified for RW experiment."
-            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
-        )
+            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model.")
 
     exp_fn = functools.partial(
         PPOExperiment,
@@ -480,104 +415,10 @@ def run_ppo(args: PPOConfig):
         raise e
 
 
-@hydra.main(version_base=None, config_name="dpo")
-def run_dpo(args: DPOConfig):
-    # NOTE: we import logging here to avoid hydra logging overwrite
-    import base.logging as logging
-
-    logger = logging.getLogger("quickstart", "colored")
-
-    exp_name = args.experiment_name
-    if args.trial_name == MISSING:
-        args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
-    else:
-        trial_name = args.trial_name
-    from apps.main import main_start, main_stop
-    from experiments.common.dpo_exp import DPOExperiment
-
-    mode = kind_reminder(logger, args)
-
-    if args.model.base_model_path is None:
-        logger.warning("`base_model_path` is not specified. Using `path` as `base_model_path`.")
-        args.model.base_model_path = args.model.path
-    if args.model.tokenizer_path is None:
-        logger.warning("`tokenizer_path` is not specified. Using `base_model_path` as `tokenizer_path`.")
-        args.model.tokenizer_path = args.model.base_model_path
-
-    if args.model.parallel.pipeline_parallel_size > 1:
-        logger.warning(
-            "Pipeline parallel is enabled. Please ensure that (1) there are enough GPUs for your experiment "
-            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
-        )
-    if args.model.parallel.model_parallel_size > 1:
-        logger.warning(
-            "Model parallel is enabled. Please ensure that (1) there are enough GPUs for your experiment "
-            "and (2) the model checkpoint has been converted into shards using scripts/transform_to_pipe_ckpt.py."
-        )
-    if args.is_sft_lora and (args.sft_lora_path == args.model.path or args.model.base_model_path is None):
-        raise ValueError(
-            "sft_lora_path and model.base_model_path must be specified for DPO experiment."
-            " `path` is the path of saved LoRA weights and `base_model_path` is the path of the base model."
-        )
-    if args.dataset.valid_path is not None:
-        logger.warning(
-            "DPO does not support validation because we can't compute reference logps during training."
-        )
-
-    exp_fn = functools.partial(
-        DPOExperiment,
-        model_path=args.model.path,
-        tokenizer_path=args.model.tokenizer_path,
-        seed=args.seed,
-        total_train_epochs=args.train_epochs,
-        save_freq_steps=args.save_freq,
-        is_sft_pipe=args.is_sft_pipe,
-        is_sft_lora=args.is_sft_lora,
-        base_model_type=args.model.type,
-        sft_lora_path=args.sft_lora_path,
-        dp_size=args.model.parallel.data_parallel_size,
-        mp_size=args.model.parallel.model_parallel_size,
-        pp_size=args.model.parallel.pipeline_parallel_size,
-        use_lora=args.model.lora,
-        lora_scaling=args.model.lora_scaling,
-        lora_dim=args.model.lora_dim,
-        enable_fp16=args.model.enable_fp16,
-        enable_bf16=args.model.enable_bf16,
-        offload_optimizer=args.optimizer.offload,
-        gradient_checkpointing=args.model.gradient_checkpointing,
-        max_pairs_per_prompt=args.dataset.max_pairs_per_prompt,
-        max_seqlen=args.dataset.max_seqlen,
-        train_dataset_path=args.dataset.train_path,
-        train_tokens_per_batch=args.dataset.train_tokens_per_batch,
-        lr=args.optimizer.lr,
-        weight_decay=args.optimizer.weight_decay,
-        adam_betas=(args.optimizer.beta1, args.optimizer.beta2),
-        lr_scheduler_type=args.optimizer.lr_scheduler_type,
-        warmup_proportion=args.optimizer.warmup_steps_proportion,
-        adam_eps=args.optimizer.eps,
-        min_lr_ratio=args.optimizer.min_lr_ratio,
-        zero_stage=args.optimizer.zero_stage,
-        beta=args.beta,
-        partition_method=args.model.partition_method,
-    )
-
-    os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
-    with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
-        pickle.dump((exp_name, exp_fn), f)
-    api.config.register_experiment(exp_name, exp_fn)
-
-    try:
-        main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
-    except Exception as e:
-        main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
-        logger.warning("Exception occurred. Stopping all workers.")
-        raise e
-
-
 run_sft = build_quickstart_entry_point("sft", SFTConfig)
 run_rw = build_quickstart_entry_point("rw", RWConfig)
+run_dpo = build_quickstart_entry_point("dpo", DPOConfig)
 cs.store(name="ppo", node=PPOConfig)
-cs.store(name="dpo", node=DPOConfig)
 
 
 def main():

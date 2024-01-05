@@ -558,8 +558,16 @@ class PipelineModule(nn.Module):
 
     def load(self, load_dir, init_critic_from_actor: bool = False):
         ckpt_spec = get_ckpt_spec(load_dir)
-        assert ckpt_spec.pp_size == base.constants.pipe_parallel_world_size()
-        assert ckpt_spec.mp_size == base.constants.model_parallel_world_size()
+        if (
+            ckpt_spec.pp_size != base.constants.pipe_parallel_world_size()
+            or ckpt_spec.mp_size != base.constants.model_parallel_world_size()
+        ):
+            raise RuntimeError(
+                "Checkpoint is incompatible with current pipeline configuration. "
+                f"Current pp_size={base.constants.pipe_parallel_world_size()}, "
+                f"mp_size={base.constants.model_parallel_world_size()}. "
+                f"Checkpoint pp_size={ckpt_spec.pp_size}, mp_size={ckpt_spec.mp_size}."
+            )
         state_dict, n_shards = load_from_disk(
             load_dir,
             fn_pattern=r".*"
