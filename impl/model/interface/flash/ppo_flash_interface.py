@@ -14,6 +14,7 @@ from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
 import api.huggingface
 import api.model
+import base.constants
 import base.logging as logging
 import impl.model.utils.ppo_functional as ppo_functional
 
@@ -271,6 +272,10 @@ class PackedActorInterface(api.model.ModelInterface):
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             packed_logits_mask = data["packed_logits_mask"]
+            if base.constants.model_parallel_world_size() > 1:
+                from impl.model.parallelism.model_parallel.mappings import \
+                    gather_from_tensor_model_parallel_region
+                logits = gather_from_tensor_model_parallel_region(logits)
             logits.masked_fill_(packed_logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         return from_dict(dict(logprobs=logprobs))
