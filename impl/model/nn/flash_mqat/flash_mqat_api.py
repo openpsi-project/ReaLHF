@@ -99,20 +99,6 @@ def make_flash_model(
     sequence_parallel: bool = False,
     gradient_accumulation_fusion: bool = False,
 ) -> api.model.Model:
-    """Make a FlashMQATModel.
-
-    There are 5 primitive model types that we can construct FlashMQAT from:
-        + HF models
-        + actors w. PP
-        + actors w./o. PP
-        + critics w. PP
-        + critics w.o. PP
-    We can construct either actor or critic from them (but constructing actor
-    from critic is not allowed).
-
-    And there are 2 special types of FlashMQAT models:
-        random (aka init_from_scratch) and empty (e.g. used for pipeline module).
-    """
     if dtype == "fp16" or dtype == None:
         dtype = torch.float16
     elif dtype == "bf16":
