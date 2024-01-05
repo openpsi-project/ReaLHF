@@ -9,12 +9,15 @@ import torch.nn as nn
 import torch.utils.checkpoint
 import transformers
 
-from impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, parallel_lm_logits,
-                                                           ParallelEmbedding)
+from impl.model.parallelism.model_parallel.modules import (
+    ColumnParallelLinear,
+    parallel_lm_logits,
+    ParallelEmbedding,
+)
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import compute_varlen_position_indices
 from impl.model.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
-from impl.model.utils.save_load import load_from_disk, save_to_disk
+from impl.model.utils.save_load import load_from_disk, save_to_disk, get_ckpt_spec
 import base.constants
 import base.logging as logging
 import impl.model.parallelism.model_parallel.mappings as tensor_parallel
@@ -58,7 +61,6 @@ class FlashMQATConfig:
 
 
 class FlashMQATBlock(nn.Module):
-
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -232,7 +234,6 @@ class FlashMQATBlock(nn.Module):
 
 
 class VocabPositionEmbedding(nn.Module):
-
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -247,8 +248,6 @@ class VocabPositionEmbedding(nn.Module):
         if model_parallel:
             embed_cls = ParallelEmbedding
         else:
-            if self.sequence_parallel:
-                raise RuntimeError("sequence_parallel can only be used when model parallel size > 1.")
             embed_cls = nn.Embedding
 
         self.wte = embed_cls(config.vocab_size, config.hidden_dim, dtype=dtype, device=device)
@@ -260,7 +259,8 @@ class VocabPositionEmbedding(nn.Module):
         self.embed_drop = nn.Dropout(config.embd_pdrop)
 
         self.self_attention_mask = torch.tril(
-            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device))
+            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device)
+        )
         self.fixed_abs_position_ids = config.fixed_abs_position_ids
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
@@ -289,9 +289,9 @@ class VocabPositionEmbedding(nn.Module):
                 y.position_ids = y.position_ids.repeat(batch_size, 1)
         elif y.position_ids is None:
             # packed_input_ids is given
-            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0],
-                                                             cu_seqlens=x.cu_seqlens,
-                                                             seqlen_offsets=y.cache_seqlens)
+            y.position_ids = compute_varlen_position_indices(
+                total_seqlen=y.input_ids.shape[0], cu_seqlens=x.cu_seqlens, seqlen_offsets=y.cache_seqlens
+            )
             # lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             # if y.cache_seqlens is None:
             #     y.position_ids = torch.cat(
@@ -314,16 +314,17 @@ class VocabPositionEmbedding(nn.Module):
             # For debugging only.
             attention_mask = x.attention_mask
             if self.fixed_abs_position_ids:
-                y.position_ids = torch.arange(y.input_ids.shape[-1],
-                                              dtype=torch.long,
-                                              device=y.input_ids.device).unsqueeze(0)
+                y.position_ids = torch.arange(
+                    y.input_ids.shape[-1], dtype=torch.long, device=y.input_ids.device
+                ).unsqueeze(0)
             else:
                 y.position_ids = attention_mask.long().cumsum(-1) - 1
                 y.position_ids.masked_fill_(attention_mask == 0, 1)
             seqlen = y.input_ids.shape[-1]
             self_attention_mask = self.self_attention_mask[None, :seqlen, :seqlen]
             self_attention_mask = self_attention_mask * attention_mask.view(batch_size, 1, -1).to(
-                dtype=torch.bool, device=self_attention_mask.device)
+                dtype=torch.bool, device=self_attention_mask.device
+            )
             x.attention_mask = self_attention_mask.unsqueeze(1)
 
         inputs_embeds = self.wte(y.input_ids)
@@ -344,7 +345,6 @@ class VocabPositionEmbedding(nn.Module):
 
 
 class FlashMQATBase(nn.Module):
-
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -362,15 +362,18 @@ class FlashMQATBase(nn.Module):
                 dtype=dtype,
                 device=device,
             )
-            self.h = nn.ModuleList([
-                FlashMQATBlock(
-                    config,
-                    layer_index=i,
-                    output_layernorm=(i == config.n_layers - 1),
-                    dtype=dtype,
-                    device=device,
-                ) for i in range(config.n_layers)
-            ])
+            self.h = nn.ModuleList(
+                [
+                    FlashMQATBlock(
+                        config,
+                        layer_index=i,
+                        output_layernorm=(i == config.n_layers - 1),
+                        dtype=dtype,
+                        device=device,
+                    )
+                    for i in range(config.n_layers)
+                ]
+            )
         else:
             self.embedding_layer = self.h = None
 
@@ -396,17 +399,14 @@ class FlashMQATBase(nn.Module):
         x.pp_input = raw_pp_input
         return x
 
-# TODO: implement a customized output head class, merging the following 3 cases
-class OutputHead(nn.Linear):
-    # TODO: do we need to care about the initialization scale?
 
+class OutputHead(nn.Linear):
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
         return x
 
 
 class SequenceParallelCriticHead(nn.Linear):
-
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         all_gather_buffer = tensor_parallel.gather_from_sequence_parallel_region(x.pp_input)
         x.pp_output = nn.functional.linear(all_gather_buffer, self.weight, self.bias)
@@ -414,7 +414,6 @@ class SequenceParallelCriticHead(nn.Linear):
 
 
 class SequenceParallelActorHead(ColumnParallelLinear):
-
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         x.pp_output = parallel_lm_logits(
             x.pp_input,
@@ -431,7 +430,6 @@ class SequenceParallelActorHead(ColumnParallelLinear):
 
 
 class FlashMQATModel(nn.Module):
-
     def __init__(
         self,
         config: FlashMQATConfig,
@@ -443,10 +441,9 @@ class FlashMQATModel(nn.Module):
         if dtype is None:
             dtype = torch.float16
         self.config = config
-        self.transformer = FlashMQATBase(config,
-                                         no_param_instantiation=no_param_instantiation,
-                                         dtype=dtype,
-                                         device=device)
+        self.transformer = FlashMQATBase(
+            config, no_param_instantiation=no_param_instantiation, dtype=dtype, device=device
+        )
         if config.is_critic and config.sequence_parallel:
             self.head = SequenceParallelCriticHead(
                 config.hidden_dim,
@@ -491,11 +488,13 @@ class FlashMQATModel(nn.Module):
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
         if self.config.sequence_parallel:
             from impl.model.utils.tensor import pad_sequence_parallel_input
+
             _packed_input_ids = ys[0].input_ids
             _cu_seqlens = x.cu_seqlens
             _max_seqlen = x.max_seqlen
             packed_input_ids, cu_seqlens, max_seqlen, pad_size = pad_sequence_parallel_input(
-                ys[0].input_ids, x.cu_seqlens, x.max_seqlen)
+                ys[0].input_ids, x.cu_seqlens, x.max_seqlen
+            )
             ys[0].input_ids = packed_input_ids
             x.cu_seqlens = cu_seqlens
             x.max_seqlen = max_seqlen
@@ -620,8 +619,10 @@ class FlashMQATModel(nn.Module):
                     state_dict = load_from_disk(model_path)
                 except Exception as e:
                     logger.critical(f"Failed to load state dict from {model_path}: {e}")
-                    logger.critical("Degenerate to using huggingface model initialization. "
-                                    "This will probably cause (CPU) OOM.")
+                    logger.critical(
+                        "Degenerate to using huggingface model initialization. "
+                        "This will probably cause (CPU) OOM."
+                    )
                     state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
         else:
             logger.warning(
@@ -629,8 +630,9 @@ class FlashMQATModel(nn.Module):
                 "Loading from HuggingFace `model_path` is ensured to be correct but the `from_model` argument may cause key mismatch."
             )
             assert from_model is not None
-            state_dict = (from_model.state_dict()
-                          if not init_from_scratch and not no_param_instantiation else None)
+            state_dict = (
+                from_model.state_dict() if not init_from_scratch and not no_param_instantiation else None
+            )
 
         if not init_from_scratch and not no_param_instantiation:
             if load_model_parallel_as_list:
@@ -662,7 +664,8 @@ class FlashMQATModel(nn.Module):
     ):
         if base.constants.pipe_parallel_world_size() > 1 and not no_param_instantiation:
             raise RuntimeError(
-                "`from_$\{huggingface_model\}` can only be called without pipeline parallelism.")
+                "`from_$\{huggingface_model\}` can only be called without pipeline parallelism."
+            )
         if base.constants.model_parallel_world_size() > 1:
             config = FlashMQATModel._config_from_hf_template(
                 config_converter=config_converter,
@@ -743,8 +746,6 @@ class FlashMQATModel(nn.Module):
         ```
 
         """
-        if model_name == "pretrained":
-            raise ValueError("model_name cannot be 'pretrained'.")
         setattr(
             FlashMQATModel,
             f"from_{model_name}",
@@ -754,7 +755,8 @@ class FlashMQATModel(nn.Module):
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
                     force_load_from_hf_pretrained=force_load_from_hf_pretrained,
-                )),
+                )
+            ),
         )
         setattr(
             FlashMQATModel,
@@ -763,7 +765,8 @@ class FlashMQATModel(nn.Module):
                 functools.partial(
                     FlashMQATModel._config_from_hf_template,
                     config_converter=config_converter,
-                )),
+                )
+            ),
         )
         setattr(
             FlashMQATModel,
@@ -774,32 +777,41 @@ class FlashMQATModel(nn.Module):
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
                     force_load_from_hf_pretrained=force_load_from_hf_pretrained,
-                )),
+                )
+            ),
         )
         if state_dict_converter_to_hf:
             setattr(
                 FlashMQATModel,
                 f"dump_to_{model_name}",
-                functools.partialmethod(FlashMQATModel._to_hf_template,
-                                        state_dict_converter_to_hf=state_dict_converter_to_hf),
+                functools.partialmethod(
+                    FlashMQATModel._to_hf_template, state_dict_converter_to_hf=state_dict_converter_to_hf
+                ),
             )
 
-    def load(self, load_dir: str, init_critic_from_actor: bool = False, load_from_pipe: bool = False):
+    def load(self, load_dir: str, init_critic_from_actor: bool = False):
         if base.constants.pipe_parallel_world_size() > 1:
-            raise RuntimeError("`load` should not be called when using pipeline parallelism. "
-                               "Are your configuration correct?")
-        mp_rank = base.constants.model_parallel_rank()
-
-        if load_from_pipe:
-            state_dict, n_shards = load_from_disk(load_dir,
-                                                  fn_pattern=r".*" + f"mp-{mp_rank:02d}-" + r"s-(\d{2}).*",
-                                                  return_n_shards=True)
-        else:
-            state_dict, n_shards = load_from_disk(
-                load_dir,
-                fn_pattern=r".*" + f"-pp-00-mp-{mp_rank:02d}-" + r"s-(\d{2}).*",
-                return_n_shards=True,
+            raise RuntimeError(
+                "`load` should not be called when using pipeline parallelism. "
+                "Is your configuration correct?"
             )
+        mp_rank = base.constants.model_parallel_rank()
+        mp_size = base.constants.model_parallel_world_size()
+
+        ckpt_spec = get_ckpt_spec(load_dir)
+        if mp_size == 1 and ckpt_spec.mp_size > 1:
+            # Merge from model parallel checkpoint.
+            from .flash_mqat_parallel import mp_merge_flash_mqat_state_dict
+
+            state_dicts = [
+                load_from_disk(load_dir, fn_pattern=r".*" + f"mp-{i:02d}-" + r"s-(\d{2}).*")
+                for i in range(ckpt_spec.mp_size)
+            ]
+            state_dict = mp_merge_flash_mqat_state_dict(state_dicts, self.config)
+        else:
+            assert mp_size == ckpt_spec.mp_size
+            state_dict = load_from_disk(load_dir, fn_pattern=r".*" + f"mp-{mp_rank:02d}-" + r"s-(\d{2}).*")
+
         if init_critic_from_actor and f"{self.config.n_layers + 1}.weight" in state_dict:
             state_dict.pop(f"{self.config.n_layers + 1}.weight")
             self.load_state_dict(state_dict, strict=False)
@@ -808,8 +820,10 @@ class FlashMQATModel(nn.Module):
 
     def save(self, save_dir: str):
         if base.constants.pipe_parallel_world_size() > 1:
-            raise RuntimeError("`save` should not be called when using pipeline parallelism. "
-                               "Are your configuration correct?")
+            raise RuntimeError(
+                "`save` should not be called when using pipeline parallelism. "
+                "Is your configuration correct?"
+            )
         dp_rank = base.constants.data_parallel_rank()
         mp_rank = base.constants.model_parallel_rank()
         if dp_rank > 0:  # only save on dp_rank = 0

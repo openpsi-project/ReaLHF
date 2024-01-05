@@ -53,10 +53,12 @@ def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
     tokenizer = model.tokenizer
     logger.info(f"saving the model for epoch {model.version.epoch} step {model.version.epoch_step}...")
     os.makedirs(
-        os.path.abspath(os.path.join(
-            output_dir,
-            f"epoch{model.version.epoch}step{model.version.epoch_step}",
-        )),
+        os.path.abspath(
+            os.path.join(
+                output_dir,
+                f"epoch{model.version.epoch}step{model.version.epoch_step}",
+            )
+        ),
         exist_ok=True,
     )
     if not is_lora_model(module):
@@ -68,8 +70,9 @@ def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
         )
         return
     lora_sd = get_lora_state_dict(module)
-    save_to_disk(lora_sd, os.path.join(output_dir,
-                                       f"epoch{model.version.epoch}step{model.version.epoch_step}"))
+    save_to_disk(
+        lora_sd, os.path.join(output_dir, f"epoch{model.version.epoch}step{model.version.epoch_step}")
+    )
 
 
 def save_pipeline_model(model: api.model.Model, output_dir: str):
@@ -108,13 +111,13 @@ def split_state_dict_into_shards(state_dict: Dict, n_shards: int) -> Dict:
 
 
 def save_to_disk(
-        state_dict: Dict[str, torch.Tensor],
-        output_dir: str,
-        output_fn: Optional[str] = None,
-        save_type: str = "pt",
-        n_shards: Optional[int] = None,
-        no_shard_suffix: bool = False,
-        max_shard_size_byte: int = int(1e10),
+    state_dict: Dict[str, torch.Tensor],
+    output_dir: str,
+    output_fn: Optional[str] = None,
+    save_type: str = "pt",
+    n_shards: Optional[int] = None,
+    no_shard_suffix: bool = False,
+    max_shard_size_byte: int = int(1e10),
 ):
     os.makedirs(output_dir, exist_ok=True)
     if n_shards is None:
@@ -164,9 +167,9 @@ def save_to_disk(
         raise NotImplementedError(f"save_type {save_type} is not supported")
 
 
-def load_from_safetensors(model_dir: str,
-                          ext: str = ".safetensors",
-                          pattern: Optional[str] = None) -> Tuple[Dict, int]:
+def load_from_safetensors(
+    model_dir: str, ext: str = ".safetensors", pattern: Optional[str] = None
+) -> Tuple[Dict, int]:
     state_dict = {}
     cnt = 0
     for fn in os.listdir(model_dir):
@@ -196,96 +199,57 @@ def load_from_pytorch(model_dir: str, ext: str = ".bin", pattern: Optional[str] 
     return state_dict, cnt
 
 
-def load_from_disk(model_dir: str,
-                   fn_pattern: Optional[str] = None,
-                   return_n_shards: bool = False,
-                   load_all_mp_ranks: Optional[bool] = False) -> Dict:
-    # load_all_mp_ranks is only used by from_pipeline_module of FlashMQATModel
-    # when True, check if the checkpoints are stored by multiple mp ranks,
-    # if yes, return a list of state_dicts, otherwise return a single state_dict.
+@dataclasses.dataclass
+class CheckpointSpec:
+    mp_size: int
+    pp_size: int
+    n_shard: int
+
+
+def get_ckpt_spec(model_dir: str):
+    fns = list(os.listdir(model_dir))
+    max_mp_rank = 0
+    max_pp_rank = 0
+    max_n_shard = 0
+    for fn in fns:
+        if not re.match(r".*pp-(\d{2})-mp-(\d{2})-s-(\d{2}).*", fn):
+            continue
+        mp_rank = int(fn.split("-")[4])
+        if mp_rank > max_mp_rank:
+            max_mp_rank = mp_rank
+        pp_rank = int(fn.split("-")[2])
+        if pp_rank > max_pp_rank:
+            max_pp_rank = pp_rank
+        n_shard = int(fn.split("-")[6])
+        if n_shard > max_n_shard:
+            max_n_shard = n_shard
+    return CheckpointSpec(max_mp_rank + 1, max_pp_rank + 1, max_n_shard + 1)
+
+
+def load_from_disk(
+    model_dir: str,
+    fn_pattern: Optional[str] = None,
+    return_n_shards: bool = False,
+) -> Dict:
+    fns = list(os.listdir(model_dir))
+
     def load_model_dir_fn_pattern(model_dir, fn_pattern):
         if any(fn.endswith(".DLLMbin") for fn in fns):
             state_dict, n_shards = load_from_pytorch(model_dir, ext=".DLLMbin", pattern=fn_pattern)
         elif any(fn.endswith(".DLLMsafetensors") for fn in fns):
-            state_dict, n_shards = load_from_safetensors(model_dir,
-                                                         ext=".DLLMsafetensors",
-                                                         pattern=fn_pattern)
+            state_dict, n_shards = load_from_safetensors(
+                model_dir, ext=".DLLMsafetensors", pattern=fn_pattern
+            )
         elif any(fn.endswith(".bin") for fn in fns):
             state_dict, n_shards = load_from_pytorch(model_dir, pattern=fn_pattern)
+        # Load safetensors whenever possible, which is extremely fast.
         elif any(fn.endswith(".safetensors") for fn in fns):
             state_dict, n_shards = load_from_safetensors(model_dir, pattern=fn_pattern)
         else:
             logger.error(f"Cannot find any model file ending with `.bin` or `.safetensors` in {model_dir}.")
         return state_dict, n_shards
 
-    # Load safetensors whenever possible, which is extremely fast.
-    fns = list(os.listdir(model_dir))
-    # TODO: use a common merge from MP function
-    if load_all_mp_ranks:
-        # transform mp state dicts to full pp statedict
-        state_dicts = []
-        n_shards = None
-        max_mp_rank = 0
-        for fn in fns:
-            if not re.match(r".*pp-(\d{2})-mp-(\d{2})-s-(\d{2}).*", fn):
-                continue
-            mp_rank = int(fn.split("-")[4])
-            if mp_rank > max_mp_rank:
-                max_mp_rank = mp_rank
-        if max_mp_rank == 0:
-            state_dict, n_shards = load_model_dir_fn_pattern(model_dir, fn_pattern)
-        else:
-            assert fn_pattern is None
-            for mp_rank in range(max_mp_rank + 1):
-                fn_pattern = r".*" + r"pp-(\d{2})" + f"-mp-{mp_rank:02d}-" + r"s-(\d{2}).*"
-                sd, n_shards = load_model_dir_fn_pattern(model_dir, fn_pattern)
-                state_dicts.append(sd)
-            max_layers = 0
-            for k in state_dicts[0].keys():
-                i = int(k.split(".")[0])
-                max_layers = i if i > max_layers else max_layers
-            # TODO: merge into one state dict, temp solution
-            embedding_keys = [".wte"]  # dim=0 no bias
-            column_linear_keys = [
-                ".attn.q_attn",
-                ".attn.k_attn",
-                ".attn.v_attn",
-                ".mlp.c_fc",
-                ".mlp.gate_proj",
-                ".mlp.up_proj",
-                f"{max_layers}.weight",
-            ]  # dim=0 + partition bias
-            row_linear_keys = [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
-            state_dict = dict()
-            for k in state_dicts[0].keys():
-                i = int(k.split(".")[0])
-                if any([ek in k for ek in embedding_keys]) and "weight" in k:
-                    state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
-                elif any([ck in k for ck in column_linear_keys
-                          ]) and state_dicts[0][k].shape[0] > 1:  # exclude critic head
-                    state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
-                elif any([rk in k for rk in row_linear_keys]) and "weight" in k:
-                    state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=1)
-                else:
-                    state_dict[k] = state_dicts[0][k]
-            for i in range(1, max_layers):
-                for v in ["weight", "bias"]:
-                    q_key = f"{i}.attn.q_attn.{v}"
-                    k_key = f"{i}.attn.k_attn.{v}"
-                    v_key = f"{i}.attn.v_attn.{v}"
-                    c_attn_key = f"{i}.attn.c_attn.linear.weight"
-                    if q_key in state_dict:
-                        state_dict[c_attn_key] = torch.cat(
-                            [state_dict[q_key], state_dict[k_key], state_dict[v_key]], dim=0)
-                        state_dict.pop(q_key)
-                        state_dict.pop(k_key)
-                        state_dict.pop(v_key)
-                before_ln_key = f"{i}.attn.ln.weight"
-                after_ln_key = f"{i}.attn.c_attn.ln.weight"
-                state_dict[after_ln_key] = state_dict[before_ln_key]
-                state_dict.pop(before_ln_key)
-    else:
-        state_dict, n_shards = load_model_dir_fn_pattern(model_dir, fn_pattern)
+    state_dict, n_shards = load_model_dir_fn_pattern(model_dir, fn_pattern)
     if return_n_shards:
         return state_dict, n_shards
     return state_dict

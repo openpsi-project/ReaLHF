@@ -172,8 +172,6 @@ def get_flash_mqat_model_config(
         > hf_as_actor: build actor (decoder-only LLM) from huggingface models
         > hf_as_critic: build critic (transformer that outputs values instead of logits) from huggingface models
         > actor_as_critic: build critic from actor, replace the head with a new one, whether using pipeline depends on `use_pipe`
-        > pp_actor_as_critic: build critic from pipelined actor, whose state dict should be remapped
-        > pp_self: build non-pipeline actor/critic from pipelined actor/critic
         > random_actor: build a randomly initialized actor, whether using pipeline depends on `use_pipe`
         > random_critic build a randomly initialized critic, whether using pipeline depends on `use_pipe`
         > self: build a actor/critic from itself, whether using pipeline depends on `use_pipe`

@@ -157,24 +157,7 @@ def make_flash_model(
         config.sequence_parallel = sequence_parallel
         config.gradient_accumulation_fusion = gradient_accumulation_fusion
         m = FlashMQATModel(config=config, no_param_instantiation=False, dtype=dtype, device=device)
-        m.load(model_path, init_critic_from_actor=True, load_from_pipe=False)
-    elif from_type == "pp_actor_as_critic":
-        # initialize a critic from a pipeline-parallel actor
-        with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
-            config = FlashMQATConfig(**json.load(f))
-        config.is_critic = True
-        config.sequence_parallel = sequence_parallel
-        config.gradient_accumulation_fusion = gradient_accumulation_fusion
-        m = FlashMQATModel(config=config, no_param_instantiation=False, dtype=dtype, device=device)
-        m.load(model_path, init_critic_from_actor=True, load_from_pipe=True)
-    elif from_type == "pp_self":
-        # load a pipeline-parallel actor/critic
-        with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
-            config = FlashMQATConfig(**json.load(f))
-        config.sequence_parallel = sequence_parallel
-        config.gradient_accumulation_fusion = gradient_accumulation_fusion
-        m = FlashMQATModel(config=config, no_param_instantiation=False, dtype=dtype, device=device)
-        m.load(model_path, init_critic_from_actor=False, load_from_pipe=True)
+        m.load(model_path, init_critic_from_actor=True)
     elif from_type == "random_actor":
         # randomly initialize a actor
         m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
@@ -231,7 +214,7 @@ def make_flash_model(
         config.sequence_parallel = sequence_parallel
         config.gradient_accumulation_fusion = gradient_accumulation_fusion
         m = FlashMQATModel(config=config, no_param_instantiation=False, dtype=dtype, device=device)
-        m.load(model_path, init_critic_from_actor=False, load_from_pipe=False)
+        m.load(model_path, init_critic_from_actor=False)
 
     if tokenizer is None:
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)

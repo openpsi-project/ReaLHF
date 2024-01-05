@@ -4,9 +4,15 @@ import torch
 
 from .flash_mqat_base import FlashMQATConfig
 from base.monitor import process_memory_mb
-from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, FlashMQATModel,
-                                                      OutputHead, SequenceParallelActorHead,
-                                                      SequenceParallelCriticHead, VocabPositionEmbedding)
+from impl.model.nn.flash_mqat.flash_mqat_base import (
+    FlashMQATBlock,
+    FlashMQATConfig,
+    FlashMQATModel,
+    OutputHead,
+    SequenceParallelActorHead,
+    SequenceParallelCriticHead,
+    VocabPositionEmbedding,
+)
 from impl.model.parallelism.pipeline_parallel.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
@@ -14,6 +20,19 @@ import base.constants
 import base.logging as logging
 
 logger = logging.getLogger("flash mqat parallel")
+
+# keys used to identify modules
+_embedding_keys = lambda config: [".wte", ".wpe"]  # dim=0 no bias
+_column_linear_keys = lambda config: [
+    ".attn.c_attn.q_attn",
+    ".attn.c_attn.k_attn",
+    ".attn.c_attn.v_attn",
+    ".mlp.c_fc",
+    ".mlp.gate_proj",
+    ".mlp.up_proj",
+    f"{config.n_layers + 1}.weight",
+]  # dim=0 + partition bias
+_row_linear_keys = lambda config: [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
 
 
 # model parallel partition util functions
@@ -35,37 +54,22 @@ def mp_partition_flash_mqat_state_dict(
 ) -> List[Dict]:
     # the qkv linear in non-paralleled model is merged. We should split it first.
     for i in range(1, config.n_layers + 1):
-        print(list(state_dict.keys()))
-        w = state_dict[f"{i}.attn.c_attn.linear.weight"]
-        nq = config.hidden_dim // config.head_dim
-        q_proj_w = w[:nq * config.head_dim]
-        k_proj_w = w[nq * config.head_dim:(nq + config.n_kv_heads) * config.head_dim]
-        v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim:]
-        state_dict[f"{i}.attn.c_attn.q_attn.weight"] = q_proj_w
-        state_dict[f"{i}.attn.c_attn.k_attn.weight"] = k_proj_w
-        state_dict[f"{i}.attn.c_attn.v_attn.weight"] = v_proj_w
-        state_dict.pop(f"{i}.attn.c_attn.linear.weight")
-        if f"{i}.attn.c_attn.linear.bias" in state_dict:
-            b = state_dict[f"{i}.attn.c_attn.linear.bias"]
-            state_dict[f"{i}.attn.c_attn.q_attn.weight"] = b[:nq * config.head_dim]
-            state_dict[f"{i}.attn.c_attn.k_attn.bias"] = b[nq * config.head_dim:(nq + config.n_kv_heads) *
-                                                           config.head_dim]
-            state_dict[f"{i}.attn.c_attn.v_attn.bias"] = b[(nq + config.n_kv_heads) * config.head_dim:]
-            state_dict.pop(f"{i}.attn.c_attn.linear.bias")
+        for key in ["weight", "bias"]:
+            if f"{i}.attn.c_attn.linear.{key}" not in state_dict:
+                continue
+            w = state_dict[f"{i}.attn.c_attn.linear.{key}"]
+            nq = config.hidden_dim // config.head_dim
+            q_proj_w = w[: nq * config.head_dim]
+            k_proj_w = w[nq * config.head_dim : (nq + config.n_kv_heads) * config.head_dim]
+            v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim :]
+            state_dict[f"{i}.attn.c_attn.q_attn.{key}"] = q_proj_w
+            state_dict[f"{i}.attn.c_attn.k_attn.{key}"] = k_proj_w
+            state_dict[f"{i}.attn.c_attn.v_attn.{key}"] = v_proj_w
+            state_dict.pop(f"{i}.attn.c_attn.linear.{key}")
 
-    # converted to normal llama, now partition into model parallel ckpt for current rank
-    # keys used to identify modules
-    embedding_keys = [".wte", ".wpe"]  # dim=0 no bias
-    column_linear_keys = [
-        ".attn.c_attn.q_attn",
-        ".attn.c_attn.k_attn",
-        ".attn.c_attn.v_attn",
-        ".mlp.c_fc",
-        ".mlp.gate_proj",
-        ".mlp.up_proj",
-        f"{config.n_layers + 1}.weight",
-    ]  # dim=0 + partition bias
-    row_linear_keys = [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
+    embedding_keys = _embedding_keys(config)
+    column_linear_keys = _column_linear_keys(config)
+    row_linear_keys = _row_linear_keys(config)
 
     for k, v in state_dict.items():
         # print(f"key {k}:: ")
@@ -87,6 +91,48 @@ def mp_partition_flash_mqat_state_dict(
         # print(f"after partition shape {state_dict[k].shape}")
 
     return [{k: v[mp_rank] for k, v in state_dict.items()} for mp_rank in range(mp_size)]
+
+
+def mp_merge_flash_mqat_state_dict(
+    state_dicts: List[Dict[str, torch.Tensor]],
+    config: FlashMQATConfig,
+) -> Dict:
+    mp_size = len(state_dicts)
+    if mp_size == 1:
+        return state_dicts[0]
+
+    embedding_keys = _embedding_keys(config)
+    column_linear_keys = _column_linear_keys(config)
+    row_linear_keys = _row_linear_keys(config)
+
+    state_dict = dict()
+    for k in state_dicts[0].keys():
+        i = int(k.split(".")[0])
+        if any([ek in k for ek in embedding_keys]) and "weight" in k:
+            state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
+        elif (
+            any([ck in k for ck in column_linear_keys]) and state_dicts[0][k].shape[0] > 1
+        ):  # exclude critic head
+            state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
+        elif any([rk in k for rk in row_linear_keys]) and "weight" in k:
+            state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=1)
+        else:
+            state_dict[k] = state_dicts[0][k]
+
+    # the qkv linear in non-paralleled model is merged.
+    for i in range(1, config.n_layers + 1):
+        for key in ["weight", "bias"]:
+            if f"{i}.attn.c_attn.q_attn.{key}" not in state_dict:
+                continue
+            qw = state_dict[f"{i}.attn.c_attn.q_attn.{key}"]
+            kw = state_dict[f"{i}.attn.c_attn.k_attn.{key}"]
+            vw = state_dict[f"{i}.attn.c_attn.v_attn.{key}"]
+            state_dict[f"{i}.attn.c_attn.linear.{key}"] = torch.cat([qw, kw, vw], dim=0)
+            state_dict.pop(f"{i}.attn.c_attn.q_attn.{key}")
+            state_dict.pop(f"{i}.attn.c_attn.k_attn.{key}")
+            state_dict.pop(f"{i}.attn.c_attn.v_attn.{key}")
+
+    return state_dict
 
 
 def make_causal_flash_mqat_pipe_module(
@@ -172,11 +218,12 @@ def pipe_wrap_fn(
     init_critic_from_actor: bool = False,
     init_from_scratch: bool = False,
 ):
-
     def pipe_wrap_fn_(model: api.model.Model) -> api.model.Model:
         if not isinstance(model.module, FlashMQATModel):
-            raise RuntimeError(f"Only FlashMQAT models can be wrapped as "
-                               f"pipeline module, provided type {type(model.module)}")
+            raise RuntimeError(
+                f"Only FlashMQAT models can be wrapped as "
+                f"pipeline module, provided type {type(model.module)}"
+            )
         config = model.module.config
         module = make_causal_flash_mqat_pipe_module(
             config,
