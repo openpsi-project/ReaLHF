@@ -56,6 +56,10 @@ class FlashMQATConfig:
     # only used for debugging, True for GPT2
     fixed_abs_position_ids: bool = False
 
+    # remained for compatibility, not used any more
+    ckpt_attn: bool = False
+    ckpt_mlp: bool = False
+
 
 class FlashMQATBlock(nn.Module):
 
@@ -693,8 +697,12 @@ class FlashMQATModel(nn.Module):
         return model
 
     # Template function used for FlashMQAT to HF models, similar to C++ template but is ugly in python.
-    def _to_hf_template(self, output_dir, state_dict_converter_to_hf):
-        save_to_disk(state_dict_converter_to_hf(self.state_dict(), self.config), output_dir)
+    def _to_hf_template(config, state_dict, output_dir, hf_base_model_path, state_dict_converter_to_hf):
+        save_to_disk(state_dict_converter_to_hf(FlashMQATModel.from_pipe_state_dict(config, state_dict),
+                                                config),
+                     output_dir,
+                     with_hf_format=True,
+                     hf_base_model_path=hf_base_model_path)
 
     @staticmethod
     def register_hf_model(
@@ -771,8 +779,9 @@ class FlashMQATModel(nn.Module):
             setattr(
                 FlashMQATModel,
                 f"dump_to_{model_name}",
-                functools.partialmethod(FlashMQATModel._to_hf_template,
-                                        state_dict_converter_to_hf=state_dict_converter_to_hf),
+                staticmethod(
+                    functools.partial(FlashMQATModel._to_hf_template,
+                                      state_dict_converter_to_hf=state_dict_converter_to_hf)),
             )
 
     def load(self, load_dir: str, init_critic_from_actor: bool = False):
