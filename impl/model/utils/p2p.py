@@ -9,6 +9,7 @@ from deepspeed.git_version_info import torch_info
 # To query whether we have send/recv support
 from packaging.version import Version
 import torch
+import torch.distributed
 
 from base.constants import process_group_offset
 
@@ -72,43 +73,34 @@ def _is_valid_send_recv(src_stage, dest_stage):
 def send(tensor, dest_stage, async_op=False):
     # NOTE: The input is the stage id rather than the global rank
     global _groups
-    assert async_op == False, "Doesn't support async_op true"
+    # assert async_op == False, "Doesn't support async_op true"
     src_stage = _grid.get_stage_id()
     _is_valid_send_recv(src_stage, dest_stage)
 
     dest_rank = _grid.stage_to_global(stage_id=dest_stage)
-    if async_op:
-        global _async
-        op = dist.isend(tensor, dest_rank + process_group_offset())
-        _async.append(op)
+    if can_send_recv():
+        send_method = torch.distributed.isend if async_op else dist.send
+        return send_method(tensor, dest_rank + process_group_offset())
     else:
-        if can_send_recv():
-            return dist.send(tensor, dest_rank + process_group_offset())
-        else:
-            group = _get_send_recv_group(src_stage, dest_stage)
-            src_rank = _grid.stage_to_global(stage_id=src_stage)
-            return dist.broadcast(tensor, src_rank + process_group_offset(), group=group, async_op=async_op)
+        group = _get_send_recv_group(src_stage, dest_stage)
+        src_rank = _grid.stage_to_global(stage_id=src_stage)
+        return dist.broadcast(tensor, src_rank + process_group_offset(), group=group, async_op=async_op)
 
 
 def recv(tensor, src_stage, async_op=False):
     # NOTE: The input is the stage id rather than the global rank
     global _groups
-    assert async_op == False, "Doesn't support async_op true"
+    # assert async_op == False, "Doesn't support async_op true"
     dest_stage = _grid.get_stage_id()
     _is_valid_send_recv(src_stage, dest_stage)
 
     src_rank = _grid.stage_to_global(stage_id=src_stage)
-
-    if async_op:
-        global _async
-        op = dist.irecv(tensor, src_rank + process_group_offset())
-        _async.append(op)
+    if can_send_recv():
+        recv_method = torch.distributed.irecv if async_op else dist.recv
+        return recv_method(tensor, src_rank + process_group_offset())
     else:
-        if can_send_recv():
-            return dist.recv(tensor, src_rank + process_group_offset())
-        else:
-            group = _get_send_recv_group(src_stage, dest_stage)
-            return dist.broadcast(tensor, src_rank + process_group_offset(), group=group, async_op=async_op)
+        group = _get_send_recv_group(src_stage, dest_stage)
+        return dist.broadcast(tensor, src_rank + process_group_offset(), group=group, async_op=async_op)
 
 
 def wait():

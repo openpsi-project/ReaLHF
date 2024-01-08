@@ -43,11 +43,17 @@ class TensorBuffer:
               require_grads: bool = False):
         self.tensors[name][mbid] = torch.zeros(shape, dtype=dtype, device=device, requires_grad=require_grads)
 
-    def get(self, name: str, mbid: int, remove: bool = False):
-        if remove:
-            return self.tensors[name].pop(mbid)
-        else:
-            return self.tensors[name][mbid]
+    def get(self, name: str, mbid: int, remove: bool = False, raise_error: bool = True):
+        try:
+            if remove:
+                return self.tensors[name].pop(mbid)
+            else:
+                return self.tensors[name][mbid]
+        except KeyError as e:
+            if raise_error:
+                raise e
+            else:
+                return None
 
     def remove(self, name: str, mbid: Optional[int] = None, check_exists: bool = False):
         try:
@@ -70,12 +76,3 @@ class TensorBuffer:
 
     def clear(self):
         self.tensors = defaultdict(dict)
-
-
-def send_grad(grad: torch.Tensor, dst_stage: int):
-    p2p.send(grad, dst_stage)
-
-
-def recv_grad(buf: torch.Tensor, src_stage: int):
-    p2p.recv(buf, src_stage)
-    return buf

@@ -141,16 +141,6 @@ def run_train_batch(rank, seed):
     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
     engine.enable_async_p2p()
 
-    # os.environ["DLLM_TRACE"] = "1"
-    tracer = get_tracer(tracer_entries=int(2e6),
-                        max_stack_depth=10,
-                        ignore_c_function=False,
-                        ignore_frozen=True,
-                        log_async=True,
-                        min_duration=10,
-                        output_file=f"/home/meizy/logs/viztracer/trace{rank}.json")
-    tracer.start()
-
     os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(tracer_entries=int(2e6),
                         max_stack_depth=10,
@@ -194,18 +184,7 @@ def run_generate(rank, seed):
     data = init_data(model.tokenizer, device, 2 * BATCH_SIZE, seed=seed)
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
-    # engine.enable_async_p2p()
-
-    # os.environ["DLLM_TRACE"] = "1"
-    tracer = get_tracer(
-        tracer_entries=int(2e6),
-        # max_stack_depth=10,
-        ignore_c_function=False,
-        ignore_frozen=True,
-        log_async=True,
-        min_duration=20,
-        output_file=f"/home/meizy/logs/viztracer/trace{rank}.json")
-    tracer.start()
+    engine.enable_async_p2p()
 
     os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(

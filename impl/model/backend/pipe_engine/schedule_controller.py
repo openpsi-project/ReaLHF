@@ -231,16 +231,17 @@ class EngineScheduleController:
         self.__init_storage()
         # self.__binded_schedule = dict()
         import os
-        os.environ["DLLM_TRACE"] = "1"
-        tracer = get_tracer(
-            tracer_entries=int(2e6),
-            # max_stack_depth=10,
-            ignore_c_function=False,
-            ignore_frozen=True,
-            log_async=True,
-            min_duration=5,
-            output_file=f"/home/meizy/logs/viztracer/controller.json")
-        tracer.start()
+
+        # os.environ["DLLM_TRACE"] = "1"
+        # tracer = get_tracer(
+        #     tracer_entries=int(2e6),
+        #     # max_stack_depth=10,
+        #     ignore_c_function=False,
+        #     ignore_frozen=True,
+        #     log_async=True,
+        #     min_duration=5,
+        #     output_file=f"/home/meizy/logs/viztracer/controller.json")
+        # tracer.start()
 
         while not self.__terminated:
             sched_issued = self.__check_and_issue_schedule()
@@ -256,7 +257,7 @@ class EngineScheduleController:
             self.__posted += posted
             self.__polled += polled
             self.__check_terminate()
-        tracer.save()
+        # tracer.save()
 
 
 class EngineScheduleClient:
