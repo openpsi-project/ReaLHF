@@ -12,6 +12,8 @@ torchrun --standalone --nnodes=1 --nproc-per-node=8 --module \
 ```
 
 """
+import base.constants
+import json
 import os
 import random
 import time
@@ -34,23 +36,17 @@ batch_size = batch_size_tokens // seqlen
 MODEL_NAME = "default"
 
 # parallelism config
-NUM_MP = 2
-NUM_PP = 2
-NUM_DP = 2
+NUM_MP = 8
+NUM_PP = 1
+NUM_DP = 1
 assert batch_size >= NUM_DP
-NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
 if MODEL_TYPE == "llama":
-    if NUM_PP == 1 and NUM_MP == 1:
-        SUFFIX = ""
-    elif NUM_PP == 1:
-        SUFFIX = f"_{NUM_MP}mp_{NUM_SHARDS}s"
-    elif NUM_MP == 1:
-        SUFFIX = f"_{NUM_PP}pp_{NUM_SHARDS}s"
-    elif NUM_PP > 1:
-        SUFFIX = f"_{NUM_PP}pp_{NUM_MP}mp_{NUM_SHARDS}s"
-    MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-13b-hf{SUFFIX}"
+    MODEL_PARALLEL_PATH = (
+        f"/lustre/public/pretrained_model_weights/sharded_new/Llama-2-13b-hf_{NUM_PP}pp_{NUM_MP}mp"
+    )
+from base.monitor import gpu_memory_mb
 
 ## performance related config
 PROFILE_INTERFACE_TYPE = "train_step"
@@ -76,40 +72,25 @@ def make_finetune_spec(bs_per_device, total_train_epochs=1, total_train_steps=10
 def make_backend():
     import api.model
 
-    if NUM_PP == 1:
-        return api.model.make_backend(
-            config_package.ModelBackend(
-                type_="ds_train",
-                args=dict(
-                    optimizer_name="adam",
-                    optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
-                    warmup_steps_proportion=0.0,
-                    min_lr_ratio=0.0,
-                    # TODO: test zero_stage = 2 or 3 later
-                    gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
-                    zero_stage=1,
-                    enable_fp16=not USE_BF16,
-                    enable_bf16=USE_BF16,
-                ),
-            ))
-    elif NUM_PP > 1:
-        return api.model.make_backend(
-            config_package.ModelBackend(
-                type_="ds_train",
-                args=dict(
-                    optimizer_name="adam",
-                    optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
-                    warmup_steps_proportion=0.0,
-                    min_lr_ratio=0.0,
-                    zero_stage=1,
-                    engine_type="pipe",
-                    gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
-                    num_pipeline_stages=NUM_PP,
-                    enable_fp16=not USE_BF16,
-                    enable_bf16=USE_BF16,
-                    sequence_parallel=USE_SEQ_PARALLEL,
-                ),
-            ))
+    return api.model.make_backend(
+        config_package.ModelBackend(
+            type_="ds_train",
+            args=dict(
+                optimizer_name="adam",
+                optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
+                warmup_steps_proportion=0.0,
+                min_lr_ratio=0.0,
+                zero_stage=2 if NUM_PP > 1 else 2,
+                engine_type="pipe" if NUM_PP > 1 else "deepspeed",
+                gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
+                num_pipeline_stages=NUM_PP,
+                enable_fp16=not USE_BF16,
+                enable_bf16=USE_BF16,
+                sequence_parallel=USE_SEQ_PARALLEL,
+                num_pipeline_micro_batches=NUM_PP,
+            ),
+        )
+    )
 
 
 def make_interface():
@@ -123,57 +104,25 @@ def make_model(device):
     import impl.model.nn.flash_mqat.flash_mqat_api
 
     model_config = config_package.Model(
-        "flash_mqat_actor",
+        "flash_mqat",
         args=dict(
             model_path=MODEL_PARALLEL_PATH,
-            from_type=MODEL_TYPE,
-            tokenizer_path=MODEL_PARALLEL_PATH,
-            init_from_scratch=True,
-            no_param_instantiation=True,
+            from_type="self" if NUM_PP == 1 else "empty_actor",
             dtype="bf16" if USE_BF16 else "fp16",
+            hf_model_type=MODEL_TYPE,
+            tokenizer_path=MODEL_PARALLEL_PATH,
+            sequence_parallel=USE_SEQ_PARALLEL,
+            gradient_accumulation_fusion=GRADIENT_ACCUMULATION_FUSION,
         ),
     )
     assert NUM_PP > 1 or NUM_MP > 1, "can not test model without mp or dp"
-    if NUM_PP == 1:
+    if NUM_PP > 1:
         model_config.wrappers += [
             config_package.ModelWrapper(
-                "model_parallel",
+                "pipe_flash_mqat",
                 args=dict(
                     model_path=MODEL_PARALLEL_PATH,
-                    sequence_parallel=USE_SEQ_PARALLEL,
-                    gradient_accumulation_fusion=GRADIENT_ACCUMULATION_FUSION,
-                    is_critic=False,
-                    init_critic_from_actor=False,
-                    init_from_scratch=False,
-                ),
-            )
-        ]
-    elif NUM_MP == 1:
-        model_config.wrappers += [
-            config_package.ModelWrapper(
-                "pipe",
-                args=dict(
-                    model_path=MODEL_PARALLEL_PATH,
-                    num_pp=NUM_PP,
-                    num_dp=NUM_DP,
-                    is_critic=False,
-                    init_critic_from_actor=False,
-                    init_from_scratch=False,
-                ),
-            )
-        ]
-    elif NUM_PP > 1:
-        model_config.wrappers += [
-            config_package.ModelWrapper(
-                "model_pipe_parallel",
-                args=dict(
-                    model_path=MODEL_PARALLEL_PATH,
-                    num_pp=NUM_PP,
-                    num_mp=NUM_MP,
-                    num_dp=NUM_DP,
-                    sequence_parallel=USE_SEQ_PARALLEL,
-                    gradient_accumulation_fusion=GRADIENT_ACCUMULATION_FUSION,
-                    is_critic=False,
+                    partition_method="parameters_balanced",
                     init_critic_from_actor=False,
                     init_from_scratch=False,
                 ),
@@ -216,8 +165,8 @@ def make_batch(tokenizer, device, seed=373):
     dp_rank = base.constants.data_parallel_rank()
     dp_worldsize = base.constants.data_parallel_world_size()
     random.seed(seed)
-    whole_batch = [random_sentence(min_len=seqlen, max_len=seqlen) for _ in range(batch_size)]
-    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank:batch_size // dp_worldsize * (dp_rank + 1)]
+    whole_batch = [random_sentence(min_len=seqlen + 100, max_len=seqlen + 100) for _ in range(batch_size)]
+    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank : batch_size // dp_worldsize * (dp_rank + 1)]
     return make_input(tokenizer, device, dp_batch)
 
 
@@ -241,17 +190,38 @@ def main(rank: int = None, world_size: int = None):
 
     init_global_constants(NUM_DP, NUM_MP, NUM_PP)
 
+    # packed_input_ids = torch.randint(0, vocab_size, (batch_size * seqlen,), dtype=torch.long, device=device)
+    # cu_seqlens = torch.arange(batch_size + 1, dtype=torch.int32, device=device) * seqlen
+    # prompt_mask = torch.randint(0, 2, (batch_size * seqlen,), dtype=torch.bool, device=device)
+
+    if base.constants.model_parallel_rank() == 0:
+        gpu_memory_mb("before model initialization")
     model = make_model(device)
+    # cnt = 0
+    # params_to_mem = {}
+    # for k, m in model.module.named_parameters():
+    #     if m.is_cuda:
+    #         if m.dtype == torch.float16:
+    #             factor = 2
+    #         elif m.dtype == torch.float32:
+    #             factor = 4
+    #         else:
+    #             raise NotImplementedError(m.dtype)
+    #         cnt += m.numel() * factor
+    #         params_to_mem[k] = m.numel() * factor
+    # print(cnt / 1024**2)
+    # pretty_dict = json.dumps({k: v / 1024**2 for k, v in params_to_mem.items()}, indent=4)
+    # print(pretty_dict)
+    data = make_batch(model.tokenizer, device)
+    if USE_GRADIENT_CHECKPOINTING:
+        model.module.gradient_checkpointing_enable()
+    if base.constants.model_parallel_rank() == 0:
+        gpu_memory_mb("after model initialization")
     backend = make_backend()
     ft_spec = make_finetune_spec(512)
     interface = make_interface()
 
-    model = backend.initialize(model, ft_spec)
-
-    # packed_input_ids = torch.randint(0, vocab_size, (batch_size * seqlen,), dtype=torch.long, device=device)
-    # cu_seqlens = torch.arange(batch_size + 1, dtype=torch.int32, device=device) * seqlen
-    # prompt_mask = torch.randint(0, 2, (batch_size * seqlen,), dtype=torch.bool, device=device)
-    data = make_batch(model.tokenizer, device)
+    # model = backend.initialize(model, ft_spec)
 
     s = torch.profiler.schedule(skip_first=1, warmup=1, active=2, repeat=1, wait=0)
 
@@ -263,13 +233,13 @@ def main(rank: int = None, world_size: int = None):
         p.export_chrome_trace(os.path.join(dirname, f"rank{rank}.json"))
 
     with torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-            record_shapes=True,
-            profile_memory=True,
-            with_stack=True,
-            schedule=s,
-            on_trace_ready=trace_handler,
-            with_flops=True,
+        activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+        schedule=s,
+        on_trace_ready=trace_handler,
+        with_flops=True,
     ) as prof:
         for _ in range(10):
             torch.cuda.synchronize()
