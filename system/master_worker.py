@@ -132,6 +132,7 @@ async def model_rpc_func(
     # Expand scatter buffer if necessary
     _scatter_buffer_changed = False
     for k, buf_shape in buf_shapes.items():
+        # TODO: change to use GlobalMemoryBuffer
         if k not in scatter_buffer:
             logger.info(f"Create scatter buffer on master worker for {k} with shape {buf_shape}")
             scatter_buffer[k] = [
