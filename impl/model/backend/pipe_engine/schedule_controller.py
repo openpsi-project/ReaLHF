@@ -149,9 +149,10 @@ class EngineScheduleController:
                                     found = True
                                     bind_stage_ri.remove(bind_inst)
                             if not found:
-                                raise RuntimeError(f"Binded instruction {bind} of {inst} not ready.")
-                else:
-                    sched.update(stage_id)
+                                raise RuntimeError(
+                                    f"Binded instruction {b} of {inst} not ready. Current ready {ri}")
+                # else:
+                #     sched.update(stage_id)
 
     def __post_one_instruction(self, stage: int, sched_index: int, inst: PipeInstruction, end: bool):
         """ core, post one instruction to one stage
@@ -212,6 +213,7 @@ class EngineScheduleController:
                 completed += len(insts)
                 if signal_code == 1:  # terminate
                     this_prior_sched.terminate_signal_count += 1
+                    # print(f"terminate signal received {stage_id} {sched_id} {insts}")
                     sched.terminate_stage(stage_id)
                     # print(f"{this_prior_sched.index} count = {this_prior_sched.terminate_signal_count}")
                     if this_prior_sched.terminate_signal_count >= self.num_stages:

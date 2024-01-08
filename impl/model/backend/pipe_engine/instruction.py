@@ -255,20 +255,6 @@ class InstructionSet:
             return self.__storage.values()
         else:
             return list(self.__storage.values())
-        # res_set = set().union(*[s for s in self.__stage_sets.values()])
-
-        # res_list = list(res_set)
-        # for s in res_list:
-        #     r = PipeInstruction.decode(s)
-        #     deps = self.__deps_storage.get(s, None)
-        #     if deps is not None:
-        #         r.deps = deps
-        #     bind = self.__bind_storage.get(s, None)
-        #     if bind is not None:
-        #         r.bind = bind
-        #     res.append(r)
-        # res.sort()
-        # return res
 
     def __len__(self):
         return self.__size

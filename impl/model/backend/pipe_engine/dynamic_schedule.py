@@ -95,7 +95,11 @@ class DynamicPipeSchedule(ABC):
                 self.__executed.add(inst)
         # self.__update_ready()
 
-    def all_executed(self):
+    def all_executed(self, stage=None):
+        if stage is not None:
+            return self.__ready.size(stage) + self.__not_ready.size(stage) + self.__inflight.size(stage) == 0
+        # print(self.__ready.find(stage), self.__not_ready.find(stage), self.__inflight.find(stage))
+        # print(f"all executed: {len(self.__ready)} {len(self.__not_ready)} {len(self.__inflight)}")
         return len(self.__ready) + len(self.__not_ready) + len(self.__inflight) == 0
 
     def ready(self) -> Dict[int, List[PipeInstruction]]:
@@ -108,13 +112,19 @@ class DynamicPipeSchedule(ABC):
             self.__init_inst_set()
             self.__initialized = True
 
+        for stage in range(self.num_stages):
+            if self.all_executed(stage):
+                self.update(stage)
+
         self.__update_ready()
         r = dict()
         if self.all_executed() and not self.__end_schedule_sent:
             for i in range(self.num_stages):
                 if self.__stage_terminated[i]:
+                    # print(f"stage {i} already terminated")
                     r[i] = []
                 else:
+                    # print(f"stage {i} send end schedule")
                     inst = EndSchedule(stage_id=i, micro_batch_id=0)
                     r[i] = [inst]
             self.__end_schedule_sent = True
@@ -123,6 +133,7 @@ class DynamicPipeSchedule(ABC):
         for i in range(self.num_stages):
             r[i] = self.__ready.find(stage_id=i)
             # print(f"not ready: {self.__not_ready.find(stage_id=i)}")
+            # print(f"in flight: {self.__inflight.find(stage_id=i)}")
             for inst in r[i]:
                 self.__ready.remove(inst)
                 self.__inflight.add(inst)
@@ -135,23 +146,24 @@ class DynamicPipeSchedule(ABC):
     #         self.__ready.remove(inst)
     #         self.__inflight.add(inst)
 
-    def update(self, stage_id):
+    def update(self, stage_id=None):
         """ Called by controller to find new instructions for some stage_id
         """
         if self.__terminated:
             raise RuntimeError("Cannot update an already terminated schedule.")
-        if self.__not_ready.size(stage_id) == 0 and self.__inflight.size(stage_id) == 0:
-            new_instructions = self.update_instructions()
-            if len(new_instructions) > 0:
-                self.__not_ready.add(new_instructions)
-                # self.__update_ready()
-                return True
+        # if self.__not_ready.size(stage_id) == 0 and self.__inflight.size(stage_id) == 0:
+        new_instructions = self.update_instructions()
+        if len(new_instructions) > 0:
+            self.__not_ready.add(new_instructions)
+            # self.__update_ready()
+            return True
         return False
 
     def _is_update_ready(self, inst: PipeInstruction):
         """ check if an instruction is ready but not put into ready set
         """
         update_ready = all([self.__executed.contain(dep) for dep in inst.deps])
+        # print(f"inst {inst} deps {inst.deps} update ready {update_ready}")
         return update_ready
 
     def terminate_stage(self, stage_id):
@@ -163,7 +175,8 @@ class DynamicPipeSchedule(ABC):
         not_ready_list = self.__not_ready.find(stage_id=stage_id)
         self.__not_ready.remove(not_ready_list)
         inflight_list = self.__inflight.find(stage_id=stage_id)
-        assert len(inflight_list) == 0
+        assert len(inflight_list) == 0, f"stage {stage_id} terminated with inflight instructions {inflight_list}, "\
+                                        f"ready {ready_list}, not ready {not_ready_list}"
 
         self.__executed.add(ready_list + not_ready_list)
 
@@ -274,10 +287,11 @@ class GenerationSchedule(DynamicPipeSchedule):
         binded with SendNextTokens(stage_id=num_stages - 1, micro_batch_id=M, step_id=T)
     """
 
-    def __init__(self, steps_per_update=5, *args, **kwargs):
+    def __init__(self, steps_per_update=5, preserve_fwd_order=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.steps_per_update = steps_per_update
         self.remaining_steps = self.num_steps
+        self.preserve_fwd_order = preserve_fwd_order
 
     def __post_init__(self):
         assert self.num_micro_batches >= self.num_stages, \
@@ -303,8 +317,16 @@ class GenerationSchedule(DynamicPipeSchedule):
         for m, s, t in itertools.product(range(self.num_micro_batches), range(self.num_stages), range(st,
                                                                                                       et)):
             fwd_deps = []
+            # preserve forward order in generation, which is necessary for tensor parallel
+            if self.preserve_fwd_order:
+                if m > 0:
+                    fwd_deps.append(ForwardPass(stage_id=s, micro_batch_id=m - 1, step_id=t))
+                if m == 0 and t > 0:
+                    fwd_deps.append(
+                        ForwardPass(stage_id=s, micro_batch_id=self.num_micro_batches - 1, step_id=t - 1))
+
             if m > 0 and s == 0:
-                fwd_deps.append(SendActivation(stage_id=0, micro_batch_id=m - 1, step_id=t))
+                fwd_deps.append(SendActivation(stage_id=s, micro_batch_id=m - 1, step_id=t))
             if s == 0 and t > 0:
                 fwd_deps.append(RecvNextTokens(stage_id=0, micro_batch_id=m, step_id=t - 1))
             if s > 0:
@@ -324,7 +346,7 @@ class GenerationSchedule(DynamicPipeSchedule):
                     RecvActivation(stage_id=s, micro_batch_id=m, step_id=t, deps=rcv_deps, bind=rcv_bind))
 
             if s == self.num_stages - 1 and t < self.num_steps - 1:
-                snd_deps = [ForwardPass(stage_id=s, micro_batch_id=m, step_id=t)]
+                snd_deps = [ForwardPass(stage_id=self.num_stages - 1, micro_batch_id=m, step_id=t)]
                 snd_bind = [RecvNextTokens(stage_id=0, micro_batch_id=m, step_id=t)]
                 insts.append(
                     SendNextTokens(stage_id=self.num_stages - 1,

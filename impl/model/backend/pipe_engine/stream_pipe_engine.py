@@ -48,7 +48,14 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        assert base.constants.model_parallel_world_size() == 1, \
+               "Currently stream pipe engine with tensor parallel has synchronization problem when multiple "\
+               "schedules are issued. We have to keep the order between forward passes across tensor parallel ranks "\
+               "or there will be deadlocks. Fixing it with global controller across tensor parallel ranks may "\
+               "and force the order between forward passes will probably cause severe performance issue."
+        # TODO: FIX THIS
         self.pp_rank = base.constants.pipe_parallel_rank()
+
         self.engine_controller = None
         # self.engine_controller_started = False
         if self.pp_rank == 0:
@@ -220,10 +227,12 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                  tokenizer: transformers.PreTrainedTokenizerFast,
                  gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
                  num_micro_batches: Optional[int] = None) -> EngineFuture:
+        # is_model_parallel = base.constants.model_parallel_world_size() > 1
         sched = GenerationSchedule(num_micro_batches=num_micro_batches,
                                    num_stages=self.num_stages,
                                    num_steps=gconfig.max_new_tokens,
                                    steps_per_update=2,
+                                   preserve_fwd_order=False,
                                    sched_id=99)
         self.set_num_micro_batches(num_micro_batches)
         sched_index, f = self.start_schedule(sched, self.generate_priority)

@@ -141,7 +141,7 @@ def run_train_batch(rank, seed):
     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
     engine.enable_async_p2p()
 
-    os.environ["DLLM_TRACE"] = "1"
+    # os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(tracer_entries=int(2e6),
                         max_stack_depth=10,
                         ignore_c_function=False,
@@ -184,9 +184,9 @@ def run_generate(rank, seed):
     data = init_data(model.tokenizer, device, 2 * BATCH_SIZE, seed=seed)
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
-    engine.enable_async_p2p()
+    # engine.enable_async_p2p()
 
-    os.environ["DLLM_TRACE"] = "1"
+    # os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(
         tracer_entries=int(2e6),
         # max_stack_depth=10,
