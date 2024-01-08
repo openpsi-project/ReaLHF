@@ -3,6 +3,7 @@ import dataclasses
 import json
 import os
 import re
+import shutil
 
 from safetensors import safe_open
 from safetensors.torch import save_file as save_safetensors_file
@@ -93,20 +94,42 @@ def split_state_dict_into_shards(state_dict: Dict, n_shards: int) -> Dict:
         shard = {}
         for j in range(start, start + size):
             shard[keys[j]] = state_dict[keys[j]]
-            print(f"shard {i} key {keys[j]}")
+            # print(f"shard {i} key {keys[j]}")
         start += size
         shards.append(shard)
     return shards
 
 
+HF_MODEL_CONFIG_FILES = [
+    "config.json",
+    "generation_config.json",
+    "tokenizer_config.json",
+    "vocab.json",
+    "merges.txt",
+    "special_tokens_map.json",
+    "tokenizer.json",
+]
+
+
+def copy_hf_configs(src_model_dir, dst_model_dir):
+    for file in HF_MODEL_CONFIG_FILES:
+        try:
+            shutil.copy(os.path.join(src_model_dir, file), os.path.join(dst_model_dir, file))
+            print(f"copied {file} from {src_model_dir} to {dst_model_dir}")
+        except FileNotFoundError:
+            print(f"{file} not exist in {src_model_dir} skipping.")
+
+
 def save_to_disk(
-        state_dict: Dict[str, torch.Tensor],
-        output_dir: str,
-        output_fn: Optional[str] = None,
-        save_type: str = "pt",
-        n_shards: Optional[int] = None,
-        no_shard_suffix: bool = False,
-        max_shard_size_byte: int = int(1e10),
+    state_dict: Dict[str, torch.Tensor],
+    output_dir: str,
+    output_fn: Optional[str] = None,
+    save_type: str = "pt",
+    n_shards: Optional[int] = None,
+    no_shard_suffix: bool = False,
+    max_shard_size_byte: int = int(1e10),
+    with_hf_format: bool = False,
+    hf_base_model_path: Optional[str] = None,
 ):
     os.makedirs(output_dir, exist_ok=True)
     if n_shards is None:
@@ -146,14 +169,27 @@ def save_to_disk(
     shards = split_state_dict_into_shards(state_dict, n_shards)
     if save_type == "pt":
         assert output_fn.endswith("bin")
+        bin_index = {}
+        bin_index["metadata"] = dict(total_size=param_size)
+        bin_index['weight_map'] = {}
         for i, shard in enumerate(shards):
             torch.save(shard, os.path.join(output_dir, output_fn.format(shard=i + 1)))
+            for k in shard:
+                bin_index['weight_map'][k] = output_fn.format(shard=i + 1)
+        # NOTE: we may require this to call `from_pretrained` like huggingface models
+        if with_hf_format:
+            with open(os.path.join(output_dir, "pytorch_model.bin.index.json"), "w") as f:
+                json.dump(bin_index, f, indent=4)
     elif save_type == "st":
+        # NOTE: calling `from_pretrained` like huggingface models is not supported for safetensors now
         assert output_fn.endswith("safetensors")
         for i, shard in enumerate(shards):
             save_safetensors_file(shard, os.path.join(output_dir, output_fn.format(shard=i + 1)))
     else:
         raise NotImplementedError(f"save_type {save_type} is not supported")
+
+    if with_hf_format:
+        copy_hf_configs(hf_base_model_path, output_dir)
 
 
 def load_from_safetensors(model_dir: str,
