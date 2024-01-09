@@ -1,12 +1,10 @@
 from typing import Dict, Optional, Tuple
 import dataclasses
-import itertools
 
 import torch
 
-from base.namedarray import from_dict, NamedArray, recursive_apply
+from base.namedarray import NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
-from impl.model.interface.flash.ppo_flash_interface import _ppo_actor_loss_from_model_outputs
 from impl.model.interface.flash.sft_flash_interface import compute_packed_sft_loss
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 import api.model
@@ -23,6 +21,12 @@ logger = logging.getLogger("StreamPipeTestInterface")
 @dataclasses.dataclass
 class StreamPipeTestInterface(api.model.ModelInterface):
 
+    def __post_init__(self):
+        self._is_future_interface = True
+        self.register_post_hook("train_step", self.__collect_train_step)
+        self.register_post_hook("generate", self.__collect_generate)
+
+    @api.model.future_interface_pre_hooks
     def train_step(self,
                    model: api.model.Model,
                    data: NamedArray,
@@ -48,9 +52,9 @@ class StreamPipeTestInterface(api.model.ModelInterface):
                                     num_micro_batches=num_micro_batches,
                                     **loss_fn_kwargs)
 
-        return future, data
+        return future
 
-    def postprocess_train_step(self, model: api.model.Model, data: NamedArray, future: EngineFuture) -> Dict:
+    def __collect_train_step(self, model: api.model.Model, data: NamedArray, future: EngineFuture) -> Dict:
         loss, _ = future.result()
         module = model.module
 
@@ -64,6 +68,7 @@ class StreamPipeTestInterface(api.model.ModelInterface):
             res['loss'] = float(loss)
         return res
 
+    @api.model.future_interface_pre_hooks
     @torch.no_grad()
     def generate(self,
                  model: api.model.Model,
@@ -88,11 +93,9 @@ class StreamPipeTestInterface(api.model.ModelInterface):
             gconfig=gconfig,
             num_micro_batches=num_micro_batches,
         )
-        return future, data
+        return future
 
-    def postprocess_generate(self, model: api.model.Model, data: NamedArray, future: EngineFuture) -> Dict:
-        module = model.module
-        assert isinstance(module, StreamPipeEngine)
+    def __collect_generate(self, model: api.model.Model, data: NamedArray, future: EngineFuture) -> Dict:
         res = future.result()
         if res is not None:
             gen_tokens, logprobs, logits_mask, *_ = res

@@ -8,7 +8,7 @@ from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
 from impl.model.interface.flash.ppo_flash_interface import _ppo_actor_loss_from_model_outputs
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
-from impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
+from impl.model.utils.functional import masked_normalization
 import api.model
 import base.logging as logging
 import impl.model.utils.ppo_functional as ppo_functional
@@ -48,6 +48,10 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
     value_norm_eps: float = 1e-5
 
     def __post_init__(self):
+        self._is_future_interface = True
+        self.register_post_hook("train_step", self.__collect_train_step)
+        self.register_post_hook("generate", self.__collect_generate)
+
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
             assert self.adaptive_kl_horizon is not None
@@ -66,6 +70,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
 
+    @api.model.future_interface_pre_hook
     @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> Tuple[EngineFuture, NamedArray]:
         """ Returns future and data for post process
@@ -95,7 +100,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
         return future, data
 
     @torch.no_grad()
-    def postprocess_generate(self, model: api.model.Model, data: NamedArray, future: EngineFuture):
+    def __collect_generate(self, model: api.model.Model, data: NamedArray, future: EngineFuture):
         assert future.done()
         gen_tokens, logprobs, logits_mask, *_ = future.result()
 
@@ -169,6 +174,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
         )
         return from_dict(res)
 
+    @api.model.future_interface_pre_hook
     def train_step(self, model: api.model.Model, data: NamedArray) -> EngineFuture:
         module = model.module
         assert isinstance(module, StreamPipeEngine)
@@ -266,7 +272,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
 
         return future, global_stats
 
-    def postprocess_train_step(self, model: api.model.Model, data: NamedArray, future: EngineFuture):
+    def __collect_train_step(self, model: api.model.Model, data: NamedArray, future: EngineFuture):
         assert future.done()
         global_stats = data.to_dict()
         module = model.module

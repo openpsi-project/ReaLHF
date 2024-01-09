@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Any, Callable, Dict, Optional, Union
 import abc
 import dataclasses
@@ -68,7 +69,29 @@ class ModelBackend(abc.ABC):
         return self._initialize(model, spec)
 
 
+def future_interface_pre_hook(func):
+    """ Should be wrapped by all APIs that return future, store the data 
+    in the interface for post hook to use.
+    """
+
+    def wrapper(interface: ModelInterface, model: Model, data: NamedArray):
+        assert interface.is_future_interface
+        interface._hooks_data_storage[func.__name__] = data
+        return func(interface, model, data)
+
+    return wrapper
+
+
 class ModelInterface(abc.ABC):
+
+    def __init__(self):
+        self._is_future_interface = False
+        self._hooks = {}
+        self._hooks_data_storage = {}
+
+    @property
+    def is_future_interface(self):
+        return self._is_future_interface
 
     def save(self, model: Model, save_dir: str):
         pass
@@ -84,6 +107,29 @@ class ModelInterface(abc.ABC):
 
     def train_step(self, model: Model, data: NamedArray) -> Dict:
         raise NotImplementedError()
+
+    def register_post_hook(self, func_name: str, post_hook: Callable):
+        """ Register hook for API in the interface, only used in interfaces for StreamPipeEngine.
+        Hooks should be registered in the __post_init__ function of interface class.
+        Only one hook can be registered for each API, and for one API type, only one instance will be executing at a time.
+        Hooks should take model, data and future as input, and return a dict or namedarray as collected result.
+        
+        Args:
+            func_name (str): name of the function to be hooked, should be one of [
+                "evaluate", "inference", "generate", "train_step"
+            ]
+            post_hook (Callable): the function to be called after the original function.
+        """
+        assert self.is_future_interface
+        self._hooks[func_name] = post_hook
+
+    def execute_post_hook(self, func_name, model, future):
+        """ Execute resgitered hooks, only used in interfaces for StreamPipeEngine.
+        Execute in model worker after the futures of APIs are completed.
+        """
+        assert self.is_future_interface
+        f = self._hooks_data_storage.pop(func_name)
+        return f(model, self._hooks_data_storage[func_name], future)
 
 
 ALL_MODEL_CLASSES = {}
