@@ -3,6 +3,7 @@ import dataclasses
 import json
 import os
 import re
+import shutil
 
 from safetensors import safe_open
 from safetensors.torch import save_file as save_safetensors_file
@@ -18,6 +19,7 @@ import base.logging as logging
 logger = logging.getLogger("Model Save")
 
 
+################################ these functions are currently not used ################################
 def save_hf_format(
     model: transformers.PreTrainedModel,
     tokenizer: transformers.PreTrainedTokenizerFast,
@@ -73,16 +75,7 @@ def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
                                        f"epoch{model.version.epoch}step{model.version.epoch_step}"))
 
 
-def save_pipeline_model(model: api.model.Model, output_dir: str):
-    module = model.module
-    sub_folder = f"epoch{model.version.epoch}step{model.version.epoch_step}"
-    output_dir = os.path.join(output_dir, sub_folder)
-    os.makedirs(output_dir, exist_ok=True)
-    module.save(output_dir)
-    output_config_file = os.path.join(output_dir, "config.json")
-    config = dataclasses.asdict(module.config)
-    with open(output_config_file, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=4)
+################################ these functions are currently not used ################################
 
 
 def split_state_dict_into_shards(state_dict: Dict, n_shards: int, verbose: bool = False) -> Dict:
@@ -103,21 +96,42 @@ def split_state_dict_into_shards(state_dict: Dict, n_shards: int, verbose: bool 
         shard = {}
         for j in range(start, start + size):
             shard[keys[j]] = state_dict[keys[j]]
-            if verbose:
-                print(f"shard {i} key {keys[j]}")
+            # print(f"shard {i} key {keys[j]}")
         start += size
         shards.append(shard)
     return shards
 
 
+HF_MODEL_CONFIG_FILES = [
+    "config.json",
+    "generation_config.json",
+    "tokenizer_config.json",
+    "vocab.json",
+    "merges.txt",
+    "special_tokens_map.json",
+    "tokenizer.json",
+]
+
+
+def copy_hf_configs(src_model_dir, dst_model_dir):
+    for file in HF_MODEL_CONFIG_FILES:
+        try:
+            shutil.copy(os.path.join(src_model_dir, file), os.path.join(dst_model_dir, file))
+            print(f"copied {file} from {src_model_dir} to {dst_model_dir}")
+        except FileNotFoundError:
+            print(f"{file} not exist in {src_model_dir} skipping.")
+
+
 def save_to_disk(
-        state_dict: Dict[str, torch.Tensor],
-        output_dir: str,
-        output_fn: Optional[str] = None,
-        save_type: str = "pt",
-        n_shards: Optional[int] = None,
-        no_shard_suffix: bool = False,
-        max_shard_size_byte: int = int(1e10),
+    state_dict: Dict[str, torch.Tensor],
+    output_dir: str,
+    output_fn: Optional[str] = None,
+    save_type: str = "pt",
+    n_shards: Optional[int] = None,
+    no_shard_suffix: bool = False,
+    max_shard_size_byte: int = int(1e10),
+    with_hf_format: bool = False,
+    hf_base_model_path: Optional[str] = None,
 ):
     os.makedirs(output_dir, exist_ok=True)
     if n_shards is None:
@@ -157,14 +171,27 @@ def save_to_disk(
     shards = split_state_dict_into_shards(state_dict, n_shards)
     if save_type == "pt":
         assert output_fn.endswith("bin")
-        for i, shard in enumerate(tqdm.tqdm(shards, desc="Dumping pytorch state dict to disk...")):
+        bin_index = {}
+        bin_index["metadata"] = dict(total_size=param_size)
+        bin_index['weight_map'] = {}
+        for i, shard in enumerate(shards):
             torch.save(shard, os.path.join(output_dir, output_fn.format(shard=i + 1)))
+            for k in shard:
+                bin_index['weight_map'][k] = output_fn.format(shard=i + 1)
+        # NOTE: we may require this to call `from_pretrained` like huggingface models
+        if with_hf_format:
+            with open(os.path.join(output_dir, "pytorch_model.bin.index.json"), "w") as f:
+                json.dump(bin_index, f, indent=4)
     elif save_type == "st":
+        # NOTE: calling `from_pretrained` like huggingface models is not supported for safetensors now
         assert output_fn.endswith("safetensors")
         for i, shard in enumerate(tqdm.tqdm(shards, desc="Dumping safetensors to disk...")):
             save_safetensors_file(shard, os.path.join(output_dir, output_fn.format(shard=i + 1)))
     else:
         raise NotImplementedError(f"save_type {save_type} is not supported")
+
+    if with_hf_format:
+        copy_hf_configs(hf_base_model_path, output_dir)
 
 
 def load_from_safetensors(model_dir: str,
@@ -199,15 +226,40 @@ def load_from_pytorch(model_dir: str, ext: str = ".bin", pattern: Optional[str] 
     return state_dict, cnt
 
 
+@dataclasses.dataclass
+class CheckpointSpec:
+    mp_size: int
+    pp_size: int
+    n_shard: int
+
+
+def get_ckpt_spec(model_dir: str):
+    fns = list(os.listdir(model_dir))
+    max_mp_rank = 0
+    max_pp_rank = 0
+    max_n_shard = 0
+    for fn in fns:
+        if not re.match(r".*pp-(\d{2})-mp-(\d{2})-s-(\d{2}).*", fn):
+            continue
+        mp_rank = int(fn.split("-")[4])
+        if mp_rank > max_mp_rank:
+            max_mp_rank = mp_rank
+        pp_rank = int(fn.split("-")[2])
+        if pp_rank > max_pp_rank:
+            max_pp_rank = pp_rank
+        n_shard = int(fn.split("-")[6].split('.')[0])
+        if n_shard > max_n_shard:
+            max_n_shard = n_shard
+    return CheckpointSpec(max_mp_rank + 1, max_pp_rank + 1, max_n_shard + 1)
+
+
 def load_from_disk(
     model_dir: str,
     fn_pattern: Optional[str] = None,
     return_n_shards: bool = False,
-    load_all_mp_ranks: Optional[bool] = False,
 ) -> Dict:
-    # load_all_mp_ranks is only used by from_pipeline_module of FlashMQATModel
-    # when True, check if the checkpoints are stored by multiple mp ranks,
-    # if yes, return a list of state_dicts, otherwise return a single state_dict.
+    fns = list(os.listdir(model_dir))
+
     def load_model_dir_fn_pattern(model_dir, fn_pattern):
         if any(fn.endswith(".DLLMbin") for fn in fns):
             state_dict, n_shards = load_from_pytorch(model_dir, ext=".DLLMbin", pattern=fn_pattern)
@@ -217,75 +269,14 @@ def load_from_disk(
                                                          pattern=fn_pattern)
         elif any(fn.endswith(".bin") for fn in fns):
             state_dict, n_shards = load_from_pytorch(model_dir, pattern=fn_pattern)
+        # Load safetensors whenever possible, which is extremely fast.
         elif any(fn.endswith(".safetensors") for fn in fns):
             state_dict, n_shards = load_from_safetensors(model_dir, pattern=fn_pattern)
         else:
             logger.error(f"Cannot find any model file ending with `.bin` or `.safetensors` in {model_dir}.")
         return state_dict, n_shards
 
-    # Load safetensors whenever possible, which is extremely fast.
-    fns = list(os.listdir(model_dir))
-    if load_all_mp_ranks:
-        # transform mp state dicts to full pp statedict
-        state_dicts = []
-        n_shards = None
-        max_mp_rank = 0
-        for fn in fns:
-            if not re.match(r".*pp-(\d{2})-mp-(\d{2})-s-(\d{2}).*", fn):
-                continue
-            mp_rank = int(fn.split("-")[4])
-            if mp_rank > max_mp_rank:
-                max_mp_rank = mp_rank
-        if max_mp_rank == 0:
-            state_dict, n_shards = load_model_dir_fn_pattern(model_dir, fn_pattern)
-        else:
-            assert fn_pattern is None
-            for mp_rank in range(max_mp_rank + 1):
-                fn_pattern = r".*" + r"pp-(\d{2})" + f"-mp-{mp_rank:02d}-" + r"s-(\d{2}).*"
-                sd, n_shards = load_model_dir_fn_pattern(model_dir, fn_pattern)
-                state_dicts.append(sd)
-            # TODO: merge into one state dict, temp solution
-            embedding_keys = [".wte"]  # dim=0 no bias
-            column_linear_keys = [
-                ".attn.q_attn",
-                ".attn.k_attn",
-                ".attn.v_attn",
-                ".mlp.c_fc",
-                ".mlp.gate_proj",
-                ".mlp.up_proj",
-            ]  # dim=0 + partition bias
-            row_linear_keys = [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
-            state_dict = dict()
-            max_layers = 0
-            for k in state_dicts[0].keys():
-                i = int(k.split(".")[0])
-                max_layers = i if i > max_layers else max_layers
-                if any([ek in k for ek in embedding_keys]) and "weight" in k:
-                    state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
-                elif any([ck in k for ck in column_linear_keys]):
-                    state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
-                elif any([rk in k for rk in row_linear_keys]) and "weight" in k:
-                    state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=1)
-                else:
-                    state_dict[k] = state_dicts[0][k]
-            for i in range(1, max_layers):
-                for v in ["weight", "bias"]:
-                    q_key = f"{i}.attn.q_attn.{v}"
-                    k_key = f"{i}.attn.k_attn.{v}"
-                    v_key = f"{i}.attn.v_attn.{v}"
-                    c_attn_key = f"{i}.attn.c_attn.linear.weight"
-                    if q_key in state_dict:
-                        state_dict[c_attn_key] = torch.cat(
-                            [state_dict[q_key], state_dict[k_key], state_dict[v_key]], dim=0)
-                        state_dict.pop(q_key)
-                        state_dict.pop(k_key)
-                        state_dict.pop(v_key)
-                before_ln_key = f"{i}.attn.ln.weight"
-                after_ln_key = f"{i}.attn.c_attn.ln.weight"
-                state_dict[after_ln_key] = state_dict[before_ln_key]
-                state_dict.pop(before_ln_key)
-    else:
-        state_dict, n_shards = load_model_dir_fn_pattern(model_dir, fn_pattern)
+    state_dict, n_shards = load_model_dir_fn_pattern(model_dir, fn_pattern)
     if return_n_shards:
         return state_dict, n_shards
     return state_dict

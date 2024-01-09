@@ -19,14 +19,14 @@ from base.monitor import time_mark
 from base.namedarray import NamedArray
 from base.topology import PipelineParallelGrid
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig, genstep
+from impl.model.parallelism.pipeline_parallel.pipeline_module import PipelineError, PipelineModule
+from impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-from impl.model.utils.pipeline_module import PipelineError, PipelineModule
 from impl.model.utils.tensor import pad_sequence_parallel_generate_input, pad_sequence_parallel_input
-from impl.model.utils.tensor_storage import TensorBuffer
 import base.constants
 import base.logging as logging
 import impl.model.backend.pipe_engine.static_schedule as schedule
-import impl.model.utils.p2p as p2p
+import impl.model.parallelism.pipeline_parallel.p2p as p2p
 
 logger = logging.getLogger("DeepSpeedPipelineEngine", "benchmark")
 
@@ -75,7 +75,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.stage_id = self.grid.get_stage_id()
         self.dp_id = self.grid.get_data_parallel_id()
         self.num_micro_batches = num_micro_batches if num_micro_batches else self.num_stages
-        # num_micro_batches is configurable, default value: 2 * num_stages
+        # num_micro_batches is configurable, default value: num_stages
         self.num_layers = self.module.num_layers  # number of leyers in current pipeline stage
 
         # PipelineEngine needs to handle data loading specially due to only the first
@@ -95,7 +95,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # storages
         self.tensor_buffer = TensorBuffer()
 
-        # TODO: add activation checkpoints
         # schedule execution states
         self.tokenizer = None
         self.current_gconfig = None
@@ -213,11 +212,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         mb_seq_lens = []
 
         def input_to_pipe_model_input(input: NamedArray, mbid: int):
-            max_seqlen = torch.tensor(int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))).cuda()
+            max_seqlen = int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))
             store_kv_cache = self._generate_mode
 
-            cu_seqlens = input.cu_seqlens.to(self.device)
-            packed_input_ids = input.packed_input_ids.to(self.device)
+            cu_seqlens = input.cu_seqlens
+            packed_input_ids = input.packed_input_ids
 
             # sequence parallel input padding
             if self.sequence_parallel:
@@ -232,7 +231,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                                                                                                             max_seqlen)
                     self.tensor_buffer.put("pad_size", mbid, pad_size)
                     self.tensor_buffer.put("pad_seq_size", mbid, pad_seq_size)
-            x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=store_kv_cache)
+            x = PipeTransferData(cu_seqlens=cu_seqlens.int(),
+                                 max_seqlen=int(max_seqlen),
+                                 store_kv_cache=store_kv_cache)
             if self.is_first_stage():
                 ys = [PipeCacheData(input_ids=packed_input_ids)
                       ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
@@ -249,22 +250,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             self.tensor_buffer.put("batch_input_x", mbid, x)
             self.tensor_buffer.put("batch_input_ys", mbid, ys)
             self.tensor_buffer.put("batch_lengths", mbid, x.cu_seqlens.shape[0] - 1)
+            self.tensor_buffer.put("mb_seq_lens", mbid, mb_seq_lens[mbid])
 
         # pre allocate receive buffers and pre store other information
         for mbid, batch in enumerate(batches):
-            # print(f"tensor buffer alloc {mbid} {(mb_seq_lens[mbid], self.hidden_dim)}")
-            activation_shape = (mb_seq_lens[mbid], self.hidden_dim)
-            self.tensor_buffer.alloc("activation",
-                                     mbid,
-                                     activation_shape,
-                                     self.dtype,
-                                     self.device,
-                                     require_grads=self._train_mode)
-
-            if self._train_mode:
-                self.tensor_buffer.alloc("grad", mbid, activation_shape, self.dtype, self.device)
-            others_cache = dict(cu_seqlens=batch[0].cu_seqlens,
-                                max_seqlen=batch[0].max_seqlen,
+            others_cache = dict(cu_seqlens=batch[0].cu_seqlens.int(),
+                                max_seqlen=int(batch[0].max_seqlen),
                                 store_kv_cache=batch[0].store_kv_cache)
             self.tensor_buffer.put("pipe_transfer_infos", mbid, others_cache)
 
@@ -314,6 +305,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.tensor_buffer.remove("batch_input_x")
         self.tensor_buffer.remove("batch_input_ys")
         self.tensor_buffer.remove("input_cache")
+        self.tensor_buffer.remove("first_token")
 
     def _set_eval_batch_states(self):
         self._compute_loss = True
@@ -487,7 +479,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             stats = []
 
             for mbid in range(self.num_micro_batches):
-                loss = self.tensor_buffer.get("losses", mbid).detach()
+                loss = self.tensor_buffer.get("losses", mbid)  # .detach()
                 losses.append(loss)
                 stats.append(self.tensor_buffer.get("stats", mbid))
 
@@ -793,8 +785,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         output_x = self.tensor_buffer.get("batch_output_x", micro_batch_id, remove=True)
 
         if self.is_last_stage():
-            loss = self.tensor_buffer.get("losses", micro_batch_id, remove=False)
+            loss = self.tensor_buffer.get("losses", micro_batch_id, remove=True)
             super().backward(loss)
+            self.tensor_buffer.put("losses", micro_batch_id, loss.detach().clone())
             return
 
         if self.bfloat16_enabled() and not self.is_last_stage():
@@ -860,11 +853,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
 
     def _exec_send_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
-        # x: PipeTransferData = self.tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
-        # activation = x.pp_input
         assert self._train_mode, "_exec_send_grads() should be only executed in train mode."
         assert not self.is_first_stage()
-        activation = self.tensor_buffer.get("activation", micro_batch_id, remove=False)
+        activation = self.tensor_buffer.get("activation", micro_batch_id, remove=True)
         assert activation.grad is not None
         handle = p2p.send(activation.grad, self.prev_stage, async_op=self._async_p2p)
         if self._async_p2p:
@@ -905,11 +896,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             self.tensor_buffer.put("recv_next_tokens_handle", micro_batch_id, handle)
         self.tensor_buffer.put("recv_next_tokens_buf", micro_batch_id, recv_buf)
 
-        # recvd = recv_buf.clone().detach()
-        # self.tensor_buffer.put("next_tokens_cache", micro_batch_id, recvd)
         x = PipeTransferData(store_kv_cache=True)
-        # others_cache = dict(store_kv_cache=True)
-        # self.tensor_buffer.put("pipe_transfer_infos", micro_batch_id, others_cache)
         self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
 
         # ys = self.tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)

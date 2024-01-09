@@ -3,7 +3,9 @@ from typing import Dict, List, Optional, Union
 import asyncio
 import copy
 import dataclasses
+import gc
 import getpass
+import itertools
 import os
 import re
 import sys
@@ -175,6 +177,7 @@ async def scatter_tensor_to_mws(
         buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s[k]) for s in all_shapes])
 
     # Expand scatter buffer if necessary
+    _scatter_buffer_changed = False
     for k, buf_shape in buf_shapes.items():
         if k not in scatter_buffer or (k in scatter_buffer and
                                        not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k][0].shape)):
@@ -187,6 +190,22 @@ async def scatter_tensor_to_mws(
             scatter_buffer[k] = [
                 torch.empty(buf_shape, dtype=dtypes[k], device=device) for _ in range(len(datas) + 1)
             ]
+            _scatter_buffer_changed = True
+        elif k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k][0].shape):
+            logger.info(f"Resize scatter buffer on master worker for {k}"
+                        f" from {scatter_buffer[k][0].shape} to {buf_shape}")
+            new_x = []
+            for x in scatter_buffer[k]:
+                padding = tuple(
+                    itertools.chain.from_iterable(
+                        reversed([(0, s2 - s1) for s1, s2 in zip(x.shape, buf_shape)])))
+                new_x.append(torch.nn.functional.pad(x, pad=padding, mode="constant", value=0))
+            scatter_buffer[k] = new_x
+            _scatter_buffer_changed = True
+    if _scatter_buffer_changed:
+        gc.collect()
+        torch.cuda.empty_cache()
+        gc.collect()
 
     # Put data into scatter buffer
     for i, data in enumerate(datas):
@@ -307,6 +326,7 @@ async def gather_tensor_from_mws(
                 assert buf_shapes[k] == all_buf_shapes[0][k]
 
         # Expand gather buffer if necessary.
+        _gather_buffer_changed = False
         for k, buf_shape in buf_shapes.items():
             if k not in gather_buffer or (k in gather_buffer and not base.numpy_utils.shape_leq(
                     buf_shape, gather_buffer[k][0].shape)):
@@ -322,6 +342,23 @@ async def gather_tensor_from_mws(
                     torch.empty(buf_shape, dtype=responses[0].dtypes[k], device=device)
                     for _ in range(dp_size + 1)
                 ]
+                _gather_buffer_changed = True
+            elif k in gather_buffer and not base.numpy_utils.shape_leq(buf_shape, gather_buffer[k][0].shape):
+                logger.info(
+                    f"Resize gather buffer on master worker for {k} from {gather_buffer[k][0].shape} to {buf_shape}"
+                )
+                new_x = []
+                for x in gather_buffer[k]:
+                    padding = tuple(
+                        itertools.chain.from_iterable(
+                            reversed([(0, s2 - s1) for s1, s2 in zip(x.shape, buf_shape)])))
+                    new_x.append(torch.nn.functional.pad(x, pad=padding, mode="constant", value=0))
+                gather_buffer[k] = new_x
+                _gather_buffer_changed = True
+        if _gather_buffer_changed:
+            gc.collect()
+            torch.cuda.empty_cache()
+            gc.collect()
 
         for k in gather_buffer:
             assert len(gather_buffer[k]) == dp_size + 1

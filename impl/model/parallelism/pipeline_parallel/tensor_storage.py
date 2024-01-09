@@ -3,9 +3,8 @@ from typing import Any, List, Optional, Tuple
 
 import torch
 
-from impl.model.utils.data import PipeCacheData, PipeTransferData
 import base.logging as logging
-import impl.model.utils.p2p as p2p
+import impl.model.parallelism.pipeline_parallel.p2p as p2p
 
 logger = logging.getLogger("tensor_utils")
 
@@ -42,6 +41,7 @@ class TensorBuffer:
               device: torch.device,
               require_grads: bool = False):
         self.tensors[name][mbid] = torch.zeros(shape, dtype=dtype, device=device, requires_grad=require_grads)
+        return self.tensors[name][mbid]
 
     def get(self, name: str, mbid: int, remove: bool = False, raise_error: bool = True):
         try:

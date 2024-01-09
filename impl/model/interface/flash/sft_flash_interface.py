@@ -8,10 +8,14 @@ import tqdm
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.utils.functional import gather_packed_shifted_log_probs
-from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
+from impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
+from impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
+                                         gather_packed_shifted_log_probs)
+from impl.model.utils.save_load import save_hf_or_lora_model
 import api.data
 import api.model
+import base.constants
+import base.dataparallel
 
 try:
     from flash_attn.bert_padding import unpad_input
@@ -27,16 +31,12 @@ def compute_packed_sft_loss(
     **kwargs,
 ) -> torch.Tensor:
     # **kwargs is used to ensure the correctness of invoking this function
-    logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids)
-    shift_one_indices = torch.cat([
-        torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
-        for i in range(cu_seqlens.shape[0] - 1)
-    ])
+    shift_one_indices = build_shift_one_indices(logits, cu_seqlens)
+    logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids).float()
     prompt_mask = prompt_mask[shift_one_indices]
     # float16 will overflow here
-    loss = -torch.where(prompt_mask, 0, logprobs.float()).sum() / (prompt_mask.numel() -
-                                                                   prompt_mask.count_nonzero())
-    return loss, {"loss": loss.detach().cpu()}
+    loss = -torch.where(prompt_mask, 0, logprobs).sum() / (prompt_mask.numel() - prompt_mask.count_nonzero())
+    return loss, {"loss": loss.detach()}
 
 
 class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
@@ -57,13 +57,14 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 input_lens=cu_seqlens[1:] -
                 cu_seqlens[:-1],  # this is used to partition other loss_fn_kwargs into microbatches
             )
-            loss, _ = module.train_batch(packed_input_ids=packed_input_ids,
-                                         cu_seqlens=cu_seqlens,
-                                         loss_fn=compute_packed_sft_loss,
-                                         **loss_fn_kwargs)
+            loss, _ = module.train_batch(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                loss_fn=compute_packed_sft_loss,
+                **loss_fn_kwargs,
+            )
         else:
-            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-                            max_seqlen=max_seqlen).logits
+            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
             loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
             module.backward(loss)
             module.step()
@@ -79,10 +80,10 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         return res
 
     def save(self, model: api.model.Model, save_dir: str):
-        if isinstance(model.module, DeepSpeedPipelineEngine):
-            save_pipeline_model(model, save_dir)
-        else:
-            save_hf_or_lora_model(model, save_dir)
+        model.module.save(save_dir,
+                          epoch=model.version.epoch,
+                          epoch_step=model.version.epoch_step,
+                          global_step=model.version.global_step)
 
     @torch.inference_mode()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
@@ -95,9 +96,9 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
 
         for step, data in enumerate(tqdm.tqdm(eval_dataloader)):
             data = recursive_apply(from_dict(data), lambda x: x.to(device))
-            packed_input_ids: torch.Tensor = data['packed_input_ids']  # shape [tot_seqlen]
-            cu_seqlens: torch.Tensor = data['cu_seqlens']
-            prompt_mask: torch.BoolTensor = data['prompt_mask']  # shape [tot_seqlen]
+            packed_input_ids: torch.Tensor = data["packed_input_ids"]  # shape [tot_seqlen]
+            cu_seqlens: torch.Tensor = data["cu_seqlens"].int()
+            prompt_mask: torch.BoolTensor = data["prompt_mask"]  # shape [tot_seqlen]
             max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
             if isinstance(module, DeepSpeedPipelineEngine):
@@ -112,7 +113,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
             else:
                 logits = module(packed_input_ids=packed_input_ids,
                                 cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen).logits
+                                max_seqlen=max_seqlen)
                 loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
 
             if loss is not None:
@@ -129,25 +130,23 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
             return dict(ppl=perplexity)
         return res
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> Dict:
         device = model.device
         module = model.module
         module.eval()
 
         data = recursive_apply(data, lambda x: x.to(device))
-        packed_input_ids: torch.Tensor = data['packed_input_ids']
-        cu_seqlens: torch.Tensor = data['cu_seqlens']
-        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
+        packed_input_ids: torch.Tensor = data["packed_input_ids"]
+        cu_seqlens: torch.Tensor = data["cu_seqlens"]
+        max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
 
         if isinstance(module, DeepSpeedPipelineEngine):
             logits = module.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
-            if logits is not None:
-                logits = logits
         else:
             logits = model.module(packed_input_ids=packed_input_ids,
                                   cu_seqlens=cu_seqlens,
-                                  max_seqlen=max_seqlen).logits
+                                  max_seqlen=max_seqlen)
         return dict(logits=logits)
 
     # for testing only

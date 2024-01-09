@@ -3,6 +3,7 @@ import dataclasses
 import queue
 
 import torch
+import torch.distributed
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
@@ -12,6 +13,7 @@ from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATM
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import mask_eos_token
 from impl.model.utils.logits_warper import top_k_top_p_logits
+import base.constants
 import base.logging as logging
 
 try:
@@ -62,6 +64,10 @@ def genstep(
             unfinished_sequences: Bool tensor indicator of whether a sequence is finished.
                 Shape [bs].
     """
+    if base.constants.model_parallel_world_size() > 1:
+        from impl.model.parallelism.model_parallel.mappings import gather_from_tensor_model_parallel_region
+        next_token_logits = gather_from_tensor_model_parallel_region(next_token_logits)
+
     unfinished_sequences = unfinished_sequences.bool()
     next_token_logits = next_token_logits.float()
     if isinstance(generated_idx, int):
@@ -91,6 +97,18 @@ def genstep(
     next_tokens = distrb.mode if gconfig.greedy else distrb.sample()
     logprob = distrb.log_prob(next_tokens)
 
+    if base.constants.model_parallel_world_size() > 1:
+        if base.constants.model_parallel_rank() > 0:
+            logprob[:] = 0
+            next_tokens[:] = 0
+        handle = torch.distributed.all_reduce(logprob,
+                                              torch.distributed.ReduceOp.SUM,
+                                              async_op=True,
+                                              group=base.constants.model_parallel_group())
+        torch.distributed.all_reduce(next_tokens,
+                                     torch.distributed.ReduceOp.SUM,
+                                     group=base.constants.model_parallel_group())
+
     if tokenizer.eos_token_id is not None:
         if tokenizer.pad_token_id is None:
             raise ValueError("If `eos_token_id` is defined, make sure that `pad_token_id` is defined.")
@@ -109,6 +127,9 @@ def genstep(
     logits_mask = next_token_logits != torch.finfo(next_token_logits.dtype).min
     if logits_mask.all():
         logits_mask = None
+
+    if base.constants.model_parallel_world_size() > 1:
+        handle.wait()
 
     return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
 

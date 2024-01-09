@@ -9,7 +9,7 @@ import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-from impl.model.utils.save_load import save_hf_or_lora_model, save_pipeline_model
+from impl.model.utils.save_load import save_hf_or_lora_model
 import api.model
 import base.logging as logging
 
@@ -47,8 +47,8 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
     @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_input_ids: torch.Tensor = data["packed_input_ids"].squeeze()
-        cu_seqlens: torch.Tensor = data["cu_seqlens"].squeeze()
+        packed_input_ids: torch.Tensor = data["packed_input_ids"]
+        cu_seqlens: torch.Tensor = data["cu_seqlens"].int()
 
         module: deepspeed.DeepSpeedEngine = model.module
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
@@ -87,7 +87,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
         input_lens: torch.Tensor = data["pair_input_lens"]
         group_factor: torch.Tensor = data["group_factor"]
-        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0)
+        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
         module = model.module
@@ -135,20 +135,10 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
     def save(self, model: api.model.Model, output_dir):
         if not self.enable_save:
             return
-        from impl.model.nn.lora import is_lora_model
-
-        if isinstance(model.module, DeepSpeedPipelineEngine):
-            save_pipeline_model(model, output_dir)
-        else:
-            save_hf_or_lora_model(model, output_dir)
-            if is_lora_model(model.module):
-                save_path = os.path.abspath(
-                    os.path.join(
-                        output_dir,
-                        f"epoch{model.version.epoch}step{model.version.epoch_step}",
-                    ))
-                os.makedirs(save_path, exist_ok=True)
-                torch.save(model.module.module.head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
+        model.module.save(output_dir,
+                          epoch=model.version.epoch,
+                          epoch_step=model.version.epoch_step,
+                          global_step=model.version.global_step)
 
     @torch.no_grad()
     def evaluate(self, model_: api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
@@ -166,7 +156,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
             packed_input_ids: torch.Tensor = data["packed_input_ids"]
             input_lens: torch.Tensor = data["pair_input_lens"]
             group_factor: torch.Tensor = data["group_factor"]
-            cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0)
+            cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
             max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
             if isinstance(model, DeepSpeedPipelineEngine):

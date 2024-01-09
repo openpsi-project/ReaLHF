@@ -11,8 +11,7 @@ import torch.utils.checkpoint
 import transformers
 
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBase, FlashMQATBlock, FlashMQATConfig,
-                                                      FlashMQATModel)
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel
 from impl.model.utils.data import DuckGenerationOutput, DuckModelOutput, PipeCacheData, PipeTransferData
 from impl.model.utils.save_load import load_from_disk
 import api.huggingface
@@ -28,47 +27,9 @@ import base.logging as logging
 logger = logging.getLogger("FlashMQAT Interface")
 
 
-class HuggingfaceLikeFlashMQATForCausalLM(FlashMQATModel):
-    """__call__ on this model will return a huggingface-like output."""
-
-    def __init__(
-        self,
-        config: FlashMQATConfig,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
-        **kwargs,
-    ):
-        super().__init__(config, is_critic=False, dtype=dtype, device=device)
-
-    def forward(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        packed_input_ids: Optional[torch.Tensor] = None,
-        cu_seqlens: Optional[torch.Tensor] = None,
-        max_seqlen: Optional[int] = None,
-    ) -> DuckModelOutput:
-        assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)
-        build_packed = False
-        if packed_input_ids is None and attention_mask is not None:
-            batch_size, seqlen = input_ids.shape
-            packed_input_ids, indices, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
-            build_packed = True
-        if packed_input_ids is not None:
-            x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            ys = [PipeCacheData(input_ids=packed_input_ids)
-                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
-        else:
-            x = PipeTransferData()
-            ys = [PipeCacheData(input_ids=input_ids)
-                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
-        logits = FlashMQATModel.forward(self, x, ys).pp_output
-        if build_packed:
-            logits = pad_input(logits, indices, batch_size, seqlen)
-        return DuckModelOutput(logits=logits)
-
-    def generate(
-        self,
+# a helper function to make flash_mqat look like huggingface model
+def generate_helper(
+        self: FlashMQATModel,
         tokenizer: transformers.PreTrainedTokenizerFast,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
@@ -76,74 +37,67 @@ class HuggingfaceLikeFlashMQATForCausalLM(FlashMQATModel):
         v_caches: Optional[List[torch.Tensor]] = None,
         cache_seqlens: Optional[torch.Tensor] = None,
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
-    ) -> DuckGenerationOutput:
-        current_forward = self.forward
-        self.forward = functools.partial(FlashMQATModel.forward, self)
-        seq, scores, mask, _, _ = generate(
-            self,
-            tokenizer,
-            input_ids,
-            attention_mask,
-            k_caches,
-            v_caches,
-            cache_seqlens,
-            gconfig,
-        )
-        self.forward = current_forward
-        return DuckGenerationOutput(seq, scores, mask)
-
-
-class DeepSpeedChatLikeFlashMQATCriticModel(FlashMQATModel):
-
-    def __init__(
+) -> DuckGenerationOutput:
+    current_forward = self.forward
+    self.forward = functools.partial(FlashMQATModel.forward, self)
+    seq, scores, mask, _, _ = generate(
         self,
-        config: FlashMQATConfig,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
-        **kwargs,
-    ):
-        super().__init__(config, is_critic=True, dtype=dtype, device=device)
+        tokenizer,
+        input_ids,
+        attention_mask,
+        k_caches,
+        v_caches,
+        cache_seqlens,
+        gconfig,
+    )
+    self.forward = current_forward
+    return DuckGenerationOutput(seq, scores, mask)
 
-    def forward(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        packed_input_ids: Optional[torch.Tensor] = None,
-        cu_seqlens: Optional[torch.Tensor] = None,
-        max_seqlen: Optional[int] = None,
-    ) -> DuckModelOutput:
-        assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)
-        build_packed = False
-        if packed_input_ids is None and attention_mask is not None:
-            build_packed = True
-            packed_input_ids, indices, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
-            batch_size, seqlen = input_ids
-        if packed_input_ids is not None:
-            x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            ys = [PipeCacheData(input_ids=packed_input_ids)
-                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
-        else:
-            x = PipeTransferData()
-            ys = [PipeCacheData(input_ids=input_ids)
-                  ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
-        scores = FlashMQATModel.forward(self, x, ys).pp_output
-        if build_packed:
-            scores = pad_input(scores, indices, batch_size, seqlen)
-        return scores
+
+# a helper function to make flash_mqat look like huggingface model
+def forward_helper(
+    self: FlashMQATModel,
+    input_ids: Optional[torch.Tensor] = None,
+    attention_mask: Optional[torch.Tensor] = None,
+    packed_input_ids: Optional[torch.Tensor] = None,
+    cu_seqlens: Optional[torch.Tensor] = None,
+    max_seqlen: Optional[int] = None,
+) -> DuckModelOutput:
+    assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)
+    build_packed = False
+    if packed_input_ids is None and attention_mask is not None:
+        build_packed = True
+        packed_input_ids, indices, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+        batch_size, seqlen = input_ids.shape[:2]
+    if packed_input_ids is not None:
+        x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+        ys = [PipeCacheData(input_ids=packed_input_ids)
+              ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+    else:
+        x = PipeTransferData()
+        ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+    scores = FlashMQATModel.forward(self, x, ys).pp_output
+    if build_packed:
+        scores = pad_input(scores, indices, batch_size, seqlen)
+    return scores
+
+
+def add_helper_functions(m: FlashMQATModel):
+    m.forward = functools.partial(forward_helper, m)
+    m.generate = functools.partial(generate_helper, m)
+    return m
 
 
 def make_flash_model(
-    module_cls: FlashMQATModel,
     name: str,
     device: torch.device,
     model_path: str,
-    no_param_instantiation: bool = False,
-    dtype: Optional[str] = None,  # here dtype is string because it is passed from config
-    # which do not import torch
-    from_type: str = "starcoder",
+    from_type: str,
+    dtype: Optional[str] = None,
+    hf_model_type: Optional[str] = None,
     tokenizer_path: Optional[str] = None,
-    init_from_scratch: bool = False,
-    v_head_path: Optional[str] = None,
+    sequence_parallel: bool = False,
+    gradient_accumulation_fusion: bool = False,
 ) -> api.model.Model:
     if dtype == "fp16" or dtype == None:
         dtype = torch.float16
@@ -153,67 +107,106 @@ def make_flash_model(
         dtype == torch.float32
     else:
         raise NotImplementedError(f"Unsupported dtype {dtype}")
-    is_critic = module_cls == DeepSpeedChatLikeFlashMQATCriticModel
-    if from_type == "self":
-        # Initialize from a self-trained model, e.g., PPO actor loading SFT model.
-        net = FlashMQATModel.from_pretrained(
-            model_path=model_path,
-            init_from_scratch=init_from_scratch,
-            is_critic=is_critic,
-            dtype=dtype,
-            device=device,
-            no_param_instantiation=no_param_instantiation,
-        )
-        if tokenizer_path is None:
-            raise ValueError("tokenizer_path must be provided when from_type is 'self'.")
-        tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
-    elif from_type == "pipe":
-        # Merge weights of the pipeline model into a single one, probably used for inference.
-        if init_from_scratch or no_param_instantiation:
-            raise ValueError("init_from_scratch must be False when from_type is 'pipe'.")
-        net = FlashMQATModel.from_pipeline_module(model_path=model_path,
-                                                  is_critic=is_critic,
-                                                  dtype=dtype,
-                                                  device=device)
-        if tokenizer_path is None:
-            raise ValueError("tokenizer_path must be provided when from_type is 'self'.")
-        tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
-    elif from_type == "sft":
-        # Special load for reward model loading from SFT. The value head will be re-initialized.
-        if not is_critic:
-            raise RuntimeError("from_type 'sft' is only supported for critic model.")
-        with open(os.path.join(model_path, "config.json"), "r") as f:
-            config = FlashMQATConfig(**json.load(f))
-        net = module_cls(
-            config,
-            no_param_instantiation=no_param_instantiation,
-            dtype=dtype,
-            device=device,
-        )
-        if not init_from_scratch and not no_param_instantiation:
-            state_dict = load_from_disk(model_path)
-            state_dict["head.weight"] = net.state_dict()["head.weight"]
-            net.load_state_dict(state_dict)
-        tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
-    else:
+
+    tokenizer = None
+    if from_type == "hf_as_critic":
         # Convert a HuggingFace model into FlashMQAT.
-        net = getattr(FlashMQATModel, f"from_{from_type}")(model_path=model_path,
-                                                           dtype=dtype,
-                                                           device=device,
-                                                           is_critic=is_critic,
-                                                           no_param_instantiation=no_param_instantiation,
-                                                           init_from_scratch=init_from_scratch)
+        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
+            model_path=model_path,
+            dtype=dtype,
+            device=device,
+            is_critic=True,
+            no_param_instantiation=False,
+            init_from_scratch=False,
+            sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+        )
         tokenizer = api.huggingface.load_hf_tokenizer(model_path)
-    if not isinstance(net, module_cls):
-        net.forward = functools.partial(module_cls.forward, net)
-        if hasattr(module_cls, "generate"):
-            net.generate = functools.partial(module_cls.generate, net)
-    if v_head_path is not None and not init_from_scratch:
-        net.head.load_state_dict(torch.load(v_head_path, map_location="cpu"))
-    return api.model.Model(name, net, tokenizer, device, dtype=dtype)
+    elif from_type == "hf_as_actor":
+        # Convert a HuggingFace model into FlashMQAT.
+        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
+            model_path=model_path,
+            dtype=dtype,
+            device=device,
+            is_critic=False,
+            no_param_instantiation=False,
+            init_from_scratch=False,
+            sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+        )
+        tokenizer = api.huggingface.load_hf_tokenizer(model_path)
+    elif from_type == "actor_as_critic":
+        # initialize a critic from actor
+        with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
+            config = FlashMQATConfig(**json.load(f))
+        config.is_critic = True
+        config.sequence_parallel = sequence_parallel
+        config.gradient_accumulation_fusion = gradient_accumulation_fusion
+        m = FlashMQATModel(config=config, no_param_instantiation=False, dtype=dtype, device=device)
+        m.load(model_path, init_critic_from_actor=True)
+    elif from_type == "random_actor":
+        # randomly initialize a actor
+        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
+            model_path=tokenizer_path,
+            dtype=dtype,
+            device=device,
+            is_critic=False,
+            no_param_instantiation=False,
+            init_from_scratch=True,
+            sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+        )
+    elif from_type == "random_critic":
+        # randomly initialize a critic
+        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
+            model_path=tokenizer_path,
+            dtype=dtype,
+            device=device,
+            is_critic=True,
+            no_param_instantiation=False,
+            init_from_scratch=True,
+            sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+        )
+    elif from_type == "empty_actor":
+        # initialize an empty actor, probably used for pipeline module
+        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
+            model_path=tokenizer_path,
+            dtype=dtype,
+            device=device,
+            is_critic=False,
+            no_param_instantiation=True,
+            init_from_scratch=True,
+            sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+        )
+    elif from_type == "empty_critic":
+        # initialize a empty critic, probably used for pipeline module
+        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
+            model_path=tokenizer_path,
+            dtype=dtype,
+            device=device,
+            is_critic=True,
+            no_param_instantiation=True,
+            init_from_scratch=True,
+            sequence_parallel=sequence_parallel,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+        )
+    else:
+        # load a non-pipeline actor/critic
+        assert from_type == "self"
+        with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
+            config = FlashMQATConfig(**json.load(f))
+        config.sequence_parallel = sequence_parallel
+        config.gradient_accumulation_fusion = gradient_accumulation_fusion
+        m = FlashMQATModel(config=config, no_param_instantiation=False, dtype=dtype, device=device)
+        m.load(model_path, init_critic_from_actor=False)
+
+    if tokenizer is None:
+        tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
+
+    m = add_helper_functions(m)
+    return api.model.Model(name, m, tokenizer, device, dtype=dtype)
 
 
-api.model.register_model("flash_mqat_actor",
-                         functools.partial(make_flash_model, HuggingfaceLikeFlashMQATForCausalLM))
-api.model.register_model("flash_mqat_critic",
-                         functools.partial(make_flash_model, DeepSpeedChatLikeFlashMQATCriticModel))
+api.model.register_model("flash_mqat", make_flash_model)

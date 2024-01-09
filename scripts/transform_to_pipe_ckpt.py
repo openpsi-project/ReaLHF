@@ -8,8 +8,9 @@ import torch.nn as nn
 
 from base.datapack import partition_balanced as true_partition_balanced
 from impl.model.nn.flash_mqat.flash_mqat_base import *
-from impl.model.nn.flash_mqat.flash_mqat_parallel import *
-from impl.model.utils.pipeline_module import LayerSpec
+from impl.model.nn.flash_mqat.flash_mqat_parallel import (make_causal_flash_mqat_pipe_module,
+                                                          mp_partition_flash_mqat_state_dict)
+from impl.model.parallelism.pipeline_parallel.pipeline_module import LayerSpec
 from impl.model.utils.save_load import save_to_disk
 import base.constants
 
@@ -24,76 +25,32 @@ MODEL_CONFIG_FILES = [
 ]
 
 
-def get_layer_specs(config: FlashMQATConfig, to_critic, is_mp):
-    layer_specs = []
-    # vocab pos embedding
-    if not is_mp:
-        embedding_layer = LayerSpec(VocabPositionEmbedding, config, dtype=None, device=None)
-        layer_specs.append(embedding_layer)
-
-        for i in range(config.n_layers):
-            flash_mqat_block = LayerSpec(
-                FlashMQATBlock,
-                config,
-                layer_index=i,
-                output_layernorm=(i == config.n_layers - 1),
-                dtype=None,
-                device=None,
-            )
-            layer_specs.append(flash_mqat_block)
-    else:
-        embedding_layer = LayerSpec(ParallelVocabPositionEmbedding, config, dtype=None, device=None)
-        layer_specs.append(embedding_layer)
-        for i in range(config.n_layers):
-            flash_mqat_block = LayerSpec(
-                ParallelFlashMQATBlock,
-                config,
-                layer_index=i,
-                output_layernorm=(i == config.n_layers - 1),
-                dtype=None,
-                device=None,
-            )
-            layer_specs.append(flash_mqat_block)
-
-    head = LayerSpec(
-        OutputHead,
-        config.hidden_dim,
-        config.vocab_size if not to_critic else 1,
-        bias=False,
-        device=None,
-        dtype=None,
-    )
-    layer_specs.append(head)
-
-    return layer_specs
-
-
-def count_layer_params(layer_specs):
-    param_counts = [0] * len(layer_specs)
-    for idx, layer in enumerate(layer_specs):
-        if isinstance(layer, LayerSpec):
-            l = layer.build()
-            params = filter(lambda p: p.requires_grad, l.parameters())
-            param_counts[idx] = sum(p.numel() for p in params)
-        elif isinstance(layer, nn.Module):
-            params = filter(lambda p: p.requires_grad, layer.parameters())
-            param_counts[idx] = sum(p.numel() for p in params)
-        print(f"count_layer_params build layer {layer.typename.__name__}")
+def count_layer_params(num_layers: int, state_dict_list: List[Dict[str, torch.Tensor]]) -> List[int]:
+    param_counts = []
+    for i in range(num_layers):
+        cnt = 0
+        for sd in state_dict_list:
+            for k, v in sd.items():
+                if k.startswith(f"{str(i)}."):
+                    cnt += v.numel()
+        param_counts.append(cnt)
+    print(f"Count layer paramters: {param_counts}")
     return param_counts
 
 
-def partition_layers(layer_specs, num_stages, method="uniform"):
+def partition_layers(layer_specs, state_dict_list, num_stages, method="uniform"):
     # Each stage gets a simple uniform number of layers.
     parts = None
+    num_layers = len(layer_specs)
     if method == "uniform":
-        num_layers = len(layer_specs)
         parts = ds_utils.partition_uniform(num_items=num_layers, num_parts=num_stages)
     elif method == "parameters":
-        param_counts = count_layer_params(layer_specs)
+        param_counts = count_layer_params(num_layers, state_dict_list)
         parts = ds_utils.partition_balanced(weights=param_counts, num_parts=num_stages)
     elif method == "parameters_balanced":
-        param_counts = count_layer_params(layer_specs)
+        param_counts = count_layer_params(num_layers, state_dict_list)
         import numpy as np
+
         param_counts = np.array(param_counts)
         parts = true_partition_balanced(nums=param_counts, k=num_stages)
     else:
@@ -193,15 +150,16 @@ def main():
                         type=str,
                         default="/lustre/public/pretrained_model_weights/Llama-2-7b-hf")
     parser.add_argument("--model_type", type=str, default="llama")
-    parser.add_argument("--num_pp", type=int, default=4)
-    parser.add_argument("--num_mp", type=int, default=1)
+    parser.add_argument("--num_pp", type=int, default=2)
+    parser.add_argument("--num_mp", type=int, default=2)
     parser.add_argument("--num_shards", type=int, default=3)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--partition_method", type=str, default="parameters_balanced")
     parser.add_argument(
         "--to_critic",
         action="store_true",
-        help="transform actor model to critic model by changing the last layer, only for test purposes.")
+        help="transform actor model to critic model by changing the last layer, only for test purposes.",
+    )
     args = parser.parse_args()
     if args.partition_method == "parameters":
         logger.warning(
@@ -223,28 +181,28 @@ def main():
         output_dir = os.path.join(default_save_root, output_dir)
     else:
         output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
 
     # TODO: load and process full statedict by shard for large model that can not fit into memory
     cfg = None
     base.constants.set_fake_mp_world_size(args.num_mp)
     base.constants.set_fake_mp_rank(0)
+    cfg, state_dict = getattr(FlashMQATModel,
+                              f"config_and_param_from_{args.model_type}")(model_path=args.model_dir)
     if args.num_mp > 1:
-        args.model_type = f"parallel_{args.model_type}"
-        cfg, state_dict = getattr(FlashMQATModel, f"config_and_param_from_{args.model_type}")(
-            model_path=args.model_dir, load_model_parallel_as_list=True)
-        state_dict_list = [{k: v[mp_rank] for k, v in state_dict.items()} for mp_rank in range(args.num_mp)]
+        state_dict_list = mp_partition_flash_mqat_state_dict(state_dict, cfg, args.num_mp)
     else:
-        cfg, state_dict = getattr(FlashMQATModel,
-                                  f"config_and_param_from_{args.model_type}")(model_path=args.model_dir)
         state_dict_list = [state_dict]
 
     if args.num_pp > 1:
-        layer_specs = get_layer_specs(cfg, args.to_critic, is_mp=args.num_mp > 1)
-        state_dict_list = [FlashMQATModel.map_to_pipe_state_dict(cfg, sd) for sd in state_dict_list]
+        layer_specs = make_causal_flash_mqat_pipe_module(cfg,
+                                                         partition_method=args.partition_method,
+                                                         output_layer_specs_only=True)
         if args.to_critic:
             state_dict_list = [fit_state_dict_to_critic(len(layer_specs), sd) for sd in state_dict_list]
         print("loaded full state_dict")
         stage_to_layer_idx = partition_layers(layer_specs,
+                                              state_dict_list,
                                               num_stages=args.num_pp,
                                               method=args.partition_method)
         stage_to_state_dict_list = [
@@ -264,6 +222,8 @@ def main():
                 save_state_dict(shard, 0, mp_rank, shard_index, output_dir)
 
     copy_configs(args.model_dir, output_dir)
+    with open(os.path.join(output_dir, "flash_mqat_config.json"), "w") as f:
+        json.dump(dataclasses.asdict(cfg), f, indent=4)
 
 
 if __name__ == "__main__":

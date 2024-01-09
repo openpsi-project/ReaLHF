@@ -1,20 +1,36 @@
 import itertools
+import os
 import unittest
 
-import pytest
 import torch
 import transformers
 
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_api import HuggingfaceLikeFlashMQATForCausalLM
+from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
+from tests.utils import *
 import api.huggingface
+
+torch.cuda.manual_seed_all(1)
 
 
 class LlamaFlashMQATForwardTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        torch.cuda.set_device(0)
+        torch.distributed.init_process_group(
+            rank=0,
+            world_size=1,
+            backend="nccl",
+            init_method="tcp://localhost:7778",
+        )
+        os.environ["LOCAL_RANK"] = str(0)
+        import deepspeed
+
+        deepspeed.init_distributed()
+        init_global_constants(1, 1, 1)
+
         hf_path = "/lustre/public/pretrained_model_weights/deepseek-coder-6.7b-base"
         # hf_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
         # hf_path = "/lustre/public/pretrained_model_weights/codellama-13B"
@@ -35,9 +51,10 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
             dtype=torch.float16, device=device)
         cls.llama.eval()
 
-        cls.hf_like_model = HuggingfaceLikeFlashMQATForCausalLM.from_llama(from_model=cls.llama,
-                                                                           dtype=torch.float16,
-                                                                           device=device)
+        cls.hf_like_model = FlashMQATModel.from_llama(from_model=cls.llama,
+                                                      dtype=torch.float16,
+                                                      device=device)
+        cls.hf_like_model = add_helper_functions(cls.hf_like_model)
         cls.hf_like_model.eval()
         cls.config = cls.hf_like_model.config
 
@@ -53,7 +70,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         x2 = self.hf_like_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
-        ).logits
+        )
         if with_mask:
             x1 = x1 * attention_mask.unsqueeze(-1)
             x2 = x2 * attention_mask.unsqueeze(-1)

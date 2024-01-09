@@ -4,7 +4,7 @@ import itertools
 
 from api.config import *
 from api.config import register_experiment
-from experiments.common.ppo_exp import PPOExperiment
+from experiments.common.ppo_exp import PPOConfig
 
 EXPR_DEADLINE = None
 EXPR_TIME_LIMIT = None
@@ -175,7 +175,7 @@ def get_exp_cls(config: ChatRLHFBenchmarkConfig):
         actor_gradient_checkpointing=config.gradient_checkpointing,
         critic_gradient_checkpointing=config.gradient_checkpointing,
     )
-    exp_cls = functools.partial(customized_schedule(get_schduling_config(config))(PPOExperiment), **args)
+    exp_cls = functools.partial(customized_schedule(get_schduling_config(config))(PPOConfig), **args)
     return exp_cls
 
 

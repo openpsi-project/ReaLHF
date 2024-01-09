@@ -1,3 +1,4 @@
+import functools
 import os
 import time
 import unittest
@@ -9,14 +10,12 @@ import torch.distributed
 import torch.multiprocessing as mp
 
 from base.monitor import get_tracer
-from tests.parallel.utils import *
+from tests.utils import *
 import api.config as config_package
 
-# TODO: organize parallel testing codes, merge pipe_parallel_test.py and model_parallel_test.py
-
-NUM_MP = 1
+NUM_MP = 2
 NUM_PP = 4
-NUM_DP = 2
+NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
@@ -43,12 +42,13 @@ GRADIENT_ACCUMULATION_FUSION = False
 
 def make_backend():
     import api.model
+
     if NUM_PP == 1:
         return api.model.make_backend(
             config_package.ModelBackend(
-                type_='ds_train',
+                type_="ds_train",
                 args=dict(
-                    optimizer_name='adam',
+                    optimizer_name="adam",
                     optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
                     warmup_steps_proportion=0.0,
                     min_lr_ratio=0.0,
@@ -57,84 +57,63 @@ def make_backend():
                     zero_stage=1,
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
-                )))
+                ),
+            ))
     elif NUM_PP > 1:
         return api.model.make_backend(
-            config_package.ModelBackend(type_='ds_train',
-                                        args=dict(
-                                            optimizer_name='adam',
-                                            optimizer_config=dict(lr=1e-5,
-                                                                  weight_decay=0.0,
-                                                                  betas=(0.9, 0.95)),
-                                            warmup_steps_proportion=0.0,
-                                            min_lr_ratio=0.0,
-                                            zero_stage=1,
-                                            engine_type="pipe",
-                                            gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
-                                            num_pipeline_stages=NUM_PP,
-                                            enable_fp16=not USE_BF16,
-                                            enable_bf16=USE_BF16,
-                                            sequence_parallel=USE_SEQ_PARALLEL,
-                                            num_pipeline_micro_batches=NUM_PP * 2,
-                                        )))
+            config_package.ModelBackend(
+                type_="ds_train",
+                args=dict(
+                    optimizer_name="adam",
+                    optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
+                    warmup_steps_proportion=0.0,
+                    min_lr_ratio=0.0,
+                    zero_stage=1,
+                    engine_type="pipe",
+                    gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
+                    num_pipeline_stages=NUM_PP,
+                    enable_fp16=not USE_BF16,
+                    enable_bf16=USE_BF16,
+                    sequence_parallel=USE_SEQ_PARALLEL,
+                    num_pipeline_micro_batches=NUM_PP,
+                ),
+            ))
 
 
 def make_interface():
     import api.model
+
     return api.model.make_interface(config_package.ModelInterface(type_="flash_sft", args=dict()))
 
 
 def make_model(device):
     import api.model
     import impl.model.nn.flash_mqat.flash_mqat_api
-    model_config = config_package.Model("flash_mqat_actor",
-                                        args=dict(
-                                            model_path=MODEL_PARALLEL_PATH,
-                                            from_type=MODEL_TYPE,
-                                            tokenizer_path=MODEL_PARALLEL_PATH,
-                                            init_from_scratch=True,
-                                            no_param_instantiation=True,
-                                            dtype="bf16" if USE_BF16 else "fp16",
-                                        ))
+
+    model_config = config_package.Model(
+        "flash_mqat",
+        args=dict(
+            model_path=MODEL_PARALLEL_PATH,
+            from_type="self" if NUM_PP == 1 else "empty_actor",
+            dtype="bf16" if USE_BF16 else "fp16",
+            hf_model_type=MODEL_TYPE,
+            tokenizer_path=MODEL_PARALLEL_PATH,
+            sequence_parallel=USE_SEQ_PARALLEL,
+            gradient_accumulation_fusion=False,
+        ),
+    )
     assert NUM_PP > 1 or NUM_MP > 1, "can not test model without mp or dp"
-    if NUM_PP == 1:
+    if NUM_PP > 1:
         model_config.wrappers += [
-            config_package.ModelWrapper("model_parallel",
-                                        args=dict(
-                                            model_path=MODEL_PARALLEL_PATH,
-                                            sequence_parallel=USE_SEQ_PARALLEL,
-                                            gradient_accumulation_fusion=GRADIENT_ACCUMULATION_FUSION,
-                                            is_critic=False,
-                                            init_critic_from_actor=False,
-                                            init_from_scratch=False,
-                                        ))
-        ]
-    elif NUM_MP == 1:
-        model_config.wrappers += [
-            config_package.ModelWrapper("pipe",
-                                        args=dict(
-                                            model_path=MODEL_PARALLEL_PATH,
-                                            num_pp=NUM_PP,
-                                            num_dp=NUM_DP,
-                                            is_critic=False,
-                                            init_critic_from_actor=False,
-                                            init_from_scratch=False,
-                                        ))
-        ]
-    elif NUM_PP > 1:
-        model_config.wrappers += [
-            config_package.ModelWrapper("model_pipe_parallel",
-                                        args=dict(
-                                            model_path=MODEL_PARALLEL_PATH,
-                                            num_pp=NUM_PP,
-                                            num_mp=NUM_MP,
-                                            num_dp=NUM_DP,
-                                            sequence_parallel=USE_SEQ_PARALLEL,
-                                            gradient_accumulation_fusion=GRADIENT_ACCUMULATION_FUSION,
-                                            is_critic=False,
-                                            init_critic_from_actor=False,
-                                            init_from_scratch=False,
-                                        ))
+            config_package.ModelWrapper(
+                "pipe_flash_mqat",
+                args=dict(
+                    model_path=MODEL_PARALLEL_PATH,
+                    partition_method="parameters_balanced",
+                    init_critic_from_actor=False,
+                    init_from_scratch=False,
+                ),
+            )
         ]
 
     model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
@@ -173,10 +152,8 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     model.module.eval()
 
     st = time.monotonic()
-    # logits = model.module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-    #                       max_seqlen=max_seqlen).logits.float()
     res = interface.inference(model, data)
-    logits = res['logits']
+    logits = res["logits"]
     print(f"rank {rank} mp FIRST inference "
           f"time cost {time.monotonic() - st:.4f}")
     if logits is not None:
@@ -184,18 +161,15 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
 
     st = time.monotonic()
     res = interface.inference(model, data)
-    logits = res['logits']
+    logits = res["logits"]
     if logits is not None:
-        from impl.model.utils.model_parallel.mappings import gather_from_tensor_model_parallel_region
+        from impl.model.parallelism.model_parallel.mappings import gather_from_tensor_model_parallel_region
+
         logits = gather_from_tensor_model_parallel_region(logits)
         print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
-    # for _ in range(10):
-    #     st = time.monotonic()
-    #     logits = model.module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-    #                         max_seqlen=max_seqlen).logits.float()
-    #     print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
 
     import base.constants
+
     if base.constants.pipe_parallel_rank() == NUM_PP - 1:
         res_queue.put(logits)
     time.sleep(2)
@@ -221,10 +195,10 @@ def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     res = interface.train_step(model, data)
     print(f"rank {rank} mp FIRST train time cost {time.monotonic() - st:.4f}, res {res}")
 
-    for _ in range(3):
-        st = time.monotonic()
-        res = interface.train_step(model, data)
-        print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
+    # for _ in range(3):
+    #     st = time.monotonic()
+    #     res = interface.train_step(model, data)
+    #     print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
 
     tracer.save()
 
@@ -233,6 +207,7 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
     data = init_data(model.tokenizer, device, BATCH_SIZE * 2, seed=seed)
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
+
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
     model.module.num_micro_batches = 4 * NUM_PP
     model.module.enable_async_p2p()
@@ -303,7 +278,7 @@ def run_mixed(rank: int, seed: int):
 def run_linear(rank: int, res_queue: mp.Queue, seed: int):
     import torch.distributed as dist
 
-    from impl.model.utils.model_parallel.modules import ColumnParallelLinear, RowParallelLinear
+    from impl.model.parallelism.model_parallel.modules import ColumnParallelLinear, RowParallelLinear
     import base.constants
 
     # device, model, backend, interface = init_handles(rank)
@@ -318,6 +293,7 @@ def run_linear(rank: int, res_queue: mp.Queue, seed: int):
         rank=rank,
     )
     import deepspeed
+
     deepspeed.init_distributed()
     init_global_constants(NUM_DP, NUM_MP, 1)
 
@@ -363,16 +339,32 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
         self.tokenizer.padding_side = "left"
 
     def init_baseline_model(self):
-        from impl.model.nn.flash_mqat.flash_mqat_api import HuggingfaceLikeFlashMQATForCausalLM
+        from impl.model.nn.flash_mqat.flash_mqat_api import forward_helper, generate_helper
+        from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
         import impl.model.nn.flash_mqat.flash_from_hf_impl
-        self.device = device = 'cuda'
+
+        self.device = device = "cuda"
         self.dtype = dtype = torch.float16
 
         self.init_tokenizer()
 
-        if MODEL_TYPE == "llama":
-            self.baseline_model = HuggingfaceLikeFlashMQATForCausalLM.from_llama(
-                model_path=BASELINE_MODEL_PATH, dtype=dtype, device=device)
+        torch.cuda.set_device(0)
+        torch.distributed.init_process_group(
+            rank=0,
+            world_size=1,
+            backend="nccl",
+            init_method="tcp://localhost:7778",
+        )
+        os.environ["LOCAL_RANK"] = str(0)
+        import deepspeed
+
+        deepspeed.init_distributed()
+        init_global_constants(1, 1, 1, model_name="baseline")
+        self.baseline_model = getattr(FlashMQATModel, f"from_{MODEL_TYPE}")(model_path=BASELINE_MODEL_PATH,
+                                                                            dtype=dtype,
+                                                                            device=device)
+        self.baseline_model.forward = functools.partial(forward_helper, self.baseline_model)
+        self.baseline_model.generate = functools.partial(generate_helper, self.baseline_model)
 
     def testTrainStep(self):
         clear_name_resolve()
@@ -430,21 +422,21 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
         self.init_baseline_model()
         data = init_data(self.tokenizer, self.device, BATCH_SIZE, seed=self.seed, dp_rank=0, num_dp=1)
-        packed_input_ids = data['packed_input_ids']
-        cu_seqlens = data['cu_seqlens'].int()
+        packed_input_ids = data["packed_input_ids"]
+        cu_seqlens = data["cu_seqlens"].int()
         max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
         self.baseline_model.eval()
 
         st = time.monotonic()
         r = self.baseline_model(packed_input_ids=packed_input_ids,
                                 cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen).logits.float()
+                                max_seqlen=max_seqlen).float()
         print(f"baseline FIRST inference time cost {time.monotonic() - st:.4f}")
 
         st = time.monotonic()
         r = self.baseline_model(packed_input_ids=packed_input_ids,
                                 cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen).logits.float()
+                                max_seqlen=max_seqlen).float()
         print(f"baseline inference time cost {time.monotonic() - st:.4f}")
 
         print(f"diff: {r - res[0]}, max/correct_max {(r - res[0]).abs().max()}/{r.abs().max()}, "
@@ -513,4 +505,4 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testMixed")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testTrainStep")

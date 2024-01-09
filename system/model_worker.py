@@ -1,5 +1,6 @@
 from typing import Dict
 import gc
+import itertools
 import queue
 import socket
 import time
@@ -205,15 +206,21 @@ class ModelWorker(worker_base.Worker):
 
             # Maybe create or extend the size of scatter buffer.
             for (k, buf_shape), dtype in zip(request.buf_shapes.items(), request.dtypes.values()):
-                if k not in scatter_buffer or (k in scatter_buffer and not base.numpy_utils.shape_leq(
-                        buf_shape, scatter_buffer[k].shape)):
+                if k not in scatter_buffer:
                     if self._is_dp_head:
-                        if k in scatter_buffer:
-                            logger.info(f"Resizing scatter buffer key {k} "
-                                        f"from {scatter_buffer[k].shape} to {buf_shape}")
-                        else:
-                            logger.info(f"Create scatter buffer key {k} with shape {buf_shape}")
+                        logger.info(f"Create scatter buffer key {k} with shape {buf_shape}")
                     scatter_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
+                elif k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape,
+                                                                            scatter_buffer[k].shape):
+                    if self._is_dp_head:
+                        logger.info(f"Resizing scatter buffer key {k} "
+                                    f"from {scatter_buffer[k].shape} to {buf_shape}")
+                    padding = tuple(
+                        itertools.chain.from_iterable(
+                            reversed([(0, target_size - current_size)
+                                      for target_size, current_size in zip(buf_shape, scatter_buffer[k].shape)
+                                      ])))
+                    scatter_buffer[k] = torch.nn.functional.pad(scatter_buffer[k], padding, "constant", 0)
 
             if self._is_dp_head:
                 # Receive from the master worker
