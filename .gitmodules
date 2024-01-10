@@ -1,11 +1,3 @@
-[submodule "thirdparty/cugae"]
-	path = thirdparty/cugae
-	url = https://github.com/garrett4wade/cugae.git
-	branch = main
-[submodule "thirdparty/Megatron-LM"]
-	path = thirdparty/Megatron-LM
-	url = https://github.com/NVIDIA/Megatron-LM.git
-	branch = main
 [submodule "thirdparty/flash-attention"]
 	path = thirdparty/flash-attention
 	url = https://github.com/garrett4wade/flash-attention.git
@@ -13,4 +5,12 @@
 [submodule "thirdparty/TransformerEngine"]
 	path = thirdparty/TransformerEngine
 	url = https://github.com/NVIDIA/TransformerEngine.git
+	branch = main
+[submodule "thirdparty/cugae"]
+	path = thirdparty/cugae
+	url = https://github.com/garrett4wade/cugae.git
+	branch = main
+[submodule "thirdparty/Megatron-LM"]
+	path = thirdparty/Megatron-LM
+	url = https://github.com/NVIDIA/Megatron-LM.git
 	branch = main
