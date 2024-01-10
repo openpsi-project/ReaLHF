@@ -10,5 +10,3 @@
 	path = thirdparty/flash-attention
 	url = https://github.com/garrett4wade/flash-attention.git
 	branch = rotary
-[submodule "thirdparty/TransformerEngine/"]
-	branch = main
