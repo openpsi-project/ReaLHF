@@ -1,3 +1,4 @@
 [submodule "thirdparty/TransformerEngine"]
-    path = thirdparty/TransformerEngine
-    url = https://github.com/NVIDIA/TransformerEngine.git
+	path = thirdparty/TransformerEngine
+	url = https://github.com/NVIDIA/TransformerEngine.git
+	branch = release_v1.1
