@@ -6,3 +6,7 @@
 	path = thirdparty/cugae
 	url = https://github.com/garrett4wade/cugae.git
 	branch = main
+[submodule "thirdparty/Megatron-LM"]
+	path = thirdparty/Megatron-LM
+	url = https://github.com/NVIDIA/Megatron-LM.git
+	branch = main
