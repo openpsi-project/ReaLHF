@@ -10,3 +10,7 @@
 	path = thirdparty/Megatron-LM
 	url = https://github.com/NVIDIA/Megatron-LM.git
 	branch = main
+[submodule "thirdparty/flash-attention"]
+	path = thirdparty/flash-attention
+	url = https://github.com/garrett4wade/flash-attention.git
+	branch = rotary
