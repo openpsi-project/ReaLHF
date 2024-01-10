@@ -1,7 +1,7 @@
 [submodule "thirdparty/TransformerEngine"]
 	path = thirdparty/TransformerEngine
 	url = https://github.com/NVIDIA/TransformerEngine.git
-	branch = release_v1.1
+	branch = stable
 [submodule "thirdparty/cugae"]
 	path = thirdparty/cugae
 	url = https://github.com/garrett4wade/cugae.git
