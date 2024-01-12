@@ -40,9 +40,10 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     # addtional deepspeed args
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
     engine_type: str = "deepspeed"
+    # parallelism args
     num_pipeline_stages: int = 1
-    num_pipeline_micro_batches: Optional[int] = None
     sequence_parallel: bool = False
+    enable_async_p2p_communication: bool = False
     # selective gradient ckpt, only effective when gradient_checkpointing is True
     ckpt_attn: bool = False  # checkpoint attn only
     ckpt_mlp: bool = False  # checkpoint mlp only
@@ -142,9 +143,8 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             config=ds_config,
             lr_scheduler=lr_scheduler,
             engine_type=self.engine_type,
-            num_pipeline_micro_batches=self.num_pipeline_micro_batches,
             sequence_parallel=self.sequence_parallel,
-        )
+            enable_async_p2p_communication=self.enable_async_p2p_communication)
 
         if self.engine_type == "pipe" or self.engine_type == "stream_pipe":
             # log pipeline infos
@@ -169,8 +169,8 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
     # pipeline inference
     engine_type: str = "deepspeed"
     num_pipeline_stages: int = 1
-    num_pipeline_micro_batches: Optional[int] = None
     sequence_parallel: bool = False
+    enable_async_p2p_communication: bool = False
 
     def __post_init__(self):
         if base.constants.model_parallel_world_size() == 1 and self.sequence_parallel:
@@ -190,9 +190,8 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
             model=module,
             config=ds_config,
             engine_type=self.engine_type,
-            num_pipeline_micro_batches=self.num_pipeline_micro_batches,
             sequence_parallel=self.sequence_parallel,
-        )
+            enable_async_p2p_communication=self.enable_async_p2p_communication)
         model.module = module
         return model
 

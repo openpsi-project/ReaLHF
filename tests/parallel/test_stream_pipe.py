@@ -8,7 +8,7 @@ import torch
 import torch.multiprocessing as mp
 
 from base.monitor import get_tracer
-from tests.parallel.utils import *
+from tests.utils import *
 import api.config as config_package
 
 NUM_MP = 1
@@ -101,8 +101,7 @@ def make_stream_pipe_backend():
                                               num_pipeline_stages=NUM_PP,
                                               enable_fp16=not USE_BF16,
                                               enable_bf16=USE_BF16,
-                                              sequence_parallel=USE_SEQ_PARALLEL,
-                                              num_pipeline_micro_batches=2 * NUM_PP)))
+                                              sequence_parallel=USE_SEQ_PARALLEL)))
 
 
 def make_interface():

@@ -70,6 +70,7 @@ class NCCLProcessGroupInfo:
     # Group connecting each data parallel head
     # (i.e., [mp=0,pp=pp_size-1,dp=i for i in range(dp_size)]) with master
     mas_dp_head_groups: Dict[str, torch.distributed.ProcessGroup]
+    mas_pp_stage_groups: Dict[str, List[torch.distributed.ProcessGroup]]
 
 
 def setup_ddp(
@@ -91,10 +92,12 @@ def setup_ddp(
 
     mw_ranks = {}
     mw_head_ranks = {}
+    mw_pp_stage_ranks = {}
     if mw_topos is not None:
         offset = 1
         for model_name, topo in mw_topos.items():
             n_mw = topo.world_size()
+            pp_size = topo.get_dim("pipe")
 
             mw_indices = list(range(offset, offset + n_mw))
             mw_ranks[model_name] = list(sorted([peers.index(x) for x in mw_indices]))
@@ -102,7 +105,11 @@ def setup_ddp(
             dp_head_indices = [
                 xx + offset for xx in topo.filter_match(pipe=topo.get_dim("pipe") - 1, model=0)
             ]
+            pp_stage_indices = [[xx + offset for xx in topo.filter_match(pipe=pp_rank)]
+                                for pp_rank in range(pp_size)]
             mw_head_ranks[model_name] = [0] + [peers.index(x) for x in dp_head_indices]
+            mw_pp_stage_ranks[model_name] = [[0] + [peers.index(x) for x in pp_stage]
+                                             for pp_stage in pp_stage_indices]
 
             offset += n_mw
 
@@ -150,6 +157,15 @@ def setup_ddp(
         mas_dp_head_groups[model_name] = torch.distributed.new_group(ranks, backend="nccl")
         logger.info("Created master-DP head group for model %s with ranks %s", model_name, ranks)
 
+    mw_pp_stage_groups = {}
+    for model_name, stage_ranks in mw_pp_stage_ranks.items():
+        group_list = []
+        for pp_stage, ranks in enumerate(stage_ranks):
+            group_list.append(torch.distributed.new_group(ranks, backend="nccl"))
+            logger.info(
+                f"Created master-pp stage group for model {model_name} stage {pp_stage} with ranks {ranks}")
+        mw_pp_stage_groups[model_name] = group_list
+
     logger.info(f"Setup process group finishes for worker_index={worker_index}")
 
     return NCCLProcessGroupInfo(
@@ -158,6 +174,7 @@ def setup_ddp(
         local_gpu_id=local_gpu_id,
         mw_groups=mw_groups,
         mas_mw_groups=mas_mw_groups,
+        mas_pp_stage_groups=mw_pp_stage_groups,
         mas_dp_head_groups=mas_dp_head_groups,
     )
 

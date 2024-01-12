@@ -119,7 +119,6 @@ class DPOConfig(Experiment):
                 gradient_checkpointing=self.actor.gradient_checkpointing,
                 num_pipeline_stages=self.actor.parallel.pipeline_parallel_size,
                 engine_type="pipe" if self.actor.parallel.pipeline_parallel_size > 1 else "deepspeed",
-                num_pipeline_micro_batches=self.actor.parallel.num_pipeline_micro_batches,
                 offload_optimizer_state=self.actor.optimizer.offload,
                 enable_bf16=self.actor.enable_bf16,
                 enable_fp16=self.actor.enable_fp16,
@@ -134,7 +133,6 @@ class DPOConfig(Experiment):
                 offload=self.ref.offload,
                 enable_bf16=self.ref.enable_bf16,
                 engine_type="pipe" if self.ref.parallel.pipeline_parallel_size > 1 else "deepspeed",
-                num_pipeline_micro_batches=self.ref.parallel.num_pipeline_micro_batches,
                 sequence_parallel=self.ref.parallel.use_sequence_parallel,
             ),
         )

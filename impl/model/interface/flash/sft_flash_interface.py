@@ -61,6 +61,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
                 loss_fn=compute_packed_sft_loss,
+                num_micro_batches=base.constants.pipe_parallel_world_size() * 2,
                 **loss_fn_kwargs,
             )
         else:
@@ -169,6 +170,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
                 gconfig=gconfig,
+                num_micro_batches=base.constants.pipe_parallel_world_size() * 4,
             )
             if res is None:
                 return dict()

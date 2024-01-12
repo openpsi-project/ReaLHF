@@ -20,6 +20,7 @@ class PackedGenScoringInterface(api.model.ModelInterface):
     generation_config: Optional[Dict] = None
 
     def __post_init__(self):
+        super().__post_init__()
         self.score_model = transformers.AutoModelForSequenceClassification.from_pretrained(
             "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english").cuda()
         self.score_tokenizer = api.huggingface.load_hf_tokenizer(

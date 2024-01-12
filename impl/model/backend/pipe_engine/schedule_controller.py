@@ -48,6 +48,7 @@ class EngineScheduleController:
         self.__binded_schedule = None
         self.__terminate_queue = multiprocessing.Queue(1)
         self.__schedule_queue = multiprocessing.Queue(1)
+        multiprocessing.set_start_method("fork", force=True)
         self.thread = multiprocessing.Process(target=self.run)
         # self.thread.start()
 

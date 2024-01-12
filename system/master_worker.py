@@ -162,12 +162,13 @@ class RPCCorountineControl:
 async def scatter_tensor_to_mws(
     datas: List[namedarray.NamedArray],
     rpc: api.dfg.ModelRPC,
-    streams: List[request_reply_stream.RequestReplyStream],
+    streams: List[List[request_reply_stream.RequestReplyStream]],
     all_buffer_indices: List[List[int]],
     all_seqlens: List[List[int]],
-    mas_dp_head_group: torch.distributed.ProcessGroup,
+    mas_pp_stage_groups: List[torch.distributed.ProcessGroup],
     scatter_buffer: Dict[str, List[torch.Tensor]],
     device: torch.device,
+    mp_size: int,
     ctrl: RPCCorountineControl,
 ) -> List[uuid.UUID]:
     dtypes = {k: v.dtype for k, v in datas[0].items()}
@@ -181,19 +182,19 @@ async def scatter_tensor_to_mws(
     for k, buf_shape in buf_shapes.items():
         if k not in scatter_buffer or (k in scatter_buffer and
                                        not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k][0].shape)):
-            if k in scatter_buffer:
-                logger.info(f"Resize RPC *{rpc.name}* scatter buffer on master worker for {k}"
-                            f" from {scatter_buffer[k][0].shape} to {buf_shape}")
-            else:
-                logger.info(
-                    f"Create RPC *{rpc.name}* scatter buffer on master worker for {k} with shape {buf_shape}")
+            # if k in scatter_buffer:
+            #     logger.info(f"Resize RPC *{rpc.name}* scatter buffer on master worker for {k}"
+            #                 f" from {scatter_buffer[k][0].shape} to {buf_shape}")
+            # else:
+            #     logger.info(
+            #         f"Create RPC *{rpc.name}* scatter buffer on master worker for {k} with shape {buf_shape}")
             scatter_buffer[k] = [
                 torch.empty(buf_shape, dtype=dtypes[k], device=device) for _ in range(len(datas) + 1)
             ]
             _scatter_buffer_changed = True
         elif k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k][0].shape):
-            logger.info(f"Resize scatter buffer on master worker for {k}"
-                        f" from {scatter_buffer[k][0].shape} to {buf_shape}")
+            # logger.info(f"Resize scatter buffer on master worker for {k}"
+            #             f" from {scatter_buffer[k][0].shape} to {buf_shape}")
             new_x = []
             for x in scatter_buffer[k]:
                 padding = tuple(
@@ -207,6 +208,7 @@ async def scatter_tensor_to_mws(
         torch.cuda.empty_cache()
         gc.collect()
 
+    expanded_buffer = {k: [scatter_buffer[k][0]] for k in scatter_buffer}
     # Put data into scatter buffer
     for i, data in enumerate(datas):
         for k, v in data.items():
@@ -214,35 +216,43 @@ async def scatter_tensor_to_mws(
             s = tuple(slice(0, x) for x in v.shape)
             scatter_buffer[k][i + 1][s] = data[k]
 
+            # expand scatter buffer to model parallel ranks
+            expanded_buffer[k].extend([scatter_buffer[k][i + 1]] * mp_size)
+
     request_ids = []
-    ack_ids = []
-    for stream, shapes, buffer_indices, seqlens in zip(streams, all_shapes, all_buffer_indices, all_seqlens):
-        req = request_reply_stream.Payload(
-            handle_name=rpc.interface_type.value,
-            actual_shapes=shapes,
-            buf_shapes=buf_shapes,
-            dtypes=dtypes,
-            is_tensor=True,
-            buffer_indices=buffer_indices,
-            seqlens=seqlens,
-        )
-        request_ids.append(stream.post(req))
-        ack_ids.append(req.ack_reply_id)
+    for pp_rank, pp_stage_streams in enumerate(streams):
+        ack_ids = []
+        for stream, shapes, buffer_indices, seqlens in zip(pp_stage_streams, all_shapes, all_buffer_indices,
+                                                           all_seqlens):
+            req = request_reply_stream.Payload(
+                handle_name=rpc.interface_type.value,
+                actual_shapes=shapes,
+                buf_shapes=buf_shapes,
+                dtypes=dtypes,
+                is_tensor=True,
+                buffer_indices=buffer_indices,
+                seqlens=seqlens,
+            )
+            request_ids.append(stream.post(req))
+            ack_ids.append(req.ack_reply_id)
 
-    # Wait for the ack message from model worker
-    await asyncio.gather(*[
-        _awaitable_response(s, pattern=create_exact_match_pattern([ack_id]))
-        for s, ack_id in zip(streams, ack_ids)
-    ])
+        # logger.info(f"Waiting for ack from stage {pp_rank}")
+        # Wait for the ack message from model worker
+        await asyncio.gather(*[
+            _awaitable_response(s, pattern=create_exact_match_pattern([ack_id]))
+            for s, ack_id in zip(pp_stage_streams, ack_ids)
+        ])
+        # logger.info(f"Scatter data to stage {pp_rank}")
 
-    # Scatter data to DP head model workers.
-    for k in scatter_buffer:
-        torch.distributed.scatter(
-            scatter_buffer[k][0],
-            scatter_list=scatter_buffer[k],
-            src=0,
-            group=mas_dp_head_group,
-        )
+        # Scatter data to DP head model workers.
+        for k in scatter_buffer:
+            torch.distributed.scatter(
+                expanded_buffer[k][0],
+                scatter_list=expanded_buffer[k],
+                src=0,
+                group=mas_pp_stage_groups[pp_rank],
+            )
+        torch.cuda.synchronize()
 
     return request_ids
 
@@ -250,8 +260,8 @@ async def scatter_tensor_to_mws(
 async def model_rpc_request_func(
     rpc: api.dfg.ModelRPC,
     buffer: AsyncIOSequenceBuffer,
-    streams: List[request_reply_stream.RequestReplyStream],
-    mas_dp_head_group: torch.distributed.ProcessGroup,
+    streams: List[List[request_reply_stream.RequestReplyStream]],
+    mas_pp_stage_groups: List[torch.distributed.ProcessGroup],
     scatter_buffer: Dict[str, List[torch.Tensor]],
     device: torch.device,
     topo: base.topology.PipeModelDataParallelTopology,
@@ -260,11 +270,13 @@ async def model_rpc_request_func(
     dp_size = topo.get_dim("data")
     mp_size = topo.get_dim("model")
     pp_size = topo.get_dim("pipe")
-    assert dp_size == len(streams)
+    assert pp_size == len(streams)
+    assert dp_size == len(streams[0])
 
     while not ctrl.stop.is_set():
         await ctrl.can_do_rpc.acquire()
         sample = await buffer.get_batch_for_rpc(rpc)
+        # logger.info(f"Model rpc {rpc.name} requesting.")
         datas, n_seqs = dataparallel.get_broker(rpc.dp_broker_type).scatter_to(
             sample.data,
             dp_size,
@@ -294,16 +306,18 @@ async def model_rpc_request_func(
             streams=streams,
             all_buffer_indices=all_buffer_indices,
             all_seqlens=all_seqlens,
-            mas_dp_head_group=mas_dp_head_group,
+            mas_pp_stage_groups=mas_pp_stage_groups,
             scatter_buffer=scatter_buffer,
             device=device,
+            mp_size=mp_size,
             ctrl=ctrl,
         )
         await ctrl.request_queue.put((req_ids, time.perf_counter()))
+        logger.info(f"Model rpc {rpc.name} requested.")
 
 
 async def gather_tensor_from_mws(
-    streams: List[request_reply_stream.RequestReplyStream],
+    streams: List[List[request_reply_stream.RequestReplyStream]],
     req_ids: List[uuid.UUID],
     rpc: api.dfg.ModelRPC,
     mas_dp_head_group: torch.distributed.ProcessGroup,
@@ -312,15 +326,19 @@ async def gather_tensor_from_mws(
     dp_size: int,
     ctrl: RPCCorountineControl,
 ) -> namedarray.NamedArray:
+    # dp_head_streams = streams[-1]
+    streams = list(itertools.chain.from_iterable(streams))
     responses = await asyncio.gather(*[
         _awaitable_response(s, pattern=create_exact_match_pattern([req_id]))
         for s, req_id in zip(streams, req_ids)
     ])
 
+    dp_head_responses = responses[-dp_size:]
     recv_tik = time.perf_counter()
 
-    if responses[0].is_tensor:
-        all_buf_shapes = [response.buf_shapes for response in responses]
+    # logger.info([res.is_tensor for res in responses])
+    if dp_head_responses[-1].is_tensor:  # responses[-1] is from dp_head
+        all_buf_shapes = [response.buf_shapes for response in dp_head_responses]
         for buf_shapes in all_buf_shapes:
             for k, v in buf_shapes.items():
                 assert buf_shapes[k] == all_buf_shapes[0][k]
@@ -330,16 +348,16 @@ async def gather_tensor_from_mws(
         for k, buf_shape in buf_shapes.items():
             if k not in gather_buffer or (k in gather_buffer and not base.numpy_utils.shape_leq(
                     buf_shape, gather_buffer[k][0].shape)):
-                if k in gather_buffer:
-                    logger.info(
-                        f"Resize RPC *{rpc.name}* gather buffer on master worker for {k} from {gather_buffer[k][0].shape} to {buf_shape}"
-                    )
-                else:
-                    logger.info(
-                        f"Create RPC *{rpc.name}* gather buffer on master worker for {k} with shape {buf_shape}"
-                    )
+                # if k in gather_buffer:
+                #     logger.info(
+                #         f"Resize RPC *{rpc.name}* gather buffer on master worker for {k} from {gather_buffer[k][0].shape} to {buf_shape}"
+                #     )
+                # else:
+                #     logger.info(
+                #         f"Create RPC *{rpc.name}* gather buffer on master worker for {k} with shape {buf_shape}"
+                #     )
                 gather_buffer[k] = [
-                    torch.empty(buf_shape, dtype=responses[0].dtypes[k], device=device)
+                    torch.empty(buf_shape, dtype=dp_head_responses[0].dtypes[k], device=device)
                     for _ in range(dp_size + 1)
                 ]
                 _gather_buffer_changed = True
@@ -360,8 +378,10 @@ async def gather_tensor_from_mws(
             torch.cuda.empty_cache()
             gc.collect()
 
+        # only gather from dp heads
         for k in gather_buffer:
             assert len(gather_buffer[k]) == dp_size + 1
+            # logger.info(f"Gathering {k} from dp heads")
             torch.distributed.gather(
                 gather_buffer[k][0],
                 gather_list=gather_buffer[k],
@@ -370,10 +390,10 @@ async def gather_tensor_from_mws(
             )
 
         all_res = []
-        for i, response in enumerate(responses):
+        for i, response in enumerate(dp_head_responses):
             res_ = {}
             for k, vs in gather_buffer.items():
-                assert len(vs) == len(responses) + 1
+                assert len(vs) == len(dp_head_responses) + 1
                 v = vs[i + 1]
                 shape = response.actual_shapes[k]
                 s = tuple(slice(0, x) for x in shape)
@@ -382,15 +402,15 @@ async def gather_tensor_from_mws(
         res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(all_res)
     else:
         res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(
-            [response.data for response in responses])
+            [response.data for response in dp_head_responses])
     # logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
-    return responses, rpc.remap_output_keys(res)
+    return dp_head_responses, rpc.remap_output_keys(res)
 
 
 async def model_rpc_reply_func(
     rpc: api.dfg.ModelRPC,
     buffer: AsyncIOSequenceBuffer,
-    streams: List[request_reply_stream.RequestReplyStream],
+    streams: List[List[request_reply_stream.RequestReplyStream]],
     mas_dp_head_group: torch.distributed.ProcessGroup,
     gather_buffer: Dict[str, List[torch.Tensor]],
     device: torch.device,
@@ -578,8 +598,7 @@ class MasterWorker(worker_base.Worker):
                                        k: request_reply_stream.make_master_stream(
                                            self.config.worker_info,
                                            v,
-                                           n_subscribers=self.__model_topos[k.model_name].get_dim("model") *
-                                           self.__model_topos[k.model_name].get_dim("pipe"),
+                                           n_subscribers=self.__model_topos[k.model_name].get_dim("model"),
                                        )
                                        for k, v in self.config.model_streams.items()
                                    }
@@ -650,9 +669,12 @@ class MasterWorker(worker_base.Worker):
             model_ft_spec = copy.deepcopy(ft_spec)
             model_ft_spec.batch_size_per_device = batch_size // num_dp
             model_ft_specs.append(model_ft_spec)
+
+        # logger.info("before create task initialize")
         _task = event_loop.create_task(
             group_rpc_blocked(list(self.__model_streams.values()), "initialize", model_ft_specs))
         event_loop.run_until_complete(asyncio.gather(_task))
+        # logger.info("initialize complete")
 
         self.__scatter_buffers = {rpc.name: {} for rpc in self.__model_rpcs}
         self.__gather_buffers = {rpc.name: {} for rpc in self.__model_rpcs}
@@ -676,7 +698,11 @@ class MasterWorker(worker_base.Worker):
 
         coroutine_tasks = []
         for rpc in self.__model_rpcs:
-            concerned_streams = [v for k, v in self.__model_streams.items() if k.model_name == rpc.model_name]
+            # should be a dict: pp_rank to streams
+            pp_world_size = self.__model_topos[rpc.model_name].get_dim("pipe")
+            stream_array = [[v for k, v in self.__model_streams.items() \
+                            if k.model_name == rpc.model_name and k.pp_rank == pp_rank] for pp_rank in range(pp_world_size)]
+            # dp_head_streams = stream_array[-1]
 
             rpc_count = asyncio.Semaphore(rpc.max_concurrent_calls)
             request_queue = asyncio.Queue(rpc.max_concurrent_calls)
@@ -695,25 +721,25 @@ class MasterWorker(worker_base.Worker):
                 model_rpc_request_func(
                     rpc=rpc,
                     buffer=self.__seqbuffer,
-                    streams=concerned_streams,
-                    mas_dp_head_group=self.__pg_info.mas_dp_head_groups[rpc.model_name],
+                    streams=stream_array,
+                    mas_pp_stage_groups=self.__pg_info.mas_pp_stage_groups[rpc.model_name],
                     scatter_buffer=self.__scatter_buffers[rpc.name],
                     device=self.__device,
                     topo=self.__model_topos[rpc.model_name],
                     ctrl=ctrl,
                 ))
-            rely_task = event_loop.create_task(
+            reply_task = event_loop.create_task(
                 model_rpc_reply_func(
                     rpc=rpc,
                     buffer=self.__seqbuffer,
-                    streams=concerned_streams,
+                    streams=stream_array,
                     mas_dp_head_group=self.__pg_info.mas_dp_head_groups[rpc.model_name],
                     gather_buffer=self.__gather_buffers[rpc.name],
                     device=self.__device,
                     topo=self.__model_topos[rpc.model_name],
                     ctrl=ctrl,
                 ))
-            coroutine_tasks += [request_task, rely_task]
+            coroutine_tasks += [request_task, reply_task]
 
         load_data_task = event_loop.create_task(
             load_data_func(
@@ -790,7 +816,7 @@ class MasterWorker(worker_base.Worker):
                 self.__asyncio_ctx.loop._run_once()
                 # NOTE: The following line will propagate errors in corountines back to the main thread.
                 # It raises asyncio.exceptions.InvalidStateError if the result is not ready.
-                # (In our use cases, the result will never be ready becuase corountines run while-loops.)
+                # (In our use cases, the result will never be ready because corountines run while-loops.)
                 # We just ignore this error and continue running.
                 self.__asyncio_ctx.future.result()
             except asyncio.exceptions.InvalidStateError:

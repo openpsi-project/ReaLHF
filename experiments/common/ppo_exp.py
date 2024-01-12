@@ -26,7 +26,7 @@ rollout = ModelRPC(
     dp_broker_type="packed",
     min_n_seqs=64,
     max_n_seqs=65,
-    max_concurrent_calls=1,
+    max_concurrent_calls=2,
 )
 inf_reward = ModelRPC(
     "reward",
@@ -37,6 +37,7 @@ inf_reward = ModelRPC(
     output_key_remap={"scores": "rewards"},
     dp_broker_type="packed",
     min_n_seqs=64,
+    max_concurrent_calls=1,
 )
 
 inf_ref_logits = ModelRPC(
@@ -51,6 +52,7 @@ inf_ref_logits = ModelRPC(
     output_key_remap={"logprobs": "packed_ref_logprobs"},
     dp_broker_type="packed",
     min_n_seqs=64,
+    max_concurrent_calls=1,
 )
 
 inf_values = ModelRPC(
@@ -61,6 +63,7 @@ inf_values = ModelRPC(
     output_key_remap={"scores": "values"},
     dp_broker_type="packed",
     min_n_seqs=64,
+    max_concurrent_calls=1,
 )
 
 train_actor = ModelRPC(
@@ -80,6 +83,7 @@ train_actor = ModelRPC(
     log_return_value=True,
     dp_broker_type="packed",
     min_n_tokens=10240,
+    max_concurrent_calls=1,
 )
 
 train_critic = ModelRPC(
@@ -98,6 +102,7 @@ train_critic = ModelRPC(
     dp_broker_type="packed",
     log_return_value=True,
     min_n_tokens=10240,
+    max_concurrent_calls=1,
 )
 
 
@@ -131,6 +136,8 @@ class PPOHyperparmeters:
         value_norm_type (str): Type of value normalization. Either exponential moving average or moving average.
         value_norm_beta (float): Exponential decay factor in exponential moving average.
         value_norm_eps (float): Epsilon factor in the denominator of exponential moving average.
+        actor_as_critic (bool): Whether to use actor as critic for critic and reward models.
+        use_stream_pipe_engine (bool): Whether to use stream pipe engine for actor model.
     """
 
     max_new_tokens: int = 512
@@ -155,6 +162,8 @@ class PPOHyperparmeters:
     value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
+    actor_as_critic: bool = False
+    use_stream_pipe_engine: bool = False
 
 
 @dataclasses.dataclass
@@ -221,10 +230,7 @@ class PPOConfig(Experiment):
             ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(
-                    cpu=4,
-                    mem=100000,
-                ),
+                scheduling=Scheduling.master_worker_default(cpu=16, mem=100000, gpu=1, gpu_type="tesla"),
             ),
             model_worker=[
                 TasksGroup(
@@ -271,16 +277,8 @@ class PPOConfig(Experiment):
             "packed_prompt",
             args=dict(
                 dataset_path=self.dataset.path,
-                max_prompt_len=self.dataset.max_prompt_len,
-                pad_to_max_length=False,  # since we only have one dataloader, it's ok to use without padding
-            ),
-        )
-        dataloader = DataLoader(
-            "default",
-            args=dict(
-                shuffle=True,
-                drop_last=True,
-                batch_size=self.dataset.batch_size,
+                n_tokens_per_batch=self.dataset.n_tokens_per_batch,
+                max_length=self.dataset.max_prompt_len,
             ),
         )
         dataloader = DataLoader("iterable_dataset_loader")
@@ -302,9 +300,9 @@ class PPOConfig(Experiment):
             temperature=self.ppo.temperature,
         )
 
-        def _make_model_config(cfg: ModelConfig):
+        def _make_model_config(cfg: ModelConfig, from_type: str):
             return get_flash_mqat_model_config(
-                from_type="self",
+                from_type=from_type,
                 model_path=cfg.path,
                 hf_model_type=cfg.type,
                 tokenizer_path=cfg.base_model_path,
@@ -315,12 +313,18 @@ class PPOConfig(Experiment):
                 lora=cfg.lora,
             )
 
-        actor_model = _make_model_config(self.actor)
-        ref_model = _make_model_config(self.ref)
-        critic_model = _make_model_config(self.critic)
-        rw_model = _make_model_config(self.rew)
+        actor_model = _make_model_config(self.actor, "self")
+        ref_model = _make_model_config(self.ref, "self")
+        # critic_type = "self" if not self.ppo.actor_as_critic else "actor_as_critic"
+        critic_type = "random_critic"
+        critic_model = _make_model_config(self.critic, critic_type)
+        rw_model = _make_model_config(self.rew, critic_type)
 
-        def _make_train_backend_config(cfg: ModelConfig):
+        def _make_train_backend_config(cfg: ModelConfig, use_stream_pipe_engine: bool):
+            if cfg.parallel.pipeline_parallel_size > 1:
+                engine_type = "stream_pipe" if use_stream_pipe_engine else "pipe"
+            else:
+                engine_type = "deepspeed"
             return ModelBackend(
                 "ds_train",
                 args=dict(
@@ -338,18 +342,18 @@ class PPOConfig(Experiment):
                         cfg.optimizer.zero_stage, 1),
                     gradient_checkpointing=cfg.gradient_checkpointing,
                     num_pipeline_stages=cfg.parallel.pipeline_parallel_size,
-                    engine_type="pipe" if cfg.parallel.pipeline_parallel_size > 1 else "deepspeed",
-                    num_pipeline_micro_batches=cfg.parallel.num_pipeline_micro_batches,
+                    engine_type=engine_type,
                     offload_optimizer_state=cfg.optimizer.offload,
                     offload_param=cfg.offload,
                     enable_bf16=cfg.enable_bf16,
                     enable_fp16=cfg.enable_fp16,
                     sequence_parallel=cfg.parallel.use_sequence_parallel,
+                    enable_async_p2p_communication=cfg.enable_async_p2p,
                 ),
             )
 
-        actor_backend = _make_train_backend_config(self.actor)
-        critic_backend = _make_train_backend_config(self.critic)
+        actor_backend = _make_train_backend_config(self.actor, self.ppo.use_stream_pipe_engine)
+        critic_backend = _make_train_backend_config(self.critic, False)
 
         def make_inf_backend(cfg: ModelConfig):
             return ModelBackend(
@@ -360,7 +364,6 @@ class PPOConfig(Experiment):
                     offload=cfg.offload,
                     enable_bf16=cfg.enable_bf16,
                     engine_type="pipe" if cfg.parallel.pipeline_parallel_size > 1 else "deepspeed",
-                    num_pipeline_micro_batches=cfg.parallel.num_pipeline_micro_batches,
                     sequence_parallel=cfg.parallel.use_sequence_parallel,
                 ),
             )
@@ -395,6 +398,18 @@ class PPOConfig(Experiment):
         )
         ref_interface = copy.deepcopy(actor_interface)
         ref_interface.args["enable_save"] = False
+
+        if self.ppo.use_stream_pipe_engine:
+            actor_interface = ModelInterface(
+                "stream_pipe_ppo_actor",
+                args={
+                    **copy.deepcopy(ppo_kwargs),
+                    "generation_config": generation_kwargs,
+                    "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
+                    "force_no_logits_mask": False,
+                    "adv_norm": self.ppo.adv_norm,
+                },
+            )
 
         critic_interface = ModelInterface(
             "flash_critic",

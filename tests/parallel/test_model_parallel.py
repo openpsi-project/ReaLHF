@@ -3,8 +3,6 @@ import os
 import time
 import unittest
 
-from torch.profiler import profile, ProfilerActivity, record_function
-# import transformers
 import torch
 import torch.distributed
 import torch.multiprocessing as mp
@@ -38,6 +36,7 @@ USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
 USE_SEQ_PARALLEL = True
 GRADIENT_ACCUMULATION_FUSION = False
+ASYNC_P2P = True
 
 
 def make_backend():
@@ -57,6 +56,8 @@ def make_backend():
                     zero_stage=1,
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
+                    sequence_parallel=USE_SEQ_PARALLEL,
+                    enable_async_p2p_communication=ASYNC_P2P,
                 ),
             ))
     elif NUM_PP > 1:
@@ -75,7 +76,7 @@ def make_backend():
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
                     sequence_parallel=USE_SEQ_PARALLEL,
-                    num_pipeline_micro_batches=NUM_PP,
+                    enable_async_p2p_communication=ASYNC_P2P,
                 ),
             ))
 
@@ -178,10 +179,8 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
 def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
-    model.module.num_micro_batches = 2 * NUM_PP
-    model.module.enable_async_p2p()
 
-    os.environ["DLLM_TRACE"] = "1"
+    # os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(tracer_entries=int(2e6),
                         max_stack_depth=10,
                         ignore_c_function=False,
@@ -195,10 +194,10 @@ def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     res = interface.train_step(model, data)
     print(f"rank {rank} mp FIRST train time cost {time.monotonic() - st:.4f}, res {res}")
 
-    # for _ in range(3):
-    #     st = time.monotonic()
-    #     res = interface.train_step(model, data)
-    #     print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
+    for _ in range(3):
+        st = time.monotonic()
+        res = interface.train_step(model, data)
+        print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
 
     tracer.save()
 
@@ -209,11 +208,10 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
-    model.module.num_micro_batches = 4 * NUM_PP
-    model.module.enable_async_p2p()
 
     import os
-    os.environ["DLLM_TRACE"] = "1"
+
+    # os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(
         tracer_entries=int(2e6),
         # max_stack_depth=10,
@@ -234,15 +232,15 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
 
     tracer.save()
 
-    # for i in range(10):
-    #     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
-    #     st = time.monotonic()
-    #     outputs = interface.generate(model, data, gconfig=gconfig)
-    #     t = time.monotonic() - st
-    #     print(f"rank {rank} mp generate time cost {t:.4f}")
-    #     if len(outputs) > 0:
-    #         print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
-    #               f"log probs shape {outputs['log_probs'].shape}")
+    for i in range(3):
+        data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
+        st = time.monotonic()
+        outputs = interface.generate(model, data, gconfig=gconfig)
+        t = time.monotonic() - st
+        print(f"rank {rank} mp generate time cost {t:.4f}")
+        if len(outputs) > 0:
+            print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
+                  f"log probs shape {outputs['log_probs'].shape}")
 
 
 def run_mixed(rank: int, seed: int):
@@ -261,16 +259,14 @@ def run_mixed(rank: int, seed: int):
 
     st = time.monotonic()
 
-    engine.num_micro_batches = 2 * NUM_PP
     for train_data in train_datas:
         st2 = time.monotonic()
         train_res = interface.train_step(model, train_data)
         print(f"train {time.monotonic() - st2} total {time.monotonic() - st:.4f}")
 
-    engine.num_micro_batches = 4 * NUM_PP
-    gen_res = interface.generate(model, gen_data, gconfig=gconfig)
-
-    print(f"generate {time.monotonic() - st:.4f}")
+    for _ in range(2):
+        gen_res = interface.generate(model, gen_data, gconfig=gconfig)
+        print(f"generate {time.monotonic() - st:.4f}")
 
     print(f"rank {rank} FIRST mixed time cost {time.monotonic() - st:.4f}")
 
@@ -505,4 +501,4 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testTrainStep")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testMixed")

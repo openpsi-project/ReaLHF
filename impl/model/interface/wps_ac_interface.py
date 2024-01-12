@@ -174,6 +174,7 @@ class WPSActorInterface(api.model.ModelInterface):
     adaptive_kl_horizon: Optional[float] = 10000
 
     def __post_init__(self):
+        super().__post_init__()
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
             assert self.adaptive_kl_horizon is not None
@@ -415,6 +416,7 @@ class WPSCriticInterface(api.model.ModelInterface):
     adaptive_kl_horizon: Optional[float] = 10000
 
     def __post_init__(self):
+        super().__post_init__()
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
             assert self.adaptive_kl_horizon is not None
@@ -535,6 +537,7 @@ api.model.register_interface('wps_critic', WPSCriticInterface)
 class WPSPlackettLuceRewardInterface(api.model.ModelInterface):
 
     def __post_init__(self):
+        super().__post_init__()
         self.train_total_correct_predictions = 0
         self.train_total_predictions = 0
 

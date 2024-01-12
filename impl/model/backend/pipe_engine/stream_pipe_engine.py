@@ -13,8 +13,8 @@ from impl.model.backend.pipe_engine.dynamic_schedule import (DynamicPipeSchedule
                                                              InferenceSchedule, Train1F1BSchedule)
 from impl.model.backend.pipe_engine.schedule_controller import EngineScheduleClient, EngineScheduleController
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
+from impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-from impl.model.utils.tensor_storage import TensorBuffer
 import base.constants
 import base.logging as logging
 
@@ -24,9 +24,10 @@ logger = logging.getLogger("StreamPipeEngine", "benchmark")
 class EngineFuture:
     """A simple future used to retrive result of a StreamPipeEngine execution Result"""
 
-    def __init__(self):
+    def __init__(self, req_id=None):
         self.__done = False
         self.__result = None
+        self.__request_id = req_id
 
     def done(self):
         return self.__done
@@ -41,6 +42,9 @@ class EngineFuture:
         if not self.__done:
             raise RuntimeError("Future not done")
         return self.__result
+
+    def request_id(self):
+        return self.__request_id
 
 
 class StreamPipeEngine(DeepSpeedPipelineEngine):
@@ -166,6 +170,9 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         f = EngineFuture()
         self.future_mapping[sched_index] = f
         self.schedule_count += 1
+        logger.info(
+            f"Issued schedule {sched_index} with priority {priority}, schedule type {sched.__class__.__name__}"
+        )
         return sched_index, f
 
     def end_schedule(self, schedule_index: int):
@@ -178,6 +185,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                 cu_seqlens: torch.Tensor,
                 input_lens_for_partition: Optional[torch.Tensor] = None,
                 num_micro_batches: Optional[int] = None) -> EngineFuture:
+        num_micro_batches = num_micro_batches if num_micro_batches else self.num_stages
         sched = InferenceSchedule(num_micro_batches=num_micro_batches, num_stages=self.num_stages)
         self.set_num_micro_batches(num_micro_batches)
         sched_index, f = self.start_schedule(sched, self.forward_priority)
@@ -200,16 +208,18 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                     input_lens_for_partition: Optional[torch.Tensor] = None,
                     num_micro_batches: Optional[int] = None,
                     **loss_fn_kwargs) -> EngineFuture:
+        num_micro_batches = num_micro_batches if num_micro_batches else self.num_stages
         sched = Train1F1BSchedule(num_micro_batches=num_micro_batches,
                                   num_stages=self.num_stages,
                                   sched_id=self.train_sched_id)
-        self.set_num_micro_batches(num_micro_batches)
         self.train_sched_id += 1
         sched_index, f = self.start_schedule(sched, self.train_priority)
         self.set_state_mapping[sched_index] = self._set_train_batch_states
         self.result_collect_mapping[sched_index] = self._train_batch_collect_result
-        self.num_micro_batches_mapping[
-            sched_index] = num_micro_batches if num_micro_batches else self.num_stages
+
+        self.num_micro_batches_mapping[sched_index] = num_micro_batches
+        self.set_num_micro_batches(num_micro_batches)
+
         self.set_tensor_buffer(sched_index)
 
         self._set_train_batch_states()
@@ -228,19 +238,22 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                  gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
                  num_micro_batches: Optional[int] = None) -> EngineFuture:
         # is_model_parallel = base.constants.model_parallel_world_size() > 1
+        num_micro_batches = num_micro_batches if num_micro_batches else self.num_stages
         sched = GenerationSchedule(num_micro_batches=num_micro_batches,
                                    num_stages=self.num_stages,
                                    num_steps=gconfig.max_new_tokens,
                                    steps_per_update=2,
                                    preserve_fwd_order=False,
                                    sched_id=99)
-        self.set_num_micro_batches(num_micro_batches)
         sched_index, f = self.start_schedule(sched, self.generate_priority)
         # TODO: states: current_config, tokenizer, terminate_condition()
         self.set_state_mapping[sched_index] = self._set_generate_states
         self.result_collect_mapping[sched_index] = self._generate_collect_result
-        self.num_micro_batches_mapping[
-            sched_index] = num_micro_batches if num_micro_batches else self.num_stages
+
+        num_micro_batches = num_micro_batches if num_micro_batches else self.num_stages
+        self.num_micro_batches_mapping[sched_index] = num_micro_batches
+        self.set_num_micro_batches(num_micro_batches)
+
         self.set_tensor_buffer(sched_index)
 
         self._set_generate_states()
@@ -258,13 +271,17 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                    input_lens_for_partition: Optional[torch.Tensor] = None,
                    num_micro_batches: Optional[int] = None,
                    **loss_fn_kwargs) -> EngineFuture:
+        num_micro_batches = num_micro_batches if num_micro_batches else self.num_stages
         sched = InferenceSchedule(num_micro_batches=num_micro_batches, num_stages=self.num_stages)
-        self.set_num_micro_batches(num_micro_batches)
         sched_index, f = self.start_schedule(sched, self.forward_priority)
-        self.num_micro_batches_mapping[
-            sched_index] = num_micro_batches if num_micro_batches else self.num_stages
+
         self.set_state_mapping[sched_index] = self._set_eval_batch_states
         self.result_collect_mapping[sched_index] = self._eval_batch_collect_result
+
+        num_micro_batches = num_micro_batches if num_micro_batches else self.num_stages
+        self.num_micro_batches_mapping[sched_index] = num_micro_batches
+        self.set_num_micro_batches(num_micro_batches)
+
         self.set_tensor_buffer(sched_index)
 
         self._set_eval_batch_states()
@@ -275,10 +292,13 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
 
         return f
 
-    def run(self):
-        # if not self.engine_controller_started and self.engine_controller is not None:
-        #     self.engine_controller.start()
-        #     self.engine_controller_started = True
+    def poll_one_step(self):
+        """ Run one step for stream pipe engine, including:
+        1. poll instruction from engine controller;
+        2. if instruction is not None, set tensor buffer, set state, set num micro batches, execute instruction;
+        3. post result to engine controller;
+        This method should be called by model worker.
+        """
 
         sched_id, cmd, sched_end = self.engine_client.poll_instruction()
         if sched_id is not None:
@@ -298,11 +318,9 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
 
             try:
                 self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
-                # self.rank_print(f"START cmd {cmd} of sched {sched_id}")
-                # self.executed.append((sched_id, cmd))
-                # self.print_executed()
+                # logger.info(f"Rank {self.global_rank}: START cmd {cmd} of sched {sched_id}")
                 exec_end = self._exec_instr(*cmd.args)
-                # self.rank_print(f"END cmd {cmd} of sched {sched_id}, END {exec_end}")
+                # logger.info(f"Rank {self.global_rank}: END cmd {cmd} of sched {sched_id}")
             except Exception as e:
                 logger.error(f"Rank {self.global_rank} Exception {e} in cmd {cmd}")
                 raise e
@@ -311,12 +329,11 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
             self.engine_client.post_result(signal_code)
 
             if exec_end and sched_id in self.active_schedules:
-                # print(f"end sched id {sched_id}")
                 self.end_schedule(sched_id)
                 res = self.result_collect_mapping[sched_id]()
                 self.future_mapping[sched_id].set_result(res)
-                # gpu_memory_mb(f"before clear tensor buffer {sched_id}")
                 self.clear_tensor_buffer(sched_id)
+                self.future_mapping.pop(sched_id)
                 # gpu_memory_mb(f"after clear tensor buffer {sched_id}")
                 # gc.collect()
                 # torch.cuda.empty_cache()

@@ -14,6 +14,7 @@ import torch.utils.data
 
 from base.monitor import time_mark
 from base.topology import PipelineParallelGrid
+from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
 import api.config as config
 import api.data
 import api.model
@@ -51,12 +52,17 @@ class ModelWorker(worker_base.Worker):
 
         self.__stream = None
 
+        # log info
+        self.__total_time = 0.01
+        self.__engine_poll_time = 0
+
     def _configure(self, cfg: config.ModelWorker):
         self.config = cfg
         self.model_name = cfg.model_name
 
         self.__experiment_name = self.config.worker_info.experiment_name
         self.__trial_name = self.config.worker_info.trial_name
+
         # NOTE: here worker_index is different from peer/ddp rank
         self.__worker_index = cfg.worker_info.worker_index
 
@@ -104,6 +110,8 @@ class ModelWorker(worker_base.Worker):
                 self.__pg_info.mw_groups[model_name_],
             )
 
+        base.constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
+
         logger.info(f"SetUp Information - Model worker index {self.__worker_index}"
                     f' type "{self.config.model_name}" located at '
                     f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}.")
@@ -131,6 +139,7 @@ class ModelWorker(worker_base.Worker):
         )
         self.__interface = api.model.make_interface(self.config.interface)
         self.__backend = api.model.make_backend(self.config.backend)
+        self.__engine = None
 
         if self.config.eval_datasets is not None and self.config.eval_dataloader is not None:
             eval_datasets = [
@@ -171,6 +180,7 @@ class ModelWorker(worker_base.Worker):
         # DP head will receive data from the master, broadcast to all data parallel peers.
         # It will also return result back to master, while other workers in the data parallel group return None.
         self._is_dp_head = self._mp_rank == 0 and self._pp_rank == self._pp_size - 1
+        self._is_dp_pp_head = self._mp_rank == 0
 
         # One for each RPC, e.g., generation and train_step use different buffers.
         self.__scatter_buffers: Dict[Dict[str, torch.Tensor]] = {}
@@ -178,6 +188,14 @@ class ModelWorker(worker_base.Worker):
 
         self.__request_queue = queue.Queue(maxsize=8)
         self.__reply_queue = queue.Queue(maxsize=8)
+        self.__request_sample_size = dict()
+
+        # only used by future interfaces and stream pipe engine
+        self.__is_stream_pipe = self.__interface.is_future_interface
+
+        self.__request_storage = dict()  # mapping from request id to requests
+        self.__future_storage = dict()  # mapping from request id to corresponding future
+        self.__post_hook_data_storage = dict()
 
     def __maybe_receive_request(self):
         recv_tik = time.perf_counter()
@@ -186,8 +204,13 @@ class ModelWorker(worker_base.Worker):
         except request_reply_stream.NoMessage:
             return
 
+        logger.info(f"(dp, mp, pp)=({self._dp_rank}, {self._mp_rank}, {self._pp_rank}) receive request")
+        self.__request_storage[request.request_id] = request
         # ACK message to indicate ready to run dist.scatter
-        if request.is_tensor and self._is_dp_head:
+        if request.is_tensor and self._is_dp_pp_head:
+            logger.info(
+                f"(dp, mp, pp)=({self._dp_rank}, {self._mp_rank}, {self._pp_rank}) receive tensor request {request.handle_name}, send ack"
+            )
             assert request.ack_reply_id is not None
             ack = request_reply_stream.Payload(handle_name=request.handle_name,
                                                request_id=request.ack_reply_id)
@@ -222,18 +245,22 @@ class ModelWorker(worker_base.Worker):
                                       ])))
                     scatter_buffer[k] = torch.nn.functional.pad(scatter_buffer[k], padding, "constant", 0)
 
-            if self._is_dp_head:
-                # Receive from the master worker
-                for k in request.buf_shapes:
-                    dist.scatter(
-                        scatter_buffer[k],
-                        scatter_list=None,
-                        src=0,
-                        group=self.__pg_info.mas_dp_head_groups[self.model_name],
-                    )
-            # Broadcast to the DP group / receive from the DP head
+            # if self._is_dp_head:
+            # Receive from the master worker
             for k in request.buf_shapes:
-                dist.broadcast(scatter_buffer[k], src=self._bsrc, group=self._bgroup)
+                dist.scatter(
+                    scatter_buffer[k],
+                    scatter_list=None,
+                    src=0,
+                    group=self.__pg_info.mas_pp_stage_groups[self.model_name][self._pp_rank],
+                )
+                logger.info(f"request {request.handle_name} scatter {k} done, {scatter_buffer[k][0]}")
+
+            # Broadcast to the DP group / receive from the DP head
+            # for k in request.buf_shapes:
+            #     logger.info(f"before broadcast, scatter_buffer[k] shape {scatter_buffer[k].shape}")
+            #     dist.broadcast(scatter_buffer[k], src=self._bsrc, group=self._bgroup)
+            #     logger.info(f"request {request.handle_name} broadcast {k} done, {scatter_buffer[k][0]}")
 
             # Slice the array to get the actual data
             data = {}
@@ -250,33 +277,33 @@ class ModelWorker(worker_base.Worker):
         self.__request_queue.put_nowait((request, data))
 
     def __model_poll_step(self) -> worker_base.PollResult:
-        # TODO: Duck implementation. We should pass request/reply queue to the engine and call engine.poll().
+        # interface
         try:
             request, data = self.__request_queue.get_nowait()
         except queue.Empty:
-            return worker_base.PollResult(0, 0)
+            return
 
         request: request_reply_stream.Payload
         tik = time.perf_counter()
+
+        self.logger.info(f"Model worker #{self.model_name}# start handle request *{request.handle_name}*, "
+                         f"request_id {request.request_id}.")
         try:
             worker_identifier = self.__mw_id
             if request.handle_name == "initialize":
                 self.__model = self.__backend.initialize(self.__model, data)
+                self.__engine = self.__model.module
+                if self.__is_stream_pipe:
+                    assert isinstance(self.__engine, StreamPipeEngine)
                 res = None
             elif request.handle_name == "save":
                 res = self.__interface.save(self.__model, data)  # -> None
             elif request.handle_name == "inference":
-                time_mark(f"{self.model_name}_inference_start", worker_identifier)
                 res = self.__interface.inference(self.__model, data)  # -> NamedArray
-                time_mark(f"{self.model_name}_inference_end", worker_identifier)
             elif request.handle_name == "train_step":
-                time_mark(f"{self.model_name}_train_start", worker_identifier)
                 res = self.__interface.train_step(self.__model, data)  # -> Dict
-                time_mark(f"{self.model_name}_train_end", worker_identifier)
             elif request.handle_name == "generate":
-                time_mark(f"{self.model_name}_generate_start", worker_identifier)
                 res = self.__interface.generate(self.__model, data)  # -> NamedArray
-                time_mark(f"{self.model_name}_generate_end", worker_identifier)
             elif request.handle_name == "evaluate":
                 res = self.__interface.evaluate(self.__model, self.__eval_dataloader)  # -> Dict
             else:
@@ -284,25 +311,38 @@ class ModelWorker(worker_base.Worker):
         except RuntimeError as e:
             # We may print some info here.
             raise e
-        if self._is_dp_head:
-            blogger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
-                         f" in ${time.perf_counter() - tik:.4f}$s")
-        self.__reply_queue.put_nowait((request, res))
+
+        if self.__is_stream_pipe and isinstance(res, tuple):
+            # When using stream pipe engine and future interface,
+            # there are two kinds of APIs in the interface, one is blocking API that returns the result directly,
+            # the other is non-blocking API that returns a future object.
+            # When handling non-blocking API, we only store the future and leave the job to the engine
+            # and check/poll the result later.
+            future, cache_data = res
+            assert isinstance(future, EngineFuture)
+            self.__future_storage[request.request_id] = future
+            self.__post_hook_data_storage[request.request_id] = cache_data
+            self.logger.info(
+                f"Model worker #{self.model_name}# issued future request *{request.handle_name}*.")
+        else:
+            if self._is_dp_head:
+                blogger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
+                             f" in ${time.perf_counter() - tik:.4f}$s")
+            self.__reply_queue.put_nowait((request, res))
 
         sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
-        return worker_base.PollResult(sample_count=sample_count, batch_count=1)
+        self.__request_sample_size[request.request_id] = sample_count
 
-    def __maybe_post_response(self):
-        try:
-            request, res = self.__reply_queue.get_nowait()
-        except queue.Empty:
-            return
+    def __maybe_engine_poll_step(self):
+        if self.__is_stream_pipe and self.__engine is not None:
+            self.__engine: StreamPipeEngine
+            self.__engine.poll_one_step()
 
-        request: request_reply_stream.Payload
+    def __post_one_response(self, request: request_reply_stream.Payload, res):
         gather_buffer = self.__gather_buffers[request.handle_name]
 
-        if not self._is_dp_head:
-            # Discard returned data if not DP head.
+        if not self._is_dp_pp_head:
+            # Discard returned data if not DP+PP head.
             return
 
         if isinstance(res, namedarray.NamedArray):
@@ -350,9 +390,10 @@ class ModelWorker(worker_base.Worker):
 
         self.__stream.post(reply)
 
-        if reply.is_tensor:
+        if reply.is_tensor and self._is_dp_head:
             # Copy data to the gather buffer.
             for k, v in res.items():
+                logger.info(f"Gathering {k} with shape {v.shape}")
                 s = tuple(slice(0, size) for size in v.shape)
                 gather_buffer[k][s] = v
                 dist.gather(
@@ -362,29 +403,61 @@ class ModelWorker(worker_base.Worker):
                     group=self.__pg_info.mas_dp_head_groups[self.model_name],
                 )
 
+    def __maybe_post_responses(self):
+        ready_to_post = []
+        try:
+            request, res = self.__reply_queue.get_nowait()
+            ready_to_post.append((request, res))
+        except queue.Empty:
+            pass
+
+        for request_id, future in self.__future_storage.items():
+            future: EngineFuture
+            if future.done():
+                request = self.__request_storage[request_id]
+                data = self.__post_hook_data_storage.pop(request_id)
+                res = self.__interface.execute_post_hook(request.handle_name, self.__model, data, future)
+                ready_to_post.append((request, res))
+
+        batch_size = sample_size = 0
+        for request, res in ready_to_post:
+            request: request_reply_stream.Payload
+            self.__post_one_response(request, res)
+
+            if self.__is_stream_pipe:
+                self.__request_storage.pop(request.request_id)
+                if request.request_id in self.__future_storage:
+                    self.__future_storage.pop(request.request_id)
+            sample_size += self.__request_sample_size.pop(request.request_id)
+            batch_size += 1
+        return worker_base.PollResult(sample_count=sample_size, batch_count=batch_size)
+
     def _poll(self):
         if not self.__ddp_env_resolved:
             self.__lazy_setup()
             self.__ddp_env_resolved = True
 
+        st = time.monotonic()
         self.__maybe_receive_request()
 
-        r = self.__model_poll_step()
+        self.__model_poll_step()
 
-        self.__maybe_post_response()
+        poll_st = time.monotonic()
+        self.__maybe_engine_poll_step()
+        pt = time.monotonic() - poll_st
+        r = self.__maybe_post_responses()
 
-        if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
-            # following huggingface trl # ALWAYS COST 0.3+ SEC
-            st = time.monotonic()
-            gc.collect()
-            torch.cuda.empty_cache()
-            gc.collect()
-            et = time.monotonic()
-            if self._is_dp_head:
-                blogger.debug(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
+        if r.batch_count > 0:
+            if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
+                # following huggingface trl # ALWAYS COST 0.3+ SEC
+                st = time.monotonic()
+                gc.collect()
+                torch.cuda.empty_cache()
+                gc.collect()
+                et = time.monotonic()
+                if self._is_dp_head:
+                    blogger.debug(f"Model worker {self.model_name} cleared cache in {et-st:.4f}s")
 
-        # logging gpu/cpu stats
-        if r.sample_count > 0:
             tik = time.perf_counter()
             blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
                 self.model_name,
@@ -393,4 +466,14 @@ class ModelWorker(worker_base.Worker):
             )))
             blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
 
+        t = time.monotonic() - st
+        self.__total_time += t
+        self.__engine_poll_time += pt
+        blogger.debug(
+            f"Model worker #{self.model_name}# poll time: {t:.4f}s, engine poll time {pt:.4f}s, percent {pt/t:.4f}"
+        )
+        if r.batch_count > 0:
+            blogger.debug(
+                f"Total time {self.__total_time:.4f}s, engine poll time {self.__engine_poll_time:.4f}s, "
+                f"percent {self.__engine_poll_time/self.__total_time:.4f}")
         return r

@@ -42,6 +42,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
     output_bias: float = 0.0
 
     def __post_init__(self):
+        super().__post_init__()
         self.train_total_predictions = self.train_total_correct_predictions = 0
 
     @torch.no_grad()

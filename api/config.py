@@ -244,19 +244,20 @@ class ModelWorkerID:
 class MasterStreamID:
     """ID for master streams.
     This stream will broadcast requests for downstream workers.
-    Data within the same dp_rank is the same.
+    Data within the same dp_rank is the same and should be sent together within the same pp_rank.
     """
 
     model_name: str
     dp_rank: int
+    pp_rank: int
 
     def __post_init__(self):
-        assert self.dp_rank >= 0
+        assert self.dp_rank >= 0 and self.pp_rank >= 0
         if "@" in self.model_name:
             raise ValueError("model_name cannot contain @")
 
     def __repr__(self):
-        return f"master2{self.model_name}@dp{self.dp_rank:02d}"
+        return f"master2{self.model_name}@pp{self.pp_rank:02d}@dp{self.dp_rank:02d}"
 
     def __hash__(self):
         return hash(str(self))
@@ -264,7 +265,8 @@ class MasterStreamID:
     def __eq__(self, other):
         # Compare the key attribute for equality
         if isinstance(other, MasterStreamID):
-            return self.model_name == other.model_name and self.dp_rank == other.dp_rank
+            return self.model_name == other.model_name and self.dp_rank == other.dp_rank \
+                    and self.pp_rank == other.pp_rank
         return False
 
 
@@ -357,17 +359,16 @@ class ExperimentConfig:
                     dp_rank=mw.dp_rank,
                 ) for mw in mws
             ]
-            for dp_i in range(topo.get_dim("data")):
-                master_stream_id = MasterStreamID(model_name, dp_i)
+            for dp_i, pp_i in itertools.product(range(topo.get_dim("data")), range(topo.get_dim("pipe"))):
+                master_stream_id = MasterStreamID(model_name, dp_i, pp_i)
                 model_streams[master_stream_id] = RequestReplyStream(
                     push_stream_name=str(master_stream_id),
-                    pull_stream_name=str(
-                        ModelWorkerID(model_name, pp_rank=topo.get_dim("pipe") - 1, mp_rank=0, dp_rank=dp_i)),
+                    pull_stream_name=str(ModelWorkerID(model_name, pp_rank=pp_i, mp_rank=0, dp_rank=dp_i)),
                 )
             for mw, model_id in zip(mws, model_stream_ids):
                 mw.stream = RequestReplyStream(
                     push_stream_name=str(model_id),
-                    pull_stream_name=str(MasterStreamID(model_name, mw.dp_rank)),
+                    pull_stream_name=str(MasterStreamID(model_name, mw.dp_rank, mw.pp_rank)),
                 )
 
         for mw in self.model_worker:

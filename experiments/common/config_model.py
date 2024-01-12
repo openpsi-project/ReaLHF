@@ -18,7 +18,6 @@ class ParallelismConfig:
         use_sequence_parallel (bool): Whether to use sequence parallelism combined with model parallelism.
         partition_method (str): Partition method for modules using pipeline parallel.
                                 Support "uniform", "parameters" and "parameters_balanced".
-        num_pipeline_micro_batches (int): Number of micro batches for pipeline parallelism.
     """
 
     model_parallel_size: int = 1
@@ -26,19 +25,12 @@ class ParallelismConfig:
     data_parallel_size: int = 1
     use_sequence_parallel: bool = False
     partition_method: Optional[str] = "parameters_balanced"
-    num_pipeline_micro_batches: Optional[int] = None
 
     def __post_init__(self):
         if self.pipeline_parallel_size < 1 or self.data_parallel_size < 1 or self.model_parallel_size < 1:
             raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
         if self.use_sequence_parallel and self.model_parallel_size <= 1:
             raise ValueError("Sequence parallelism requires model parallelism.")
-        if self.num_pipeline_micro_batches is not None and (
-                self.num_pipeline_micro_batches < self.pipeline_parallel_size
-                or self.num_pipeline_micro_batches % self.pipeline_parallel_size != 0):
-            raise ValueError(
-                f"Invalid num_pipeline_micro_batches: {self.num_pipeline_micro_batches} with {self.pipeline_parallel_size} stages"
-            )
 
 
 @dataclasses.dataclass
@@ -118,13 +110,15 @@ class ModelConfig:
         type (str): Model type. Please check SUPPORTED_MODELS.
         path (str): Model checkpoint path, the directory instead of the file.
         base_model_path (str): HuggingFace model checkpoint path. Used for loading tokenizer and HuggingFace config.
+        tokenizer_path (str): Tokenizer path.
         lora (bool): Whether to use LoRA.
-        lora_dim (int): LoRA dimension.
-        lora_scaling (float): LoRA scaling factor.
         gradient_checkpointing (bool): Whether to use gradient checkpointing of MLP inside each block.
         enable_fp16 (bool): Whether to use fp16.
         enable_bf16 (bool): Whether to use bf16. Mutual exclusive with fp16.
+        offload (bool): Whether to offload model to CPU.
         parallel (ParallelismConfig): Parallelism configuration.
+        optimizer (OptimizerConfig): Optimizer configuration.
+        enable_async_p2p (bool): Whether to use async p2p, only effective when using pipeline parallelism.
     """
 
     type: str = dataclasses.field(
@@ -141,6 +135,7 @@ class ModelConfig:
     offload: bool = False
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
     optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
+    enable_async_p2p: bool = False
 
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:

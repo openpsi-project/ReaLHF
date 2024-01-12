@@ -110,7 +110,6 @@ class RWConfig(Experiment):
                 gradient_checkpointing=self.model.gradient_checkpointing,
                 num_pipeline_stages=self.model.parallel.pipeline_parallel_size,
                 engine_type="pipe" if self.model.parallel.pipeline_parallel_size > 1 else "deepspeed",
-                num_pipeline_micro_batches=self.model.parallel.num_pipeline_micro_batches,
                 offload_optimizer_state=self.model.optimizer.offload,
                 enable_bf16=self.model.enable_bf16,
                 enable_fp16=self.model.enable_fp16,

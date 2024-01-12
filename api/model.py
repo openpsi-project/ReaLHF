@@ -69,25 +69,11 @@ class ModelBackend(abc.ABC):
         return self._initialize(model, spec)
 
 
-def future_interface_pre_hook(func):
-    """ Should be wrapped by all APIs that return future, store the data 
-    in the interface for post hook to use.
-    """
-
-    def wrapper(interface: ModelInterface, model: Model, data: NamedArray):
-        assert interface.is_future_interface
-        interface._hooks_data_storage[func.__name__] = data
-        return func(interface, model, data)
-
-    return wrapper
-
-
 class ModelInterface(abc.ABC):
 
-    def __init__(self):
+    def __post_init__(self):
         self._is_future_interface = False
         self._hooks = {}
-        self._hooks_data_storage = {}
 
     @property
     def is_future_interface(self):
@@ -123,13 +109,12 @@ class ModelInterface(abc.ABC):
         assert self.is_future_interface
         self._hooks[func_name] = post_hook
 
-    def execute_post_hook(self, func_name, model, future):
+    def execute_post_hook(self, func_name, model, data, future):
         """ Execute resgitered hooks, only used in interfaces for StreamPipeEngine.
         Execute in model worker after the futures of APIs are completed.
         """
         assert self.is_future_interface
-        f = self._hooks_data_storage.pop(func_name)
-        return f(model, self._hooks_data_storage[func_name], future)
+        return self._hooks[func_name](model, data, future)
 
 
 ALL_MODEL_CLASSES = {}

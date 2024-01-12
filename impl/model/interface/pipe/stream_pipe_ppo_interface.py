@@ -1,4 +1,5 @@
 from typing import Dict, Optional, Tuple
+import collections
 import dataclasses
 import itertools
 
@@ -10,6 +11,7 @@ from impl.model.interface.flash.ppo_flash_interface import _ppo_actor_loss_from_
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 from impl.model.utils.functional import masked_normalization
 import api.model
+import base.constants
 import base.logging as logging
 import impl.model.utils.ppo_functional as ppo_functional
 
@@ -19,6 +21,8 @@ logger = logging.getLogger("stream_pipe_test")
 @dataclasses.dataclass
 class StreamPipePPOActorInterface(api.model.ModelInterface):
     n_minibatches: int = 4
+    train_pipeline_microbatches_ratio: int = 2  # n_train_microbatches = pipeline_num_stages * train_pipeline_microbatches_ratio
+    generation_pipeline_microbatches_ratio: int = 2
 
     generation_config: Optional[Dict] = None
 
@@ -48,6 +52,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
     value_norm_eps: float = 1e-5
 
     def __post_init__(self):
+        super().__post_init__()
         self._is_future_interface = True
         self.register_post_hook("train_step", self.__collect_train_step)
         self.register_post_hook("generate", self.__collect_generate)
@@ -60,7 +65,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
         else:
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
         if self.value_norm:
-            from impl.model.utils.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
+            from impl.model.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
 
             if self.value_norm_type == "exp":
                 self.rms = ExponentialRunningMeanStd(beta=self.value_norm_beta, epsilon=self.value_norm_eps)
@@ -70,7 +75,6 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
 
-    @api.model.future_interface_pre_hook
     @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> Tuple[EngineFuture, NamedArray]:
         """ Returns future and data for post process
@@ -83,32 +87,40 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_prompts = data["packed_prompts"]
         cu_seqlens = data["prompt_cu_seqlens"]
+
+        data = from_dict(dict(
+            packed_prompts=packed_prompts.clone(),
+            prompt_cu_seqlens=cu_seqlens.clone(),
+        ))
+
         prompt_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
         bs = prompt_lengths.shape[0]
 
+        num_micro_batches = self.generation_pipeline_microbatches_ratio * base.constants.pipe_parallel_world_size(
+        )
         future = module.generate(
             tokenizer=model.tokenizer,
             packed_input_ids=packed_prompts,
             cu_seqlens=cu_seqlens,
             gconfig=GenerationConfig(**self.generation_config),
+            num_micro_batches=num_micro_batches,
         )
 
-        data = from_dict(dict(
-            packed_prompts=packed_prompts,
-            cu_seqlens=cu_seqlens,
-        ))
         return future, data
 
     @torch.no_grad()
     def __collect_generate(self, model: api.model.Model, data: NamedArray, future: EngineFuture):
         assert future.done()
+        r = future.result()
+        if r is None:
+            return None
+
         gen_tokens, logprobs, logits_mask, *_ = future.result()
 
         # data = recursive_apply(data, lambda x: x.to(model.device))
         packed_prompts = data["packed_prompts"]
         cu_seqlens = data["prompt_cu_seqlens"]
         prompt_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
-
         bs = prompt_lengths.shape[0]
 
         pad_token_id = model.tokenizer.pad_token_id
@@ -128,6 +140,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
             # Prompts are left-padded. Besides, prompt_log_probs is one-step shorter than prompts.
             prompts_list.append(packed_prompts[cu_seqlens[i]:cu_seqlens[i + 1]])
             prompt_log_probs_list.append(logprobs.new_zeros(prompt_len - 1))
+
             if logits_mask is not None:
                 prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len - 1, logits_mask.shape[-1])))
 
@@ -148,6 +161,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
              seq_lengths.cumsum(0)])
         packed_logprobs = torch.cat(
             list(itertools.chain.from_iterable(zip(prompt_log_probs_list, gen_log_probs_list))))
+
         assert packed_seq.shape[0] == packed_logprobs.shape[0] + bs, (
             packed_seq.shape,
             packed_logprobs.shape,
@@ -174,7 +188,6 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
         )
         return from_dict(res)
 
-    @api.model.future_interface_pre_hook
     def train_step(self, model: api.model.Model, data: NamedArray) -> EngineFuture:
         module = model.module
         assert isinstance(module, StreamPipeEngine)
@@ -245,10 +258,10 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
         module.set_version_steps(model.version.global_step)
         loss_fn_kwargs = dict(
             input_lens=input_lens,  # used for partition
-            old_logp=data["old_logp"],
-            ppo_loss_mask=data["ppo_loss_mask"],
-            advantages=data["advantages"],
-            kl_rewards=data["kl_rewards"],
+            old_logp=old_logp,
+            ppo_loss_mask=loss_mask,
+            advantages=advantages,
+            kl_rewards=kl_rewards,
             kl_adapter=self.kl_adapter,
             eps_clip=self.eps_clip,
             early_stop_imp_ratio=self.early_stop_imp_ratio,
@@ -256,10 +269,12 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
             logits_mask=logits_mask,
         )
 
+        num_micro_batches = self.train_pipeline_microbatches_ratio * base.constants.pipe_parallel_world_size()
         future = module.train_batch(
             packed_input_ids=data["packed_seq"],
             cu_seqlens=data["cu_seqlens"],
             loss_fn=_ppo_actor_loss_from_model_outputs,
+            num_micro_batches=num_micro_batches,
             **loss_fn_kwargs,
         )
 
@@ -276,8 +291,9 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
         assert future.done()
         global_stats = data.to_dict()
         module = model.module
-        loss, stats = future.result()
+        loss, stats = future.result()  # None for not pipeline end stage
 
+        train_stats = collections.defaultdict(lambda: 0)
         if stats:
             for k, v in stats.items():
                 train_stats[k] += v
@@ -290,10 +306,10 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
         if train_stats:
             train_stats: Dict[str, torch.Tensor] = dict(train_stats, **global_stats)
             for k, v in train_stats.items():
-                v = v.detach() / self.n_minibatches
+                v = v.detach()
                 train_stats[k] = v.item()
 
-        return loss
+        return dict(train_stats)
 
 
 api.model.register_interface("stream_pipe_ppo_actor", StreamPipePPOActorInterface)

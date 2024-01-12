@@ -86,10 +86,12 @@ class PromptOnlyDatasetConfig:
     Args:
         max_prompt_len (int): Maximum prompt length. Prompts shorter than this will be left-padded
             and prompts longer than this will be truncated.
-        batch_size (int): Number of prompts in each batch.
+        n_tokens_per_batch (int): Number of tokens in each batch, used for packed dataset
+        batch_size (int): Number of prompts in each batch, used for non-packed dataset
         path (str): Path to the dataset.
     """
 
     max_prompt_len: int = 256
+    n_tokens_per_batch: int = 65536
     batch_size: int = 256
     path: str = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl"

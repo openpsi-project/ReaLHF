@@ -22,11 +22,11 @@ logger = logging.getLogger("StreamPipeTestInterface")
 class StreamPipeTestInterface(api.model.ModelInterface):
 
     def __post_init__(self):
+        super().__post_init__()
         self._is_future_interface = True
         self.register_post_hook("train_step", self.__collect_train_step)
         self.register_post_hook("generate", self.__collect_generate)
 
-    @api.model.future_interface_pre_hooks
     def train_step(self,
                    model: api.model.Model,
                    data: NamedArray,
@@ -51,6 +51,7 @@ class StreamPipeTestInterface(api.model.ModelInterface):
                                     loss_fn=compute_packed_sft_loss,
                                     num_micro_batches=num_micro_batches,
                                     **loss_fn_kwargs)
+        self.store_data("train_step", data)
 
         return future
 
@@ -68,7 +69,6 @@ class StreamPipeTestInterface(api.model.ModelInterface):
             res['loss'] = float(loss)
         return res
 
-    @api.model.future_interface_pre_hooks
     @torch.no_grad()
     def generate(self,
                  model: api.model.Model,
