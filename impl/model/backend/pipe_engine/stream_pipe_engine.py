@@ -3,6 +3,7 @@ from types import MethodType
 from typing import Callable, List, Optional, Tuple
 import dataclasses
 import gc
+import os
 
 import torch
 import transformers
@@ -63,7 +64,8 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         self.engine_controller = None
         # self.engine_controller_started = False
         if self.pp_rank == 0:
-            self.engine_controller = EngineScheduleController(num_stages=self.num_stages)
+            self.engine_controller = EngineScheduleController(num_stages=self.num_stages,
+                                                              trace=os.environ.get("DLLM_TRACE", "0") == "1")
             self.engine_controller.start()
 
         self.engine_client = EngineScheduleClient(stage_id=self.pp_rank)
@@ -352,3 +354,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
     def stop_controller(self):
         if self.engine_controller is not None:
             self.engine_controller.stop()
+
+    def save_tracer(self):
+        if self.engine_controller is not None:
+            self.engine_controller.save_tracer()

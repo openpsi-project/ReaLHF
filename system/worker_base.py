@@ -525,12 +525,12 @@ class Worker:
         )
         os.makedirs(os.path.dirname(self._tracer_output_file), exist_ok=True)
         self.__tracer = base.monitor.get_tracer(
-            tracer_entries=int(2e6),
-            # max_stack_depth=10,
+            # tracer_entries=int(2e6),
+            max_stack_depth=4,
             ignore_c_function=False,
             ignore_frozen=True,
             log_async=True,
-            min_duration=500,
+            min_duration=10,
             output_file=self._tracer_output_file,
         )
         self.__tracer_save_freqctrl = base.timeutil.FrequencyControl(
@@ -597,7 +597,8 @@ class Worker:
                 self.__last_successful_poll_time = time.monotonic_ns()
 
                 if r.sample_count == r.batch_count == 0:
-                    time.sleep(0.002)
+                    # time.sleep(0.002)
+                    pass
                 else:
                     now = time.monotonic_ns()
                     if self.__last_update_ns is not None:  # Update new stats with 10 seconds frequency.

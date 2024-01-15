@@ -73,6 +73,7 @@ class DynamicPipeSchedule(ABC):
     def __update_ready(self):
         """ Update ready instructions from not_ready to ready
         """
+        # TODO: slow, do something
         ready_insts = []
         for inst in self.__not_ready.find(unmutable_result=True):
             if self._is_update_ready(inst):
@@ -162,9 +163,13 @@ class DynamicPipeSchedule(ABC):
     def _is_update_ready(self, inst: PipeInstruction):
         """ check if an instruction is ready but not put into ready set
         """
-        update_ready = all([self.__executed.contain(dep) for dep in inst.deps])
-        # print(f"inst {inst} deps {inst.deps} update ready {update_ready}")
-        return update_ready
+        for dep in inst.deps:
+            if not self.__executed.contain(dep):
+                return False
+        return True
+        # update_ready = all([self.__executed.contain(dep) for dep in inst.deps])
+        # # print(f"inst {inst} deps {inst.deps} update ready {update_ready}")
+        # return update_ready
 
     def terminate_stage(self, stage_id):
         if self.__stage_terminated[stage_id]:

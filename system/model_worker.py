@@ -1,6 +1,7 @@
 from typing import Dict
 import gc
 import itertools
+import os
 import queue
 import socket
 import time
@@ -465,13 +466,17 @@ class ModelWorker(worker_base.Worker):
                 round(get_accelerator().max_memory_allocated() / 1024**3, 2),
             )))
             blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
+            if self.__is_stream_pipe and os.environ.get("DLLM_TRACE", "0") == "1":
+                assert isinstance(self.__engine, StreamPipeEngine)
+                blogger.debug(f"Tracer for controller saving ... ")
+                self.__engine.save_tracer()
 
         t = time.monotonic() - st
         self.__total_time += t
         self.__engine_poll_time += pt
-        blogger.debug(
-            f"Model worker #{self.model_name}# poll time: {t:.4f}s, engine poll time {pt:.4f}s, percent {pt/t:.4f}"
-        )
+        # blogger.debug(
+        #     f"Model worker #{self.model_name}# poll time: {t:.4f}s, engine poll time {pt:.4f}s, percent {pt/t:.4f}"
+        # )
         if r.batch_count > 0:
             blogger.debug(
                 f"Total time {self.__total_time:.4f}s, engine poll time {self.__engine_poll_time:.4f}s, "
