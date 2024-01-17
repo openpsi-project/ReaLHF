@@ -11,7 +11,7 @@ from base.monitor import get_tracer
 from tests.utils import *
 import api.config as config_package
 
-NUM_MP = 2
+NUM_MP = 1
 NUM_PP = 4
 NUM_DP = 1
 NUM_SHARDS = 3
@@ -29,14 +29,14 @@ if MODEL_TYPE == "llama":
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
 BATCH_SIZE = 128
-MIN_NEW_TOKENS = 10
-MAX_NEW_TOKENS = 30
+MIN_NEW_TOKENS = 64
+MAX_NEW_TOKENS = 64
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
-USE_SEQ_PARALLEL = True
+USE_SEQ_PARALLEL = False
 GRADIENT_ACCUMULATION_FUSION = False
-ASYNC_P2P = True
+ASYNC_P2P = False
 
 
 def make_backend():
@@ -72,7 +72,7 @@ def make_backend():
                     zero_stage=1,
                     engine_type="pipe",
                     gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
-                    num_pipeline_stages=NUM_PP,
+                    num_pipeline_stages=2 * NUM_PP,
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
                     sequence_parallel=USE_SEQ_PARALLEL,
@@ -194,7 +194,7 @@ def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     res = interface.train_step(model, data)
     print(f"rank {rank} mp FIRST train time cost {time.monotonic() - st:.4f}, res {res}")
 
-    for _ in range(3):
+    for _ in range(10):
         st = time.monotonic()
         res = interface.train_step(model, data)
         print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
@@ -204,7 +204,7 @@ def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
 
 def run_generate(rank: int, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
-    data = init_data(model.tokenizer, device, BATCH_SIZE * 2, seed=seed)
+    data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
@@ -225,22 +225,22 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
     st = time.monotonic()
     outputs = interface.generate(model, data, gconfig=gconfig)
     t = time.monotonic() - st
-    print(f"rank {rank} mp FIRST generate time cost {t:.4f}")
+    print(f"rank {rank} FIRST generate time cost {t:.4f}")
     if len(outputs) > 0:
         print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
               f"log probs shape {outputs['log_probs'].shape}")
-
-    tracer.save()
 
     for i in range(3):
         data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
         st = time.monotonic()
         outputs = interface.generate(model, data, gconfig=gconfig)
         t = time.monotonic() - st
-        print(f"rank {rank} mp generate time cost {t:.4f}")
+        print(f"rank {rank} generate time cost {t:.4f}")
         if len(outputs) > 0:
             print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
                   f"log probs shape {outputs['log_probs'].shape}")
+
+    tracer.save()
 
 
 def run_mixed(rank: int, seed: int):
@@ -252,23 +252,30 @@ def run_mixed(rank: int, seed: int):
 
     train_iters = 3
     train_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(train_iters)]
-    gen_data = init_data(model.tokenizer, device, BATCH_SIZE * 2, seed=seed + 100)
+    gen_data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + 100)
 
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
 
+    def mixed_one_step():
+        for _ in range(1):
+            gen_res = interface.generate(model, gen_data, gconfig=gconfig)
+            print(f"generate {time.monotonic() - st:.4f}")
+
+        for train_data in train_datas:
+            st2 = time.monotonic()
+            train_res = interface.train_step(model, train_data)
+            print(f"train {time.monotonic() - st2} total {time.monotonic() - st:.4f}")
+
     st = time.monotonic()
-
-    for train_data in train_datas:
-        st2 = time.monotonic()
-        train_res = interface.train_step(model, train_data)
-        print(f"train {time.monotonic() - st2} total {time.monotonic() - st:.4f}")
-
-    for _ in range(2):
-        gen_res = interface.generate(model, gen_data, gconfig=gconfig)
-        print(f"generate {time.monotonic() - st:.4f}")
+    mixed_one_step()
 
     print(f"rank {rank} FIRST mixed time cost {time.monotonic() - st:.4f}")
+
+    for _ in range(3):
+        st = time.monotonic()
+        mixed_one_step()
+        print(f"mixed time cost {time.monotonic() - st:.4f}")
 
 
 def run_linear(rank: int, res_queue: mp.Queue, seed: int):

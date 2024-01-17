@@ -51,9 +51,7 @@ class StreamPipeTestInterface(api.model.ModelInterface):
                                     loss_fn=compute_packed_sft_loss,
                                     num_micro_batches=num_micro_batches,
                                     **loss_fn_kwargs)
-        self.store_data("train_step", data)
-
-        return future
+        return future, data
 
     def __collect_train_step(self, model: api.model.Model, data: NamedArray, future: EngineFuture) -> Dict:
         loss, _ = future.result()
@@ -93,7 +91,7 @@ class StreamPipeTestInterface(api.model.ModelInterface):
             gconfig=gconfig,
             num_micro_batches=num_micro_batches,
         )
-        return future
+        return future, data
 
     def __collect_generate(self, model: api.model.Model, data: NamedArray, future: EngineFuture) -> Dict:
         res = future.result()

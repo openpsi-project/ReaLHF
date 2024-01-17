@@ -437,6 +437,7 @@ class ModelWorker(worker_base.Worker):
         if not self.__ddp_env_resolved:
             self.__lazy_setup()
             self.__ddp_env_resolved = True
+            self.tracer.start()
 
         st = time.monotonic()
         self.__maybe_receive_request()
@@ -466,10 +467,12 @@ class ModelWorker(worker_base.Worker):
                 round(get_accelerator().max_memory_allocated() / 1024**3, 2),
             )))
             blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
-            if self.__is_stream_pipe and os.environ.get("DLLM_TRACE", "0") == "1":
-                assert isinstance(self.__engine, StreamPipeEngine)
-                blogger.debug(f"Tracer for controller saving ... ")
-                self.__engine.save_tracer()
+            if os.environ.get("DLLM_TRACE", "0") == "1":
+                self.tracer.save()
+                if self.__is_stream_pipe:
+                    assert isinstance(self.__engine, StreamPipeEngine)
+                    blogger.debug(f"Tracer for controller saving ... ")
+                    self.__engine.save_tracer()
 
         t = time.monotonic() - st
         self.__total_time += t

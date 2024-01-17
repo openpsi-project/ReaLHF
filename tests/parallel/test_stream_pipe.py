@@ -13,7 +13,7 @@ import api.config as config_package
 
 NUM_MP = 1
 NUM_PP = 4
-NUM_DP = 2
+NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
@@ -29,56 +29,44 @@ if MODEL_TYPE == "llama":
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
 BATCH_SIZE = 128
-MIN_NEW_TOKENS = 10
-MAX_NEW_TOKENS = 30
+MIN_NEW_TOKENS = 64
+MAX_NEW_TOKENS = 64
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
-USE_SEQ_PARALLEL = True
+USE_SEQ_PARALLEL = False
 GRADIENT_ACCUMULATION_FUSION = False
+ASYNC_P2P = True
 
 
 def make_model(device):
     import api.model
     import impl.model.nn.flash_mqat.flash_mqat_api
-    model_config = config_package.Model("flash_mqat_actor",
-                                        args=dict(
-                                            model_path=MODEL_PARALLEL_PATH,
-                                            from_type=MODEL_TYPE,
-                                            tokenizer_path=MODEL_PARALLEL_PATH,
-                                            init_from_scratch=True,
-                                            no_param_instantiation=True,
-                                            dtype="bf16" if USE_BF16 else "fp16",
-                                        ))
-    assert NUM_PP > 1, "can not test stream pipe without pipeline parallel"
-    if NUM_MP == 1:
+
+    model_config = config_package.Model(
+        "flash_mqat",
+        args=dict(
+            model_path=MODEL_PARALLEL_PATH,
+            from_type="self" if NUM_PP == 1 else "empty_actor",
+            dtype="bf16" if USE_BF16 else "fp16",
+            hf_model_type=MODEL_TYPE,
+            tokenizer_path=MODEL_PARALLEL_PATH,
+            sequence_parallel=USE_SEQ_PARALLEL,
+            gradient_accumulation_fusion=False,
+        ),
+    )
+    assert NUM_PP > 1 or NUM_MP > 1, "can not test model without mp or dp"
+    if NUM_PP > 1:
         model_config.wrappers += [
-            config_package.ModelWrapper("pipe",
-                                        args=dict(
-                                            model_path=MODEL_PARALLEL_PATH,
-                                            num_pp=NUM_PP,
-                                            num_dp=NUM_DP,
-                                            is_critic=False,
-                                            init_critic_from_actor=False,
-                                            init_from_scratch=False,
-                                            partition_method="parameters_balanced",
-                                        ))
-        ]
-    else:
-        model_config.wrappers += [
-            config_package.ModelWrapper("model_pipe_parallel",
-                                        args=dict(
-                                            model_path=MODEL_PARALLEL_PATH,
-                                            num_pp=NUM_PP,
-                                            num_mp=NUM_MP,
-                                            num_dp=NUM_DP,
-                                            sequence_parallel=USE_SEQ_PARALLEL,
-                                            gradient_accumulation_fusion=GRADIENT_ACCUMULATION_FUSION,
-                                            is_critic=False,
-                                            init_critic_from_actor=False,
-                                            init_from_scratch=False,
-                                            partition_method="parameters_balanced",
-                                        ))
+            config_package.ModelWrapper(
+                "pipe_flash_mqat",
+                args=dict(
+                    model_path=MODEL_PARALLEL_PATH,
+                    partition_method="parameters_balanced",
+                    init_critic_from_actor=False,
+                    init_from_scratch=False,
+                ),
+            )
         ]
 
     model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
@@ -87,26 +75,25 @@ def make_model(device):
 
 def make_stream_pipe_backend():
     import api.model
+    assert NUM_PP > 1
     return api.model.make_backend(
-        config_package.ModelBackend(type_='ds_train',
-                                    args=dict(optimizer_name='adam',
-                                              optimizer_config=dict(lr=1e-5,
-                                                                    weight_decay=0.0,
-                                                                    betas=(0.9, 0.95)),
-                                              warmup_steps_proportion=0.0,
-                                              min_lr_ratio=0.0,
-                                              zero_stage=1,
-                                              engine_type="stream_pipe",
-                                              gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
-                                              num_pipeline_stages=NUM_PP,
-                                              enable_fp16=not USE_BF16,
-                                              enable_bf16=USE_BF16,
-                                              sequence_parallel=USE_SEQ_PARALLEL)))
-
-
-def make_interface():
-    import api.model
-    return api.model.make_interface(config_package.ModelInterface(type_="flash_sft", args=dict()))
+        config_package.ModelBackend(
+            type_="ds_train",
+            args=dict(
+                optimizer_name="adam",
+                optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
+                warmup_steps_proportion=0.0,
+                min_lr_ratio=0.0,
+                zero_stage=1,
+                engine_type="stream_pipe",
+                gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
+                num_pipeline_stages=NUM_PP,
+                enable_fp16=not USE_BF16,
+                enable_bf16=USE_BF16,
+                sequence_parallel=USE_SEQ_PARALLEL,
+                enable_async_p2p_communication=ASYNC_P2P,
+            ),
+        ))
 
 
 def make_stream_pipe_interface():
@@ -138,7 +125,6 @@ def run_train_batch(rank, seed):
     from impl.model.backend.pipe_engine.stream_pipe_engine import StreamPipeEngine
     assert isinstance(engine, StreamPipeEngine)
     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
-    engine.enable_async_p2p()
 
     # os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(tracer_entries=int(2e6),
@@ -154,9 +140,9 @@ def run_train_batch(rank, seed):
     future, data = interface.train_step(model, data, num_micro_batches=2 * NUM_PP)
 
     while not future.done():
-        engine.run()
+        engine.poll_one_step()
 
-    res = interface.postprocess_train_step(model, data, future)
+    res = interface.execute_post_hook("train_step", model, data, future)
     print(f"rank {rank} mp FIRST train time cost {time.monotonic() - st:.4f}, res {res}")
 
     for _ in range(3):
@@ -164,9 +150,9 @@ def run_train_batch(rank, seed):
         future, data = interface.train_step(model, data, num_micro_batches=2 * NUM_PP)
 
         while not future.done():
-            engine.run()
+            engine.poll_one_step()
 
-        res = interface.postprocess_train_step(model, data, future)
+        res = interface.execute_post_hook("train_step", model, data, future)
         print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
 
     time.sleep(1)
@@ -180,7 +166,7 @@ def run_generate(rank, seed):
     from impl.model.backend.pipe_engine.stream_pipe_engine import StreamPipeEngine
     assert isinstance(engine, StreamPipeEngine)
 
-    data = init_data(model.tokenizer, device, 2 * BATCH_SIZE, seed=seed)
+    data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
     # engine.enable_async_p2p()
@@ -197,28 +183,27 @@ def run_generate(rank, seed):
     tracer.start()
 
     st = time.monotonic()
-    future, data = interface.generate(model, data, gconfig=gconfig, num_micro_batches=4 * NUM_PP)
+    future, data = interface.generate(model, data, gconfig=gconfig, num_micro_batches=2 * NUM_PP)
 
     while not future.done():
-        engine.run()
+        engine.poll_one_step()
 
-    res = interface.postprocess_generate(model, data, future)
+    res = interface.execute_post_hook("generate", model, data, future)
 
-    print(f"rank {rank} mp FIRST generate time cost {time.monotonic() - st:.4f}, batchsize {2*BATCH_SIZE}")
+    print(f"rank {rank} FIRST generate time cost {time.monotonic() - st:.4f}, batchsize {BATCH_SIZE}")
 
-    # for _ in range(3):
-    #     st = time.monotonic()
-    #     future, data = interface.generate(model, data, gconfig=gconfig, num_micro_batches=4*NUM_PP)
+    for _ in range(3):
+        st = time.monotonic()
 
-    #     while not future.done():
-    #         engine.run()
+        future, data = interface.generate(model, data, gconfig=gconfig, num_micro_batches=2 * NUM_PP)
 
-    #     res = interface.postprocess_generate(model, data, future)
-    #     print(f"rank {rank} mp generate time cost {time.monotonic() - st:.4f}")
+        while not future.done():
+            engine.poll_one_step()
 
-    # if len(res) > 0:
-    #     print(f"generate result gen_tokens shape{res['gen_tokens'].shape}, "
-    #           f"log probs shape {res['log_probs'].shape}")
+        res = interface.execute_post_hook("generate", model, data, future)
+        print(f"rank {rank} generate time cost {time.monotonic() - st:.4f}")
+
+    time.sleep(1)
 
     engine.stop_controller()
     tracer.save()
@@ -242,40 +227,56 @@ def run_mixed(rank, seed):
     tracer.start()
 
     train_iters = 3
-    train_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(train_iters)]
-    gen_data = init_data(model.tokenizer, device, BATCH_SIZE * 2, seed=seed + 100)
 
-    from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
-    gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
-    engine.enable_async_p2p()
+    def mixed_one_step(seed_):
+        train_datas = [
+            init_data(model.tokenizer, device, BATCH_SIZE, seed=seed_ + i) for i in range(train_iters)
+        ]
+        gen_data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed_ + 100)
+
+        from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
+        gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
+
+        st = time.monotonic()
+
+        gfs = []
+        for _ in range(1):
+            gf, _ = interface.generate(model, gen_data, gconfig=gconfig, num_micro_batches=2 * NUM_PP)
+            # for train_data in train_datas:
+            gfs.append(gf)
+
+        tfs = []
+
+        for i in range(train_iters):
+            tf, _ = interface.train_step(model, train_datas[i], num_micro_batches=2 * NUM_PP)
+            tfs.append(tf)
+
+            while not tf.done():
+                engine.poll_one_step()
+
+            print(f"rank {rank} train step {i} done, time {time.monotonic() - st}")
+
+        while not gf.done():
+            engine.poll_one_step()
+
+        gress = []
+        for gf in gfs:
+            gres = interface.execute_post_hook("generate", model, gen_data, gf)
+            gress.append(gres)
+
+        tress = []
+        for tf, train_data in zip(tfs, train_datas):
+            tres = interface.execute_post_hook("train_step", model, train_data, tf)
+            tress.append(tres)
 
     st = time.monotonic()
-    gf, _ = interface.generate(model, gen_data, gconfig=gconfig, num_micro_batches=4 * NUM_PP)
-    # for train_data in train_datas:
-    tfs = []
-    for i in range(train_iters):
-        tf, _ = interface.train_step(model, train_datas[i], num_micro_batches=2 * NUM_PP)
-        tfs.append(tf)
-
-        while not tf.done():
-            engine.run()
-
-        print(f"rank {rank} train step {i} done, time {time.monotonic() - st}")
-
-    while not gf.done():
-        engine.run()
-
-    gres = interface.postprocess_generate(model, gen_data, gf)
-    tress = []
-    for tf, train_data in zip(tfs, train_datas):
-        tres = interface.postprocess_train_step(model, train_data, tf)
-        tress.append(tres)
+    mixed_one_step(seed)
     print(f"first mixed time cost {time.monotonic() - st:.4f}")
 
-    if len(gres) > 0:
-        print(f"generate result gen_tokens shape{gres['gen_tokens'].shape}, "
-              f"log probs shape {gres['log_probs'].shape}")
-    print(f"tres {tress}")
+    for i in range(3):
+        st = time.monotonic()
+        mixed_one_step(seed + i + 1)
+        print(f"mixed time cost {time.monotonic() - st:.4f}")
 
     engine.stop_controller()
     tracer.save()

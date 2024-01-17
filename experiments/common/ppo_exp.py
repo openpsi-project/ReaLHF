@@ -24,9 +24,9 @@ rollout = ModelRPC(
         "prompt_mask",
     ],
     dp_broker_type="packed",
-    min_n_seqs=256,
-    max_n_seqs=257,
-    max_concurrent_calls=2,
+    min_n_seqs=128,
+    max_n_seqs=129,
+    max_concurrent_calls=1,
 )
 
 inf_reward = ModelRPC(
@@ -37,7 +37,7 @@ inf_reward = ModelRPC(
     output_data=["scores"],
     output_key_remap={"scores": "rewards"},
     dp_broker_type="packed",
-    min_n_seqs=256,
+    min_n_seqs=128,
     max_concurrent_calls=1,
 )
 
@@ -52,7 +52,7 @@ inf_ref_logits = ModelRPC(
     output_data=["logprobs"],
     output_key_remap={"logprobs": "packed_ref_logprobs"},
     dp_broker_type="packed",
-    min_n_seqs=256,
+    min_n_seqs=128,
     max_concurrent_calls=1,
 )
 
@@ -63,7 +63,7 @@ inf_values = ModelRPC(
     output_data=["scores"],
     output_key_remap={"scores": "values"},
     dp_broker_type="packed",
-    min_n_seqs=256,
+    min_n_seqs=128,
     max_concurrent_calls=1,
 )
 
@@ -83,9 +83,9 @@ train_actor = ModelRPC(
     ],
     log_return_value=True,
     dp_broker_type="packed",
-    min_n_seqs=128,
+    min_n_seqs=256,
     max_n_seqs=8192,
-    min_n_tokens=32768,
+    min_n_tokens=65536,
     max_concurrent_calls=1,
 )
 
@@ -104,9 +104,9 @@ train_critic = ModelRPC(
     ],
     dp_broker_type="packed",
     log_return_value=True,
-    min_n_seqs=128,
+    min_n_seqs=256,
     max_n_seqs=8192,
-    min_n_tokens=32768,
+    min_n_tokens=65536,
     max_concurrent_calls=1,
 )
 
