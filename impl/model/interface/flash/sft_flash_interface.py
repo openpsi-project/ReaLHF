@@ -170,7 +170,6 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
                 gconfig=gconfig,
-                num_micro_batches=base.constants.pipe_parallel_world_size() * 4,
             )
             if res is None:
                 return dict()

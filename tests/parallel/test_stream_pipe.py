@@ -126,7 +126,7 @@ def run_train_batch(rank, seed):
     assert isinstance(engine, StreamPipeEngine)
     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
 
-    # os.environ["DLLM_TRACE"] = "1"
+    os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(tracer_entries=int(2e6),
                         max_stack_depth=10,
                         ignore_c_function=False,
@@ -171,7 +171,7 @@ def run_generate(rank, seed):
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
     # engine.enable_async_p2p()
 
-    # os.environ["DLLM_TRACE"] = "1"
+    os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(
         tracer_entries=int(2e6),
         # max_stack_depth=10,
@@ -192,7 +192,7 @@ def run_generate(rank, seed):
 
     print(f"rank {rank} FIRST generate time cost {time.monotonic() - st:.4f}, batchsize {BATCH_SIZE}")
 
-    for _ in range(3):
+    for _ in range(1):
         st = time.monotonic()
 
         future, data = interface.generate(model, data, gconfig=gconfig, num_micro_batches=2 * NUM_PP)
@@ -203,10 +203,11 @@ def run_generate(rank, seed):
         res = interface.execute_post_hook("generate", model, data, future)
         print(f"rank {rank} generate time cost {time.monotonic() - st:.4f}")
 
+    engine.save_tracer()
+    tracer.save()
     time.sleep(1)
 
     engine.stop_controller()
-    tracer.save()
 
 
 def run_mixed(rank, seed):
@@ -278,8 +279,10 @@ def run_mixed(rank, seed):
         mixed_one_step(seed + i + 1)
         print(f"mixed time cost {time.monotonic() - st:.4f}")
 
-    engine.stop_controller()
     tracer.save()
+    engine.save_tracer()
+
+    engine.stop_controller()
 
 
 class StreamPipeTest(unittest.TestCase):
@@ -325,4 +328,4 @@ class StreamPipeTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="StreamPipeTest.testMixed")
+    unittest.main(defaultTest="StreamPipeTest.testGenerate")

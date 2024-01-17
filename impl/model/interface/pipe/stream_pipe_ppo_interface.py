@@ -2,6 +2,7 @@ from typing import Dict, Optional, Tuple
 import collections
 import dataclasses
 import itertools
+import time
 
 import torch
 
@@ -95,6 +96,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
 
         prompt_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
         bs = prompt_lengths.shape[0]
+        logger.info(f"packed_prompts shape {packed_prompts.shape} bs {bs}")
 
         num_micro_batches = self.generation_pipeline_microbatches_ratio * base.constants.pipe_parallel_world_size(
         )
@@ -116,6 +118,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
             return None
 
         gen_tokens, logprobs, logits_mask, *_ = future.result()
+        logger.info(f"gen_tokens shape {gen_tokens.shape}")
 
         # data = recursive_apply(data, lambda x: x.to(model.device))
         packed_prompts = data["packed_prompts"]

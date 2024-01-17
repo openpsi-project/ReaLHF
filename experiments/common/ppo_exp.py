@@ -26,7 +26,7 @@ rollout = ModelRPC(
     dp_broker_type="packed",
     min_n_seqs=128,
     max_n_seqs=129,
-    max_concurrent_calls=1,
+    max_concurrent_calls=2,
 )
 
 inf_reward = ModelRPC(

@@ -55,7 +55,7 @@ class EngineScheduleController:
         self.__tracer_save_queue = multiprocessing.Queue(1)
         multiprocessing.set_start_method("fork", force=True)
         self.thread = multiprocessing.Process(target=self.run)
-        self._trace_controller = False  # trace
+        self._trace_controller = True  # trace
         # self.thread.start()
 
     def __init_sockets(self):
@@ -262,15 +262,16 @@ class EngineScheduleController:
         import base.cluster
         if self._trace_controller:
             os.environ["DLLM_TRACE"] = "1"
-        output_path = os.path.join(
-            base.cluster.spec.fileroot,
-            "logs",
-            getpass.getuser(),
-            self.__experiment_name,
-            self.__trial_name,
-            "trace_results",
-            "controller.json",
-        )
+        # output_path = os.path.join(
+        #     base.cluster.spec.fileroot,
+        #     "logs",
+        #     getpass.getuser(),
+        #     self.__experiment_name,
+        #     self.__trial_name,
+        #     "trace_results",
+        #     "controller.json",
+        # )
+        output_path = "/home/meizy/logs/viztracer/controller.json"
         self.tracer = get_tracer(
             # tracer_entries=int(5e6),
             # max_stack_depth=10,
@@ -306,8 +307,10 @@ class EngineScheduleController:
             # if polled > 0:
             #     print(f"Polled {polled} results")
 
+            posted += self.post_instructions()
             if len(schedule_indices_to_update) > 0:
                 self.update_instruction_queues(schedule_indices_to_update)
+
             self.__posted += posted
             self.__polled += polled
             self.__check_terminate()

@@ -211,7 +211,7 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
 
     import os
 
-    # os.environ["DLLM_TRACE"] = "1"
+    os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(
         tracer_entries=int(2e6),
         # max_stack_depth=10,
@@ -230,8 +230,8 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
         print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
               f"log probs shape {outputs['log_probs'].shape}")
 
-    for i in range(3):
-        data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
+    for i in range(1):
+        # data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed+i)
         st = time.monotonic()
         outputs = interface.generate(model, data, gconfig=gconfig)
         t = time.monotonic() - st
@@ -508,4 +508,4 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testMixed")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testGenerate")

@@ -78,7 +78,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.num_stages = self.grid.get_pipe_parallel_world_size()
         self.stage_id = self.grid.get_stage_id()
         self.dp_id = self.grid.get_data_parallel_id()
-        self.num_micro_batches = self.num_stages * 2
+        self.num_micro_batches = self.default_num_micro_batches = self.num_stages * 2
         # num_micro_batches is configurable, default value: num_stages * 2
         self.num_layers = self.module.num_layers  # number of leyers in current pipeline stage
 
@@ -399,7 +399,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 cu_seqlens: torch.Tensor,
                 input_lens_for_partition: Optional[torch.Tensor] = None,
                 num_micro_batches: Optional[int] = None):
-        self.num_micro_batches = num_micro_batches if num_micro_batches else self.num_micro_batches
+        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
         self._set_forward_states()
         # forward one step and return packed logits
         self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
@@ -423,7 +423,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             logits = torch.cat(logits_list, dim=0)
 
         self._post_forward()
-        self.num_micro_batches = self.num_stages
         return logits
 
     def eval_batch(self,
@@ -433,7 +432,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                    input_lens_for_partition: Optional[torch.Tensor] = None,
                    num_micro_batches: Optional[int] = None,
                    **loss_fn_kwargs):
-        self.num_micro_batches = num_micro_batches if num_micro_batches else self.num_micro_batches
+        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
         self._set_eval_batch_states()
         self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
         self._loss_fn = loss_fn
@@ -467,7 +466,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 avg_stats[key] = torch.stack([stat[key] for stat in stats]).mean()
 
         self._post_eval_batch()
-        self.num_micro_batches = self.num_stages
         return avg_loss, avg_stats
 
     def train_batch(self,
@@ -480,7 +478,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if not torch._C.is_grad_enabled():
             raise RuntimeError(f'train_batch() requires gradients enabled. Use eval_batch() instead.')
 
-        self.num_micro_batches = num_micro_batches if num_micro_batches else self.num_micro_batches
+        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
         self._set_train_batch_states()
         self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
         self._loss_fn = loss_fn
@@ -510,7 +508,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 avg_stats[key] = torch.stack([stat[key] for stat in stats]).mean()
 
         self._post_eval_batch()
-        self.num_micro_batches = self.num_stages
         return avg_loss, avg_stats
 
     @torch.no_grad()
@@ -522,7 +519,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
         num_micro_batches: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
-        self.num_micro_batches = num_micro_batches if num_micro_batches else self.num_micro_batches
+        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
         self._set_generate_states()
         self._prepare_input(packed_input_ids, cu_seqlens)
         self.current_gconfig = gconfig
@@ -540,7 +537,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._exec_schedule(sched, terminate_condition)
         r = self._maybe_gather_generate_outputs()
         self._post_generate()
-        self.num_micro_batches = self.num_stages
         return r
 
     def _maybe_gather_generate_outputs(self):

@@ -197,6 +197,7 @@ class ModelWorker(worker_base.Worker):
         self.__request_storage = dict()  # mapping from request id to requests
         self.__future_storage = dict()  # mapping from request id to corresponding future
         self.__post_hook_data_storage = dict()
+        self.__request_time = dict()
 
     def __maybe_receive_request(self):
         recv_tik = time.perf_counter()
@@ -323,6 +324,7 @@ class ModelWorker(worker_base.Worker):
             assert isinstance(future, EngineFuture)
             self.__future_storage[request.request_id] = future
             self.__post_hook_data_storage[request.request_id] = cache_data
+            self.__request_time[request.request_id] = tik
             self.logger.info(
                 f"Model worker #{self.model_name}# issued future request *{request.handle_name}*.")
         else:
@@ -418,6 +420,9 @@ class ModelWorker(worker_base.Worker):
                 request = self.__request_storage[request_id]
                 data = self.__post_hook_data_storage.pop(request_id)
                 res = self.__interface.execute_post_hook(request.handle_name, self.__model, data, future)
+                tik = self.__request_time.pop(request_id)
+                blogger.info(f"Model worker #{self.model_name}# handle request *{request.handle_name}*"
+                             f" in ${time.perf_counter() - tik:.4f}$s")
                 ready_to_post.append((request, res))
 
         batch_size = sample_size = 0

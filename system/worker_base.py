@@ -525,7 +525,7 @@ class Worker:
         )
         os.makedirs(os.path.dirname(self._tracer_output_file), exist_ok=True)
         self.__tracer = base.monitor.get_tracer(
-            tracer_entries=int(2e6),
+            tracer_entries=int(1e7),
             # max_stack_depth=25,
             ignore_c_function=False,
             ignore_frozen=True,

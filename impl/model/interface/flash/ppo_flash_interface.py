@@ -2,6 +2,7 @@ from typing import Dict, Optional, Tuple
 import collections
 import dataclasses
 import itertools
+import time
 
 import torch
 
@@ -159,9 +160,13 @@ class PackedActorInterface(api.model.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_prompts = data["packed_prompts"]
         cu_seqlens = data["prompt_cu_seqlens"]
+
         prompt_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
         bs = prompt_lengths.shape[0]
 
+        # logger.info(f"packed_prompts shape {packed_prompts.shape}, bs {bs}")
+
+        # st = time.monotonic()
         if isinstance(module, DeepSpeedPipelineEngine):
             res = module.generate(
                 tokenizer=model.tokenizer,
@@ -173,6 +178,7 @@ class PackedActorInterface(api.model.ModelInterface):
                 return None
 
             gen_tokens, logprobs, logits_mask, *_ = res
+            # logger.info(f"gen_tokens shape {gen_tokens.shape}")
         else:
             # unwrap deepspeed engine here
             module = module.module
@@ -248,6 +254,8 @@ class PackedActorInterface(api.model.ModelInterface):
             packed_logits_mask=packed_logits_mask.bool() if packed_logits_mask is not None else None,
             prompt_mask=prompt_mask,
         )
+
+        # logger.info(f"interface generate time {time.monotonic() - st}")
         return from_dict(res)
 
     @torch.no_grad()
