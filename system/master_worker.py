@@ -148,7 +148,7 @@ class RPCCorountineControl:
     # does not exceed #max_concurrent_calls
     can_do_rpc: asyncio.Semaphore
     # for synchronizing req ids between req and reply coroutines
-    request_queue: asyncio.Queue
+    request_queues: List[asyncio.Queue]
     # for counting the number of finished training steps
     # one training step corresponds to traversal of the whole DFG
     train_count: asyncio.Queue
@@ -273,6 +273,7 @@ async def model_rpc_request_func(
     assert pp_size == len(streams)
     assert dp_size == len(streams[0])
 
+    response_coroutine_idx = 0
     while not ctrl.stop.is_set():
         await ctrl.can_do_rpc.acquire()
         sample = await buffer.get_batch_for_rpc(rpc)
@@ -312,7 +313,8 @@ async def model_rpc_request_func(
             mp_size=mp_size,
             ctrl=ctrl,
         )
-        await ctrl.request_queue.put((req_ids, time.perf_counter()))
+        await ctrl.request_queues[response_coroutine_idx].put((req_ids, time.perf_counter()))
+        response_coroutine_idx = (response_coroutine_idx + 1) % len(ctrl.request_queues)
         logger.info(f"Model rpc {rpc.name} requested.")
 
 
@@ -411,6 +413,7 @@ async def gather_tensor_from_mws(
 
 async def model_rpc_reply_func(
     rpc: api.dfg.ModelRPC,
+    corountine_idx: int,
     buffer: AsyncIOSequenceBuffer,
     streams: List[List[request_reply_stream.RequestReplyStream]],
     mas_dp_head_group: torch.distributed.ProcessGroup,
@@ -421,7 +424,7 @@ async def model_rpc_reply_func(
 ):
     dp_size = topo.get_dim("data")
     while not ctrl.stop.is_set():
-        req_ids, tik = await ctrl.request_queue.get()
+        req_ids, tik = await ctrl.request_queues[corountine_idx].get()
 
         responses, res = await gather_tensor_from_mws(
             streams=streams,
@@ -707,12 +710,12 @@ class MasterWorker(worker_base.Worker):
             # dp_head_streams = stream_array[-1]
 
             rpc_count = asyncio.Semaphore(rpc.max_concurrent_calls)
-            request_queue = asyncio.Queue(rpc.max_concurrent_calls)
+            request_queues = [asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)]
 
             ctrl = RPCCorountineControl(
                 stop=self.__stop_ctl,
                 can_do_rpc=rpc_count,
-                request_queue=request_queue,
+                request_queues=request_queues,
                 train_count=self.__train_count,
                 fetch_data_queue=self.__fetch_data_queue,
                 eval_queue=self.__eval_queue,
@@ -730,18 +733,22 @@ class MasterWorker(worker_base.Worker):
                     topo=self.__model_topos[rpc.model_name],
                     ctrl=ctrl,
                 ))
-            reply_task = event_loop.create_task(
-                model_rpc_reply_func(
-                    rpc=rpc,
-                    buffer=self.__seqbuffer,
-                    streams=stream_array,
-                    mas_dp_head_group=self.__pg_info.mas_dp_head_groups[rpc.model_name],
-                    gather_buffer=self.__gather_buffers[rpc.name],
-                    device=self.__device,
-                    topo=self.__model_topos[rpc.model_name],
-                    ctrl=ctrl,
-                ))
-            coroutine_tasks += [request_task, reply_task]
+            reply_tasks = []
+            for j in range(rpc.max_concurrent_calls):
+                _reply_task = event_loop.create_task(
+                    model_rpc_reply_func(
+                        rpc=rpc,
+                        corountine_idx=j,
+                        buffer=self.__seqbuffer,
+                        streams=stream_array,
+                        mas_dp_head_group=self.__pg_info.mas_dp_head_groups[rpc.model_name],
+                        gather_buffer=self.__gather_buffers[rpc.name],
+                        device=self.__device,
+                        topo=self.__model_topos[rpc.model_name],
+                        ctrl=ctrl,
+                    ))
+                reply_tasks.append(_reply_task)
+            coroutine_tasks += [request_task] + reply_tasks
 
         load_data_task = event_loop.create_task(
             load_data_func(
