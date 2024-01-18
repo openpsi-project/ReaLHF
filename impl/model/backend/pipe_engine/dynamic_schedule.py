@@ -36,7 +36,7 @@ class DynamicPipeSchedule(ABC):
         self.num_steps = num_steps
         # self.__all_instructions: InstructionSet = self.init_instructions()
 
-        self.__not_ready: InstructionSet = InstructionSet()
+        self.__not_ready: InstructionSet = InstructionSet(dependency_aware=True)
         self.__executed: InstructionSet = InstructionSet()
         self.__inflight: InstructionSet = InstructionSet()
         self.__ready: InstructionSet = InstructionSet()
@@ -47,7 +47,8 @@ class DynamicPipeSchedule(ABC):
         self.__sched_id = sched_id
 
     def __init_inst_set(self):
-        self.__not_ready.add(self.init_instructions())
+        for inst in self.init_instructions():
+            self.__not_ready.add(inst)
         self.__stage_terminated = {stage_id: False for stage_id in range(self.num_stages)}
 
         # avoid execute instruction after stage executed EndSchedule
@@ -73,14 +74,14 @@ class DynamicPipeSchedule(ABC):
     def __update_ready(self):
         """ Update ready instructions from not_ready to ready
         """
-        # TODO: slow, do something
-        ready_insts = []
-        for inst in self.__not_ready.find(unmutable_result=True):
-            if self._is_update_ready(inst):
-                ready_insts.append(inst)
-
-        self.__not_ready.remove(ready_insts)
-        self.__ready.add(ready_insts)
+        # ready_insts = []
+        # for inst in self.__not_ready.find(unmutable_result=True):
+        #     if self._is_update_ready(inst):
+        #         ready_insts.append(inst)
+        # self.__not_ready.remove(ready_insts)
+        ready_insts = self.__not_ready.pop_roots()
+        for inst in ready_insts:
+            self.__ready.add(inst)
 
     def exec(self, insts: List[PipeInstruction]):
         """Called by controller to execute a set of instructions.
@@ -94,13 +95,15 @@ class DynamicPipeSchedule(ABC):
             if inst.name != "EndSchedule":
                 self.__inflight.remove(inst)
                 self.__executed.add(inst)
+            self.__not_ready.exec(inst)
         # self.__update_ready()
 
     def all_executed(self, stage=None):
         if stage is not None:
+            # print(f"all executed {stage}")
+            # print(self.__ready.find(stage), self.__not_ready.find(stage), self.__inflight.find(stage))
+            # print(self.__ready.size(stage) + self.__not_ready.size(stage) + self.__inflight.size(stage))
             return self.__ready.size(stage) + self.__not_ready.size(stage) + self.__inflight.size(stage) == 0
-        # print(self.__ready.find(stage), self.__not_ready.find(stage), self.__inflight.find(stage))
-        # print(f"all executed: {len(self.__ready)} {len(self.__not_ready)} {len(self.__inflight)}")
         return len(self.__ready) + len(self.__not_ready) + len(self.__inflight) == 0
 
     def ready(self) -> Dict[int, List[PipeInstruction]]:
@@ -113,9 +116,9 @@ class DynamicPipeSchedule(ABC):
             self.__init_inst_set()
             self.__initialized = True
 
-        for stage in range(self.num_stages):
-            if self.all_executed(stage):
-                self.update(stage)
+        # for stage in range(self.num_stages):
+        #     if self.all_executed(stage):
+        #         self.update(stage)
 
         self.__update_ready()
         r = dict()
@@ -154,8 +157,15 @@ class DynamicPipeSchedule(ABC):
             raise RuntimeError("Cannot update an already terminated schedule.")
         # if self.__not_ready.size(stage_id) == 0 and self.__inflight.size(stage_id) == 0:
         new_instructions = self.update_instructions()
+        # print(f"update {len(new_instructions)} instructions")
         if len(new_instructions) > 0:
-            self.__not_ready.add(new_instructions)
+            for inst in new_instructions:
+                # new_deps = []
+                # for dep in inst.deps:
+                #     if not self.__executed.contain(dep):
+                #         new_deps.append(dep)
+                # inst.deps = new_deps
+                self.__not_ready.add(inst)
             # self.__update_ready()
             return True
         return False
@@ -176,14 +186,17 @@ class DynamicPipeSchedule(ABC):
             raise RuntimeError("Cannot terminate an already terminated stage.")
 
         ready_list = self.__ready.find(stage_id=stage_id)
-        self.__ready.remove(ready_list)
+        for inst in ready_list:
+            self.__ready.remove(inst)
         not_ready_list = self.__not_ready.find(stage_id=stage_id)
-        self.__not_ready.remove(not_ready_list)
+        for inst in not_ready_list:
+            self.__not_ready.remove(inst)
         inflight_list = self.__inflight.find(stage_id=stage_id)
         assert len(inflight_list) == 0, f"stage {stage_id} terminated with inflight instructions {inflight_list}, "\
                                         f"ready {ready_list}, not ready {not_ready_list}"
 
-        self.__executed.add(ready_list + not_ready_list)
+        for inst in ready_list + not_ready_list:
+            self.__executed.add(inst)
 
         self.__stage_terminated[stage_id] = True
 
@@ -292,9 +305,9 @@ class GenerationSchedule(DynamicPipeSchedule):
         binded with SendNextTokens(stage_id=num_stages - 1, micro_batch_id=M, step_id=T)
     """
 
-    def __init__(self, steps_per_update=5, preserve_fwd_order=False, *args, **kwargs):
+    def __init__(self, preserve_fwd_order=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.steps_per_update = steps_per_update
+        # self.steps_per_update = steps_per_update
         self.remaining_steps = self.num_steps
         self.preserve_fwd_order = preserve_fwd_order
 
@@ -303,15 +316,17 @@ class GenerationSchedule(DynamicPipeSchedule):
                "num_micro_batches must be >= num_stages for optimized performance."
 
     def init_instructions(self) -> List[PipeInstruction]:
-        r = self.__n_step_instructions(self.steps_per_update)
+        # r = self.__n_step_instructions(self.steps_per_update)
+        r = self.__n_step_instructions(self.num_steps)
         return r
 
     def update_instructions(self) -> List[PipeInstruction]:
-        if self.remaining_steps == 0:
-            return []
-        else:
-            r = self.__n_step_instructions(self.steps_per_update)
-            return r
+        # if self.remaining_steps == 0:
+        #     return []
+        # else:
+        #     r = self.__n_step_instructions(self.steps_per_update)
+        #     return r
+        return []
 
     def __n_step_instructions(self, n):
         insts = []
@@ -326,13 +341,13 @@ class GenerationSchedule(DynamicPipeSchedule):
             if self.preserve_fwd_order:
                 if m > 0:
                     fwd_deps.append(ForwardPass(stage_id=s, micro_batch_id=m - 1, step_id=t))
-                if m == 0 and t > 0:
+                if m == 0 and t > st:
                     fwd_deps.append(
                         ForwardPass(stage_id=s, micro_batch_id=self.num_micro_batches - 1, step_id=t - 1))
 
             if m > 0 and s == 0:
                 fwd_deps.append(SendActivation(stage_id=s, micro_batch_id=m - 1, step_id=t))
-            if s == 0 and t > 0:
+            if s == 0 and t > st:
                 fwd_deps.append(RecvNextTokens(stage_id=0, micro_batch_id=m, step_id=t - 1))
             if s > 0:
                 fwd_deps.append(RecvActivation(stage_id=s, micro_batch_id=m, step_id=t))

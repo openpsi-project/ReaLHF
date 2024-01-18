@@ -211,7 +211,7 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
 
     import os
 
-    os.environ["DLLM_TRACE"] = "1"
+    # os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(
         tracer_entries=int(2e6),
         # max_stack_depth=10,

@@ -55,7 +55,7 @@ class EngineScheduleController:
         self.__tracer_save_queue = multiprocessing.Queue(1)
         multiprocessing.set_start_method("fork", force=True)
         self.thread = multiprocessing.Process(target=self.run)
-        self._trace_controller = True  # trace
+        self._trace_controller = False  # trace
         # self.thread.start()
 
     def __init_sockets(self):
@@ -278,7 +278,7 @@ class EngineScheduleController:
             ignore_c_function=False,
             ignore_frozen=True,
             log_async=True,
-            min_duration=15,
+            # min_duration=5,
             output_file=output_path)
         self.tracer.start()
 

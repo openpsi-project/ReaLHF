@@ -61,18 +61,18 @@ def main(rank):
     st = time.monotonic()
     instructions = defaultdict(list)
     while True:
-        # if rank == 0 and not started:
-        #     sched = GenerationSchedule(num_micro_batches=NUM_PP * 2,
-        #                                num_stages=NUM_PP,
-        #                                num_steps=100,
-        #                                steps_per_update=5)
-        #     controller.issue_schedule(sched, 10)
-        #     started = True
+        if rank == 0 and not started:
+            sched = GenerationSchedule(num_micro_batches=NUM_PP * 2,
+                                       num_stages=NUM_PP,
+                                       num_steps=1000,
+                                       steps_per_update=2)
+            controller.issue_schedule(sched, 10)
+            started = True
 
-        if rank == 0 and train_started is False:
-            sched = Train1F1BSchedule(num_micro_batches=NUM_PP * 2, num_stages=NUM_PP)
-            controller.issue_schedule(sched, 99)
-            train_started = True
+        # if rank == 0 and train_started is False:
+        #     sched = Train1F1BSchedule(num_micro_batches=NUM_PP * 2, num_stages=NUM_PP)
+        #     controller.issue_schedule(sched, 99)
+        #     train_started = True
 
         sched_id, inst, end = client.poll_instruction()
 
@@ -99,7 +99,6 @@ def main(rank):
 
 
 if __name__ == "__main__":
-
     import base.name_resolve as name_resolve
     import base.names as names
     name_resolve.clear_subtree(names.trial_root(experiment_name="test", trial_name="test"))

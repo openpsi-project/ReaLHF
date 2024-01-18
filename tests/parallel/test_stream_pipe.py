@@ -171,7 +171,7 @@ def run_generate(rank, seed):
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
     # engine.enable_async_p2p()
 
-    os.environ["DLLM_TRACE"] = "1"
+    # os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(
         tracer_entries=int(2e6),
         # max_stack_depth=10,

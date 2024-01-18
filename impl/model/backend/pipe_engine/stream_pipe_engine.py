@@ -244,7 +244,6 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         sched = GenerationSchedule(num_micro_batches=num_micro_batches,
                                    num_stages=self.num_stages,
                                    num_steps=gconfig.max_new_tokens,
-                                   steps_per_update=2,
                                    preserve_fwd_order=False,
                                    sched_id=99)
         sched_index, f = self.start_schedule(sched, self.generate_priority)
