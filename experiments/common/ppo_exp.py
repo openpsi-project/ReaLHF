@@ -83,9 +83,9 @@ train_actor = ModelRPC(
     ],
     log_return_value=True,
     dp_broker_type="packed",
-    min_n_seqs=256,
-    max_n_seqs=8192,
-    min_n_tokens=65536,
+    min_n_seqs=128,
+    max_n_seqs=129,
+    min_n_tokens=1,
     max_concurrent_calls=1,
 )
 
@@ -104,9 +104,9 @@ train_critic = ModelRPC(
     ],
     dp_broker_type="packed",
     log_return_value=True,
-    min_n_seqs=256,
-    max_n_seqs=8192,
-    min_n_tokens=65536,
+    min_n_seqs=128,
+    max_n_seqs=129,
+    min_n_tokens=1,
     max_concurrent_calls=1,
 )
 

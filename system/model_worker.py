@@ -392,11 +392,13 @@ class ModelWorker(worker_base.Worker):
             )
 
         self.__stream.post(reply)
+        logger.info(f"handle_name {request.handle_name} Posted req id = {request.request_id}")
 
         if reply.is_tensor and self._is_dp_head:
             # Copy data to the gather buffer.
             for k, v in res.items():
-                logger.info(f"Gathering {k} with shape {v.shape}")
+                logger.info(f"handle_name {request.handle_name} "
+                            f"Gathering {k} with shape {v.shape}, req id = {request.request_id}")
                 s = tuple(slice(0, size) for size in v.shape)
                 gather_buffer[k][s] = v
                 dist.gather(

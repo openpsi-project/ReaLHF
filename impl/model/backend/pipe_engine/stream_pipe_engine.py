@@ -78,9 +78,9 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         self.set_state_mapping = dict()
         self.result_collect_mapping = dict()
 
-        # make these configurable
-        self.forward_priority = 1
-        self.train_priority = 2
+        # when a schedule is issued, self.generate_priority -= 1, self.train_priority += 1
+        self.forward_priority = 0
+        self.train_priority = 0
         self.generate_priority = 0
 
         self.train_sched_id = 0
@@ -215,6 +215,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                                   num_stages=self.num_stages,
                                   sched_id=self.train_sched_id)
         self.train_sched_id += 1
+        self.train_priority += 1
         sched_index, f = self.start_schedule(sched, self.train_priority)
         self.set_state_mapping[sched_index] = self._set_train_batch_states
         self.result_collect_mapping[sched_index] = self._train_batch_collect_result
@@ -244,8 +245,8 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         sched = GenerationSchedule(num_micro_batches=num_micro_batches,
                                    num_stages=self.num_stages,
                                    num_steps=gconfig.max_new_tokens,
-                                   preserve_fwd_order=False,
-                                   sched_id=99)
+                                   preserve_fwd_order=False)
+        self.generate_priority -= 1
         sched_index, f = self.start_schedule(sched, self.generate_priority)
         # TODO: states: current_config, tokenizer, terminate_condition()
         self.set_state_mapping[sched_index] = self._set_generate_states

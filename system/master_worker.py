@@ -328,10 +328,12 @@ async def gather_tensor_from_mws(
 ) -> namedarray.NamedArray:
     # dp_head_streams = streams[-1]
     streams = list(itertools.chain.from_iterable(streams))
+    logger.info(f"rpc {rpc.name} waiting for responses {req_ids}")
     responses = await asyncio.gather(*[
         _awaitable_response(s, pattern=create_exact_match_pattern([req_id]))
         for s, req_id in zip(streams, req_ids)
     ])
+    logger.info(f"rpc {rpc.name} received responses {req_ids}")
 
     dp_head_responses = responses[-dp_size:]
     recv_tik = time.perf_counter()
@@ -381,7 +383,7 @@ async def gather_tensor_from_mws(
         # only gather from dp heads
         for k in gather_buffer:
             assert len(gather_buffer[k]) == dp_size + 1
-            # logger.info(f"Gathering {k} from dp heads")
+            logger.info(f"rpc {rpc.name} Gathering {k} from dp heads")
             torch.distributed.gather(
                 gather_buffer[k][0],
                 gather_list=gather_buffer[k],

@@ -152,6 +152,7 @@ class EngineScheduleController:
         2. enqueue instructions to instruction queue with priority
         3. 
         """
+        stage_updated = {stage_id: False for stage_id in range(self.num_stages)}
         for prior_sched in self.schedules:
             sched = prior_sched.schedule
             if to_update is not None:
@@ -159,15 +160,19 @@ class EngineScheduleController:
                     continue
             ri = sched.ready()  # ready instructions
             for stage_id in range(self.num_stages):
+                if stage_updated[stage_id]:
+                    continue
                 stage_ri = ri[stage_id]
                 for inst in stage_ri:
                     inst: PipeInstruction
                     self.__inst_queues[stage_id].append((prior_sched, inst))
+                    stage_updated[stage_id] = True
                     bind = inst.bind
                     if len(bind) > 0:
                         for b in bind:
                             bind_stage_ri = ri[b.stage_id]
                             self.__inst_queues[b.stage_id].append((prior_sched, b))
+                            # stage_updated[b.stage_id] = True
                             found = False
                             for bind_inst in bind_stage_ri:
                                 if bind_inst == b:
