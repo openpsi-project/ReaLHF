@@ -157,35 +157,36 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         module.eval()
 
         data = recursive_apply(data, lambda x: x.to(model.device))
-        prompts: torch.LongTensor = data["prompts"]
-        prompt_att_mask: torch.BoolTensor = data["prompt_att_mask"]
-        bs, prompt_max_len = prompts.shape[:2]
+        # prompts: torch.LongTensor = data["prompts"]
+        # prompt_att_mask: torch.BoolTensor = data["prompt_att_mask"]
+        # bs, prompt_max_len = prompts.shape[:2]
 
-        if isinstance(module, DeepSpeedPipelineEngine):
-            packed_input_ids, _, cu_seqlens, _ = unpad_input(prompts, prompt_att_mask)
+        assert isinstance(module, DeepSpeedPipelineEngine)
+        # if isinstance(module, DeepSpeedPipelineEngine):
+        # packed_input_ids, _, cu_seqlens, _ = unpad_input(prompts, prompt_att_mask)
 
-            res = module.generate(
-                tokenizer=model.tokenizer,
-                packed_input_ids=packed_input_ids,
-                cu_seqlens=cu_seqlens,
-                gconfig=gconfig,
-            )
-            if res is None:
-                return dict()
+        res = module.generate(
+            tokenizer=model.tokenizer,
+            packed_input_ids=data['packed_input_ids'],
+            cu_seqlens=data['cu_seqlens'],
+            gconfig=gconfig,
+        )
+        if res is None:
+            return dict()
 
-            gen_tokens, logprobs, logits_mask, *_ = res
-        else:
-            # unwrap deepspeed engine here
-            module = module.module
-            gen_res = module.generate(
-                tokenizer=model.tokenizer,
-                input_ids=prompts,
-                attention_mask=prompt_att_mask,
-                gconfig=gconfig,
-            )
-            gen_tokens = gen_res.sequences
-            logprobs = gen_res.scores
-            logits_mask = gen_res.logits_mask
+        gen_tokens, logprobs, logits_mask, *_ = res
+        # else:
+        #     # unwrap deepspeed engine here
+        #     module = module.module
+        #     gen_res = module.generate(
+        #         tokenizer=model.tokenizer,
+        #         input_ids=prompts,
+        #         attention_mask=prompt_att_mask,
+        #         gconfig=gconfig,
+        #     )
+        #     gen_tokens = gen_res.sequences
+        #     logprobs = gen_res.scores
+        #     logits_mask = gen_res.logits_mask
 
         return dict(
             gen_tokens=gen_tokens,
