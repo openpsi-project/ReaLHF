@@ -1,4 +1,5 @@
 from typing import Dict, Optional, Tuple
+import os
 
 import torch
 import transformers
@@ -6,6 +7,14 @@ import transformers
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 import base.constants
+
+try:
+    import transformer_engine.pytorch as te
+
+    TE_ENABLED = True
+except ImportError:
+    TE_ENABLED = False
+USE_TE_BACKEND = TE_ENABLED and os.getenv("FLASH_MQAT_USE_TE") == "1"
 
 ################################ StarCoder Begin ################################
 
@@ -27,6 +36,7 @@ def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig) ->
 
 
 def _starcoder_key_mapping_fn(config: FlashMQATConfig) -> Dict[str, str]:
+    assert not USE_TE_BACKEND, "starcoder does not support TE backend now"
     key_mappings = {
         "transformer.wte.weight": "transformer.embedding_layer.wte.weight",
         "transformer.wpe.weight": "transformer.embedding_layer.wpe.weight",
@@ -94,6 +104,7 @@ def gpt2_config_converter(gpt2config: transformers.GPT2Config) -> FlashMQATConfi
 
 
 def gpt2_state_dict_converter(state_dict: Dict, config: FlashMQATConfig) -> Dict:
+    assert not USE_TE_BACKEND, "gpt does not support TE backend now"
     new_state_dict = {}
     replace_from = [
         "wte.weight",
@@ -235,6 +246,28 @@ def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
     keys_to_pop = [k for k in state_dict.keys() if "rotary_emb.inv_freq" in k]
     for k in keys_to_pop:
         state_dict.pop(k)
+        
+    if USE_TE_BACKEND:
+        state_dict = new_state_dict
+        new_state_dict = {}
+        te_replace_pairs = [
+            (".mlp.ln.weight", ".mlp.layer_norm_weight"),
+            (".mlp.down_proj.weight", ".mlp.fc2_weight"),
+        ]
+        for k, v in state_dict.items():
+            for k1, k2 in te_replace_pairs:
+                if k1 in k:
+                    k = k.replace(k1, k2)
+            new_state_dict[k] = v
+        
+        # fuse gate && up weight
+        for i in range(config.n_layers):
+            gate_w = new_state_dict[f"transformer.h.{i}.mlp.gate_proj.weight"]
+            upproj_w = new_state_dict[f"transformer.h.{i}.mlp.up_proj.weight"]
+            w = torch.cat([gate_w, upproj_w], dim=0)
+            new_state_dict[f"transformer.h.{i}.mlp.fc1.weight"] = w
+            new_state_dict.pop(f"transformer.h.{i}.mlp.gate_proj.weight")
+            new_state_dict.pop(f"transformer.h.{i}.mlp.up_proj.weight")
     return new_state_dict
 
 
