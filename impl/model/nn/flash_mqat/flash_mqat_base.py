@@ -734,7 +734,10 @@ class FlashMQATModel(nn.Module):
         model = FlashMQATModel.from_starcoder(model_path="/lustre/public/pretrained_model_weights/starcoder-16bit")
 
         # 5. Dump to HuggingFace model
-        model.dump_to_starcoder(save_path)
+        FlashMQATModel.dump_to_starcoder(model.config,
+                                         model.state_dict(),
+                                         save_path,
+                                         "/lustre/public/pretrained_model_weights/starcoder-16bit")
 
         # 6. Use the dumped weights
         from impl.model.nn.utils.save_load import load_from_disk
