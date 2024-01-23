@@ -76,9 +76,8 @@ def state_dict_to_starcoder(state_dict, config):
     return new_state_dict
 
 
-FlashMQATModel.register_hf_model(
-    "starcoder", convert_config_starcoder, state_dict_from_starcoder, state_dict_to_starcoder
-)
+FlashMQATModel.register_hf_model("starcoder", convert_config_starcoder, state_dict_from_starcoder,
+                                 state_dict_to_starcoder)
 
 ################################ StarCoder End ################################
 
@@ -170,12 +169,8 @@ def state_dict_to_gpt2(state_dict, config):
         for rf, rt in zip(replace_from, replace_to):
             if rf in k:
                 k = k.replace(rf, rt)
-        if (
-            k.endswith(".linear.weight")
-            or k.endswith("proj.weight")
-            or k.endswith("fc.weight")
-            or k.endswith("c_attn.weight")
-        ):
+        if (k.endswith(".linear.weight") or k.endswith("proj.weight") or k.endswith("fc.weight")
+                or k.endswith("c_attn.weight")):
             v = v.transpose(0, 1)
         new_state_dict[k] = v
     return new_state_dict
@@ -331,9 +326,9 @@ def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: FlashMQATCo
     for i in range(config.n_layers):
         w = state_dict[f"model.layers.{i}.self_attn.c_attn.linear.weight"]
         nq = config.hidden_dim // config.head_dim
-        q_proj_w = w[: nq * config.head_dim]
-        k_proj_w = w[nq * config.head_dim : (nq + config.n_kv_heads) * config.head_dim]
-        v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim :]
+        q_proj_w = w[:nq * config.head_dim]
+        k_proj_w = w[nq * config.head_dim:(nq + config.n_kv_heads) * config.head_dim]
+        v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim:]
         w = torch.cat([q_proj_w, k_proj_w, v_proj_w], dim=0)
         state_dict[f"model.layers.{i}.self_attn.q_proj.weight"] = q_proj_w
         state_dict[f"model.layers.{i}.self_attn.k_proj.weight"] = k_proj_w
@@ -343,7 +338,6 @@ def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: FlashMQATCo
 
 
 for name in ["llama", "deepseek", "codellama"]:
-    FlashMQATModel.register_hf_model(
-        name, convert_config_llama, convert_state_dict_llama, to_llama_state_dict
-    )
+    FlashMQATModel.register_hf_model(name, convert_config_llama, convert_state_dict_llama,
+                                     to_llama_state_dict)
 ################################ LLaMa End ################################

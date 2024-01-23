@@ -14,6 +14,7 @@ known_local_folder = [
     'system',
     'tests',
 ]
+skip = ["thirdparty"]
 
 [tool.yapf]
 based_on_style = "pep8"
@@ -24,3 +25,6 @@ blank_line_before_nested_class_or_def = true
 # split_all_comma_separated_values = true
 space_between_ending_comma_and_closing_bracket = false
 allow_split_before_dict_value = false
+
+[tool.yapfignore]
+ignore_patterns = ["thirdparty/*"]

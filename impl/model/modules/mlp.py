@@ -9,10 +9,7 @@ import torch.distributed as dist
 import torch.nn as nn
 
 from impl.model.parallelism.model_parallel.modules import (
-    ColumnParallelLinear,
-    merged_linear_with_grad_accumulation_and_async_allreduce,
-    RowParallelLinear,
-)
+    ColumnParallelLinear, merged_linear_with_grad_accumulation_and_async_allreduce, RowParallelLinear)
 import base.constants
 import base.logging as logging
 
@@ -33,6 +30,7 @@ def get_activation_fn(activation_function: str) -> Callable:
 
 
 class LayerNormQKVLinear(nn.Module):
+
     def __init__(
         self,
         input_dim: int,
@@ -43,7 +41,8 @@ class LayerNormQKVLinear(nn.Module):
         use_attention_bias: bool,
         layer_norm_type: Optional[str] = None,
         # parallelism
-        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
+        model_parallel:
+        bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device
@@ -77,9 +76,8 @@ class LayerNormQKVLinear(nn.Module):
             )
         else:
             self.mp_worldsize = base.constants.model_parallel_world_size()
-            assert n_q_heads % self.mp_worldsize == 0, (
-                f"n_q_heads {n_q_heads} must be divisible by " f"mp_worldsize {self.mp_worldsize}"
-            )
+            assert n_q_heads % self.mp_worldsize == 0, (f"n_q_heads {n_q_heads} must be divisible by "
+                                                        f"mp_worldsize {self.mp_worldsize}")
             hidden_dim = input_dim
             self.q_attn = ColumnParallelLinear(
                 hidden_dim,
@@ -115,11 +113,9 @@ class LayerNormQKVLinear(nn.Module):
                 )
             else:
                 if n_kv_heads > 1:
-                    logger.warning(
-                        f"Cannot split {n_kv_heads} kv heads evenly among "
-                        f"{self.mp_worldsize} model parallel ranks, "
-                        f"use unsplitted linear for kv heads instead"
-                    )
+                    logger.warning(f"Cannot split {n_kv_heads} kv heads evenly among "
+                                   f"{self.mp_worldsize} model parallel ranks, "
+                                   f"use unsplitted linear for kv heads instead")
                 self.k_attn = nn.Linear(
                     hidden_dim,
                     head_dim * n_kv_heads,
@@ -202,6 +198,7 @@ class LayerNormQKVLinear(nn.Module):
 
 
 class LayerNormMLP(nn.Module):
+
     def __init__(
         self,
         hidden_dim: int,
@@ -210,7 +207,8 @@ class LayerNormMLP(nn.Module):
         activation_function: str,
         layer_norm_epsilon: float,
         # parallelism
-        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
+        model_parallel:
+        bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device
@@ -260,6 +258,7 @@ class LayerNormMLP(nn.Module):
 
 
 class LlamaLayerNormMLP(nn.Module):
+
     def __init__(
         self,
         hidden_dim: int,
@@ -267,7 +266,8 @@ class LlamaLayerNormMLP(nn.Module):
         activation_function: str,
         layer_norm_epsilon: float,
         # parallelism
-        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
+        model_parallel:
+        bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device
@@ -365,6 +365,7 @@ class LlamaLayerNormMLP(nn.Module):
 
 
 class LlamaRMSNorm(nn.Module):
+
     def __init__(
         self,
         hidden_size: int,
@@ -405,7 +406,8 @@ if USE_TE_BACKEND:
         activation_function: str,
         layer_norm_epsilon: float,
         # parallelism
-        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
+        model_parallel:
+        bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device

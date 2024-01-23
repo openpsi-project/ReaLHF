@@ -2,8 +2,8 @@
 
 from typing import List, Sequence
 
-import torch
 import numpy as np
+import torch
 
 from base.constants import *
 
@@ -206,6 +206,7 @@ class VocabUtility:
         return VocabUtility.vocab_range_from_per_partition_vocab_size(per_partition_vocab_size, rank,
                                                                       world_size)
 
+
 class GlobalMemoryBuffer:
     """Global buffer to avoid dynamic memory allocations.
     Caller should ensure that buffers of the same name
@@ -216,13 +217,12 @@ class GlobalMemoryBuffer:
 
     def get_tensor(self, tensor_shape, dtype, name, force_zero: bool = False):
         required_len = int(np.prod(tensor_shape))
-        if (
-            self.buffer.get((name, dtype), None) is None
-            or self.buffer[(name, dtype)].numel() < required_len
-        ):
-            self.buffer[(name, dtype)] = torch.empty(
-                required_len, dtype=dtype, device=torch.cuda.current_device(), requires_grad=False
-            )
+        if (self.buffer.get((name, dtype), None) is None
+                or self.buffer[(name, dtype)].numel() < required_len):
+            self.buffer[(name, dtype)] = torch.empty(required_len,
+                                                     dtype=dtype,
+                                                     device=torch.cuda.current_device(),
+                                                     requires_grad=False)
             if force_zero:
                 self.buffer[(name, dtype)].zero_()
 

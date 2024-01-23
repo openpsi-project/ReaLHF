@@ -14,7 +14,6 @@ torchrun --standalone --nnodes=1 --nproc-per-node=8 --module \
 ```
 
 """
-import base.constants
 import json
 import os
 import random
@@ -24,10 +23,11 @@ import torch
 import torch.distributed
 import torch.profiler
 
+from base.monitor import gpu_memory_mb
 import api.config as config_package
+import base.constants
 import base.gpu_utils
 import base.namedarray
-from base.monitor import gpu_memory_mb
 
 seqlen = 1024
 vocab_size = 32000
@@ -46,7 +46,6 @@ WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "codellama"
 MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded/CodeLlama-34b-hf_2pp_2mp_3s"
 BASE_MODEL_PATH = "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf/"
-
 
 ## performance related config
 PROFILE_INTERFACE_TYPE = "generate"
@@ -90,8 +89,7 @@ def make_backend():
                     sequence_parallel=USE_SEQ_PARALLEL,
                     num_pipeline_micro_batches=NUM_PP,
                 ),
-            )
-        )
+            ))
     else:
         return api.model.make_backend(
             config_package.ModelBackend(
@@ -105,8 +103,7 @@ def make_backend():
                     sequence_parallel=USE_SEQ_PARALLEL,
                     num_pipeline_micro_batches=NUM_PP,
                 ),
-            )
-        )
+            ))
 
 
 def make_interface():
@@ -182,7 +179,7 @@ def make_batch(tokenizer, device, seed=373):
     dp_worldsize = base.constants.data_parallel_world_size()
     random.seed(seed)
     whole_batch = [random_sentence(min_len=seqlen + 100, max_len=seqlen + 100) for _ in range(batch_size)]
-    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank : batch_size // dp_worldsize * (dp_rank + 1)]
+    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank:batch_size // dp_worldsize * (dp_rank + 1)]
     return make_input(tokenizer, device, dp_batch)
 
 
@@ -250,13 +247,13 @@ def main(rank: int = None, world_size: int = None):
             p.export_chrome_trace(os.path.join(dirname, f"rank{rank}.json"))
 
     with torch.profiler.profile(
-        activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-        record_shapes=True,
-        profile_memory=True,
-        with_stack=True,
-        schedule=s,
-        on_trace_ready=trace_handler,
-        with_flops=True,
+            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+            schedule=s,
+            on_trace_ready=trace_handler,
+            with_flops=True,
     ) as prof:
         for _ in range(10):
             torch.cuda.synchronize()
@@ -270,14 +267,11 @@ def main(rank: int = None, world_size: int = None):
                 gconfig = GenerationConfig(min_new_tokens=1, max_new_tokens=10)
                 res = interface.generate(model, data, gconfig)
             torch.cuda.synchronize()
-            if (
-                base.constants.model_parallel_rank() == 0
-                and base.constants.pipe_parallel_rank() == NUM_PP - 1
-            ):
+            if (base.constants.model_parallel_rank() == 0
+                    and base.constants.pipe_parallel_rank() == NUM_PP - 1):
                 print(
                     f"generate {res['gen_tokens'].shape[1]} tokens * batch size {res['gen_tokens'].shape[0]}, "
-                    f"time: {time.monotonic() - st}"
-                )
+                    f"time: {time.monotonic() - st}")
             prof.step()
 
 

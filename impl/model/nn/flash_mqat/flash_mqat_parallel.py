@@ -1,19 +1,13 @@
 from typing import *
+import os
 
 import torch
-import os
 
 from .flash_mqat_base import FlashMQATConfig
 from base.monitor import process_memory_mb
-from impl.model.nn.flash_mqat.flash_mqat_base import (
-    FlashMQATBlock,
-    FlashMQATConfig,
-    FlashMQATModel,
-    OutputHead,
-    SequenceParallelActorHead,
-    SequenceParallelCriticHead,
-    VocabPositionEmbedding,
-)
+from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, FlashMQATModel,
+                                                      OutputHead, SequenceParallelActorHead,
+                                                      SequenceParallelCriticHead, VocabPositionEmbedding)
 from impl.model.parallelism.pipeline_parallel.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
@@ -79,9 +73,9 @@ def mp_partition_flash_mqat_state_dict(
                 continue
             w = state_dict[f"{i}.attn.c_attn.linear.{key}"]
             nq = config.hidden_dim // config.head_dim
-            q_proj_w = w[: nq * config.head_dim]
-            k_proj_w = w[nq * config.head_dim : (nq + config.n_kv_heads) * config.head_dim]
-            v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim :]
+            q_proj_w = w[:nq * config.head_dim]
+            k_proj_w = w[nq * config.head_dim:(nq + config.n_kv_heads) * config.head_dim]
+            v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim:]
             state_dict[f"{i}.attn.c_attn.q_attn.{key}"] = q_proj_w
             state_dict[f"{i}.attn.c_attn.k_attn.{key}"] = k_proj_w
             state_dict[f"{i}.attn.c_attn.v_attn.{key}"] = v_proj_w
@@ -130,9 +124,8 @@ def mp_merge_flash_mqat_state_dict(
         i = int(k.split(".")[0])
         if any([ek in k for ek in embedding_keys]) and "weight" in k:
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
-        elif (
-            any([ck in k for ck in column_linear_keys]) and state_dicts[0][k].shape[0] > 1
-        ):  # exclude critic head
+        elif (any([ck in k for ck in column_linear_keys])
+              and state_dicts[0][k].shape[0] > 1):  # exclude critic head
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
         elif any([rk in k for rk in row_linear_keys]) and "weight" in k:
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=1)
@@ -234,12 +227,11 @@ def pipe_wrap_fn(
     init_critic_from_actor: bool = False,
     init_from_scratch: bool = False,
 ):
+
     def pipe_wrap_fn_(model: api.model.Model) -> api.model.Model:
         if not isinstance(model.module, FlashMQATModel):
-            raise RuntimeError(
-                f"Only FlashMQAT models can be wrapped as "
-                f"pipeline module, provided type {type(model.module)}"
-            )
+            raise RuntimeError(f"Only FlashMQAT models can be wrapped as "
+                               f"pipeline module, provided type {type(model.module)}")
         config = model.module.config
         module = make_causal_flash_mqat_pipe_module(
             config,

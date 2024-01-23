@@ -116,6 +116,7 @@ class ParallelEmbedding(torch.nn.Module):
         output = reduce_from_tensor_model_parallel_region(output_parallel)
         return output
 
+
 class LinearWithFrozenWeight(torch.autograd.Function):
     """Linear operator that does not calculate gradient for weight.
     This op and LinearWithGradAccumulationAndAsyncCommunication performs 
@@ -128,7 +129,10 @@ class LinearWithFrozenWeight(torch.autograd.Function):
     @staticmethod
     @custom_fwd
     def forward(
-        ctx, input, weight, bias,
+        ctx,
+        input,
+        weight,
+        bias,
     ):
         ctx.save_for_backward(weight)
         output = torch.matmul(input, weight.t())
@@ -191,6 +195,7 @@ def linear_with_frozen_weight(
     ]
 
     return LinearWithFrozenWeight.apply(*args)
+
 
 class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
     """See linear_with_grad_accumulation_and_async_allreduce"""

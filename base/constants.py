@@ -35,6 +35,7 @@ _fake_mp_rank = None
 
 # TODO: As in Megatron, we can set NCCL group options. Is it necessary?
 
+
 def set_model_name(model_name: str):
     global _model_name
     assert _model_name is None, "Cannot set model_name twice."
@@ -150,13 +151,14 @@ def set_fake_mp_rank(rank):
     global _fake_mp_rank
     _fake_mp_rank = rank
 
+
 def set_global_memory_buffer(buffer):
     global _global_memory_buffer
     assert _global_memory_buffer is None, "cannot set global memory buffer twice"
     _global_memory_buffer = buffer
 
+
 def get_global_memory_buffer():
     global _global_memory_buffer
     assert _global_memory_buffer is not None, "global memory buffer is not set"
     return _global_memory_buffer
-    
