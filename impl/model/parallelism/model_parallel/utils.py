@@ -214,7 +214,7 @@ class GlobalMemoryBuffer:
     def __init__(self):
         self.buffer = {}
 
-    def get_tensor(self, tensor_shape, dtype, name):
+    def get_tensor(self, tensor_shape, dtype, name, force_zero: bool = False):
         required_len = int(np.prod(tensor_shape))
         if (
             self.buffer.get((name, dtype), None) is None
@@ -223,5 +223,7 @@ class GlobalMemoryBuffer:
             self.buffer[(name, dtype)] = torch.empty(
                 required_len, dtype=dtype, device=torch.cuda.current_device(), requires_grad=False
             )
+            if force_zero:
+                self.buffer[(name, dtype)].zero_()
 
         return self.buffer[(name, dtype)][0:required_len].view(*tensor_shape)
