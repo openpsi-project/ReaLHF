@@ -13,7 +13,6 @@ parser.add_argument("--cpu", action="store_true")
 parser.add_argument("--retry", type=int, default=100)
 parser.add_argument("--tv", type=str, default=LATEST_TV)
 parser.add_argument("--rebuild", action="store_true")
-parser.add_argument("--trt", action="store_true")
 args = parser.parse_args()
 
 if __name__ == "__main__":
@@ -35,15 +34,13 @@ if __name__ == "__main__":
         cmd = f"docker build -t {target_img} -f docker/Dockerfile"
         if args.gpu:
             base_image = f"nvcr.io/nvidia/pytorch:{args.tv}-py3"
-            if args.trt:
-                base_image = "tensorrt_llm/release:latest"
             cmd += (f" --build-arg base_image={base_image} "
                     f"--build-arg INCUBATOR_VER={time.time()}")
         else:
             cmd += f".cpu --build-arg base_image=ubuntu:22.04"
         if args.rebuild:
             cmd += " --no-cache "
-        cmd += " /local/fw/packages/docker"
+        cmd += " ."
         print(cmd)
         os.system(cmd)
         time.sleep(1)
