@@ -76,8 +76,9 @@ def state_dict_to_starcoder(state_dict, config):
     return new_state_dict
 
 
-FlashMQATModel.register_hf_model("starcoder", convert_config_starcoder, state_dict_from_starcoder,
-                                 state_dict_to_starcoder)
+FlashMQATModel.register_hf_model(
+    "starcoder", convert_config_starcoder, state_dict_from_starcoder, state_dict_to_starcoder
+)
 
 ################################ StarCoder End ################################
 
@@ -137,7 +138,7 @@ def gpt2_state_dict_converter(state_dict: Dict, config: FlashMQATConfig) -> Dict
         if k.endswith(".linear.weight") or k.endswith("proj.weight") or k.endswith("fc.weight"):
             v = v.transpose(0, 1)
         new_state_dict[k] = v
-    new_state_dict['head.weight'] = state_dict['transformer.wte.weight']
+    new_state_dict["head.weight"] = state_dict["transformer.wte.weight"]
     return new_state_dict
 
 
@@ -169,18 +170,24 @@ def state_dict_to_gpt2(state_dict, config):
         for rf, rt in zip(replace_from, replace_to):
             if rf in k:
                 k = k.replace(rf, rt)
-        if k.endswith(".linear.weight") or k.endswith("proj.weight") or k.endswith("fc.weight") or k.endswith(
-                "c_attn.weight"):
+        if (
+            k.endswith(".linear.weight")
+            or k.endswith("proj.weight")
+            or k.endswith("fc.weight")
+            or k.endswith("c_attn.weight")
+        ):
             v = v.transpose(0, 1)
         new_state_dict[k] = v
     return new_state_dict
 
 
-FlashMQATModel.register_hf_model("gpt2",
-                                 gpt2_config_converter,
-                                 gpt2_state_dict_converter,
-                                 state_dict_to_gpt2,
-                                 force_load_from_hf_pretrained=True)
+FlashMQATModel.register_hf_model(
+    "gpt2",
+    gpt2_config_converter,
+    gpt2_state_dict_converter,
+    state_dict_to_gpt2,
+    force_load_from_hf_pretrained=True,
+)
 
 ################################ GPT2 End ################################
 
@@ -246,7 +253,7 @@ def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
     keys_to_pop = [k for k in state_dict.keys() if "rotary_emb.inv_freq" in k]
     for k in keys_to_pop:
         state_dict.pop(k)
-        
+
     if USE_TE_BACKEND:
         state_dict = new_state_dict
         new_state_dict = {}
@@ -259,19 +266,48 @@ def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
                 if k1 in k:
                     k = k.replace(k1, k2)
             new_state_dict[k] = v
-        
+
         # fuse gate && up weight
         for i in range(config.n_layers):
             gate_w = new_state_dict[f"transformer.h.{i}.mlp.gate_proj.weight"]
             upproj_w = new_state_dict[f"transformer.h.{i}.mlp.up_proj.weight"]
             w = torch.cat([gate_w, upproj_w], dim=0)
-            new_state_dict[f"transformer.h.{i}.mlp.fc1.weight"] = w
+            new_state_dict[f"transformer.h.{i}.mlp.fc1_weight"] = w
+            new_state_dict[f"transformer.h.{i}.mlp._extra_state"] = None
             new_state_dict.pop(f"transformer.h.{i}.mlp.gate_proj.weight")
             new_state_dict.pop(f"transformer.h.{i}.mlp.up_proj.weight")
     return new_state_dict
 
 
-def to_llama_state_dict(state_dict: Dict, config: FlashMQATConfig) -> Dict:
+def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: FlashMQATConfig) -> Dict:
+    if USE_TE_BACKEND:
+        # remove all extra states
+        keys = list(state_dict.keys())
+        for k in keys:
+            if k.endswith("_extra_state"):
+                state_dict.pop(k)
+
+        # split gate && up weight
+        for i in range(config.n_layers):
+            w = state_dict[f"transformer.h.{i}.mlp.fc1_weight"]
+            gate_w, upproj_w = w.split((w.shape[0] // 2, w.shape[0] // 2), dim=0)
+            state_dict[f"transformer.h.{i}.mlp.gate_proj.weight"] = gate_w.contiguous()
+            state_dict[f"transformer.h.{i}.mlp.up_proj.weight"] = upproj_w.contiguous()
+            state_dict.pop(f"transformer.h.{i}.mlp.fc1_weight")
+
+        # rename
+        new_state_dict = {}
+        te_replace_pairs = [
+            (".mlp.layer_norm_weight", ".mlp.ln.weight"),
+            (".mlp.fc2_weight", ".mlp.down_proj.weight"),
+        ]
+        for k, v in state_dict.items():
+            for k1, k2 in te_replace_pairs:
+                if k1 in k:
+                    k = k.replace(k1, k2)
+            new_state_dict[k] = v
+        state_dict = new_state_dict
+
     replace_pairs = [
         ("model.", "transformer."),
         (".embed_tokens.", ".embedding_layer.wte."),
@@ -295,9 +331,9 @@ def to_llama_state_dict(state_dict: Dict, config: FlashMQATConfig) -> Dict:
     for i in range(config.n_layers):
         w = state_dict[f"model.layers.{i}.self_attn.c_attn.linear.weight"]
         nq = config.hidden_dim // config.head_dim
-        q_proj_w = w[:nq * config.head_dim]
-        k_proj_w = w[nq * config.head_dim:(nq + config.n_kv_heads) * config.head_dim]
-        v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim:]
+        q_proj_w = w[: nq * config.head_dim]
+        k_proj_w = w[nq * config.head_dim : (nq + config.n_kv_heads) * config.head_dim]
+        v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim :]
         w = torch.cat([q_proj_w, k_proj_w, v_proj_w], dim=0)
         state_dict[f"model.layers.{i}.self_attn.q_proj.weight"] = q_proj_w
         state_dict[f"model.layers.{i}.self_attn.k_proj.weight"] = k_proj_w
@@ -307,6 +343,7 @@ def to_llama_state_dict(state_dict: Dict, config: FlashMQATConfig) -> Dict:
 
 
 for name in ["llama", "deepseek", "codellama"]:
-    FlashMQATModel.register_hf_model(name, convert_config_llama, convert_state_dict_llama,
-                                     to_llama_state_dict)
+    FlashMQATModel.register_hf_model(
+        name, convert_config_llama, convert_state_dict_llama, to_llama_state_dict
+    )
 ################################ LLaMa End ################################
