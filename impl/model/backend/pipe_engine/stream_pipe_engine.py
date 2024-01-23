@@ -169,12 +169,13 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
 
         if self.engine_controller is not None:
             self.engine_controller.issue_schedule(sched, priority)
+            logger.info(
+                f"Issued schedule {sched_index} with priority {priority}, schedule type {sched.__class__.__name__}"
+            )
         f = EngineFuture()
         self.future_mapping[sched_index] = f
         self.schedule_count += 1
-        logger.info(
-            f"Issued schedule {sched_index} with priority {priority}, schedule type {sched.__class__.__name__}"
-        )
+        logger.info(f"Rank {self.global_rank} started schedule {sched_index} done.")
         return sched_index, f
 
     def end_schedule(self, schedule_index: int):
@@ -320,9 +321,9 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
 
             try:
                 self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
-                # logger.info(f"Rank {self.global_rank}: START cmd {cmd} of sched {sched_id}")
+                logger.info(f"Rank {self.global_rank}: START cmd {cmd} of sched {sched_id}")
                 exec_end = self._exec_instr(*cmd.args)
-                # logger.info(f"Rank {self.global_rank}: END cmd {cmd} of sched {sched_id}")
+                logger.info(f"Rank {self.global_rank}: END cmd {cmd} of sched {sched_id}")
             except Exception as e:
                 logger.error(f"Rank {self.global_rank} Exception {e} in cmd {cmd}")
                 raise e

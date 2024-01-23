@@ -330,12 +330,12 @@ async def gather_tensor_from_mws(
 ) -> namedarray.NamedArray:
     # dp_head_streams = streams[-1]
     streams = list(itertools.chain.from_iterable(streams))
-    logger.info(f"rpc {rpc.name} waiting for responses {req_ids}")
+    # logger.info(f"rpc {rpc.name} waiting for responses {req_ids}")
     responses = await asyncio.gather(*[
         _awaitable_response(s, pattern=create_exact_match_pattern([req_id]))
         for s, req_id in zip(streams, req_ids)
     ])
-    logger.info(f"rpc {rpc.name} received responses {req_ids}")
+    # logger.info(f"rpc {rpc.name} received responses {req_ids}")
 
     dp_head_responses = responses[-dp_size:]
     recv_tik = time.perf_counter()
@@ -366,9 +366,9 @@ async def gather_tensor_from_mws(
                 ]
                 _gather_buffer_changed = True
             elif k in gather_buffer and not base.numpy_utils.shape_leq(buf_shape, gather_buffer[k][0].shape):
-                logger.info(
-                    f"Resize gather buffer on master worker for {k} from {gather_buffer[k][0].shape} to {buf_shape}"
-                )
+                # logger.info(
+                #     f"Resize gather buffer on master worker for {k} from {gather_buffer[k][0].shape} to {buf_shape}"
+                # )
                 new_x = []
                 for x in gather_buffer[k]:
                     padding = tuple(

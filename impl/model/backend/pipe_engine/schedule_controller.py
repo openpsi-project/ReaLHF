@@ -1,5 +1,5 @@
-from collections import defaultdict
-from typing import List, Union
+from collections import defaultdict, deque
+from typing import Deque, List, Union
 import dataclasses
 import multiprocessing
 import queue
@@ -31,12 +31,23 @@ class PrioritizedSchedule:
         return self.priority < other.priority
 
 
+@dataclasses.dataclass
+class PrioritizedInstruction:
+    priority: int
+    schedule_index: int
+    instruction: PipeInstruction
+    blocked: bool = False
+
+    def __lt__(self, other: 'PrioritizedInstruction'):
+        return self.priority < other.priority
+
+
 class EngineScheduleController:
     """ Centralized scheduler that schedules pipeline instruction for each engine.
     only exists on every engine that has pp_rank=0
     """
 
-    def __init__(self, num_stages: int, trace: bool = False):
+    def __init__(self, num_stages: int, trace: bool = False, round_robin: bool = False):
         self.num_stages = num_stages
         self.waiting_stages = list(range(self.num_stages))
         self.schedule_count = 0
@@ -55,7 +66,8 @@ class EngineScheduleController:
         self.__tracer_save_queue = multiprocessing.Queue(1)
         multiprocessing.set_start_method("fork", force=True)
         self.thread = multiprocessing.Process(target=self.run)
-        self._trace_controller = False  # trace
+        self._trace_controller = trace  # TODO: make it configurable
+        self.__round_robin = round_robin  # TODO: make it configurable
         # self.thread.start()
 
     def __init_sockets(self):
@@ -89,7 +101,9 @@ class EngineScheduleController:
         self.tracer = None
 
     def __init_storage(self):
-        self.__inst_queues = defaultdict(list)
+        self.__inst_queues = defaultdict(deque)
+        self.__comm_queues = defaultdict(deque)  # try to use two queues, this queue is for binded
+        # self.__inst_queues_table = defaultdict(lambda: defaultdict(list)) # stage_id -> sched_id -> inst_queue
 
     def start(self):
         self.thread.start()
@@ -128,6 +142,9 @@ class EngineScheduleController:
         try:
             sched, priority = self.__schedule_queue.get(block=False)
             prior_sched = self.__issue_schedule(sched, priority)
+            print(
+                f"Issued sched {prior_sched.index} {prior_sched.schedule.__class__.__name__} with priority {prior_sched.priority}"
+            )
             return prior_sched.index
         except queue.Empty:
             return None
@@ -152,37 +169,96 @@ class EngineScheduleController:
         2. enqueue instructions to instruction queue with priority
         3. 
         """
-        stage_updated = {stage_id: False for stage_id in range(self.num_stages)}
+        if self.__round_robin:
+            self.__round_robin_update_instruction_queues(to_update)
+        else:
+            self.__prioritized_update_instruction_queues(to_update)
+
+    def __prioritized_update_instruction_queues(self, to_update=None):
+
+        def insert_instruction_with_priority(stage_inst_queue: Deque[PrioritizedInstruction],
+                                             new_p_inst: PrioritizedInstruction):
+            for idx in range(len(stage_inst_queue), 0, -1):
+                p_inst = stage_inst_queue[idx - 1]
+                if p_inst.blocked or p_inst.priority >= new_p_inst.priority:
+                    stage_inst_queue.insert(idx, new_p_inst)
+                    break
+            else:
+                stage_inst_queue.appendleft(new_p_inst)
+
         for prior_sched in self.schedules:
             sched = prior_sched.schedule
             if to_update is not None:
                 if prior_sched.index not in to_update:
                     continue
             ri = sched.ready()  # ready instructions
+            # stage3_updated = False
             for stage_id in range(self.num_stages):
-                if stage_updated[stage_id]:
-                    continue
                 stage_ri = ri[stage_id]
                 for inst in stage_ri:
                     inst: PipeInstruction
-                    self.__inst_queues[stage_id].append((prior_sched, inst))
-                    stage_updated[stage_id] = True
-                    bind = inst.bind
-                    if len(bind) > 0:
+                    stage_inst_queue = self.__inst_queues[stage_id]
+                    stage_comm_queue = self.__comm_queues[stage_id]
+                    # insert instruction into queue by priority
+                    # new_p_inst = PrioritizedInstruction(prior_sched.priority, prior_sched.index, inst, blocked=len(inst.bind)>0)
+                    new_p_inst = PrioritizedInstruction(prior_sched.priority, prior_sched.index, inst)
+
+                    if len(inst.bind) == 0:
+                        insert_instruction_with_priority(stage_inst_queue, new_p_inst)
+                    else:
+                        stage_comm_queue.append(new_p_inst)
+                        # if stage_id == 3:
+                        #     stage3_updated = True
+                        # handle binded instruction
+                        bind = inst.bind
                         for b in bind:
+                            _bind = bind.copy()
+                            _bind.remove(b)
+                            _bind.append(inst)
                             bind_stage_ri = ri[b.stage_id]
-                            self.__inst_queues[b.stage_id].append((prior_sched, b))
-                            # stage_updated[b.stage_id] = True
-                            found = False
-                            for bind_inst in bind_stage_ri:
-                                if bind_inst == b:
-                                    found = True
-                                    bind_stage_ri.remove(bind_inst)
-                            if not found:
-                                raise RuntimeError(
-                                    f"Binded instruction {b} of {inst} not ready. Current ready {ri}")
-                # else:
-                #     sched.update(stage_id)
+                            # bind_stage_inst_queue = self.__inst_queues[b.stage_id]
+                            bind_stage_comm_queue = self.__comm_queues[b.stage_id]
+                            b.bind = _bind
+                            bind_p_inst = PrioritizedInstruction(prior_sched.priority,
+                                                                 prior_sched.index,
+                                                                 b,
+                                                                 blocked=True)
+                            # insert_instruction_with_priority(bind_stage_inst_queue, bind_p_inst)
+                            bind_stage_comm_queue.append(bind_p_inst)
+                            # if b.stage_id == 3:
+                            #     stage3_updated = True
+                            try:
+                                bind_stage_ri.remove(b)
+                            except ValueError:
+                                raise ValueError(
+                                    f"Instruction {b} not found in ready queue of stage {b.stage_id}")
+            # if stage3_updated:
+            #     print(f"stage 3 instruction queue {self.__inst_queues[3]}")
+
+    def __round_robin_update_instruction_queues(self, to_update=None):
+        for prior_sched in self.schedules:
+            sched = prior_sched.schedule
+            if to_update is not None:
+                if prior_sched.index not in to_update:
+                    continue
+            priority = prior_sched.priority
+            sched_index = prior_sched.index
+            ri = sched.ready()  # ready instructions
+            for stage_id in range(self.num_stages):
+                stage_ri = ri[stage_id]
+                for inst in stage_ri:
+                    inst: PipeInstruction
+                    self.__inst_queues[stage_id].append(PrioritizedInstruction(priority, sched_index, inst))
+                    bind = inst.bind
+                    for b in bind:
+                        bind_stage_inst_queue = ri[b.stage_id]
+                        self.__inst_queues[b.stage_id].append(PrioritizedInstruction(
+                            priority, sched_index, b))
+                        try:
+                            bind_stage_inst_queue.remove(b)
+                        except ValueError:
+                            raise ValueError(
+                                f"Instruction {b} not found in ready queue of stage {b.stage_id}")
 
     def __post_one_instruction(self, stage: int, sched_index: int, inst: PipeInstruction, end: bool):
         """ core, post one instruction to one stage
@@ -199,14 +275,48 @@ class EngineScheduleController:
         self.waiting_stages.remove(stage)
 
     def post_instructions(self):
+        if self.__round_robin:
+            return self.__round_robin_post_instructions()
+        else:
+            return self.__prioritized_post_instructions()
+
+    def __round_robin_post_instructions(self):
         posted = 0
         for stage in self.waiting_stages:
-            stage_inst_squeue = self.__inst_queues[stage]
-            if len(stage_inst_squeue) > 0:
-                prior_sched, inst = stage_inst_squeue.pop(0)
-                sched_index = prior_sched.index
-                self.__post_one_instruction(stage, sched_index, inst, end=False)
+            q = self.__inst_queues[stage]
+            if len(q) > 0:
+                p_inst: PrioritizedInstruction = q.popleft()
+                self.__post_one_instruction(stage, p_inst.schedule_index, p_inst.instruction, end=False)
                 posted += 1
+        return posted
+
+    def __prioritized_post_instructions(self):
+        posted = 0
+        for stage in self.waiting_stages:
+            q = self.__inst_queues[stage]
+            comm_q = self.__comm_queues[stage]
+            p_inst = None
+            if len(comm_q) > 0:
+                p_inst: PrioritizedInstruction = comm_q.popleft()
+            elif len(q) > 0:
+                p_inst: PrioritizedInstruction = q.popleft()
+            if p_inst is not None:
+                inst = p_inst.instruction
+                self.__post_one_instruction(stage, p_inst.schedule_index, inst, end=False)
+                posted += 1
+                # if stage == 3:
+                #     print(f"stage 3 posted inst {inst}")
+
+                # set bind to block
+                # bind = inst.bind
+                # for b in bind:
+                #     bind_stage_inst_queue = self.__inst_queues[b.stage_id]
+                #     for p_inst in bind_stage_inst_queue:
+                #         if p_inst.instruction == b:
+                #             p_inst.blocked = True
+                #             break
+                #     if b.stage_id == 3:
+                #         print(f"stage 3 blocked inst {b}")
         return posted
 
     def poll_results(self):
@@ -302,8 +412,9 @@ class EngineScheduleController:
         while not self.__terminated:
             schedule_indices_to_update = set(
             )  # contains schedule indices that should be updated in this iteration
-            schedule_indices_to_update.add(self.__check_and_issue_schedule())
-            posted = self.post_instructions()
+            issued_schedule = self.__check_and_issue_schedule()
+            if issued_schedule is not None:
+                schedule_indices_to_update.add(issued_schedule)
             # if posted > 0:
             #     print(f"schedule_controller.py: Posted {posted} instructions")
             # time.sleep(0.001)
@@ -312,9 +423,11 @@ class EngineScheduleController:
             # if polled > 0:
             #     print(f"Polled {polled} results")
 
-            posted += self.post_instructions()
+            # posted += self.post_instructions()
             if len(schedule_indices_to_update) > 0:
                 self.update_instruction_queues(schedule_indices_to_update)
+
+            posted = self.post_instructions()
 
             self.__posted += posted
             self.__polled += polled

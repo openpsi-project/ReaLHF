@@ -28,9 +28,9 @@ if MODEL_TYPE == "llama":
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 128
-MIN_NEW_TOKENS = 64
-MAX_NEW_TOKENS = 64
+BATCH_SIZE = 64
+MIN_NEW_TOKENS = 32
+MAX_NEW_TOKENS = 32
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
@@ -228,6 +228,7 @@ def run_mixed(rank, seed):
     tracer.start()
 
     train_iters = 3
+    generate_iters = 2
 
     def mixed_one_step(seed_):
         train_datas = [
@@ -241,7 +242,7 @@ def run_mixed(rank, seed):
         st = time.monotonic()
 
         gfs = []
-        for _ in range(1):
+        for _ in range(generate_iters):
             gf, _ = interface.generate(model, gen_data, gconfig=gconfig, num_micro_batches=2 * NUM_PP)
             # for train_data in train_datas:
             gfs.append(gf)
@@ -252,13 +253,31 @@ def run_mixed(rank, seed):
             tf, _ = interface.train_step(model, train_datas[i], num_micro_batches=2 * NUM_PP)
             tfs.append(tf)
 
-            while not tf.done():
-                engine.poll_one_step()
+            # while not tf.done():
+            #     engine.poll_one_step()
 
-            print(f"rank {rank} train step {i} done, time {time.monotonic() - st}")
+            # print(f"rank {rank} train step {i} done, time {time.monotonic() - st}")
 
-        while not gf.done():
+        futures = gfs + tfs
+        done_futures = []
+
+        while not all(f.done() for f in futures):
             engine.poll_one_step()
+            for i, f in enumerate(futures):
+                if f not in done_futures:
+                    if f.done():
+                        done_futures.append(f)
+                        print(f"future {i} done, time {time.monotonic() - st}")
+
+        # for i, gf in enumerate(gfs):
+        #     while not gf.done():
+        #         engine.poll_one_step()
+        #     print(f"generate {i} done, time cost {time.monotonic() - st:4f}")
+
+        # for i, tf in enumerate(tfs):
+        #     while not tf.done():
+        #         engine.poll_one_step()
+        #     print(f"train {i} done, time cost {time.monotonic() - st:4f}")
 
         gress = []
         for gf in gfs:
@@ -272,12 +291,14 @@ def run_mixed(rank, seed):
 
     st = time.monotonic()
     mixed_one_step(seed)
-    print(f"first mixed time cost {time.monotonic() - st:.4f}")
+    print(f"first mixed time cost {time.monotonic() - st:.4f}")  # round_robin: gen_iter=2, train_iter=3
+    # BS 64, min_new_tokens=32, max_new_tokens=32, prompt_length~150
+    # mixed cots ~10.8s
 
-    for i in range(3):
-        st = time.monotonic()
-        mixed_one_step(seed + i + 1)
-        print(f"mixed time cost {time.monotonic() - st:.4f}")
+    # for i in range(3):
+    #     st = time.monotonic()
+    #     mixed_one_step(seed + i + 1)
+    #     print(f"mixed time cost {time.monotonic() - st:.4f}")
 
     tracer.save()
     engine.save_tracer()
@@ -328,4 +349,4 @@ class StreamPipeTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="StreamPipeTest.testGenerate")
+    unittest.main(defaultTest="StreamPipeTest.testMixed")
