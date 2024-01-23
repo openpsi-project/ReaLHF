@@ -11,7 +11,7 @@ from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
 from tests.utils import *
 import api.huggingface
 
-torch.cuda.manual_seed_all(1)
+torch.cuda.manual_seed_all(2)
 
 
 class LlamaFlashMQATForwardTest(unittest.TestCase):
