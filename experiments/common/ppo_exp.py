@@ -239,7 +239,7 @@ class PPOConfig(Experiment):
                                                             mem=100000,
                                                             gpu=1,
                                                             gpu_type="tesla",
-                                                            exclude="QH-com23"),
+                                                            exclude="QH-com[23,35,37]"),
             ),
             model_worker=[
                 TasksGroup(
@@ -248,7 +248,7 @@ class PPOConfig(Experiment):
                                                                gpu=1,
                                                                gpu_type="tesla",
                                                                mem=50000,
-                                                               exclude="QH-com23"),
+                                                               exclude="QH-com[23,35,37]"),
                 ),
                 TasksGroup(
                     count=self.n_critics,
@@ -256,7 +256,7 @@ class PPOConfig(Experiment):
                                                                gpu=1,
                                                                gpu_type="tesla",
                                                                mem=100000,
-                                                               exclude="QH-com23"),
+                                                               exclude="QH-com[23,35,37]"),
                 ),
                 TasksGroup(
                     count=self.n_rewards,
@@ -264,7 +264,7 @@ class PPOConfig(Experiment):
                                                                gpu=1,
                                                                gpu_type="tesla",
                                                                mem=100000,
-                                                               exclude="QH-com23"),
+                                                               exclude="QH-com[23,35,37]"),
                 ),
                 TasksGroup(
                     count=self.n_refs,

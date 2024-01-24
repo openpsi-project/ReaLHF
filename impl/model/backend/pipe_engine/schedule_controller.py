@@ -66,7 +66,7 @@ class EngineScheduleController:
         self.__tracer_save_queue = multiprocessing.Queue(1)
         multiprocessing.set_start_method("fork", force=True)
         self.thread = multiprocessing.Process(target=self.run)
-        self._trace_controller = trace  # TODO: make it configurable
+        self.__trace_controller = trace  # TODO: make it configurable
         self.__round_robin = round_robin  # TODO: make it configurable
         # self.thread.start()
 
@@ -112,7 +112,7 @@ class EngineScheduleController:
         self.__terminate_queue.put(0)
 
     def save_tracer(self):
-        if self._trace_controller:
+        if self.__trace_controller:
             self.__tracer_save_queue.put(0)
 
     # @property
@@ -330,10 +330,11 @@ class EngineScheduleController:
         completed_scheds = set()
         while True:
             try:
-                stage_id, sched_id, signal_code, *insts = self.signal_socket.recv_multipart(flags=zmq.NOBLOCK)
+                stage_id, sched_id, signal_code, inst = self.signal_socket.recv_multipart(flags=zmq.NOBLOCK)
                 stage_id = int.from_bytes(stage_id, byteorder="big")
                 sched_id = int.from_bytes(sched_id, byteorder="big")
                 signal_code = int.from_bytes(signal_code, byteorder="big")
+                inst = PipeInstruction.decode(inst)
 
                 assert stage_id not in self.waiting_stages
                 self.waiting_stages.append(stage_id)
@@ -346,22 +347,20 @@ class EngineScheduleController:
                 if sched is None:
                     raise RuntimeError(f"Schedule with index {sched_id} not found.")
 
-                insts = [PipeInstruction.decode(inst) for inst in insts]
-                # print(f"Rank {stage_id}: sched {sched_id} stage {stage_id} executing {insts}")
-                sched.exec(insts)
-                # print(f"Rank {stage_id}: sched {sched_id} stage {stage_id} executed {insts}")
+                sched.exec(inst)
 
-                completed += len(insts)
+                completed += 1
                 completed_scheds.add(sched_id)
                 if signal_code == 1:  # terminate
-                    this_prior_sched.terminate_signal_count += 1
-                    # print(f"terminate signal received {stage_id} {sched_id} {insts}")
-                    sched.terminate_stage(stage_id)
-                    # print(f"{this_prior_sched.index} count = {this_prior_sched.terminate_signal_count}")
-                    if this_prior_sched.terminate_signal_count >= self.num_stages:
-                        sched.terminate()
-                        self.schedules.remove(this_prior_sched)
-                        # print(f"removed sched {this_prior_sched.index}, schedules {len(self.schedules)}")
+                    if not isinstance(inst, EndSchedule):
+                        assert this_prior_sched.terminate_signal_count == 0
+                        # print("initiate terminate")
+                        sched.initiate_terminate()
+                    else:
+                        this_prior_sched.terminate_signal_count += 1
+                        # print(f"controller end schedule count {this_prior_sched.terminate_signal_count}")
+                        if this_prior_sched.terminate_signal_count >= self.num_stages:
+                            self.schedules.remove(this_prior_sched)
                 elif signal_code != 0:  # normal instruction execute, nothing happens
                     raise NotImplementedError(
                         f"Unknown signal code {signal_code} received when polling results.")
@@ -373,7 +372,7 @@ class EngineScheduleController:
         import os
 
         import base.cluster
-        if self._trace_controller:
+        if self.__trace_controller:
             os.environ["DLLM_TRACE"] = "1"
         # output_path = os.path.join(
         #     base.cluster.spec.fileroot,
@@ -391,7 +390,7 @@ class EngineScheduleController:
             ignore_c_function=False,
             ignore_frozen=True,
             log_async=True,
-            # min_duration=5,
+            min_duration=15,
             output_file=output_path)
         self.tracer.start()
 
@@ -404,7 +403,7 @@ class EngineScheduleController:
         self.__init_sockets()
         self.__init_storage()
 
-        if self._trace_controller:
+        if self.__trace_controller:
             self.init_tracer()  # TODO: trace
 
         while not self.__terminated:
@@ -430,7 +429,7 @@ class EngineScheduleController:
             self.__posted += posted
             self.__polled += polled
             self.__check_terminate()
-            if self._trace_controller:
+            if self.__trace_controller:
                 self.__check_tracer_save()  # TODO: trace
 
 

@@ -58,7 +58,7 @@ def make_finetune_spec(bs_per_device, total_train_epochs=1, total_train_steps=10
     return finetune_spec
 
 
-def random_sentence(min_len=100, max_len=128):
+def random_sentence(min_len=500, max_len=512):
     words = ["the", "quick", "brown", "fox", "jumped", "over", "the", "lazy", "dog"]
     sentence_length = random.randint(min_len, max_len)
     return " ".join(random.choices(words, k=sentence_length))

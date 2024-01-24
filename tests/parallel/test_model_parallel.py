@@ -12,7 +12,7 @@ from tests.utils import *
 import api.config as config_package
 
 NUM_MP = 1
-NUM_PP = 4
+NUM_PP = 8
 NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
@@ -251,12 +251,13 @@ def run_mixed(rank: int, seed: int):
     assert isinstance(engine, DeepSpeedPipelineEngine)
 
     train_iters = 3
-    gen_iters = 2
+    gen_iters = 3
 
     train_datas = [
         init_data(model.tokenizer, device, BATCH_SIZE * 2, seed=seed + i) for i in range(train_iters)
     ]
     gen_data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + 100)
+
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
 
@@ -275,10 +276,10 @@ def run_mixed(rank: int, seed: int):
 
     print(f"rank {rank} FIRST mixed time cost {time.monotonic() - st:.4f}")
 
-    for _ in range(3):
-        st = time.monotonic()
-        mixed_one_step()
-        print(f"mixed time cost {time.monotonic() - st:.4f}")
+    # for _ in range(3):
+    #     st = time.monotonic()
+    #     mixed_one_step()
+    #     print(f"mixed time cost {time.monotonic() - st:.4f}")
 
 
 def run_linear(rank: int, res_queue: mp.Queue, seed: int):

@@ -43,6 +43,7 @@ class DynamicPipeSchedule(ABC):
 
         self.__initialized = False
         self.__terminated = False  # terminate the schedule, used to avoid duplicated terminate
+        self.__terminating = False  # terminate process initiated but not finished
         self.__end_schedule_sent = False
         self.__sched_id = sched_id
 
@@ -83,29 +84,27 @@ class DynamicPipeSchedule(ABC):
         for inst in ready_insts:
             self.__ready.add(inst)
 
-    def exec(self, insts: List[PipeInstruction]):
-        """Called by controller to execute a set of instructions.
+    def exec(self, inst: PipeInstruction):
+        """Called by controller to execute ONE instruction.
         Steps: 
         1. Move executed instructions from ready to executed. 
         2. Update, move ready instructions from not_ready to ready.
         """
         if self.__terminated:
             raise RuntimeError("Cannot execute an already terminated schedule.")
-        for inst in insts:
-            # if self.__stage_terminated[inst.stage_id]:
-            #     continue
-            if inst.name != "EndSchedule":
-                try:
-                    self.__inflight.remove(inst)
-                    self.__executed.add(inst)
-                except KeyError:
-                    # TODO: sometimes double execute, check why
-                    if inst not in self.__executed:
-                        raise KeyError(
-                            f"inst: {inst} not in inflight {self.__inflight.find()}; executed {self.__executed.find()};"
-                            f"ready {self.__ready.find()}; not ready {self.__not_ready.find()}")
+        if inst.name != "EndSchedule":
+            try:
+                self.__inflight.remove(inst)
+                self.__executed.add(inst)
+            except KeyError:
+                # TODO: sometimes double execute, check why
+                if inst not in self.__executed:
+                    raise KeyError(
+                        f"inst: {inst} not in inflight {self.__inflight.find()}; executed {self.__executed.find()};"
+                        f"ready {self.__ready.find()}; not ready {self.__not_ready.find()}")
             self.__not_ready.exec(inst)
-        # self.__update_ready()
+        else:
+            self.__terminate_stage(inst.stage_id)
 
     def all_executed(self, stage=None):
         if stage is not None:
@@ -130,17 +129,18 @@ class DynamicPipeSchedule(ABC):
         #         self.update(stage)
 
         self.__update_ready()
-        r = dict()
-        if self.all_executed() and not self.__end_schedule_sent:
+        r = {i: [] for i in range(self.num_stages)}
+        if (self.all_executed() or self.__terminating) and not self.__end_schedule_sent:
+            # insert EndSchedule instruction to instruction queues, wait for all stages to execute
+            # EndSchedule to finish the entire schedule
             for i in range(self.num_stages):
-                if self.__stage_terminated[i]:
-                    # print(f"stage {i} already terminated")
-                    r[i] = []
-                else:
-                    # print(f"stage {i} send end schedule")
+                if not self.__stage_terminated[i]:
+                    # print("end schedule sent for stage ", i)
                     inst = EndSchedule(stage_id=i, micro_batch_id=0)
                     r[i] = [inst]
             self.__end_schedule_sent = True
+            return r
+        elif self.__end_schedule_sent:
             return r
 
         for i in range(self.num_stages):
@@ -150,6 +150,7 @@ class DynamicPipeSchedule(ABC):
             for inst in r[i]:
                 self.__ready.remove(inst)
                 self.__inflight.add(inst)
+
         return r
 
     # def enqueue(self, insts: List[PipeInstruction]):
@@ -190,7 +191,7 @@ class DynamicPipeSchedule(ABC):
         # # print(f"inst {inst} deps {inst.deps} update ready {update_ready}")
         # return update_ready
 
-    def terminate_stage(self, stage_id):
+    def __terminate_stage(self, stage_id):
         if self.__stage_terminated[stage_id]:
             raise RuntimeError("Cannot terminate an already terminated stage.")
 
@@ -210,19 +211,16 @@ class DynamicPipeSchedule(ABC):
 
         self.__stage_terminated[stage_id] = True
 
-    def terminate(self):
-        """ Called by controller to terminate the schedule, force execute end schedule instruction for all stages
-        Move all instructions from ready to executed.
+        if all(self.__stage_terminated.values()):
+            self.__terminated = True
+            self.__terminating = False
+
+    def initiate_terminate(self):
+        """ Called by controller to initiate terminate process of the schedule.
         """
         if self.__terminated:
-            raise RuntimeError("Cannot terminate an already terminated schedule.")
-
-        assert all([self.__stage_terminated[stage_id] for stage_id in range(self.num_stages)]), \
-               "Schedule terminate called before stage terminate"
-        self.__terminated = True
-        # for i in range(self.num_stages):
-        #     self.__bind_insts[i].append(EndSchedule(stage_id=i, micro_batch_id=0))
-        #     self.__terminated = True
+            raise RuntimeError("Cannot initiate terminate on an already terminated schedule.")
+        self.__terminating = True
 
 
 class InferenceSchedule(DynamicPipeSchedule):

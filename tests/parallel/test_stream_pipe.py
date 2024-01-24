@@ -12,7 +12,7 @@ from tests.utils import *
 import api.config as config_package
 
 NUM_MP = 1
-NUM_PP = 4
+NUM_PP = 8
 NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
@@ -126,7 +126,7 @@ def run_train_batch(rank, seed):
     assert isinstance(engine, StreamPipeEngine)
     data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
 
-    os.environ["DLLM_TRACE"] = "1"
+    # os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(tracer_entries=int(2e6),
                         max_stack_depth=10,
                         ignore_c_function=False,
@@ -224,11 +224,11 @@ def run_mixed(rank, seed):
                         ignore_frozen=True,
                         log_async=True,
                         min_duration=20,
-                        output_file=f"/home/meizy/logs/viztracer/async_p2p/trace{rank}.json")
+                        output_file=f"/home/meizy/logs/viztracer/trace{rank}.json")
     tracer.start()
 
     train_iters = 3
-    generate_iters = 2
+    generate_iters = 3
 
     def mixed_one_step(seed_):
         train_datas = [
@@ -295,10 +295,10 @@ def run_mixed(rank, seed):
     # BS 64, min_new_tokens=32, max_new_tokens=32, prompt_length~150
     # mixed cots ~10.8s
 
-    for i in range(2):
-        st = time.monotonic()
-        mixed_one_step(seed + i + 1)
-        print(f"mixed time cost {time.monotonic() - st:.4f}")
+    # for i in range(2):
+    #     st = time.monotonic()
+    #     mixed_one_step(seed + i + 1)
+    #     print(f"mixed time cost {time.monotonic() - st:.4f}")
 
     tracer.save()
     engine.save_tracer()
