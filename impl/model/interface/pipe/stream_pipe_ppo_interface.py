@@ -96,7 +96,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
 
         prompt_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
         bs = prompt_lengths.shape[0]
-        logger.info(f"packed_prompts shape {packed_prompts.shape} bs {bs}")
+        # logger.info(f"packed_prompts shape {packed_prompts.shape} bs {bs}")
 
         num_micro_batches = self.generation_pipeline_microbatches_ratio * base.constants.pipe_parallel_world_size(
         )
@@ -239,6 +239,7 @@ class StreamPipePPOActorInterface(api.model.ModelInterface):
             short1cu_seqlens=short1cu_seqlens,
             seq_no_eos_mask=seq_no_eos_mask,
         )
+
         advantages, returns = ppo_functional.get_packed_advantages_and_returns(
             gamma=self.discount,
             lam=self.gae_lambda,

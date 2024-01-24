@@ -24,8 +24,8 @@ rollout = ModelRPC(
         "prompt_mask",
     ],
     dp_broker_type="packed",
-    min_n_seqs=128,
-    max_n_seqs=129,
+    min_n_seqs=256,
+    max_n_seqs=257,
     max_concurrent_calls=4,
 )
 
@@ -37,7 +37,7 @@ inf_reward = ModelRPC(
     output_data=["scores"],
     output_key_remap={"scores": "rewards"},
     dp_broker_type="packed",
-    min_n_seqs=128,
+    min_n_seqs=256,
     max_concurrent_calls=1,
 )
 
@@ -52,7 +52,7 @@ inf_ref_logits = ModelRPC(
     output_data=["logprobs"],
     output_key_remap={"logprobs": "packed_ref_logprobs"},
     dp_broker_type="packed",
-    min_n_seqs=128,
+    min_n_seqs=256,
     max_concurrent_calls=1,
 )
 
@@ -63,7 +63,7 @@ inf_values = ModelRPC(
     output_data=["scores"],
     output_key_remap={"scores": "values"},
     dp_broker_type="packed",
-    min_n_seqs=128,
+    min_n_seqs=256,
     max_concurrent_calls=1,
 )
 
@@ -83,8 +83,8 @@ train_actor = ModelRPC(
     ],
     log_return_value=True,
     dp_broker_type="packed",
-    min_n_seqs=128,
-    max_n_seqs=129,
+    min_n_seqs=256,
+    max_n_seqs=257,
     min_n_tokens=1,
     max_concurrent_calls=1,
 )
@@ -104,8 +104,8 @@ train_critic = ModelRPC(
     ],
     dp_broker_type="packed",
     log_return_value=True,
-    min_n_seqs=128,
-    max_n_seqs=129,
+    min_n_seqs=256,
+    max_n_seqs=257,
     min_n_tokens=1,
     max_concurrent_calls=1,
 )
@@ -235,44 +235,44 @@ class PPOConfig(Experiment):
             ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=16, mem=100000, gpu=1, gpu_type="tesla"),
+                scheduling=Scheduling.master_worker_default(cpu=16,
+                                                            mem=100000,
+                                                            gpu=1,
+                                                            gpu_type="tesla",
+                                                            exclude="QH-com23"),
             ),
             model_worker=[
                 TasksGroup(
                     count=self.n_actors,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type="tesla",
-                        mem=100000,
-                    ),
+                    scheduling=Scheduling.model_worker_default(cpu=4,
+                                                               gpu=1,
+                                                               gpu_type="tesla",
+                                                               mem=50000,
+                                                               exclude="QH-com23"),
                 ),
                 TasksGroup(
                     count=self.n_critics,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type="tesla",
-                        mem=100000,
-                    ),
+                    scheduling=Scheduling.model_worker_default(cpu=4,
+                                                               gpu=1,
+                                                               gpu_type="tesla",
+                                                               mem=100000,
+                                                               exclude="QH-com23"),
                 ),
                 TasksGroup(
                     count=self.n_rewards,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type="tesla",
-                        mem=100000,
-                    ),
+                    scheduling=Scheduling.model_worker_default(cpu=4,
+                                                               gpu=1,
+                                                               gpu_type="tesla",
+                                                               mem=100000,
+                                                               exclude="QH-com23"),
                 ),
                 TasksGroup(
                     count=self.n_refs,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type="tesla",
-                        mem=100000,
-                    ),
+                    scheduling=Scheduling.model_worker_default(cpu=4,
+                                                               gpu=1,
+                                                               gpu_type="tesla",
+                                                               mem=100000,
+                                                               exclude="QH-com23"),
                 ),
             ],
         )
@@ -320,8 +320,8 @@ class PPOConfig(Experiment):
 
         actor_model = _make_model_config(self.actor, "self")
         ref_model = _make_model_config(self.ref, "self")
-        # critic_type = "self" if not self.ppo.actor_as_critic else "actor_as_critic"
-        critic_type = "random_critic"
+        critic_type = "self" if not self.ppo.actor_as_critic else "actor_as_critic"
+        # critic_type = "random_critic"
         critic_model = _make_model_config(self.critic, critic_type)
         rw_model = _make_model_config(self.rew, critic_type)
 

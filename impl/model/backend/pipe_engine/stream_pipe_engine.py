@@ -50,8 +50,10 @@ class EngineFuture:
 
 class StreamPipeEngine(DeepSpeedPipelineEngine):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, verbose=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        self.__verbose = verbose  # verbose
 
         assert base.constants.model_parallel_world_size() == 1, \
                "Currently stream pipe engine with tensor parallel has synchronization problem when multiple "\
@@ -87,6 +89,12 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         # debug
         self.run_count = 0
         self.executed = []
+
+        self.instruction_buffer = None
+
+    def log_verbose(self, msg):
+        if self.__verbose:
+            logger.info(msg)
 
     def _forward_collect_result(self):
         logits = None
@@ -169,13 +177,13 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
 
         if self.engine_controller is not None:
             self.engine_controller.issue_schedule(sched, priority)
-            logger.info(
+            self.log_verbose(
                 f"Issued schedule {sched_index} with priority {priority}, schedule type {sched.__class__.__name__}"
             )
         f = EngineFuture()
         self.future_mapping[sched_index] = f
         self.schedule_count += 1
-        logger.info(f"Rank {self.global_rank} started schedule {sched_index} done.")
+        self.log_verbose(f"Rank {self.global_rank} started schedule {sched_index}.")
         return sched_index, f
 
     def end_schedule(self, schedule_index: int):
@@ -303,8 +311,16 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         This method should be called by model worker.
         """
 
-        sched_id, cmd, sched_end = self.engine_client.poll_instruction()
+        if self.instruction_buffer is not None:
+            sched_id, cmd, sched_end = self.instruction_buffer  # there is a chance when instruction from
+            # schedule controller arrive before interface is executed on this engine,
+            # in this case, store instruciton in buffer and wait for interface to be executed
+        else:
+            sched_id, cmd, sched_end = self.engine_client.poll_instruction()
         if sched_id is not None:
+            if sched_id not in self.active_schedules + self.finished_schedules:
+                self.instruction_buffer = (sched_id, cmd, sched_end)
+                return
             # self.rank_print(
             #     f"received instruction sched id {sched_id} cmd {cmd} end {sched_end}"
             # )
@@ -321,15 +337,17 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
 
             try:
                 self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
-                logger.info(f"Rank {self.global_rank}: START cmd {cmd} of sched {sched_id}")
+                self.log_verbose(f"Rank {self.global_rank}: START cmd {cmd} of sched {sched_id}")
                 exec_end = self._exec_instr(*cmd.args)
-                logger.info(f"Rank {self.global_rank}: END cmd {cmd} of sched {sched_id}")
+                self.log_verbose(f"Rank {self.global_rank}: END cmd {cmd} of sched {sched_id}")
             except Exception as e:
                 logger.error(f"Rank {self.global_rank} Exception {e} in cmd {cmd}")
                 raise e
 
             signal_code = 1 if exec_end else 0
-            self.engine_client.post_result(signal_code)
+            if signal_code == 1:
+                logger.info(f"Rank {self.global_rank}: END sched {sched_id}, end cmd {cmd}")
+            self.engine_client.post_result(cmd, sched_id, signal_code)
 
             if exec_end and sched_id in self.active_schedules:
                 self.end_schedule(sched_id)

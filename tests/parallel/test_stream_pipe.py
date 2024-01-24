@@ -28,9 +28,9 @@ if MODEL_TYPE == "llama":
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 64
-MIN_NEW_TOKENS = 32
-MAX_NEW_TOKENS = 32
+BATCH_SIZE = 128
+MIN_NEW_TOKENS = 128
+MAX_NEW_TOKENS = 128
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
@@ -232,7 +232,7 @@ def run_mixed(rank, seed):
 
     def mixed_one_step(seed_):
         train_datas = [
-            init_data(model.tokenizer, device, BATCH_SIZE, seed=seed_ + i) for i in range(train_iters)
+            init_data(model.tokenizer, device, BATCH_SIZE * 2, seed=seed_ + i) for i in range(train_iters)
         ]
         gen_data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed_ + 100)
 
@@ -295,10 +295,10 @@ def run_mixed(rank, seed):
     # BS 64, min_new_tokens=32, max_new_tokens=32, prompt_length~150
     # mixed cots ~10.8s
 
-    # for i in range(3):
-    #     st = time.monotonic()
-    #     mixed_one_step(seed + i + 1)
-    #     print(f"mixed time cost {time.monotonic() - st:.4f}")
+    for i in range(2):
+        st = time.monotonic()
+        mixed_one_step(seed + i + 1)
+        print(f"mixed time cost {time.monotonic() - st:.4f}")
 
     tracer.save()
     engine.save_tracer()

@@ -125,10 +125,10 @@ def setup_ddp(
         host_ip = socket.gethostbyname(socket.gethostname())
         port = network.find_free_port()
         ddp_init_address = f"tcp://{host_ip}:{port}"
-        name_resolve.add(ddp_master_name, ddp_init_address, keepalive_ttl=60)
+        name_resolve.add(ddp_master_name, ddp_init_address, keepalive_ttl=300)
     else:
         try:
-            ddp_init_address = name_resolve.wait(ddp_master_name, timeout=60)
+            ddp_init_address = name_resolve.wait(ddp_master_name, timeout=300)
         except TimeoutError:
             raise TimeoutError(
                 f"global_rank={global_rank} worker_index={worker_index} wait for ddp_init_method timeout.")

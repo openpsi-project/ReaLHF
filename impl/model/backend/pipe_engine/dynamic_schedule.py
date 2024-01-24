@@ -92,9 +92,18 @@ class DynamicPipeSchedule(ABC):
         if self.__terminated:
             raise RuntimeError("Cannot execute an already terminated schedule.")
         for inst in insts:
+            # if self.__stage_terminated[inst.stage_id]:
+            #     continue
             if inst.name != "EndSchedule":
-                self.__inflight.remove(inst)
-                self.__executed.add(inst)
+                try:
+                    self.__inflight.remove(inst)
+                    self.__executed.add(inst)
+                except KeyError:
+                    # TODO: sometimes double execute, check why
+                    if inst not in self.__executed:
+                        raise KeyError(
+                            f"inst: {inst} not in inflight {self.__inflight.find()}; executed {self.__executed.find()};"
+                            f"ready {self.__ready.find()}; not ready {self.__not_ready.find()}")
             self.__not_ready.exec(inst)
         # self.__update_ready()
 
@@ -191,6 +200,7 @@ class DynamicPipeSchedule(ABC):
         not_ready_list = self.__not_ready.find(stage_id=stage_id)
         for inst in not_ready_list:
             self.__not_ready.remove(inst)
+
         inflight_list = self.__inflight.find(stage_id=stage_id)
         assert len(inflight_list) == 0, f"stage {stage_id} terminated with inflight instructions {inflight_list}, "\
                                         f"ready {ready_list}, not ready {not_ready_list}"

@@ -694,7 +694,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.__maybe_calculate_loss(x, micro_batch_id)
         self.__maybe_store_logits(x, micro_batch_id)
         self.tensor_buffer.put("batch_output_x", micro_batch_id, x)  # send activation
-        return end
+        # TODO: proper end condition for generate
+        # if end:
+        #     logger.info(f"rank {self.global_rank} stage_id {stage_id} mbid {micro_batch_id} step {step_id} forward pass end")
+        # return end
 
     def __maybe_init_kv_cache(self, x: PipeTransferData, ys: List[PipeCacheData], mbid: int):
         if not self._generate_mode:
@@ -953,6 +956,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def _exec_end_schedule(self, stage_id: int, micro_batch_id: int, step_id: int):
         """ Used in StreamPipeEngine to force end the schedule. Do nothing. 
         """
+        logger.info(f"rank {self.global_rank} stage {stage_id} execute EndSchedule")
         return True
 
     def _zero_grads(self, inputs):

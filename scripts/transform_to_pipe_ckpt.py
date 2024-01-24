@@ -177,6 +177,8 @@ def main():
             output_dir = f"{model_name}_{args.num_mp}mp_{args.num_shards}s"
         else:
             output_dir = f"{model_name}_{args.num_pp}pp_{args.num_mp}mp_{args.num_shards}s"
+        if args.to_critic:
+            output_dir += "_critic"
         default_save_root = "/lustre/public/pretrained_model_weights/sharded"
         output_dir = os.path.join(default_save_root, output_dir)
     else:

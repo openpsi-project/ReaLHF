@@ -142,9 +142,9 @@ class EngineScheduleController:
         try:
             sched, priority = self.__schedule_queue.get(block=False)
             prior_sched = self.__issue_schedule(sched, priority)
-            print(
-                f"Issued sched {prior_sched.index} {prior_sched.schedule.__class__.__name__} with priority {prior_sched.priority}"
-            )
+            # print(
+            #     f"Issued sched {prior_sched.index} {prior_sched.schedule.__class__.__name__} with priority {prior_sched.priority}"
+            # )
             return prior_sched.index
         except queue.Empty:
             return None
@@ -362,9 +362,7 @@ class EngineScheduleController:
                         sched.terminate()
                         self.schedules.remove(this_prior_sched)
                         # print(f"removed sched {this_prior_sched.index}, schedules {len(self.schedules)}")
-                elif signal_code == 0:  # normal instruction execute, nothing happens
-                    pass
-                else:
+                elif signal_code != 0:  # normal instruction execute, nothing happens
                     raise NotImplementedError(
                         f"Unknown signal code {signal_code} received when polling results.")
             except zmq.ZMQError:
@@ -467,8 +465,8 @@ class EngineScheduleClient:
         name = names.model_controller_barrier(expr_name, trial_name, model_name, dp_rank, mp_rank)
         name_resolve.add_subentry(name, self.stage_id)
 
-        self.last_inst: PipeInstruction = None
-        self.last_inst_sched: int = None
+        # self.last_inst: PipeInstruction = None
+        # self.last_inst_sched: int = None
 
     def poll_instruction(self):
         """Called by engine in every run step, check instruction from controller.
@@ -481,24 +479,30 @@ class EngineScheduleClient:
             assert stage_id == self.stage_id
             inst = PipeInstruction.decode(encoded)
             # print(f"Rank {stage_id}: stage {self.stage_id} received instruction {sched_index} {inst}")
-            self.last_inst = inst
-            self.last_inst_sched = sched_index
+            # self.last_inst = inst
+            # self.last_inst_sched = sched_index
             # print(f"stage {self.stage_id} {sched_index} {inst} {end}")
             return sched_index, inst, end
         except zmq.ZMQError:
             return None, None, None
 
-    def post_result(self, signal: int):
-        assert self.last_inst is not None and self.last_inst_sched is not None
+    def post_result(self, inst: PipeInstruction, sched_id: int, signal: int):
+        # assert self.last_inst is not None and self.last_inst_sched is not None
+        # msg = [
+        #     int.to_bytes(self.stage_id, 4, byteorder="big"),
+        #     int.to_bytes(self.last_inst_sched, 4, byteorder="big"),
+        #     int.to_bytes(signal, 4, byteorder="big"),
+        #     self.last_inst.encode()
+        # ]
         msg = [
             int.to_bytes(self.stage_id, 4, byteorder="big"),
-            int.to_bytes(self.last_inst_sched, 4, byteorder="big"),
+            int.to_bytes(sched_id, 4, byteorder="big"),
             int.to_bytes(signal, 4, byteorder="big"),
-            self.last_inst.encode()
+            inst.encode()
         ]
         # print(
         #     f"Rank {self.stage_id}: posting result stage {self.stage_id} inst {self.last_inst} of sched {self.last_inst_sched}"
         # )
         self.signal_socket.send_multipart(msg)
-        self.last_inst = None
-        self.last_inst_sched = None
+        # self.last_inst = None
+        # self.last_inst_sched = None

@@ -29,8 +29,8 @@ if MODEL_TYPE == "llama":
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
 BATCH_SIZE = 128
-MIN_NEW_TOKENS = 64
-MAX_NEW_TOKENS = 64
+MIN_NEW_TOKENS = 128
+MAX_NEW_TOKENS = 128
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
@@ -251,14 +251,17 @@ def run_mixed(rank: int, seed: int):
     assert isinstance(engine, DeepSpeedPipelineEngine)
 
     train_iters = 3
-    train_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(train_iters)]
-    gen_data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + 100)
+    gen_iters = 2
 
+    train_datas = [
+        init_data(model.tokenizer, device, BATCH_SIZE * 2, seed=seed + i) for i in range(train_iters)
+    ]
+    gen_data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + 100)
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
 
     def mixed_one_step():
-        for _ in range(1):
+        for _ in range(gen_iters):
             gen_res = interface.generate(model, gen_data, gconfig=gconfig)
             print(f"generate {time.monotonic() - st:.4f}")
 
@@ -508,4 +511,4 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testGenerate")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testMixed")

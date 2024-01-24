@@ -206,13 +206,13 @@ class ModelWorker(worker_base.Worker):
         except request_reply_stream.NoMessage:
             return
 
-        logger.info(f"(dp, mp, pp)=({self._dp_rank}, {self._mp_rank}, {self._pp_rank}) receive request")
+        # logger.info(f"(dp, mp, pp)=({self._dp_rank}, {self._mp_rank}, {self._pp_rank}) receive request")
         self.__request_storage[request.request_id] = request
         # ACK message to indicate ready to run dist.scatter
         if request.is_tensor and self._is_dp_pp_head:
-            logger.info(
-                f"(dp, mp, pp)=({self._dp_rank}, {self._mp_rank}, {self._pp_rank}) receive tensor request {request.handle_name}, send ack"
-            )
+            # logger.info(
+            #     f"(dp, mp, pp)=({self._dp_rank}, {self._mp_rank}, {self._pp_rank}) receive tensor request {request.handle_name}, send ack"
+            # )
             assert request.ack_reply_id is not None
             ack = request_reply_stream.Payload(handle_name=request.handle_name,
                                                request_id=request.ack_reply_id)
@@ -232,14 +232,14 @@ class ModelWorker(worker_base.Worker):
             # Maybe create or extend the size of scatter buffer.
             for (k, buf_shape), dtype in zip(request.buf_shapes.items(), request.dtypes.values()):
                 if k not in scatter_buffer:
-                    if self._is_dp_head:
-                        logger.info(f"Create scatter buffer key {k} with shape {buf_shape}")
+                    # if self._is_dp_head:
+                    #     logger.info(f"Create scatter buffer key {k} with shape {buf_shape}")
                     scatter_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
                 elif k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape,
                                                                             scatter_buffer[k].shape):
-                    if self._is_dp_head:
-                        logger.info(f"Resizing scatter buffer key {k} "
-                                    f"from {scatter_buffer[k].shape} to {buf_shape}")
+                    # if self._is_dp_head:
+                    #     logger.info(f"Resizing scatter buffer key {k} "
+                    #                 f"from {scatter_buffer[k].shape} to {buf_shape}")
                     padding = tuple(
                         itertools.chain.from_iterable(
                             reversed([(0, target_size - current_size)
@@ -256,7 +256,7 @@ class ModelWorker(worker_base.Worker):
                     src=0,
                     group=self.__pg_info.mas_pp_stage_groups[self.model_name][self._pp_rank],
                 )
-                logger.info(f"request {request.handle_name} scatter {k} done, {scatter_buffer[k][0]}")
+                # logger.info(f"request {request.handle_name} scatter {k} done, {scatter_buffer[k][0]}")
 
             # Broadcast to the DP group / receive from the DP head
             # for k in request.buf_shapes:
@@ -366,11 +366,11 @@ class ModelWorker(worker_base.Worker):
             for (k, dtype), buf_shape in zip(dtypes.items(), buf_shapes.values()):
                 if k not in gather_buffer or (k in gather_buffer and not base.numpy_utils.shape_leq(
                         buf_shape, gather_buffer[k].shape)):
-                    if k in gather_buffer:
-                        logger.info(
-                            f"Resizing gather buffer key {k} from {gather_buffer[k].shape} to {buf_shape}")
-                    else:
-                        logger.info(f"Create gather buffer key {k} with shape {buf_shape}")
+                    # if k in gather_buffer:
+                    #     logger.info(
+                    #         f"Resizing gather buffer key {k} from {gather_buffer[k].shape} to {buf_shape}")
+                    # else:
+                    #     logger.info(f"Create gather buffer key {k} with shape {buf_shape}")
                     gather_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
 
             reply = request_reply_stream.Payload(
@@ -397,8 +397,8 @@ class ModelWorker(worker_base.Worker):
         if reply.is_tensor and self._is_dp_head:
             # Copy data to the gather buffer.
             for k, v in res.items():
-                logger.info(f"handle_name {request.handle_name} "
-                            f"Gathering {k} with shape {v.shape}, req id = {request.request_id}")
+                # logger.info(f"handle_name {request.handle_name} "
+                #             f"Gathering {k} with shape {v.shape}, req id = {request.request_id}")
                 s = tuple(slice(0, size) for size in v.shape)
                 gather_buffer[k][s] = v
                 dist.gather(

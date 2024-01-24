@@ -257,7 +257,7 @@ class NameResolvingRequstClient(IpRequestClient):
 
         master_recv_name = names.request_reply_stream(experiment_name, trial_name, pull_stream_name)
         try:
-            master_recv_address = name_resolve.wait(master_recv_name, timeout=60)
+            master_recv_address = name_resolve.wait(master_recv_name, timeout=300)
         except TimeoutError as e:
             logger.error(f"Master timeout waiting for worker send stream {pull_stream_name}")
             raise e
@@ -295,7 +295,7 @@ class NameResolvingReplyServer(IpReplyServer):
 
         recv_name = names.request_reply_stream(experiment_name, trial_name, pull_stream_name)
         try:
-            master_send_addr = name_resolve.wait(recv_name, timeout=60)
+            master_send_addr = name_resolve.wait(recv_name, timeout=300)
         except TimeoutError as e:
             logger.error(f"Worker timeout waiting for master send stream {pull_stream_name}")
             raise e

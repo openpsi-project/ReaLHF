@@ -385,7 +385,7 @@ async def gather_tensor_from_mws(
         # only gather from dp heads
         for k in gather_buffer:
             assert len(gather_buffer[k]) == dp_size + 1
-            logger.info(f"rpc {rpc.name} Gathering {k} from dp heads")
+            # logger.info(f"rpc {rpc.name} Gathering {k} from dp heads")
             torch.distributed.gather(
                 gather_buffer[k][0],
                 gather_list=gather_buffer[k],
