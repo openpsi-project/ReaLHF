@@ -28,7 +28,7 @@ if MODEL_TYPE == "llama":
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 MIN_NEW_TOKENS = 128
 MAX_NEW_TOKENS = 128
 
@@ -349,4 +349,4 @@ class StreamPipeTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="StreamPipeTest.testMixed")
+    unittest.main(defaultTest="StreamPipeTest.testGenerate")

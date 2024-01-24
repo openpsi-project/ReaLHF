@@ -36,7 +36,6 @@ class PrioritizedInstruction:
     priority: int
     schedule_index: int
     instruction: PipeInstruction
-    blocked: bool = False
 
     def __lt__(self, other: 'PrioritizedInstruction'):
         return self.priority < other.priority
@@ -103,7 +102,6 @@ class EngineScheduleController:
     def __init_storage(self):
         self.__inst_queues = defaultdict(deque)
         self.__comm_queues = defaultdict(deque)  # try to use two queues, this queue is for binded
-        # self.__inst_queues_table = defaultdict(lambda: defaultdict(list)) # stage_id -> sched_id -> inst_queue
 
     def start(self):
         self.thread.start()
@@ -114,16 +112,6 @@ class EngineScheduleController:
     def save_tracer(self):
         if self.__trace_controller:
             self.__tracer_save_queue.put(0)
-
-    # @property
-    # def posted(self):
-    #     """ Number of instruction posted """
-    #     return self.__posted
-
-    # @property
-    # def completed(self):
-    #     """ Number of instruction completed """
-    #     return self.__polled
 
     def issue_schedule(self, sched: DynamicPipeSchedule, priority: int):
         """Called by engine if an API (train_batch, eval_batch, generate ... ) is called, 
@@ -142,9 +130,6 @@ class EngineScheduleController:
         try:
             sched, priority = self.__schedule_queue.get(block=False)
             prior_sched = self.__issue_schedule(sched, priority)
-            # print(
-            #     f"Issued sched {prior_sched.index} {prior_sched.schedule.__class__.__name__} with priority {prior_sched.priority}"
-            # )
             return prior_sched.index
         except queue.Empty:
             return None
@@ -180,7 +165,7 @@ class EngineScheduleController:
                                              new_p_inst: PrioritizedInstruction):
             for idx in range(len(stage_inst_queue), 0, -1):
                 p_inst = stage_inst_queue[idx - 1]
-                if p_inst.blocked or p_inst.priority >= new_p_inst.priority:
+                if p_inst.priority >= new_p_inst.priority:
                     stage_inst_queue.insert(idx, new_p_inst)
                     break
             else:
@@ -200,15 +185,12 @@ class EngineScheduleController:
                     stage_inst_queue = self.__inst_queues[stage_id]
                     stage_comm_queue = self.__comm_queues[stage_id]
                     # insert instruction into queue by priority
-                    # new_p_inst = PrioritizedInstruction(prior_sched.priority, prior_sched.index, inst, blocked=len(inst.bind)>0)
                     new_p_inst = PrioritizedInstruction(prior_sched.priority, prior_sched.index, inst)
 
                     if len(inst.bind) == 0:
                         insert_instruction_with_priority(stage_inst_queue, new_p_inst)
                     else:
                         stage_comm_queue.append(new_p_inst)
-                        # if stage_id == 3:
-                        #     stage3_updated = True
                         # handle binded instruction
                         bind = inst.bind
                         for b in bind:
@@ -219,21 +201,14 @@ class EngineScheduleController:
                             # bind_stage_inst_queue = self.__inst_queues[b.stage_id]
                             bind_stage_comm_queue = self.__comm_queues[b.stage_id]
                             b.bind = _bind
-                            bind_p_inst = PrioritizedInstruction(prior_sched.priority,
-                                                                 prior_sched.index,
-                                                                 b,
-                                                                 blocked=True)
+                            bind_p_inst = PrioritizedInstruction(prior_sched.priority, prior_sched.index, b)
                             # insert_instruction_with_priority(bind_stage_inst_queue, bind_p_inst)
                             bind_stage_comm_queue.append(bind_p_inst)
-                            # if b.stage_id == 3:
-                            #     stage3_updated = True
                             try:
                                 bind_stage_ri.remove(b)
                             except ValueError:
                                 raise ValueError(
                                     f"Instruction {b} not found in ready queue of stage {b.stage_id}")
-            # if stage3_updated:
-            #     print(f"stage 3 instruction queue {self.__inst_queues[3]}")
 
     def __round_robin_update_instruction_queues(self, to_update=None):
         for prior_sched in self.schedules:

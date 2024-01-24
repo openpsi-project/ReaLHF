@@ -345,8 +345,8 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                 raise e
 
             signal_code = 1 if exec_end else 0
-            if signal_code == 1:
-                logger.info(f"Rank {self.global_rank}: END sched {sched_id}, end cmd {cmd}")
+            # if signal_code == 1:
+            #     logger.info(f"Rank {self.global_rank}: END sched {sched_id}, end cmd {cmd}")
             self.engine_client.post_result(cmd, sched_id, signal_code)
 
             if exec_end and sched_id in self.active_schedules:
