@@ -41,6 +41,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def __init__(self,
                  sequence_parallel=False,
                  enable_async_p2p_communication=False,
+                 enable_async_instruction=False,
                  *super_args,
                  **super_kwargs):
         super().__init__(*super_args, **super_kwargs)
@@ -121,6 +122,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._first_token = False
 
         self._async_p2p = enable_async_p2p_communication
+        self._async_instruction = enable_async_instruction and self._async_p2p
 
         self._post_init_logging()
 
@@ -617,22 +619,22 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         prompt_logits = torch.cat(prompt_logits, dim=0)
         return gen_tokens, log_probs, logits_mask, None, prompt_logits
 
-    def _exec_reduce_tied_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
-        # We need to run this first to write to self.averaged_gradients;
-        # since this class turns `enable_backward_allreduce` off,
-        # `self.overlapping_partition_gradients_reduce_epilogue()` defined in the DeepSpeedEngine
-        # never actually runs. I suspect this is because of efficiency problems; get_flat_partition in
-        # stage2.py might do something expensive; someone will have to look into that later. But
-        # in the meantime, this fixes ZeRO2 + Pipelining enough to run a demo. Further profiling
-        # needed to decide if it actually breaks everything.
-        # (see https://github.com/EleutherAI/gpt-neox/issues/62#issuecomment-761471944)
-        if self.zero_optimization_partition_gradients():
-            self.optimizer.overlapping_partition_gradients_reduce_epilogue()
+    # def _exec_reduce_tied_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
+    #     # We need to run this first to write to self.averaged_gradients;
+    #     # since this class turns `enable_backward_allreduce` off,
+    #     # `self.overlapping_partition_gradients_reduce_epilogue()` defined in the DeepSpeedEngine
+    #     # never actually runs. I suspect this is because of efficiency problems; get_flat_partition in
+    #     # stage2.py might do something expensive; someone will have to look into that later. But
+    #     # in the meantime, this fixes ZeRO2 + Pipelining enough to run a demo. Further profiling
+    #     # needed to decide if it actually breaks everything.
+    #     # (see https://github.com/EleutherAI/gpt-neox/issues/62#issuecomment-761471944)
+    #     if self.zero_optimization_partition_gradients():
+    #         self.optimizer.overlapping_partition_gradients_reduce_epilogue()
 
-        weight_group_list = self.module.get_tied_weights_and_groups()
-        for weight, group in weight_group_list:
-            grad = weight._hp_grad if self.bfloat16_enabled() else weight.grad
-            dist.all_reduce(grad, group=group)
+    #     weight_group_list = self.module.get_tied_weights_and_groups()
+    #     for weight, group in weight_group_list:
+    #         grad = weight._hp_grad if self.bfloat16_enabled() else weight.grad
+    #         dist.all_reduce(grad, group=group)
 
     def _exec_reduce_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert self._train_mode, "_exec_reduce_grads() should only be executed in train mode"
@@ -645,6 +647,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         else:
             self.allreduce_gradients(bucket_size=MEMORY_OPT_ALLREDUCE_SIZE)
         self._force_grad_boundary = False
+
+        return False, None
 
     def _bf16_reduce_grads(self):
         # Make our own list of gradients from the optimizer's FP32 grads
@@ -697,7 +701,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # TODO: proper end condition for generate
         # if end:
         #     logger.info(f"rank {self.global_rank} stage_id {stage_id} mbid {micro_batch_id} step {step_id} forward pass end")
-        return end
+        return end, None
 
     def __maybe_init_kv_cache(self, x: PipeTransferData, ys: List[PipeCacheData], mbid: int):
         if not self._generate_mode:
@@ -812,7 +816,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             loss = self.tensor_buffer.get("losses", micro_batch_id, remove=True)
             super().backward(loss)
             self.tensor_buffer.put("losses", micro_batch_id, loss.detach().clone())
-            return
+            return False, None
 
         if self.bfloat16_enabled() and not self.is_last_stage():
             # manually call because we don't call optimizer.backward()
@@ -829,6 +833,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if self.bfloat16_enabled() and not self.is_last_stage():
             # manually call because we don't call optimizer.backward()
             self.optimizer.update_hp_grads(clear_lp_grads=False)
+        return False, None
 
     def _exec_send_activations(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert not self.is_last_stage()
@@ -839,6 +844,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if self._async_p2p:
             self.tensor_buffer.put("send_act_handle", micro_batch_id, handle)
         # self.rank_print(f"send tensor DONE {micro_batch_id}, {x.pp_input.shape}")
+        return False, handle
 
     def _exec_recv_activations(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert not self.is_first_stage()
@@ -874,6 +880,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # others = self.tensor_buffer.get("pipe_transfer_infos", micro_batch_id, remove=False)
         # x = PipeTransferData(pp_input=buf, **others)
         # self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
+        return False, recv_handle
 
     def _exec_send_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert self._train_mode, "_exec_send_grads() should be only executed in train mode."
@@ -883,6 +890,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         handle = p2p.send(activation.grad, self.prev_stage, async_op=self._async_p2p)
         if self._async_p2p:
             self.tensor_buffer.put("send_grad_handle", micro_batch_id, handle)
+        return False, handle
 
     def _exec_recv_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert self._train_mode, "_exec_recv_grads() should be only executed in train mode."
@@ -893,6 +901,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         handle = p2p.recv(buf, self.next_stage, async_op=self._async_p2p)
         if self._async_p2p:
             self.tensor_buffer.put("recv_grad_handle", micro_batch_id, handle)
+        return False, handle
 
     def _exec_send_next_tokens(self, stage_id: int, micro_batch_id: int, step_id: int):
         """ When generating, send next tokens from the last stage to the first stage.
@@ -904,6 +913,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         handle = p2p.send(next_tokens_to_send, self.next_stage, async_op=self._async_p2p)
         if self._async_p2p:
             self.tensor_buffer.put("send_next_tokens_handle", micro_batch_id, handle)
+        return False, handle
 
     def _exec_recv_next_tokens(self, stage_id: int, micro_batch_id: int, step_id: int):
         """ When generating, recv next tokens from the last stage on the first stage
@@ -921,6 +931,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         x = PipeTransferData(store_kv_cache=True)
         self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
+
+        return False, handle
 
         # ys = self.tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
         # ys[0].input_ids = recv_buf  # .unsqueeze(-1) # sequence parallel forward only accept one dim input_ids
@@ -952,12 +964,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # self.rank_print("after sync loss scale")
 
         self._force_grad_boundary = False
+        return False, None
 
     def _exec_end_schedule(self, stage_id: int, micro_batch_id: int, step_id: int):
         """ Used in StreamPipeEngine to force end the schedule. Do nothing. 
         """
         # logger.info(f"rank {self.global_rank} stage {stage_id} execute EndSchedule")
-        return True
+        return True, None
 
     def _zero_grads(self, inputs):
         if isinstance(inputs, torch.Tensor):

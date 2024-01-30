@@ -12,8 +12,8 @@ from tests.utils import *
 import api.config as config_package
 
 NUM_MP = 1
-NUM_PP = 8
-NUM_DP = 1
+NUM_PP = 4
+NUM_DP = 2
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
@@ -28,9 +28,9 @@ if MODEL_TYPE == "llama":
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 128
-MIN_NEW_TOKENS = 128
-MAX_NEW_TOKENS = 128
+BATCH_SIZE = 200
+MIN_NEW_TOKENS = 32
+MAX_NEW_TOKENS = 32
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
@@ -250,20 +250,18 @@ def run_mixed(rank: int, seed: int):
     from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
     assert isinstance(engine, DeepSpeedPipelineEngine)
 
-    train_iters = 3
-    gen_iters = 3
+    train_iters = 4
+    gen_iters = 1
 
-    train_datas = [
-        init_data(model.tokenizer, device, BATCH_SIZE * 2, seed=seed + i) for i in range(train_iters)
-    ]
-    gen_data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + 100)
+    train_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(train_iters)]
+    gen_datas = [init_data(model.tokenizer, device, BATCH_SIZE * 4, seed=seed + i) for i in range(gen_iters)]
 
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
 
     def mixed_one_step():
-        for _ in range(gen_iters):
-            gen_res = interface.generate(model, gen_data, gconfig=gconfig)
+        for i in range(gen_iters):
+            gen_res = interface.generate(model, gen_datas[i], gconfig=gconfig)
             print(f"generate {time.monotonic() - st:.4f}")
 
         for train_data in train_datas:
@@ -276,10 +274,10 @@ def run_mixed(rank: int, seed: int):
 
     print(f"rank {rank} FIRST mixed time cost {time.monotonic() - st:.4f}")
 
-    # for _ in range(3):
-    #     st = time.monotonic()
-    #     mixed_one_step()
-    #     print(f"mixed time cost {time.monotonic() - st:.4f}")
+    for _ in range(1):
+        st = time.monotonic()
+        mixed_one_step()
+        print(f"mixed time cost {time.monotonic() - st:.4f}")
 
 
 def run_linear(rank: int, res_queue: mp.Queue, seed: int):

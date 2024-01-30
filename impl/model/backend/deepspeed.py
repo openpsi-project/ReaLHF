@@ -44,6 +44,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     num_pipeline_stages: int = 1
     sequence_parallel: bool = False
     enable_async_p2p_communication: bool = False
+    enable_async_instruction: bool = False
     # selective gradient ckpt, only effective when gradient_checkpointing is True
     ckpt_attn: bool = False  # checkpoint attn only
     ckpt_mlp: bool = False  # checkpoint mlp only
@@ -144,7 +145,8 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             lr_scheduler=lr_scheduler,
             engine_type=self.engine_type,
             sequence_parallel=self.sequence_parallel,
-            enable_async_p2p_communication=self.enable_async_p2p_communication)
+            enable_async_p2p_communication=self.enable_async_p2p_communication,
+            enable_async_instruction=self.enable_async_instruction)
 
         if self.engine_type == "pipe" or self.engine_type == "stream_pipe":
             # log pipeline infos

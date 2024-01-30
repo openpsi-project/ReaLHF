@@ -1,6 +1,7 @@
 from collections import defaultdict, deque
 from typing import Deque, List, Union
 import dataclasses
+import enum
 import multiprocessing
 import queue
 import threading
@@ -18,6 +19,13 @@ import base.names as names
 import base.network as network
 
 logger = logging.getLogger("ScheduleController", "benchmark")
+
+
+class SignalCode(enum.IntEnum):
+    EXEC = 0
+    END = 1
+    HOLD = 2
+    COMM_EXEC = 3
 
 
 @dataclasses.dataclass
@@ -311,22 +319,27 @@ class EngineScheduleController:
                 signal_code = int.from_bytes(signal_code, byteorder="big")
                 inst = PipeInstruction.decode(inst)
 
-                assert stage_id not in self.waiting_stages
-                self.waiting_stages.append(stage_id)
+                # print(f"controller received signal {signal_code} from stage {stage_id} sched {sched_id} inst {inst}")
+                if signal_code != SignalCode.COMM_EXEC:
+                    assert stage_id not in self.waiting_stages
+                    self.waiting_stages.append(stage_id)
+
                 sched = None
                 this_prior_sched = None
                 for prior_sched in self.schedules:
                     if prior_sched.index == sched_id:
                         sched = prior_sched.schedule
                         this_prior_sched = prior_sched
+
                 if sched is None:
                     raise RuntimeError(f"Schedule with index {sched_id} not found.")
 
-                sched.exec(inst)
+                if signal_code != SignalCode.HOLD:
+                    sched.exec(inst)
+                    completed += 1
+                    completed_scheds.add(sched_id)
 
-                completed += 1
-                completed_scheds.add(sched_id)
-                if signal_code == 1:  # terminate
+                if signal_code == SignalCode.END:  # terminate
                     if not isinstance(inst, EndSchedule):
                         assert this_prior_sched.terminate_signal_count == 0
                         # print("initiate terminate")
@@ -336,9 +349,6 @@ class EngineScheduleController:
                         # print(f"controller end schedule count {this_prior_sched.terminate_signal_count}")
                         if this_prior_sched.terminate_signal_count >= self.num_stages:
                             self.schedules.remove(this_prior_sched)
-                elif signal_code != 0:  # normal instruction execute, nothing happens
-                    raise NotImplementedError(
-                        f"Unknown signal code {signal_code} received when polling results.")
             except zmq.ZMQError:
                 return completed, completed_scheds
 

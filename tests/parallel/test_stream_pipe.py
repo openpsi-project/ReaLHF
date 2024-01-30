@@ -12,8 +12,8 @@ from tests.utils import *
 import api.config as config_package
 
 NUM_MP = 1
-NUM_PP = 8
-NUM_DP = 1
+NUM_PP = 4
+NUM_DP = 2
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
@@ -28,15 +28,16 @@ if MODEL_TYPE == "llama":
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 64
-MIN_NEW_TOKENS = 128
-MAX_NEW_TOKENS = 128
+BATCH_SIZE = 200
+MIN_NEW_TOKENS = 32
+MAX_NEW_TOKENS = 32
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
 USE_SEQ_PARALLEL = False
 GRADIENT_ACCUMULATION_FUSION = False
 ASYNC_P2P = True
+ASYNC_INSTRUCTION = True  # only effective when async_p2p is true
 
 
 def make_model(device):
@@ -92,6 +93,7 @@ def make_stream_pipe_backend():
                 enable_bf16=USE_BF16,
                 sequence_parallel=USE_SEQ_PARALLEL,
                 enable_async_p2p_communication=ASYNC_P2P,
+                enable_async_instruction=ASYNC_INSTRUCTION,
             ),
         ))
 
@@ -145,7 +147,7 @@ def run_train_batch(rank, seed):
     res = interface.execute_post_hook("train_step", model, data, future)
     print(f"rank {rank} mp FIRST train time cost {time.monotonic() - st:.4f}, res {res}")
 
-    for _ in range(3):
+    for _ in range(1):
         st = time.monotonic()
         future, data = interface.train_step(model, data, num_micro_batches=2 * NUM_PP)
 
@@ -183,7 +185,7 @@ def run_generate(rank, seed):
     tracer.start()
 
     st = time.monotonic()
-    future, data = interface.generate(model, data, gconfig=gconfig, num_micro_batches=2 * NUM_PP)
+    future, data = interface.generate(model, data, gconfig=gconfig, num_micro_batches=NUM_PP)
 
     while not future.done():
         engine.poll_one_step()
@@ -195,7 +197,7 @@ def run_generate(rank, seed):
     for _ in range(1):
         st = time.monotonic()
 
-        future, data = interface.generate(model, data, gconfig=gconfig, num_micro_batches=2 * NUM_PP)
+        future, data = interface.generate(model, data, gconfig=gconfig, num_micro_batches=NUM_PP)
 
         while not future.done():
             engine.poll_one_step()
@@ -217,7 +219,9 @@ def run_mixed(rank, seed):
     from impl.model.interface.pipe.stream_pipe_test_interface import StreamPipeTestInterface
     assert isinstance(engine, StreamPipeEngine)
     assert isinstance(interface, StreamPipeTestInterface)
+
     # os.environ["DLLM_TRACE"] = "1"
+
     tracer = get_tracer(tracer_entries=int(2e6),
                         max_stack_depth=10,
                         ignore_c_function=False,
@@ -225,27 +229,30 @@ def run_mixed(rank, seed):
                         log_async=True,
                         min_duration=20,
                         output_file=f"/home/meizy/logs/viztracer/trace{rank}.json")
-    tracer.start()
 
-    train_iters = 3
-    generate_iters = 3
+    train_iters = 4
+    generate_iters = 1
+
+    train_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(train_iters)]
+    gen_datas = [
+        init_data(model.tokenizer, device, BATCH_SIZE * 4, seed=seed + i) for i in range(generate_iters)
+    ]
 
     def mixed_one_step(seed_):
-        train_datas = [
-            init_data(model.tokenizer, device, BATCH_SIZE * 2, seed=seed_ + i) for i in range(train_iters)
-        ]
-        gen_data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed_ + 100)
-
         from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
         gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
 
         st = time.monotonic()
 
         gfs = []
-        for _ in range(generate_iters):
-            gf, _ = interface.generate(model, gen_data, gconfig=gconfig, num_micro_batches=2 * NUM_PP)
+        for i in range(generate_iters):
+            gf, _ = interface.generate(model, gen_datas[i], gconfig=gconfig, num_micro_batches=NUM_PP)
             # for train_data in train_datas:
             gfs.append(gf)
+
+        # tt = time.monotonic()
+        # while time.monotonic() - tt < 2:
+        #     engine.poll_one_step()
 
         tfs = []
 
@@ -253,12 +260,12 @@ def run_mixed(rank, seed):
             tf, _ = interface.train_step(model, train_datas[i], num_micro_batches=2 * NUM_PP)
             tfs.append(tf)
 
-            # while not tf.done():
-            #     engine.poll_one_step()
+            while not tf.done():
+                engine.poll_one_step()
 
-            # print(f"rank {rank} train step {i} done, time {time.monotonic() - st}")
+            print(f"rank {rank} train step {i} done, time {time.monotonic() - st}")
 
-        futures = gfs + tfs
+        futures = gfs  # + tfs
         done_futures = []
 
         while not all(f.done() for f in futures):
@@ -267,7 +274,7 @@ def run_mixed(rank, seed):
                 if f not in done_futures:
                     if f.done():
                         done_futures.append(f)
-                        print(f"future {i} done, time {time.monotonic() - st}")
+                        print(f"generate future {i} done, time {time.monotonic() - st}")
 
         # for i, gf in enumerate(gfs):
         #     while not gf.done():
@@ -280,7 +287,7 @@ def run_mixed(rank, seed):
         #     print(f"train {i} done, time cost {time.monotonic() - st:4f}")
 
         gress = []
-        for gf in gfs:
+        for gf, gen_data in zip(gfs, gen_datas):
             gres = interface.execute_post_hook("generate", model, gen_data, gf)
             gress.append(gres)
 
@@ -289,16 +296,23 @@ def run_mixed(rank, seed):
             tres = interface.execute_post_hook("train_step", model, train_data, tf)
             tress.append(tres)
 
+    tracer.start()
+
     st = time.monotonic()
     mixed_one_step(seed)
     print(f"first mixed time cost {time.monotonic() - st:.4f}")  # round_robin: gen_iter=2, train_iter=3
     # BS 64, min_new_tokens=32, max_new_tokens=32, prompt_length~150
     # mixed cots ~10.8s
 
-    # for i in range(2):
-    #     st = time.monotonic()
-    #     mixed_one_step(seed + i + 1)
-    #     print(f"mixed time cost {time.monotonic() - st:.4f}")
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    for i in range(1):
+        st = time.monotonic()
+        mixed_one_step(seed + i + 1)
+        print(f"mixed time cost {time.monotonic() - st:.4f}")
 
     tracer.save()
     engine.save_tracer()
@@ -349,4 +363,4 @@ class StreamPipeTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="StreamPipeTest.testGenerate")
+    unittest.main(defaultTest="StreamPipeTest.testMixed")

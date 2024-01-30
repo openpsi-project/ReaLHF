@@ -169,6 +169,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 tokenizer=model.tokenizer,
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
+                num_micro_batches=base.constants.pipe_parallel_world_size(),
                 gconfig=gconfig,
             )
             if res is None:

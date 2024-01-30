@@ -12,7 +12,8 @@ from base.monitor import gpu_memory_mb
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.backend.pipe_engine.dynamic_schedule import (DynamicPipeSchedule, GenerationSchedule,
                                                              InferenceSchedule, Train1F1BSchedule)
-from impl.model.backend.pipe_engine.schedule_controller import EngineScheduleClient, EngineScheduleController
+from impl.model.backend.pipe_engine.schedule_controller import (EngineScheduleClient,
+                                                                EngineScheduleController, SignalCode)
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 from impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
 from impl.model.utils.data import PipeCacheData, PipeTransferData
@@ -53,7 +54,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
     def __init__(self, verbose=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.__verbose = verbose  # verbose
+        self.__verbose = verbose
 
         assert base.constants.model_parallel_world_size() == 1, \
                "Currently stream pipe engine with tensor parallel has synchronization problem when multiple "\
@@ -91,6 +92,9 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         self.executed = []
 
         self.instruction_buffer = None
+
+        self.comm_handle_table = defaultdict(list)
+        self.comm_instruction_table = defaultdict(list)
 
     def log_verbose(self, msg):
         if self.__verbose:
@@ -317,6 +321,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
             # in this case, store instruciton in buffer and wait for interface to be executed
         else:
             sched_id, cmd, sched_end = self.engine_client.poll_instruction()
+
         if sched_id is not None:
             if sched_id not in self.active_schedules + self.finished_schedules:
                 self.instruction_buffer = (sched_id, cmd, sched_end)
@@ -338,15 +343,23 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
             try:
                 self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
                 self.log_verbose(f"Rank {self.global_rank}: START cmd {cmd} of sched {sched_id}")
-                exec_end = self._exec_instr(*cmd.args)
+                exec_end, comm_handle = self._exec_instr(*cmd.args)
                 self.log_verbose(f"Rank {self.global_rank}: END cmd {cmd} of sched {sched_id}")
             except Exception as e:
                 logger.error(f"Rank {self.global_rank} Exception {e} in cmd {cmd}")
                 raise e
 
-            signal_code = 1 if exec_end else 0
+            signal_code = SignalCode.END if exec_end else SignalCode.EXEC
             # if signal_code == 1:
             #     logger.info(f"Rank {self.global_rank}: END sched {sched_id}, end cmd {cmd}")
+
+            if self._async_instruction and not comm_handle is None:
+                self.comm_handle_table[sched_id].append(comm_handle)
+                self.comm_instruction_table[sched_id].append(cmd)
+                signal_code = SignalCode.HOLD
+                self.log_verbose(
+                    f"Rank {self.global_rank} sched id {sched_id} record handle {comm_handle} cmd {cmd}")
+
             self.engine_client.post_result(cmd, sched_id, signal_code)
 
             if exec_end and sched_id in self.active_schedules:
@@ -359,6 +372,27 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                 # gc.collect()
                 # torch.cuda.empty_cache()
                 # gc.collect()
+
+        # check whether handle finished, if finished, pop and post result
+        if self._async_instruction:
+            # check handles
+            for sched_id in self.active_schedules:
+                handle_list = self.comm_handle_table[sched_id]
+                inst_list = self.comm_instruction_table[sched_id]
+                new_handle_list = []
+                new_inst_list = []
+                # print(f"sched_id {sched_id} length comm handle list {len(handle_list)} comm inst list {len(inst_list)}")
+                for handle, cmd in zip(handle_list, inst_list):
+                    # print(f"Rank {self.global_rank} handle {handle} cmd {cmd} check")
+                    if handle.is_completed():
+                        self.log_verbose(f"Rank {self.global_rank} handle {handle} cmd {cmd} completed, post")
+                        self.engine_client.post_result(cmd, sched_id, SignalCode.COMM_EXEC)
+                    else:
+                        # print(f"Rank {self.global_rank} handle {handle} cmd {cmd} NOT completed")
+                        new_handle_list.append(handle)
+                        new_inst_list.append(cmd)
+                self.comm_handle_table[sched_id] = new_handle_list
+                self.comm_instruction_table[sched_id] = new_inst_list
 
         # self.run_count += 1
         # if self.run_count % 10000 == 0:
