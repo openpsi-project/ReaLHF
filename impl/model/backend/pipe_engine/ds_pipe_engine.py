@@ -77,6 +77,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         self.global_rank = self.grid.get_global_rank()
         self.num_stages = self.grid.get_pipe_parallel_world_size()
+        assert self.num_stages > 1
         self.stage_id = self.grid.get_stage_id()
         self.dp_id = self.grid.get_data_parallel_id()
         self.num_micro_batches = num_micro_batches if num_micro_batches else self.num_stages
@@ -276,7 +277,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         for mbid in range(self.num_micro_batches):
             self.tensor_buffer.put("kv_cache_reserved", mbid, False)
-            self.tensor_buffer.put("terminate", mbid, False)
+            self.tensor_buffer.put("terminate", mbid, torch.tensor(0, dtype=torch.bool, device=self.device))
             self.tensor_buffer.put("generated_idx", mbid, 0)
             batch_length = self.tensor_buffer.get("batch_lengths", mbid)
             self.tensor_buffer.put("unfinished_sequences", mbid,
@@ -509,7 +510,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                                           max_new_tokens=gconfig.max_new_tokens)
 
         def terminate_condition():
-            return all([self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)])
+            return torch.stack([self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)]).all()
 
         self._exec_schedule(sched, terminate_condition)
         r = self.__maybe_gather_generate_outputs()
@@ -712,7 +713,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
             logits, self.tokenizer, unfinished_sequences, generated_idx, self.current_gconfig)
 
-        self.tensor_buffer.put("terminate", mbid, terminate)
+        self.tensor_buffer.put("terminate", mbid, torch.tensor(terminate, dtype=torch.bool, device=self.device))
         self.tensor_buffer.put("unfinished_sequences", mbid, unfinished_sequences)
         self.tensor_buffer.put("generated_idx", mbid, generated_idx + 1)
         assert next_tokens is not None and logprob is not None
@@ -773,6 +774,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                                                      micro_batch_id,
                                                      remove=not self._train_mode)
         p2p.send(x.pp_input, self.next_stage)
+        if self._generate_mode:
+            terminate = self.tensor_buffer.get("terminate", micro_batch_id)
+            p2p.send(terminate, self.next_stage)
 
     def _exec_recv_activations(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert not self.is_first_stage()
@@ -804,6 +808,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         p2p.recv(buf, self.prev_stage)
         x = PipeTransferData(pp_input=buf, **others)
         self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
+        if self._generate_mode:
+            terminate = torch.empty((), dtype=torch.bool, device=self.device)
+            p2p.recv(terminate, self.prev_stage)
+            self.tensor_buffer.put("terminate", micro_batch_id, terminate)
 
     def _exec_send_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert self._train_mode, "_exec_send_grads() should be only executed in train mode."
@@ -829,6 +837,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         p2p.send_tensor_meta(next_tokens_to_send, self.next_stage)
         p2p.send(next_tokens_to_send, self.next_stage)
 
+        assert self._generate_mode
+        p2p.send(self.tensor_buffer.get("terminate", micro_batch_id), self.next_stage)
+
     def _exec_recv_next_tokens(self, stage_id: int, micro_batch_id: int, step_id: int):
         """ When generating, recv next tokens from the last stage on the first stage
         Construct next forward input
@@ -843,6 +854,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         ys = self.tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
         ys[0].input_ids = recv_buf  # .unsqueeze(-1) # sequence parallel forward only accept one dim input_ids
         ys[0].position_ids = None
+
+        assert self._generate_mode
+        terminate = torch.empty((), dtype=torch.bool, device=self.device)
+        p2p.recv(terminate, self.prev_stage)
+        self.tensor_buffer.put("terminate", micro_batch_id, terminate)
 
     def _exec_optimizer_step(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert self._train_mode, "_exec_optimizer_step() should be only executed in train mode."
@@ -914,15 +930,14 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         """
         # For each step in the schedule
         self.step_count = 0
+        will_break = False
+        if self.is_last_stage():
+            burn_out_steps = self.num_stages - 1
+        elif self.stage_id == self.num_stages - 2:
+            burn_out_steps = 0
+        else:
+            burn_out_steps = 1
         for step_cmds in pipe_schedule:
-            if terminate_condition is not None:
-                terminate_tensor = torch.tensor(0, dtype=torch.int32, device=self.device)
-                if terminate_condition():
-                    terminate_tensor = torch.tensor(1, dtype=torch.int32, device=self.device)
-                # all reduce terminate tensor from all ranks
-                dist.all_reduce(terminate_tensor, group=base.constants.parallelism_group())
-                if terminate_tensor.item() >= self.grid.get_data_parallel_world_size():
-                    break
             # For each instruction in the step
             step_id, micro_batch_id, step_cmds = step_cmds
             # logger.info(
@@ -933,6 +948,14 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 if type(cmd) not in self._INSTRUCTION_MAP:
                     raise RuntimeError(
                         f'{self.__class__.__name__} does not understand instruction {repr(cmd)}')
+
+                if will_break:
+                    if self.is_last_stage() and burn_out_steps < self.num_stages - 1 and type(cmd) != schedule.RecvActivation:
+                        # logger.info(f"rank {self.global_rank} skip cmd: {cmd}")
+                        continue
+                    elif not self.is_last_stage() and type(cmd) != schedule.SendActivation:
+                        # logger.info(f"rank {self.global_rank} skip cmd: {cmd}")
+                        continue
 
                 # Equivalent to: self._exec_forward_pass(buffer_id=0)
                 try:
@@ -950,4 +973,14 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     raise e
                 # logger.info(f"rank {self.global_rank} complete cmd: {cmd}")
             self.step_count += 1
+
+            # exec_forward_pass() and __maybe_genstep() will put the "terminate" signal into tensor_buffer, such that
+            # terminate_condition() will return True for the last stage.
+            if will_break:
+                burn_out_steps -= 1
+            if terminate_condition is not None and terminate_condition():
+                will_break = True
+            if will_break and burn_out_steps <= 0:
+                # logger.info(f"rank {self.global_rank} break the exec_schedule loop")
+                break
         self.sched_count += 1
