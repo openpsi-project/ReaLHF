@@ -31,7 +31,7 @@ def count_layer_params(num_layers: int, state_dict_list: List[Dict[str, torch.Te
         cnt = 0
         for sd in state_dict_list:
             for k, v in sd.items():
-                if k.startswith(f"{str(i)}."):
+                if k.startswith(f"{str(i)}.") and v is not None:
                     cnt += v.numel()
         param_counts.append(cnt)
     print(f"Count layer paramters: {param_counts}")
@@ -93,10 +93,13 @@ def split_state_dict_by_stage(state_dict, stage_to_layer_idx):
 
 def save_state_dict(state_dict, stage_index, mp_rank, shard_index, model_dir):
     os.makedirs(model_dir, exist_ok=True)
-    output_fn = f"model-pp-{stage_index:02d}-mp-{mp_rank:02d}-s-{shard_index:02d}.safetensors"
-    save_to_disk(state_dict, model_dir, output_fn=output_fn, save_type="st", n_shards=1, no_shard_suffix=True)
+    from impl.model import USE_TE_BACKEND
+    suffix = "safetensors" if not USE_TE_BACKEND else "bin"
+    save_type = "st" if not USE_TE_BACKEND else "pt"
+    output_fn = f"model-pp-{stage_index:02d}-mp-{mp_rank:02d}-s-{shard_index:02d}.{suffix}"
+    save_to_disk(state_dict, model_dir, output_fn=output_fn, save_type=save_type, n_shards=1, no_shard_suffix=True)
     print(
-        f"saved {len(state_dict.keys())} keys to {model_dir}/model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.safetensors"
+        f"saved {len(state_dict.keys())} keys to {model_dir}/model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.{suffix}"
     )
     print(f"saved {state_dict.keys()} to "
           f"{model_dir}/pytorch_model-pp-{stage_index:02d}-mp-{mp_rank:02d}-s-{shard_index:02d}.bin")
@@ -148,10 +151,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_dir",
                         type=str,
-                        default="/lustre/public/pretrained_model_weights/Llama-2-7b-hf")
+                        default="/lustre/public/pretrained_model_weights/CodeLlama-34b-hf/")
     parser.add_argument("--model_type", type=str, default="llama")
-    parser.add_argument("--num_pp", type=int, default=2)
-    parser.add_argument("--num_mp", type=int, default=2)
+    parser.add_argument("--num_pp", type=int, default=4)
+    parser.add_argument("--num_mp", type=int, default=1)
     parser.add_argument("--num_shards", type=int, default=3)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--partition_method", type=str, default="parameters_balanced")
@@ -170,7 +173,7 @@ def main():
 
     assert args.num_mp > 1 or args.num_pp > 1
     if args.output_dir is None:
-        model_name = args.model_dir.split("/")[-1]
+        model_name = args.model_dir.rstrip("/").split("/")[-1]
         if args.num_mp == 1:
             output_dir = f"{model_name}_{args.num_pp}pp_{args.num_shards}s"
         elif args.num_pp == 1:
