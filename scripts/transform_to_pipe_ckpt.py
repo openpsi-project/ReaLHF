@@ -97,7 +97,12 @@ def save_state_dict(state_dict, stage_index, mp_rank, shard_index, model_dir):
     suffix = "safetensors" if not USE_TE_BACKEND else "bin"
     save_type = "st" if not USE_TE_BACKEND else "pt"
     output_fn = f"model-pp-{stage_index:02d}-mp-{mp_rank:02d}-s-{shard_index:02d}.{suffix}"
-    save_to_disk(state_dict, model_dir, output_fn=output_fn, save_type=save_type, n_shards=1, no_shard_suffix=True)
+    save_to_disk(state_dict,
+                 model_dir,
+                 output_fn=output_fn,
+                 save_type=save_type,
+                 n_shards=1,
+                 no_shard_suffix=True)
     print(
         f"saved {len(state_dict.keys())} keys to {model_dir}/model-pp-{stage_index:02d}-mp-00-s-{shard_index:02d}.{suffix}"
     )

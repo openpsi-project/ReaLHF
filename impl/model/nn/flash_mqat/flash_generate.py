@@ -223,20 +223,26 @@ def generate(
         prompt_logits = model(x, ys).pp_output
         logits = prompt_logits[cu_seqlens[1:] - 1]
         cache_seqlens = input_lens.clone().to(dtype=torch.int32)
-        for y in ys[1:-1]:
+        layer_indices = range(len(ys))
+        for y, layer_idx in zip(ys[1:-1], layer_indices[1:-1]):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(max_seq_len + gconfig.max_new_tokens,
                                  mconfig.hidden_dim // mconfig.head_dim + 10)
             # fix of a flash attention bug
-            k_cache = torch.zeros((bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-                                  dtype=y.k_cache.dtype,
-                                  device=device)
-            v_cache = torch.zeros((bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-                                  dtype=y.v_cache.dtype,
-                                  device=device)
-            for i in range(bs):
-                k_cache[i, :input_lens[i]] = y.k_cache[cu_seqlens[i]:cu_seqlens[i + 1]]
-                v_cache[i, :input_lens[i]] = y.v_cache[cu_seqlens[i]:cu_seqlens[i + 1]]
+            k_cache = base.constants.get_global_memory_buffer().get_tensor(
+                tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+                dtype=y.k_cache.dtype,
+                name=f"kv_cache_{layer_idx}_k",
+                force_zero=True)
+            v_cache = base.constants.get_global_memory_buffer().get_tensor(
+                tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+                dtype=y.v_cache.dtype,
+                name=f"kv_cache_{layer_idx}_v",
+                force_zero=True)
+            indices = torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
+                                   dtype=torch.long)[None, :] < input_lens[:, None]
+            k_cache[indices] = y.k_cache
+            v_cache[indices] = y.v_cache
             y.k_cache = k_cache
             y.v_cache = v_cache
             y.cache_seqlens = cache_seqlens

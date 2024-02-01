@@ -12,6 +12,7 @@ except ModuleNotFoundError:
     pass
 
 import os
+
 try:
     import transformer_engine.pytorch as te
 

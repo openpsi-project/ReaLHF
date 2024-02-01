@@ -49,6 +49,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         assert self.zero_optimization_stage(
         ) < 2, "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
 
+        self.module: PipelineModule
+
         # deepspeed enigne attributes
         self.pipeline_parallelism = True
         # We schedule the all-reduces, so disable it in super().backward()
@@ -500,6 +502,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
         self._set_generate_states()
         self._prepare_input(packed_input_ids, cu_seqlens)
+        # for elegant generation termination
+        gconfig.max_new_tokens += self.num_stages - 1
         self.current_gconfig = gconfig
         self.tokenizer = tokenizer
         self._pre_generate()
@@ -510,7 +514,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                                           max_new_tokens=gconfig.max_new_tokens)
 
         def terminate_condition():
-            return torch.stack([self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)]).all()
+            return torch.stack(
+                [self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)]).all()
 
         self._exec_schedule(sched, terminate_condition)
         r = self.__maybe_gather_generate_outputs()
@@ -656,29 +661,38 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.tensor_buffer.put("prompt_logits", mbid, logits)
         # reserve kv cache
         cu_seqlens = x.cu_seqlens
+        max_seq_len = self.tensor_buffer.get("pipe_transfer_infos", mbid)["max_seqlen"]
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-        max_seq_len = int(max(input_lens))
 
+        layer_indices = range(self.module.layer_idx_start, self.module.layer_idx_stop)
+        assert len(ys) == len(layer_indices)
         if self.is_first_stage():
             ys[0].cache_seqlens = input_lens.clone().to(dtype=torch.int32)
             ys = ys[1:]
+            layer_indices = layer_indices[1:]
         if self.is_last_stage():
             ys = ys[:-1]
+            layer_indices = layer_indices[:-1]
 
-        bs = len(input_lens)
-        for y in ys:
+        bs = input_lens.shape[0]
+        for y, layer_idx in zip(ys, layer_indices):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(max_seq_len + self.current_gconfig.max_new_tokens,
                                  self.hidden_dim // self.head_dim + 10)
-            k_cache = torch.zeros((bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-                                  dtype=y.k_cache.dtype,
-                                  device=self.device)
-            v_cache = torch.zeros((bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-                                  dtype=y.v_cache.dtype,
-                                  device=self.device)
-            for i in range(bs):
-                k_cache[i, :input_lens[i]] = y.k_cache[cu_seqlens[i]:cu_seqlens[i + 1]]
-                v_cache[i, :input_lens[i]] = y.v_cache[cu_seqlens[i]:cu_seqlens[i + 1]]
+            k_cache = base.constants.get_global_memory_buffer().get_tensor(
+                tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+                dtype=y.k_cache.dtype,
+                name=f"kv_cache_{layer_idx}_k",
+                force_zero=True)
+            v_cache = base.constants.get_global_memory_buffer().get_tensor(
+                tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+                dtype=y.v_cache.dtype,
+                name=f"kv_cache_{layer_idx}_v",
+                force_zero=True)
+            indices = torch.arange(kvcache_seqlen, device=self.device,
+                                   dtype=torch.long)[None, :] < input_lens[:, None]
+            k_cache[indices] = y.k_cache
+            v_cache[indices] = y.v_cache
             y.k_cache = k_cache
             y.v_cache = v_cache
             y.cache_seqlens = input_lens.clone().to(dtype=torch.int32)
@@ -713,7 +727,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
             logits, self.tokenizer, unfinished_sequences, generated_idx, self.current_gconfig)
 
-        self.tensor_buffer.put("terminate", mbid, torch.tensor(terminate, dtype=torch.bool, device=self.device))
+        self.tensor_buffer.put("terminate", mbid, torch.tensor(terminate,
+                                                               dtype=torch.bool,
+                                                               device=self.device))
         self.tensor_buffer.put("unfinished_sequences", mbid, unfinished_sequences)
         self.tensor_buffer.put("generated_idx", mbid, generated_idx + 1)
         assert next_tokens is not None and logprob is not None
@@ -950,7 +966,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                         f'{self.__class__.__name__} does not understand instruction {repr(cmd)}')
 
                 if will_break:
-                    if self.is_last_stage() and burn_out_steps < self.num_stages - 1 and type(cmd) != schedule.RecvActivation:
+                    if self.is_last_stage() and burn_out_steps < self.num_stages - 1 and type(
+                            cmd) != schedule.RecvActivation:
                         # logger.info(f"rank {self.global_rank} skip cmd: {cmd}")
                         continue
                     elif not self.is_last_stage() and type(cmd) != schedule.SendActivation:

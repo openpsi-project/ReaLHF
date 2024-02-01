@@ -223,7 +223,7 @@ class GlobalMemoryBuffer:
                                                      dtype=dtype,
                                                      device=torch.cuda.current_device(),
                                                      requires_grad=False)
-            if force_zero:
-                self.buffer[(name, dtype)].zero_()
-
-        return self.buffer[(name, dtype)][0:required_len].view(*tensor_shape)
+        res = self.buffer[(name, dtype)][0:required_len].view(*tensor_shape)
+        if force_zero:
+            res.zero_()
+        return res

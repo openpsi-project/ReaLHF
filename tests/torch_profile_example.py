@@ -32,19 +32,20 @@ import base.namedarray
 seqlen = 1024
 vocab_size = 32000
 
-batch_size_tokens = 1024 * 128
+batch_size_tokens = 1024 * 64
 batch_size = batch_size_tokens // seqlen
 
 MODEL_NAME = "default"
 
 # parallelism config
-NUM_MP = 2
-NUM_PP = 2
+NUM_MP = 1
+NUM_PP = 4
 NUM_DP = 2
 assert batch_size >= NUM_DP
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "codellama"
 MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded/CodeLlama-34b-hf_2pp_2mp_3s"
+MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded/CodeLlama-34b-hf_4pp_3s"
 BASE_MODEL_PATH = "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf/"
 
 ## performance related config
