@@ -94,12 +94,15 @@ class OptimizerConfig:
     )
     warmup_steps_proportion: float = 0.02
     offload: bool = False
+    use_hybrid_engine: bool = False
 
     def __post_init__(self):
         if self.min_lr_ratio < 0.0 or self.min_lr_ratio > 1.0:
             raise ValueError(f"Invalid min_lr_ratio: {self.min_lr_ratio}")
         if self.warmup_steps_proportion < 0.0 or self.warmup_steps_proportion > 1.0:
             raise ValueError(f"Invalid warmup_steps_proportion: {self.warmup_steps_proportion}")
+        if self.use_hybrid_engine and self.zero_stage != 3:
+            raise ValueError("Hybrid engine is only supported when zero stage=3.")
 
 
 @dataclasses.dataclass
@@ -152,6 +155,8 @@ class ModelConfig:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
         if self.offload and not self.optimizer.zero_stage != 3:
             raise ValueError("offload model is only supported when zero stage=3.")
+        if self.parallel.pipeline_parallel_size > 1 and self.optimizer.zero_stage > 1:
+            raise ValueError("zero stage should be at most 1 when pipeline parallelism is used.")
 
 
 def get_flash_mqat_model_config(

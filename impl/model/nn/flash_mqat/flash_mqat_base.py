@@ -692,7 +692,7 @@ class FlashMQATModel(nn.Module):
                 model.load(model_path, init_critic_from_actor=is_critic)
             else:
                 if is_critic:
-                    state_dict["head.weight"] = model.state_dict()["head.weight"]
+                    state_dict[f"{config.n_layers+1}.weight"] = model.state_dict()[f"{config.n_layers+1}.weight"]
                 model.load_state_dict(state_dict)
         return model
 

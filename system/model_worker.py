@@ -3,6 +3,7 @@ import gc
 import itertools
 import socket
 import time
+import multiprocessing as mp
 
 from deepspeed.accelerator import get_accelerator
 import deepspeed
@@ -11,7 +12,7 @@ import torch
 import torch.distributed as dist
 import torch.utils.data
 
-from base.monitor import time_mark
+from base.monitor import time_mark, gpu_utilization_monitor
 from base.topology import PipelineParallelGrid
 import api.config as config
 import api.data
@@ -179,6 +180,9 @@ class ModelWorker(worker_base.Worker):
             # DP head will receive data from the master, broadcast to all data parallel peers.
             # It will also return result back to master, while other workers in the data parallel group return None.
             self._is_dp_head = self._mp_rank == 0 and self._pp_rank == self._pp_size - 1
+            
+            self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor, args=(self.__pg_info.local_gpu_id, 7200))
+            self.__gpu_util_mp.start()
 
         recv_tik = time.perf_counter()
         try:
@@ -276,8 +280,8 @@ class ModelWorker(worker_base.Worker):
         if self._is_dp_head:
             # Discard returned data if not DP head.
             if isinstance(res, namedarray.NamedArray):
-                shapes = {k: v.shape for k, v in res.items()}
-                dtypes = {k: v.dtype for k, v in res.items()}
+                shapes = {k: v.shape for k, v in res.items() if v is not None}
+                dtypes = {k: v.dtype for k, v in res.items() if v is not None}
 
                 all_shapes = [None for _ in range(self.config.topo.get_dim("data"))]
                 dist.all_gather_object(
@@ -330,6 +334,8 @@ class ModelWorker(worker_base.Worker):
             if reply.is_tensor:
                 # Copy data to the gather buffer.
                 for k, v in res.items():
+                    if v is None:
+                        continue
                     s = tuple(slice(0, size) for size in v.shape)
                     gather_buffer[k][s] = v
                     dist.gather(

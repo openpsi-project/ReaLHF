@@ -265,7 +265,7 @@ def main(rank: int = None, world_size: int = None):
             else:
                 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 
-                gconfig = GenerationConfig(min_new_tokens=1, max_new_tokens=10)
+                gconfig = GenerationConfig(min_new_tokens=1, max_new_tokens=512)
                 res = interface.generate(model, data, gconfig)
             torch.cuda.synchronize()
             if (base.constants.model_parallel_rank() == 0
