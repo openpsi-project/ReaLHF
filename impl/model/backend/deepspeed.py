@@ -42,6 +42,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     engine_type: str = "deepspeed"
     num_pipeline_stages: int = 1
     num_pipeline_micro_batches: Optional[int] = None
+    num_inf_pipeline_mbs: Optional[int] = None
     sequence_parallel: bool = False
     # selective gradient ckpt, only effective when gradient_checkpointing is True
     ckpt_attn: bool = False  # checkpoint attn only
@@ -143,6 +144,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             lr_scheduler=lr_scheduler,
             engine_type=self.engine_type,
             num_pipeline_micro_batches=self.num_pipeline_micro_batches,
+            num_inf_pipeline_mbs=self.num_inf_pipeline_mbs,
             sequence_parallel=self.sequence_parallel,
         )
 

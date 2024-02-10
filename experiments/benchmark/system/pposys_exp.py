@@ -115,7 +115,7 @@ class PPOSysExperiment(Experiment):
     rew_nodelist: str
 
     seed: int = 1
-    benchmark_steps: int = 30
+    benchmark_steps: int = 20
 
     actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     critic: ModelConfig = dataclasses.field(default_factory=ModelConfig)
@@ -168,6 +168,7 @@ class PPOSysExperiment(Experiment):
         for m in base_setup.model_worker[offset : offset + self.base_config.n_actors]:
             m.model = actor_model
             m.interface.args["force_no_logits_mask"] = True
+            m.backend.args["num_inf_pipeline_mbs"] = self.actor.parallel.num_inf_pipeline_mbs
             m.backend.args["enable_hybrid_engine"] = self.actor.optimizer.use_hybrid_engine
             m.backend.args["max_out_tokens"] = ppo_benchmark_hyperparam.max_new_tokens
         offset += self.base_config.n_actors

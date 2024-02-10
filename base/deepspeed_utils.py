@@ -131,6 +131,7 @@ def deepspeed_initialize(
     lr_scheduler: Optional[Union[torch.optim.lr_scheduler._LRScheduler, DeepSpeedSchedulerCallable]] = None,
     mpu=None,
     num_pipeline_micro_batches: Optional[int] = None,
+    num_inf_pipeline_mbs: Optional[int] = None,
     sequence_parallel: Optional[bool] = None,
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
@@ -167,6 +168,7 @@ def deepspeed_initialize(
         config_class = DeepSpeedConfig(config, mpu)
         engine = DeepSpeedPipelineEngine(
             num_micro_batches=num_pipeline_micro_batches,
+            num_inf_micro_batches=num_inf_pipeline_mbs,
             sequence_parallel=sequence_parallel,
             model=model,
             args=None,

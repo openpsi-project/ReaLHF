@@ -43,7 +43,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     ]
     DTYPE_TO_ID = {dtype: id_ for id_, dtype in enumerate(ID_TO_DTYPE)}
 
-    def __init__(self, num_micro_batches=None, sequence_parallel=False, *super_args, **super_kwargs):
+    def __init__(self, num_micro_batches=None, num_inf_micro_batches=None, sequence_parallel=False, *super_args, **super_kwargs):
         super().__init__(*super_args, **super_kwargs)
         assert isinstance(self.module, PipelineModule), "model must base PipelineModule"
         assert self.zero_optimization_stage(
@@ -83,6 +83,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.stage_id = self.grid.get_stage_id()
         self.dp_id = self.grid.get_data_parallel_id()
         self.num_micro_batches = num_micro_batches if num_micro_batches else self.num_stages
+        self.num_inf_micro_batches = num_inf_micro_batches if num_inf_micro_batches else self.num_micro_batches
         # num_micro_batches is configurable, default value: num_stages
         self.num_layers = self.module.num_layers  # number of leyers in current pipeline stage
 
@@ -146,6 +147,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         if self.global_rank == 0:
             logger.info(f'CONFIG: num_micro_batches={self.num_micro_batches} '
+                        f'num_inf_micro_batches={self.num_inf_micro_batches} '
                         f'num_layers(this stage)={self.num_layers} '
                         f'pp_size={self.num_stages} '
                         f'dp_size={self.grid.get_data_parallel_world_size()} '
@@ -200,7 +202,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                               input_lens=input_lens_for_partition)
         else:
             data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
-        splitted = PackedParallelDataBroker.scatter_to(data, self.num_micro_batches)
+        n_mbs = self.num_micro_batches if self._train_mode else self.num_inf_micro_batches
+        splitted = PackedParallelDataBroker.scatter_to(data, n_mbs)
         if input_lens_for_partition is not None:
             splitted = [
                 NamedArray(packed_input_ids=x['packed_input_ids'],
@@ -277,7 +280,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._compute_loss = False
         self._generate_mode = True
 
-        for mbid in range(self.num_micro_batches):
+        for mbid in range(self.num_inf_micro_batches):
             self.tensor_buffer.put("kv_cache_reserved", mbid, False)
             self.tensor_buffer.put("terminate", mbid, torch.tensor(0, dtype=torch.bool, device=self.device))
             self.tensor_buffer.put("generated_idx", mbid, 0)
@@ -390,7 +393,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # forward one step and return packed logits
         self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
         self._pre_forward()
-        sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
+        sched = schedule.InferenceSchedule(micro_batches=self.num_inf_micro_batches,
                                            stages=self.num_stages,
                                            stage_id=self.stage_id)
         self._exec_schedule(sched)
@@ -398,7 +401,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         logits = None
         if self.is_last_stage():
             logits_list = []
-            for i in range(self.num_micro_batches):
+            for i in range(self.num_inf_micro_batches):
                 logits = self.tensor_buffer.get("logits", i, remove=True)
                 # logger.info(f"mbid {i} before remove pad logits shape {logits.shape}")
                 if self.sequence_parallel:
@@ -424,7 +427,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._pre_eval_batch()
 
         # Do the work
-        sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
+        sched = schedule.InferenceSchedule(micro_batches=self.num_inf_micro_batches,
                                            stages=self.num_stages,
                                            stage_id=self.stage_id)
 
@@ -438,7 +441,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             losses = []
             stats = []
 
-            for mbid in range(self.num_micro_batches):
+            for mbid in range(self.num_inf_micro_batches):
                 loss = self.tensor_buffer.get("losses", mbid).detach()
                 losses.append(loss)
                 stats.append(self.tensor_buffer.get("stats", mbid))
@@ -508,14 +511,14 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.tokenizer = tokenizer
         self._pre_generate()
 
-        sched = schedule.GenerateSchedule(micro_batches=self.num_micro_batches,
+        sched = schedule.GenerateSchedule(micro_batches=self.num_inf_micro_batches,
                                           stages=self.num_stages,
                                           stage_id=self.stage_id,
                                           max_new_tokens=gconfig.max_new_tokens)
 
         def terminate_condition():
             return torch.stack(
-                [self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)]).all()
+                [self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_inf_micro_batches)]).all()
 
         self._exec_schedule(sched, terminate_condition)
         r = self.__maybe_gather_generate_outputs()
@@ -530,7 +533,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         all_log_probs = []
         all_logits_mask = []
         vocab_size = None
-        for mbid in range(self.num_micro_batches):
+        for mbid in range(self.num_inf_micro_batches):
             gen_token_ph = self.tensor_buffer.get("gen_token_ph", mbid, remove=True)
             gen_logprob_ph = self.tensor_buffer.get("gen_logprob_ph", mbid, remove=True)
             gen_logits_mask_ph = self.tensor_buffer.get("gen_logits_mask_ph", mbid, remove=True)
@@ -595,7 +598,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             logits_mask = torch.cat(all_logits_mask, dim=0)
 
         prompt_logits = [
-            self.tensor_buffer.get("prompt_logits", mbid) for mbid in range(self.num_micro_batches)
+            self.tensor_buffer.get("prompt_logits", mbid) for mbid in range(self.num_inf_micro_batches)
         ]
         prompt_logits = torch.cat(prompt_logits, dim=0)
         return gen_tokens, log_probs, logits_mask, None, prompt_logits

@@ -4,6 +4,7 @@ import functools
 from experiments.common.ppo_exp import PPOConfig, PPOHyperparmeters
 from experiments.common import ModelConfig, ModelBackend, ParallelismConfig, OptimizerConfig
 from .pposys_exp import PPOSysExperiment
+from copy import deepcopy
 
 
 def build_llama2_model(
@@ -16,17 +17,15 @@ def build_llama2_model(
     offload_model: bool = False,
     offload_opt: bool = False,
     use_hybrid_engine: bool = False,
+    num_inf_pipeline_mbs: int = None,
 ):
     assert model_size in ["7b", "13b", "34b", "70b"]
-    if model_size in ["7b", "34b"]:
+    if model_size in ["7b", "13b", "70b"]:
         model_dir_prefix = f"Llama-2-{model_size}-hf"
-        model_type_ = "codellama"
-    elif model_size == "13b":
-        model_dir_prefix = "codellama-13B"
-        model_type_ = "codellama"
-    elif model_size == "70b":
-        model_dir_prefix = "Llama-2-70b-hf"
         model_type_ = "llama"
+    else:
+        model_dir_prefix = "CodeLlama-34b-hf"
+        model_type_ = "codellama"
     if pp_size > 1:
         ckpt_base_dir = "/lustre/public/pretrained_model_weights/sharded_new/"
         model_path = os.path.join(ckpt_base_dir, f"{model_dir_prefix}_{pp_size}pp_1mp")
@@ -39,6 +38,7 @@ def build_llama2_model(
         data_parallel_size=dp_size,
         use_sequence_parallel=False,
         num_pipeline_micro_batches=pp_mbs,
+        num_inf_pipeline_mbs=num_inf_pipeline_mbs,
     )
     optimizer = OptimizerConfig(
         zero_stage=zero_stage if pp_size == 1 else 1,
@@ -70,29 +70,65 @@ rew = build_llama2_model(
     zero_stage=0,
 )
 
-############################### 7b experiment begin ###############################
-def register_7b_dp8pp2_experiment():
+
+def register_possible_experiment(model_size: str, dp_size: int):
+    if model_size in ["7b", "13b"]:
+        n_actor_gpus = 16
+        n_ref_gpus = 4
+        ref_dp_size = 2
+        master_nodelist = "QH-com16"
+        actor_nodelist = "QH-com[17-18]"
+        critic_nodelist = "QH-com19"
+        ref_nodelist = "QH-com20"
+        rew_nodelist = "QH-com20"
+    elif model_size == "34b":
+        n_actor_gpus = 32
+        n_ref_gpus = 8
+        ref_dp_size = 2
+        master_nodelist = "QH-com25"
+        actor_nodelist = "QH-com[01-04]"
+        critic_nodelist = "QH-com30"
+        ref_nodelist = "QH-com31"
+        rew_nodelist = "QH-com32"
+    elif model_size == "70b":
+        n_actor_gpus = 64
+        n_ref_gpus = 16
+        ref_dp_size = 2
+        master_nodelist = "QH-com33"
+        actor_nodelist = "QH-com[34-41]"
+        critic_nodelist = "QH-com23"
+        ref_nodelist = "QH-com[21-22]"
+        rew_nodelist = "QH-com42"
+    else:
+        raise NotImplementedError()
+    if dp_size > n_actor_gpus:
+        return
+    pp_size = n_actor_gpus // dp_size
+    ref_pp_size = n_ref_gpus // ref_dp_size
+    # by default, n_mbs = 2 * pp_size
     actor = build_llama2_model(
-        model_size="7b",
-        dp_size=8,
-        pp_size=2,
-        pp_mbs=4,
-        zero_stage=1,
+        model_size=model_size,
+        dp_size=dp_size,
+        pp_size=pp_size,
+        pp_mbs=pp_size * 2,
+        zero_stage=1 if pp_size > 1 else 2,
     )
     ref = build_llama2_model(
-        model_size="7b",
-        dp_size=4,
+        model_size=model_size,
+        dp_size=ref_dp_size,
+        pp_size=ref_pp_size,
         zero_stage=0,
     )
+    model_size_int = int(model_size.split("b")[0])
     register_experiment(
-        f"sosp-baseline-a7c7r7",
+        f"sosp-baseline-a{model_size_int}-{dp_size}x{pp_size}-c7r7",
         functools.partial(
             PPOSysExperiment,
-            master_nodelist="QH-com16",
-            actor_nodelist="QH-com[17-18]",
-            critic_nodelist="QH-com19",
-            ref_nodelist="QH-com20",
-            rew_nodelist="QH-com20",
+            master_nodelist=master_nodelist,
+            actor_nodelist=actor_nodelist,
+            critic_nodelist=critic_nodelist,
+            ref_nodelist=ref_nodelist,
+            rew_nodelist=rew_nodelist,
             actor=actor,
             critic=critic,
             ref=ref,
@@ -100,34 +136,48 @@ def register_7b_dp8pp2_experiment():
         ),
     )
 
-def register_7b_hybrid_dp8_experiment():
-    actor = build_llama2_model(
-        model_size="7b",
-        dp_size=8,
-        zero_stage=3,
-        use_hybrid_engine=True,
-    )
-    ref = build_llama2_model(
-        model_size="7b",
-        dp_size=4,
-        zero_stage=0,
-    )
+    if pp_size == 1:
+        return
+    # register experiments with n_mbs = pp_size
+    actor = deepcopy(actor)
+    actor.parallel.num_pipeline_micro_batches = pp_size
     register_experiment(
-        f"sosp-baseline-a7c7r7-he",
+        f"sosp-baseline-a{model_size_int}-{dp_size}x{pp_size}-c7r7-mb1",
         functools.partial(
             PPOSysExperiment,
-            master_nodelist="QH-com16",
-            actor_nodelist="QH-com[17-18]",
-            critic_nodelist="QH-com19",
-            ref_nodelist="QH-com20",
-            rew_nodelist="QH-com20",
+            master_nodelist=master_nodelist,
+            actor_nodelist=actor_nodelist,
+            critic_nodelist=critic_nodelist,
+            ref_nodelist=ref_nodelist,
+            rew_nodelist=rew_nodelist,
             actor=actor,
             critic=critic,
             ref=ref,
             rew=rew,
         ),
     )
-############################### 7b experiment end ###############################
 
-register_7b_dp8pp2_experiment()
-register_7b_hybrid_dp8_experiment()
+    # register experiments with gen n_mbs = pp_size * 2 while train n_mbs = pp_size
+    actor = deepcopy(actor)
+    actor.parallel.num_pipeline_micro_batches = 2 * pp_size
+    actor.parallel.num_inf_pipeline_mbs = pp_size
+    register_experiment(
+        f"sosp-baseline-a{model_size_int}-{dp_size}x{pp_size}-c7r7-mb1gen",
+        functools.partial(
+            PPOSysExperiment,
+            master_nodelist=master_nodelist,
+            actor_nodelist=actor_nodelist,
+            critic_nodelist=critic_nodelist,
+            ref_nodelist=ref_nodelist,
+            rew_nodelist=rew_nodelist,
+            actor=actor,
+            critic=critic,
+            ref=ref,
+            rew=rew,
+        ),
+    )
+
+
+for dp_size in map(lambda x: 2**x, range(7)):
+    for model_size in ["7b", "13b", "34b", "70b"]:
+        register_possible_experiment(model_size, dp_size)

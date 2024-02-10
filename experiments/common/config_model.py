@@ -27,6 +27,7 @@ class ParallelismConfig:
     use_sequence_parallel: bool = False
     partition_method: Optional[str] = "parameters_balanced"
     num_pipeline_micro_batches: Optional[int] = None
+    num_inf_pipeline_mbs: Optional[int] = None
 
     def __post_init__(self):
         if self.pipeline_parallel_size < 1 or self.data_parallel_size < 1 or self.model_parallel_size < 1:
