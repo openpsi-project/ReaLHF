@@ -62,7 +62,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
         return ParallelDataBroker.gather_from(src)
 
     @staticmethod
-    def scatter_to(src: namedarray.NamedArray, n_dp: int) -> List[namedarray.NamedArray]:
+    def scatter_to(src: namedarray.NamedArray, n_dp: int, min_size: int = 1) -> List[namedarray.NamedArray]:
         if "input_lens" not in src:
             if "cu_seqlens" in src:
                 src["input_lens"] = src["cu_seqlens"][1:] - src["cu_seqlens"][:-1]
@@ -70,7 +70,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
                 raise RuntimeError("input_lens must be in the return data when using packed data broker. "
                                    f"Current keys: {list(src.keys())}.")
 
-        partitions = datapack.min_abs_diff_partition(src["input_lens"].cpu().numpy().astype(np.int64), n_dp)
+        partitions = datapack.min_abs_diff_partition(src["input_lens"].cpu().numpy().astype(np.int64), n_dp, min_size)
 
         input_lens: List[torch.IntTensor] = [src["input_lens"][start:end].int() for start, end in partitions]
         cu_seqlens = [torch.cat([x.new_zeros(1), torch.cumsum(x, dim=0)]).int() for x in input_lens]
