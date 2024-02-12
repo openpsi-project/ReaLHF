@@ -111,12 +111,8 @@ async def model_rpc_func(
         else:
             data[rpc_config.input_key_remap[k]] = data_registry[k]
 
-    # HACK: add-hoc implementation to avoid inbalanced partition when #seqs is closed to pp_size/n_pp_mbs
-    pp_size = base.constants.grid_of_model(rpc_config.model_name).get_pipe_parallel_world_size()
-    min_size = pp_size * 2 if pp_size > 1 else 1
-
     data = namedarray.from_dict(data)
-    datas = dataparallel.get_broker(rpc_config.dp_broker_type).scatter_to(data, num_dp, min_size=min_size)
+    datas = dataparallel.get_broker(rpc_config.dp_broker_type).scatter_to(data, num_dp, min_size=rpc_config.min_n_seqs_per_dp)
 
     dtypes = {k: v.dtype for k, v in datas[0].items()}
     all_shapes = [{k: v.shape for k, v in data.items()} for data in datas]

@@ -340,10 +340,15 @@ class PackedActorInterface(api.model.ModelInterface):
         if self.value_norm:
             self.rms.update(returns, mask=loss_mask)
 
+        _n_seqs = reward_score.shape[0]
         global_stats = dict(
             task_reward=reward_score.mean().detach(),
             kl_reward=(kl_rewards.detach() * loss_mask).sum().mean(),
             advantage=advantages.mean().detach(),
+            avg_seq_len=(cu_seqlens[1:] - cu_seqlens[:-1]).float().mean(),
+            avg_prompt_len=prompt_mask.sum().float() / _n_seqs,
+            n_tokens=cu_seqlens[-1].float(),
+            n_prompt_tokens=prompt_mask.sum().float(),
         )
 
         if self.adv_norm:
@@ -360,7 +365,7 @@ class PackedActorInterface(api.model.ModelInterface):
                 logits_mask=data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None,
             ))
 
-        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches)
+        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=(data_["cu_seqlens"].shape[0] - 1) // self.n_minibatches)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         for data in datas:
@@ -621,7 +626,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                 cu_seqlens=data_["cu_seqlens"],
             ))
 
-        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches)
+        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=(data_["cu_seqlens"].shape[0] - 1) // self.n_minibatches)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         for data in datas:

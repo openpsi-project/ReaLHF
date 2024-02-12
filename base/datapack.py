@@ -154,7 +154,7 @@ def allocate(lengths: np.ndarray, lengths_cumsum: np.ndarray, c: int, rank: int,
 
 
 @numba.njit
-def partition_balanced(nums: np.ndarray, k: int, min_size: int):
+def partition_balanced(nums: np.ndarray, k: int, min_size: int=1):
     """Partition an array into k subarrays with a minimum absolute difference of sums and minimum subarray size.
 
     Dynamic programming solution.
@@ -223,7 +223,7 @@ def min_abs_diff_partition(arr: Union[np.ndarray, List], k: int, min_size: int =
     if len(arr) < k:
         raise ValueError(f"The array to be partitioned must have length >= k. (array {arr}, k={k})" +
                          err_hint)
-    if len(nums) < k * min_size:
+    if len(arr) < k * min_size:
         raise ValueError(f"Length of the array to be partitioned must be at least k * min_size ({k} * {min_size}).")
     partitions = partition_balanced_tuples(arr, k, min_size)
     last_end = 0

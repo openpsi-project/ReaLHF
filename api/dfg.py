@@ -24,6 +24,7 @@ class ModelRPC:
     output_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
     dp_broker_type: str = "padded_batch"
     log_return_value: bool = False
+    min_n_seqs_per_dp: int = 1
 
     @property
     def name(self):
