@@ -56,6 +56,10 @@ def grid():
         raise RuntimeError(f"Grid for model {_model_name} is not set.")
     return _grids[_model_name]
 
+def grid_of_model(model_name: str):
+    if _grids.get(model_name, None) is None:
+        raise RuntimeError(f"Grid for model {model_name} is not set.")
+    return _grids[model_name]
 
 def set_parallelism_group(model_name: str, pgroup):
     global _pgroups

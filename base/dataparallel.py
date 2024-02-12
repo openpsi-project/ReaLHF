@@ -36,7 +36,7 @@ class ParallelDataBroker:
             raise NotImplementedError(f"Don't know how to gather data of type {[type(x) for x in src]}.")
 
     @abc.abstractstaticmethod
-    def scatter_to(src: namedarray.NamedArray, n_dp: int) -> List[namedarray.NamedArray]:
+    def scatter_to(src: namedarray.NamedArray, n_dp: int, **kwargs) -> List[namedarray.NamedArray]:
         """Scatter the input of a data-parallel model RPC."""
         pass
 
@@ -48,7 +48,7 @@ class PaddedBatchParallelDataBroker(ParallelDataBroker):
         return ParallelDataBroker.gather_from(src)
 
     @staticmethod
-    def scatter_to(src: namedarray.NamedArray, n_dp: int) -> List[namedarray.NamedArray]:
+    def scatter_to(src: namedarray.NamedArray, n_dp: int, **kwargs) -> List[namedarray.NamedArray]:
         datas = namedarray.split(src, n_dp)
         for x in datas:
             x.register_metadata(**src.metadata)
