@@ -79,26 +79,26 @@ def register_possible_experiment(model_size: str, dp_size: int):
         master_nodelist = "QH-com16"
         actor_nodelist = "QH-com[17-18]"
         critic_nodelist = "QH-com19"
-        ref_nodelist = "QH-com20"
-        rew_nodelist = "QH-com20"
+        ref_nodelist = "QH-com15"
+        rew_nodelist = "QH-com15"
     elif model_size == "34b":
         n_actor_gpus = 32
         n_ref_gpus = 8
         ref_dp_size = 2
         master_nodelist = "QH-com25"
-        actor_nodelist = "QH-com[01-04]"
-        critic_nodelist = "QH-com30"
-        ref_nodelist = "QH-com31"
-        rew_nodelist = "QH-com32"
+        actor_nodelist = "QH-com[30-33]"
+        critic_nodelist = "QH-com34"
+        ref_nodelist = "QH-com36"
+        rew_nodelist = "QH-com37"
     elif model_size == "70b":
         n_actor_gpus = 64
         n_ref_gpus = 16
         ref_dp_size = 2
-        master_nodelist = "QH-com33"
-        actor_nodelist = "QH-com[34-41]"
-        critic_nodelist = "QH-com23"
-        ref_nodelist = "QH-com[21-22]"
-        rew_nodelist = "QH-com42"
+        master_nodelist = "QH-com49"
+        actor_nodelist = "QH-com[25-28,30-33]"
+        critic_nodelist = "QH-com39"
+        ref_nodelist = "QH-com[36-37]"
+        rew_nodelist = "QH-com01"
     else:
         raise NotImplementedError()
     if dp_size > n_actor_gpus:

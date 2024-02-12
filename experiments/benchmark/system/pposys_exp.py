@@ -139,8 +139,8 @@ class PPOSysExperiment(Experiment):
         base_setup.master_worker.scheduling.nodelist = self.master_nodelist
         base_setup.model_worker[0].scheduling.nodelist = self.actor_nodelist
         base_setup.model_worker[1].scheduling.nodelist = self.critic_nodelist
-        base_setup.model_worker[2].scheduling.nodelist = self.ref_nodelist
-        base_setup.model_worker[3].scheduling.nodelist = self.rew_nodelist
+        base_setup.model_worker[2].scheduling.nodelist = self.rew_nodelist
+        base_setup.model_worker[3].scheduling.nodelist = self.ref_nodelist
         return base_setup
 
     def initial_setup(self) -> ExperimentConfig:
@@ -182,6 +182,15 @@ class PPOSysExperiment(Experiment):
             m.model = ref_model
         assert offset + self.base_config.n_refs == len(base_setup.model_worker)
 
+        global train_actor
+        train_actor = copy.deepcopy(train_actor)
+        if self.actor.parallel.pipeline_parallel_size > 1:
+            pp_nmbs = (
+                self.actor.parallel.num_pipeline_micro_batches
+                if self.actor.parallel.num_pipeline_micro_batches is not None
+                else self.actor.parallel.pipeline_parallel_size
+            )
+            train_actor.min_n_seqs_per_dp = ppo_benchmark_hyperparam.ppo_n_minibatches * pp_nmbs
         return ExperimentConfig(
             total_train_epochs=1,
             benchmark_steps=self.benchmark_steps,
