@@ -114,6 +114,8 @@ class PPOSysExperiment(Experiment):
     ref_nodelist: str
     rew_nodelist: str
 
+    batch_size: Optional[int] = 512
+
     seed: int = 1
     benchmark_steps: int = 20
 
@@ -123,6 +125,8 @@ class PPOSysExperiment(Experiment):
     rew: ModelConfig = dataclasses.field(default_factory=ModelConfig)
 
     def __post_init__(self):
+        dataset = copy.deepcopy(ppo_benchmark_dataset)
+        dataset.batch_size = self.batch_size
         self.base_config = PPOConfig(
             seed=self.seed,
             actor=self.actor,
@@ -130,7 +134,7 @@ class PPOSysExperiment(Experiment):
             ref=self.ref,
             rew=self.rew,
             ppo=ppo_benchmark_hyperparam,
-            dataset=ppo_benchmark_dataset,
+            dataset=dataset,
         )
 
     def scheduling_setup(self) -> ExperimentScheduling:
