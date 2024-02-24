@@ -202,6 +202,8 @@ class PPOConfig(Experiment):
                 count=1,
                 scheduling=Scheduling.master_worker_default(
                     cpu=4,
+                    gpu=1,
+                    gpu_type="tesla",
                     mem=100000,
                 ),
             ),
@@ -437,19 +439,6 @@ class PPOConfig(Experiment):
         ] + [
             ModelWorker(
                 seed=self.seed,
-                model=rw_model,
-                backend=rw_backend,
-                interface=rw_interface,
-                model_name="reward",
-                dp_rank=rw_topo.get_coord(i).data,
-                pp_rank=rw_topo.get_coord(i).pipe,
-                mp_rank=rw_topo.get_coord(i).model,
-                topo=rw_topo,
-                cuda_cache_cleanliness=True,
-            ) for i in range(self.n_rewards)
-        ] + [
-            ModelWorker(
-                seed=self.seed,
                 model=ref_model,
                 backend=ref_backend,
                 interface=ref_interface,
@@ -460,6 +449,19 @@ class PPOConfig(Experiment):
                 topo=ref_topo,
                 cuda_cache_cleanliness=True,
             ) for i in range(self.n_refs)
+        ]+ [
+            ModelWorker(
+                seed=self.seed,
+                model=rw_model,
+                backend=rw_backend,
+                interface=rw_interface,
+                model_name="reward",
+                dp_rank=rw_topo.get_coord(i).data,
+                pp_rank=rw_topo.get_coord(i).pipe,
+                mp_rank=rw_topo.get_coord(i).model,
+                topo=rw_topo,
+                cuda_cache_cleanliness=True,
+            ) for i in range(self.n_rewards)
         ])
 
         return ExperimentConfig(

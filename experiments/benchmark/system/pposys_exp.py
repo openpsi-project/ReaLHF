@@ -89,9 +89,9 @@ train_critic = ModelRPC(
 )
 
 ppo_benchmark_hyperparam = PPOHyperparmeters(
-    max_new_tokens=1024,
-    min_new_tokens=10,
-    greedy=False,
+    max_new_tokens=-1,  # will be overwritten
+    min_new_tokens=-1,  # will be overwritten
+    greedy=True,
     top_p=0.9,
     top_k=2048,
     temperature=1.2,
@@ -100,8 +100,8 @@ ppo_benchmark_hyperparam = PPOHyperparmeters(
 )
 
 ppo_benchmark_dataset = PromptOnlyDatasetConfig(
-    max_prompt_len=1024,
-    batch_size=512,
+    max_prompt_len=-1,  # will be overwritten
+    batch_size=-1,  # will be overwritten
     path="/lustre/fw/datasets/antropic-hh/ppo_prompt_only.jsonl",
 )
 
@@ -114,10 +114,12 @@ class PPOSysExperiment(Experiment):
     ref_nodelist: str
     rew_nodelist: str
 
+    max_answer_len: int
     batch_size: Optional[int] = 512
+    max_prompt_len: int = 256
 
     seed: int = 1
-    benchmark_steps: int = 20
+    benchmark_steps: int = 10
 
     actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     critic: ModelConfig = dataclasses.field(default_factory=ModelConfig)
@@ -125,26 +127,35 @@ class PPOSysExperiment(Experiment):
     rew: ModelConfig = dataclasses.field(default_factory=ModelConfig)
 
     def __post_init__(self):
+        global ppo_benchmark_dataset
         dataset = copy.deepcopy(ppo_benchmark_dataset)
         dataset.batch_size = self.batch_size
+        dataset.max_prompt_len = self.max_prompt_len
+        global ppo_benchmark_hyperparam
+        hyperparam = copy.deepcopy(ppo_benchmark_hyperparam)
+        hyperparam.max_new_tokens = self.max_answer_len
+        hyperparam.min_new_tokens = self.max_answer_len
         self.base_config = PPOConfig(
             seed=self.seed,
             actor=self.actor,
             critic=self.critic,
             ref=self.ref,
             rew=self.rew,
-            ppo=ppo_benchmark_hyperparam,
+            ppo=hyperparam,
             dataset=dataset,
         )
 
     def scheduling_setup(self) -> ExperimentScheduling:
         base_setup = self.base_config.scheduling_setup()
-        base_setup.data_worker.scheduling.nodelist = "QH-com47"
+        exclude = "QH-com02,QH-com03,QH-com29,QH-com35"
         base_setup.master_worker.scheduling.nodelist = self.master_nodelist
+        base_setup.master_worker.scheduling.exclude = exclude
         base_setup.model_worker[0].scheduling.nodelist = self.actor_nodelist
         base_setup.model_worker[1].scheduling.nodelist = self.critic_nodelist
         base_setup.model_worker[2].scheduling.nodelist = self.rew_nodelist
         base_setup.model_worker[3].scheduling.nodelist = self.ref_nodelist
+        for s in base_setup.model_worker:
+            s.scheduling.exclude = exclude
         return base_setup
 
     def initial_setup(self) -> ExperimentConfig:
@@ -179,12 +190,12 @@ class PPOSysExperiment(Experiment):
         for m in base_setup.model_worker[offset : offset + self.base_config.n_critics]:
             m.model = critic_model
         offset += self.base_config.n_critics
-        for m in base_setup.model_worker[offset : offset + self.base_config.n_rewards]:
-            m.model = rw_model
-        offset += self.base_config.n_rewards
         for m in base_setup.model_worker[offset : offset + self.base_config.n_refs]:
             m.model = ref_model
-        assert offset + self.base_config.n_refs == len(base_setup.model_worker)
+        offset += self.base_config.n_refs
+        for m in base_setup.model_worker[offset : offset + self.base_config.n_rewards]:
+            m.model = rw_model
+        assert offset + self.base_config.n_rewards == len(base_setup.model_worker)
 
         global train_actor
         train_actor = copy.deepcopy(train_actor)
@@ -195,6 +206,8 @@ class PPOSysExperiment(Experiment):
                 else self.actor.parallel.pipeline_parallel_size
             )
             train_actor.min_n_seqs_per_dp = ppo_benchmark_hyperparam.ppo_n_minibatches * pp_nmbs
+        else:
+            train_actor.min_n_seqs_per_dp = ppo_benchmark_hyperparam.ppo_n_minibatches
         return ExperimentConfig(
             total_train_epochs=1,
             benchmark_steps=self.benchmark_steps,

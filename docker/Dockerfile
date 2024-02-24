@@ -47,7 +47,7 @@ ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 ENV NVTE_WITH_USERBUFFERS=1
 ENV NVTE_FRAMEWORK=pytorch
 ENV MPI_HOME=/usr/local/mpi
-ENV MAX_JOBS=32
+ENV MAX_JOBS=64
 
 # install transformer engine
 # note that we should in stall transformer_engine before flash attention,
@@ -63,9 +63,12 @@ RUN pip3 uninstall -y flash_attn && pip3 install /tmp/flash_attn-2.3.6-cp310-cp3
 COPY thirdparty/cugae/dist/cugae-0.1.0-cp310-cp310-linux_x86_64.whl /tmp/cugae-0.1.0-cp310-cp310-linux_x86_64.whl
 RUN pip3 install /tmp/cugae-0.1.0-cp310-cp310-linux_x86_64.whl
 
+COPY thirdparty/DeepSpeed /tmp/DeepSpeed
+RUN pip3 install /tmp/DeepSpeed
+
 # final clean up
 WORKDIR /app
-RUN rm -rf /tmp/TransformerEngine /tmp/flash_attn-2.3.6-cp310-cp310-linux_x86_64.whl /tmp/cugae-0.1.0-cp310-cp310-linux_x86_64.whl /tmp/pytorch
+RUN rm -rf /tmp/DeepSpeed /tmp/TransformerEngine /tmp/flash_attn-2.3.6-cp310-cp310-linux_x86_64.whl /tmp/cugae-0.1.0-cp310-cp310-linux_x86_64.whl /tmp/pytorch
 
 # install zmq with pgm
 # COPY ./zeromq-4.3.4.tar.gz /

@@ -69,14 +69,14 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
         chosen_end_scores = scores[cu_seqlens[1:] - 1]  # [bs]
 
         ###################### logging ######################
-        input_ids = [packed_input_ids[start:end] for start, end in zip(cu_seqlens[:-1], cu_seqlens[1:])]
-        seq_strs = model.tokenizer.batch_decode(input_ids,
-                                                clean_up_tokenization_spaces=False,
-                                                skip_special_tokens=True)
-        for seq_str, score in zip(seq_strs, chosen_end_scores):
-            logger.info(
-                f"reward is {colorama.Fore.RED}{score.item()}{colorama.Style.RESET_ALL}, sequence is: {colorama.Fore.YELLOW + colorama.Style.DIM}{seq_str}{colorama.Style.RESET_ALL}"
-            )
+        # input_ids = [packed_input_ids[start:end] for start, end in zip(cu_seqlens[:-1], cu_seqlens[1:])]
+        # seq_strs = model.tokenizer.batch_decode(input_ids,
+        #                                         clean_up_tokenization_spaces=False,
+        #                                         skip_special_tokens=True)
+        # for seq_str, score in zip(seq_strs, chosen_end_scores):
+        #     logger.info(
+        #         f"reward is {colorama.Fore.RED}{score.item()}{colorama.Style.RESET_ALL}, sequence is: {colorama.Fore.YELLOW + colorama.Style.DIM}{seq_str}{colorama.Style.RESET_ALL}"
+        #     )
         #####################################################
 
         return from_dict(dict(scores=chosen_end_scores))
