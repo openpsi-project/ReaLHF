@@ -201,18 +201,6 @@ class PPOConfig(Experiment):
             raise ValueError(
                 "rew_lora_path, rew_base_model_type and rew_head_path must be specified when is_rw_lora is True."
             )
-        if (self.actor.path != self.ref.path or self.actor.base_model_path != self.ref.base_model_path
-                or self.actor.type != self.ref.type):
-            raise ValueError("actor and ref must be the same model.")
-        if (self.critic.path != self.rew.path or self.critic.base_model_path != self.rew.base_model_path
-                or self.critic.type != self.rew.type):
-            raise ValueError("critic and rew must be the same model.")
-        if self.actor.tokenizer_path != self.critic.tokenizer_path:
-            raise ValueError(
-                f"`actor` and `critic` must use the same tokenizer. "
-                "It is possible that you are using the same base model with different sizes "
-                "(e.g., LLaMa 13b as the actor and 7b as the critic). They have the same "
-                "tokenizer but different model paths. Please specify the tokenizer path manually.")
 
         self.n_actors = int(self.actor.parallel.pipeline_parallel_size *
                             self.actor.parallel.model_parallel_size * self.actor.parallel.data_parallel_size)
@@ -479,19 +467,6 @@ class PPOConfig(Experiment):
         ] + [
             ModelWorker(
                 seed=self.seed,
-                model=rw_model,
-                backend=rw_backend,
-                interface=rw_interface,
-                model_name="reward",
-                dp_rank=rw_topo.get_coord(i).data,
-                pp_rank=rw_topo.get_coord(i).pipe,
-                mp_rank=rw_topo.get_coord(i).model,
-                topo=rw_topo,
-                cuda_cache_cleanliness=True,
-            ) for i in range(self.n_rewards)
-        ] + [
-            ModelWorker(
-                seed=self.seed,
                 model=ref_model,
                 backend=ref_backend,
                 interface=ref_interface,
@@ -502,6 +477,19 @@ class PPOConfig(Experiment):
                 topo=ref_topo,
                 cuda_cache_cleanliness=True,
             ) for i in range(self.n_refs)
+        ]+ [
+            ModelWorker(
+                seed=self.seed,
+                model=rw_model,
+                backend=rw_backend,
+                interface=rw_interface,
+                model_name="reward",
+                dp_rank=rw_topo.get_coord(i).data,
+                pp_rank=rw_topo.get_coord(i).pipe,
+                mp_rank=rw_topo.get_coord(i).model,
+                topo=rw_topo,
+                cuda_cache_cleanliness=True,
+            ) for i in range(self.n_rewards)
         ])
 
         return ExperimentConfig(

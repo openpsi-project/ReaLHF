@@ -11,6 +11,16 @@ try:
 except ModuleNotFoundError:
     pass
 
+import os
+
+try:
+    import transformer_engine.pytorch as te
+
+    TE_ENABLED = True
+except ImportError:
+    TE_ENABLED = False
+USE_TE_BACKEND = TE_ENABLED and os.getenv("FLASH_MQAT_USE_TE") == "1"
+
 import impl.model.backend.deepspeed
 import impl.model.interface.chat
 import impl.model.interface.dpo_interface

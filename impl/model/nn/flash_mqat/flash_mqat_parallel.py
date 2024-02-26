@@ -1,4 +1,5 @@
 from typing import *
+import os
 
 import torch
 
@@ -12,6 +13,14 @@ import api.huggingface
 import api.model
 import base.constants
 import base.logging as logging
+
+try:
+    import transformer_engine.pytorch as te
+
+    TE_ENABLED = True
+except ImportError:
+    TE_ENABLED = False
+USE_TE_BACKEND = TE_ENABLED and os.getenv("FLASH_MQAT_USE_TE") == "1"
 
 logger = logging.getLogger("flash mqat parallel")
 
@@ -27,6 +36,17 @@ _column_linear_keys = lambda config: [
     f"{config.n_layers + 1}.weight",
 ]  # dim=0 + partition bias
 _row_linear_keys = lambda config: [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
+
+if USE_TE_BACKEND:
+    _column_linear_keys = lambda config: [
+        ".attn.c_attn.q_attn",
+        ".attn.c_attn.k_attn",
+        ".attn.c_attn.v_attn",
+        ".mlp.c_fc",
+        ".mlp.fc1_weight",
+        f"{config.n_layers + 1}.weight",
+    ]  # dim=0 + partition bias
+    _row_linear_keys = lambda config: [".attn.c_proj", ".mlp.fc2_weight"]
 
 
 # model parallel partition util functions

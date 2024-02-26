@@ -133,6 +133,8 @@ def deepspeed_initialize(
     sequence_parallel: Optional[bool] = False,
     enable_async_p2p_communication: Optional[bool] = False,
     enable_async_instruction: Optional[bool] = False,
+    num_pipeline_micro_batches: Optional[int] = None,
+    num_inf_pipeline_mbs: Optional[int] = None,
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
     if mpu is None:
@@ -168,6 +170,8 @@ def deepspeed_initialize(
         config_class = DeepSpeedConfig(config, mpu)
         engine_cls = DeepSpeedPipelineEngine if engine_type == "pipe" else StreamPipeEngine
         engine = engine_cls(
+            num_micro_batches=num_pipeline_micro_batches,
+            num_inf_micro_batches=num_inf_pipeline_mbs,
             sequence_parallel=sequence_parallel,
             enable_async_p2p_communication=enable_async_p2p_communication,
             enable_async_instruction=enable_async_instruction,

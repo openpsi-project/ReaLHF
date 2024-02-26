@@ -25,6 +25,8 @@ class ParallelismConfig:
     data_parallel_size: int = 1
     use_sequence_parallel: bool = False
     partition_method: Optional[str] = "parameters_balanced"
+    num_pipeline_micro_batches: Optional[int] = None
+    num_inf_pipeline_mbs: Optional[int] = None
 
     def __post_init__(self):
         if self.pipeline_parallel_size < 1 or self.data_parallel_size < 1 or self.model_parallel_size < 1:
@@ -86,12 +88,15 @@ class OptimizerConfig:
     )
     warmup_steps_proportion: float = 0.02
     offload: bool = False
+    use_hybrid_engine: bool = False
 
     def __post_init__(self):
         if self.min_lr_ratio < 0.0 or self.min_lr_ratio > 1.0:
             raise ValueError(f"Invalid min_lr_ratio: {self.min_lr_ratio}")
         if self.warmup_steps_proportion < 0.0 or self.warmup_steps_proportion > 1.0:
             raise ValueError(f"Invalid warmup_steps_proportion: {self.warmup_steps_proportion}")
+        if self.use_hybrid_engine and self.zero_stage != 3:
+            raise ValueError("Hybrid engine is only supported when zero stage=3.")
 
 
 @dataclasses.dataclass
@@ -147,6 +152,8 @@ class ModelConfig:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
         if self.offload and not self.optimizer.zero_stage != 3:
             raise ValueError("offload model is only supported when zero stage=3.")
+        if self.parallel.pipeline_parallel_size > 1 and self.optimizer.zero_stage > 1:
+            raise ValueError("zero stage should be at most 1 when pipeline parallelism is used.")
 
 
 def get_flash_mqat_model_config(
@@ -186,10 +193,10 @@ def get_flash_mqat_model_config(
 
     if use_pipe:
         pipe_init_from_scratch = from_type == "random_actor" or from_type == "random_critic"
-        pipe_init_critic_from_actor = from_type == "actor_as_critic"
+        pipe_init_critic_from_actor = from_type == "actor_as_critic" or from_type == "hf_as_critic"
         with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
             original_is_critic = json.load(f)["is_critic"]
-        is_critic = original_is_critic or from_type == "actor_as_critic"
+        is_critic = original_is_critic or pipe_init_critic_from_actor or from_type == "random_critic"
         from_type = "empty_critic" if is_critic else "empty_actor"
 
     model = Model(

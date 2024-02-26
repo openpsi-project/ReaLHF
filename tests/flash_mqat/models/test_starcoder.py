@@ -331,6 +331,8 @@ class FlashMQATStarCoderTest(unittest.TestCase):
             attention_mask=prompt_att_mask,
             gconfig=gconfig,
         )
+        original_k_caches = [y.k_cache.clone() for y in ys]
+        original_v_caches = [y.v_cache.clone() for y in ys]
 
         first_n_tokens = 50 - prompt_len
         gconfig.max_new_tokens = first_n_tokens
@@ -374,9 +376,9 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         assert torch.allclose(log_probs, log_probs2)
         assert torch.allclose(logits_mask[:, :first_n_tokens], logits_mask21)
         assert torch.allclose(logits_mask, logits_mask2)
-        for y1, y2 in zip(ys, ys2):
-            assert torch.allclose(y1.k_cache, y2.k_cache)
-            assert torch.allclose(y1.v_cache, y2.v_cache)
+        for (k_cache, v_cache), y2 in zip(zip(original_k_caches, original_v_caches), ys2):
+            assert torch.allclose(k_cache, y2.k_cache)
+            assert torch.allclose(v_cache, y2.v_cache)
 
     def testGenerateTwoOrMoreSamples(self):
         seqs = [

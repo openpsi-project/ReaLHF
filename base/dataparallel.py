@@ -44,7 +44,7 @@ class ParallelDataBroker:
             raise NotImplementedError(f"Don't know how to gather data of type {[type(x) for x in src]}.")
 
     @abc.abstractstaticmethod
-    def scatter_to(src: namedarray.NamedArray, n_dp: int) -> List[namedarray.NamedArray]:
+    def scatter_to(src: namedarray.NamedArray, n_dp: int, **kwargs) -> List[namedarray.NamedArray]:
         """Scatter the input of a data-parallel model RPC."""
         pass
 
@@ -56,7 +56,7 @@ class PaddedBatchParallelDataBroker(ParallelDataBroker):
         return ParallelDataBroker.gather_from(src)
 
     @staticmethod
-    def scatter_to(src: namedarray.NamedArray, n_dp: int) -> List[namedarray.NamedArray]:
+    def scatter_to(src: namedarray.NamedArray, n_dp: int, **kwargs) -> List[namedarray.NamedArray]:
         datas = namedarray.split(src, n_dp)
         for x in datas:
             x.register_metadata(**src.metadata)
@@ -73,7 +73,8 @@ class PackedParallelDataBroker(ParallelDataBroker):
     def scatter_to(src: namedarray.NamedArray,
                    n_dp: int,
                    return_sizes=False,
-                   partitions: Optional[List[Tuple[int, int]]] = None) -> List[namedarray.NamedArray]:
+                   partitions: Optional[List[Tuple[int, int]]] = None,
+                   min_size: int = 1) -> List[namedarray.NamedArray]:
         if "input_lens" not in src:
             if "cu_seqlens" in src:
                 raw_input_lens = src["cu_seqlens"][1:] - src["cu_seqlens"][:-1]
@@ -90,7 +91,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
             raw_input_lens = src["input_lens"]
 
         if partitions is None:
-            partitions = datapack.min_abs_diff_partition(raw_input_lens.cpu().numpy().astype(np.int64), n_dp)
+            partitions = datapack.min_abs_diff_partition(raw_input_lens.cpu().numpy().astype(np.int64), n_dp, min_size)
 
         input_lens: List[torch.IntTensor] = [raw_input_lens[start:end].int() for start, end in partitions]
         cu_seqlens = [torch.cat([x.new_zeros(1), torch.cumsum(x, dim=0)]).int() for x in input_lens]

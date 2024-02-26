@@ -35,6 +35,13 @@ _LLM_ENVVARS = {
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
     "CUDA_DEVICE_MAX_CONNECTIONS": "1",
     "PYTHONUSERBASE": "/nonsense",
+    # torch.distributed.all_reduce does not free the input tensor until
+    # the synchronization point. This causes the memory usage to grow
+    # as the number of all_reduce calls increases. This env var disables
+    # this behavior.
+    # Related issue:
+    # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
+    "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
 }
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v

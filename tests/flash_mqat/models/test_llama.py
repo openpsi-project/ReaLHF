@@ -11,7 +11,7 @@ from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
 from tests.utils import *
 import api.huggingface
 
-torch.cuda.manual_seed_all(1)
+torch.cuda.manual_seed_all(2)
 
 
 class LlamaFlashMQATForwardTest(unittest.TestCase):
@@ -31,7 +31,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         deepspeed.init_distributed()
         init_global_constants(1, 1, 1)
 
-        hf_path = "/lustre/public/pretrained_model_weights/deepseek-coder-6.7b-base"
+        cls.hf_path = hf_path = "/lustre/public/pretrained_model_weights/deepseek-coder-6.7b-base"
         # hf_path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
         # hf_path = "/lustre/public/pretrained_model_weights/codellama-13B"
 
@@ -119,6 +119,20 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         for max_prompt_len, with_mask in itertools.product(max_prompt_len_c, with_mask_c):
             self._generate(max_prompt_len, with_mask)
 
+    @unittest.skip("skip because it is slow")
+    def testDumpLoad(self):
+        os.makedirs("/tmp/_flash_mqat_test/llama/", exist_ok=True)
+        FlashMQATModel.dump_to_llama(
+            self.hf_like_model.config,
+            self.hf_like_model.state_dict(),
+            "/tmp/_flash_mqat_test/llama/",
+            self.hf_path,
+        )
+        from impl.model.utils.save_load import load_from_disk
+
+        self.llama.load_state_dict(load_from_disk("/tmp/_flash_mqat_test/llama/"))
+
 
 if __name__ == "__main__":
+    # unittest.main(defaultTest="LlamaFlashMQATForwardTest.testDumpLoad")
     unittest.main()

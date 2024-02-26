@@ -153,6 +153,27 @@ class PackedActorInterface(api.model.ModelInterface):
 
     @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+        bs = data["prompts"].shape[0]
+        assert bs % self.n_minibatches == 0
+        minibatch_size = bs // self.n_minibatches
+        all_res = []
+        for i in range(0, bs, minibatch_size):
+            res = self._generate_minibatch(model, data[i:i + minibatch_size])
+            all_res.append(res)
+        input_lens = torch.cat([x['cu_seqlens'][1:] - x['cu_seqlens'][:-1] for x in all_res])
+        # FIXME: here we cannot use PackedDataBroker.gather_from because the second gather_from in master worker will stuck due to unknown reason.
+        r = dict()
+        for k, v in all_res[0].items():
+            if v is None:
+                r[k] = None
+            elif k != 'cu_seqlens':
+                r[k] = torch.cat([x[k] for x in all_res])
+            else:
+                r[k] = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0), value=0)
+        return from_dict(r)
+
+    @torch.no_grad()
+    def _generate_minibatch(self, model: api.model.Model, data: NamedArray) -> Dict:
         module = model.module
 
         module.eval()
@@ -254,9 +275,7 @@ class PackedActorInterface(api.model.ModelInterface):
             packed_logits_mask=packed_logits_mask.bool() if packed_logits_mask is not None else None,
             prompt_mask=prompt_mask,
         )
-
-        # logger.info(f"interface generate time {time.monotonic() - st}")
-        return from_dict(res)
+        return res
 
     @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
@@ -347,10 +366,15 @@ class PackedActorInterface(api.model.ModelInterface):
         if self.value_norm:
             self.rms.update(returns, mask=loss_mask)
 
+        _n_seqs = reward_score.shape[0]
         global_stats = dict(
             task_reward=reward_score.mean().detach(),
             kl_reward=(kl_rewards.detach() * loss_mask).sum().mean(),
             advantage=advantages.mean().detach(),
+            avg_seq_len=(cu_seqlens[1:] - cu_seqlens[:-1]).float().mean(),
+            avg_prompt_len=prompt_mask.sum().float() / _n_seqs,
+            n_tokens=cu_seqlens[-1].float(),
+            n_prompt_tokens=prompt_mask.sum().float(),
         )
 
         if self.adv_norm:
@@ -367,7 +391,7 @@ class PackedActorInterface(api.model.ModelInterface):
                 logits_mask=data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None,
             ))
 
-        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches)
+        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=(data_["cu_seqlens"].shape[0] - 1) // self.n_minibatches)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         for data in datas:
@@ -629,7 +653,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                 cu_seqlens=data_["cu_seqlens"],
             ))
 
-        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches)
+        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=(data_["cu_seqlens"].shape[0] - 1) // self.n_minibatches)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         for data in datas:

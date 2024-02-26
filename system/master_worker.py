@@ -180,14 +180,9 @@ async def scatter_tensor_to_mws(
     # Expand scatter buffer if necessary
     _scatter_buffer_changed = False
     for k, buf_shape in buf_shapes.items():
-        if k not in scatter_buffer or (k in scatter_buffer and
-                                       not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k][0].shape)):
-            # if k in scatter_buffer:
-            #     logger.info(f"Resize RPC *{rpc.name}* scatter buffer on master worker for {k}"
-            #                 f" from {scatter_buffer[k][0].shape} to {buf_shape}")
-            # else:
-            #     logger.info(
-            #         f"Create RPC *{rpc.name}* scatter buffer on master worker for {k} with shape {buf_shape}")
+        # TODO: change to use GlobalMemoryBuffer
+        if k not in scatter_buffer:
+            # logger.info(f"Create scatter buffer on master worker for {k} with shape {buf_shape}")
             scatter_buffer[k] = [
                 torch.empty(buf_shape, dtype=dtypes[k], device=device) for _ in range(len(datas) + 1)
             ]

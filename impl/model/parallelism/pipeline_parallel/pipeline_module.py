@@ -338,6 +338,14 @@ class PipelineModule(nn.Module):
         """number of layers in current pipeline stage"""
         return len(self.forward_funcs)
 
+    @property
+    def layer_idx_start(self):
+        return self._local_start
+
+    @property
+    def layer_idx_stop(self):
+        return self._local_stop
+
     def gradient_checkpointing_enable(self, attn=False, mlp=False):
         for layer in self.forward_funcs:
             try:

@@ -7,6 +7,7 @@ import time
 import numpy as np
 import psutil
 import viztracer
+import pynvml
 
 import base.logging as logging
 
@@ -283,3 +284,17 @@ def get_tracer(
         )
     else:
         return NoopTracer()
+
+def gpu_utilization_monitor(gpu_idx:int, ttl:float):
+    pynvml.nvmlInit()
+    tik = time.time()
+    while time.time() - tik < ttl:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
+        utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
+        memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        total_memory = memory_info.total / (1024 ** 2)  # Convert bytes to megabytes
+        used_memory = memory_info.used / (1024 ** 2)
+        memory_usage_percentage = (used_memory / total_memory) * 100
+        logger.debug(f"GPU {gpu_idx}: Compute Utilization - {utilization.gpu}%, Total Memory - {total_memory:.2f}MB, Used Memory - {used_memory:.2f}MB, Memory Usage - {memory_usage_percentage:.2f}%")
+        time.sleep(10)
+    pynvml.nvmlShutdown()

@@ -170,7 +170,7 @@ cython_debug/
 api_key.txt
 api_key.json
 
-*.sh
+./*.sh
 *.png
 *.jpg
 *.pdf

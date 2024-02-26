@@ -46,13 +46,20 @@ _model_name: str = None
 _grids: Dict[str, Any] = {}  # PipelineParallelGrid, not type hint here to avoid circular import
 _pgroups: Dict[str, Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
 
+_global_memory_buffer = None  # type GlobalMemoryBuffer, not type hint here to avoid circular import
+
 # used only in scripts and tests
 _fake_mp_world_size = None
 _fake_mp_rank = None
 
+# TODO: As in Megatron, we can set NCCL group options. Is it necessary?
+
 
 def set_model_name(model_name: str):
     global _model_name
+    assert _model_name is None, "Cannot set model_name twice."
+    from impl.model.parallelism.model_parallel.utils import GlobalMemoryBuffer
+    set_global_memory_buffer(GlobalMemoryBuffer())
     _model_name = copy.deepcopy(model_name)
 
 
@@ -72,6 +79,10 @@ def grid():
         raise RuntimeError(f"Grid for model {_model_name} is not set.")
     return _grids[_model_name]
 
+def grid_of_model(model_name: str):
+    if _grids.get(model_name, None) is None:
+        raise RuntimeError(f"Grid for model {model_name} is not set.")
+    return _grids[model_name]
 
 def set_parallelism_group(model_name: str, pgroup):
     global _pgroups
@@ -174,3 +185,14 @@ def set_fake_grid(model_name, rank, topo):
 
     global _grids
     _grids[model_name] = FakeGrid(rank=rank, topo=topo)
+
+def set_global_memory_buffer(buffer):
+    global _global_memory_buffer
+    assert _global_memory_buffer is None, "cannot set global memory buffer twice"
+    _global_memory_buffer = buffer
+
+
+def get_global_memory_buffer():
+    global _global_memory_buffer
+    assert _global_memory_buffer is not None, "global memory buffer is not set"
+    return _global_memory_buffer

@@ -5,6 +5,7 @@ import os
 import queue
 import socket
 import time
+import multiprocessing as mp
 
 from deepspeed.accelerator import get_accelerator
 import deepspeed
@@ -13,7 +14,7 @@ import torch
 import torch.distributed as dist
 import torch.utils.data
 
-from base.monitor import time_mark
+from base.monitor import time_mark, gpu_utilization_monitor
 from base.topology import PipelineParallelGrid
 from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
 import api.config as config
@@ -193,6 +194,9 @@ class ModelWorker(worker_base.Worker):
 
         # only used by future interfaces and stream pipe engine
         self.__is_stream_pipe = self.__interface.is_future_interface
+        
+        self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor, args=(self.__pg_info.local_gpu_id, 7200))
+        self.__gpu_util_mp.start()
 
         self.__request_storage = dict()  # mapping from request id to requests
         self.__future_storage = dict()  # mapping from request id to corresponding future
@@ -229,8 +233,10 @@ class ModelWorker(worker_base.Worker):
         if request.is_tensor:
             assert data is None
 
+            data = {}
             # Maybe create or extend the size of scatter buffer.
             for (k, buf_shape), dtype in zip(request.buf_shapes.items(), request.dtypes.values()):
+                # TODO: change here to use global buffer
                 if k not in scatter_buffer:
                     # if self._is_dp_head:
                     #     logger.info(f"Create scatter buffer key {k} with shape {buf_shape}")
@@ -268,7 +274,8 @@ class ModelWorker(worker_base.Worker):
             data = {}
             for k, target_shape in request.actual_shapes.items():
                 s = tuple(slice(0, target_size) for target_size in target_shape)
-                data[k] = scatter_buffer[k][s]
+                data[k] = buf[s].clone()
+
             data = namedarray.from_dict(data)
 
         if self._is_dp_head:
