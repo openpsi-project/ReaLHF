@@ -13,6 +13,7 @@ class ModelSize(enum.Enum):
 
 
 def _parse_log(rootdir: str, model_size, dp_size, pp_size, exp_identifier=""):
+    # throughput is (4*gen_bs*n_actor_gpus / e2e_time)
     record_times = []
     oom = False
     # print(">>>", os.path.join(rootdir, f"model_worker-0"))

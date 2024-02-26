@@ -244,7 +244,7 @@ def register_sosp_experiments_with_full_gpu_mem(
         dp_size=critic_dp_size,
         pp_size=critic_pp_size,
         zero_stage=1 if critic_pp_size > 1 else 2,
-        offload_opt=True,
+        # offload_opt=True,
     )
 
     # build reward model
@@ -263,7 +263,7 @@ def register_sosp_experiments_with_full_gpu_mem(
         mp_size=mp_size,
         pp_size=pp_size,
         zero_stage=1 if pp_size > 1 else 2,
-        offload_opt=True,
+        # offload_opt=True,
     )
     actor.parallel.num_pipeline_micro_batches = 2 * pp_size
     actor.parallel.num_inf_pipeline_mbs = pp_size
