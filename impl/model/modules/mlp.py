@@ -9,7 +9,10 @@ import torch.distributed as dist
 import torch.nn as nn
 
 from impl.model.parallelism.model_parallel.modules import (
-    ColumnParallelLinear, merged_linear_with_grad_accumulation_and_async_allreduce, RowParallelLinear)
+    ColumnParallelLinear,
+    merged_linear_with_grad_accumulation_and_async_allreduce,
+    RowParallelLinear,
+)
 import base.constants
 import base.logging as logging
 
@@ -41,8 +44,7 @@ class LayerNormQKVLinear(nn.Module):
         use_attention_bias: bool,
         layer_norm_type: Optional[str] = None,
         # parallelism
-        model_parallel:
-        bool = False,  # We set this as an option for replacing this module with layers in transformer engine
+        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device
@@ -76,8 +78,9 @@ class LayerNormQKVLinear(nn.Module):
             )
         else:
             self.mp_worldsize = base.constants.model_parallel_world_size()
-            assert n_q_heads % self.mp_worldsize == 0, (f"n_q_heads {n_q_heads} must be divisible by "
-                                                        f"mp_worldsize {self.mp_worldsize}")
+            assert n_q_heads % self.mp_worldsize == 0, (
+                f"n_q_heads {n_q_heads} must be divisible by " f"mp_worldsize {self.mp_worldsize}"
+            )
             hidden_dim = input_dim
             self.q_attn = ColumnParallelLinear(
                 hidden_dim,
@@ -113,9 +116,11 @@ class LayerNormQKVLinear(nn.Module):
                 )
             else:
                 if n_kv_heads > 1:
-                    logger.warning(f"Cannot split {n_kv_heads} kv heads evenly among "
-                                   f"{self.mp_worldsize} model parallel ranks, "
-                                   f"use unsplitted linear for kv heads instead")
+                    logger.warning(
+                        f"Cannot split {n_kv_heads} kv heads evenly among "
+                        f"{self.mp_worldsize} model parallel ranks, "
+                        f"use unsplitted linear for kv heads instead"
+                    )
                 self.k_attn = nn.Linear(
                     hidden_dim,
                     head_dim * n_kv_heads,
@@ -207,8 +212,7 @@ class LayerNormMLP(nn.Module):
         activation_function: str,
         layer_norm_epsilon: float,
         # parallelism
-        model_parallel:
-        bool = False,  # We set this as an option for replacing this module with layers in transformer engine
+        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device
@@ -266,8 +270,7 @@ class LlamaLayerNormMLP(nn.Module):
         activation_function: str,
         layer_norm_epsilon: float,
         # parallelism
-        model_parallel:
-        bool = False,  # We set this as an option for replacing this module with layers in transformer engine
+        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device
@@ -364,7 +367,7 @@ class LlamaLayerNormMLP(nn.Module):
             return self.down_proj(self.act_fn(gate) * upproj)
 
 
-class LlamaRMSNorm(nn.Module):
+class _LlamaRMSNorm(nn.Module):
 
     def __init__(
         self,
@@ -382,10 +385,34 @@ class LlamaRMSNorm(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor):
         input_dtype = hidden_states.dtype
+        # TODO: optimize the following, compute variance in SRAM
         hidden_states = hidden_states.to(torch.float32)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
         return self.weight * hidden_states.to(input_dtype)
+
+
+try:
+    # HACK: we use transformer engine's rms norm as long as we can find the transformer engine package
+    import transformer_engine.pytorch as te
+
+    def _TELlamaRMSNorm(
+        hidden_size: int,
+        eps: float = 1e-6,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        return te.module.rmsnorm.RMSNorm(
+            hidden_size=hidden_size,
+            eps=eps,
+            sequence_parallel=False,  # FIXME: does this have any nagative effect?
+            params_dtype=dtype,
+            device=device,
+        )
+
+    LlamaRMSNorm = _TELlamaRMSNorm
+except ModuleNotFoundError:
+    LlamaRMSNorm = _LlamaRMSNorm
 
 
 try:
@@ -406,8 +433,7 @@ if USE_TE_BACKEND:
         activation_function: str,
         layer_norm_epsilon: float,
         # parallelism
-        model_parallel:
-        bool = False,  # We set this as an option for replacing this module with layers in transformer engine
+        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device

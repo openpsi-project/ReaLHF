@@ -7,7 +7,7 @@ import torch.utils.checkpoint
 from .mlp import LayerNormQKVLinear
 from .rotary import RotaryEmbedding
 from impl.model.parallelism.model_parallel.modules import RowParallelLinear
-from impl.model.utils.functional import torch_attn_func
+from impl.model.utils.functional import torch_attn_func, apply_rotary_varlen, compute_varlen_position_indices
 import base.logging as logging
 
 try:
@@ -162,11 +162,23 @@ class CausalSelfAttentionLayer(nn.Module):
 
         if self.apply_rotary and k_cache is None:
             # otherwise, we input rotary cos/sin directly into flash_attn_with_kvcache
-            qk = self.rotary_emb(
+            self.rotary_emb._update_cos_sin_cache(max_seqlen, q.device, q.dtype)
+            rotary_indices = compute_varlen_position_indices(q.shape[0], cu_seqlens)
+            qk = apply_rotary_varlen(
                 torch.cat([q, k], dim=-2),
+                cos=self.rotary_emb._cos_cached,
+                sin=self.rotary_emb._sin_cached,
                 cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
+                interleaved=self.rotary_emb.interleaved,
+                rotary_indices=rotary_indices,
             )
+            # HACK: RotaryEmbedding used flash-attention's triton kernel internally, but it will
+            # cause an illegal memory access error when batch size is large. Use pytorch implementation instead. 
+            # qk = self.rotary_emb(
+            #     torch.cat([q, k], dim=-2),
+            #     cu_seqlens=cu_seqlens,
+            #     max_seqlen=max_seqlen,
+            # )
             q, k = qk.split((q.shape[-2], k.shape[-2]), dim=-2)
         elif self.apply_rotary:
             self.rotary_emb._update_cos_sin_cache(k_cache.shape[1], device=q.device, dtype=q.dtype)
