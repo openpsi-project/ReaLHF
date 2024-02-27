@@ -13,7 +13,6 @@ def build_llama2_model(
     zero_stage: int,
     mp_size: int = 1,
     pp_size: int = 1,
-    pp_mbs: int = None,
     gradient_checkpointing: bool = True,
     offload_model: bool = False,
     offload_opt: bool = False,
@@ -112,7 +111,6 @@ def register_sosp_experiments_with_fixed_bs(model_size: str, dp_size: int):
         model_size=model_size,
         dp_size=dp_size,
         pp_size=pp_size,
-        pp_mbs=pp_size * 2,
         zero_stage=1 if pp_size > 1 else 2,
     )
     ref = build_llama2_model(
@@ -238,7 +236,7 @@ def register_sosp_experiments_with_full_gpu_mem(
         dp_size=critic_dp_size,
         pp_size=critic_pp_size,
         zero_stage=1 if critic_pp_size > 1 else 2,
-        # offload_opt=True,
+        offload_opt=True,
     )
 
     # build reward model
@@ -257,7 +255,7 @@ def register_sosp_experiments_with_full_gpu_mem(
         mp_size=mp_size,
         pp_size=pp_size,
         zero_stage=1 if pp_size > 1 else 2,
-        # offload_opt=True,
+        offload_opt=True,
     )
 
     ref_mp_size, ref_dp_size, ref_pp_size = ref_parallel_strategy
