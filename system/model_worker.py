@@ -184,10 +184,6 @@ class ModelWorker(worker_base.Worker):
         self._is_dp_head = self._mp_rank == 0 and self._pp_rank == self._pp_size - 1
         self._is_dp_pp_head = self._mp_rank == 0
 
-        # One for each RPC, e.g., generation and train_step use different buffers.
-        self.__scatter_buffers: Dict[Dict[str, torch.Tensor]] = {}
-        self.__gather_buffers: Dict[Dict[str, torch.Tensor]] = {}
-
         self.__request_queue = queue.Queue(maxsize=8)
         self.__reply_queue = queue.Queue(maxsize=8)
         self.__request_sample_size = dict()
@@ -222,60 +218,19 @@ class ModelWorker(worker_base.Worker):
                                                request_id=request.ack_reply_id)
             self.__stream.post(ack)
 
-        if request.handle_name not in self.__gather_buffers:
-            self.__gather_buffers[request.handle_name] = {}
-        if request.handle_name not in self.__scatter_buffers:
-            self.__scatter_buffers[request.handle_name] = {}
-
-        scatter_buffer = self.__scatter_buffers[request.handle_name]
-
         data = request.data
         if request.is_tensor:
             assert data is None
 
             data = {}
             # Maybe create or extend the size of scatter buffer.
-            for (k, buf_shape), dtype in zip(request.buf_shapes.items(), request.dtypes.values()):
-                # TODO: change here to use global buffer
-                if k not in scatter_buffer:
-                    # if self._is_dp_head:
-                    #     logger.info(f"Create scatter buffer key {k} with shape {buf_shape}")
-                    scatter_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
-                elif k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape,
-                                                                            scatter_buffer[k].shape):
-                    # if self._is_dp_head:
-                    #     logger.info(f"Resizing scatter buffer key {k} "
-                    #                 f"from {scatter_buffer[k].shape} to {buf_shape}")
-                    padding = tuple(
-                        itertools.chain.from_iterable(
-                            reversed([(0, target_size - current_size)
-                                      for target_size, current_size in zip(buf_shape, scatter_buffer[k].shape)
-                                      ])))
-                    scatter_buffer[k] = torch.nn.functional.pad(scatter_buffer[k], padding, "constant", 0)
-
-            # if self._is_dp_head:
-            # Receive from the master worker
-            for k in request.buf_shapes:
-                dist.scatter(
-                    scatter_buffer[k],
-                    scatter_list=None,
+            for (k, buf_shape), dtype, actual_shape in zip(request.buf_shapes.items(), request.dtypes.values(), request.actual_shapes.values()):
+                buf = base.constants.get_global_memory_buffer().get_tensor(buf_shape, dtype, "scatter_gather")
+                dist.scatter(buf,scatter_list=None,
                     src=0,
-                    group=self.__pg_info.mas_pp_stage_groups[self.model_name][self._pp_rank],
-                )
-                # logger.info(f"request {request.handle_name} scatter {k} done, {scatter_buffer[k][0]}")
-
-            # Broadcast to the DP group / receive from the DP head
-            # for k in request.buf_shapes:
-            #     logger.info(f"before broadcast, scatter_buffer[k] shape {scatter_buffer[k].shape}")
-            #     dist.broadcast(scatter_buffer[k], src=self._bsrc, group=self._bgroup)
-            #     logger.info(f"request {request.handle_name} broadcast {k} done, {scatter_buffer[k][0]}")
-
-            # Slice the array to get the actual data
-            data = {}
-            for k, target_shape in request.actual_shapes.items():
-                s = tuple(slice(0, target_size) for target_size in target_shape)
+                    group=self.__pg_info.mas_pp_stage_groups[self.model_name][self._pp_rank],)
+                s = tuple(slice(0, target_size) for target_size in actual_shape)
                 data[k] = buf[s].clone()
-
             data = namedarray.from_dict(data)
 
         if self._is_dp_head:
@@ -349,8 +304,6 @@ class ModelWorker(worker_base.Worker):
             self.__engine.poll_one_step()
 
     def __post_one_response(self, request: request_reply_stream.Payload, res):
-        gather_buffer = self.__gather_buffers[request.handle_name]
-
         if not self._is_dp_pp_head:
             # Discard returned data if not DP+PP head.
             return
@@ -368,17 +321,6 @@ class ModelWorker(worker_base.Worker):
             buf_shapes = {}
             for k in shapes:
                 buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s[k]) for s in all_shapes])
-
-            # Expand buffer shape if necessary.
-            for (k, dtype), buf_shape in zip(dtypes.items(), buf_shapes.values()):
-                if k not in gather_buffer or (k in gather_buffer and not base.numpy_utils.shape_leq(
-                        buf_shape, gather_buffer[k].shape)):
-                    # if k in gather_buffer:
-                    #     logger.info(
-                    #         f"Resizing gather buffer key {k} from {gather_buffer[k].shape} to {buf_shape}")
-                    # else:
-                    #     logger.info(f"Create gather buffer key {k} with shape {buf_shape}")
-                    gather_buffer[k] = torch.empty(buf_shape, dtype=dtype, device=self.__device)
 
             reply = request_reply_stream.Payload(
                 request_id=request.request_id,
@@ -406,10 +348,12 @@ class ModelWorker(worker_base.Worker):
             for k, v in res.items():
                 # logger.info(f"handle_name {request.handle_name} "
                 #             f"Gathering {k} with shape {v.shape}, req id = {request.request_id}")
+                buf_shape = reply.actual_shapes[k]
+                buf = base.constants.get_global_memory_buffer().get_tensor(buf_shape, v.dtype, "scatter_gather")
                 s = tuple(slice(0, size) for size in v.shape)
-                gather_buffer[k][s] = v
+                buf[s] = v
                 dist.gather(
-                    gather_buffer[k],
+                    buf,
                     gather_list=None,
                     dst=0,
                     group=self.__pg_info.mas_dp_head_groups[self.model_name],
