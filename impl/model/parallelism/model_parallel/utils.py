@@ -223,9 +223,8 @@ class GlobalMemoryBuffer:
                                                      device=torch.cuda.current_device(),
                                                      requires_grad=False)
         elif self.buffer[(name, dtype)].numel() < required_len:
-            self.buffer[(name, dtype)] = torch.nn.functional.pad(self.buffer[(name, dtype)],
-                                                                 (0, required_len - self.buffer[(name, dtype)].numel()),
-                                                                 value=0)
+            self.buffer[(name, dtype)] = torch.nn.functional.pad(
+                self.buffer[(name, dtype)], (0, required_len - self.buffer[(name, dtype)].numel()), value=0)
         res = self.buffer[(name, dtype)][0:required_len].view(*tensor_shape)
         if force_zero:
             res.zero_()

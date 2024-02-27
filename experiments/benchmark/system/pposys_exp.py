@@ -2,14 +2,13 @@ import functools
 
 from omegaconf import MISSING
 
-from experiments.common.config_dataset import PromptOnlyDatasetConfig
-from experiments.common.config_model import get_flash_mqat_model_config, ModelConfig
 from api.config import *
 from api.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
-import base.logging as logging
+from experiments.common.config_dataset import PromptOnlyDatasetConfig
+from experiments.common.config_model import get_flash_mqat_model_config, ModelConfig
 from experiments.common.ppo_exp import PPOConfig, PPOHyperparmeters
-
+import base.logging as logging
 
 rollout = ModelRPC(
     "actor",
@@ -182,30 +181,28 @@ class PPOSysExperiment(Experiment):
         rw_model = _make_model_config(self.rew, True)
 
         offset = 0
-        for m in base_setup.model_worker[offset : offset + self.base_config.n_actors]:
+        for m in base_setup.model_worker[offset:offset + self.base_config.n_actors]:
             m.model = actor_model
             m.interface.args["force_no_logits_mask"] = True
             m.backend.args["enable_hybrid_engine"] = self.actor.optimizer.use_hybrid_engine
             m.backend.args["max_out_tokens"] = ppo_benchmark_hyperparam.max_new_tokens
         offset += self.base_config.n_actors
-        for m in base_setup.model_worker[offset : offset + self.base_config.n_critics]:
+        for m in base_setup.model_worker[offset:offset + self.base_config.n_critics]:
             m.model = critic_model
         offset += self.base_config.n_critics
-        for m in base_setup.model_worker[offset : offset + self.base_config.n_refs]:
+        for m in base_setup.model_worker[offset:offset + self.base_config.n_refs]:
             m.model = ref_model
         offset += self.base_config.n_refs
-        for m in base_setup.model_worker[offset : offset + self.base_config.n_rewards]:
+        for m in base_setup.model_worker[offset:offset + self.base_config.n_rewards]:
             m.model = rw_model
         assert offset + self.base_config.n_rewards == len(base_setup.model_worker)
 
         global train_actor
         train_actor = copy.deepcopy(train_actor)
         if self.actor.parallel.pipeline_parallel_size > 1:
-            pp_nmbs = (
-                self.actor.parallel.pipe_mbs_config.train_step
-                if self.actor.parallel.pipe_mbs_config.train_step is not None
-                else self.actor.parallel.pipeline_parallel_size * 2
-            )
+            pp_nmbs = (self.actor.parallel.pipe_mbs_config.train_step
+                       if self.actor.parallel.pipe_mbs_config.train_step is not None else
+                       self.actor.parallel.pipeline_parallel_size * 2)
             train_actor.min_n_seqs_per_dp = ppo_benchmark_hyperparam.ppo_n_minibatches * pp_nmbs
         else:
             train_actor.min_n_seqs_per_dp = ppo_benchmark_hyperparam.ppo_n_minibatches

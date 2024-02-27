@@ -91,7 +91,8 @@ class PackedParallelDataBroker(ParallelDataBroker):
             raw_input_lens = src["input_lens"]
 
         if partitions is None:
-            partitions = datapack.min_abs_diff_partition(raw_input_lens.cpu().numpy().astype(np.int64), n_dp, min_size)
+            partitions = datapack.min_abs_diff_partition(raw_input_lens.cpu().numpy().astype(np.int64), n_dp,
+                                                         min_size)
 
         input_lens: List[torch.IntTensor] = [raw_input_lens[start:end].int() for start, end in partitions]
         cu_seqlens = [torch.cat([x.new_zeros(1), torch.cumsum(x, dim=0)]).int() for x in input_lens]

@@ -151,9 +151,8 @@ class ModelConfig:
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
-        if self.enable_bf16 and (
-            self.parallel.model_parallel_size > 1 or self.parallel.pipeline_parallel_size > 1
-        ):
+        if self.enable_bf16 and (self.parallel.model_parallel_size > 1
+                                 or self.parallel.pipeline_parallel_size > 1):
             raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
         if self.parallel.pipeline_parallel_size > 1 and self.lora is not None:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
@@ -207,7 +206,7 @@ def get_flash_mqat_model_config(
         original_is_critic = False
         if from_type == "actor_as_critic":
             from_type = "hf_as_critic"
-            
+
     if use_pipe:
         pipe_init_from_scratch = from_type == "random_actor" or from_type == "random_critic"
         pipe_init_critic_from_actor = from_type == "actor_as_critic" or from_type == "hf_as_critic"

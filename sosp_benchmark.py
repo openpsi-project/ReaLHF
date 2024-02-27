@@ -1,13 +1,11 @@
-import os
-import math
-import enum
 import argparse
+import enum
 import itertools
+import math
+import os
 
-from experiments.benchmark.system.sosp2024 import (
-    interested_parallel_strategies,
-    _get_heuristic_device_partition,
-)
+from experiments.benchmark.system.sosp2024 import (_get_heuristic_device_partition,
+                                                   interested_parallel_strategies)
 
 
 def sweep_model_size(model_size: int, verbose_only: bool):

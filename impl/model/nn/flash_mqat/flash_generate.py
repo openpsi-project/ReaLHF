@@ -195,8 +195,8 @@ def generate(
             attention_mask = attention_mask.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
         elif k_caches is not None:
             for k_cache, v_cache in zip(k_caches, v_caches):
-                assert (k_cache.shape[0] == v_cache.shape[0] == input_ids.shape[0] == attention_mask.shape[0] ==
-                        cache_seqlens.shape[0])
+                assert (k_cache.shape[0] == v_cache.shape[0] == input_ids.shape[0] == attention_mask.shape[0]
+                        == cache_seqlens.shape[0])
         bs = input_ids.shape[0]
     else:
         assert attention_mask is None

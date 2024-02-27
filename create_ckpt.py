@@ -1,7 +1,7 @@
 from typing import *
-import subprocess
-import os
 import argparse
+import os
+import subprocess
 
 
 def get_partitions(model_size: int) -> List[Tuple[int, int]]:
@@ -30,9 +30,8 @@ def main(args):
             ckpt_base_dir = "/lustre/public/pretrained_model_weights/"
             model_path = os.path.join(ckpt_base_dir, model_dir_prefix)
             partitioned_ckpt_base_dir = "/lustre/public/pretrained_model_weights/sharded_new/"
-            output_path = os.path.join(
-                partitioned_ckpt_base_dir, f"{model_dir_prefix}_{pp_size}pp_{mp_size}mp"
-            )
+            output_path = os.path.join(partitioned_ckpt_base_dir,
+                                       f"{model_dir_prefix}_{pp_size}pp_{mp_size}mp")
             if os.path.exists(output_path):
                 print(f"{model_size}B model partition pp{pp_size}*mp{mp_size} already exists. Skipping.")
                 continue

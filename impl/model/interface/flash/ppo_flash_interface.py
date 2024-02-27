@@ -126,7 +126,6 @@ class PackedActorInterface(api.model.ModelInterface):
     pipe_gen_n_mbs: Optional[int] = None
     pipe_inf_n_mbs: Optional[int] = None
     pipe_train_n_mbs: Optional[int] = None
-    
 
     def __post_init__(self):
         super().__post_init__()
@@ -147,7 +146,7 @@ class PackedActorInterface(api.model.ModelInterface):
             else:
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
-        
+
         if self.pipe_gen_n_mbs is None:
             self.pipe_gen_n_mbs = base.constants.pipe_parallel_world_size()
         if self.pipe_inf_n_mbs is None:
@@ -280,7 +279,9 @@ class PackedActorInterface(api.model.ModelInterface):
         max_seqlen = int(max(input_lens))
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            res = module.forward(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, num_micro_batches=self.pipe_inf_n_mbs)
+            res = module.forward(packed_input_ids=data["packed_seq"],
+                                 cu_seqlens=cu_seqlens,
+                                 num_micro_batches=self.pipe_inf_n_mbs)
             if res is None:
                 return None
             logits = res
@@ -519,7 +520,7 @@ class PackedCriticInterface(api.model.ModelInterface):
     value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
-    
+
     pipe_train_n_mbs: Optional[int] = None
     pipe_inf_n_mbs: Optional[int] = None
 
@@ -542,7 +543,7 @@ class PackedCriticInterface(api.model.ModelInterface):
             else:
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
-        
+
         if self.pipe_train_n_mbs is None:
             self.pipe_train_n_mbs = base.constants.pipe_parallel_world_size() * 2
         if self.pipe_inf_n_mbs is None:
@@ -567,7 +568,9 @@ class PackedCriticInterface(api.model.ModelInterface):
         max_seqlen = int(max(input_lens))
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            scores = module.forward(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, num_micro_batches=self.pipe_inf_n_mbs)
+            scores = module.forward(packed_input_ids=data["packed_seq"],
+                                    cu_seqlens=cu_seqlens,
+                                    num_micro_batches=self.pipe_inf_n_mbs)
             if scores is None:
                 return None
         else:

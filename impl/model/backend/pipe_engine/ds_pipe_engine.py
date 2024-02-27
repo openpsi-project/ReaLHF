@@ -127,7 +127,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         self._async_p2p = enable_async_p2p_communication
         self._async_instruction = enable_async_instruction and self._async_p2p
-        
 
         self._post_init_logging()
 
@@ -900,7 +899,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if self._async_p2p:
             self.tensor_buffer.put("recv_act_handle", micro_batch_id, recv_handle)
         self.tensor_buffer.put("recv_act_buf", micro_batch_id, buf)
-        
+
         if type(self) == DeepSpeedPipelineEngine and self._generate_mode:
             recv_handle.wait()
             terminate = torch.empty((), dtype=torch.bool, device=self.device)

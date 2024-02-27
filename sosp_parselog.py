@@ -1,8 +1,9 @@
+import enum
 import os
 import re
-import numpy as np
 import subprocess
-import enum
+
+import numpy as np
 
 
 class ModelSize(enum.Enum):

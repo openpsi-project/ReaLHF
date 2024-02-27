@@ -7,7 +7,7 @@ import torch.utils.checkpoint
 from .mlp import LayerNormQKVLinear
 from .rotary import RotaryEmbedding
 from impl.model.parallelism.model_parallel.modules import RowParallelLinear
-from impl.model.utils.functional import torch_attn_func, apply_rotary_varlen, compute_varlen_position_indices
+from impl.model.utils.functional import apply_rotary_varlen, compute_varlen_position_indices, torch_attn_func
 import base.logging as logging
 
 try:
@@ -173,7 +173,7 @@ class CausalSelfAttentionLayer(nn.Module):
                 rotary_indices=rotary_indices,
             )
             # HACK: RotaryEmbedding used flash-attention's triton kernel internally, but it will
-            # cause an illegal memory access error when batch size is large. Use pytorch implementation instead. 
+            # cause an illegal memory access error when batch size is large. Use pytorch implementation instead.
             # qk = self.rotary_emb(
             #     torch.cat([q, k], dim=-2),
             #     cu_seqlens=cu_seqlens,

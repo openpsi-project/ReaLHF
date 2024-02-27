@@ -1,11 +1,11 @@
 from typing import Dict
 import gc
 import itertools
+import multiprocessing as mp
 import os
 import queue
 import socket
 import time
-import multiprocessing as mp
 
 from deepspeed.accelerator import get_accelerator
 import deepspeed
@@ -14,7 +14,7 @@ import torch
 import torch.distributed as dist
 import torch.utils.data
 
-from base.monitor import time_mark, gpu_utilization_monitor
+from base.monitor import gpu_utilization_monitor, time_mark
 from base.topology import PipelineParallelGrid
 from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
 import api.config as config
