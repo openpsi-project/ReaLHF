@@ -19,6 +19,7 @@ import numpy as np
 import torch
 import torch.distributed
 
+from impl.model.parallelism.model_parallel.utils import GlobalMemoryBuffer
 from base.asyncio_utils import raise_asyncio_exception, setup_run_until_complete, teardown_run_util_complete
 from base.buffer import AsyncIOSequenceBuffer
 from base.cluster import spec as cluster_spec
@@ -177,43 +178,6 @@ async def scatter_tensor_to_mws(
     for k in dtypes:
         buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s[k]) for s in all_shapes])
 
-    # Expand scatter buffer if necessary
-    _scatter_buffer_changed = False
-    for k, buf_shape in buf_shapes.items():
-        # TODO: change to use GlobalMemoryBuffer
-        if k not in scatter_buffer:
-            # logger.info(f"Create scatter buffer on master worker for {k} with shape {buf_shape}")
-            scatter_buffer[k] = [
-                torch.empty(buf_shape, dtype=dtypes[k], device=device) for _ in range(len(datas) + 1)
-            ]
-            _scatter_buffer_changed = True
-        elif k in scatter_buffer and not base.numpy_utils.shape_leq(buf_shape, scatter_buffer[k][0].shape):
-            # logger.info(f"Resize scatter buffer on master worker for {k}"
-            #             f" from {scatter_buffer[k][0].shape} to {buf_shape}")
-            new_x = []
-            for x in scatter_buffer[k]:
-                padding = tuple(
-                    itertools.chain.from_iterable(
-                        reversed([(0, s2 - s1) for s1, s2 in zip(x.shape, buf_shape)])))
-                new_x.append(torch.nn.functional.pad(x, pad=padding, mode="constant", value=0))
-            scatter_buffer[k] = new_x
-            _scatter_buffer_changed = True
-    if _scatter_buffer_changed:
-        gc.collect()
-        torch.cuda.empty_cache()
-        gc.collect()
-
-    expanded_buffer = {k: [scatter_buffer[k][0]] for k in scatter_buffer}
-    # Put data into scatter buffer
-    for i, data in enumerate(datas):
-        for k, v in data.items():
-            assert len(scatter_buffer[k]) == len(datas) + 1
-            s = tuple(slice(0, x) for x in v.shape)
-            scatter_buffer[k][i + 1][s] = data[k]
-
-            # expand scatter buffer to model parallel ranks
-            expanded_buffer[k].extend([scatter_buffer[k][i + 1]] * mp_size)
-
     request_ids = []
     for pp_rank, pp_stage_streams in enumerate(streams):
         ack_ids = []
@@ -239,15 +203,30 @@ async def scatter_tensor_to_mws(
         ])
         # logger.info(f"Scatter data to stage {pp_rank}")
 
-        # Scatter data to DP head model workers.
-        for k in scatter_buffer:
+        for (k, buf_shape), dtype in zip(buf_shapes.items(), dtypes.values()):
+            scatter_buffer = [
+                base.constants.get_global_memory_buffer().get_tensor(
+                    buf_shape, dtype, name=f"scatter_gather_master")
+            ] + [
+                base.constants.get_global_memory_buffer().get_tensor(
+                    buf_shape, dtype, name=f"scatter_gather_dp{i}") for i in range(len(datas))
+            ]
+            for buf, data in zip(scatter_buffer[1:], datas):
+                v = data[k]
+                s = tuple(slice(0, x) for x in v.shape)
+                buf[s] = v
+
+            # Expand along the model parallelism dimension.
+            scatter_buffer = [scatter_buffer[0]] + list(
+                itertools.chain.from_iterable([[buf] * mp_size for buf in scatter_buffer[1:]]))
+
+            # Scatter to dp_rank=*, pp_rank=pp_rank, mp_rank=*
             torch.distributed.scatter(
-                expanded_buffer[k][0],
-                scatter_list=expanded_buffer[k],
+                scatter_buffer[0],
+                scatter_list=scatter_buffer,
                 src=0,
                 group=mas_pp_stage_groups[pp_rank],
             )
-        torch.cuda.synchronize()
 
     return request_ids
 
@@ -338,67 +317,38 @@ async def gather_tensor_from_mws(
     # logger.info([res.is_tensor for res in responses])
     if dp_head_responses[-1].is_tensor:  # responses[-1] is from dp_head
         all_buf_shapes = [response.buf_shapes for response in dp_head_responses]
+        dtypes = dp_head_responses[-1].dtypes
+
+        # A simple sanity check to ensure that gather buffer shapes are all the same across DP ranks.
         for buf_shapes in all_buf_shapes:
             for k, v in buf_shapes.items():
                 assert buf_shapes[k] == all_buf_shapes[0][k]
 
-        # Expand gather buffer if necessary.
-        _gather_buffer_changed = False
+        all_res = [dict() for _ in range(dp_size)]
         for k, buf_shape in buf_shapes.items():
-            if k not in gather_buffer or (k in gather_buffer and not base.numpy_utils.shape_leq(
-                    buf_shape, gather_buffer[k][0].shape)):
-                # if k in gather_buffer:
-                #     logger.info(
-                #         f"Resize RPC *{rpc.name}* gather buffer on master worker for {k} from {gather_buffer[k][0].shape} to {buf_shape}"
-                #     )
-                # else:
-                #     logger.info(
-                #         f"Create RPC *{rpc.name}* gather buffer on master worker for {k} with shape {buf_shape}"
-                #     )
-                gather_buffer[k] = [
-                    torch.empty(buf_shape, dtype=dp_head_responses[0].dtypes[k], device=device)
-                    for _ in range(dp_size + 1)
-                ]
-                _gather_buffer_changed = True
-            elif k in gather_buffer and not base.numpy_utils.shape_leq(buf_shape, gather_buffer[k][0].shape):
-                # logger.info(
-                #     f"Resize gather buffer on master worker for {k} from {gather_buffer[k][0].shape} to {buf_shape}"
-                # )
-                new_x = []
-                for x in gather_buffer[k]:
-                    padding = tuple(
-                        itertools.chain.from_iterable(
-                            reversed([(0, s2 - s1) for s1, s2 in zip(x.shape, buf_shape)])))
-                    new_x.append(torch.nn.functional.pad(x, pad=padding, mode="constant", value=0))
-                gather_buffer[k] = new_x
-                _gather_buffer_changed = True
-        if _gather_buffer_changed:
-            gc.collect()
-            torch.cuda.empty_cache()
-            gc.collect()
+            gather_buffer = [
+                base.constants.get_global_memory_buffer().get_tensor(
+                    buf_shape, dtypes[k], name="scatter_gather_master")
+            ] + [
+                base.constants.get_global_memory_buffer().get_tensor(
+                    buf_shape, dtypes[k], name=f"scatter_gather_dp{i}") for i in range(dp_size)
+            ]
 
-        # only gather from dp heads
-        for k in gather_buffer:
-            assert len(gather_buffer[k]) == dp_size + 1
-            # logger.info(f"rpc {rpc.name} Gathering {k} from dp heads")
+            # Only gather from DP heads, ignoring the MP/PP dimension.
             torch.distributed.gather(
-                gather_buffer[k][0],
-                gather_list=gather_buffer[k],
+                gather_buffer[0],
+                gather_list=gather_buffer,
                 dst=0,
                 group=mas_dp_head_group,
             )
 
-        all_res = []
-        for i, response in enumerate(dp_head_responses):
-            res_ = {}
-            for k, vs in gather_buffer.items():
-                assert len(vs) == len(dp_head_responses) + 1
-                v = vs[i + 1]
-                shape = response.actual_shapes[k]
-                s = tuple(slice(0, x) for x in shape)
-                res_[k] = v[s]
-            all_res.append(namedarray.from_dict(res_))
-        res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(all_res)
+            for res, v, actual_shape in zip(all_res, gather_buffer[1:],
+                                            [response.actual_shapes[k] for response in dp_head_responses]):
+                s = tuple(slice(0, x) for x in actual_shape)
+                res[k] = v[s].clone()
+
+        res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(list(map(namedarray.from_dict,
+                                                                               all_res)))
     else:
         res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(
             [response.data for response in dp_head_responses])
@@ -634,6 +584,8 @@ class MasterWorker(worker_base.Worker):
             )
             base.constants.set_grid(model_name_, grid)
             offset += topo_.world_size()
+
+        base.constants.set_global_memory_buffer(GlobalMemoryBuffer())
 
         # Request training specification from data workers, e.g. batch size and total train steps.
         self.__data_stream.post(request_reply_stream.Payload(handle_name="spec"))

@@ -190,8 +190,9 @@ class ModelWorker(worker_base.Worker):
 
         # only used by future interfaces and stream pipe engine
         self.__is_stream_pipe = self.__interface.is_future_interface
-        
-        self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor, args=(self.__pg_info.local_gpu_id, 7200))
+
+        self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor,
+                                        args=(self.__pg_info.local_gpu_id, 7200))
         self.__gpu_util_mp.start()
 
         self.__request_storage = dict()  # mapping from request id to requests
@@ -224,11 +225,16 @@ class ModelWorker(worker_base.Worker):
 
             data = {}
             # Maybe create or extend the size of scatter buffer.
-            for (k, buf_shape), dtype, actual_shape in zip(request.buf_shapes.items(), request.dtypes.values(), request.actual_shapes.values()):
+            for (k, buf_shape), dtype, actual_shape in zip(request.buf_shapes.items(),
+                                                           request.dtypes.values(),
+                                                           request.actual_shapes.values()):
                 buf = base.constants.get_global_memory_buffer().get_tensor(buf_shape, dtype, "scatter_gather")
-                dist.scatter(buf,scatter_list=None,
+                dist.scatter(
+                    buf,
+                    scatter_list=None,
                     src=0,
-                    group=self.__pg_info.mas_pp_stage_groups[self.model_name][self._pp_rank],)
+                    group=self.__pg_info.mas_pp_stage_groups[self.model_name][self._pp_rank],
+                )
                 s = tuple(slice(0, target_size) for target_size in actual_shape)
                 data[k] = buf[s].clone()
             data = namedarray.from_dict(data)
@@ -351,7 +357,8 @@ class ModelWorker(worker_base.Worker):
                 if v is None:
                     continue
                 buf_shape = reply.buf_shapes[k]
-                buf = base.constants.get_global_memory_buffer().get_tensor(buf_shape, v.dtype, "scatter_gather")
+                buf = base.constants.get_global_memory_buffer().get_tensor(buf_shape, v.dtype,
+                                                                           "scatter_gather")
                 s = tuple(slice(0, size) for size in v.shape)
                 buf[s] = v
                 dist.gather(
