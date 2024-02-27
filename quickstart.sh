@@ -37,7 +37,10 @@ python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240
     save_freq_steps=null \
     dataset.max_prompt_len=256 \
     dataset.n_tokens_per_batch=8192 \
+    actor_per_device_generate_batch_size=128 \
+    actor_per_device_train_batch_size=128 \
     ppo.max_new_tokens=256 \
+    ppo.min_new_tokens=256 \
     ppo.ppo_n_minibatches=4 \
     ppo.adv_norm=True ppo.value_norm=True \
     ppo.top_p=0.9 ppo.top_k=1024 ppo.actor_as_critic=True 

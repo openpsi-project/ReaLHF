@@ -788,9 +788,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
             logits, self.tokenizer, unfinished_sequences, generated_idx, self.current_gconfig)
 
-        self.tensor_buffer.put("terminate", mbid, torch.tensor(terminate,
-                                                               dtype=torch.bool,
-                                                               device=self.device))
+        self.tensor_buffer.put("terminate", mbid, terminate)
         self.tensor_buffer.put("unfinished_sequences", mbid, unfinished_sequences)
         self.tensor_buffer.put("generated_idx", mbid, generated_idx + 1)
         assert next_tokens is not None and logprob is not None
