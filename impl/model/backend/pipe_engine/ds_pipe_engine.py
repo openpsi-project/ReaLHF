@@ -150,7 +150,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         unique_params = params_tensor[1]
 
         if self.global_rank == 0:
-            logger.info(f'CONFIG: num_micro_batches={self.num_micro_batches} '
+            logger.info(f'CONFIG: default_num_micro_batches={self.default_num_micro_batches} '
                         f'num_layers(this stage)={self.num_layers} '
                         f'pp_size={self.num_stages} '
                         f'dp_size={self.grid.get_data_parallel_world_size()} '

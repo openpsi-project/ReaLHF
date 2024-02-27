@@ -165,25 +165,6 @@ class PackedActorInterface(api.model.ModelInterface):
 
     @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
-        datas = PackedParallelDataBroker.scatter_to(data, n_dp=self.n_minibatches, min_size=self.pipe_gen_n_mbs)
-        all_res = []
-        for d in datas:
-            res = self._generate_minibatch(model, d)
-            all_res.append(res)
-        input_lens = torch.cat([x['cu_seqlens'][1:] - x['cu_seqlens'][:-1] for x in all_res])
-        # FIXME: here we cannot use PackedDataBroker.gather_from because the second gather_from in master worker will stuck due to unknown reason.
-        r = dict()
-        for k, v in all_res[0].items():
-            if v is None:
-                r[k] = None
-            elif k != 'cu_seqlens':
-                r[k] = torch.cat([x[k] for x in all_res])
-            else:
-                r[k] = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0), value=0)
-        return from_dict(r)
-
-    @torch.no_grad()
-    def _generate_minibatch(self, model: api.model.Model, data: NamedArray) -> Dict:
         module = model.module
 
         module.eval()
@@ -286,7 +267,7 @@ class PackedActorInterface(api.model.ModelInterface):
             packed_logits_mask=packed_logits_mask.bool() if packed_logits_mask is not None else None,
             prompt_mask=prompt_mask,
         )
-        return res
+        return from_dict(res)
 
     @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:

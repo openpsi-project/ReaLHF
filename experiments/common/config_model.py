@@ -198,11 +198,19 @@ def get_flash_mqat_model_config(
     if (lora is not None or is_sft_lora or is_rew_lora) and use_pipe:
         raise NotImplementedError("LORA is not supported in pipeline model")
 
+    try:
+        with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
+            original_is_critic = json.load(f)["is_critic"]
+    except FileNotFoundError:
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model path {model_path} does not exist")
+        original_is_critic = False
+        if from_type == "actor_as_critic":
+            from_type = "hf_as_critic"
+            
     if use_pipe:
         pipe_init_from_scratch = from_type == "random_actor" or from_type == "random_critic"
         pipe_init_critic_from_actor = from_type == "actor_as_critic" or from_type == "hf_as_critic"
-        with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
-            original_is_critic = json.load(f)["is_critic"]
         is_critic = original_is_critic or pipe_init_critic_from_actor or from_type == "random_critic"
         from_type = "empty_critic" if is_critic else "empty_actor"
 
