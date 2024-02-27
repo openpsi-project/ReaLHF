@@ -31,8 +31,11 @@ logger = logging.getLogger("FlashMQAT Interface")
 def generate_helper(
         self: FlashMQATModel,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        input_ids: torch.Tensor,
+        input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        packed_input_ids: Optional[torch.Tensor] = None,
+        cu_seqlens: Optional[torch.Tensor] = None,
+        max_seqlen: Optional[int] = None,
         k_caches: Optional[List[torch.Tensor]] = None,
         v_caches: Optional[List[torch.Tensor]] = None,
         cache_seqlens: Optional[torch.Tensor] = None,
@@ -41,14 +44,17 @@ def generate_helper(
     current_forward = self.forward
     self.forward = functools.partial(FlashMQATModel.forward, self)
     seq, scores, mask, _, _ = generate(
-        self,
-        tokenizer,
-        input_ids,
-        attention_mask,
-        k_caches,
-        v_caches,
-        cache_seqlens,
-        gconfig,
+        model=self,
+        tokenizer=tokenizer,
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        packed_input_ids=packed_input_ids,
+        cu_seqlens=cu_seqlens,
+        max_seqlen=max_seqlen,
+        k_caches=k_caches,
+        v_caches=v_caches,
+        cache_seqlens=cache_seqlens,
+        gconfig=gconfig,
     )
     self.forward = current_forward
     return DuckGenerationOutput(seq, scores, mask)

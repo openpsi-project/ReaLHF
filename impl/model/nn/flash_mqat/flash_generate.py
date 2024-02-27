@@ -138,8 +138,11 @@ def genstep(
 def generate(
     model: FlashMQATModel,
     tokenizer: transformers.PreTrainedTokenizerFast,
-    input_ids: torch.Tensor,
+    input_ids: Optional[torch.Tensor] = None,
     attention_mask: Optional[torch.Tensor] = None,
+    packed_input_ids: Optional[torch.LongTensor] = None,
+    cu_seqlens: Optional[torch.LongTensor] = None,
+    max_seqlen: Optional[int] = None,
     k_caches: Optional[List[torch.Tensor]] = None,
     v_caches: Optional[List[torch.Tensor]] = None,
     cache_seqlens: Optional[torch.Tensor] = None,
@@ -182,21 +185,29 @@ def generate(
             prompt_logits: Output logits of prompts. None if k/v caches are passed in.
                 Shape [#tot_prompt_tokens * num_samples].
     """
-    if attention_mask is None:
-        attention_mask = torch.ones_like(input_ids)
     if (k_caches is None) != (v_caches is None) or (k_caches is None) != (cache_seqlens is None):
         raise ValueError("k_cache, v_cache, cache_seqlens must be all None or all not None")
-    if gconfig.num_samples > 1 and k_caches is None:
-        input_ids = input_ids.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
-        attention_mask = attention_mask.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
-    elif k_caches is not None:
-        for k_cache, v_cache in zip(k_caches, v_caches):
-            assert (k_cache.shape[0] == v_cache.shape[0] == input_ids.shape[0] == attention_mask.shape[0] ==
-                    cache_seqlens.shape[0])
+    if input_ids is not None:
+        if attention_mask is None:
+            attention_mask = torch.ones_like(input_ids)
+        if gconfig.num_samples > 1 and k_caches is None:
+            input_ids = input_ids.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
+            attention_mask = attention_mask.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
+        elif k_caches is not None:
+            for k_cache, v_cache in zip(k_caches, v_caches):
+                assert (k_cache.shape[0] == v_cache.shape[0] == input_ids.shape[0] == attention_mask.shape[0] ==
+                        cache_seqlens.shape[0])
+        bs = input_ids.shape[0]
+    else:
+        assert attention_mask is None
+        assert packed_input_ids is not None
+        assert cu_seqlens is not None
+        assert gconfig.num_samples == 1, "packed_input_ids input is not supported for num_samples > 1"
+        assert k_caches is None and v_caches is None, "Continuing generation with packed_input_ids is not supported."
+        bs = cu_seqlens.shape[0] - 1
 
-    device = input_ids.device
+    device = torch.cuda.current_device()
     mconfig: FlashMQATConfig = model.config
-    bs, prompt_padded_len = input_ids.shape[:2]
 
     terminate = False
     generated_idx = 0
@@ -212,10 +223,13 @@ def generate(
         # Generate from scratch.
         # Input_ids may have different lengths, we should first pack them into a large batch
         # to use varlen flash attention, then record kv caches for the following inferences.
-        packed_input_ids, _, cu_seqlens, max_seq_len = unpad_input(input_ids, attention_mask)
+        if input_ids is not None:
+            packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+        else:
+            max_seqlen = cu_seqlens.max().item()
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
 
-        x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seq_len, store_kv_cache=True)
+        x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True)
         # one embedding layer, n_layers transformer block, one output layer
         ys = [PipeCacheData(input_ids=packed_input_ids)
               ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
@@ -226,7 +240,7 @@ def generate(
         layer_indices = range(len(ys))
         for y, layer_idx in zip(ys[1:-1], layer_indices[1:-1]):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
-            kvcache_seqlen = max(max_seq_len + gconfig.max_new_tokens,
+            kvcache_seqlen = max(max_seqlen + gconfig.max_new_tokens,
                                  mconfig.hidden_dim // mconfig.head_dim + 10)
             # fix of a flash attention bug
             k_cache = base.constants.get_global_memory_buffer().get_tensor(
@@ -258,14 +272,14 @@ def generate(
         generated_idx += 1
     else:
         # Resume from a previous generation state.
-        if prompt_padded_len != 1:
+        if input_ids.shape[1] != 1:
             raise ValueError("prompt_padded_len must be 1 when resuming from a previous generation state.")
-        max_seq_len = gconfig.max_new_tokens + int(max(cache_seqlens)) + 1
+        max_seqlen = gconfig.max_new_tokens + int(max(cache_seqlens)) + 1
         for i in range(len(k_caches)):
-            pad = (0, 0, 0, 0, 0, max_seq_len - k_caches[i].shape[1])
-            if k_caches[i].shape[1] < max_seq_len:
+            pad = (0, 0, 0, 0, 0, max_seqlen - k_caches[i].shape[1])
+            if k_caches[i].shape[1] < max_seqlen:
                 k_caches[i] = nn.functional.pad(k_caches[i], pad)
-            if v_caches[i].shape[1] < max_seq_len:
+            if v_caches[i].shape[1] < max_seqlen:
                 v_caches[i] = nn.functional.pad(v_caches[i], pad)
         x = PipeTransferData(store_kv_cache=torch.tensor(1))
         ys = ([PipeCacheData(cache_seqlens=cache_seqlens)] + [
@@ -323,8 +337,8 @@ def vanilla_packed_generate(
 
     # The main loop.
     while not terminate:
-        packed_input_ids, _, cu_seqlens, max_seq_len = unpad_input(input_ids, attention_mask)
-        x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seq_len)
+        packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+        x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
         # one embedding layer, n_layers transformer block, one output layer
         ys = [PipeCacheData(input_ids=packed_input_ids)
               ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]

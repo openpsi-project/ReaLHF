@@ -216,7 +216,7 @@ class PPOSysExperiment(Experiment):
         rollout = copy.deepcopy(rollout)
         rollout.min_n_seqs = self.batch_size
         rollout.max_n_seqs = self.batch_size + 1
-        rollout.max_concurrent_calls = 4
+        rollout.max_concurrent_calls = 1
 
         global inf_ref_logits
         inf_ref_logits = copy.deepcopy(inf_ref_logits)

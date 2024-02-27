@@ -309,8 +309,8 @@ class ModelWorker(worker_base.Worker):
             return
 
         if isinstance(res, namedarray.NamedArray):
-            shapes = {k: v.shape for k, v in res.items()}
-            dtypes = {k: v.dtype for k, v in res.items()}
+            shapes = {k: v.shape for k, v in res.items() if v is not None}
+            dtypes = {k: v.dtype for k, v in res.items() if v is not None}
 
             all_shapes = [None for _ in range(self.config.topo.get_dim("data"))]
             dist.all_gather_object(
@@ -348,7 +348,9 @@ class ModelWorker(worker_base.Worker):
             for k, v in res.items():
                 # logger.info(f"handle_name {request.handle_name} "
                 #             f"Gathering {k} with shape {v.shape}, req id = {request.request_id}")
-                buf_shape = reply.actual_shapes[k]
+                if v is None:
+                    continue
+                buf_shape = reply.buf_shapes[k]
                 buf = base.constants.get_global_memory_buffer().get_tensor(buf_shape, v.dtype, "scatter_gather")
                 s = tuple(slice(0, size) for size in v.shape)
                 buf[s] = v
