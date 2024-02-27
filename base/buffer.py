@@ -261,6 +261,13 @@ class AsyncIOSequenceBuffer:
 
             while not _can_do_rpc():
                 await self._lock.wait()
+
+            # HACK: A simple (but may be useless) trick to prioritize training over inference and inference over generate.
+            if rpc.interface_type == api.dfg.ModelInterfaceType.GENERATE:
+                await asyncio.sleep(2e-3)
+            elif rpc.interface_type == api.dfg.ModelInterfaceType.INFERENCE:
+                await asyncio.sleep(1e-3)
+
             # await self._lock.wait_for(_can_do_rpc)
             self._assert_valid_indicator()
 
