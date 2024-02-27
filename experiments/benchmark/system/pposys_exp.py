@@ -14,7 +14,7 @@ from experiments.common.ppo_exp import PPOConfig, PPOHyperparmeters
 rollout = ModelRPC(
     "actor",
     ModelInterfaceType.GENERATE,
-    input_data=["prompts", "prompt_att_mask"],
+    input_data=["packed_prompts", "prompt_cu_seqlens"],
     output_data=[
         "seq_no_eos_mask",
         "packed_seq",
@@ -22,7 +22,9 @@ rollout = ModelRPC(
         "packed_logprobs",
         "prompt_mask",
     ],
+    dp_broker_type="packed",
 )
+
 inf_reward = ModelRPC(
     "reward",
     ModelInterfaceType.INFERENCE,
@@ -183,7 +185,6 @@ class PPOSysExperiment(Experiment):
         for m in base_setup.model_worker[offset : offset + self.base_config.n_actors]:
             m.model = actor_model
             m.interface.args["force_no_logits_mask"] = True
-            m.backend.args["num_inf_pipeline_mbs"] = self.actor.parallel.num_inf_pipeline_mbs
             m.backend.args["enable_hybrid_engine"] = self.actor.optimizer.use_hybrid_engine
             m.backend.args["max_out_tokens"] = ppo_benchmark_hyperparam.max_new_tokens
         offset += self.base_config.n_actors
@@ -201,13 +202,42 @@ class PPOSysExperiment(Experiment):
         train_actor = copy.deepcopy(train_actor)
         if self.actor.parallel.pipeline_parallel_size > 1:
             pp_nmbs = (
-                self.actor.parallel.num_pipeline_micro_batches
-                if self.actor.parallel.num_pipeline_micro_batches is not None
-                else self.actor.parallel.pipeline_parallel_size
+                self.actor.parallel.pipe_mbs_config.train_step
+                if self.actor.parallel.pipe_mbs_config.train_step is not None
+                else self.actor.parallel.pipeline_parallel_size * 2
             )
             train_actor.min_n_seqs_per_dp = ppo_benchmark_hyperparam.ppo_n_minibatches * pp_nmbs
         else:
             train_actor.min_n_seqs_per_dp = ppo_benchmark_hyperparam.ppo_n_minibatches
+        train_actor.min_n_seqs = self.batch_size
+        train_actor.max_n_seqs = self.batch_size + 1
+
+        global rollout
+        rollout = copy.deepcopy(rollout)
+        rollout.min_n_seqs = self.batch_size
+        rollout.max_n_seqs = self.batch_size + 1
+        rollout.max_concurrent_calls = 4
+
+        global inf_ref_logits
+        inf_ref_logits = copy.deepcopy(inf_ref_logits)
+        inf_ref_logits.min_n_seqs = self.batch_size
+        inf_ref_logits.max_n_seqs = self.batch_size + 1
+
+        global inf_reward
+        inf_reward = copy.deepcopy(inf_reward)
+        inf_reward.min_n_seqs = self.batch_size
+        inf_reward.max_n_seqs = self.batch_size + 1
+
+        global inf_values
+        inf_values = copy.deepcopy(inf_values)
+        inf_values.min_n_seqs = self.batch_size
+        inf_values.max_n_seqs = self.batch_size + 1
+
+        global train_critic
+        train_critic = copy.deepcopy(train_critic)
+        train_critic.min_n_seqs = self.batch_size
+        train_critic.max_n_seqs = self.batch_size + 1
+
         return ExperimentConfig(
             total_train_epochs=1,
             benchmark_steps=self.benchmark_steps,

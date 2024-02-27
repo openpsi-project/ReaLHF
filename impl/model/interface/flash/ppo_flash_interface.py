@@ -123,6 +123,11 @@ class PackedActorInterface(api.model.ModelInterface):
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
 
+    pipe_gen_n_mbs: Optional[int] = None
+    pipe_inf_n_mbs: Optional[int] = None
+    pipe_train_n_mbs: Optional[int] = None
+    
+
     def __post_init__(self):
         super().__post_init__()
         if self.adaptive_kl_ctl:
@@ -142,6 +147,13 @@ class PackedActorInterface(api.model.ModelInterface):
             else:
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
+        
+        if self.pipe_gen_n_mbs is None:
+            self.pipe_gen_n_mbs = base.constants.pipe_parallel_world_size()
+        if self.pipe_inf_n_mbs is None:
+            self.pipe_inf_n_mbs = base.constants.pipe_parallel_world_size()
+        if self.pipe_train_n_mbs is None:
+            self.pipe_train_n_mbs = base.constants.pipe_parallel_world_size() * 2
 
     def save(self, model: api.model.Model, save_dir: str):
         if not self.enable_save:
@@ -153,12 +165,10 @@ class PackedActorInterface(api.model.ModelInterface):
 
     @torch.no_grad()
     def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
-        bs = data["prompts"].shape[0]
-        assert bs % self.n_minibatches == 0
-        minibatch_size = bs // self.n_minibatches
+        datas = PackedParallelDataBroker.scatter_to(data, n_dp=self.n_minibatches, min_size=self.pipe_gen_n_mbs)
         all_res = []
-        for i in range(0, bs, minibatch_size):
-            res = self._generate_minibatch(model, data[i:i + minibatch_size])
+        for d in datas:
+            res = self._generate_minibatch(model, d)
             all_res.append(res)
         input_lens = torch.cat([x['cu_seqlens'][1:] - x['cu_seqlens'][:-1] for x in all_res])
         # FIXME: here we cannot use PackedDataBroker.gather_from because the second gather_from in master worker will stuck due to unknown reason.
@@ -194,6 +204,7 @@ class PackedActorInterface(api.model.ModelInterface):
                 packed_input_ids=packed_prompts,
                 cu_seqlens=cu_seqlens,
                 gconfig=GenerationConfig(**self.generation_config),
+                num_micro_batches=self.pipe_gen_n_mbs,
             )
             if res is None:
                 return None
@@ -288,7 +299,7 @@ class PackedActorInterface(api.model.ModelInterface):
         max_seqlen = int(max(input_lens))
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens)
+            res = module.forward(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, num_micro_batches=self.pipe_inf_n_mbs)
             if res is None:
                 return None
             logits = res
@@ -391,7 +402,7 @@ class PackedActorInterface(api.model.ModelInterface):
                 logits_mask=data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None,
             ))
 
-        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=(data_["cu_seqlens"].shape[0] - 1) // self.n_minibatches)
+        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=self.pipe_train_n_mbs)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         for data in datas:
@@ -417,6 +428,7 @@ class PackedActorInterface(api.model.ModelInterface):
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=data["cu_seqlens"],
                     loss_fn=_ppo_actor_loss_from_model_outputs,
+                    num_micro_batches=self.pipe_train_n_mbs,
                     **loss_fn_kwargs,
                 )
             else:
@@ -526,6 +538,9 @@ class PackedCriticInterface(api.model.ModelInterface):
     value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
+    
+    pipe_train_n_mbs: Optional[int] = None
+    pipe_inf_n_mbs: Optional[int] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -546,6 +561,11 @@ class PackedCriticInterface(api.model.ModelInterface):
             else:
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
+        
+        if self.pipe_train_n_mbs is None:
+            self.pipe_train_n_mbs = base.constants.pipe_parallel_world_size() * 2
+        if self.pipe_inf_n_mbs is None:
+            self.pipe_inf_n_mbs = base.constants.pipe_parallel_world_size()
 
     def save(self, model: api.model.Model, save_dir: str):
         if not self.enable_save:
@@ -566,7 +586,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         max_seqlen = int(max(input_lens))
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            scores = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens)
+            scores = module.forward(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, num_micro_batches=self.pipe_inf_n_mbs)
             if scores is None:
                 return None
         else:
@@ -653,7 +673,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                 cu_seqlens=data_["cu_seqlens"],
             ))
 
-        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=(data_["cu_seqlens"].shape[0] - 1) // self.n_minibatches)
+        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=self.pipe_train_n_mbs)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         for data in datas:
@@ -677,6 +697,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=data["cu_seqlens"],
                     loss_fn=_ppo_critic_loss_from_model_outputs,
+                    num_micro_batches=self.pipe_train_n_mbs,
                     **loss_kwargs,
                 )
             else:

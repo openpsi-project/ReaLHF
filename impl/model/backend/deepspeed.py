@@ -42,8 +42,6 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     engine_type: str = "deepspeed"
     # parallelism args
     num_pipeline_stages: int = 1
-    num_pipeline_micro_batches: Optional[int] = None
-    num_inf_pipeline_mbs: Optional[int] = None
     sequence_parallel: bool = False
     enable_async_p2p_communication: bool = False
     enable_async_instruction: bool = False
@@ -146,8 +144,6 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             config=ds_config,
             lr_scheduler=lr_scheduler,
             engine_type=self.engine_type,
-            num_pipeline_micro_batches=self.num_pipeline_micro_batches,
-            num_inf_pipeline_mbs=self.num_inf_pipeline_mbs,
             sequence_parallel=self.sequence_parallel,
             enable_async_p2p_communication=self.enable_async_p2p_communication,
             enable_async_instruction=self.enable_async_instruction)

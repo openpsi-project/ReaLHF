@@ -32,7 +32,7 @@ class ModelRPC:
     min_n_tokens: int = 1
     max_n_tokens: int = 655360
 
-    max_concurrent_calls: int = 2
+    max_concurrent_calls: int = 1
 
     parents: List[str] = dataclasses.field(default_factory=lambda: [])
     children: List[str] = dataclasses.field(default_factory=lambda: [])

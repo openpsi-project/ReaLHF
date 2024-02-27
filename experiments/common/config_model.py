@@ -8,6 +8,13 @@ SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "deepseek", "codellama"]
 
 
 @dataclasses.dataclass
+class PipelineMicroBatchConfig:
+    generate: Optional[int] = None
+    inference: Optional[int] = None
+    train_step: Optional[int] = None
+
+
+@dataclasses.dataclass
 class ParallelismConfig:
     """Model parallelism configuration.
 
@@ -25,8 +32,7 @@ class ParallelismConfig:
     data_parallel_size: int = 1
     use_sequence_parallel: bool = False
     partition_method: Optional[str] = "parameters_balanced"
-    num_pipeline_micro_batches: Optional[int] = None
-    num_inf_pipeline_mbs: Optional[int] = None
+    pipe_mbs_config: PipelineMicroBatchConfig = dataclasses.field(default_factory=PipelineMicroBatchConfig)
 
     def __post_init__(self):
         if self.pipeline_parallel_size < 1 or self.data_parallel_size < 1 or self.model_parallel_size < 1:
@@ -145,8 +151,9 @@ class ModelConfig:
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
-        if self.enable_bf16 and (self.parallel.model_parallel_size > 1
-                                 or self.parallel.pipeline_parallel_size > 1):
+        if self.enable_bf16 and (
+            self.parallel.model_parallel_size > 1 or self.parallel.pipeline_parallel_size > 1
+        ):
             raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
         if self.parallel.pipeline_parallel_size > 1 and self.lora is not None:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")

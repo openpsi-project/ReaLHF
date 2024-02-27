@@ -88,7 +88,6 @@ def make_backend():
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
                     sequence_parallel=USE_SEQ_PARALLEL,
-                    num_pipeline_micro_batches=NUM_PP,
                 ),
             ))
     else:
@@ -102,7 +101,6 @@ def make_backend():
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
                     sequence_parallel=USE_SEQ_PARALLEL,
-                    num_pipeline_micro_batches=NUM_PP,
                 ),
             ))
 

@@ -18,7 +18,6 @@ def build_llama2_model(
     offload_model: bool = False,
     offload_opt: bool = False,
     use_hybrid_engine: bool = False,
-    num_inf_pipeline_mbs: int = None,
 ):
     assert model_size in ["7b", "13b", "34b", "70b"]
     if model_size in ["7b", "13b", "70b"]:
@@ -38,8 +37,6 @@ def build_llama2_model(
         pipeline_parallel_size=pp_size,
         data_parallel_size=dp_size,
         use_sequence_parallel=False,  # FIXME: use sequence parallelism during training, but not generate
-        num_pipeline_micro_batches=pp_mbs,
-        num_inf_pipeline_mbs=num_inf_pipeline_mbs,
     )
     optimizer = OptimizerConfig(
         zero_stage=zero_stage if pp_size == 1 else 1,
@@ -145,7 +142,6 @@ def register_sosp_experiments_with_fixed_bs(model_size: str, dp_size: int):
         return
     # register experiments with n_mbs = pp_size
     actor = deepcopy(actor)
-    actor.parallel.num_pipeline_micro_batches = pp_size
     register_experiment(
         f"sosp-baseline-a{model_size_int}-{dp_size}x{pp_size}-c7r7-mb1",
         functools.partial(
@@ -164,8 +160,6 @@ def register_sosp_experiments_with_fixed_bs(model_size: str, dp_size: int):
 
     # register experiments with gen n_mbs = pp_size * 2 while train n_mbs = pp_size
     actor = deepcopy(actor)
-    actor.parallel.num_pipeline_micro_batches = 2 * pp_size
-    actor.parallel.num_inf_pipeline_mbs = pp_size
     register_experiment(
         f"sosp-baseline-a{model_size_int}-{dp_size}x{pp_size}-c7r7-mb1gen",
         functools.partial(
@@ -265,8 +259,6 @@ def register_sosp_experiments_with_full_gpu_mem(
         zero_stage=1 if pp_size > 1 else 2,
         # offload_opt=True,
     )
-    actor.parallel.num_pipeline_micro_batches = 2 * pp_size
-    actor.parallel.num_inf_pipeline_mbs = pp_size
 
     ref_mp_size, ref_dp_size, ref_pp_size = ref_parallel_strategy
     assert ref_mp_size * ref_dp_size * ref_pp_size == n_ref_gpus
