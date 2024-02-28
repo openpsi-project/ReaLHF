@@ -32,7 +32,8 @@ class PipeInstruction:
                  micro_batch_id: int,
                  deps: List['PipeInstruction'] = [],
                  bind: List['PipeInstruction'] = [],
-                 step_id: int = 0):
+                 step_id: int = 0,
+                 schedule_id: int = 0):
         self.stage_id = stage_id
         self.micro_batch_id = micro_batch_id
         self.deps = deps
@@ -41,6 +42,7 @@ class PipeInstruction:
         self.step_id = step_id
         self.args = (stage_id, micro_batch_id, step_id)
         self.__str_encode = f"{self.name};{self.stage_id};{self.micro_batch_id};{self.step_id}"
+        self.schedule_id = schedule_id
 
     def __repr__(self):
         return f"{self.name}{self.args}"

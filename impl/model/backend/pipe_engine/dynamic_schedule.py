@@ -29,7 +29,7 @@ class DynamicPipeSchedule(ABC):
                  num_micro_batches: int,
                  num_stages: int,
                  num_steps: Optional[int] = 0,
-                 sched_id: int = 0):
+                 schedule_id: int = 0):
         super().__init__()
         self.num_micro_batches = num_micro_batches
         self.num_stages = num_stages
@@ -45,7 +45,7 @@ class DynamicPipeSchedule(ABC):
         self.__terminated = False  # terminate the schedule, used to avoid duplicated terminate
         self.__terminating = False  # terminate process initiated but not finished
         self.__end_schedule_sent = False
-        self.__sched_id = sched_id
+        self.schedule_id = schedule_id
 
     def __init_inst_set(self):
         for inst in self.init_instructions():

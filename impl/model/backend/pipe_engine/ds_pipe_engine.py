@@ -863,7 +863,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if self._async_p2p:
             self.tensor_buffer.put("send_act_handle", micro_batch_id, handle)
         if type(self) == DeepSpeedPipelineEngine and self._generate_mode:
-            handle.wait()
+            if self._async_p2p:
+                handle.wait()
             terminate = self.tensor_buffer.get("terminate", micro_batch_id)
             p2p.send(terminate, self.next_stage)
         # self.rank_print(f"send tensor DONE {micro_batch_id}, {x.pp_input.shape}")
@@ -901,7 +902,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.tensor_buffer.put("recv_act_buf", micro_batch_id, buf)
 
         if type(self) == DeepSpeedPipelineEngine and self._generate_mode:
-            recv_handle.wait()
+            if self._async_p2p:
+                recv_handle.wait()
             terminate = torch.empty((), dtype=torch.bool, device=self.device)
             p2p.recv(terminate, self.prev_stage)
             self.tensor_buffer.put("terminate", micro_batch_id, terminate)
@@ -942,10 +944,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         handle = p2p.send(next_tokens_to_send, self.next_stage, async_op=self._async_p2p)
         if self._async_p2p:
             self.tensor_buffer.put("send_next_tokens_handle", micro_batch_id, handle)
-        return False, handle
 
-        assert self._generate_mode
-        p2p.send(self.tensor_buffer.get("terminate", micro_batch_id), self.next_stage)
+        if type(self) == DeepSpeedPipelineEngine and self._generate_mode:
+            if self._async_p2p:
+                handle.wait()
+            p2p.send(self.tensor_buffer.get("terminate", micro_batch_id), self.next_stage)
+
+        return False, handle
 
     def _exec_recv_next_tokens(self, stage_id: int, micro_batch_id: int, step_id: int):
         """ When generating, recv next tokens from the last stage on the first stage
@@ -964,16 +969,18 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         x = PipeTransferData(store_kv_cache=True)
         self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
 
+        if type(self) == DeepSpeedPipelineEngine and self._generate_mode:
+            if self._async_p2p:
+                handle.wait()
+            terminate = torch.empty((), dtype=torch.bool, device=self.device)
+            p2p.recv(terminate, self.prev_stage)
+            self.tensor_buffer.put("terminate", micro_batch_id, terminate)
+
         return False, handle
 
         # ys = self.tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
         # ys[0].input_ids = recv_buf  # .unsqueeze(-1) # sequence parallel forward only accept one dim input_ids
         # ys[0].position_ids = None
-
-        assert self._generate_mode
-        terminate = torch.empty((), dtype=torch.bool, device=self.device)
-        p2p.recv(terminate, self.prev_stage)
-        self.tensor_buffer.put("terminate", micro_batch_id, terminate)
 
     def _exec_optimizer_step(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert self._train_mode, "_exec_optimizer_step() should be only executed in train mode."

@@ -12,6 +12,7 @@ import zmq
 from base.monitor import get_tracer
 from impl.model.backend.pipe_engine.dynamic_schedule import DynamicPipeSchedule
 from impl.model.backend.pipe_engine.instruction import EndSchedule, PipeInstruction
+from impl.model.backend.pipe_engine.message import SignalCode
 import base.constants
 import base.logging as logging
 import base.name_resolve as name_resolve
@@ -20,12 +21,11 @@ import base.network as network
 
 logger = logging.getLogger("ScheduleController", "benchmark")
 
-
-class SignalCode(enum.IntEnum):
-    EXEC = 0
-    END = 1
-    HOLD = 2
-    COMM_EXEC = 3
+# class SignalCode(enum.IntEnum):
+#     EXEC = 0
+#     END = 1
+#     HOLD = 2
+#     COMM_EXEC = 3
 
 
 @dataclasses.dataclass

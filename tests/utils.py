@@ -73,7 +73,7 @@ def make_input(tokenizer, device, s):
     input_ids = input_ids.to(device)
     attention_mask = attention_mask.to(device)
 
-    print(f"make input input_ids.shape {input_ids.shape}")
+    # print(f"make input input_ids.shape {input_ids.shape}")
 
     return input_ids, attention_mask
 

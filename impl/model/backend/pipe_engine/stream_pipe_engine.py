@@ -12,8 +12,9 @@ from base.monitor import gpu_memory_mb
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.backend.pipe_engine.dynamic_schedule import (DynamicPipeSchedule, GenerationSchedule,
                                                              InferenceSchedule, Train1F1BSchedule)
-from impl.model.backend.pipe_engine.schedule_controller import (EngineScheduleClient,
-                                                                EngineScheduleController, SignalCode)
+from impl.model.backend.pipe_engine.fast_schedule_controller import FastScheduleClient, FastScheduleController
+from impl.model.backend.pipe_engine.message import SignalCode
+from impl.model.backend.pipe_engine.schedule_controller import EngineScheduleClient, EngineScheduleController
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 from impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
 from impl.model.utils.data import PipeCacheData, PipeTransferData
@@ -51,7 +52,7 @@ class EngineFuture:
 
 class StreamPipeEngine(DeepSpeedPipelineEngine):
 
-    def __init__(self, verbose=False, *args, **kwargs):
+    def __init__(self, use_fast_controller=False, verbose=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.__verbose = verbose
@@ -59,22 +60,32 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         assert base.constants.model_parallel_world_size() == 1, \
                "Currently stream pipe engine with tensor parallel has synchronization problem when multiple "\
                "schedules are issued. We have to keep the order between forward passes across tensor parallel ranks "\
-               "or there will be deadlocks. Fixing it with global controller across tensor parallel ranks may "\
+               "or there will be deadlocks. Fixing it with global controller across tensor parallel ranks "\
                "and force the order between forward passes will probably cause severe performance issue."
         # TODO: FIX THIS
         self.pp_rank = base.constants.pipe_parallel_rank()
+        self.__use_fast_controller = use_fast_controller
 
         self.engine_controller = None
         # self.engine_controller_started = False
         if self.pp_rank == 0:
-            self.engine_controller = EngineScheduleController(num_stages=self.num_stages,
-                                                              trace=os.environ.get("DLLM_TRACE", "0") == "1")
-            self.engine_controller.start()
+            if use_fast_controller:
+                self.engine_controller = FastScheduleController(num_stages=self.num_stages)
+                self.engine_controller.launch()
+            else:
+                self.engine_controller = EngineScheduleController(num_stages=self.num_stages,
+                                                                  trace=os.environ.get("DLLM_TRACE",
+                                                                                       "0") == "1")
+                self.engine_controller.start()
 
-        self.engine_client = EngineScheduleClient(stage_id=self.pp_rank)
+        if self.__use_fast_controller:
+            self.engine_client = FastScheduleClient(stage_id=self.pp_rank)
+        else:
+            self.engine_client = EngineScheduleClient(stage_id=self.pp_rank)
         self.schedule_count = 0
         self.active_schedules = []
         self.finished_schedules = []
+        self.schedule_mapping = dict()  # mapping from schedule index to corresponding schedule
         self.tensor_buffer_mapping = dict()  # mapping from schedule index to corresponding tensor buffer
         self.future_mapping = dict()  # mapping from schedule index to corresponding future
         self.num_micro_batches_mapping = dict()  # mapping from schedule index to num micro batches
@@ -176,6 +187,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
     def start_schedule(self, sched: DynamicPipeSchedule, priority: int):
         sched_index = self.schedule_count
         self.active_schedules.append(sched_index)
+        self.schedule_mapping[sched_index] = sched
         self.tensor_buffer_mapping[sched_index] = TensorBuffer()
         # print(f"sched index {sched_index} tensor buffer init")
 
@@ -194,6 +206,11 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         self.tensor_buffer_mapping.pop(schedule_index)
         self.active_schedules.remove(schedule_index)
         self.finished_schedules.append(schedule_index)
+
+        res = self.result_collect_mapping[schedule_index]()
+        self.future_mapping[schedule_index].set_result(res)
+        self.clear_tensor_buffer(schedule_index)
+        self.future_mapping.pop(schedule_index)
 
     def forward(self,
                 packed_input_ids: torch.Tensor,
@@ -226,7 +243,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         num_micro_batches = num_micro_batches if num_micro_batches else self.num_stages
         sched = Train1F1BSchedule(num_micro_batches=num_micro_batches,
                                   num_stages=self.num_stages,
-                                  sched_id=self.train_sched_id)
+                                  schedule_id=self.train_sched_id)
         self.train_sched_id += 1
         self.train_priority += 1
         sched_index, f = self.start_schedule(sched, self.train_priority)
@@ -307,13 +324,14 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
 
         return f
 
-    def poll_one_step(self):
+    def poll_one_step_py_controller(self):
         """ Run one step for stream pipe engine, including:
         1. poll instruction from engine controller;
         2. if instruction is not None, set tensor buffer, set state, set num micro batches, execute instruction;
         3. post result to engine controller;
         This method should be called by model worker.
         """
+        assert not self.__use_fast_controller
 
         if self.instruction_buffer is not None:
             sched_id, cmd, sched_end = self.instruction_buffer  # there is a chance when instruction from
@@ -326,54 +344,76 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
             if sched_id not in self.active_schedules + self.finished_schedules:
                 self.instruction_buffer = (sched_id, cmd, sched_end)
                 return
-            # self.rank_print(
-            #     f"received instruction sched id {sched_id} cmd {cmd} end {sched_end}"
-            # )
-            # sched_id, cmd, sched_end = r
-            self.set_tensor_buffer(sched_id)
-            # self.rank_print(f"setting tensor buffer for schedule {sched_id}")
-            self.set_state_mapping[sched_id]()
-            # self.rank_print(f"setting state for schedule {sched_id}")
-            num_micro_batches = self.num_micro_batches_mapping[sched_id]
-            self.set_num_micro_batches(num_micro_batches)
 
-            if type(cmd) not in self._INSTRUCTION_MAP:
-                raise RuntimeError(f'{self.__class__.__name__} does not understand instruction {repr(cmd)}')
-
-            try:
-                self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
-                self.log_verbose(f"Rank {self.global_rank}: START cmd {cmd} of sched {sched_id}")
-                exec_end, comm_handle = self._exec_instr(*cmd.args)
-                self.log_verbose(f"Rank {self.global_rank}: END cmd {cmd} of sched {sched_id}")
-            except Exception as e:
-                logger.error(f"Rank {self.global_rank} Exception {e} in cmd {cmd}")
-                raise e
-
-            signal_code = SignalCode.END if exec_end else SignalCode.EXEC
-            # if signal_code == 1:
-            #     logger.info(f"Rank {self.global_rank}: END sched {sched_id}, end cmd {cmd}")
-
-            if self._async_instruction and not comm_handle is None:
-                self.comm_handle_table[sched_id].append(comm_handle)
-                self.comm_instruction_table[sched_id].append(cmd)
-                signal_code = SignalCode.HOLD
-                self.log_verbose(
-                    f"Rank {self.global_rank} sched id {sched_id} record handle {comm_handle} cmd {cmd}")
-
+            signal_code = self.execute_instruction(cmd, sched_id)
             self.engine_client.post_result(cmd, sched_id, signal_code)
 
-            if exec_end and sched_id in self.active_schedules:
-                self.end_schedule(sched_id)
-                res = self.result_collect_mapping[sched_id]()
-                self.future_mapping[sched_id].set_result(res)
-                self.clear_tensor_buffer(sched_id)
-                self.future_mapping.pop(sched_id)
-                # gpu_memory_mb(f"after clear tensor buffer {sched_id}")
-                # gc.collect()
-                # torch.cuda.empty_cache()
-                # gc.collect()
+        finished = self.maybe_check_async_handles()
+        for sched_id, instructions in finished.items():
+            for instruction in instructions:
+                self.engine_client.post_result(instruction, sched_id, SignalCode.COMM_EXEC)
 
-        # check whether handle finished, if finished, pop and post result
+    def poll_one_step_fast_controller(self):
+        assert self.__use_fast_controller
+        self.engine_client: FastScheduleClient
+        self.engine_client.post()
+        self.engine_client.poll()
+
+        while not self.engine_client.empty():
+            # execute all instructions stored in the poll message buffer
+            sched_id, instruction = self.engine_client.pop()
+            schedule = self.schedule_mapping[sched_id]
+
+            signal_code = self.execute_instruction()
+            self.engine_client.post_result(instruction, schedule, signal_code)
+
+        finished = self.maybe_check_async_handles()
+        for sched_id, instructions in finished.items():
+            for instruction in instructions:
+                self.engine_client.post_result(instruction, self.schedule_mapping[sched_id],
+                                               SignalCode.COMM_EXEC)
+
+    def execute_instruction(self, instruction, sched_id):
+        self.set_tensor_buffer(sched_id)
+        # self.rank_print(f"setting tensor buffer for schedule {sched_id}")
+        self.set_state_mapping[sched_id]()
+        # self.rank_print(f"setting state for schedule {sched_id}")
+        num_micro_batches = self.num_micro_batches_mapping[sched_id]
+        self.set_num_micro_batches(num_micro_batches)
+
+        if type(instruction) not in self._INSTRUCTION_MAP:
+            raise RuntimeError(
+                f'{self.__class__.__name__} does not understand instruction {repr(instruction)}')
+
+        try:
+            self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(instruction)], self)
+            self.log_verbose(f"Rank {self.global_rank}: START cmd {instruction} of sched {sched_id}")
+            exec_end, comm_handle = self._exec_instr(*instruction.args)
+            self.log_verbose(f"Rank {self.global_rank}: END cmd {instruction} of sched {sched_id}")
+        except Exception as e:
+            logger.error(f"Rank {self.global_rank} Exception {e} in cmd {instruction}")
+            raise e
+
+        signal_code = SignalCode.END if exec_end else SignalCode.EXEC
+        # if signal_code == 1:
+        #     logger.info(f"Rank {self.global_rank}: END sched {sched_id}, end cmd {cmd}")
+
+        if self._async_instruction and not comm_handle is None:
+            self.comm_handle_table[sched_id].append(comm_handle)
+            self.comm_instruction_table[sched_id].append(instruction)
+            signal_code = SignalCode.HOLD
+            self.log_verbose(
+                f"Rank {self.global_rank} sched id {sched_id} record handle {comm_handle} cmd {instruction}")
+
+        if signal_code == SignalCode.END and sched_id in self.active_schedules:
+            self.end_schedule(sched_id)
+
+        return signal_code
+
+    def maybe_check_async_handles(self):
+        # check whether handle finished, if finished, pop. return a dict mapping schedule id to finished
+        # comm instructions
+        res = defaultdict(list)
         if self._async_instruction:
             # check handles
             for sched_id in self.active_schedules:
@@ -386,17 +426,19 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                     # print(f"Rank {self.global_rank} handle {handle} cmd {cmd} check")
                     if handle.is_completed():
                         self.log_verbose(f"Rank {self.global_rank} handle {handle} cmd {cmd} completed, post")
-                        self.engine_client.post_result(cmd, sched_id, SignalCode.COMM_EXEC)
+                        # self.engine_client.post_result(cmd, sched_id, SignalCode.COMM_EXEC)
+                        res[sched_id].append(cmd)
                     else:
                         # print(f"Rank {self.global_rank} handle {handle} cmd {cmd} NOT completed")
                         new_handle_list.append(handle)
                         new_inst_list.append(cmd)
                 self.comm_handle_table[sched_id] = new_handle_list
                 self.comm_instruction_table[sched_id] = new_inst_list
+        return res
 
-        # self.run_count += 1
-        # if self.run_count % 10000 == 0:
-        #     logger.info("Rank {} run count {}".format(self.global_rank, self.run_count))
+    def poll_one_step(self):
+        return self.poll_one_step_py_controller() if not self.__use_fast_controller \
+               else self.poll_one_step_fast_controller()
 
     def print_executed(self):
         s = f"Rank {self.global_rank}: "

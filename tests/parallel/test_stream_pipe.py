@@ -13,7 +13,7 @@ import api.config as config_package
 
 NUM_MP = 1
 NUM_PP = 4
-NUM_DP = 2
+NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
@@ -28,9 +28,9 @@ if MODEL_TYPE == "llama":
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 200
-MIN_NEW_TOKENS = 32
-MAX_NEW_TOKENS = 32
+BATCH_SIZE = 128
+MIN_NEW_TOKENS = 128
+MAX_NEW_TOKENS = 128
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
@@ -304,12 +304,7 @@ def run_mixed(rank, seed):
     # BS 64, min_new_tokens=32, max_new_tokens=32, prompt_length~150
     # mixed cots ~10.8s
 
-    import gc
-    gc.collect()
-    torch.cuda.empty_cache()
-    gc.collect()
-
-    for i in range(1):
+    for i in range(2):
         st = time.monotonic()
         mixed_one_step(seed + i + 1)
         print(f"mixed time cost {time.monotonic() - st:.4f}")

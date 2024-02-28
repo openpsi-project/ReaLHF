@@ -13,7 +13,7 @@ import api.config as config_package
 
 NUM_MP = 1
 NUM_PP = 4
-NUM_DP = 2
+NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
@@ -28,9 +28,9 @@ if MODEL_TYPE == "llama":
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 200
-MIN_NEW_TOKENS = 32
-MAX_NEW_TOKENS = 32
+BATCH_SIZE = 128
+MIN_NEW_TOKENS = 128
+MAX_NEW_TOKENS = 128
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
@@ -250,6 +250,17 @@ def run_mixed(rank: int, seed: int):
     from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
     assert isinstance(engine, DeepSpeedPipelineEngine)
 
+    import os
+
+    # os.environ["DLLM_TRACE"] = "1"
+    tracer = get_tracer(tracer_entries=int(2e6),
+                        max_stack_depth=10,
+                        ignore_c_function=False,
+                        ignore_frozen=True,
+                        log_async=True,
+                        min_duration=10,
+                        output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json")
+
     train_iters = 4
     gen_iters = 1
 
@@ -269,15 +280,19 @@ def run_mixed(rank: int, seed: int):
             train_res = interface.train_step(model, train_data)
             print(f"train {time.monotonic() - st2} total {time.monotonic() - st:.4f}")
 
+    tracer.start()
+
     st = time.monotonic()
     mixed_one_step()
 
     print(f"rank {rank} FIRST mixed time cost {time.monotonic() - st:.4f}")
 
-    for _ in range(1):
+    for _ in range(2):
         st = time.monotonic()
         mixed_one_step()
         print(f"mixed time cost {time.monotonic() - st:.4f}")
+
+    tracer.save()
 
 
 def run_linear(rank: int, res_queue: mp.Queue, seed: int):
