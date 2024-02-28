@@ -52,10 +52,10 @@ class EngineFuture:
 
 class StreamPipeEngine(DeepSpeedPipelineEngine):
 
-    def __init__(self, use_fast_controller=False, verbose=False, *args, **kwargs):
+    def __init__(self, verbose=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.__verbose = verbose
+        self.__verbose = True  # verbose
 
         assert base.constants.model_parallel_world_size() == 1, \
                "Currently stream pipe engine with tensor parallel has synchronization problem when multiple "\
@@ -64,21 +64,20 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                "and force the order between forward passes will probably cause severe performance issue."
         # TODO: FIX THIS
         self.pp_rank = base.constants.pipe_parallel_rank()
-        self.__use_fast_controller = use_fast_controller
 
         self.engine_controller = None
         # self.engine_controller_started = False
         if self.pp_rank == 0:
-            if use_fast_controller:
+            if self._use_fast_schedule_controller:
                 self.engine_controller = FastScheduleController(num_stages=self.num_stages)
-                self.engine_controller.launch()
+                self.engine_controller.start()
             else:
                 self.engine_controller = EngineScheduleController(num_stages=self.num_stages,
                                                                   trace=os.environ.get("DLLM_TRACE",
                                                                                        "0") == "1")
                 self.engine_controller.start()
 
-        if self.__use_fast_controller:
+        if self._use_fast_schedule_controller:
             self.engine_client = FastScheduleClient(stage_id=self.pp_rank)
         else:
             self.engine_client = EngineScheduleClient(stage_id=self.pp_rank)
@@ -192,7 +191,10 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         # print(f"sched index {sched_index} tensor buffer init")
 
         if self.engine_controller is not None:
-            self.engine_controller.issue_schedule(sched, priority)
+            if self._use_fast_schedule_controller:
+                self.engine_client.issue_schedule(sched)
+            else:
+                self.engine_controller.issue_schedule(sched, priority)
             self.log_verbose(
                 f"Issued schedule {sched_index} with priority {priority}, schedule type {sched.__class__.__name__}"
             )
@@ -331,7 +333,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         3. post result to engine controller;
         This method should be called by model worker.
         """
-        assert not self.__use_fast_controller
+        assert not self._use_fast_schedule_controller
 
         if self.instruction_buffer is not None:
             sched_id, cmd, sched_end = self.instruction_buffer  # there is a chance when instruction from
@@ -354,7 +356,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                 self.engine_client.post_result(instruction, sched_id, SignalCode.COMM_EXEC)
 
     def poll_one_step_fast_controller(self):
-        assert self.__use_fast_controller
+        assert self._use_fast_schedule_controller
         self.engine_client: FastScheduleClient
         self.engine_client.post()
         self.engine_client.poll()
@@ -437,7 +439,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         return res
 
     def poll_one_step(self):
-        return self.poll_one_step_py_controller() if not self.__use_fast_controller \
+        return self.poll_one_step_py_controller() if not self._use_fast_schedule_controller \
                else self.poll_one_step_fast_controller()
 
     def print_executed(self):

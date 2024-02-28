@@ -38,6 +38,7 @@ USE_SEQ_PARALLEL = False
 GRADIENT_ACCUMULATION_FUSION = False
 ASYNC_P2P = True
 ASYNC_INSTRUCTION = True  # only effective when async_p2p is true
+USE_FAST_SCHEDULE_CONTROLLER = False
 
 
 def make_model(device):
@@ -94,6 +95,7 @@ def make_stream_pipe_backend():
                 sequence_parallel=USE_SEQ_PARALLEL,
                 enable_async_p2p_communication=ASYNC_P2P,
                 enable_async_instruction=ASYNC_INSTRUCTION,
+                use_fast_schedule_controller=USE_FAST_SCHEDULE_CONTROLLER,
             ),
         ))
 
@@ -131,8 +133,8 @@ def run_train_batch(rank, seed):
     # os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(tracer_entries=int(2e6),
                         max_stack_depth=10,
-                        ignore_c_function=False,
                         ignore_frozen=True,
+                        ignore_c_function=False,
                         log_async=True,
                         min_duration=10,
                         output_file=f"/home/meizy/logs/viztracer/trace{rank}.json")
@@ -158,6 +160,7 @@ def run_train_batch(rank, seed):
         print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
 
     time.sleep(1)
+
     engine.stop_controller()
     tracer.save()
 
@@ -358,4 +361,4 @@ class StreamPipeTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="StreamPipeTest.testMixed")
+    unittest.main(defaultTest="StreamPipeTest.testTrainStep")

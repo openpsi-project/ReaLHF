@@ -31,7 +31,7 @@ class FastScheduleController:
         self.__port = network.find_free_port()
         self.__address = network.gethostip()
 
-    def launch(self):
+    def start(self):
         name = names.model_controller(self.__expr_name, self.__trial_name, self.__model_name, self.__dp_rank,
                                       self.__mp_rank)
 
@@ -70,6 +70,9 @@ class FastScheduleController:
         logger.info(f"FastScheduleController terminated with returncode {self.__process.returncode}:"
                     f"\nOutput: {final_output} \nError: {final_error}")
         return self.__process.returncode
+
+    def save_tracer(self):
+        pass
 
 
 class FastScheduleClient:

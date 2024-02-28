@@ -38,12 +38,14 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     is provided.
     """
 
-    def __init__(self,
-                 sequence_parallel=False,
-                 enable_async_p2p_communication=False,
-                 enable_async_instruction=False,
-                 *super_args,
-                 **super_kwargs):
+    def __init__(
+            self,
+            sequence_parallel=False,
+            enable_async_p2p_communication=False,
+            enable_async_instruction=False,
+            use_fast_schedule_controller=False,  # only use in StreamPipeEngine
+            *super_args,
+            **super_kwargs):
         super().__init__(*super_args, **super_kwargs)
         assert isinstance(self.module, PipelineModule), "model must base PipelineModule"
         assert self.zero_optimization_stage(
@@ -127,6 +129,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         self._async_p2p = enable_async_p2p_communication
         self._async_instruction = enable_async_instruction and self._async_p2p
+        self._use_fast_schedule_controller = use_fast_schedule_controller
 
         self._post_init_logging()
 
