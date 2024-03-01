@@ -10,8 +10,12 @@ import os
 import sys
 
 from base.cluster import spec as cluster_spec
-from base.constants import (DATASET_CACHE_PATH, PYTORCH_KERNEL_CACHE_PATH, TORCH_EXTENSIONS_DIR,
-                            TRITON_CACHE_PATH)
+from base.constants import (
+    DATASET_CACHE_PATH,
+    PYTORCH_KERNEL_CACHE_PATH,
+    TORCH_EXTENSIONS_DIR,
+    TRITON_CACHE_PATH,
+)
 import api.dfg
 import base.topology
 
@@ -28,9 +32,9 @@ _LLM_ENVVARS = {
     # "NCCL_SOCKET_IFNAME": "ibp71s0",
     # "GLOO_SOCKET_IFNAME": "ibp71s0",
     # "TORCH_USE_CUDA_DSA": "1",
-    # "CUDA_LAUNCH_BLOCKING": "1",
-    # "NCCL_COMM_BLOCKING": "1",
-    # "NCCL_BLOCKING_WAIT": "1",
+    "CUDA_LAUNCH_BLOCKING": "1",
+    "NCCL_COMM_BLOCKING": "1",
+    "NCCL_BLOCKING_WAIT": "1",
     # "TORCH_SHOW_CPP_STACKTRACES": "1",
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
     "CUDA_DEVICE_MAX_CONNECTIONS": "1",
@@ -41,7 +45,7 @@ _LLM_ENVVARS = {
     # this behavior.
     # Related issue:
     # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
-    "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
+    # "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
 }
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
@@ -68,33 +72,27 @@ class Scheduling:
 
     @staticmethod
     def master_worker_default(**kwargs):
-        return Scheduling(**{
-            "cpu": 16,
-            "gpu": 1,
-            "mem": 20 * 1024,
-            "container_image": _LLM_GPU_IMAGE,
-            **kwargs
-        })
+        return Scheduling(
+            **{"cpu": 16, "gpu": 1, "mem": 20 * 1024, "container_image": _LLM_GPU_IMAGE, **kwargs}
+        )
 
     @staticmethod
     def data_worker_default(**kwargs):
-        return Scheduling(**{
-            "cpu": 4,
-            "gpu": 0,
-            "mem": 20 * 1024,
-            "container_image": _LLM_CPU_IMAGE,
-            **kwargs
-        })
+        return Scheduling(
+            **{"cpu": 4, "gpu": 0, "mem": 20 * 1024, "container_image": _LLM_CPU_IMAGE, **kwargs}
+        )
 
     @staticmethod
     def model_worker_default(**kwargs):
-        return Scheduling(**{
-            "cpu": 2,
-            "gpu": 1,
-            "mem": 60 * 1024,
-            "container_image": _LLM_GPU_IMAGE,
-            **kwargs,
-        })
+        return Scheduling(
+            **{
+                "cpu": 2,
+                "gpu": 1,
+                "mem": 60 * 1024,
+                "container_image": _LLM_GPU_IMAGE,
+                **kwargs,
+            }
+        )
 
 
 @dataclasses.dataclass
@@ -112,8 +110,9 @@ class WorkerInformation:
     worker_tag: Optional[str] = None  # For actor and policy worker, can be "training" or "evaluation".
     host_key: Optional[str] = None  # Worker will update and keep this key alive.
     watch_keys: Union[str, List[str]] = None  # Worker will exit if all of the watching keys are gone.
-    wandb_entity: Optional[
-        str] = None  # wandb_{config} are optional. They overwrite system wandb_configuration.
+    wandb_entity: Optional[str] = (
+        None  # wandb_{config} are optional. They overwrite system wandb_configuration.
+    )
     wandb_project: Optional[str] = None
     wandb_job_type: Optional[str] = None
     wandb_group: Optional[str] = None
@@ -169,28 +168,71 @@ class ModelBackend:
 
 
 @dataclasses.dataclass
-class RequestReplyStream:
-    push_stream_name: str
-    pull_stream_name: str
-    serialization_method: str = "pickle_compress"
+class ModelShardID:
+    model_name: str
+    dp_rank: int
+    mp_rank: int
+    pp_rank: int
+    topo: base.topology.PipeModelDataParallelTopology = dataclasses.field(
+        default_factory=lambda x: base.topology.PipeModelDataParallelTopology(1, 1, 1)
+    )
+
+    def __post_init__(self):
+        assert self.dp_rank >= 0 and self.mp_rank >= 0 and self.pp_rank >= 0
+        if "@" in self.model_name:
+            raise ValueError("model_name cannot contain @")
+        assert self.dp_rank < self.topo.get_dim("data")
+        assert self.mp_rank < self.topo.get_dim("model")
+        assert self.pp_rank < self.topo.get_dim("pipe")
+
+    @property
+    def parallelism_rank(self):
+        return self.topo.get_rank(data=self.dp_rank, model=self.mp_rank, pipe=self.pp_rank)
+
+    @classmethod
+    def from_parallelism_rank(cls, model_name, topo, parallelism_rank):
+        c = topo.get_coord(parallelism_rank)
+        return cls(model_name=model_name, dp_rank=c.data, mp_rank=c.model, pp_rank=c.pipe, topo=topo)
+
+    def __repr__(self):
+        return f"{self.model_name}@pp{self.pp_rank:02d}@mp{self.mp_rank:02d}@dp{self.dp_rank:02d}"
+
+    def __hash__(self):
+        return hash(str(self))
+
+    def __eq__(self, other):
+        # Compare the key attribute for equality
+        if isinstance(other, ModelShardID):
+            return (
+                self.model_name == other.model_name
+                and self.dp_rank == other.dp_rank
+                and self.mp_rank == other.mp_rank
+                and self.pp_rank == other.pp_rank
+            )
+        return False
+
+
+@dataclasses.dataclass
+class StandaloneModelShard:
+    """A combination of model, model interface, and model backend. Representing
+    a runnable model shard, which has topology `topo` and is indexed by `dp_rank`,
+    `mp_rank`, and `pp_rank`. `StandaloneModelShard` resides in model workers,
+    and each model worker can have multiple shards.
+    """
+
+    id: ModelShardID
+    model: Model
+    interface: ModelInterface
+    backend: ModelBackend
+    # evaluation
+    eval_datasets: Optional[List[Dataset]] = None
+    eval_dataloader: Optional[DataLoader] = None
 
 
 @dataclasses.dataclass
 class ModelWorker:
     seed: int
-    model: Model
-    interface: ModelInterface
-    backend: ModelBackend
-    model_name: str  # the name of this whole model, not this shard
-    # parallelism ranks, used to reveal model shard's identity
-    dp_rank: int = 0
-    mp_rank: int = 0
-    pp_rank: int = 0
-    topo: Optional[base.topology.PipeModelDataParallelTopology] = dataclasses.field(
-        default_factory=lambda x: base.topology.PipeModelDataParallelTopology(1, 1, 1))
-    # evaluation
-    eval_datasets: Optional[List[Dataset]] = None
-    eval_dataloader: Optional[DataLoader] = None
+    shards: List[StandaloneModelShard]
     use_dataset_cache: bool = False
     dataset_cahce_root: str = DATASET_CACHE_PATH
     # cuda & cudnn config
@@ -198,13 +240,16 @@ class ModelWorker:
     cudnn_deterministic: bool = False
     cuda_cache_cleanliness: bool = True
     cuda_cache_clear_freq: int = 10
-    # stream and worker_info will be configured automatically
-    mw_topos: Dict[str, base.topology.PipeModelDataParallelTopology] = None
-    stream: Optional[RequestReplyStream] = None
+    # model_topos and worker_info will be configured automatically
+    model_topos: Dict[str, base.topology.PipeModelDataParallelTopology] = None
+    mw_bcast_groups: List[List[int]] = None
+    msid2mwid: Dict[ModelShardID, int] = None
     worker_info: Optional[WorkerInformation] = None
 
     def __post_init__(self):
-        assert "@" not in self.model_name
+        model_names = [s.id.model_name for s in self.shards]
+        if len(set(model_names)) != len(model_names):
+            raise ValueError("ModelWorker cannot have multiple shards of the same model name.")
 
 
 @dataclasses.dataclass
@@ -216,65 +261,8 @@ class DataWorker:
     # dataset cache
     use_dataset_cache: bool = False
     dataset_cahce_root: str = DATASET_CACHE_PATH
-    # stream and worker_info will be configured automatically
-    stream: RequestReplyStream = None
+    # worker_info will be configured automatically
     worker_info: Optional[WorkerInformation] = None
-
-
-@dataclasses.dataclass
-class ModelWorkerID:
-    model_name: str
-    dp_rank: int
-    mp_rank: int
-    pp_rank: int
-
-    def __post_init__(self):
-        assert self.dp_rank >= 0 and self.mp_rank >= 0 and self.pp_rank >= 0
-        if "@" in self.model_name:
-            raise ValueError("model_name cannot contain @")
-
-    def __repr__(self):
-        return f"{self.model_name}@pp{self.pp_rank:02d}@mp{self.mp_rank:02d}@dp{self.dp_rank:02d}"
-
-    def __hash__(self):
-        return hash(str(self))
-
-    def __eq__(self, other):
-        # Compare the key attribute for equality
-        if isinstance(other, ModelWorkerID):
-            return (self.model_name == other.model_name and self.dp_rank == other.dp_rank
-                    and self.mp_rank == other.mp_rank and self.pp_rank == other.pp_rank)
-        return False
-
-
-@dataclasses.dataclass
-class MasterStreamID:
-    """ID for master streams.
-    This stream will broadcast requests for downstream workers.
-    Data within the same dp_rank is the same and should be sent together within the same pp_rank.
-    """
-
-    model_name: str
-    dp_rank: int
-    pp_rank: int
-
-    def __post_init__(self):
-        assert self.dp_rank >= 0 and self.pp_rank >= 0
-        if "@" in self.model_name:
-            raise ValueError("model_name cannot contain @")
-
-    def __repr__(self):
-        return f"master2{self.model_name}@pp{self.pp_rank:02d}@dp{self.dp_rank:02d}"
-
-    def __hash__(self):
-        return hash(str(self))
-
-    def __eq__(self, other):
-        # Compare the key attribute for equality
-        if isinstance(other, MasterStreamID):
-            return self.model_name == other.model_name and self.dp_rank == other.dp_rank \
-                    and self.pp_rank == other.pp_rank
-        return False
 
 
 @dataclasses.dataclass
@@ -290,11 +278,11 @@ class MasterWorker:
     eval_frequency_seconds: int
     # main components
     model_rpcs: List[api.dfg.ModelRPC]
-    data_stream: RequestReplyStream
-    model_streams: Dict[MasterStreamID, RequestReplyStream]
+    n_model_workers: int
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology]
     benchmark_steps: int
-    mw_topos: Dict[str, base.topology.PipeModelDataParallelTopology] = None
+    msid2mwid: Dict[ModelShardID, int] = None
+    mw_bcast_groups: List[List[int]] = None
     worker_info: Optional[WorkerInformation] = None
 
 
@@ -335,64 +323,74 @@ class ExperimentConfig:
     def __post_init__(self):
         assert self.master_worker is None
 
-        model_names = []
+        model_names = set()
         for w in self.model_worker:
-            if w.model_name not in model_names:
-                model_names.append(w.model_name)
+            model_names = model_names.union([s.id.model_name for s in w.shards])
 
-        model_streams = {}
         model_topos = {}
-        mw_topos = {}
         for model_name in model_names:
-            mws = [w for w in self.model_worker if w.model_name == model_name]
-            mw_topos[model_name] = mws[0].topo
-            ranks = [mw.topo.get_rank(pipe=mw.pp_rank, model=mw.mp_rank, data=mw.dp_rank) for mw in mws]
-            # Sanity check of parallelism ranks.
-            if set(ranks) != set(list(range(len(mws)))) or any(mw.topo.world_size() != len(mws)
-                                                               for mw in mws):
-                raise ValueError(f"Parallelism rank check failed: model name {model_name}, "
-                                 f"parallelism ranks pipe={[mw.pp_rank for mw in mws]}, "
-                                 f"model={[mw.mp_rank for mw in mws]}, "
-                                 f"data={[mw.dp_rank for mw in mws]}, "
-                                 f"flattened ranks {ranks}.")
-            model_topos[model_name] = topo = mws[0].topo
-
-            # Set stream for model workers.
-            model_stream_ids = [
-                ModelWorkerID(
-                    model_name=mw.model_name,
-                    pp_rank=mw.pp_rank,
-                    mp_rank=mw.mp_rank,
-                    dp_rank=mw.dp_rank,
-                ) for mw in mws
+            _this_mws = list(
+                filter(lambda mw: any(x.id.model_name == model_name for x in mw.shards), self.model_worker)
+            )
+            all_shards: List[StandaloneModelShard] = [
+                next(filter(lambda x: x.id.model_name == model_name, mw.shards)) for mw in _this_mws
             ]
-            for dp_i, pp_i in itertools.product(range(topo.get_dim("data")), range(topo.get_dim("pipe"))):
-                master_stream_id = MasterStreamID(model_name, dp_i, pp_i)
-                model_streams[master_stream_id] = RequestReplyStream(
-                    push_stream_name=str(master_stream_id),
-                    pull_stream_name=str(ModelWorkerID(model_name, pp_rank=pp_i, mp_rank=0, dp_rank=dp_i)),
-                )
-            for mw, model_id in zip(mws, model_stream_ids):
-                mw.stream = RequestReplyStream(
-                    push_stream_name=str(model_id),
-                    pull_stream_name=str(MasterStreamID(model_name, mw.dp_rank, mw.pp_rank)),
-                )
+            model_topos[model_name] = all_shards[0].id.topo
 
-        for mw in self.model_worker:
-            mw.mw_topos = mw_topos
+            ##### Sanity check of parallelism ranks. #####
+            ranks = [s.id.parallelism_rank for s in all_shards]
+            _topos = [s.id.topo for s in all_shards]
+            if set(ranks) != set(list(range(len(_this_mws)))) or any(
+                _t.world_size() != _topos[0].world_size() for _t in _topos
+            ):
+                raise ValueError(
+                    f"Parallelism rank check failed: model name {model_name}, "
+                    f"model shard ids={[s.id for s in all_shards]}."
+                )
+            ##### Sanity check of parallelism ranks. #####
+
+        msid2mwid = {}
+        for i, mw in enumerate(self.model_worker):
+            mw.model_topos = model_topos
+            for m in mw.shards:
+                msid2mwid[m.id] = i
+        for m in self.model_worker:
+            m.msid2mwid = msid2mwid
+
+        def can_bcast_together(mw1: ModelWorker, mw2: ModelWorker):
+            # If there does not exist a model that crosses pipeline parallelism ranks along mw1 and mw2,
+            # (e.g., pp_rank=0 on mw1 and pp_rank=1 on mw2) then we can broadcast to mw1 and mw2 simultaneously.
+            _shard_ids1 = [s.id for s in mw1.shards]
+            _shard_ids2 = [s.id for s in mw2.shards]
+            _names1 = [x.model_name for x in _shard_ids1]
+            _names2 = [x.model_name for x in _shard_ids2]
+            return not any(
+                mn in _names1
+                and mn in _names2
+                and _shard_ids1[_names1.index(mn)].pp_rank != _shard_ids2[_names2.index(mn)].pp_rank
+                for mn in model_topos
+            )
+
+        # Create model worker groups that can do scatter/gather with master worker.
+        # Upon scattering/gathering, the target process group will be partitioned
+        # into smaller sub-groups according to it, such that NCCL will not get stuck.
+        mw_bcast_groups: List[List[int]] = []
+        for j, mw in enumerate(self.model_worker):
+            idx = None
+            for _idx, g in enumerate(mw_bcast_groups):
+                if all(can_bcast_together(mw, self.model_worker[jj]) for jj in g):
+                    idx = _idx
+                    break
+            if idx is None:
+                mw_bcast_groups.append([j])
+            else:
+                mw_bcast_groups[idx].append(j)
+
+        for m in self.model_worker:
+            m.mw_bcast_groups = mw_bcast_groups
 
         if len(self.data_worker) != 1:
             raise RuntimeError("Only one data worker is supported now.")
-
-        data_stream = RequestReplyStream(
-            push_stream_name="master2data",
-            pull_stream_name="data2master",
-        )
-        for i, d in enumerate(self.data_worker):
-            d.stream = RequestReplyStream(push_stream_name=f"data2master", pull_stream_name=f"master2data")
-
-        for w in itertools.chain(self.model_worker, self.data_worker):
-            assert w.stream is not None
 
         self.master_worker = [
             MasterWorker(
@@ -403,11 +401,11 @@ class ExperimentConfig:
                 eval_frequency_epochs=self.eval_frequency_epochs,
                 eval_frequency_steps=self.eval_frequency_steps,
                 eval_frequency_seconds=self.eval_frequency_seconds,
-                data_stream=data_stream,
-                model_streams=model_streams,
                 model_topos=model_topos,
                 model_rpcs=self.model_rpcs,
-                mw_topos=mw_topos,
+                n_model_workers=len(self.model_worker),
+                msid2mwid=msid2mwid,
+                mw_bcast_groups=mw_bcast_groups,
                 benchmark_steps=self.benchmark_steps,  # only used for benchmark
             )
         ]
@@ -472,8 +470,7 @@ def dataclass_to_dict(dc):
         root_name = dc.__class__.__name__
         dc = dict(
             config_class=root_name,
-            config_value={k.name: dataclass_to_dict(getattr(dc, k.name))
-                          for k in dataclasses.fields(dc)},
+            config_value={k.name: dataclass_to_dict(getattr(dc, k.name)) for k in dataclasses.fields(dc)},
         )
     else:
         raise f"{dc} of type {type(dc)} cannot be parse to dict."
@@ -485,10 +482,9 @@ def config_to_dataclass(config: Union[List, Dict]):
         return [config_to_dataclass(c) for c in config]
     elif isinstance(config, dict):
         if "config_class" in config.keys():
-            return getattr(sys.modules[__name__], config["config_class"])(**{
-                k: config_to_dataclass(v)
-                for k, v in config["config_value"].items()
-            })
+            return getattr(sys.modules[__name__], config["config_class"])(
+                **{k: config_to_dataclass(v) for k, v in config["config_value"].items()}
+            )
         else:
             return config
     elif isinstance(config, (str, int, float)) or config is None:

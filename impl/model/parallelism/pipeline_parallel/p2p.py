@@ -11,7 +11,7 @@ from packaging.version import Version
 import torch
 import torch.distributed
 
-from base.constants import process_group_offset
+from base.constants import to_global_pg_rank
 
 _groups = None
 _grid = None
@@ -57,7 +57,7 @@ def init_process_groups(grid):
     assert _grid.pipe_parallel_size > 1, "There is no pipeline parallelism"
 
     if not can_send_recv():
-        # _groups = [dist.new_group(ranks=[g + process_group_offset() for g in group]) for group in _grid.p2p_groups]
+        # _groups = [dist.new_group(ranks=[to_global_pg_rank(g) for g in group]) for group in _grid.p2p_groups]
         raise NotImplementedError("Cannot use send/recv with torch version < 1.8."
                                   f" PyTorch version {Version(torch.__version__)}.")
 
@@ -80,11 +80,11 @@ def send(tensor, dest_stage, async_op=False):
     dest_rank = _grid.stage_to_global(stage_id=dest_stage)
     if can_send_recv():
         send_method = torch.distributed.isend if async_op else dist.send
-        return send_method(tensor, dest_rank + process_group_offset())
+        return send_method(tensor, to_global_pg_rank(dest_rank))
     else:
         group = _get_send_recv_group(src_stage, dest_stage)
         src_rank = _grid.stage_to_global(stage_id=src_stage)
-        return dist.broadcast(tensor, src_rank + process_group_offset(), group=group, async_op=async_op)
+        return dist.broadcast(tensor, to_global_pg_rank(src_rank), group=group, async_op=async_op)
 
 
 def recv(tensor, src_stage, async_op=False):
@@ -97,10 +97,10 @@ def recv(tensor, src_stage, async_op=False):
     src_rank = _grid.stage_to_global(stage_id=src_stage)
     if can_send_recv():
         recv_method = torch.distributed.irecv if async_op else dist.recv
-        return recv_method(tensor, src_rank + process_group_offset())
+        return recv_method(tensor, to_global_pg_rank(src_rank))
     else:
         group = _get_send_recv_group(src_stage, dest_stage)
-        return dist.broadcast(tensor, src_rank + process_group_offset(), group=group, async_op=async_op)
+        return dist.broadcast(tensor, to_global_pg_rank(src_rank), group=group, async_op=async_op)
 
 
 def wait():

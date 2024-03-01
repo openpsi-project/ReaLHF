@@ -448,14 +448,20 @@ class PPOConfig(Experiment):
             [
                 ModelWorker(
                     seed=self.seed,
-                    model=actor_model,
-                    backend=actor_backend,
-                    interface=actor_interface,
-                    model_name="actor",
-                    topo=actor_topo,
-                    dp_rank=actor_topo.get_coord(i).data,
-                    pp_rank=actor_topo.get_coord(i).pipe,
-                    mp_rank=actor_topo.get_coord(i).model,
+                    shards=[
+                        StandaloneModelShard(
+                            id=ModelShardID(
+                                model_name="actor",
+                                topo=actor_topo,
+                                dp_rank=actor_topo.get_coord(i).data,
+                                pp_rank=actor_topo.get_coord(i).pipe,
+                                mp_rank=actor_topo.get_coord(i).model,
+                            ),
+                            model=actor_model,
+                            backend=actor_backend,
+                            interface=actor_interface,
+                        )
+                    ],
                     cuda_cache_cleanliness=True,
                 )
                 for i in range(self.n_actors)
@@ -463,14 +469,20 @@ class PPOConfig(Experiment):
             + [
                 ModelWorker(
                     seed=self.seed,
-                    model=critic_model,
-                    backend=critic_backend,
-                    interface=critic_interface,
-                    model_name="critic",
-                    topo=critic_topo,
-                    dp_rank=critic_topo.get_coord(i).data,
-                    pp_rank=critic_topo.get_coord(i).pipe,
-                    mp_rank=critic_topo.get_coord(i).model,
+                    shards=[
+                        StandaloneModelShard(
+                            id=ModelShardID(
+                                model_name="critic",
+                                topo=critic_topo,
+                                dp_rank=critic_topo.get_coord(i).data,
+                                pp_rank=critic_topo.get_coord(i).pipe,
+                                mp_rank=critic_topo.get_coord(i).model,
+                            ),
+                            model=critic_model,
+                            backend=critic_backend,
+                            interface=critic_interface,
+                        )
+                    ],
                     cuda_cache_cleanliness=True,
                 )
                 for i in range(self.n_critics)
@@ -478,14 +490,20 @@ class PPOConfig(Experiment):
             + [
                 ModelWorker(
                     seed=self.seed,
-                    model=ref_model,
-                    backend=ref_backend,
-                    interface=ref_interface,
-                    model_name="ref",
-                    dp_rank=ref_topo.get_coord(i).data,
-                    pp_rank=ref_topo.get_coord(i).pipe,
-                    mp_rank=ref_topo.get_coord(i).model,
-                    topo=ref_topo,
+                    shards=[
+                        StandaloneModelShard(
+                            id=ModelShardID(
+                                model_name="ref",
+                                topo=ref_topo,
+                                dp_rank=ref_topo.get_coord(i).data,
+                                pp_rank=ref_topo.get_coord(i).pipe,
+                                mp_rank=ref_topo.get_coord(i).model,
+                            ),
+                            model=ref_model,
+                            backend=ref_backend,
+                            interface=ref_interface,
+                        )
+                    ],
                     cuda_cache_cleanliness=True,
                 )
                 for i in range(self.n_refs)
@@ -493,14 +511,20 @@ class PPOConfig(Experiment):
             + [
                 ModelWorker(
                     seed=self.seed,
-                    model=rw_model,
-                    backend=rw_backend,
-                    interface=rw_interface,
-                    model_name="reward",
-                    dp_rank=rw_topo.get_coord(i).data,
-                    pp_rank=rw_topo.get_coord(i).pipe,
-                    mp_rank=rw_topo.get_coord(i).model,
-                    topo=rw_topo,
+                    shards=[
+                        StandaloneModelShard(
+                            id=ModelShardID(
+                                model_name="reward",
+                                topo=rw_topo,
+                                dp_rank=rw_topo.get_coord(i).data,
+                                pp_rank=rw_topo.get_coord(i).pipe,
+                                mp_rank=rw_topo.get_coord(i).model,
+                            ),
+                            model=rw_model,
+                            backend=rw_backend,
+                            interface=rw_interface,
+                        )
+                    ],
                     cuda_cache_cleanliness=True,
                 )
                 for i in range(self.n_rewards)

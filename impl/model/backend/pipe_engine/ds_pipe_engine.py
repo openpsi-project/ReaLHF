@@ -17,7 +17,7 @@ import transformers
 from base.dataparallel import PackedParallelDataBroker
 from base.monitor import time_mark
 from base.namedarray import NamedArray
-from base.topology import PipelineParallelGrid
+from base.topology import ParallelGrid
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig, genstep
 from impl.model.parallelism.pipeline_parallel.pipeline_module import PipelineError, PipelineModule
 from impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
@@ -74,7 +74,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.sched_count = 0
 
         # parallelism constants
-        self.grid: PipelineParallelGrid = base.constants.grid()
+        self.grid: ParallelGrid = base.constants.grid()
         assert self.dp_world_size == self.grid.data_parallel_size
 
         self.global_rank = self.grid.get_global_rank()

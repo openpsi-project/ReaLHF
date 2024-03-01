@@ -21,7 +21,7 @@ import torch.nn as nn
 
 from base.datapack import partition_balanced as true_partition_balanced
 from base.monitor import process_memory_mb, time_mark
-from base.topology import PipeDataParallelTopology, PipelineParallelGrid, PipeModelDataParallelTopology
+from base.topology import PipeDataParallelTopology, ParallelGrid, PipeModelDataParallelTopology
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, OutputHead
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
@@ -448,7 +448,7 @@ class PipelineModule(nn.Module):
         for key, comm in self.tied_comms.items():
             dist.broadcast(
                 getattr(comm["module"], comm["weight_attr"]),
-                src=min(comm["ranks"]) + base.constants.process_group_offset(),
+                src=base.constants.to_global_pg_rank(min(comm["ranks"])),
                 group=comm["group"],
             )
 
@@ -481,7 +481,7 @@ class PipelineModule(nn.Module):
                         else:
                             tied_ranks.append(self._grid.stage_to_global(stage_id=s, data=dp))
                     group = dist.new_group(
-                        ranks=[rank + base.constants.process_group_offset() for rank in tied_ranks])
+                        ranks=[base.constants.to_global_pg_rank(rank) for rank in tied_ranks])
 
                     # Record this tied module if we own a local copy of it.
                     if self.global_rank in tied_ranks:
