@@ -32,6 +32,7 @@ _LLM_ENVVARS = {
     # "NCCL_SOCKET_IFNAME": "ibp71s0",
     # "GLOO_SOCKET_IFNAME": "ibp71s0",
     # "TORCH_USE_CUDA_DSA": "1",
+    # FIXME: change to non-blocking
     "CUDA_LAUNCH_BLOCKING": "1",
     "NCCL_COMM_BLOCKING": "1",
     "NCCL_BLOCKING_WAIT": "1",

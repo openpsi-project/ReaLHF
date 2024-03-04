@@ -284,11 +284,11 @@ class ModelWorker(worker_base.Worker):
                 data[k] = buf[s].clone()
             data = namedarray.from_dict(data)
 
-        with base.constants.model_scope(handler.model_name):
-            if self._is_dp_head:
-                self.logger.info(
-                    f"Model {handler.model_name} receive request {request.handle_name} time: {time.perf_counter() - recv_tik}"
-                )
+        # with base.constants.model_scope(handler.model_name):
+        #     if self._is_dp_head:
+        #         self.logger.info(
+        #             f"Model {handler.model_name} receive request {request.handle_name} time: {time.perf_counter() - recv_tik}"
+        #         )
 
         self.__request_queue.put_nowait((request, data))
 
@@ -302,11 +302,11 @@ class ModelWorker(worker_base.Worker):
         request: request_reply_stream.Payload
         tik = time.perf_counter()
 
-        self.logger.info(
-            f"Model worker {self.__worker_index} #{request.handler}# "
-            f"start handle request *{request.handle_name}*, "
-            f"request_id {request.request_id}."
-        )
+        # self.logger.info(
+        #     f"Model worker {self.__worker_index} #{request.handler}# "
+        #     f"start handle request *{request.handle_name}*, "
+        #     f"request_id {request.request_id}."
+        # )
         with base.constants.model_scope(request.handler.model_name):
             try:
                 if request.handle_name == "initialize":
@@ -326,7 +326,9 @@ class ModelWorker(worker_base.Worker):
                 elif request.handle_name == "evaluate":
                     res = self._interface.evaluate(self._model, self._eval_dataloader)  # -> Dict
                 elif request.handle_name == "gather_tensor_reply":
-                    res = self.__gather_tensor_reply(request.buf_shapes, request.data, request.handler)
+                    res = None
+                    if self._is_dp_head:
+                        res = self.__gather_tensor_reply(request)
                 elif request.handle_name == "offload":
                     raise NotImplementedError(f"Offload is not implemented yet.")  # FIXME: offload
                 elif request.handle_name == "sync_param":
@@ -362,10 +364,19 @@ class ModelWorker(worker_base.Worker):
         sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
         self.__request_sample_size[request.request_id] = sample_count
 
-    def __gather_tensor_reply(self, buf_shapes: Dict, request_id: uuid.UUID, handler: config.ModelShardID):
-        with base.constants.model_scope(handler.model_name):
-            if not self._is_dp_head:
-                return
+    def __gather_tensor_reply(self, request: request_reply_stream.Payload):
+        # This is not the ID of "gather" request, but the ID of the original RPC, e.g., generate
+        # Used to index the reply storage.
+        request_id = request.data
+        handler = request.handler
+        buf_shapes = request.buf_shapes
+
+        ack = request_reply_stream.Payload(
+            handler="master",
+            handle_name="gather_tensor_reply",
+            request_id=request.ack_reply_id,
+        )
+        self.__stream.post(ack)
         res: namedarray.NamedArray = self.__reply_storage.pop(request_id)
 
         pg_idx = [
@@ -407,7 +418,7 @@ class ModelWorker(worker_base.Worker):
                 handle_name=request.handle_name,
                 is_tensor=True,
                 actual_shapes=shapes,
-                buf_shapes=None,
+                buf_shapes=dict(),
                 dtypes=dtypes,
                 seqlens=request.seqlens,
                 buffer_indices=request.buffer_indices,
@@ -421,8 +432,9 @@ class ModelWorker(worker_base.Worker):
                 data=res,
             )
 
+        print(f"model {','.join(self.model_names)} >>>>> ready_to_post", reply.request_id)
         self.__stream.post(reply)
-        logger.info(f"handle_name {request.handle_name} Posted req id = {request.request_id}")
+        # logger.info(f"handle_name {request.handle_name} Posted req id = {request.request_id}")
 
         with base.constants.model_scope(request.handler.model_name):
             if reply.is_tensor and self._is_dp_head:
@@ -450,6 +462,11 @@ class ModelWorker(worker_base.Worker):
                 )
                 ready_to_post.append((request, res))
 
+        if ready_to_post:
+            print(
+                f"model {','.join(self.model_names)} >>>>> ready_to_post",
+                [r[0].request_id for r in ready_to_post],
+            )
         batch_size = sample_size = 0
         for request, res in ready_to_post:
             request: request_reply_stream.Payload

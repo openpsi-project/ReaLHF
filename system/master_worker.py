@@ -344,58 +344,60 @@ async def gather_tensor_from_mws(
     dp_head_handlers: List[config_pkg.ModelShardID],
     gather_groups: List[torch.distributed.ProcessGroup],
 ) -> Tuple[List[request_reply_stream.Payload], Union[dict, namedarray.NamedArray]]:
-    # logger.info(f"rpc {rpc.name} waiting for responses {req_ids}")
+    logger.info(f"rpc {rpc.name} waiting for responses {req_ids}")
     responses = await asyncio.gather(
         *[_awaitable_response(stream, pattern=create_exact_match_pattern([req_id])) for req_id in req_ids]
     )
-    # logger.info(f"rpc {rpc.name} received responses {req_ids}")
+    logger.info(f"rpc {rpc.name} received responses {req_ids}")
 
-    dp_head_responses = [responses[i] for i in dp_head_indices]
-    assert all(r.buf_shapes is None for r in dp_head_responses)
-    buf_shapes = {}
-    for k in dp_head_responses[0].dtypes.keys():
-        buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s.actual_shapes[k]) for s in dp_head_responses])
-
-    gather_acks = [
-        request_reply_stream.Payload(
-            handler=h,
-            handle_name="gather_tensor_reply",
-            actual_shapes=None,
-            buf_shapes=buf_shapes,
-            dtypes=None,
-            is_tensor=False,
-        )
-        for h in dp_head_handlers
-    ]
-    ack_ids = [stream.post(ack) for ack in gather_acks]
-    await asyncio.gather(
-        *[_awaitable_response(stream, pattern=create_exact_match_pattern([ack_id])) for ack_id in ack_ids]
-    )
-
+    responses = [responses[i] for i in dp_head_indices]
     recv_tik = time.perf_counter()
 
-    if not dp_head_responses[-1].is_tensor:
+    if not responses[-1].is_tensor:
         res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(
-            [response.data for response in dp_head_responses]
+            [response.data for response in responses]
         )
         # logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
-        return dp_head_responses, res
+        return responses, res
 
-    all_res = [dict() for _ in range(len(dp_head_responses))]
+    assert all(len(r.buf_shapes) == 0 for r in responses)
+    buf_shapes = {}
+    for k in responses[0].dtypes.keys():
+        buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s.actual_shapes[k]) for s in responses])
+
+    all_res = [dict() for _ in range(len(responses))]
     for gather_group in gather_groups:
         assert all(torch.distributed.get_rank(gather_group) != -1 for gather_group in gather_groups)
         gather_mw_ids = [r - 1 for r in torch.distributed.get_process_group_ranks(gather_group)]
 
         gather_response_indices = [i for i, mw_id in enumerate(dp_head_mw_ids) if mw_id in gather_mw_ids]
         this_responses = [responses[i] for i in gather_response_indices]
-
-        all_buf_shapes = [response.buf_shapes for response in this_responses]
+        this_handlers = [dp_head_handlers[i] for i in gather_response_indices]
+        this_request_indices = [dp_head_indices[i] for i in gather_response_indices]
         dtypes = this_responses[-1].dtypes
 
-        # A simple sanity check to ensure that gather buffer shapes are all the same across DP ranks.
-        for buf_shapes in all_buf_shapes:
-            for k, v in buf_shapes.items():
-                assert buf_shapes[k] == all_buf_shapes[0][k]
+        gather_requests = [
+            request_reply_stream.Payload(
+                handler=h,
+                handle_name="gather_tensor_reply",
+                actual_shapes=None,
+                buf_shapes=buf_shapes,
+                dtypes=None,
+                is_tensor=False,
+                data=req_ids[j],
+            )
+            for h, j in zip(this_handlers, this_request_indices)
+        ]
+        [stream.post(x) for x in gather_requests]
+        gather_ack_ids = [r.ack_reply_id for r in gather_requests]
+
+        # wait for the ack message from model workers
+        await asyncio.gather(
+            *[
+                _awaitable_response(stream, pattern=create_exact_match_pattern([ack_id]))
+                for ack_id in gather_ack_ids
+            ]
+        )
 
         for k, buf_shape in buf_shapes.items():
             gather_buffer = [
@@ -410,6 +412,7 @@ async def gather_tensor_from_mws(
             ]
 
             # Only gather from DP heads, ignoring the MP/PP dimension.
+            print(f">>>>>>>> master gather reply {k} of {rpc.name}")
             torch.distributed.gather(
                 gather_buffer[0],
                 gather_list=gather_buffer,
@@ -420,14 +423,15 @@ async def gather_tensor_from_mws(
             for idx, v, actual_shape in zip(
                 gather_response_indices,
                 gather_buffer[1:],
-                [response.actual_shapes[k] for response in dp_head_responses],
+                [response.actual_shapes[k] for response in responses],
             ):
                 s = tuple(slice(0, x) for x in actual_shape)
                 all_res[idx][k] = v[s].clone()
 
+    logger.info(f"rpc {rpc.name} finished tensor gather {req_ids}")
     res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(list(map(namedarray.from_dict, all_res)))
     # logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
-    return dp_head_responses, rpc.remap_output_keys(res)
+    return responses, rpc.remap_output_keys(res)
 
 
 async def model_rpc_reply_func(
@@ -446,6 +450,9 @@ async def model_rpc_reply_func(
         msid2mwid[config_pkg.ModelShardID.from_parallelism_rank(rpc.model_name, topo, i)]
         for i in dp_head_indices
     ]
+    dp_head_handlers = [
+        config_pkg.ModelShardID.from_parallelism_rank(rpc.model_name, topo, i) for i in dp_head_indices
+    ]
 
     while not ctrl.stop.is_set():
         req_ids, tik = await ctrl.request_queues[corountine_idx].get()
@@ -456,6 +463,7 @@ async def model_rpc_reply_func(
             req_ids=req_ids,
             dp_head_indices=dp_head_indices,
             dp_head_mw_ids=dp_head_mw_ids,
+            dp_head_handlers=dp_head_handlers,
             gather_groups=gather_groups,
         )
 
