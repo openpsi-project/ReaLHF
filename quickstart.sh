@@ -2,7 +2,8 @@
 
 actor_pp_size=2
 base_model_path="/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
-actor_model_path="/lustre/public/pretrained_model_weights/sharded_new/Llama-2-7b-hf_2pp_2mp/"
+# actor_model_path="/lustre/public/pretrained_model_weights/sharded_new/Llama-2-7b-hf_2pp_2mp/"
+actor_model_path=$base_model_path
 critic_model_path="/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
 
 python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240227 \
@@ -10,9 +11,9 @@ python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240
     actor.type=llama \
     actor.path=$actor_model_path \
     actor.base_model_path=$actor_model_path \
-    actor.parallel.pipeline_parallel_size=2 \
-    actor.parallel.model_parallel_size=2 \
-    actor.parallel.data_parallel_size=1 \
+    actor.parallel.pipeline_parallel_size=1 \
+    actor.parallel.model_parallel_size=1 \
+    actor.parallel.data_parallel_size=7 \
     actor.gradient_checkpointing=True \
     actor.parallel.use_sequence_parallel=False \
     actor.enable_async_p2p=True \
@@ -22,23 +23,23 @@ python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240
     critic.base_model_path=$critic_model_path \
     critic.parallel.pipeline_parallel_size=1 \
     critic.parallel.model_parallel_size=1 \
-    critic.parallel.data_parallel_size=1 \
+    critic.parallel.data_parallel_size=7 \
     critic.gradient_checkpointing=True \
     critic.parallel.use_sequence_parallel=False \
     critic.optimizer.offload=True \
     ref.type=llama \
     ref.path=$actor_model_path  \
     ref.base_model_path=$actor_model_path \
-    ref.parallel.pipeline_parallel_size=1 \
+    ref.parallel.data_parallel_size=7 \
     rew.type=llama \
     rew.path=$critic_model_path \
     rew.base_model_path=$critic_model_path \
-    rew.parallel.data_parallel_size=1 \
+    rew.parallel.data_parallel_size=7 \
     save_freq_steps=null \
     dataset.max_prompt_len=256 \
     dataset.n_tokens_per_batch=8192 \
-    actor_per_device_generate_batch_size=128 \
-    actor_per_device_train_batch_size=128 \
+    actor_per_device_generate_batch_size=40 \
+    actor_per_device_train_batch_size=40 \
     ppo.max_new_tokens=256 \
     ppo.min_new_tokens=256 \
     ppo.ppo_n_minibatches=4 \

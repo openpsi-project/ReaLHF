@@ -197,15 +197,15 @@ async def scatter_tensor_to_mws(
         assert all(torch.distributed.get_rank(scatter_group) != -1 for scatter_group in scatter_groups)
         # Since master must belong to all scatter groups, it is safe to call get_process_group_ranks here.
         scatter_mw_ids = [r - 1 for r in torch.distributed.get_process_group_ranks(scatter_group)]
-        hanlder_indices = list(
+        handler_indices = list(
             map(lambda x: x[0], filter(lambda ix: ix[1] in scatter_mw_ids, enumerate(handler_mw_ids)))
         )
 
-        this_handlers = [handlers[i] for i in hanlder_indices]
-        this_datas = [datas[i] for i in hanlder_indices]
-        this_all_buffer_indices = [all_buffer_indices[i] for i in hanlder_indices]
-        this_all_seqlens = [all_seqlens[i] for i in hanlder_indices]
-        this_replica_ids = [data_replica_ids[i] for i in hanlder_indices]
+        this_handlers = [handlers[i] for i in handler_indices]
+        this_datas = [datas[i] for i in handler_indices]
+        this_all_buffer_indices = [all_buffer_indices[i] for i in handler_indices]
+        this_all_seqlens = [all_seqlens[i] for i in handler_indices]
+        this_replica_ids = [data_replica_ids[i] for i in handler_indices]
 
         dtypes = {k: v.dtype for k, v in this_datas[0].items()}
         all_shapes = [{k: v.shape for k, v in data.items()} for data in this_datas]
@@ -251,10 +251,11 @@ async def scatter_tensor_to_mws(
             for data, replica_id in zip(datas, this_replica_ids):
                 if replica_id in copied_replica_ids:
                     continue
-                buf = scatter_buffer[f"data{j}"]
+                buf = scatter_buffer[f"data{replica_id}"]
                 v = data[k]
                 s = tuple(slice(0, x) for x in v.shape)
                 buf[s] = v
+                copied_replica_ids.append(replica_id)
 
             scatter_list = [scatter_buffer["master"]] + [scatter_buffer[f"data{j}"] for j in this_replica_ids]
 

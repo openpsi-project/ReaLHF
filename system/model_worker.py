@@ -354,7 +354,7 @@ class ModelWorker(worker_base.Worker):
                     f"Model worker #{request.handler.model_name}# issued future request *{request.handle_name}*."
                 )
             else:
-                if self._is_dp_head:
+                if self._is_dp_head and self._dp_rank == 0:
                     blogger.info(
                         f"Model worker #{request.handler.model_name}# handle request *{request.handle_name}*"
                         f" in ${time.perf_counter() - tik:.4f}$s"

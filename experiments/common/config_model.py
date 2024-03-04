@@ -206,6 +206,8 @@ def get_flash_mqat_model_config(
         original_is_critic = False
         if from_type == "actor_as_critic":
             from_type = "hf_as_critic"
+        if from_type == "self":
+            from_type = "hf_as_actor"
 
     if use_pipe:
         pipe_init_from_scratch = from_type == "random_actor" or from_type == "random_critic"

@@ -238,33 +238,33 @@ class PPOConfig(Experiment):
                         mem=50000,
                     ),
                 ),
-                TasksGroup(
-                    count=self.n_critics,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type="tesla",
-                        mem=100000,
-                    ),
-                ),
-                TasksGroup(
-                    count=self.n_rewards,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type="tesla",
-                        mem=100000,
-                    ),
-                ),
-                TasksGroup(
-                    count=self.n_refs,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type="tesla",
-                        mem=100000,
-                    ),
-                ),
+                # TasksGroup(
+                #     count=self.n_critics,
+                #     scheduling=Scheduling.model_worker_default(
+                #         cpu=4,
+                #         gpu=1,
+                #         gpu_type="tesla",
+                #         mem=100000,
+                #     ),
+                # ),
+                # TasksGroup(
+                #     count=self.n_rewards,
+                #     scheduling=Scheduling.model_worker_default(
+                #         cpu=4,
+                #         gpu=1,
+                #         gpu_type="tesla",
+                #         mem=100000,
+                #     ),
+                # ),
+                # TasksGroup(
+                #     count=self.n_refs,
+                #     scheduling=Scheduling.model_worker_default(
+                #         cpu=4,
+                #         gpu=1,
+                #         gpu_type="tesla",
+                #         mem=100000,
+                #     ),
+                # ),
             ],
         )
 
@@ -444,92 +444,152 @@ class PPOConfig(Experiment):
             num_dp=self.rew.parallel.data_parallel_size,
         )
 
-        model_worker = (
-            [
-                ModelWorker(
-                    seed=self.seed,
-                    shards=[
-                        StandaloneModelShard(
-                            id=ModelShardID(
-                                model_name="actor",
-                                topo=actor_topo,
-                                dp_rank=actor_topo.get_coord(i).data,
-                                pp_rank=actor_topo.get_coord(i).pipe,
-                                mp_rank=actor_topo.get_coord(i).model,
-                            ),
-                            model=actor_model,
-                            backend=actor_backend,
-                            interface=actor_interface,
-                        )
-                    ],
-                    cuda_cache_cleanliness=True,
-                )
-                for i in range(self.n_actors)
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    shards=[
-                        StandaloneModelShard(
-                            id=ModelShardID(
-                                model_name="critic",
-                                topo=critic_topo,
-                                dp_rank=critic_topo.get_coord(i).data,
-                                pp_rank=critic_topo.get_coord(i).pipe,
-                                mp_rank=critic_topo.get_coord(i).model,
-                            ),
-                            model=critic_model,
-                            backend=critic_backend,
-                            interface=critic_interface,
-                        )
-                    ],
-                    cuda_cache_cleanliness=True,
-                )
-                for i in range(self.n_critics)
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    shards=[
-                        StandaloneModelShard(
-                            id=ModelShardID(
-                                model_name="ref",
-                                topo=ref_topo,
-                                dp_rank=ref_topo.get_coord(i).data,
-                                pp_rank=ref_topo.get_coord(i).pipe,
-                                mp_rank=ref_topo.get_coord(i).model,
-                            ),
-                            model=ref_model,
-                            backend=ref_backend,
-                            interface=ref_interface,
-                        )
-                    ],
-                    cuda_cache_cleanliness=True,
-                )
-                for i in range(self.n_refs)
-            ]
-            + [
-                ModelWorker(
-                    seed=self.seed,
-                    shards=[
-                        StandaloneModelShard(
-                            id=ModelShardID(
-                                model_name="reward",
-                                topo=rw_topo,
-                                dp_rank=rw_topo.get_coord(i).data,
-                                pp_rank=rw_topo.get_coord(i).pipe,
-                                mp_rank=rw_topo.get_coord(i).model,
-                            ),
-                            model=rw_model,
-                            backend=rw_backend,
-                            interface=rw_interface,
-                        )
-                    ],
-                    cuda_cache_cleanliness=True,
-                )
-                for i in range(self.n_rewards)
-            ]
-        )
+        # Deep-first strategy
+        # model_worker = (
+        #     [
+        #         ModelWorker(
+        #             seed=self.seed,
+        #             shards=[
+        #                 StandaloneModelShard(
+        #                     id=ModelShardID(
+        #                         model_name="actor",
+        #                         topo=actor_topo,
+        #                         dp_rank=actor_topo.get_coord(i).data,
+        #                         pp_rank=actor_topo.get_coord(i).pipe,
+        #                         mp_rank=actor_topo.get_coord(i).model,
+        #                     ),
+        #                     model=actor_model,
+        #                     backend=actor_backend,
+        #                     interface=actor_interface,
+        #                 )
+        #             ],
+        #             cuda_cache_cleanliness=True,
+        #         )
+        #         for i in range(self.n_actors)
+        #     ]
+        #     + [
+        #         ModelWorker(
+        #             seed=self.seed,
+        #             shards=[
+        #                 StandaloneModelShard(
+        #                     id=ModelShardID(
+        #                         model_name="critic",
+        #                         topo=critic_topo,
+        #                         dp_rank=critic_topo.get_coord(i).data,
+        #                         pp_rank=critic_topo.get_coord(i).pipe,
+        #                         mp_rank=critic_topo.get_coord(i).model,
+        #                     ),
+        #                     model=critic_model,
+        #                     backend=critic_backend,
+        #                     interface=critic_interface,
+        #                 )
+        #             ],
+        #             cuda_cache_cleanliness=True,
+        #         )
+        #         for i in range(self.n_critics)
+        #     ]
+        #     + [
+        #         ModelWorker(
+        #             seed=self.seed,
+        #             shards=[
+        #                 StandaloneModelShard(
+        #                     id=ModelShardID(
+        #                         model_name="ref",
+        #                         topo=ref_topo,
+        #                         dp_rank=ref_topo.get_coord(i).data,
+        #                         pp_rank=ref_topo.get_coord(i).pipe,
+        #                         mp_rank=ref_topo.get_coord(i).model,
+        #                     ),
+        #                     model=ref_model,
+        #                     backend=ref_backend,
+        #                     interface=ref_interface,
+        #                 )
+        #             ],
+        #             cuda_cache_cleanliness=True,
+        #         )
+        #         for i in range(self.n_refs)
+        #     ]
+        #     + [
+        #         ModelWorker(
+        #             seed=self.seed,
+        #             shards=[
+        #                 StandaloneModelShard(
+        #                     id=ModelShardID(
+        #                         model_name="reward",
+        #                         topo=rw_topo,
+        #                         dp_rank=rw_topo.get_coord(i).data,
+        #                         pp_rank=rw_topo.get_coord(i).pipe,
+        #                         mp_rank=rw_topo.get_coord(i).model,
+        #                     ),
+        #                     model=rw_model,
+        #                     backend=rw_backend,
+        #                     interface=rw_interface,
+        #                 )
+        #             ],
+        #             cuda_cache_cleanliness=True,
+        #         )
+        #         for i in range(self.n_rewards)
+        #     ]
+        # )
+
+        # Breadth-first strategy
+        model_worker = [
+            ModelWorker(
+                seed=self.seed,
+                shards=[
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            model_name="actor",
+                            topo=actor_topo,
+                            dp_rank=actor_topo.get_coord(i).data,
+                            pp_rank=actor_topo.get_coord(i).pipe,
+                            mp_rank=actor_topo.get_coord(i).model,
+                        ),
+                        model=actor_model,
+                        backend=actor_backend,
+                        interface=actor_interface,
+                    ),
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            model_name="critic",
+                            topo=critic_topo,
+                            dp_rank=critic_topo.get_coord(i).data,
+                            pp_rank=critic_topo.get_coord(i).pipe,
+                            mp_rank=critic_topo.get_coord(i).model,
+                        ),
+                        model=critic_model,
+                        backend=critic_backend,
+                        interface=critic_interface,
+                    ),
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            model_name="ref",
+                            topo=ref_topo,
+                            dp_rank=ref_topo.get_coord(i).data,
+                            pp_rank=ref_topo.get_coord(i).pipe,
+                            mp_rank=ref_topo.get_coord(i).model,
+                        ),
+                        model=ref_model,
+                        backend=ref_backend,
+                        interface=ref_interface,
+                    ),
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            model_name="reward",
+                            topo=rw_topo,
+                            dp_rank=rw_topo.get_coord(i).data,
+                            pp_rank=rw_topo.get_coord(i).pipe,
+                            mp_rank=rw_topo.get_coord(i).model,
+                        ),
+                        model=rw_model,
+                        backend=rw_backend,
+                        interface=rw_interface,
+                    ),
+                ],
+                cuda_cache_cleanliness=True,
+            )
+            for i in range(self.n_actors)
+        ]
 
         global_train_bs = self.actor_per_device_train_batch_size * self.n_actors
         global_gen_bs = self.actor_per_device_generate_batch_size * self.n_actors
@@ -555,23 +615,23 @@ class PPOConfig(Experiment):
 
         global rollout
         rollout = copy.deepcopy(rollout)
-        rollout.min_n_seqs = global_gen_bs // 4
-        rollout.max_n_seqs = global_gen_bs // 4 + 1
+        rollout.min_n_seqs = global_gen_bs
+        rollout.max_n_seqs = global_gen_bs + 1
 
         global inf_ref_logits
         inf_ref_logits = copy.deepcopy(inf_ref_logits)
-        inf_ref_logits.min_n_seqs = global_gen_bs // 4
-        inf_ref_logits.max_n_seqs = global_gen_bs // 4 + 1
+        inf_ref_logits.min_n_seqs = global_gen_bs
+        inf_ref_logits.max_n_seqs = global_gen_bs + 1
 
         global inf_reward
         inf_reward = copy.deepcopy(inf_reward)
-        inf_reward.min_n_seqs = global_gen_bs // 4
-        inf_reward.max_n_seqs = global_gen_bs // 4 + 1
+        inf_reward.min_n_seqs = global_gen_bs
+        inf_reward.max_n_seqs = global_gen_bs + 1
 
         global inf_values
         inf_values = copy.deepcopy(inf_values)
-        inf_values.min_n_seqs = global_gen_bs // 4
-        inf_values.max_n_seqs = global_gen_bs // 4 + 1
+        inf_values.min_n_seqs = global_gen_bs
+        inf_values.max_n_seqs = global_gen_bs + 1
 
         return ExperimentConfig(
             total_train_epochs=self.total_train_epochs,
