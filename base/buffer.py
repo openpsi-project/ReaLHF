@@ -234,6 +234,16 @@ class AsyncIOSequenceBuffer:
             if self._is_idle[indices].any():
                 self._lock.notify(len(self._rpc_names))
 
+    def _request_load_data(self):
+        try:
+            self._fetch_ctl.put_nowait(1)
+        except asyncio.QueueFull:
+            pass
+        try:
+            self._fetch_master_ctl.put_nowait(1)
+        except asyncio.QueueFull:
+            pass
+
     async def get_batch_for_rpc(self, rpc: api.dfg.ModelRPC) -> SequenceSample:
         rpc_idx = self._rpc_names.index(rpc.name)
 
@@ -249,32 +259,30 @@ class AsyncIOSequenceBuffer:
             return True
 
         async with self._lock:
-            if rpc.is_src and (self._buf_size < rpc.min_n_seqs or self._n_tokens < rpc.min_n_tokens):
-                try:
-                    self._fetch_ctl.put_nowait(1)
-                except asyncio.QueueFull:
-                    pass
-                try:
-                    self._fetch_master_ctl.put_nowait(1)
-                except asyncio.QueueFull:
-                    pass
+            # await self._lock.wait_for(_can_do_rpc)
+            if rpc.is_src:
+                ready_indices = np.nonzero((self._is_idle | self._is_being_read)
+                                    & self._ready_for_rpcs[:, rpc_idx]
+                                    & ~self._completed_rpc[:, rpc_idx])[0]
+                seqlens = self.__buffer._get_seqlen(ready_indices)
+                # *2 because we want to fetch new data as long as the *next* RPC does not have enough data.
+                if len(ready_indices) < rpc.min_n_seqs * 2 or seqlens.sum() < rpc.min_n_tokens * 2:
+                    self._request_load_data()
 
             while not _can_do_rpc():
                 await self._lock.wait()
-
-            # HACK: A simple (but may be useless) trick to prioritize training over inference and inference over generate.
-            if rpc.interface_type == api.dfg.ModelInterfaceType.GENERATE:
-                await asyncio.sleep(2e-2)
-            elif rpc.interface_type == api.dfg.ModelInterfaceType.INFERENCE:
-                await asyncio.sleep(1e-2)
-
-            # await self._lock.wait_for(_can_do_rpc)
+            
             self._assert_valid_indicator()
 
             ready_indices = np.nonzero((self._is_idle | self._is_being_read)
-                                       & self._ready_for_rpcs[:, rpc_idx]
-                                       & ~self._completed_rpc[:, rpc_idx])[0]
+                                    & self._ready_for_rpcs[:, rpc_idx]
+                                    & ~self._completed_rpc[:, rpc_idx])[0]
             seqlens = self.__buffer._get_seqlen(ready_indices)
+            
+            if rpc.is_src:
+                # *2 because we want to fetch new data as long as the *next* RPC does not have enough data.
+                if len(ready_indices) < rpc.min_n_seqs * 2 or seqlens.sum() < rpc.min_n_tokens * 2:
+                    self._request_load_data()
 
             token_cumsum = np.cumsum(seqlens, axis=0)
             token_valid_mask = (token_cumsum >= rpc.min_n_tokens) & (token_cumsum <= rpc.max_n_tokens)

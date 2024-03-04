@@ -160,19 +160,22 @@ def split_packed_batch_into_seqs(
 
 @dataclasses.dataclass
 class RPCCorountineControl:
+    ## Shared resources ##
     stop: asyncio.Event
-    # does not exceed #max_concurrent_calls
-    can_do_rpc: asyncio.Semaphore
-    # for synchronizing req ids between req and reply coroutines
-    request_queues: List[asyncio.Queue]
     # for counting the number of finished training steps
     # one training step corresponds to traversal of the whole DFG
     train_count: asyncio.Queue
-    # for loading data
+    # for loading data, save and eval model
     fetch_data_queue: asyncio.Queue
-    # for save and eval model
     eval_queue: asyncio.Queue
     save_queue: asyncio.Queue
+
+    ## Per-coroutine resources ##
+    # Used for counting the number of concurrent calls.
+    can_do_rpc: Dict[str, asyncio.Semaphore]
+    model_traversal: Dict[str, int]
+    # for synchronizing req ids between req and reply coroutines
+    request_queues: Dict[str, List[asyncio.Queue]]
 
 
 async def scatter_tensor_to_mws(
@@ -282,10 +285,22 @@ async def model_rpc_request_func(
     ]
     handler_mw_ids = [msid2mwid[h] for h in handlers]
 
+    can_do_rpc = ctrl.can_do_rpc[rpc.name]
+    request_queues = ctrl.request_queues[rpc.name]
+
     response_coroutine_idx = 0
+    data_amount_seqs = data_amount_tokens = 0
     while not ctrl.stop.is_set():
-        await ctrl.can_do_rpc.acquire()
+        await can_do_rpc.acquire()
+        # NOTE: max-min-flow-tokens is not used here because the number of tokens can change (e.g. after generate)
+        while data_amount_seqs >= (ctrl.model_traversal[rpc.model_name] + 1) * rpc.max_min_flow_seqs:
+            await asyncio.sleep(0.1)
+
         sample = await buffer.get_batch_for_rpc(rpc)
+
+        data_amount_seqs += len(sample.seqlens)
+        data_amount_tokens += sum(sample.seqlens)
+
         # logger.info(f"Model rpc {rpc.name} requesting.")
         dp_size = topo.get_dim("data")
         datas, n_seqs = dataparallel.get_broker(rpc.dp_broker_type).scatter_to(
@@ -330,8 +345,8 @@ async def model_rpc_request_func(
             all_buffer_indices=all_buffer_indices,
             all_seqlens=all_seqlens,
         )
-        await ctrl.request_queues[response_coroutine_idx].put((req_ids, time.perf_counter()))
-        response_coroutine_idx = (response_coroutine_idx + 1) % len(ctrl.request_queues)
+        await request_queues[response_coroutine_idx].put((req_ids, time.perf_counter()))
+        response_coroutine_idx = (response_coroutine_idx + 1) % len(request_queues)
         logger.info(f"Model rpc {rpc.name} requested.")
 
 
@@ -344,11 +359,11 @@ async def gather_tensor_from_mws(
     dp_head_handlers: List[config_pkg.ModelShardID],
     gather_groups: List[torch.distributed.ProcessGroup],
 ) -> Tuple[List[request_reply_stream.Payload], Union[dict, namedarray.NamedArray]]:
-    logger.info(f"rpc {rpc.name} waiting for responses {req_ids}")
+    # logger.info(f"rpc {rpc.name} waiting for responses {req_ids}")
     responses = await asyncio.gather(
         *[_awaitable_response(stream, pattern=create_exact_match_pattern([req_id])) for req_id in req_ids]
     )
-    logger.info(f"rpc {rpc.name} received responses {req_ids}")
+    # logger.info(f"rpc {rpc.name} received responses {req_ids}")
 
     responses = [responses[i] for i in dp_head_indices]
     recv_tik = time.perf_counter()
@@ -412,7 +427,6 @@ async def gather_tensor_from_mws(
             ]
 
             # Only gather from DP heads, ignoring the MP/PP dimension.
-            print(f">>>>>>>> master gather reply {k} of {rpc.name}")
             torch.distributed.gather(
                 gather_buffer[0],
                 gather_list=gather_buffer,
@@ -428,7 +442,7 @@ async def gather_tensor_from_mws(
                 s = tuple(slice(0, x) for x in actual_shape)
                 all_res[idx][k] = v[s].clone()
 
-    logger.info(f"rpc {rpc.name} finished tensor gather {req_ids}")
+    # logger.info(f"rpc {rpc.name} finished tensor gather {req_ids}")
     res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(list(map(namedarray.from_dict, all_res)))
     # logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
     return responses, rpc.remap_output_keys(res)
@@ -454,8 +468,11 @@ async def model_rpc_reply_func(
         config_pkg.ModelShardID.from_parallelism_rank(rpc.model_name, topo, i) for i in dp_head_indices
     ]
 
+    request_queue = ctrl.request_queues[rpc.name][corountine_idx]
+    can_do_rpc = ctrl.can_do_rpc[rpc.name]
+
     while not ctrl.stop.is_set():
-        req_ids, tik = await ctrl.request_queues[corountine_idx].get()
+        req_ids, tik = await request_queue.get()
 
         responses, res = await gather_tensor_from_mws(
             rpc=rpc,
@@ -470,7 +487,10 @@ async def model_rpc_reply_func(
         if rpc.log_return_value:
             logger.info(f"RPC name {rpc.name} returns {res}")
 
-        ctrl.can_do_rpc.release()
+        can_do_rpc.release()
+
+        if rpc.is_dst_of_model:
+            ctrl.model_traversal[rpc.model_name] += 1
 
         if rpc.is_dst:
             await ctrl.train_count.put(1)
@@ -727,18 +747,27 @@ class MasterWorker(worker_base.Worker):
         event_loop.run_until_complete(asyncio.gather(_task))
         # logger.info("initialize complete")
 
-        self.__fetch_data_queue = asyncio.Queue(1)
+        self.__rpc_ctrl = RPCCorountineControl(
+            stop=asyncio.Event(),
+            train_count=asyncio.Queue(maxsize=len(self.__rpc_dsts)),
+            fetch_data_queue=asyncio.Queue(1),
+            eval_queue=asyncio.Queue(1),
+            save_queue=asyncio.Queue(1),
+            model_traversal={model_name: 0 for model_name in set(r.model_name for r in self.__model_rpcs)},
+            can_do_rpc={rpc.name: asyncio.Semaphore(rpc.max_concurrent_calls) for rpc in self.__model_rpcs},
+            request_queues={
+                rpc.name: [asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)]
+                for rpc in self.__model_rpcs
+            },
+        )
+
         self.__fetch_master_ctl = asyncio.Queue(1)
-        self.__eval_queue = asyncio.Queue(1)
-        self.__save_queue = asyncio.Queue(1)
-        self.__stop_ctl = asyncio.Event()
-        self.__train_count = asyncio.Queue(maxsize=len(self.__rpc_dsts))
 
         # NOTE: we don't set a maximum buffer size here because we want to keep all data in the buffer
         self.__seqbuffer = AsyncIOSequenceBuffer(
             self.__model_rpcs,
             max_size=int(1e6),
-            fetch_ctl=self.__fetch_data_queue,
+            fetch_ctl=self.__rpc_ctrl.fetch_data_queue,
             fetch_master_ctl=self.__fetch_master_ctl,
         )
 
@@ -748,19 +777,6 @@ class MasterWorker(worker_base.Worker):
         for rpc in self.__model_rpcs:
             # should be a dict: pp_rank to streams
 
-            rpc_count = asyncio.Semaphore(rpc.max_concurrent_calls)
-            request_queues = [asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)]
-
-            ctrl = RPCCorountineControl(
-                stop=self.__stop_ctl,
-                can_do_rpc=rpc_count,
-                request_queues=request_queues,
-                train_count=self.__train_count,
-                fetch_data_queue=self.__fetch_data_queue,
-                eval_queue=self.__eval_queue,
-                save_queue=self.__save_queue,
-            )
-
             request_task = event_loop.create_task(
                 model_rpc_request_func(
                     rpc=rpc,
@@ -769,7 +785,7 @@ class MasterWorker(worker_base.Worker):
                     msid2mwid=self.config.msid2mwid,
                     buffer=self.__seqbuffer,
                     topo=self.__model_topos[rpc.model_name],
-                    ctrl=ctrl,
+                    ctrl=self.__rpc_ctrl,
                 )
             )
             reply_tasks = []
@@ -783,7 +799,7 @@ class MasterWorker(worker_base.Worker):
                         msid2mwid=self.config.msid2mwid,
                         buffer=self.__seqbuffer,
                         topo=self.__model_topos[rpc.model_name],
-                        ctrl=ctrl,
+                        ctrl=self.__rpc_ctrl,
                     )
                 )
                 reply_tasks.append(_reply_task)
@@ -793,16 +809,16 @@ class MasterWorker(worker_base.Worker):
             load_data_func(
                 buffer=self.__seqbuffer,
                 stream=self.__stream,
-                fetch_ctl=self.__fetch_data_queue,
-                stop_ctl=self.__stop_ctl,
+                fetch_ctl=self.__rpc_ctrl.fetch_data_queue,
+                stop_ctl=self.__rpc_ctrl.stop,
             )
         )
         eval_task = event_loop.create_task(
             model_eval_thread_func(
                 stream=self.__stream,
                 handlers=self.__all_model_handlers,
-                eval_queue=self.__eval_queue,
-                stop_ctl=self.__stop_ctl,
+                eval_queue=self.__rpc_ctrl.eval_queue,
+                stop_ctl=self.__rpc_ctrl.stop,
             )
         )
         save_task = event_loop.create_task(
@@ -810,8 +826,8 @@ class MasterWorker(worker_base.Worker):
                 stream=self.__stream,
                 handlers=self.__dp0_model_handlers,
                 model_save_root=self.MODEL_SAVE_ROOT,
-                save_queue=self.__save_queue,
-                stop_ctl=self.__stop_ctl,
+                save_queue=self.__rpc_ctrl.save_queue,
+                stop_ctl=self.__rpc_ctrl.stop,
             )
         )
         coroutine_tasks += [load_data_task, eval_task, save_task]
@@ -842,9 +858,9 @@ class MasterWorker(worker_base.Worker):
         should_save = self.__save_ctl.check(epochs=int(is_new_epoch), steps=1)
 
         if should_eval:
-            self.__eval_queue.put_nowait((self._epoch, self._epoch_step))
+            self.__rpc_ctrl.eval_queue.put_nowait((self._epoch, self._epoch_step))
         if should_save:
-            self.__save_queue.put_nowait((self._epoch, self._epoch_step))
+            self.__rpc_ctrl.save_queue.put_nowait((self._epoch, self._epoch_step))
 
         if is_new_epoch:
             self._epoch += 1
@@ -859,7 +875,7 @@ class MasterWorker(worker_base.Worker):
         _rpc_dst_cnt = 0
         while _rpc_dst_cnt < self.__n_rpc_dsts:
             try:
-                self.__train_count.get_nowait()
+                self.__rpc_ctrl.train_count.get_nowait()
                 _rpc_dst_cnt += 1
                 continue
             except asyncio.QueueEmpty:
@@ -907,7 +923,7 @@ class MasterWorker(worker_base.Worker):
         return worker_base.PollResult(sample_count=1, batch_count=1)
 
     def experiment_complete_exit(self, msg: str):
-        self.__stop_ctl.set()
+        self.__rpc_ctrl.stop.set()
         self.__asyncio_ctx.loop.stop()
         try:
             teardown_run_util_complete(self.__asyncio_ctx)

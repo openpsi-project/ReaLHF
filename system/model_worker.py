@@ -432,7 +432,6 @@ class ModelWorker(worker_base.Worker):
                 data=res,
             )
 
-        print(f"model {','.join(self.model_names)} >>>>> ready_to_post", reply.request_id)
         self.__stream.post(reply)
         # logger.info(f"handle_name {request.handle_name} Posted req id = {request.request_id}")
 
@@ -462,11 +461,6 @@ class ModelWorker(worker_base.Worker):
                 )
                 ready_to_post.append((request, res))
 
-        if ready_to_post:
-            print(
-                f"model {','.join(self.model_names)} >>>>> ready_to_post",
-                [r[0].request_id for r in ready_to_post],
-            )
         batch_size = sample_size = 0
         for request, res in ready_to_post:
             request: request_reply_stream.Payload

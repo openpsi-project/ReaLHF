@@ -555,23 +555,23 @@ class PPOConfig(Experiment):
 
         global rollout
         rollout = copy.deepcopy(rollout)
-        rollout.min_n_seqs = global_gen_bs
-        rollout.max_n_seqs = global_gen_bs + 1
+        rollout.min_n_seqs = global_gen_bs // 4
+        rollout.max_n_seqs = global_gen_bs // 4 + 1
 
         global inf_ref_logits
         inf_ref_logits = copy.deepcopy(inf_ref_logits)
-        inf_ref_logits.min_n_seqs = global_gen_bs
-        inf_ref_logits.max_n_seqs = global_gen_bs + 1
+        inf_ref_logits.min_n_seqs = global_gen_bs // 4
+        inf_ref_logits.max_n_seqs = global_gen_bs // 4 + 1
 
         global inf_reward
         inf_reward = copy.deepcopy(inf_reward)
-        inf_reward.min_n_seqs = global_gen_bs
-        inf_reward.max_n_seqs = global_gen_bs + 1
+        inf_reward.min_n_seqs = global_gen_bs // 4
+        inf_reward.max_n_seqs = global_gen_bs // 4 + 1
 
         global inf_values
         inf_values = copy.deepcopy(inf_values)
-        inf_values.min_n_seqs = global_gen_bs
-        inf_values.max_n_seqs = global_gen_bs + 1
+        inf_values.min_n_seqs = global_gen_bs // 4
+        inf_values.max_n_seqs = global_gen_bs // 4 + 1
 
         return ExperimentConfig(
             total_train_epochs=self.total_train_epochs,

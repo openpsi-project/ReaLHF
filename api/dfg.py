@@ -34,8 +34,14 @@ class ModelRPC:
 
     max_concurrent_calls: int = 1
 
+    max_min_flow_seqs: int = 1
+    max_min_flow_tokens: int = 1
+
     parents: List[str] = dataclasses.field(default_factory=lambda: [])
     children: List[str] = dataclasses.field(default_factory=lambda: [])
+
+    parent_rpcs: List["ModelRPC"] = dataclasses.field(default_factory=lambda: [])
+    children_rpcs: List["ModelRPC"] = dataclasses.field(default_factory=lambda: [])
 
     def __post_init__(self):
         if self.min_n_seqs >= self.max_n_seqs or self.min_n_tokens >= self.max_n_tokens:
@@ -45,7 +51,8 @@ class ModelRPC:
                 "The maximum batch size of the source node in the dataflow graph is too large. "
                 f"The maximum number of sequences is {self.max_n_seqs} > budget {int(1e4)} and "
                 f"the maximum number of tokens is {self.max_n_tokens} > budget {int(1e8)}. "
-                "Please set a smaller value.")
+                "Please set a smaller value."
+            )
 
     @property
     def name(self):
@@ -58,6 +65,15 @@ class ModelRPC:
     @property
     def is_dst(self):
         return len(self.children) == 0
+
+    @property
+    def is_dst_of_model(self):
+        def _has_children_of_model_name(rpc: "ModelRPC", model_name: str):
+            if rpc.is_dst:
+                return False
+            return any([r.model_name == model_name or _has_children_of_model_name(r, model_name) for r in rpc.children_rpcs])
+
+        return not _has_children_of_model_name(self, self.model_name)
 
     def remap_input_keys(self, input_batch: Dict) -> namedarray.NamedArray:
         data = {}
@@ -84,6 +100,8 @@ def build_graph(rpcs: List[ModelRPC]) -> Tuple[List[ModelRPC], List[List[Tuple[s
     # Resolve dependencies between model interfaces.
     children: List[List[str]] = [[] for _ in rpcs]
     parents: List[List[str]] = [[] for _ in rpcs]
+    parent_rpcs: List[List[ModelRPC]] = [[] for _ in rpcs]
+    children_rpcs: List[List[ModelRPC]] = [[] for _ in rpcs]
     edges: List[List[Tuple[str]]] = [[() for _ in rpcs] for _ in rpcs]
 
     required_data_entries: List[Tuple[str]] = [() for _ in rpcs]
@@ -103,15 +121,26 @@ def build_graph(rpcs: List[ModelRPC]) -> Tuple[List[ModelRPC], List[List[Tuple[s
                 if k in generated_data_entries[j]:
                     if parent_rpc.name not in parents[i]:
                         parents[i].append(parent_rpc.name)
+                        parent_rpcs[i].append(parent_rpc)
                     if rpc.name not in children[j]:
                         children[j].append(rpc.name)
+                        children_rpcs[j].append(rpc)
                     edges[i][j] = (*edges[i][j], k)
                     logger.info(
-                        f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`.")
+                        f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`."
+                    )
     for i, rpc in enumerate(rpcs):
         logger.info(
-            f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }.")
-    for rpc, p, c in zip(rpcs, parents, children):
+            f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }."
+        )
+    for rpc, p, c, pr, cr in zip(rpcs, parents, children, parent_rpcs, children_rpcs):
         rpc.parents = p
         rpc.children = c
+        rpc.parent_rpcs = pr
+        rpc.children_rpcs = cr
+
+    for rpc in rpcs:
+        rpc.max_min_flow_seqs = max([r.min_n_seqs for r in rpcs if r.model_name == rpc.model_name])
+        rpc.max_min_flow_tokens = max([r.min_n_tokens for r in rpcs if r.model_name == rpc.model_name])
+
     return rpcs, edges
