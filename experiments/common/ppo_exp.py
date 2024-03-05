@@ -763,32 +763,32 @@ class PPOConfig(Experiment):
         else:
             train_actor.min_n_seqs_per_dp = self.ppo.ppo_n_minibatches
         train_actor.min_n_seqs = global_train_bs
-        train_actor.max_n_seqs = global_train_bs + 1
+        train_actor.max_n_seqs = global_train_bs
 
         global train_critic
         train_critic = copy.deepcopy(train_critic)
         train_critic.min_n_seqs = global_train_bs
-        train_critic.max_n_seqs = global_train_bs + 1
+        train_critic.max_n_seqs = global_train_bs
 
         global rollout
         rollout = copy.deepcopy(rollout)
         rollout.min_n_seqs = global_gen_bs
-        rollout.max_n_seqs = global_gen_bs + 1
+        rollout.max_n_seqs = global_gen_bs
 
         global inf_ref_logits
         inf_ref_logits = copy.deepcopy(inf_ref_logits)
         inf_ref_logits.min_n_seqs = global_gen_bs
-        inf_ref_logits.max_n_seqs = global_gen_bs + 1
+        inf_ref_logits.max_n_seqs = global_gen_bs
 
         global inf_reward
         inf_reward = copy.deepcopy(inf_reward)
         inf_reward.min_n_seqs = global_gen_bs
-        inf_reward.max_n_seqs = global_gen_bs + 1
+        inf_reward.max_n_seqs = global_gen_bs
 
         global inf_values
         inf_values = copy.deepcopy(inf_values)
         inf_values.min_n_seqs = global_gen_bs
-        inf_values.max_n_seqs = global_gen_bs + 1
+        inf_values.max_n_seqs = global_gen_bs
 
         return ExperimentConfig(
             total_train_epochs=self.total_train_epochs,

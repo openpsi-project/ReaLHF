@@ -232,9 +232,10 @@ async def scatter_tensor_to_mws(
 
         # logger.info(f"Waiting for ack from stage {pp_rank}")
         # Wait for the ack message from model worker
-        await asyncio.gather(
-            *[_awaitable_response(stream, pattern=create_exact_match_pattern([ack_id])) for ack_id in ack_ids]
-        )
+        [stream.poll(pattern=create_exact_match_pattern([ack_id]), block=True) for ack_id in ack_ids]
+        # await asyncio.gather(
+        #     *[_awaitable_response(stream, pattern=create_exact_match_pattern([ack_id])) for ack_id in ack_ids]
+        # )
         # logger.info(f"Scatter data to stage {pp_rank}")
 
         for (k, buf_shape), dtype in zip(buf_shapes.items(), dtypes.values()):
@@ -408,12 +409,13 @@ async def gather_tensor_from_mws(
         gather_ack_ids = [r.ack_reply_id for r in gather_requests]
 
         # wait for the ack message from model workers
-        await asyncio.gather(
-            *[
-                _awaitable_response(stream, pattern=create_exact_match_pattern([ack_id]))
-                for ack_id in gather_ack_ids
-            ]
-        )
+        # await asyncio.gather(
+        #     *[
+        #         _awaitable_response(stream, pattern=create_exact_match_pattern([ack_id]))
+        #         for ack_id in gather_ack_ids
+        #     ]
+        # )
+        [stream.poll(pattern=create_exact_match_pattern([ack_id]), block=True) for ack_id in gather_ack_ids]
 
         for k, buf_shape in buf_shapes.items():
             gather_buffer = [
