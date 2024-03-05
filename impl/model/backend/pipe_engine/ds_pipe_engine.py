@@ -376,7 +376,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.tokenizer = tokenizer
 
     def _initialize_comm(self):
-        p2p.init_process_groups(self.grid)
         # check connectivity
         buf = torch.zeros(1, dtype=torch.int32).cuda()
         if self.stage_id % 2 == 0:
