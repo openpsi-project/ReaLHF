@@ -10,12 +10,8 @@ import os
 import sys
 
 from base.cluster import spec as cluster_spec
-from base.constants import (
-    DATASET_CACHE_PATH,
-    PYTORCH_KERNEL_CACHE_PATH,
-    TORCH_EXTENSIONS_DIR,
-    TRITON_CACHE_PATH,
-)
+from base.constants import (DATASET_CACHE_PATH, PYTORCH_KERNEL_CACHE_PATH, TORCH_EXTENSIONS_DIR,
+                            TRITON_CACHE_PATH)
 import api.dfg
 import base.topology
 
@@ -72,27 +68,33 @@ class Scheduling:
 
     @staticmethod
     def master_worker_default(**kwargs):
-        return Scheduling(
-            **{"cpu": 16, "gpu": 1, "mem": 20 * 1024, "container_image": _LLM_GPU_IMAGE, **kwargs}
-        )
+        return Scheduling(**{
+            "cpu": 16,
+            "gpu": 1,
+            "mem": 20 * 1024,
+            "container_image": _LLM_GPU_IMAGE,
+            **kwargs
+        })
 
     @staticmethod
     def data_worker_default(**kwargs):
-        return Scheduling(
-            **{"cpu": 4, "gpu": 0, "mem": 20 * 1024, "container_image": _LLM_CPU_IMAGE, **kwargs}
-        )
+        return Scheduling(**{
+            "cpu": 4,
+            "gpu": 0,
+            "mem": 20 * 1024,
+            "container_image": _LLM_CPU_IMAGE,
+            **kwargs
+        })
 
     @staticmethod
     def model_worker_default(**kwargs):
-        return Scheduling(
-            **{
-                "cpu": 2,
-                "gpu": 1,
-                "mem": 60 * 1024,
-                "container_image": _LLM_GPU_IMAGE,
-                **kwargs,
-            }
-        )
+        return Scheduling(**{
+            "cpu": 2,
+            "gpu": 1,
+            "mem": 60 * 1024,
+            "container_image": _LLM_GPU_IMAGE,
+            **kwargs,
+        })
 
 
 @dataclasses.dataclass
@@ -174,8 +176,7 @@ class ModelShardID:
     mp_rank: int
     pp_rank: int
     topo: base.topology.PipeModelDataParallelTopology = dataclasses.field(
-        default_factory=lambda x: base.topology.PipeModelDataParallelTopology(1, 1, 1)
-    )
+        default_factory=lambda x: base.topology.PipeModelDataParallelTopology(1, 1, 1))
 
     def __post_init__(self):
         assert self.dp_rank >= 0 and self.mp_rank >= 0 and self.pp_rank >= 0
@@ -203,12 +204,8 @@ class ModelShardID:
     def __eq__(self, other):
         # Compare the key attribute for equality
         if isinstance(other, ModelShardID):
-            return (
-                self.model_name == other.model_name
-                and self.dp_rank == other.dp_rank
-                and self.mp_rank == other.mp_rank
-                and self.pp_rank == other.pp_rank
-            )
+            return (self.model_name == other.model_name and self.dp_rank == other.dp_rank
+                    and self.mp_rank == other.mp_rank and self.pp_rank == other.pp_rank)
         return False
 
 
@@ -330,8 +327,7 @@ class ExperimentConfig:
         model_topos = {}
         for model_name in model_names:
             _this_mws = list(
-                filter(lambda mw: any(x.id.model_name == model_name for x in mw.shards), self.model_worker)
-            )
+                filter(lambda mw: any(x.id.model_name == model_name for x in mw.shards), self.model_worker))
             all_shards: List[StandaloneModelShard] = [
                 next(filter(lambda x: x.id.model_name == model_name, mw.shards)) for mw in _this_mws
             ]
@@ -341,12 +337,9 @@ class ExperimentConfig:
             ranks = [s.id.parallelism_rank for s in all_shards]
             _topos = [s.id.topo for s in all_shards]
             if set(ranks) != set(list(range(len(_this_mws)))) or any(
-                _t.world_size() != _topos[0].world_size() for _t in _topos
-            ):
-                raise ValueError(
-                    f"Parallelism rank check failed: model name {model_name}, "
-                    f"model shard ids={[s.id for s in all_shards]}."
-                )
+                    _t.world_size() != _topos[0].world_size() for _t in _topos):
+                raise ValueError(f"Parallelism rank check failed: model name {model_name}, "
+                                 f"model shard ids={[s.id for s in all_shards]}.")
             ##### Sanity check of parallelism ranks. #####
 
         msid2mwid = {}
@@ -364,12 +357,8 @@ class ExperimentConfig:
             _shard_ids2 = [s.id for s in mw2.shards]
             _names1 = [x.model_name for x in _shard_ids1]
             _names2 = [x.model_name for x in _shard_ids2]
-            return not any(
-                mn in _names1
-                and mn in _names2
-                and _shard_ids1[_names1.index(mn)].pp_rank != _shard_ids2[_names2.index(mn)].pp_rank
-                for mn in model_topos
-            )
+            return not any(mn in _names1 and mn in _names2 and _shard_ids1[_names1.index(mn)].pp_rank !=
+                           _shard_ids2[_names2.index(mn)].pp_rank for mn in model_topos)
 
         # Create model worker groups that can do scatter/gather with master worker.
         # Upon scattering/gathering, the target process group will be partitioned
@@ -470,7 +459,8 @@ def dataclass_to_dict(dc):
         root_name = dc.__class__.__name__
         dc = dict(
             config_class=root_name,
-            config_value={k.name: dataclass_to_dict(getattr(dc, k.name)) for k in dataclasses.fields(dc)},
+            config_value={k.name: dataclass_to_dict(getattr(dc, k.name))
+                          for k in dataclasses.fields(dc)},
         )
     else:
         raise f"{dc} of type {type(dc)} cannot be parse to dict."
@@ -482,9 +472,10 @@ def config_to_dataclass(config: Union[List, Dict]):
         return [config_to_dataclass(c) for c in config]
     elif isinstance(config, dict):
         if "config_class" in config.keys():
-            return getattr(sys.modules[__name__], config["config_class"])(
-                **{k: config_to_dataclass(v) for k, v in config["config_value"].items()}
-            )
+            return getattr(sys.modules[__name__], config["config_class"])(**{
+                k: config_to_dataclass(v)
+                for k, v in config["config_value"].items()
+            })
         else:
             return config
     elif isinstance(config, (str, int, float)) or config is None:

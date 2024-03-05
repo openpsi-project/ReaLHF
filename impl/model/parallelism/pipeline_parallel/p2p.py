@@ -6,7 +6,6 @@ import typing
 from deepspeed import comm as dist
 from deepspeed.accelerator import get_accelerator
 from deepspeed.git_version_info import torch_info
-
 # To query whether we have send/recv support
 from packaging.version import Version
 import torch
@@ -66,8 +65,7 @@ def _is_valid_send_recv(src_stage, dest_stage):
     first_stage = 0
     last_stage = base.constants.grid().pipe_parallel_size - 1
     assert (
-        abs(src_stage - dest_stage) == 1
-        or (src_stage == first_stage and dest_stage == last_stage)
+        abs(src_stage - dest_stage) == 1 or (src_stage == first_stage and dest_stage == last_stage)
         or (src_stage == last_stage and dest_stage == first_stage)
     ), f"Functionality currently limited to send and receive between adjacent ranks only (src={src_stage}, dst={dest_stage})"
 
@@ -242,9 +240,9 @@ def send_tensor_meta(tensor: torch.Tensor, recv_stage: int):
     """
     if isinstance(tensor, torch.Tensor):
         device = torch.cuda.current_device()
-        send_ndims_dtype = torch.tensor(
-            [len(tensor.size()), DTYPE_TO_ID[tensor.dtype]], dtype=torch.long, device=device
-        )
+        send_ndims_dtype = torch.tensor([len(tensor.size()), DTYPE_TO_ID[tensor.dtype]],
+                                        dtype=torch.long,
+                                        device=device)
         send_shape = torch.tensor(tensor.size(), dtype=torch.long, device=device)
         send(send_ndims_dtype, recv_stage)
         send(send_shape, recv_stage)
@@ -316,8 +314,8 @@ def allocate_buffers(shapes_and_dtypes, requires_grad=False):
             buffer.append(None)
         else:
             buffer.append(
-                torch.zeros(
-                    shape, dtype=dtype, requires_grad=requires_grad, device=torch.cuda.current_device()
-                )
-            )
+                torch.zeros(shape,
+                            dtype=dtype,
+                            requires_grad=requires_grad,
+                            device=torch.cuda.current_device()))
     return buffer

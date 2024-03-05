@@ -262,8 +262,8 @@ class AsyncIOSequenceBuffer:
             # await self._lock.wait_for(_can_do_rpc)
             if rpc.is_src:
                 ready_indices = np.nonzero((self._is_idle | self._is_being_read)
-                                    & self._ready_for_rpcs[:, rpc_idx]
-                                    & ~self._completed_rpc[:, rpc_idx])[0]
+                                           & self._ready_for_rpcs[:, rpc_idx]
+                                           & ~self._completed_rpc[:, rpc_idx])[0]
                 seqlens = self.__buffer._get_seqlen(ready_indices)
                 # *2 because we want to fetch new data as long as the *next* RPC does not have enough data.
                 if len(ready_indices) < rpc.min_n_seqs * 2 or seqlens.sum() < rpc.min_n_tokens * 2:
@@ -271,14 +271,14 @@ class AsyncIOSequenceBuffer:
 
             while not _can_do_rpc():
                 await self._lock.wait()
-            
+
             self._assert_valid_indicator()
 
             ready_indices = np.nonzero((self._is_idle | self._is_being_read)
-                                    & self._ready_for_rpcs[:, rpc_idx]
-                                    & ~self._completed_rpc[:, rpc_idx])[0]
+                                       & self._ready_for_rpcs[:, rpc_idx]
+                                       & ~self._completed_rpc[:, rpc_idx])[0]
             seqlens = self.__buffer._get_seqlen(ready_indices)
-            
+
             if rpc.is_src:
                 # *2 because we want to fetch new data as long as the *next* RPC does not have enough data.
                 if len(ready_indices) < rpc.min_n_seqs * 2 or seqlens.sum() < rpc.min_n_tokens * 2:

@@ -1,8 +1,8 @@
 # Modified from https://github.com/microsoft/DeepSpeed/blob/aed599b4422b1cdf7397abb05a58c3726523a333/deepspeed/runtime/pipe/topology.py#
 
-from typing import Dict, Optional
 from itertools import product as cartesian_product
-from typing import NamedTuple
+from typing import Dict, NamedTuple, Optional
+
 import torch.distributed
 
 import api.config

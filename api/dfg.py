@@ -51,8 +51,7 @@ class ModelRPC:
                 "The maximum batch size of the source node in the dataflow graph is too large. "
                 f"The maximum number of sequences is {self.max_n_seqs} > budget {int(1e4)} and "
                 f"the maximum number of tokens is {self.max_n_tokens} > budget {int(1e8)}. "
-                "Please set a smaller value."
-            )
+                "Please set a smaller value.")
 
     @property
     def name(self):
@@ -68,10 +67,14 @@ class ModelRPC:
 
     @property
     def is_dst_of_model(self):
+
         def _has_children_of_model_name(rpc: "ModelRPC", model_name: str):
             if rpc.is_dst:
                 return False
-            return any([r.model_name == model_name or _has_children_of_model_name(r, model_name) for r in rpc.children_rpcs])
+            return any([
+                r.model_name == model_name or _has_children_of_model_name(r, model_name)
+                for r in rpc.children_rpcs
+            ])
 
         return not _has_children_of_model_name(self, self.model_name)
 
@@ -127,12 +130,10 @@ def build_graph(rpcs: List[ModelRPC]) -> Tuple[List[ModelRPC], List[List[Tuple[s
                         children_rpcs[j].append(rpc)
                     edges[i][j] = (*edges[i][j], k)
                     logger.info(
-                        f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`."
-                    )
+                        f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`.")
     for i, rpc in enumerate(rpcs):
         logger.info(
-            f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }."
-        )
+            f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }.")
     for rpc, p, c, pr, cr in zip(rpcs, parents, children, parent_rpcs, children_rpcs):
         rpc.parents = p
         rpc.children = c

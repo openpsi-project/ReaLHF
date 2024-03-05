@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Any, Dict
 import gc
 import itertools
 import multiprocessing as mp
@@ -17,8 +17,8 @@ import torch.utils.data
 
 from base.monitor import gpu_utilization_monitor, time_mark
 from base.topology import ParallelGrid
-from impl.model.parallelism.model_parallel.utils import GlobalMemoryBuffer
 from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
+from impl.model.parallelism.model_parallel.utils import GlobalMemoryBuffer
 import api.config as config
 import api.data
 import api.model
@@ -57,10 +57,9 @@ class ModelWorker(worker_base.Worker):
         self.config = cfg
         self.model_names = [s.id.model_name for s in cfg.shards]
         self.shard_indices = [
-            cfg.model_topos[s.id.model_name].get_rank(
-                data=s.id.dp_rank, pipe=s.id.pp_rank, model=s.id.mp_rank
-            )
-            for s in cfg.shards
+            cfg.model_topos[s.id.model_name].get_rank(data=s.id.dp_rank,
+                                                      pipe=s.id.pp_rank,
+                                                      model=s.id.mp_rank) for s in cfg.shards
         ]
 
         self.__experiment_name = self.config.worker_info.experiment_name
@@ -80,8 +79,7 @@ class ModelWorker(worker_base.Worker):
         self.__dist_env_resolved = False
 
         self.__clear_cache_frequency = base.timeutil.FrequencyControl(
-            frequency_steps=self.config.cuda_cache_clear_freq
-        )
+            frequency_steps=self.config.cuda_cache_clear_freq)
 
         r = self.config.worker_info
         return r
@@ -104,10 +102,8 @@ class ModelWorker(worker_base.Worker):
 
         base.constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
 
-        logger.info(
-            f"SetUp Information - Model worker index {self.__worker_index} located at "
-            f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}."
-        )
+        logger.info(f"SetUp Information - Model worker index {self.__worker_index} located at "
+                    f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}.")
 
         # if self.config.backend.type_ in ["ds_train", "ds_inference"]:
         deepspeed.init_distributed()
@@ -137,9 +133,9 @@ class ModelWorker(worker_base.Worker):
 
         for s in self.config.shards:
             with base.constants.model_scope(s.id.model_name):
-                self.__models[s.id.model_name] = api.model.make_model(
-                    s.model, name=s.id.model_name, device=self.__device
-                )
+                self.__models[s.id.model_name] = api.model.make_model(s.model,
+                                                                      name=s.id.model_name,
+                                                                      device=self.__device)
                 self.__interfaces[s.id.model_name] = api.model.make_interface(s.interface)
                 self.__backends[s.id.model_name] = api.model.make_backend(s.backend)
 
@@ -153,11 +149,9 @@ class ModelWorker(worker_base.Worker):
                         self.__models[s.id.model_name].tokenizer,
                         self.config.worker_info.experiment_name,
                         self.config.worker_info.trial_name,
-                        cache_root=(
-                            None if not self.config.use_dataset_cache else self.config.dataset_cahce_root
-                        ),
-                    )
-                    for d in s.eval_datasets
+                        cache_root=(None
+                                    if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
+                    ) for d in s.eval_datasets
                 ]
                 if len(eval_datasets) > 1:
                     eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
@@ -180,9 +174,8 @@ class ModelWorker(worker_base.Worker):
         self.__reply_storage: Dict[uuid.UUID, namedarray.NamedArray] = dict()
 
         # A monitoring process.
-        self.__gpu_util_mp = mp.Process(
-            target=gpu_utilization_monitor, args=(self.__pg_info.local_gpu_id, 7200)
-        )
+        self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor,
+                                        args=(self.__pg_info.local_gpu_id, 7200))
         self.__gpu_util_mp.start()
 
     @property
@@ -270,9 +263,9 @@ class ModelWorker(worker_base.Worker):
                 dist.get_rank(group) != -1 for group in self.__pg_info.scatter_groups[handler.model_name]
             ].index(True)
             scatter_group = self.__pg_info.scatter_groups[handler.model_name][pg_idx]
-            for (k, buf_shape), dtype, actual_shape in zip(
-                request.buf_shapes.items(), request.dtypes.values(), request.actual_shapes.values()
-            ):
+            for (k, buf_shape), dtype, actual_shape in zip(request.buf_shapes.items(),
+                                                           request.dtypes.values(),
+                                                           request.actual_shapes.values()):
                 buf = base.constants.get_global_memory_buffer().get_tensor(buf_shape, dtype, "scatter_gather")
                 dist.scatter(
                     buf,
@@ -357,8 +350,7 @@ class ModelWorker(worker_base.Worker):
                 if self._is_dp_head and self._dp_rank == 0:
                     blogger.info(
                         f"Model worker #{request.handler.model_name}# handle request *{request.handle_name}*"
-                        f" in ${time.perf_counter() - tik:.4f}$s"
-                    )
+                        f" in ${time.perf_counter() - tik:.4f}$s")
                 self.__reply_queue.put_nowait((request, res))
 
         sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
@@ -379,9 +371,8 @@ class ModelWorker(worker_base.Worker):
         self.__stream.post(ack)
         res: namedarray.NamedArray = self.__reply_storage.pop(request_id)
 
-        pg_idx = [
-            dist.get_rank(group) != -1 for group in self.__pg_info.gather_groups[handler.model_name]
-        ].index(True)
+        pg_idx = [dist.get_rank(group) != -1
+                  for group in self.__pg_info.gather_groups[handler.model_name]].index(True)
         gather_group = self.__pg_info.gather_groups[handler.model_name][pg_idx]
 
         # Copy data to the gather buffer.
@@ -457,8 +448,7 @@ class ModelWorker(worker_base.Worker):
                 tik = self.__request_time.pop(request_id)
                 blogger.info(
                     f"Model worker #{request.handler.model_name}# handle request *{request.handle_name}*"
-                    f" in ${time.perf_counter() - tik:.4f}$s"
-                )
+                    f" in ${time.perf_counter() - tik:.4f}$s")
                 ready_to_post.append((request, res))
 
         batch_size = sample_size = 0
@@ -502,15 +492,11 @@ class ModelWorker(worker_base.Worker):
                 blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
 
             tik = time.perf_counter()
-            blogger.debug(
-                (
-                    "Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
-                        ",".join(self.model_names),
-                        round(get_accelerator().memory_allocated() / 1024**3, 2),
-                        round(get_accelerator().max_memory_allocated() / 1024**3, 2),
-                    )
-                )
-            )
+            blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
+                ",".join(self.model_names),
+                round(get_accelerator().memory_allocated() / 1024**3, 2),
+                round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+            )))
             blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
             if os.environ.get("DLLM_TRACE", "0") == "1":
                 self.tracer.save()
@@ -530,6 +516,5 @@ class ModelWorker(worker_base.Worker):
         if r.batch_count > 0:
             blogger.debug(
                 f"Total time {self.__total_time:.4f}s, engine poll time {self.__engine_poll_time:.4f}s, "
-                f"percent {self.__engine_poll_time/self.__total_time:.4f}"
-            )
+                f"percent {self.__engine_poll_time/self.__total_time:.4f}")
         return r

@@ -252,14 +252,10 @@ class NameResolvingRequstClient(IpRequestClient):
         logger.info(f"Add master send address {self.recv_address} as {master_recv_name}")
 
         # master needs to wait all peers (subscribers) to connect
-        while (
-            len(
+        while (len(
                 name_resolve.get_subtree(
-                    names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME)
-                )
-            )
-            < n_subscribers
-        ):
+                    names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME)))
+               < n_subscribers):
             time.sleep(0.1)
         logger.info(
             f"Master discovered all {n_subscribers} "

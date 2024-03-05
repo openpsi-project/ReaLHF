@@ -943,7 +943,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         handle = p2p.send(next_tokens_to_send, self.next_stage, async_op=self._async_p2p)
         if self._async_p2p:
             self.tensor_buffer.put("send_next_tokens_handle", micro_batch_id, handle)
-        
+
         if type(self) == DeepSpeedPipelineEngine:
             if self._async_p2p:
                 handle.wait()
@@ -966,7 +966,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         x = PipeTransferData(store_kv_cache=True)
         self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
-        
+
         if type(self) == DeepSpeedPipelineEngine:
             if self._async_p2p:
                 handle.wait()

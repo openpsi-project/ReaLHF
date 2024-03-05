@@ -182,33 +182,21 @@ class PPOConfig(Experiment):
     def __post_init__(self):
         if self.is_sft_lora and (self.sft_lora_path is None or self.actor.type is None):
             raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
-        if self.is_rew_lora and (
-            self.rew_lora_path is None or self.rew.type is None or self.rew_head_path is None
-        ):
+        if self.is_rew_lora and (self.rew_lora_path is None or self.rew.type is None
+                                 or self.rew_head_path is None):
             raise ValueError(
                 "rew_lora_path, rew_base_model_type and rew_head_path must be specified when is_rw_lora is True."
             )
 
-        self.n_actors = int(
-            self.actor.parallel.pipeline_parallel_size
-            * self.actor.parallel.model_parallel_size
-            * self.actor.parallel.data_parallel_size
-        )
-        self.n_critics = int(
-            self.critic.parallel.pipeline_parallel_size
-            * self.critic.parallel.model_parallel_size
-            * self.critic.parallel.data_parallel_size
-        )
-        self.n_rewards = int(
-            self.rew.parallel.pipeline_parallel_size
-            * self.rew.parallel.model_parallel_size
-            * self.rew.parallel.data_parallel_size
-        )
-        self.n_refs = int(
-            self.ref.parallel.pipeline_parallel_size
-            * self.ref.parallel.model_parallel_size
-            * self.ref.parallel.data_parallel_size
-        )
+        self.n_actors = int(self.actor.parallel.pipeline_parallel_size *
+                            self.actor.parallel.model_parallel_size * self.actor.parallel.data_parallel_size)
+        self.n_critics = int(self.critic.parallel.pipeline_parallel_size *
+                             self.critic.parallel.model_parallel_size *
+                             self.critic.parallel.data_parallel_size)
+        self.n_rewards = int(self.rew.parallel.pipeline_parallel_size *
+                             self.rew.parallel.model_parallel_size * self.rew.parallel.data_parallel_size)
+        self.n_refs = int(self.ref.parallel.pipeline_parallel_size * self.ref.parallel.model_parallel_size *
+                          self.ref.parallel.data_parallel_size)
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -356,11 +344,8 @@ class PPOConfig(Experiment):
                     lr_scheduler_type=cfg.optimizer.lr_scheduler_type,
                     warmup_steps_proportion=cfg.optimizer.warmup_steps_proportion,
                     min_lr_ratio=cfg.optimizer.min_lr_ratio,
-                    zero_stage=(
-                        cfg.optimizer.zero_stage
-                        if cfg.parallel.pipeline_parallel_size == 1
-                        else min(cfg.optimizer.zero_stage, 1)
-                    ),
+                    zero_stage=(cfg.optimizer.zero_stage if cfg.parallel.pipeline_parallel_size == 1 else min(
+                        cfg.optimizer.zero_stage, 1)),
                     gradient_checkpointing=cfg.gradient_checkpointing,
                     num_pipeline_stages=cfg.parallel.pipeline_parallel_size,
                     engine_type=engine_type,
@@ -700,8 +685,7 @@ class PPOConfig(Experiment):
                     ),
                 ],
                 cuda_cache_cleanliness=True,
-            )
-            for i in range(self.n_actors)
+            ) for i in range(self.n_actors)
         ] + [
             ModelWorker(
                 seed=self.seed,
@@ -744,8 +728,7 @@ class PPOConfig(Experiment):
                     ),
                 ],
                 cuda_cache_cleanliness=True,
-            )
-            for i in range(self.n_critics)
+            ) for i in range(self.n_critics)
         ]
 
         global_train_bs = self.actor_per_device_train_batch_size * self.n_actors
@@ -754,11 +737,9 @@ class PPOConfig(Experiment):
         global train_actor
         train_actor = copy.deepcopy(train_actor)
         if self.actor.parallel.pipeline_parallel_size > 1:
-            pp_nmbs = (
-                self.actor.parallel.pipe_mbs_config.train_step
-                if self.actor.parallel.pipe_mbs_config.train_step is not None
-                else self.actor.parallel.pipeline_parallel_size * 2
-            )
+            pp_nmbs = (self.actor.parallel.pipe_mbs_config.train_step
+                       if self.actor.parallel.pipe_mbs_config.train_step is not None else
+                       self.actor.parallel.pipeline_parallel_size * 2)
             train_actor.min_n_seqs_per_dp = self.ppo.ppo_n_minibatches * pp_nmbs
         else:
             train_actor.min_n_seqs_per_dp = self.ppo.ppo_n_minibatches

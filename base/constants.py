@@ -1,8 +1,8 @@
 # log format constants
 from typing import *
+import contextlib
 import copy
 import getpass
-import contextlib
 
 from base.cluster import spec as cluster_spec
 
@@ -23,7 +23,6 @@ TORCH_EXTENSIONS_DIR = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torc
 
 QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/quickstart.pkl"
 
-
 # _model_name will be changed in the model_scope context manager
 _model_name: str = None
 
@@ -39,7 +38,6 @@ _global_memory_buffer = None  # type GlobalMemoryBuffer, not type hint here to a
 # used only in scripts and tests
 _fake_mp_world_size = None
 _fake_mp_rank = None
-
 
 # TODO: As in Megatron, we can set NCCL group options. Is it necessary?
 
@@ -77,9 +75,8 @@ def set_parallelism_group(model_name: str, pgroup):
     _pgroups[model_name] = pgroup
 
 
-def set_rank_mapping(
-    model_name: str, topo: "PipeModelDataParallelTopology", msid2mwid: Dict["ModelShardID", int]
-):
+def set_rank_mapping(model_name: str, topo: "PipeModelDataParallelTopology", msid2mwid: Dict["ModelShardID",
+                                                                                             int]):
     global _rank_mapping
     msid2mwid = {k: v for k, v in msid2mwid.items() if k.model_name == model_name}
     _rank_mapping[model_name] = {

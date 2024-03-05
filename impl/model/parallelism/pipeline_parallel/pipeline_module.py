@@ -21,7 +21,7 @@ import torch.nn as nn
 
 from base.datapack import partition_balanced as true_partition_balanced
 from base.monitor import process_memory_mb, time_mark
-from base.topology import PipeDataParallelTopology, ParallelGrid, PipeModelDataParallelTopology
+from base.topology import ParallelGrid, PipeDataParallelTopology, PipeModelDataParallelTopology
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, OutputHead
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
