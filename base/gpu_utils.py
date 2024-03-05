@@ -296,4 +296,12 @@ def setup_ddp_single_model(expr_name: str, trial_name: str, model_name: str, wor
 
     torch.distributed.init_process_group(**torch_dist_kwargs, group_name=model_name)
 
-    return world_size, ddp_rank, local_gpu_id
+    return NCCLProcessGroupInfo(
+        world_size=world_size,
+        global_rank=ddp_rank,
+        local_gpu_id=local_gpu_id,
+        mw_groups=None,
+        mas_mw_groups=None,
+        mas_pp_stage_groups=None,
+        mas_dp_head_groups=None,
+    )

@@ -149,15 +149,15 @@ def run_train_batch(rank, seed):
     res = interface.execute_post_hook("train_step", model, data, future)
     print(f"rank {rank} mp FIRST train time cost {time.monotonic() - st:.4f}, res {res}")
 
-    for _ in range(1):
-        st = time.monotonic()
-        future, data = interface.train_step(model, data, num_micro_batches=2 * NUM_PP)
+    # for _ in range(1):
+    #     st = time.monotonic()
+    #     future, data = interface.train_step(model, data, num_micro_batches=2 * NUM_PP)
 
-        while not future.done():
-            engine.poll_one_step()
+    #     while not future.done():
+    #         engine.poll_one_step()
 
-        res = interface.execute_post_hook("train_step", model, data, future)
-        print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
+    #     res = interface.execute_post_hook("train_step", model, data, future)
+    #     print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
 
     time.sleep(1)
 
@@ -197,16 +197,16 @@ def run_generate(rank, seed):
 
     print(f"rank {rank} FIRST generate time cost {time.monotonic() - st:.4f}, batchsize {BATCH_SIZE}")
 
-    for _ in range(1):
-        st = time.monotonic()
+    # for _ in range(1):
+    #     st = time.monotonic()
 
-        future, data = interface.generate(model, data, gconfig=gconfig, num_micro_batches=NUM_PP)
+    #     future, data = interface.generate(model, data, gconfig=gconfig, num_micro_batches=NUM_PP)
 
-        while not future.done():
-            engine.poll_one_step()
+    #     while not future.done():
+    #         engine.poll_one_step()
 
-        res = interface.execute_post_hook("generate", model, data, future)
-        print(f"rank {rank} generate time cost {time.monotonic() - st:.4f}")
+    #     res = interface.execute_post_hook("generate", model, data, future)
+    #     print(f"rank {rank} generate time cost {time.monotonic() - st:.4f}")
 
     engine.save_tracer()
     tracer.save()
@@ -225,13 +225,14 @@ def run_mixed(rank, seed):
 
     # os.environ["DLLM_TRACE"] = "1"
 
+    sub_dir = "fast_controller" if USE_FAST_SCHEDULE_CONTROLLER else "normal"
     tracer = get_tracer(tracer_entries=int(2e6),
                         max_stack_depth=10,
                         ignore_c_function=False,
                         ignore_frozen=True,
                         log_async=True,
                         min_duration=20,
-                        output_file=f"/home/meizy/logs/viztracer/trace{rank}.json")
+                        output_file=f"/home/meizy/logs/viztracer/{sub_dir}/trace{rank}.json")
 
     train_iters = 4
     generate_iters = 1
@@ -299,13 +300,13 @@ def run_mixed(rank, seed):
             tres = interface.execute_post_hook("train_step", model, train_data, tf)
             tress.append(tres)
 
-    tracer.start()
-
     st = time.monotonic()
     mixed_one_step(seed)
     print(f"first mixed time cost {time.monotonic() - st:.4f}")  # round_robin: gen_iter=2, train_iter=3
     # BS 64, min_new_tokens=32, max_new_tokens=32, prompt_length~150
     # mixed cots ~10.8s
+
+    tracer.start()
 
     for i in range(2):
         st = time.monotonic()
@@ -315,6 +316,7 @@ def run_mixed(rank, seed):
     tracer.save()
     engine.save_tracer()
 
+    time.sleep(1)
     engine.stop_controller()
 
 
@@ -361,4 +363,4 @@ class StreamPipeTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="StreamPipeTest.testTrainStep")
+    unittest.main(defaultTest="StreamPipeTest.testMixed")

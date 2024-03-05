@@ -148,7 +148,8 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             sequence_parallel=self.sequence_parallel,
             enable_async_p2p_communication=self.enable_async_p2p_communication,
             enable_async_instruction=self.enable_async_instruction,
-            use_fast_schedule_controller=self.use_fast_schedule_controller)
+            use_fast_schedule_controller=self.use_fast_schedule_controller,
+        )
 
         if self.engine_type == "pipe" or self.engine_type == "stream_pipe":
             # log pipeline infos
@@ -195,7 +196,8 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
             config=ds_config,
             engine_type=self.engine_type,
             sequence_parallel=self.sequence_parallel,
-            enable_async_p2p_communication=self.enable_async_p2p_communication)
+            enable_async_p2p_communication=self.enable_async_p2p_communication,
+        )
         model.module = module
         return model
 

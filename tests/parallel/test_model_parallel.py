@@ -83,7 +83,6 @@ def make_backend():
 
 def make_interface():
     import api.model
-
     return api.model.make_interface(config_package.ModelInterface(type_="flash_sft", args=dict()))
 
 
@@ -218,7 +217,7 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
         ignore_c_function=False,
         ignore_frozen=True,
         log_async=True,
-        min_duration=10,
+        # min_duration=10,
         output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json")
     tracer.start()
 

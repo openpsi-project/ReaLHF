@@ -40,16 +40,30 @@ MODEL_NAME = "default"
 # parallelism config
 NUM_MP = 1
 NUM_PP = 4
-NUM_DP = 2
+NUM_DP = 1
 assert batch_size >= NUM_DP
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
-MODEL_TYPE = "codellama"
-MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded/CodeLlama-34b-hf_2pp_2mp_3s"
-MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded/CodeLlama-34b-hf_4pp_3s"
-BASE_MODEL_PATH = "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf/"
+# MODEL_TYPE = "codellama"
+# MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded/CodeLlama-34b-hf_2pp_2mp_3s"
+# MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded/CodeLlama-34b-hf_4pp_3s"
+# BASE_MODEL_PATH = "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf/"
+
+NUM_SHARDS = 3
+MODEL_TYPE = "llama"
+
+if NUM_PP == 1:
+    SUFFIX = f"_{NUM_MP}mp_{NUM_SHARDS}s"
+elif NUM_MP == 1:
+    SUFFIX = f"_{NUM_PP}pp_{NUM_SHARDS}s"
+elif NUM_PP > 1:
+    SUFFIX = f"_{NUM_PP}pp_{NUM_MP}mp_{NUM_SHARDS}s"
+# BASE_MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
+# MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
+BASE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
+MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
 
 ## performance related config
-PROFILE_INTERFACE_TYPE = "generate"
+PROFILE_INTERFACE_TYPE = "train_step"
 SHORTNAME = {"inference": "fwd", "train_step": "fwdbwd", "generate": "gen"}
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
@@ -72,7 +86,7 @@ def make_finetune_spec(bs_per_device, total_train_epochs=1, total_train_steps=10
 def make_backend():
     import api.model
 
-    if PROFILE_INTERFACE_TYPE == "train_step":
+    if NUM_PP == 1:
         return api.model.make_backend(
             config_package.ModelBackend(
                 type_="ds_train",
@@ -81,28 +95,69 @@ def make_backend():
                     optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
                     warmup_steps_proportion=0.0,
                     min_lr_ratio=0.0,
-                    zero_stage=1 if NUM_PP > 1 else 2,
-                    engine_type="pipe" if NUM_PP > 1 else "deepspeed",
+                    # TODO: test zero_stage = 2 or 3 later
                     gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
-                    num_pipeline_stages=NUM_PP,
+                    zero_stage=1,
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
                     sequence_parallel=USE_SEQ_PARALLEL,
-                ),
+                    enable_async_p2p_communication=False),
             ))
-    else:
+    elif NUM_PP > 1:
         return api.model.make_backend(
             config_package.ModelBackend(
-                type_="ds_inference",
+                type_="ds_train",
                 args=dict(
-                    zero_stage=0,
-                    engine_type="pipe" if NUM_PP > 1 else "deepspeed",
-                    num_pipeline_stages=NUM_PP,
+                    optimizer_name="adam",
+                    optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
+                    warmup_steps_proportion=0.0,
+                    min_lr_ratio=0.0,
+                    zero_stage=1,
+                    engine_type="pipe",
+                    gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
+                    num_pipeline_stages=2 * NUM_PP,
                     enable_fp16=not USE_BF16,
                     enable_bf16=USE_BF16,
                     sequence_parallel=USE_SEQ_PARALLEL,
+                    enable_async_p2p_communication=False,
                 ),
             ))
+
+
+# def make_backend():
+#     import api.model
+
+#     if PROFILE_INTERFACE_TYPE == "train_step":
+#         return api.model.make_backend(
+#             config_package.ModelBackend(
+#                 type_="ds_train",
+#                 args=dict(
+#                     optimizer_name="adam",
+#                     optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
+#                     warmup_steps_proportion=0.0,
+#                     min_lr_ratio=0.0,
+#                     zero_stage=1 if NUM_PP > 1 else 2,
+#                     engine_type="pipe" if NUM_PP > 1 else "deepspeed",
+#                     gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
+#                     num_pipeline_stages=NUM_PP,
+#                     enable_fp16=not USE_BF16,
+#                     enable_bf16=USE_BF16,
+#                     sequence_parallel=USE_SEQ_PARALLEL,
+#                 ),
+#             ))
+#     else:
+#         return api.model.make_backend(
+#             config_package.ModelBackend(
+#                 type_="ds_inference",
+#                 args=dict(
+#                     zero_stage=0,
+#                     engine_type="pipe" if NUM_PP > 1 else "deepspeed",
+#                     num_pipeline_stages=NUM_PP,
+#                     enable_fp16=not USE_BF16,
+#                     enable_bf16=USE_BF16,
+#                     sequence_parallel=USE_SEQ_PARALLEL,
+#                 ),
+#             ))
 
 
 def make_interface():
@@ -122,7 +177,7 @@ def make_model(device):
             from_type="self" if NUM_PP == 1 else "empty_actor",
             dtype="bf16" if USE_BF16 else "fp16",
             hf_model_type=MODEL_TYPE,
-            tokenizer_path=BASE_MODEL_PATH,
+            tokenizer_path=MODEL_PARALLEL_PATH,
             sequence_parallel=USE_SEQ_PARALLEL,
             gradient_accumulation_fusion=GRADIENT_ACCUMULATION_FUSION,
         ),
@@ -235,7 +290,7 @@ def main(rank: int = None, world_size: int = None):
 
     model = backend.initialize(model, ft_spec)
 
-    s = torch.profiler.schedule(skip_first=1, warmup=1, active=2, repeat=1, wait=0)
+    s = torch.profiler.schedule(skip_first=0, warmup=1, active=1, repeat=1, wait=0)
 
     dirname = f"./trace_result/{SHORTNAME[PROFILE_INTERFACE_TYPE]}_mp{NUM_MP}pp{NUM_PP}_local"
     os.makedirs(dirname, exist_ok=True)
@@ -254,7 +309,7 @@ def main(rank: int = None, world_size: int = None):
             on_trace_ready=trace_handler,
             with_flops=True,
     ) as prof:
-        for _ in range(10):
+        for _ in range(2):
             torch.cuda.synchronize()
             st = time.monotonic()
 
@@ -263,14 +318,17 @@ def main(rank: int = None, world_size: int = None):
             else:
                 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 
-                gconfig = GenerationConfig(min_new_tokens=1, max_new_tokens=512)
+                gconfig = GenerationConfig(min_new_tokens=10, max_new_tokens=10)
                 res = interface.generate(model, data, gconfig)
             torch.cuda.synchronize()
             if (base.constants.model_parallel_rank() == 0
                     and base.constants.pipe_parallel_rank() == NUM_PP - 1):
-                print(
-                    f"generate {res['gen_tokens'].shape[1]} tokens * batch size {res['gen_tokens'].shape[0]}, "
-                    f"time: {time.monotonic() - st}")
+                if PROFILE_INTERFACE_TYPE == "generate":
+                    print(
+                        f"generate {res['gen_tokens'].shape[1]} tokens * batch size {res['gen_tokens'].shape[0]}, "
+                        f"time: {time.monotonic() - st}")
+                else:
+                    print(f"{PROFILE_INTERFACE_TYPE} time: {time.monotonic() - st}")
             prof.step()
 
 

@@ -96,6 +96,16 @@ class Scheduling:
             **kwargs,
         })
 
+    @staticmethod
+    def profile_worker_default(**kwargs):
+        return Scheduling(**{
+            "cpu": 2,
+            "gpu": 1,
+            "mem": 60 * 1024,
+            "container_image": _LLM_GPU_IMAGE,
+            **kwargs,
+        })
+
 
 @dataclasses.dataclass
 class WorkerInformation:
@@ -208,6 +218,31 @@ class ModelWorker:
 
 
 @dataclasses.dataclass
+class ProfileWorker:
+    seed: int
+    model: Model
+    interface: ModelInterface
+    backend: ModelBackend
+    model_name: str  # the name of this whole model, not this shard
+    # parallelism ranks, used to reveal model shard's identity
+    dp_rank: int = 0
+    mp_rank: int = 0
+    pp_rank: int = 0
+    topo: Optional[base.topology.PipeModelDataParallelTopology] = dataclasses.field(
+        default_factory=lambda x: base.topology.PipeModelDataParallelTopology(1, 1, 1))
+    # cuda & cudnn config
+    cudnn_benchmark: bool = False
+    cudnn_deterministic: bool = False
+    cuda_cache_cleanliness: bool = True
+    cuda_cache_clear_freq: int = 10
+    # worker info
+    worker_info: Optional[WorkerInformation] = None
+
+    def __post_init__(self):
+        assert "@" not in self.model_name
+
+
+@dataclasses.dataclass
 class DataWorker:
     tokenizer_name_or_path: str
     datasets: List[Union[str, Dataset]]
@@ -309,6 +344,7 @@ class ExperimentScheduling:
     data_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
     model_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
     master_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
+    profile_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
     controller_image: str = _LLM_CPU_IMAGE
 
 
@@ -319,6 +355,7 @@ class ExperimentConfig:
     model_rpcs: List[api.dfg.ModelRPC]
     data_worker: List[DataWorker] = dataclasses.field(default_factory=list)
     model_worker: List[ModelWorker] = dataclasses.field(default_factory=list)
+    profile_worker: List[ProfileWorker] = dataclasses.field(default_factory=list)
     # eval control
     save_frequency_epochs: Optional[int] = None
     save_frequency_steps: Optional[int] = None
@@ -333,6 +370,13 @@ class ExperimentConfig:
     config: Optional[Any] = None
 
     def __post_init__(self):
+        if len(self.profile_worker) > 0:
+            assert len(self.model_worker) == 0
+            assert len(self.data_worker) == 0
+            assert len(self.model_rpcs) == 0
+            self.master_worker = []
+            return
+
         assert self.master_worker is None
 
         model_names = []
@@ -418,6 +462,7 @@ class ExperimentConfig:
             ("model_worker", self.model_worker),
             ("master_worker", self.master_worker),
             ("data_worker", self.data_worker),
+            ("profile_worker", self.profile_worker),
         ]:
             for i, worker in enumerate(workers):
                 system_worker_info = dict(

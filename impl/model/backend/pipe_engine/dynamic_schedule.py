@@ -47,6 +47,9 @@ class DynamicPipeSchedule(ABC):
         self.__end_schedule_sent = False
         self.schedule_id = schedule_id
 
+    def set_schedule_id(self, schedule_id):
+        self.schedule_id = schedule_id
+
     def __init_inst_set(self):
         for inst in self.init_instructions():
             self.__not_ready.add(inst)
@@ -459,8 +462,8 @@ class Train1F1BSchedule(DynamicPipeSchedule):
                     fwd_deps.append(SendActivation(stage_id=0, micro_batch_id=m - 1))
                 if s > 0:
                     fwd_deps.append(RecvActivation(stage_id=s, micro_batch_id=m))
-                if m >= self.num_stages - s:
-                    fwd_deps.append(BackwardPass(stage_id=s, micro_batch_id=m - self.num_stages + s))
+                # if m >= self.num_stages - s:
+                #     fwd_deps.append(BackwardPass(stage_id=s, micro_batch_id=m - self.num_stages + s))
                 insts.append(ForwardPass(stage_id=s, micro_batch_id=m, deps=fwd_deps))
 
                 if s < self.num_stages - 1:
@@ -481,12 +484,12 @@ class Train1F1BSchedule(DynamicPipeSchedule):
 
                 # backward passes
                 bwd_deps = []
-                # if s == self.num_stages - 1:
-                #     bwd_deps.append(ForwardPass(stage_id=s, micro_batch_id=m))
+                if s == self.num_stages - 1:
+                    bwd_deps.append(ForwardPass(stage_id=s, micro_batch_id=self.num_micro_batches - 1))
                 if s < self.num_stages - 1:
                     bwd_deps.append(RecvGrad(stage_id=s, micro_batch_id=m))
-                if m + self.num_stages - 1 - s < self.num_micro_batches:
-                    bwd_deps.append(ForwardPass(stage_id=s, micro_batch_id=m + self.num_stages - 1 - s))
+                # if m + self.num_stages - 1 - s < self.num_micro_batches:
+                #     bwd_deps.append(ForwardPass(stage_id=s, micro_batch_id=m + self.num_stages - 1 - s))
                 insts.append(BackwardPass(stage_id=s, micro_batch_id=m, deps=bwd_deps))
 
                 if s > 0:

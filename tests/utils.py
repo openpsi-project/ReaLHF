@@ -1,3 +1,4 @@
+import dataclasses
 import os
 import random
 
@@ -121,3 +122,12 @@ def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
         prompt_att_mask=attention_mask,
     )
     return data
+
+
+@dataclasses.dataclass
+class StatsEntry:
+    cost: float
+
+
+class ProfileStatsTable:
+    pass

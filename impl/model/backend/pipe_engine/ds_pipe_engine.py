@@ -47,9 +47,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             *super_args,
             **super_kwargs):
         super().__init__(*super_args, **super_kwargs)
-        assert isinstance(self.module, PipelineModule), "model must base PipelineModule"
-        assert self.zero_optimization_stage(
-        ) < 2, "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
 
         self.module: PipelineModule
 
@@ -66,8 +63,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.hidden_dim = self.config.hidden_dim
         self.head_dim = self.config.head_dim
         self.n_kv = self.config.n_kv_heads
-        if self.bfloat16_enabled():
-            assert isinstance(self.optimizer, BF16_Optimizer)
         self.dtype = torch.half if not self.bfloat16_enabled() else torch.bfloat16
         self.sequence_parallel = sequence_parallel
         # tensor model parallel option, whether to enable sequence parallel
@@ -77,11 +72,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         # parallelism constants
         self.grid: PipelineParallelGrid = base.constants.grid()
-        assert self.dp_world_size == self.grid.data_parallel_size
 
         self.global_rank = self.grid.get_global_rank()
         self.num_stages = self.grid.get_pipe_parallel_world_size()
-        assert self.num_stages > 1
         self.stage_id = self.grid.get_stage_id()
         self.dp_id = self.grid.get_data_parallel_id()
 
@@ -93,7 +86,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # and last stages loading inputs/labels. We construct a sampler that uses
 
         self.is_pipe_parallel = self.grid.pipe_parallel_size > 1
-        assert self.is_pipe_parallel, "Must use pipeline parallelism with PipelineModule"
         self.is_data_parallel = self.grid.data_parallel_size > 1
         self.is_model_parallel = self.grid.model_parallel_size > 1
 
@@ -132,6 +124,17 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._use_fast_schedule_controller = use_fast_schedule_controller
 
         self._post_init_logging()
+
+    def __post_init__(self):
+        # assertions
+        assert isinstance(self.module, PipelineModule), "model must base PipelineModule"
+        assert self.zero_optimization_stage(
+        ) < 2, "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
+        if self.bfloat16_enabled():
+            assert isinstance(self.optimizer, BF16_Optimizer)
+        assert self.dp_world_size == self.grid.data_parallel_size
+        assert self.num_stages > 1
+        assert self.is_pipe_parallel, "Must use pipeline parallelism with PipelineModule"
 
     def _post_init_logging(self):
         model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
@@ -996,17 +999,17 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # self.rank_print("after take model step")
 
         # sync loss scale across pipeline stages
-        if not self.bfloat16_enabled():
-            loss_scale = self.optimizer.loss_scale
-            total_scale_cuda = torch.FloatTensor([float(loss_scale)]).to(self.device)
-            dist.all_reduce(total_scale_cuda,
-                            op=dist.ReduceOp.MIN,
-                            group=self.grid.get_model_parallel_group())
-            # all_loss_scale = total_scale_cuda[0].item()
-            logger.info(
-                f"loss scale: {total_scale_cuda}, group: { torch.distributed.get_process_group_ranks(self.mpu.get_model_parallel_group())}"
-            )
-            self.optimizer.loss_scaler.cur_scale = min(total_scale_cuda[0].item(), 8192)
+        # if not self.bfloat16_enabled():
+        #     loss_scale = self.optimizer.loss_scale
+        #     total_scale_cuda = torch.FloatTensor([float(loss_scale)]).to(self.device)
+        #     dist.all_reduce(total_scale_cuda,
+        #                     op=dist.ReduceOp.MIN,
+        #                     group=self.grid.get_model_parallel_group())
+        #     # all_loss_scale = total_scale_cuda[0].item()
+        #     logger.info(
+        #         f"loss scale: {total_scale_cuda}, group: { torch.distributed.get_process_group_ranks(self.mpu.get_model_parallel_group())}"
+        #     )
+        #     self.optimizer.loss_scaler.cur_scale = min(total_scale_cuda[0].item(), 8192)
 
         # self.rank_print("after sync loss scale")
 

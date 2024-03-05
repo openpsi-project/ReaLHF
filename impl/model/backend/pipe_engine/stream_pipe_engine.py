@@ -4,6 +4,7 @@ from typing import Callable, List, Optional, Tuple
 import dataclasses
 import gc
 import os
+import time
 
 import torch
 import transformers
@@ -55,7 +56,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
     def __init__(self, verbose=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.__verbose = True  # verbose
+        self.__verbose = verbose
 
         assert base.constants.model_parallel_world_size() == 1, \
                "Currently stream pipe engine with tensor parallel has synchronization problem when multiple "\
@@ -69,6 +70,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
         # self.engine_controller_started = False
         if self.pp_rank == 0:
             if self._use_fast_schedule_controller:
+                logger.info("starting fast schedule controller")
                 self.engine_controller = FastScheduleController(num_stages=self.num_stages)
                 self.engine_controller.start()
             else:
@@ -78,9 +80,13 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
                 self.engine_controller.start()
 
         if self._use_fast_schedule_controller:
+            # if self.pp_rank == 0:
+            #     self.engine_controller.check()
+            logger.info("starting fast schedule client")
             self.engine_client = FastScheduleClient(stage_id=self.pp_rank)
         else:
             self.engine_client = EngineScheduleClient(stage_id=self.pp_rank)
+
         self.schedule_count = 0
         self.active_schedules = []
         self.finished_schedules = []
@@ -105,6 +111,9 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
 
         self.comm_handle_table = defaultdict(list)
         self.comm_instruction_table = defaultdict(list)
+
+        self.controller_last_check = None
+        self.sync_tensor = torch.tensor([0], device=self.device)
 
     def log_verbose(self, msg):
         if self.__verbose:
@@ -185,6 +194,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
 
     def start_schedule(self, sched: DynamicPipeSchedule, priority: int):
         sched_index = self.schedule_count
+        sched.schedule_id = sched_index
         self.active_schedules.append(sched_index)
         self.schedule_mapping[sched_index] = sched
         self.tensor_buffer_mapping[sched_index] = TensorBuffer()
@@ -358,6 +368,16 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
     def poll_one_step_fast_controller(self):
         assert self._use_fast_schedule_controller
         self.engine_client: FastScheduleClient
+
+        # check_interval = 10
+        # if self.stage_id == 0:
+        #     if self.controller_last_check is None:
+        #         self.controller_last_check = time.time()
+        #         self.engine_controller.check()
+        #     elif time.time() - self.controller_last_check > check_interval:
+        #         self.controller_last_check = time.time()
+        #         self.engine_controller.check()
+
         self.engine_client.post()
         self.engine_client.poll()
 
@@ -366,7 +386,7 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
             sched_id, instruction = self.engine_client.pop()
             schedule = self.schedule_mapping[sched_id]
 
-            signal_code = self.execute_instruction()
+            signal_code = self.execute_instruction(instruction, sched_id)
             self.engine_client.post_result(instruction, schedule, signal_code)
 
         finished = self.maybe_check_async_handles()
@@ -392,6 +412,10 @@ class StreamPipeEngine(DeepSpeedPipelineEngine):
             self.log_verbose(f"Rank {self.global_rank}: START cmd {instruction} of sched {sched_id}")
             exec_end, comm_handle = self._exec_instr(*instruction.args)
             self.log_verbose(f"Rank {self.global_rank}: END cmd {instruction} of sched {sched_id}")
+            # if comm_handle is None:
+            torch.cuda.synchronize()
+            # self.sync_tensor.to("cpu")
+            # self.sync_tensor.to(self.device)
         except Exception as e:
             logger.error(f"Rank {self.global_rank} Exception {e} in cmd {instruction}")
             raise e

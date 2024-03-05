@@ -43,7 +43,10 @@ def main_worker(args):
         logger.info("CUDA_VISIBLE_DEVICES: %s", os.environ['CUDA_VISIBLE_DEVICES'])
 
     # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
+    import profiler
+
     import experiments
+    profiler.import_profiler_registers()
     import impl.dataset
     import impl.model
     import system
@@ -101,9 +104,12 @@ def main_controller(args):
             config_index: the index of experiment configuration (experiment may return multiple configurations)
             ignore_worker_error: bool, if False, stop the experiment when any worker(s) fail.
     """
+    import profiler.experiments
+
     import api.config
     import experiments
     import system
+
     if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
         with open(QUICKSTART_EXPR_CACHE_PATH, 'rb') as f:
             api.config.register_experiment(*pickle.load(f))

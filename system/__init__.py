@@ -10,7 +10,7 @@ logger = logging.getLogger("system")
 
 # NOTE: Workers are configured in the following order.
 # Take special care when adding a new worker type.
-WORKER_TYPES = ["data_worker", "master_worker", "model_worker"]
+WORKER_TYPES = ["data_worker", "master_worker", "model_worker", "profile_worker"]
 
 
 def load_worker(worker_type: str) -> Type:
@@ -21,7 +21,10 @@ def load_worker(worker_type: str) -> Type:
 
 
 def worker_type_to_module(worker_type: str):
-    return "system." + worker_type
+    if worker_type != "profile_worker":
+        return "system." + worker_type
+    else:
+        return "profiler.worker"
 
 
 def worker_type_to_class_name(worker_type: str):
