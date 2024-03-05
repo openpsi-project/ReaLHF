@@ -294,6 +294,8 @@ async def model_rpc_request_func(
     data_amount_seqs = data_amount_tokens = 0
     while not ctrl.stop.is_set():
         await can_do_rpc.acquire()
+
+        # The following two lines are used to ensure staleness=1, but it may be unnecessary when enabling the stream engine.
         # NOTE: max-min-flow-tokens is not used here because the number of tokens can change (e.g. after generate)
         while data_amount_seqs >= (ctrl.model_traversal[rpc.model_name] + 1) * rpc.max_min_flow_seqs:
             await asyncio.sleep(0.1)
