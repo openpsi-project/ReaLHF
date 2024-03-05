@@ -248,7 +248,7 @@ async def scatter_tensor_to_mws(
                     buf_shape, dtype, name=f"scatter_gather_dp{j}"
                 )
             copied_replica_ids = []
-            for data, replica_id in zip(datas, this_replica_ids):
+            for data, replica_id in zip(this_datas, this_replica_ids):
                 if replica_id in copied_replica_ids:
                     continue
                 buf = scatter_buffer[f"data{replica_id}"]
@@ -435,10 +435,11 @@ async def gather_tensor_from_mws(
                 group=gather_group,
             )
 
+            assert len(this_responses) == len(gather_response_indices) == len(gather_buffer) - 1
             for idx, v, actual_shape in zip(
                 gather_response_indices,
                 gather_buffer[1:],
-                [response.actual_shapes[k] for response in responses],
+                [r.actual_shapes[k] for r in this_responses],
             ):
                 s = tuple(slice(0, x) for x in actual_shape)
                 all_res[idx][k] = v[s].clone()
