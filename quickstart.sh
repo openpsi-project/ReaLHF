@@ -50,4 +50,4 @@ python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240
     ppo.ppo_n_minibatches=4 \
     ppo.adv_norm=True ppo.value_norm=True \
     ppo.top_p=0.9 ppo.top_k=1024 ppo.actor_as_critic=True \
-    ppo.use_stream_pipe_engine=True 
+    ppo.use_stream_pipe_engine=False

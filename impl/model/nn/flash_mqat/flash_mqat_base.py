@@ -1,4 +1,5 @@
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
+import contextlib
 import dataclasses
 import functools
 import json
@@ -147,6 +148,11 @@ class FlashMQATBlock(nn.Module):
         else:
             self.ckpt_full = True
 
+    def gradient_checkpointing_disable(self):
+        self.ckpt_attn = False
+        self.ckpt_mlp = False
+        self.ckpt_full = False
+
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         pp_input = x.pp_input
         cu_seqlens = x.cu_seqlens
@@ -167,6 +173,7 @@ class FlashMQATBlock(nn.Module):
                 attention_mask,
                 False,
                 False,
+                use_reentrant=True,
             )
         else:
             pp_output, k, v = self._forward(
@@ -214,6 +221,7 @@ class FlashMQATBlock(nn.Module):
                 cache_seqlens,
                 attention_mask,
                 max_seqlen,
+                use_reentrant=True,
             )
         else:
             attn_out, k, v = self.attn(
@@ -227,7 +235,7 @@ class FlashMQATBlock(nn.Module):
             )
         h = h + attn_out
         if ckpt_mlp:
-            h = torch.utils.checkpoint.checkpoint(self.mlp, h) + h
+            h = torch.utils.checkpoint.checkpoint(self.mlp, h, use_reentrant=True) + h
         else:
             h = self.mlp(h) + h
         if self.output_layernorm:
@@ -488,6 +496,18 @@ class FlashMQATModel(nn.Module):
             # skip the first layer to enable lora together with grad checkpointing
             l: FlashMQATBlock
             l.gradient_checkpointing_enable(attn, mlp)
+
+    @contextlib.contextmanager
+    def gradient_checkpoiting_disable(self):
+        _states = []
+        for l in self.transformer.h[1:]:
+            l: FlashMQATBlock
+            _states.append((l.ckpt_attn, l.ckpt_mlp, l.ckpt_full))
+            l.gradient_checkpointing_disable()
+        yield
+        for l, state in zip(self.transformer.h[1:], _states):
+            l: FlashMQATBlock
+            l.ckpt_attn, l.ckpt_mlp, l.ckpt_full = state
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
         if self.config.sequence_parallel:

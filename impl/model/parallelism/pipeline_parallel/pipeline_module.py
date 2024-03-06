@@ -5,6 +5,7 @@
 
 from functools import partial
 from typing import List, Optional, Tuple
+import contextlib
 import dataclasses
 import glob
 import json
@@ -352,6 +353,22 @@ class PipelineModule(nn.Module):
                 layer.gradient_checkpointing_enable(attn, mlp)
             except AttributeError:
                 logger.warning(f"Layer {layer} does not support gradient checkpointing, skipping ...")
+
+    @contextlib.contextmanager
+    def gradient_checkpointing_disable(self):
+        _states = []
+        _layers = []
+        for l in self.forward_funcs:
+            try:
+                _states.append((l.ckpt_attn, l.ckpt_mlp, l.ckpt_full))
+                _layers.append(l)
+                l.gradient_checkpointing_disable()
+            except AttributeError:
+                # logger.warning(f"Layer {type(l)} is not a FlashMQATBlock, which does not support disabling gradient checkpoting, skipping ...")
+                pass
+        yield
+        for l, s in zip(_layers, _states):
+            l.ckpt_attn, l.ckpt_mlp, l.ckpt_full = s
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]):
         local_micro_offset = self.micro_offset + 1

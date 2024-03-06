@@ -697,7 +697,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._zero_grads(x)
         self._zero_grads(ys)
 
-        x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
+        if self._generate_mode or self._inference_mode:
+            with self.module.gradient_checkpointing_disable():
+                x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
+        else:
+            x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
+
         # logger.info(f"rank {self.global_rank} mbid {micro_batch_id} step {step_id} x.pp_input shape {x.pp_input.shape}")
         is_first_step = self.__maybe_init_kv_cache(x, ys, micro_batch_id)
         self.__maybe_increase_cache_seqlens(x, ys, micro_batch_id, is_first_step)

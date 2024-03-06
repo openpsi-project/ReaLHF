@@ -234,7 +234,8 @@ def generate(
         ys = [PipeCacheData(input_ids=packed_input_ids)
               ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
         # Model forward will set k/v cache in PipeCacheData.
-        prompt_logits = model(x, ys).pp_output
+        with model.gradient_checkpoiting_disable():
+            prompt_logits = model(x, ys).pp_output
         logits = prompt_logits[cu_seqlens[1:] - 1]
         cache_seqlens = input_lens.clone().to(dtype=torch.int32)
         layer_indices = range(len(ys))
@@ -294,7 +295,8 @@ def generate(
         ys[0].input_ids = next_tokens.unsqueeze(-1)  # [bs, 1], seqlen=1
         ys[0].position_ids = None
         # K/v cache will be changed in-place with flash attention.
-        logits = model(x, ys).pp_output.squeeze(dim=1)
+        with model.gradient_checkpoiting_disable():
+            logits = model(x, ys).pp_output.squeeze(dim=1)
         cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
 
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
