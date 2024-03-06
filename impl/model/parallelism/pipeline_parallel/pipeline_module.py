@@ -354,6 +354,10 @@ class PipelineModule(nn.Module):
             except AttributeError:
                 logger.warning(f"Layer {layer} does not support gradient checkpointing, skipping ...")
 
+    def train(self, mode: bool):
+        for l in self.forward_funcs:
+            l.train(mode)
+
     @contextlib.contextmanager
     def gradient_checkpointing_disable(self):
         _states = []
