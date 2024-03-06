@@ -710,6 +710,10 @@ class ColumnParallelLinear(torch.nn.Module):
             raise RuntimeError("`async_tensor_model_parallel_allreduce` and `sequence_parallel` "
                                "cannot be enabled at the same time.")
 
+    def sequence_parallel_enable(self, mode: bool):
+        self.sequence_parallel = mode
+        self.async_tensor_model_parallel_allreduce = not mode
+
     def forward(self, input_) -> torch.Tensor:
         """Forward of ColumnParallelLinear
 
@@ -833,6 +837,9 @@ class RowParallelLinear(torch.nn.Module):
                 self.bias.zero_()
         else:
             self.register_parameter("bias", None)
+
+    def sequence_parallel_enable(self, mode: bool):
+        self.sequence_parallel = mode
 
     def forward(self, input_) -> torch.Tensor:
         """Forward of RowParallelLinear

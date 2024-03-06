@@ -525,6 +525,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
         num_micro_batches: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
+        # FIXME: change to global input buffer
+        real_sequence_parallel = self.sequence_parallel
+        self.sequence_parallel = False
+        #############
         self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
         self._set_generate_states()
         self._prepare_input(packed_input_ids, cu_seqlens)
@@ -543,9 +547,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             return torch.stack(
                 [self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)]).all()
 
-        self._exec_schedule(sched, terminate_condition)
+        with self.module.gradient_checkpointing_disable(), self.module.sequence_parallel_disable():
+            self._exec_schedule(sched, terminate_condition)
         r = self._maybe_gather_generate_outputs()
         self._post_generate()
+        # FIXME: change to global input buffer
+        self.sequence_parallel = real_sequence_parallel
+        #############
         return r
 
     def _maybe_gather_generate_outputs(self):
@@ -697,11 +705,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._zero_grads(x)
         self._zero_grads(ys)
 
-        if self._generate_mode or self._inference_mode:
-            with self.module.gradient_checkpointing_disable():
-                x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
-        else:
-            x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
+        x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
 
         # logger.info(f"rank {self.global_rank} mbid {micro_batch_id} step {step_id} x.pp_input shape {x.pp_input.shape}")
         is_first_step = self.__maybe_init_kv_cache(x, ys, micro_batch_id)

@@ -12,7 +12,7 @@ import transformers
 
 from impl.model.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
 from impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, parallel_lm_logits,
-                                                           ParallelEmbedding)
+                                                           ParallelEmbedding, RowParallelLinear)
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import compute_varlen_position_indices
 from impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
@@ -336,9 +336,16 @@ class VocabPositionEmbedding(nn.Module):
                 dtype=torch.bool, device=self_attention_mask.device)
             x.attention_mask = self_attention_mask.unsqueeze(1)
 
-        inputs_embeds = self.wte(y.input_ids)
+        x.pp_output = self._forward(y.input_ids, y.position_ids)
+        return x
+
+    def sequence_parallel_enable(self, mode: bool):
+        self.sequence_parallel = mode
+
+    def _forward(self, input_ids: torch.LongTensor, position_ids: torch.LongTensor) -> torch.Tensor:
+        inputs_embeds = self.wte(input_ids)
         if self.apply_abs_pos_embed:
-            inputs_embeds = inputs_embeds + self.wpe(y.position_ids)
+            inputs_embeds = inputs_embeds + self.wpe(position_ids)
         if self.sequence_parallel:
             inputs_embeds = tensor_parallel.scatter_to_sequence_parallel_region(inputs_embeds)
             # `scatter_to_sequence_parallel_region` returns a view, which prevents
@@ -347,9 +354,9 @@ class VocabPositionEmbedding(nn.Module):
             # if self.config.clone_scatter_output_in_embedding:
             #     embeddings = embeddings.clone()
             # with tensor_parallel.get_cuda_rng_tracker().fork():
-            x.pp_output = self.embed_drop(inputs_embeds)
+            x = self.embed_drop(inputs_embeds)
         else:
-            x.pp_output = self.embed_drop(inputs_embeds)
+            x = self.embed_drop(inputs_embeds)
         return x
 
 
@@ -413,6 +420,9 @@ class OutputHead(nn.Linear):
         x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
         return x
 
+    def _forward(self, x:torch.Tensor):
+        return super().forward(x)
+
 
 class SequenceParallelCriticHead(nn.Linear):
 
@@ -420,6 +430,10 @@ class SequenceParallelCriticHead(nn.Linear):
         all_gather_buffer = tensor_parallel.gather_from_sequence_parallel_region(x.pp_input)
         x.pp_output = nn.functional.linear(all_gather_buffer, self.weight, self.bias)
         return x
+
+    def _forward(self, x: torch.Tensor):
+        x = tensor_parallel.gather_from_sequence_parallel_region(x)
+        return super().forward(x)
 
 
 class SequenceParallelActorHead(ColumnParallelLinear):
@@ -437,6 +451,17 @@ class SequenceParallelActorHead(ColumnParallelLinear):
         # NOTE: the output is not the whole logits, but the logits for a part of tokens due to ColumnParallelLinear.
         # (However, data along the batch dim is all-gathered. No sequence parallel any more.)
         return x
+
+    def _forward(self, x: torch.Tensor):
+        return parallel_lm_logits(
+            x,
+            self.weight,
+            parallel_output=True,
+            async_tensor_model_parallel_allreduce=self.async_tensor_model_parallel_allreduce,
+            sequence_parallel=self.sequence_parallel,
+            gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+            bias=self.bias,
+        )
 
 
 class FlashMQATModel(nn.Module):
@@ -498,7 +523,7 @@ class FlashMQATModel(nn.Module):
             l.gradient_checkpointing_enable(attn, mlp)
 
     @contextlib.contextmanager
-    def gradient_checkpoiting_disable(self):
+    def gradient_checkpointing_disable(self):
         _states = []
         for l in self.transformer.h[1:]:
             l: FlashMQATBlock
@@ -508,6 +533,19 @@ class FlashMQATModel(nn.Module):
         for l, state in zip(self.transformer.h[1:], _states):
             l: FlashMQATBlock
             l.ckpt_attn, l.ckpt_mlp, l.ckpt_full = state
+
+    @contextlib.contextmanager
+    def sequence_parallel_disable(self):
+        _states = []
+        for _, m in self.named_modules():
+            if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
+                _states.append(m.sequence_parallel)
+                m.sequence_parallel_enable(False)
+        yield
+        for _, m in self.named_modules():
+            if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
+                m.sequence_parallel_enable(_states.pop(0))
+        assert len(_states) == 0
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
         if self.config.sequence_parallel:

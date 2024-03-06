@@ -374,6 +374,22 @@ class PipelineModule(nn.Module):
         for l, s in zip(_layers, _states):
             l.ckpt_attn, l.ckpt_mlp, l.ckpt_full = s
 
+    @contextlib.contextmanager
+    def sequence_parallel_disable(self):
+        from impl.model.parallelism.model_parallel.modules import RowParallelLinear, ColumnParallelLinear
+        from impl.model.nn.flash_mqat.flash_mqat_base import VocabPositionEmbedding
+        _states = []
+        for l in self.forward_funcs:
+            for _, m in l.named_modules():
+                if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
+                    _states.append(m.sequence_parallel)
+                    m.sequence_parallel_enable(False)
+        yield
+        for l in self.forward_funcs:
+            for _, m in l.named_modules():
+                if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
+                    m.sequence_parallel_enable(_states.pop(0))
+
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]):
         local_micro_offset = self.micro_offset + 1
 
