@@ -7,6 +7,8 @@ import getpass
 import math
 import os
 import shutil
+import pandas as pd
+import collections
 import socket
 import subprocess
 
@@ -591,6 +593,19 @@ def get_all_node_resources() -> Dict[str, SlurmResource]:
     return all_rres
 
 
+def resource_to_string(resources: Dict[str, SlurmResource]) -> str:
+    resource_list = [{
+        **{
+            "NodeName": k
+        },
+        **{
+            field.name: getattr(r, field.name)
+            for field in r.__dataclass_fields__.values()
+        }
+    } for k, r in resources.items()]
+    return pd.DataFrame(resource_list).to_string(index=False)
+
+
 def allocate_resources(infos: List[SlurmLaunchInfo],
                        # strategy: Literal["pack", "plane"] = "pack",
                        ) -> List[SlurmLaunchInfo]:
@@ -603,7 +618,7 @@ def allocate_resources(infos: List[SlurmLaunchInfo],
     #                 key=lambda x: x[1],
     #                 reverse=True)
     infos = sorted(infos, key=lambda x: x.resource_requirement, reverse=True)
-    for info in infos:
+    for info_idx, info in enumerate(infos):
         valid_hostnames = available_hostnames(
             node_type=info.node_type,
             nodelist=info.nodelist,
@@ -628,10 +643,25 @@ def allocate_resources(infos: List[SlurmLaunchInfo],
                 allocated[hostname] = tmp - task_left
             all_resources[hostname] = resource
         if task_left > 0:
-            now_all_resources = get_all_node_resources()
-            for hn, res in now_all_resources.items():
-                logger.info("Node: {}, Resource: {}".format(hn, res))
-            logger.info("Job: {}, Resource: {}".format(info.slurm_name, info.resource_requirement))
+            # logger.warning(f"Current resources in the cluster:\n {resource_to_string(get_all_node_resources())}")
+            logger.warning(
+                f"Unable to allocate {info.n_jobsteps} Jobs with name \"{info.slurm_name}\". "
+                f"Resource Requirement of this job is: {dataclasses.asdict(info.resource_requirement)}. "
+                f"Valid resources for this job is "
+                f"(according to NodeType={info.node_type}, NodeList={info.nodelist}, "
+                f"and Exclude={info.exclude}):\n {resource_to_string({k: v for k, v in get_all_node_resources().items() if k in valid_hostnames})}"
+            )
+            for pinfo in infos[:info_idx]:
+                if len(set(pinfo.hostfile_content.split('\n')).intersection(set(valid_hostnames))) == 0:
+                    continue
+                palloc = collections.defaultdict(lambda: 0)
+                for _n in pinfo.hostfile_content.split('\n'):
+                    palloc[_n] += 1
+                logger.warning(
+                    f"Found previous job \"{pinfo.slurm_name}\" (ntasks={pinfo.n_jobsteps}) "
+                    f"has been allocated to the same set of nodes. "
+                    f"Resource requirement of this job is: {dataclasses.asdict(pinfo.resource_requirement)}, "
+                    f"allocation of this job is {dict(palloc)}.")
             raise SlurmResourceNotEnoughException()
         hostlist = []
         for hostname, task_num in allocated.items():
