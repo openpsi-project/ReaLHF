@@ -22,8 +22,7 @@ import torch.distributed
 from base.asyncio_utils import raise_asyncio_exception, setup_run_until_complete, teardown_run_util_complete
 from base.buffer import AsyncIOSequenceBuffer
 from base.cluster import spec as cluster_spec
-from base.constants import MODEL_SAVE_ROOT
-from impl.model.parallelism.model_parallel.utils import GlobalMemoryBuffer
+from base.constants import MODEL_SAVE_ROOT, GlobalMemoryBuffer
 import api.config as config_pkg
 import api.data as data_api
 import api.dfg

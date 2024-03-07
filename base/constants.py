@@ -3,6 +3,7 @@ from typing import *
 import contextlib
 import copy
 import getpass
+import numpy as np
 
 from base.cluster import spec as cluster_spec
 
@@ -10,6 +11,30 @@ if TYPE_CHECKING:
     from api.config import ModelShardID
     from base.topology import ParallelGrid, PipeModelDataParallelTopology
 
+class GlobalMemoryBuffer:
+    """Global buffer to avoid dynamic memory allocations.
+    Caller should ensure that buffers of the same name
+    are not used concurrently."""
+
+    def __init__(self):
+        self.buffer = {}
+
+    def get_tensor(self, tensor_shape, dtype, name, force_zero: bool = False):
+        import torch
+        required_len = int(np.prod(tensor_shape))
+        if self.buffer.get((name, dtype), None) is None:
+            self.buffer[(name, dtype)] = torch.empty(required_len,
+                                                     dtype=dtype,
+                                                     device=torch.cuda.current_device(),
+                                                     requires_grad=False)
+        elif self.buffer[(name, dtype)].numel() < required_len:
+            self.buffer[(name, dtype)] = torch.nn.functional.pad(
+                self.buffer[(name, dtype)], (0, required_len - self.buffer[(name, dtype)].numel()), value=0)
+        res = self.buffer[(name, dtype)][0:required_len].view(*tensor_shape)
+        if force_zero:
+            res.zero_()
+        return res
+    
 # constants in experiment instance scope
 MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
 LOG_ROOT = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}"
@@ -33,7 +58,7 @@ _trial_name = None
 _grids: Dict[str, "ParallelGrid"] = {}
 _pgroups: Dict[str, Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
 _rank_mapping: Dict[str, Dict["ModelShardID", int]] = {}
-_global_memory_buffer = None  # type GlobalMemoryBuffer, not type hint here to avoid circular import
+_global_memory_buffer: GlobalMemoryBuffer = None
 
 # used only in scripts and tests
 _fake_mp_world_size = None

@@ -18,7 +18,7 @@ import torch.utils.data
 from base.monitor import gpu_utilization_monitor, time_mark
 from base.topology import ParallelGrid
 from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
-from impl.model.parallelism.model_parallel.utils import GlobalMemoryBuffer
+from base.constants import GlobalMemoryBuffer
 import api.config as config
 import api.data
 import api.model

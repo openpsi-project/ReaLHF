@@ -3,6 +3,8 @@
 
 # DeepSpeed Team
 
+import contextlib
+import gc
 from types import MethodType
 from typing import Callable, List, Optional, Tuple, Union
 import dataclasses
@@ -124,6 +126,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._inference_mode = True  # for evaluate() and forward()
 
         self._first_token = False
+
+        self._gd_graph = None
 
         self._async_p2p = enable_async_p2p_communication
         self._async_instruction = enable_async_instruction and self._async_p2p
@@ -516,6 +520,51 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._post_eval_batch()
         return avg_loss, avg_stats
 
+    @contextlib.contextmanager
+    def sequence_parallel_disable(self):
+        a = self.sequence_parallel
+        self.sequence_parallel = False
+        yield
+        self.sequence_parallel = a
+
+    def capture_generate_decoding_steps(self, ys: List[PipeCacheData]):
+        # TODO: use vllm cupy nccl all-reduce
+        if self.is_first_stage():
+            assert all(y.k_cache is not None for y in ys[1:]), self.stage_id
+            max_batch_size = ys[1].k_cache.shape[0]
+        elif self.is_last_stage():
+            assert all(y.k_cache is not None for y in ys[:-1]), self.stage_id
+            max_batch_size = ys[0].k_cache.shape[0]
+        else:
+            assert all(y.k_cache is not None for y in ys), self.stage_id
+            max_batch_size = ys[0].k_cache.shape[0]
+        
+        self._gd_input_buffers = dict(
+            input_ids=torch.zeros(max_batch_size, 1, dtype=torch.long, device=self.device),
+            position_ids=torch.zeros(max_batch_size, 1, dtype=torch.long, device=self.device),
+            k_caches=[y.k_cache for y in ys],
+            v_caches=[y.v_cache for y in ys],
+            hidden_states=torch.zeros(max_batch_size, 1, self.module.config.hidden_dim, device=self.device, dtype=self.module.dtype),
+            cache_seqlens=torch.zeros(max_batch_size, dtype=torch.int, device=self.device),
+            max_seqlen=None,
+            cu_seqlens=None,
+        )
+        # Run the model once without capturing the graph.
+        # This is to make sure that the captured graph does not include the
+        # kernel launches for initial benchmarking (e.g., Triton autotune).
+        self.module._forward(**self._gd_input_buffers)
+        torch.cuda.synchronize()
+        
+        self._gd_graph = torch.cuda.CUDAGraph()
+        self._gd_graph_bs = max_batch_size
+        with torch.cuda.graph(self._gd_graph):
+            output = self.module._forward(**self._gd_input_buffers)
+        torch.cuda.synchronize()
+        
+        self._gd_output_buffers = dict(output=output)
+        gc.collect()
+        torch.cuda.empty_cache()
+    
     @torch.no_grad()
     def generate(
         self,
@@ -525,35 +574,29 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
         num_micro_batches: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
-        # FIXME: change to global input buffer
-        real_sequence_parallel = self.sequence_parallel
-        self.sequence_parallel = False
-        #############
-        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
-        self._set_generate_states()
-        self._prepare_input(packed_input_ids, cu_seqlens)
-        # for elegant generation termination
-        gconfig.max_new_tokens += self.num_stages - 1
-        self.current_gconfig = gconfig
-        self.tokenizer = tokenizer
-        self._pre_generate()
+        with self.sequence_parallel_disable():
+            self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
+            self._set_generate_states()
+            self._prepare_input(packed_input_ids, cu_seqlens)
+            # for elegant generation termination
+            gconfig.max_new_tokens += self.num_stages - 1
+            self.current_gconfig = gconfig
+            self.tokenizer = tokenizer
+            self._pre_generate()
 
-        sched = schedule.GenerateSchedule(micro_batches=self.num_micro_batches,
-                                          stages=self.num_stages,
-                                          stage_id=self.stage_id,
-                                          max_new_tokens=gconfig.max_new_tokens)
+            sched = schedule.GenerateSchedule(micro_batches=self.num_micro_batches,
+                                            stages=self.num_stages,
+                                            stage_id=self.stage_id,
+                                            max_new_tokens=gconfig.max_new_tokens)
 
-        def terminate_condition():
-            return torch.stack(
-                [self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)]).all()
+            def terminate_condition():
+                return torch.stack(
+                    [self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)]).all()
 
-        with self.module.gradient_checkpointing_disable(), self.module.sequence_parallel_disable():
-            self._exec_schedule(sched, terminate_condition)
-        r = self._maybe_gather_generate_outputs()
-        self._post_generate()
-        # FIXME: change to global input buffer
-        self.sequence_parallel = real_sequence_parallel
-        #############
+            with self.module.gradient_checkpointing_disable(), self.module.sequence_parallel_disable():
+                self._exec_schedule(sched, terminate_condition)
+            r = self._maybe_gather_generate_outputs()
+            self._post_generate()
         return r
 
     def _maybe_gather_generate_outputs(self):
@@ -705,7 +748,23 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._zero_grads(x)
         self._zero_grads(ys)
 
-        x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
+        if self._generate_mode and self.tensor_buffer.get("kv_cache_reserved", micro_batch_id):
+            with torch.no_grad():
+                bs = self.tensor_buffer.get("batch_lengths", micro_batch_id)
+                if self._gd_graph is None or bs > self._gd_graph_bs:
+                    self.capture_generate_decoding_steps(ys)
+                first_y = ys[1] if self.is_first_stage() else ys[0]
+                if ys[0].input_ids is not None:
+                    self._gd_input_buffers['input_ids'][:bs] = ys[0].input_ids
+                if x.pp_input is not None:
+                    self._gd_input_buffers['hidden_states'][:bs] = x.pp_input
+                self._gd_input_buffers['position_ids'][:bs] = first_y.cache_seqlens.unsqueeze(-1)
+                self._gd_input_buffers['cache_seqlens'][:bs] = first_y.cache_seqlens
+                self._gd_graph.replay()
+            x.pp_input = self._gd_output_buffers['output'][:bs]
+            x.pp_output = None
+        else:
+            x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
 
         # logger.info(f"rank {self.global_rank} mbid {micro_batch_id} step {step_id} x.pp_input shape {x.pp_input.shape}")
         is_first_step = self.__maybe_init_kv_cache(x, ys, micro_batch_id)

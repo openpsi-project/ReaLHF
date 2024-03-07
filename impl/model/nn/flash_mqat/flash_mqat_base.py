@@ -209,7 +209,7 @@ class FlashMQATBlock(nn.Module):
         attention_mask: Optional[torch.Tensor],
         ckpt_attn: Optional[bool] = False,
         ckpt_mlp: Optional[bool] = False,
-    ) -> PipeTransferData:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         h = pp_input
         if ckpt_attn:
             attn_out, k, v = torch.utils.checkpoint.checkpoint(

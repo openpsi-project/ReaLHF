@@ -218,6 +218,8 @@ def make_causal_flash_mqat_pipe_module(
         partition_method=partition_method,
         topology=base.constants.grid()._topo,
         config=config,
+        dtype=dtype,
+        device=device,
     )
 
 

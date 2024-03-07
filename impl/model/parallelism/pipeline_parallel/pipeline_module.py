@@ -410,6 +410,45 @@ class PipelineModule(nn.Module):
 
         return x, ys
 
+    def _forward(self, input_ids: torch.LongTensor, position_ids: torch.LongTensor,
+                 hidden_states: torch.Tensor,
+                 cu_seqlens: torch.IntTensor,
+                 max_seqlen: int,
+        k_caches: Optional[List[Optional[torch.Tensor]]],
+        v_caches: Optional[List[Optional[torch.Tensor]]],
+        cache_seqlens: Optional[torch.Tensor],
+        ):
+        from impl.model.nn.flash_mqat.flash_mqat_base import VocabPositionEmbedding, FlashMQATBlock, OutputHead, SequenceParallelCriticHead, SequenceParallelActorHead
+        local_micro_offset = self.micro_offset + 1
+
+        if k_caches is None:
+            assert v_caches is None
+            assert cache_seqlens is None
+            k_caches = [None] * self.num_layers
+            v_caches = [None] * self.num_layers
+
+        for idx, layer in enumerate(self.forward_funcs):
+            time_mark(f"layer_{idx}_start", dist.get_rank(group=self.world_group))
+            self.curr_layer = idx + self._local_start
+            if self.seed_layers:
+                new_seed = (self.base_seed * local_micro_offset) + self.curr_layer
+                if self.seed_fn:
+                    self.seed_fn(new_seed)
+                else:
+                    ds_utils.set_random_seed(new_seed)
+
+            if isinstance(layer, VocabPositionEmbedding):
+                hidden_states = layer._forward(input_ids, position_ids)
+            elif isinstance(layer, FlashMQATBlock):
+                hidden_states, _, _ = layer._forward(hidden_states, cu_seqlens, k_cache=k_caches[idx], v_cache=v_caches[idx], cache_seqlens=cache_seqlens, max_seqlen=max_seqlen, attention_mask=None)
+            elif isinstance(layer, (OutputHead, SequenceParallelCriticHead, SequenceParallelActorHead)):
+                hidden_states = layer._forward(hidden_states)
+            else:
+                raise NotImplementedError(f"Unknown layer type {type(layer)} in PipelineModule.")
+            time_mark(f"layer_{idx}_end", dist.get_rank(group=self.world_group))
+
+        return hidden_states
+
     def _partition_layers(self, method="parameters_balanced"):
         num_stages = self._topo.get_dim("pipe")
         stage_id = self._topo.get_coord(self.global_rank).pipe
