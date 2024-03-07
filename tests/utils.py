@@ -10,7 +10,7 @@ import base.names as names
 
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
-MODEL_NAME = "pipedatamodel"
+MODEL_NAME = "default"
 WORKER_TYPE = "model_worker"
 
 BARRIER = None
@@ -94,11 +94,11 @@ def init_global_constants(num_dp, num_mp, num_pp, model_name=None):
     import torch.distributed as dist
     wg = dist.new_group(ranks=range(ws))
     import base.constants
-    base.constants.set_model_name(MODEL_NAME)
     base.constants.set_parallelism_group(model_name=MODEL_NAME, pgroup=wg)
     grid = ParallelGrid(process_group=wg, topology=topo)
     base.constants.set_grid(model_name=MODEL_NAME, grid=grid)
     base.constants.set_experiment_trial_names(EXPR_NAME, TRIAL_NAME)
+    base.constants.set_rank_mapping(model_name, topo)
 
 
 def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):

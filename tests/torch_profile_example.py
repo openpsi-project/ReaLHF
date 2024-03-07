@@ -4,7 +4,6 @@ Bash script to run this example:
 ```bash
 #!/bin/sh
 python3 -m apps.remote reset_name_resolve -e test -f test
-FLASH_MQAT_USE_TE=1 \
 CUDA_DEVICE_MAX_CONNECTIONS=1 \
 OMP_NUM_THREADS=8 \
 MASTER_ADDR=localhost \
@@ -44,8 +43,8 @@ NUM_DP = 2
 assert batch_size >= NUM_DP
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "codellama"
-MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded/CodeLlama-34b-hf_2pp_2mp_3s"
-MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded/CodeLlama-34b-hf_4pp_3s"
+# MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded/CodeLlama-34b-hf_2pp_2mp_3s"
+MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded_new/CodeLlama-34b-hf_4pp_1mp"
 BASE_MODEL_PATH = "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf/"
 
 ## performance related config
@@ -206,72 +205,74 @@ def main(rank: int = None, world_size: int = None):
     # cu_seqlens = torch.arange(batch_size + 1, dtype=torch.int32, device=device) * seqlen
     # prompt_mask = torch.randint(0, 2, (batch_size * seqlen,), dtype=torch.bool, device=device)
 
-    if base.constants.model_parallel_rank() == 0:
-        gpu_memory_mb("before model initialization")
-    model = make_model(device)
-    # cnt = 0
-    # params_to_mem = {}
-    # for k, m in model.module.named_parameters():
-    #     if m.is_cuda:
-    #         if m.dtype == torch.float16:
-    #             factor = 2
-    #         elif m.dtype == torch.float32:
-    #             factor = 4
-    #         else:
-    #             raise NotImplementedError(m.dtype)
-    #         cnt += m.numel() * factor
-    #         params_to_mem[k] = m.numel() * factor
-    # print(cnt / 1024**2)
-    # pretty_dict = json.dumps({k: v / 1024**2 for k, v in params_to_mem.items()}, indent=4)
-    # print(pretty_dict)
-    data = make_batch(model.tokenizer, device)
-    if USE_GRADIENT_CHECKPOINTING:
-        model.module.gradient_checkpointing_enable()
-    if base.constants.model_parallel_rank() == 0:
-        gpu_memory_mb("after model initialization")
-    backend = make_backend()
-    ft_spec = make_finetune_spec(512)
-    interface = make_interface()
+    with base.constants.model_scope(MODEL_NAME):
+        if base.constants.model_parallel_rank() == 0:
+            gpu_memory_mb("before model initialization")
+    
+        model = make_model(device)
+        # cnt = 0
+        # params_to_mem = {}
+        # for k, m in model.module.named_parameters():
+        #     if m.is_cuda:
+        #         if m.dtype == torch.float16:
+        #             factor = 2
+        #         elif m.dtype == torch.float32:
+        #             factor = 4
+        #         else:
+        #             raise NotImplementedError(m.dtype)
+        #         cnt += m.numel() * factor
+        #         params_to_mem[k] = m.numel() * factor
+        # print(cnt / 1024**2)
+        # pretty_dict = json.dumps({k: v / 1024**2 for k, v in params_to_mem.items()}, indent=4)
+        # print(pretty_dict)
+        data = make_batch(model.tokenizer, device)
+        if USE_GRADIENT_CHECKPOINTING:
+            model.module.gradient_checkpointing_enable()
+        if base.constants.model_parallel_rank() == 0:
+            gpu_memory_mb("after model initialization")
+        backend = make_backend()
+        ft_spec = make_finetune_spec(512)
+        interface = make_interface()
 
-    model = backend.initialize(model, ft_spec)
+        model = backend.initialize(model, ft_spec)
 
-    s = torch.profiler.schedule(skip_first=1, warmup=1, active=2, repeat=1, wait=0)
+        s = torch.profiler.schedule(skip_first=1, warmup=0, active=1, repeat=1, wait=0)
 
-    dirname = f"./trace_result/{SHORTNAME[PROFILE_INTERFACE_TYPE]}_mp{NUM_MP}pp{NUM_PP}_local"
-    os.makedirs(dirname, exist_ok=True)
+        dirname = f"./trace_result/{SHORTNAME[PROFILE_INTERFACE_TYPE]}_mp{NUM_MP}pp{NUM_PP}_local"
+        os.makedirs(dirname, exist_ok=True)
 
-    def trace_handler(p: torch.profiler._KinetoProfile):
-        if base.constants.model_parallel_rank() == 0 and base.constants.data_parallel_rank() == 0:
-            print(p.key_averages(group_by_input_shape=True).table(sort_by="cuda_memory_usage", row_limit=20))
-            p.export_chrome_trace(os.path.join(dirname, f"rank{rank}.json"))
+        def trace_handler(p: torch.profiler._KinetoProfile):
+            if base.constants.model_parallel_rank() == 0 and base.constants.data_parallel_rank() == 0:
+                print(p.key_averages(group_by_input_shape=True).table(sort_by="cuda_memory_usage", row_limit=20))
+                p.export_chrome_trace(os.path.join(dirname, f"rank{rank}.json"))
 
-    with torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-            record_shapes=True,
-            profile_memory=True,
-            with_stack=True,
-            schedule=s,
-            on_trace_ready=trace_handler,
-            with_flops=True,
-    ) as prof:
-        for _ in range(10):
-            torch.cuda.synchronize()
-            st = time.monotonic()
+        with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+                record_shapes=True,
+                profile_memory=True,
+                with_stack=True,
+                schedule=s,
+                on_trace_ready=trace_handler,
+                with_flops=True,
+        ) as prof:
+            for _ in range(10):
+                torch.cuda.synchronize()
+                st = time.monotonic()
 
-            if PROFILE_INTERFACE_TYPE != "generate":
-                res = getattr(interface, PROFILE_INTERFACE_TYPE)(model, data)
-            else:
-                from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
+                if PROFILE_INTERFACE_TYPE != "generate":
+                    res = getattr(interface, PROFILE_INTERFACE_TYPE)(model, data)
+                else:
+                    from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 
-                gconfig = GenerationConfig(min_new_tokens=1, max_new_tokens=512)
-                res = interface.generate(model, data, gconfig)
-            torch.cuda.synchronize()
-            if (base.constants.model_parallel_rank() == 0
-                    and base.constants.pipe_parallel_rank() == NUM_PP - 1):
-                print(
-                    f"generate {res['gen_tokens'].shape[1]} tokens * batch size {res['gen_tokens'].shape[0]}, "
-                    f"time: {time.monotonic() - st}")
-            prof.step()
+                    gconfig = GenerationConfig(min_new_tokens=1, max_new_tokens=10)
+                    res = interface.generate(model, data, gconfig)
+                torch.cuda.synchronize()
+                if (base.constants.model_parallel_rank() == 0
+                        and base.constants.pipe_parallel_rank() == NUM_PP - 1):
+                    print(
+                        f"generate {res['gen_tokens'].shape[1]} tokens * batch size {res['gen_tokens'].shape[0]}, "
+                        f"time: {time.monotonic() - st}")
+                prof.step()
 
 
 if __name__ == "__main__":

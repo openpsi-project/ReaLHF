@@ -123,8 +123,6 @@ class ModelWorker(worker_base.Worker):
             )
             base.constants.set_grid(model_name_, grid)
 
-        base.constants.set_global_memory_buffer(GlobalMemoryBuffer())
-
         self.__models: Dict[str, api.model.Model] = dict()
         self.__interfaces: Dict[str, api.model.ModelInterface] = dict()
         self.__backends: Dict[str, api.model.ModelBackend] = dict()

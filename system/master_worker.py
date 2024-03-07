@@ -659,8 +659,6 @@ class MasterWorker(worker_base.Worker):
             )
             base.constants.set_grid(model_name_, grid)
 
-        base.constants.set_global_memory_buffer(GlobalMemoryBuffer())
-
         # Request training specification from data workers, e.g. batch size and total train steps.
         self.__stream.post(request_reply_stream.Payload(
             handler="__data__",

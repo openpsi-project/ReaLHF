@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from api.config import ModelShardID
     from base.topology import ParallelGrid, PipeModelDataParallelTopology
 
+
 class GlobalMemoryBuffer:
     """Global buffer to avoid dynamic memory allocations.
     Caller should ensure that buffers of the same name
@@ -21,20 +22,22 @@ class GlobalMemoryBuffer:
 
     def get_tensor(self, tensor_shape, dtype, name, force_zero: bool = False):
         import torch
+
         required_len = int(np.prod(tensor_shape))
         if self.buffer.get((name, dtype), None) is None:
-            self.buffer[(name, dtype)] = torch.empty(required_len,
-                                                     dtype=dtype,
-                                                     device=torch.cuda.current_device(),
-                                                     requires_grad=False)
+            self.buffer[(name, dtype)] = torch.empty(
+                required_len, dtype=dtype, device=torch.cuda.current_device(), requires_grad=False
+            )
         elif self.buffer[(name, dtype)].numel() < required_len:
             self.buffer[(name, dtype)] = torch.nn.functional.pad(
-                self.buffer[(name, dtype)], (0, required_len - self.buffer[(name, dtype)].numel()), value=0)
+                self.buffer[(name, dtype)], (0, required_len - self.buffer[(name, dtype)].numel()), value=0
+            )
         res = self.buffer[(name, dtype)][0:required_len].view(*tensor_shape)
         if force_zero:
             res.zero_()
         return res
-    
+
+
 # constants in experiment instance scope
 MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
 LOG_ROOT = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}"
@@ -58,7 +61,7 @@ _trial_name = None
 _grids: Dict[str, "ParallelGrid"] = {}
 _pgroups: Dict[str, Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
 _rank_mapping: Dict[str, Dict["ModelShardID", int]] = {}
-_global_memory_buffer: GlobalMemoryBuffer = None
+_global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
 
 # used only in scripts and tests
 _fake_mp_world_size = None
@@ -84,12 +87,6 @@ def set_experiment_trial_names(expr_name: str, trial_name: str):
     _trial_name = trial_name
 
 
-def set_global_memory_buffer(buffer):
-    global _global_memory_buffer
-    assert _global_memory_buffer is None, "cannot set global memory buffer twice"
-    _global_memory_buffer = buffer
-
-
 def set_grid(model_name: str, grid: "ParallelGrid"):
     global _grids
     _grids[model_name] = grid
@@ -100,14 +97,20 @@ def set_parallelism_group(model_name: str, pgroup):
     _pgroups[model_name] = pgroup
 
 
-def set_rank_mapping(model_name: str, topo: "PipeModelDataParallelTopology", msid2mwid: Dict["ModelShardID",
-                                                                                             int]):
+def set_rank_mapping(
+    model_name: str,
+    topo: "PipeModelDataParallelTopology",
+    msid2mwid: Optional[Dict["ModelShardID", int]] = None,
+):
     global _rank_mapping
-    msid2mwid = {k: v for k, v in msid2mwid.items() if k.model_name == model_name}
-    _rank_mapping[model_name] = {
-        topo.get_rank(data=s.dp_rank, model=s.mp_rank, pipe=s.pp_rank): mw_id + 1
-        for s, mw_id in msid2mwid.items()
-    }
+    if msid2mwid is None:
+        _rank_mapping[model_name] = {i: i for i in range(topo.world_size())}
+    else:
+        msid2mwid = {k: v for k, v in msid2mwid.items() if k.model_name == model_name}
+        _rank_mapping[model_name] = {
+            topo.get_rank(data=s.dp_rank, model=s.mp_rank, pipe=s.pp_rank): mw_id + 1
+            for s, mw_id in msid2mwid.items()
+        }
 
 
 ################# attribute functions #################
