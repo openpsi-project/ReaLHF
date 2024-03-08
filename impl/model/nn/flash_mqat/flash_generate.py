@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
+import gc
 
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel
 from impl.model.utils.data import PipeCacheData, PipeTransferData
@@ -132,6 +133,53 @@ def genstep(
         handle.wait()
 
     return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
+
+
+_DECODING_CUDA_GRAPH: torch.cuda.CUDAGraph = None
+_DECODING_CUDA_GRAPH_BS: int = None
+_DECODING_CUDA_GRAPH_INPUT_BUFFER: Dict[str, torch.Tensor] = None
+_DECODING_CUDA_GRAPH_OUTPUT_BUFFER: Dict[str, torch.Tensor] = None
+
+
+@torch.no_grad()
+def get_decoding_cuda_graph(
+    model: FlashMQATModel,
+    bs: int,
+    k_caches: List[torch.Tensor],
+    v_caches: List[torch.Tensor],
+) -> Tuple[torch.cuda.CUDAGraph, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+    global _DECODING_CUDA_GRAPH
+    global _DECODING_CUDA_GRAPH_BS
+    global _DECODING_CUDA_GRAPH_INPUT_BUFFER
+    global _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
+    if _DECODING_CUDA_GRAPH is not None and _DECODING_CUDA_GRAPH_BS >= bs:
+        return _DECODING_CUDA_GRAPH, _DECODING_CUDA_GRAPH_INPUT_BUFFER, _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
+    # Build a CUDAGraph for decoding inference.
+    input_buffers = dict(
+        input_ids=torch.zeros(bs, 1, dtype=torch.long, device=model.device),
+        position_ids=torch.zeros(bs, 1, dtype=torch.long, device=model.device),
+        k_caches=k_caches,
+        v_caches=v_caches,
+        cache_seqlens=torch.zeros(bs, dtype=torch.int32, device=model.device),
+        max_seqlen=None,
+        cu_seqlens=None,
+    )
+    model._forward(**input_buffers)
+    torch.cuda.synchronize()
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        output = model._forward(**input_buffers)
+    torch.cuda.synchronize()
+    output_buffers = dict(logits=output)
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    _DECODING_CUDA_GRAPH = graph
+    _DECODING_CUDA_GRAPH_INPUT_BUFFER = input_buffers
+    _DECODING_CUDA_GRAPH_OUTPUT_BUFFER = output_buffers
+    _DECODING_CUDA_GRAPH_BS = bs
+    return graph, input_buffers, output_buffers
 
 
 @torch.no_grad()
@@ -289,22 +337,26 @@ def generate(
         ] + [PipeCacheData()])
         next_tokens = input_ids[:, -1]
 
-    # The main loop.
-    while not terminate:
-        # the next round of inference
-        ys[0].input_ids = next_tokens.unsqueeze(-1)  # [bs, 1], seqlen=1
-        ys[0].position_ids = None
-        # K/v cache will be changed in-place with flash attention.
-        with model.gradient_checkpointing_disable(), model.sequence_parallel_disable():
-            logits = model(x, ys).pp_output.squeeze(dim=1)
-        cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
+    graph, input_buffers, output_buffers = get_decoding_cuda_graph(model, bs, [y.k_cache for y in ys[1:-1]], [y.v_cache for y in ys[1:-1]])
 
-        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
-        gen_token_ph.append(next_tokens)
-        gen_logprob_ph.append(logprob)
-        gen_logits_mask_ph.append(logits_mask)
-        generated_idx += 1
+    # The main loop.
+    with model.gradient_checkpointing_disable(), model.sequence_parallel_disable():
+        while not terminate:
+            # the next round of inference
+            input_buffers['input_ids'][:bs].copy_(next_tokens.unsqueeze(-1))
+            input_buffers['position_ids'][:bs].copy_(cache_seqlens.unsqueeze(-1))
+            input_buffers['cache_seqlens'][:bs].copy_(cache_seqlens)
+            # # K/v cache will be changed in-place with flash attention.
+            graph.replay()
+            logits = output_buffers['logits'][:bs].squeeze(1)
+            cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
+
+            next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
+                logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+            gen_token_ph.append(next_tokens)
+            gen_logprob_ph.append(logprob)
+            gen_logits_mask_ph.append(logits_mask)
+            generated_idx += 1
 
     gen_tokens = torch.stack(gen_token_ph, -1)
     log_probs = torch.stack(gen_logprob_ph, -1)

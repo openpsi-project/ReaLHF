@@ -420,7 +420,7 @@ class OutputHead(nn.Linear):
         x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
         return x
 
-    def _forward(self, x:torch.Tensor):
+    def _forward(self, x: torch.Tensor):
         return super().forward(x)
 
 
@@ -477,6 +477,8 @@ class FlashMQATModel(nn.Module):
         if dtype is None:
             dtype = torch.float16
         self.config = config
+        self.dtype = dtype
+        self.device = device
         self.transformer = FlashMQATBase(config,
                                          no_param_instantiation=no_param_instantiation,
                                          dtype=dtype,
@@ -508,6 +510,8 @@ class FlashMQATModel(nn.Module):
                 device=device,
                 dtype=dtype,
             )
+
+        self.sequence_parallel = config.sequence_parallel
 
     @property
     def is_critic(self):
@@ -541,14 +545,17 @@ class FlashMQATModel(nn.Module):
             if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
                 _states.append(m.sequence_parallel)
                 m.sequence_parallel_enable(False)
+        x = self.sequence_parallel
+        self.sequence_parallel = False
         yield
         for _, m in self.named_modules():
             if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
                 m.sequence_parallel_enable(_states.pop(0))
         assert len(_states) == 0
+        self.sequence_parallel = x
 
     def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
-        if self.config.sequence_parallel:
+        if self.sequence_parallel:
             from impl.model.utils.tensor import pad_sequence_parallel_input
 
             _packed_input_ids = ys[0].input_ids
@@ -569,12 +576,49 @@ class FlashMQATModel(nn.Module):
         # pp_output is the output of this pipeline stage.
         # In the first stage, pp_input is None.
         x.pp_input = raw_pp_input
-        if self.config.sequence_parallel and pad_size > 0:
+        if self.sequence_parallel and pad_size > 0:
             x.pp_output = x.pp_output[:-pad_size]
             ys[0].input_ids = _packed_input_ids
             x.cu_seqlens = _cu_seqlens
             x.max_seqlen = _max_seqlen
+            if x.store_kv_cache:
+                for y in ys:
+                    if y.k_cache is not None:
+                        y.k_cache = y.k_cache[:-pad_size]
+                    if y.v_cache is not None:
+                        y.v_cache = y.v_cache[:-pad_size]
         return x
+
+    def _forward(
+        self,
+        input_ids: torch.LongTensor,
+        cu_seqlens: torch.IntTensor,
+        position_ids: torch.LongTensor,
+        k_caches: Optional[List[torch.Tensor]],
+        v_caches: Optional[List[torch.Tensor]],
+        cache_seqlens: Optional[torch.IntTensor],
+        max_seqlen: Optional[int],
+    ):
+        layers = self.to_layers()
+        l: VocabPositionEmbedding = layers[0]
+        h = l._forward(input_ids, position_ids)
+        if k_caches is None:
+            k_caches = [None] * (len(layers) - 2)
+            v_caches = [None] * (len(layers) - 2)
+            cache_seqlens = None
+        assert len(k_caches) == len(v_caches) == len(layers) - 2
+        for l, k_cache, v_cache in zip(layers[1:-1], k_caches, v_caches):
+            l: FlashMQATBlock
+            h, _, _ = l._forward(
+                h,
+                cu_seqlens=cu_seqlens,
+                k_cache=k_cache,
+                v_cache=v_cache,
+                cache_seqlens=cache_seqlens,
+                max_seqlen=max_seqlen,
+                attention_mask=None,
+            )
+        return layers[-1]._forward(h)
 
     @staticmethod
     def map_to_pipe_state_dict(config: FlashMQATConfig, state_dict: Dict) -> Dict:
