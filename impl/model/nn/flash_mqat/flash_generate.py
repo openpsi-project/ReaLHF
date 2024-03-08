@@ -135,11 +135,11 @@ def genstep(
     return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
 
 
-# _DECODING_CUDA_GRAPH: torch.cuda.CUDAGraph = None
-# _DECODING_CUDA_GRAPH_BS: int = None
-# _DECODING_CUDA_GRAPH_SEQLEN: int = None
-# _DECODING_CUDA_GRAPH_INPUT_BUFFER: Dict[str, torch.Tensor] = None
-# _DECODING_CUDA_GRAPH_OUTPUT_BUFFER: Dict[str, torch.Tensor] = None
+_DECODING_CUDA_GRAPH: torch.cuda.CUDAGraph = None
+_DECODING_CUDA_GRAPH_BS: int = None
+_DECODING_CUDA_GRAPH_SEQLEN: int = None
+_DECODING_CUDA_GRAPH_INPUT_BUFFER: Dict[str, torch.Tensor] = None
+_DECODING_CUDA_GRAPH_OUTPUT_BUFFER: Dict[str, torch.Tensor] = None
 
 
 @torch.no_grad()
@@ -149,14 +149,16 @@ def get_decoding_cuda_graph(
     k_caches: List[torch.Tensor],
     v_caches: List[torch.Tensor],
     cache_seqlens: torch.Tensor,
+    force_recapture: bool = False
 ) -> Tuple[torch.cuda.CUDAGraph, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-    # global _DECODING_CUDA_GRAPH
-    # global _DECODING_CUDA_GRAPH_BS
-    # global _DECODING_CUDA_GRAPH_INPUT_BUFFER
-    # global _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
-    # global _DECODING_CUDA_GRAPH_SEQLEN
-    # if _DECODING_CUDA_GRAPH is not None and _DECODING_CUDA_GRAPH_BS >= bs:
-    #     return _DECODING_CUDA_GRAPH, _DECODING_CUDA_GRAPH_INPUT_BUFFER, _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
+    global _DECODING_CUDA_GRAPH
+    global _DECODING_CUDA_GRAPH_BS
+    global _DECODING_CUDA_GRAPH_INPUT_BUFFER
+    global _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
+    global _DECODING_CUDA_GRAPH_SEQLEN
+    seqlen = k_caches[0].shape[1]
+    if not force_recapture and _DECODING_CUDA_GRAPH is not None and _DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= seqlen:
+        return _DECODING_CUDA_GRAPH, _DECODING_CUDA_GRAPH_INPUT_BUFFER, _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
     # Build a CUDAGraph for decoding inference.
     input_buffers = dict(
         input_ids=torch.ones(bs, 1, dtype=torch.long, device=model.device),
@@ -293,25 +295,26 @@ def generate(
         cache_seqlens = input_lens.clone().to(dtype=torch.int32)
         for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
+            # fix of a flash attention bug
             kvcache_seqlen = max(max_seqlen + gconfig.max_new_tokens,
                                  mconfig.hidden_dim // mconfig.head_dim + 10)
-            # fix of a flash attention bug
-            # global _DECODING_CUDA_GRAPH
-            # global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
-            # if _DECODING_CUDA_GRAPH is not None and _DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= kvcache_seqlen:
-            #     k_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER['k_caches'][layer_idx]
-            #     v_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER['v_caches'][layer_idx]
-            # else:
-            k_cache = base.constants.get_global_memory_buffer().get_tensor(
-                tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-                dtype=y.k_cache.dtype,
-                name=f"kv_cache_{layer_idx}_k",
-                force_zero=True)
-            v_cache = base.constants.get_global_memory_buffer().get_tensor(
-                tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-                dtype=y.v_cache.dtype,
-                name=f"kv_cache_{layer_idx}_v",
-                force_zero=True)
+            global _DECODING_CUDA_GRAPH
+            global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
+            global _DECODING_CUDA_GRAPH_INPUT_BUFFER
+            if _DECODING_CUDA_GRAPH is not None and _DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= kvcache_seqlen:
+                k_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER['k_caches'][layer_idx][:bs, :kvcache_seqlen]
+                v_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER['v_caches'][layer_idx][:bs, :kvcache_seqlen]
+            else:
+                k_cache = base.constants.get_global_memory_buffer().get_tensor(
+                    tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+                    dtype=y.k_cache.dtype,
+                    name=f"kv_cache_{layer_idx}_k",
+                    force_zero=True)
+                v_cache = base.constants.get_global_memory_buffer().get_tensor(
+                    tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+                    dtype=y.v_cache.dtype,
+                    name=f"kv_cache_{layer_idx}_v",
+                    force_zero=True)
             indices = torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
                                    dtype=torch.long)[None, :] < input_lens[:, None]
             k_cache[indices] = y.k_cache
@@ -347,7 +350,14 @@ def generate(
         ] + [PipeCacheData()])
         next_tokens = input_ids[:, -1]
 
-    graph, input_buffers, output_buffers = get_decoding_cuda_graph(model, bs, [y.k_cache for y in ys[1:-1]], [y.v_cache for y in ys[1:-1]], cache_seqlens,)
+    graph, input_buffers, output_buffers = get_decoding_cuda_graph(
+        model,
+        bs,
+        [y.k_cache for y in ys[1:-1]],
+        [y.v_cache for y in ys[1:-1]],
+        cache_seqlens,
+        force_recapture=k_caches is not None,
+    )
 
     # The main loop.
     with model.gradient_checkpointing_disable(), model.sequence_parallel_disable():
