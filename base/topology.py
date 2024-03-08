@@ -5,7 +5,6 @@ from typing import Dict, NamedTuple, Optional
 
 import torch.distributed
 
-import api.config
 import base.logging as logging
 
 logger = logging.getLogger("Topology")
