@@ -210,21 +210,33 @@ class PPOConfig(Experiment):
             master_worker=TasksGroup(
                 count=1,
                 scheduling=Scheduling.master_worker_default(
-                    cpu=16,
+                    cpu=4,
                     mem=100000,
                     gpu=1,
                     gpu_type="tesla",
+                    nodelist="QH-com[13-14]",
                 ),
             ),
             model_worker=[
                 #### another strategy used for testing
                 TasksGroup(
-                    count=self.n_actors + self.n_critics,
+                    count=self.n_actors,
                     scheduling=Scheduling.model_worker_default(
                         cpu=4,
                         gpu=1,
                         gpu_type="tesla",
                         mem=100000,
+                        nodelist="QH-com[13-14]",
+                    ),
+                ),
+                TasksGroup(
+                    count=self.n_critics,
+                    scheduling=Scheduling.model_worker_default(
+                        cpu=4,
+                        gpu=1,
+                        gpu_type="tesla",
+                        mem=100000,
+                        nodelist="QH-com[13-14]",
                     ),
                 ),
                 #### a strategy used for testing
