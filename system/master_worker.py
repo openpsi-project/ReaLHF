@@ -144,6 +144,48 @@ def split_packed_batch_into_seqs(
                                                             partitions=partitions)
 
 
+def handle_rpc_hook(
+    hook: api.dfg.RPCHook,
+    hook_counter: int,
+    model_name: str,
+    stream: request_reply_stream.IpRequestClient,
+    model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
+):
+    logger.info(f"Dealing with RPC hook {hook}.")
+    if isinstance(hook, (api.dfg.OffloadHook, api.dfg.LoadToDeviceHook)):
+        topo = model_topos[model_name]
+        handlers = [
+            config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
+            for j in range(topo.world_size())
+        ]
+        request_ids = request_all(stream, handlers, "offload" if isinstance(hook, api.dfg.OffloadHook) else "load_to_device", [None for _ in handlers])
+    elif isinstance(hook, api.dfg.SyncParamHook):
+        print(">>>>>>>>>>>>>>>>>>", hook_counter)
+        # Since the counter is increased after the hook is handled, we add one here.
+        if (hook_counter + 1) % hook.interval != 0:
+            return
+        src_topo = model_topos[model_name]
+        src_handlers = [
+            config_pkg.ModelShardID.from_parallelism_rank(model_name, src_topo, j)
+            for j in range(src_topo.world_size())
+        ]
+        src_payloads = [
+            request_reply_stream.Payload(handler=h, handle_name="send_param") for h in src_handlers
+        ]
+        dst_topo = model_topos[hook.target]
+        dst_handlers = [
+            config_pkg.ModelShardID.from_parallelism_rank(hook.target, dst_topo, j)
+            for j in range(dst_topo.world_size())
+        ]
+        dst_payloads = [
+            request_reply_stream.Payload(handler=h, handle_name="recv_param") for h in dst_handlers
+        ]
+        request_ids = [stream.post(p) for p in src_payloads + dst_payloads]
+    else:
+        raise NotImplementedError()
+    [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in request_ids]
+    logger.info(f"RPC hook {hook} receives responses from model worker.")
+
 @dataclasses.dataclass
 class RPCCorountineControl:
     ## Shared resources ##
@@ -253,14 +295,15 @@ async def scatter_tensor_to_mws(
 
 async def model_rpc_request_func(
     rpc: api.dfg.ModelRPC,
+    pre_hook_counters: List[int],
     stream: request_reply_stream.RequestReplyStream,
     scatter_groups: List[torch.distributed.ProcessGroup],
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     buffer: AsyncIOSequenceBuffer,
-    topo: base.topology.PipeModelDataParallelTopology,
+    model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
     ctrl: RPCCorountineControl,
 ):
-
+    topo = model_topos[rpc.model_name]
     handlers = [
         config_pkg.ModelShardID.from_parallelism_rank(rpc.model_name, topo, j)
         for j in range(topo.world_size())
@@ -315,6 +358,16 @@ async def model_rpc_request_func(
         datas = [datas[topo.get_coord(j).data] for j in range(topo.world_size())]
         all_buffer_indices = [all_buffer_indices[topo.get_coord(j).data] for j in range(topo.world_size())]
         all_seqlens = [all_seqlens[topo.get_coord(j).data] for j in range(topo.world_size())]
+
+        for i, pre_hook in enumerate(rpc.pre_hooks):
+            handle_rpc_hook(
+                pre_hook,
+                hook_counter=pre_hook_counters[i],
+                model_name=rpc.model_name,
+                stream=stream,
+                model_topos=model_topos,
+            )
+            pre_hook_counters[i] += 1
 
         # send partitioned data to model workers
         req_ids = await scatter_tensor_to_mws(
@@ -430,13 +483,15 @@ async def gather_tensor_from_mws(
 async def model_rpc_reply_func(
     corountine_idx: int,
     rpc: api.dfg.ModelRPC,
+    post_hook_counters: List[int],
     stream: request_reply_stream.RequestReplyStream,
     gather_groups: List[torch.distributed.ProcessGroup],
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     buffer: AsyncIOSequenceBuffer,
-    topo: base.topology.PipeModelDataParallelTopology,
+    model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
     ctrl: RPCCorountineControl,
 ):
+    topo = model_topos[rpc.model_name]
     dp_size = topo.get_dim("data")
     dp_head_indices = [topo.get_rank(data=i, pipe=topo.get_dim("pipe") - 1, model=0) for i in range(dp_size)]
     dp_head_mw_ids = [
@@ -484,6 +539,14 @@ async def model_rpc_reply_func(
             buffer_indices = torch.from_numpy(np.concatenate([r.buffer_indices for r in responses]))
             xs = split_packed_batch_into_seqs(res, input_lens=seqlens)
             await buffer.amend_batch(buffer_indices, xs)
+
+        for i, post_hook in enumerate(rpc.post_hooks):
+            handle_rpc_hook(post_hook,
+                            hook_counter=post_hook_counters[i],
+                            model_name=rpc.model_name,
+                            stream=stream,
+                            model_topos=model_topos)
+            post_hook_counters[i] += 1
 
         logger.info(f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - tik:.4f}s.")
 
@@ -745,18 +808,23 @@ class MasterWorker(worker_base.Worker):
 
         logger.info(f"Creating asyncio coroutines...")
 
+        self.__pre_hook_counters = [[0 for _ in rpc.pre_hooks] for rpc in self.__model_rpcs]
+        self.__post_hook_counters = [[0 for _ in rpc.post_hooks] for rpc in self.__model_rpcs]
+
         coroutine_tasks = []
-        for rpc in self.__model_rpcs:
+        for rpc, pre_hook_counters, post_hook_counters in zip(self.__model_rpcs, self.__pre_hook_counters,
+                                                              self.__post_hook_counters):
             # should be a dict: pp_rank to streams
 
             request_task = event_loop.create_task(
                 model_rpc_request_func(
                     rpc=rpc,
+                    pre_hook_counters=pre_hook_counters,
                     stream=self.__stream,
                     scatter_groups=self.__pg_info.scatter_groups[rpc.model_name],
                     msid2mwid=self.config.msid2mwid,
                     buffer=self.__seqbuffer,
-                    topo=self.__model_topos[rpc.model_name],
+                    model_topos=self.__model_topos,
                     ctrl=self.__rpc_ctrl,
                 ))
             reply_tasks = []
@@ -765,11 +833,12 @@ class MasterWorker(worker_base.Worker):
                     model_rpc_reply_func(
                         corountine_idx=j,
                         rpc=rpc,
+                        post_hook_counters=post_hook_counters,
                         stream=self.__stream,
                         gather_groups=self.__pg_info.gather_groups[rpc.model_name],
                         msid2mwid=self.config.msid2mwid,
                         buffer=self.__seqbuffer,
-                        topo=self.__model_topos[rpc.model_name],
+                        model_topos=self.__model_topos,
                         ctrl=self.__rpc_ctrl,
                     ))
                 reply_tasks.append(_reply_task)

@@ -5,7 +5,7 @@ from omegaconf import MISSING
 from .config_dataset import PromptOnlyDatasetConfig
 from .config_model import get_flash_mqat_model_config, ModelConfig
 from api.config import *
-from api.dfg import ModelInterfaceType, ModelRPC
+from api.dfg import ModelInterfaceType, ModelRPC, OffloadHook, LoadToDeviceHook, SyncParamHook
 from base.topology import PipeModelDataParallelTopology
 import base.logging as logging
 
@@ -24,6 +24,8 @@ rollout = ModelRPC(
         "prompt_mask",
     ],
     dp_broker_type="packed",
+    pre_hooks=[LoadToDeviceHook()],  # NOTE: just for testing
+    post_hooks=[OffloadHook()],  # NOTE: just for testing
 )
 
 inf_reward = ModelRPC(
@@ -74,6 +76,7 @@ train_actor = ModelRPC(
     ],
     log_return_value=True,
     dp_broker_type="packed",
+    post_hooks=[SyncParamHook(target="critic", interval=4)],  # NOTE: just for testing
 )
 
 train_critic = ModelRPC(

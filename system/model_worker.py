@@ -320,10 +320,11 @@ class ModelWorker(worker_base.Worker):
                     res = None
                     if self._is_dp_head:
                         res = self.__gather_tensor_reply(request)
-                elif request.handle_name == "offload":
-                    raise NotImplementedError(f"Offload is not implemented yet.")  # FIXME: offload
-                elif request.handle_name == "sync_param":
-                    raise NotImplementedError(f"Sync param is not implemented yet.")  # FIXME: sync param
+                elif request.handle_name in ["offload", "load_to_device", "send_param", "recv_param"]:
+                    print(f">>>>>>> model worker {self.__worker_index} model name "
+                          f"{request.handler.model_name} receive {request.handle_name} "
+                          f"request, which is not implemented yet.")
+                    res = None
                 else:
                     raise NotImplementedError(f"Unknown request type: {request.handle_name}.")
             except RuntimeError as e:
