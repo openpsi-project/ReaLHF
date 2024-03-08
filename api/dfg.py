@@ -1,11 +1,31 @@
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, Any, TYPE_CHECKING, Union
 import dataclasses
 import enum
+import itertools
 
 import base.logging as logging
 import base.namedarray as namedarray
 
 logger = logging.getLogger("DataFlowGraph", "benchmark")
+
+
+@dataclasses.dataclass
+class OffloadHook:
+    pass
+
+
+@dataclasses.dataclass
+class LoadToDeviceHook:
+    pass
+
+
+@dataclasses.dataclass
+class SyncParamHook:
+    target: str
+    interval: int = 1
+
+
+RPCHook = Union[OffloadHook, LoadToDeviceHook, SyncParamHook]
 
 
 class ModelInterfaceType(enum.Enum):
@@ -19,12 +39,16 @@ class ModelInterfaceType(enum.Enum):
 class ModelRPC:
     model_name: str
     interface_type: ModelInterfaceType
+
     input_data: List[str] = dataclasses.field(default_factory=lambda: [])
     input_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
     output_data: List[str] = dataclasses.field(default_factory=lambda: [])
     output_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
+
     dp_broker_type: str = "padded_batch"
+
     log_return_value: bool = False
+
     min_n_seqs_per_dp: int = 1
 
     min_n_seqs: int = 1
@@ -34,6 +58,10 @@ class ModelRPC:
 
     max_concurrent_calls: int = 1
 
+    pre_hooks: List[RPCHook] = dataclasses.field(default_factory=lambda: [])
+    post_hooks: List[RPCHook] = dataclasses.field(default_factory=lambda: [])
+
+    # Will be automatically filled.
     max_min_flow_seqs: int = 1
     max_min_flow_tokens: int = 1
 
@@ -51,7 +79,8 @@ class ModelRPC:
                 "The maximum batch size of the source node in the dataflow graph is too large. "
                 f"The maximum number of sequences is {self.max_n_seqs} > budget {int(1e4)} and "
                 f"the maximum number of tokens is {self.max_n_tokens} > budget {int(1e8)}. "
-                "Please set a smaller value.")
+                "Please set a smaller value."
+            )
 
     @property
     def name(self):
@@ -71,10 +100,12 @@ class ModelRPC:
         def _has_children_of_model_name(rpc: "ModelRPC", model_name: str):
             if rpc.is_dst:
                 return False
-            return any([
-                r.model_name == model_name or _has_children_of_model_name(r, model_name)
-                for r in rpc.children_rpcs
-            ])
+            return any(
+                [
+                    r.model_name == model_name or _has_children_of_model_name(r, model_name)
+                    for r in rpc.children_rpcs
+                ]
+            )
 
         return not _has_children_of_model_name(self, self.model_name)
 
@@ -130,10 +161,12 @@ def build_graph(rpcs: List[ModelRPC]) -> Tuple[List[ModelRPC], List[List[Tuple[s
                         children_rpcs[j].append(rpc)
                     edges[i][j] = (*edges[i][j], k)
                     logger.info(
-                        f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`.")
+                        f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`."
+                    )
     for i, rpc in enumerate(rpcs):
         logger.info(
-            f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }.")
+            f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }."
+        )
     for rpc, p, c, pr, cr in zip(rpcs, parents, children, parent_rpcs, children_rpcs):
         rpc.parents = p
         rpc.children = c
@@ -144,4 +177,10 @@ def build_graph(rpcs: List[ModelRPC]) -> Tuple[List[ModelRPC], List[List[Tuple[s
         rpc.max_min_flow_seqs = max([r.min_n_seqs for r in rpcs if r.model_name == rpc.model_name])
         rpc.max_min_flow_tokens = max([r.min_n_tokens for r in rpcs if r.model_name == rpc.model_name])
 
+    # sanity check of hooks
+    for rpc in rpcs:
+        for h in itertools.chain(rpc.pre_hooks, rpc.post_hooks):
+            assert isinstance(h, RPCHook), type(h)
+            if isinstance(h, SyncParamHook):
+                assert any(h.target == r.model_name for r in rpcs)
     return rpcs, edges

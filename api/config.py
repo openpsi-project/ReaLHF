@@ -342,6 +342,19 @@ class ExperimentConfig:
                                  f"model shard ids={[s.id for s in all_shards]}.")
             ##### Sanity check of parallelism ranks. #####
 
+        ######### sanity check of sync param hooks #########
+        for rpc in self.model_rpcs:
+            for hook in rpc.pre_hooks + rpc.post_hooks:
+                if not isinstance(hook, api.dfg.SyncParamHook):
+                    pass
+                target_topo = model_topos[hook.target]
+                self_topo = model_topos[rpc.model_name]
+                if (self_topo.get_dim("model") % target_topo.get_dim("model") != 0 and 
+                    target_topo.get_dim("model") % self_topo.get_dim("model") !=0):
+                    raise ValueError("To synchronize parameters between two models, "
+                                     "their model parallel size must be a multiple of each other.")
+        ######### sanity check of sync param hooks #########
+
         msid2mwid = {}
         for i, mw in enumerate(self.model_worker):
             mw.model_topos = model_topos
