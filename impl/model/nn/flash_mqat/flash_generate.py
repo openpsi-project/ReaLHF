@@ -363,9 +363,9 @@ def generate(
     with model.gradient_checkpointing_disable(), model.sequence_parallel_disable():
         while not terminate:
             # the next round of inference
-            input_buffers['input_ids'].copy_(next_tokens.unsqueeze(-1))
-            input_buffers['position_ids'].copy_(cache_seqlens.unsqueeze(-1))
-            input_buffers['cache_seqlens'].copy_(cache_seqlens)
+            input_buffers['input_ids'][:bs].copy_(next_tokens.unsqueeze(-1), non_blocking=True)
+            input_buffers['position_ids'][:bs].copy_(cache_seqlens.unsqueeze(-1), non_blocking=True)
+            input_buffers['cache_seqlens'][:bs].copy_(cache_seqlens, non_blocking=True)
             # # K/v cache will be changed in-place with flash attention.
             graph.replay()
             logits = output_buffers['logits'][:bs].squeeze(1)

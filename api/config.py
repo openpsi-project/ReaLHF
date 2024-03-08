@@ -346,7 +346,7 @@ class ExperimentConfig:
         for rpc in self.model_rpcs:
             for hook in rpc.pre_hooks + rpc.post_hooks:
                 if not isinstance(hook, api.dfg.SyncParamHook):
-                    pass
+                    continue
                 target_topo = model_topos[hook.target]
                 self_topo = model_topos[rpc.model_name]
                 if (self_topo.get_dim("model") % target_topo.get_dim("model") != 0 and 

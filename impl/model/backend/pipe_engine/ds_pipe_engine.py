@@ -532,27 +532,33 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.sequence_parallel = a
 
     def capture_generate_decoding_steps(self, ys: List[PipeCacheData]):
+        torch.cuda.synchronize()
         if self.is_first_stage():
             assert all(y.k_cache is not None for y in ys[1:]), self.stage_id
-            max_batch_size = ys[1].k_cache.shape[0]
+            max_batch_size, seqlen = ys[1].k_cache.shape[:2]
+            cache_seqlens = ys[1].cache_seqlens
         elif self.is_last_stage():
             assert all(y.k_cache is not None for y in ys[:-1]), self.stage_id
-            max_batch_size = ys[0].k_cache.shape[0]
+            max_batch_size, seqlen = ys[0].k_cache.shape[:2]
+            cache_seqlens = ys[0].cache_seqlens
         else:
             assert all(y.k_cache is not None for y in ys), self.stage_id
-            max_batch_size = ys[0].k_cache.shape[0]
+            max_batch_size, seqlen = ys[0].k_cache.shape[:2]
+            cache_seqlens = ys[0].cache_seqlens
 
         self._gd_input_buffers = dict(
-            input_ids=torch.zeros(max_batch_size, 1, dtype=torch.long, device=self.device),
-            position_ids=torch.zeros(max_batch_size, 1, dtype=torch.long, device=self.device),
+            input_ids=torch.ones(max_batch_size, 1, dtype=torch.long, device=self.device),
+            position_ids=cache_seqlens.clone().long()[:, None],
             k_caches=[y.k_cache for y in ys],
             v_caches=[y.v_cache for y in ys],
-            hidden_states=torch.zeros(max_batch_size,
+            hidden_states=torch.randn(max_batch_size,
                                       1,
                                       self.module.config.hidden_dim,
                                       device=self.device,
                                       dtype=self.module.dtype),
-            cache_seqlens=torch.zeros(max_batch_size, dtype=torch.int, device=self.device),
+            # NOTE: here cache_seqlens should be the real cache_seqlens,
+            # otherwise k/v cache will be changed in-place during capturing
+            cache_seqlens=cache_seqlens.clone(),
             max_seqlen=None,
             cu_seqlens=None,
         )
@@ -564,6 +570,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         self._gd_graph = torch.cuda.CUDAGraph()
         self._gd_graph_bs = max_batch_size
+        self._gd_graph_seqlen = seqlen
         with torch.cuda.graph(self._gd_graph):
             output = self.module._forward(**self._gd_input_buffers)
         torch.cuda.synchronize()
@@ -756,17 +763,20 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._zero_grads(ys)
 
         if self._generate_mode and self.tensor_buffer.get("kv_cache_reserved", micro_batch_id):
+            _max_seq_len = self.tensor_buffer.get("pipe_transfer_infos", micro_batch_id)["max_seqlen"]
+            kvcache_seqlen = max(_max_seq_len + self.current_gconfig.max_new_tokens,
+                                 self.hidden_dim // self.head_dim + 10)
             with torch.no_grad():
                 bs = self.tensor_buffer.get("batch_lengths", micro_batch_id)
-                if self._gd_graph is None or bs > self._gd_graph_bs:
+                if self._gd_graph is None or bs > self._gd_graph_bs or kvcache_seqlen > self._gd_graph_seqlen:
                     self.capture_generate_decoding_steps(ys)
                 first_y = ys[1] if self.is_first_stage() else ys[0]
                 if ys[0].input_ids is not None:
-                    self._gd_input_buffers['input_ids'][:bs] = ys[0].input_ids
+                    self._gd_input_buffers['input_ids'][:bs].copy_(ys[0].input_ids, non_blocking=True)
                 if x.pp_input is not None:
-                    self._gd_input_buffers['hidden_states'][:bs] = x.pp_input
-                self._gd_input_buffers['position_ids'][:bs] = first_y.cache_seqlens.unsqueeze(-1)
-                self._gd_input_buffers['cache_seqlens'][:bs] = first_y.cache_seqlens
+                    self._gd_input_buffers['hidden_states'][:bs].copy_(x.pp_input, non_blocking=True)
+                self._gd_input_buffers['position_ids'][:bs].copy_(first_y.cache_seqlens.unsqueeze(-1), non_blocking=True)
+                self._gd_input_buffers['cache_seqlens'][:bs].copy_(first_y.cache_seqlens, non_blocking=True)
                 self._gd_graph.replay()
             x.pp_input = self._gd_output_buffers['output'][:bs]
             x.pp_output = None
@@ -800,30 +810,37 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
 
         layer_indices = range(self.module.layer_idx_start, self.module.layer_idx_stop)
+        gd_input_buffer_kv_cache_indices = range(len(layer_indices))
         assert len(ys) == len(layer_indices)
         if self.is_first_stage():
             ys[0].cache_seqlens = input_lens.clone().to(dtype=torch.int32)
             ys = ys[1:]
             layer_indices = layer_indices[1:]
+            gd_input_buffer_kv_cache_indices = gd_input_buffer_kv_cache_indices[1:]
         if self.is_last_stage():
             ys = ys[:-1]
             layer_indices = layer_indices[:-1]
+            gd_input_buffer_kv_cache_indices = gd_input_buffer_kv_cache_indices[:-1]
 
         bs = input_lens.shape[0]
-        for y, layer_idx in zip(ys, layer_indices):
+        for y, layer_idx, bk_idx in zip(ys, layer_indices, gd_input_buffer_kv_cache_indices):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(max_seq_len + self.current_gconfig.max_new_tokens,
                                  self.hidden_dim // self.head_dim + 10)
-            k_cache = base.constants.get_global_memory_buffer().get_tensor(
-                tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-                dtype=y.k_cache.dtype,
-                name=f"kv_cache_{layer_idx}_k",
-                force_zero=True)
-            v_cache = base.constants.get_global_memory_buffer().get_tensor(
-                tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-                dtype=y.v_cache.dtype,
-                name=f"kv_cache_{layer_idx}_v",
-                force_zero=True)
+            if self._gd_graph is not None and self._gd_graph_bs >= bs and self._gd_graph_seqlen >= kvcache_seqlen:
+                k_cache = self._gd_input_buffers['k_caches'][bk_idx][:bs, :kvcache_seqlen]
+                v_cache = self._gd_input_buffers['v_caches'][bk_idx][:bs, :kvcache_seqlen]
+            else:
+                k_cache = base.constants.get_global_memory_buffer().get_tensor(
+                    tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+                    dtype=y.k_cache.dtype,
+                    name=f"kv_cache_{layer_idx}_k",
+                    force_zero=True)
+                v_cache = base.constants.get_global_memory_buffer().get_tensor(
+                    tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+                    dtype=y.v_cache.dtype,
+                    name=f"kv_cache_{layer_idx}_v",
+                    force_zero=True)
             indices = torch.arange(kvcache_seqlen, device=self.device,
                                    dtype=torch.long)[None, :] < input_lens[:, None]
             k_cache[indices] = y.k_cache
