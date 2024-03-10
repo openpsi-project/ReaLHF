@@ -226,7 +226,7 @@ def generate(
         if input_ids is not None:
             packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
         else:
-            max_seqlen = cu_seqlens.max().item()
+            max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True)

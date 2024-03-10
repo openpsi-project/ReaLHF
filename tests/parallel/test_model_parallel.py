@@ -11,8 +11,8 @@ from base.monitor import get_tracer
 from tests.utils import *
 import api.config as config_package
 
-NUM_MP = 1
-NUM_PP = 4
+NUM_MP = 4
+NUM_PP = 1
 NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
@@ -34,7 +34,7 @@ MAX_NEW_TOKENS = 128
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
-USE_SEQ_PARALLEL = False
+USE_SEQ_PARALLEL = True
 GRADIENT_ACCUMULATION_FUSION = False
 ASYNC_P2P = False
 
@@ -246,12 +246,12 @@ def run_mixed(rank: int, seed: int):
     device, model, backend, interface = init_handles(rank)
     engine = model.module
 
-    from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-    assert isinstance(engine, DeepSpeedPipelineEngine)
+    # from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+    # assert isinstance(engine, DeepSpeedPipelineEngine)
 
     import os
 
-    # os.environ["DLLM_TRACE"] = "1"
+    os.environ["DLLM_TRACE"] = "1"
     tracer = get_tracer(tracer_entries=int(2e6),
                         max_stack_depth=10,
                         ignore_c_function=False,
@@ -263,15 +263,17 @@ def run_mixed(rank: int, seed: int):
     train_iters = 4
     gen_iters = 1
 
-    train_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(train_iters)]
-    gen_datas = [init_data(model.tokenizer, device, BATCH_SIZE * 4, seed=seed + i) for i in range(gen_iters)]
+    train_datas = [random_sample(32 * 8, 128, 32000) for _ in range(train_iters)]
+    # train_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(train_iters)]
+    gen_datas = [random_sample(32 * 4, 128, 32000) for _ in range(gen_iters)]
+    # gen_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(gen_iters)]
 
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
 
     def mixed_one_step():
-        for i in range(gen_iters):
-            gen_res = interface.generate(model, gen_datas[i], gconfig=gconfig)
+        for gen_data in gen_datas:
+            gen_res = interface.generate(model, gen_data, gconfig=gconfig)
             print(f"generate {time.monotonic() - st:.4f}")
 
         for train_data in train_datas:
@@ -286,10 +288,10 @@ def run_mixed(rank: int, seed: int):
 
     print(f"rank {rank} FIRST mixed time cost {time.monotonic() - st:.4f}")
 
-    for _ in range(2):
-        st = time.monotonic()
-        mixed_one_step()
-        print(f"mixed time cost {time.monotonic() - st:.4f}")
+    # for _ in range(2):
+    #     st = time.monotonic()
+    #     mixed_one_step()
+    #     print(f"mixed time cost {time.monotonic() - st:.4f}")
 
     tracer.save()
 

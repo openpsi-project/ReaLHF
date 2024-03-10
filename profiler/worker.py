@@ -8,6 +8,7 @@ import socket
 import time
 
 from deepspeed.accelerator import get_accelerator
+from flash_attn.bert_padding import unpad_input
 import colorama
 import deepspeed
 import numpy as np
@@ -74,13 +75,6 @@ class ProfileWorker(worker_base.Worker):
         torch.backends.cudnn.deterministic = cfg.cudnn_deterministic
 
         seeding.set_random_seed(cfg.seed)
-
-        self.__mw_id = config.ModelWorkerID(
-            self.config.model_name,
-            dp_rank=self.config.dp_rank,
-            mp_rank=self.config.mp_rank,
-            pp_rank=self.config.pp_rank,
-        )
 
         # Reveal DDP identity of this worker to world.
         # NOTE: We include master worker in the process group, so the global rank is model_worker_index + 1
@@ -155,8 +149,8 @@ class ProfileWorker(worker_base.Worker):
         self.seq_len = 128
         self.vocab_size = 32000
 
-        self.max_profile_rounds = 20
-        self.warmup_rounds = 5
+        self.max_profile_rounds = 7
+        self.warmup_rounds = 2
         self.current_profile_round = 0
         self.profile_start = None
 
@@ -168,6 +162,7 @@ class ProfileWorker(worker_base.Worker):
             self.__engine = self.__model.module
             assert isinstance(self.__engine, ProfileEngine)
         data = random_sample(self.batch_size, self.seq_len, self.vocab_size)
+        # gen_data = random_sample(self.batch_size * 4, self.seq_len, self.vocab_size)
 
         # instruction profiles
         self.__interface.inference(self.__model, data)
@@ -175,6 +170,8 @@ class ProfileWorker(worker_base.Worker):
         self.__interface.train_step(self.__model, data)
 
         self.__interface.generate(self.__model, data)
+
+        self.__engine.profile_p2p(self.batch_size, self.seq_len)
 
         # communication profiles
         return worker_base.PollResult(sample_count=1, batch_count=1)

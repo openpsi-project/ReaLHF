@@ -73,7 +73,6 @@ def _is_valid_send_recv(src_stage, dest_stage):
 def send(tensor, dest_stage, async_op=False):
     # NOTE: The input is the stage id rather than the global rank
     global _groups
-    print(f"send tensor spec {tensor.shape}, {tensor.dtype}")
     # assert async_op == False, "Doesn't support async_op true"
     src_stage = _grid.get_stage_id()
     _is_valid_send_recv(src_stage, dest_stage)
@@ -91,7 +90,6 @@ def send(tensor, dest_stage, async_op=False):
 def recv(tensor, src_stage, async_op=False):
     # NOTE: The input is the stage id rather than the global rank
     global _groups
-    print(f"recv tensor spec {tensor.shape}, {tensor.dtype}")
     # assert async_op == False, "Doesn't support async_op true"
     dest_stage = _grid.get_stage_id()
     _is_valid_send_recv(src_stage, dest_stage)

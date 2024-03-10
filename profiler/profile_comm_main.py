@@ -18,7 +18,7 @@ logger = logging.getLogger("main", "system")
 
 CONTROLLER_TIME_LIMIT = None
 TRACE_TIMEOUT = (
-    360  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
+    300  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
 )
 
 

@@ -5,15 +5,20 @@ import json
 import os
 import time
 
+from deepspeed.runtime.engine import DeepSpeedEngine
+from flash_attn.bert_padding import unpad_input
 import torch
 import torch.distributed as dist
 
 from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
 from impl.model.backend.pipe_engine.instruction import *
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATBlock, FlashMQATConfig
+from impl.model.utils.data import PipeCacheData, PipeTransferData
 import base.constants as constants
 import base.logging as logging
 import impl.model.backend.pipe_engine.static_schedule as schedule
+import impl.model.parallelism.pipeline_parallel.p2p as p2p
 
 logger = logging.getLogger("Profile", "benchmark")
 
@@ -21,17 +26,11 @@ HOME_PATH = os.path.expanduser("~")
 DUMP_PATH = os.path.join(HOME_PATH, "logs/profile_stats")
 
 
+class ProfileLayerEngines:
+    pass
+
+
 class ProfileEngine(DeepSpeedPipelineEngine):
-    compute_instructions = [OptimizerStep, ForwardPass, BackwardPass]
-    profile_instructions = {
-        "fwd_gen_0": ForwardPass,
-        "fwd_gen_1": ForwardPass,
-        "fwd_inf": ForwardPass,
-        "fwd_train": ForwardPass,
-        "bwd_train": BackwardPass,
-        "reduce_grads": ReduceGrads,
-        "opt": OptimizerStep
-    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -98,11 +97,107 @@ class ProfileEngine(DeepSpeedPipelineEngine):
             self.step_count += 1
         dist.barrier()
 
-    def mock_comm_data(self):
-        pass
+    def profile_p2p(self, bs, seqlen):
+        h = self.hidden_dim
+        # train/inference fwd
+        self.profile_forward("fwd", (bs * seqlen, h))
+        self.profile_backward("bwd", (bs * seqlen, h))
+        # fwd gen
+        self.profile_forward("fwd_gen_1", (bs, 1, h))
 
-    def profile_p2p(self):
-        pass
+        # large scale speed test
+        # self.profile_forward("2GB", (1, 1024, 1024, 1024)) # 2GB
+        # self.profile_offload("2GB", (1, 1024, 1024, 1024)) # 2GB
+
+    def profile_forward(self, name, tensor_shape, dtype=torch.float16):
+        send_buf = torch.rand(tensor_shape, dtype=dtype, device=self.device)
+        recv_buf = torch.zeros_like(send_buf, device=self.device)
+
+        torch.cuda.synchronize()
+        dist.barrier()
+        st = time.monotonic_ns()
+        if self.stage_id % 2 == 0:
+            if not self.is_last_stage():
+                p2p.send(send_buf, self.next_stage)
+        else:
+            if not self.is_first_stage():
+                p2p.recv(recv_buf, self.prev_stage)
+
+        torch.cuda.synchronize()
+        cost = time.monotonic_ns() - st
+        k = "send" if self.stage_id % 2 == 0 else "recv"
+        k = k + "_" + name
+        self.profile_stats[k].append(cost)
+
+        dist.barrier()
+
+        st = time.monotonic_ns()
+        if self.stage_id % 2 == 0:
+            if not self.is_first_stage():
+                p2p.recv(recv_buf, self.prev_stage)
+        else:
+            if not self.is_last_stage():
+                p2p.send(send_buf, self.next_stage)
+
+        torch.cuda.synchronize()
+        cost = time.monotonic_ns() - st
+        k = "recv" if self.stage_id % 2 == 0 else "send"
+        k = k + "_" + name
+        self.profile_stats[k].append(cost)
+
+    def profile_backward(self, name, tensor_shape, dtype=torch.float16):
+        send_buf = torch.rand(tensor_shape, dtype=dtype, device=self.device)
+        recv_buf = torch.zeros_like(send_buf, device=self.device)
+
+        torch.cuda.synchronize()
+        dist.barrier()
+        st = time.monotonic_ns()
+        if self.stage_id % 2 == 0:
+            if not self.is_first_stage():
+                p2p.send(send_buf, self.prev_stage)
+        else:
+            if not self.is_last_stage():
+                p2p.recv(recv_buf, self.next_stage)
+
+        torch.cuda.synchronize()
+        cost = time.monotonic_ns() - st
+        k = "send" if self.stage_id % 2 == 0 else "recv"
+        k = k + "_" + name
+        self.profile_stats[k].append(cost)
+
+        dist.barrier()
+
+        st = time.monotonic_ns()
+        if self.stage_id % 2 == 0:
+            if not self.is_last_stage():
+                p2p.recv(recv_buf, self.next_stage)
+        else:
+            if not self.is_first_stage():
+                p2p.send(send_buf, self.prev_stage)
+        torch.cuda.synchronize()
+        cost = time.monotonic_ns() - st
+        k = "recv" if self.stage_id % 2 == 0 else "send"
+        k = k + "_" + name
+        self.profile_stats[k].append(cost)
+
+    def profile_offload(self, name, tensor_shape, dtype=torch.float16):
+        dist.barrier()
+        buf = torch.rand(tensor_shape, dtype=dtype, device=self.device)
+
+        st = time.monotonic_ns()
+        # buf.to("cpu")
+        buf = buf.cpu()
+        cost = time.monotonic_ns() - st
+        k = "store_" + name
+        self.profile_stats[k].append(cost)
+
+        dist.barrier()
+        st = time.monotonic_ns()
+        # buf.to(self.device)
+        buf = buf.cuda()
+        cost = time.monotonic_ns() - st
+        k = "load_" + name
+        self.profile_stats[k].append(cost)
 
     def dump_file_name(self):
         pass
@@ -115,8 +210,9 @@ class ProfileEngine(DeepSpeedPipelineEngine):
         s = f"Profile stats for rank {self.global_rank} " + \
             f"(dp, pp, mp) = ({self.dp_id}, {self.stage_id}, {mp_rank}):\n"
         for k, v in self.profile_stats.items():
-            v = [vv // int(10e3) for vv in v]
-            s += f"Instruction <{k}> len: {len(v)};"
+            s += str(v) + "\n"
+            v = [vv / 1000 for vv in v]
+            s += f"Instruction <{k}> len: {len(v)}; v: {v}"
             if len(v) > 0:
                 s += f" mean: {mean(v):.2f} micro secs; stdev: {stdev(v):.2f} micro secs\n"
         logger.info(s)
