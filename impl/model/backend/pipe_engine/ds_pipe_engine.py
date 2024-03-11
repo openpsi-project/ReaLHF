@@ -763,13 +763,14 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._zero_grads(ys)
 
         if self._generate_mode and self.tensor_buffer.get("kv_cache_reserved", micro_batch_id):
-            _max_seq_len = self.tensor_buffer.get("pipe_transfer_infos", micro_batch_id)["max_seqlen"]
-            kvcache_seqlen = max(_max_seq_len + self.current_gconfig.max_new_tokens,
+            kvcache_seqlen = max(base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
                                  self.hidden_dim // self.head_dim + 10)
             with torch.no_grad():
                 bs = self.tensor_buffer.get("batch_lengths", micro_batch_id)
-                if self._gd_graph is None or bs > self._gd_graph_bs or kvcache_seqlen > self._gd_graph_seqlen:
+                if self._gd_graph is None:
                     self.capture_generate_decoding_steps(ys)
+                assert self._gd_graph_bs >= bs
+                assert self._gd_graph_seqlen >= kvcache_seqlen
                 first_y = ys[1] if self.is_first_stage() else ys[0]
                 if ys[0].input_ids is not None:
                     self._gd_input_buffers['input_ids'][:bs].copy_(ys[0].input_ids, non_blocking=True)
@@ -825,9 +826,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         bs = input_lens.shape[0]
         for y, layer_idx, bk_idx in zip(ys, layer_indices, gd_input_buffer_kv_cache_indices):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
-            kvcache_seqlen = max(max_seq_len + self.current_gconfig.max_new_tokens,
+            kvcache_seqlen = max(base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
                                  self.hidden_dim // self.head_dim + 10)
             if self._gd_graph is not None and self._gd_graph_bs >= bs and self._gd_graph_seqlen >= kvcache_seqlen:
+                if self._gd_graph_bs < bs or self._gd_graph_seqlen < kvcache_seqlen:
+                    raise RuntimeError(f"CUDAGraph batch size {self._gd_graph_bs} or seqlen {self._gd_graph_seqlen} "
+                                       f"is smaller than the data batch size {bs} or seqlen {kvcache_seqlen}. "
+                                       "Have you correctly set the `max_seqlen` constant and set a `min_n_seqs_per_dp` in RPC config?")
                 k_cache = self._gd_input_buffers['k_caches'][bk_idx][:bs, :kvcache_seqlen]
                 v_cache = self._gd_input_buffers['v_caches'][bk_idx][:bs, :kvcache_seqlen]
             else:

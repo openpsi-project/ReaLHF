@@ -157,8 +157,11 @@ def get_decoding_cuda_graph(
     global _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
     global _DECODING_CUDA_GRAPH_SEQLEN
     seqlen = k_caches[0].shape[1]
-    if not force_recapture and _DECODING_CUDA_GRAPH is not None and _DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= seqlen:
+    if not force_recapture and _DECODING_CUDA_GRAPH is not None:
+        assert _DECODING_CUDA_GRAPH_BS >= bs
+        assert _DECODING_CUDA_GRAPH_SEQLEN >= seqlen
         return _DECODING_CUDA_GRAPH, _DECODING_CUDA_GRAPH_INPUT_BUFFER, _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
+    torch.cuda.synchronize()
     # Build a CUDAGraph for decoding inference.
     input_buffers = dict(
         input_ids=torch.ones(bs, 1, dtype=torch.long, device=model.device),
@@ -296,12 +299,16 @@ def generate(
         for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             # fix of a flash attention bug
-            kvcache_seqlen = max(max_seqlen + gconfig.max_new_tokens,
+            kvcache_seqlen = max(base.constants.dataset_max_seqlen() + gconfig.max_new_tokens,
                                  mconfig.hidden_dim // mconfig.head_dim + 10)
             global _DECODING_CUDA_GRAPH
-            global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
-            global _DECODING_CUDA_GRAPH_INPUT_BUFFER
-            if _DECODING_CUDA_GRAPH is not None and _DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= kvcache_seqlen:
+            if _DECODING_CUDA_GRAPH is not None:
+                global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
+                global _DECODING_CUDA_GRAPH_INPUT_BUFFER
+                if not (_DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= kvcache_seqlen):
+                    raise RuntimeError(f"CUDAGraph batch size {_DECODING_CUDA_GRAPH_BS} or seqlen {_DECODING_CUDA_GRAPH_SEQLEN} "
+                                       f"is smaller than the data batch size {bs} or seqlen {kvcache_seqlen}. "
+                                       "Have you correctly set the `max_seqlen` constant and set a `min_n_seqs_per_dp` in RPC config?")
                 k_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER['k_caches'][layer_idx][:bs, :kvcache_seqlen]
                 v_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER['v_caches'][layer_idx][:bs, :kvcache_seqlen]
             else:
@@ -356,7 +363,7 @@ def generate(
         [y.k_cache for y in ys[1:-1]],
         [y.v_cache for y in ys[1:-1]],
         cache_seqlens,
-        force_recapture=k_caches is not None,
+        force_recapture=k_caches is not None,  # FIXME: this is not the usual use case
     )
 
     # The main loop.

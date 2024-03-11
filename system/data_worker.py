@@ -55,6 +55,7 @@ class DataWorker(worker_base.Worker):
             self.__dataset = datasets[0]
         else:
             self.__dataset = torch.utils.data.ConcatDataset(datasets)
+        self.__max_seqlen = max(d.max_seqlen for d in datasets)
         self.__dataloader = data_api.make_dataloader(self.config.dataloader, self.__dataset)
         self.__data_generator = enumerate([])
 
@@ -103,6 +104,7 @@ class DataWorker(worker_base.Worker):
                 total_train_steps=-1,  # place-holder, to be filled by master worker
                 steps_per_epoch=len(self.__dataloader),
                 batch_size_per_device=batch_size,
+                max_seqlen=self.__max_seqlen,
             )
             sample_count = batch_count = 0
         else:

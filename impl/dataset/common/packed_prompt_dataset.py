@@ -124,6 +124,10 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
         self.prompts = [self.prompts[i] for i in shuffle_indices]
         self.shuffle_cnt += 1
 
+    @property
+    def max_seqlen(self):
+        return max(self.prompt_lengths)
+
     def __len__(self):
         return len(self.__batch_indices)
 

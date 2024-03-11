@@ -62,6 +62,7 @@ _grids: Dict[str, "ParallelGrid"] = {}
 _pgroups: Dict[str, Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
 _rank_mapping: Dict[str, Dict["ModelShardID", int]] = {}
 _global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
+_max_seqlen: int = None
 
 # used only in scripts and tests
 _fake_mp_world_size = None
@@ -81,6 +82,10 @@ def model_scope(model_name: str):
 
 
 ################# setter functions #################
+def set_max_seqlen(max_seqlen: int):
+    global _max_seqlen
+    _max_seqlen = max_seqlen
+
 def set_experiment_trial_names(expr_name: str, trial_name: str):
     global _experiment_name, _trial_name
     _experiment_name = expr_name
@@ -114,6 +119,12 @@ def set_rank_mapping(
 
 
 ################# attribute functions #################
+def dataset_max_seqlen() -> int:
+    global _max_seqlen
+    if _max_seqlen is None:
+        raise RuntimeError("Global constant `max_seqlen` is accessed before set.")
+    return _max_seqlen
+
 def model_name():
     if _model_name == None:
         raise RuntimeError("Global constant `model_name` should be accessed in the `model_scope` context.")

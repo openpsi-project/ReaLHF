@@ -770,6 +770,7 @@ class PPOConfig(Experiment):
         rollout = copy.deepcopy(rollout)
         rollout.min_n_seqs = global_gen_bs
         rollout.max_n_seqs = global_gen_bs
+        rollout.min_n_seqs_per_dp = global_gen_bs // actor_topo.get_dim("data")
 
         global inf_ref_logits
         inf_ref_logits = copy.deepcopy(inf_ref_logits)

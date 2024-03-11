@@ -41,7 +41,7 @@ _LLM_ENVVARS = {
     # this behavior.
     # Related issue:
     # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
-    # "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
+    "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
 }
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v

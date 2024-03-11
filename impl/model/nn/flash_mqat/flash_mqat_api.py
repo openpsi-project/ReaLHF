@@ -71,6 +71,8 @@ def forward_helper(
 ) -> DuckModelOutput:
     assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)
     build_packed = False
+    if attention_mask is None and input_ids is not None:
+        attention_mask = torch.ones_like(input_ids)
     if packed_input_ids is None and attention_mask is not None:
         build_packed = True
         packed_input_ids, indices, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)

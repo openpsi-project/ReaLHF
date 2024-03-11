@@ -8,8 +8,9 @@ import transformers
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
-from tests.utils import *
+from tests.utils import init_global_constants, MODEL_NAME
 import api.huggingface
+import base.constants
 
 torch.cuda.manual_seed_all(2)
 
@@ -51,12 +52,23 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
             dtype=torch.float16, device=device)
         cls.llama.eval()
 
-        cls.hf_like_model = FlashMQATModel.from_llama(from_model=cls.llama,
-                                                      dtype=torch.float16,
-                                                      device=device)
-        cls.hf_like_model = add_helper_functions(cls.hf_like_model)
-        cls.hf_like_model.eval()
+        with base.constants.model_scope(MODEL_NAME):
+            cls.hf_like_model = FlashMQATModel.from_llama(from_model=cls.llama,
+                                                        dtype=torch.float16,
+                                                        device=device)
+            cls.hf_like_model = add_helper_functions(cls.hf_like_model)
+            cls.hf_like_model.eval()
         cls.config = cls.hf_like_model.config
+
+    def testCountLayerParams(self):
+        from impl.model.nn.flash_mqat.flash_from_hf_impl import llama_embedding_layer_param_count, llama_output_head_param_count, llama_transformer_block_param_count
+        def count_nn_module_params(m):
+            return sum(p.data.numel() for p in m.parameters())
+        layers = self.hf_like_model.to_layers()
+        self.assertEqual(count_nn_module_params(layers[0]), llama_embedding_layer_param_count(self.hf_like_model.config))
+        for idx, l in enumerate(layers[1:-1]):
+            self.assertEqual(count_nn_module_params(l), llama_transformer_block_param_count(self.hf_like_model.config, idx))
+        self.assertEqual(count_nn_module_params(layers[-1]), llama_output_head_param_count(self.hf_like_model.config))
 
     @torch.no_grad()
     def _hf_like_forward(self, with_mask: bool, seqlen: int):
@@ -116,8 +128,9 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
     def testGenerate(self):
         max_prompt_len_c = [10, 32, 64]
         with_mask_c = [False, True]
-        for max_prompt_len, with_mask in itertools.product(max_prompt_len_c, with_mask_c):
-            self._generate(max_prompt_len, with_mask)
+        with base.constants.model_scope(MODEL_NAME):
+            for max_prompt_len, with_mask in itertools.product(max_prompt_len_c, with_mask_c):
+                self._generate(max_prompt_len, with_mask)
 
     @unittest.skip("skip because it is slow")
     def testDumpLoad(self):

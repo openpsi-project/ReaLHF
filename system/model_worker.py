@@ -301,6 +301,7 @@ class ModelWorker(worker_base.Worker):
         with base.constants.model_scope(request.handler.model_name):
             try:
                 if request.handle_name == "initialize":
+                    base.constants.set_max_seqlen(data.max_seqlen)
                     self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
                     self.__engines[request.handler.model_name] = self._model.module
                     if self._is_stream_pipe:

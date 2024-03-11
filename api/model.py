@@ -31,6 +31,7 @@ class FinetuneSpec:
     total_train_steps: int
     steps_per_epoch: int
     batch_size_per_device: int
+    max_seqlen: int
 
 
 @dataclasses.dataclass

@@ -99,6 +99,7 @@ def init_global_constants(num_dp, num_mp, num_pp, model_name=None):
     base.constants.set_grid(model_name=MODEL_NAME, grid=grid)
     base.constants.set_experiment_trial_names(EXPR_NAME, TRIAL_NAME)
     base.constants.set_rank_mapping(model_name, topo)
+    base.constants.set_max_seqlen(1024)
 
 
 def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
