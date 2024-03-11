@@ -1,7 +1,6 @@
 def import_profiler_registers():
-    import profiler.engine
+    import profiler.comm
     import profiler.experiments
-    import profiler.interface
-    import profiler.profile_layers
+    import profiler.layers
     import profiler.utils
     import profiler.worker

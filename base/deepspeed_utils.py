@@ -184,24 +184,4 @@ def deepspeed_initialize(
         )
         logger.info(f"Deepspeed Pipeline Engine initialze finished.")
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
-    elif engine_type == "profile":
-        from profiler.engine import ProfileEngine
-        config_class = DeepSpeedConfig(config, mpu)
-        engine = ProfileEngine(
-            sequence_parallel=sequence_parallel,
-            enable_async_p2p_communication=enable_async_p2p_communication,
-            enable_async_instruction=enable_async_instruction,
-            use_fast_schedule_controller=use_fast_schedule_controller,
-            model=model,
-            args=None,
-            config=config,
-            config_class=config_class,
-            mpu=mpu,
-            optimizer=optimizer,
-            lr_scheduler=lr_scheduler,
-            dist_init_required=False,
-        )
-        logger.info(f"Profile Engine initialze finished.")
-        return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
-
     return tuple(return_items)

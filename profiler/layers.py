@@ -7,6 +7,7 @@ import time
 
 from flash_attn.bert_padding import unpad_input
 import torch
+import torch.distributed as dist
 import transformers
 
 from base.topology import *
@@ -68,10 +69,20 @@ def make_layers(config: FlashMQATConfig, dtype, device):
     return [embedding_layer] + flash_mqat_blocks + [head], layer_names
 
 
+def make_stats_key(layer_name, name, bs, seq_len):
+    return f"{layer_name}-{name}-{bs}-{seq_len}"
+
+
+def parse_stats_key(key):
+    # layer_name, name, bs, seq_len
+    return key.split("-")
+
+
 class ProfileLayers:
 
     def __init__(
         self,
+        model_name: str,
         config: FlashMQATConfig,
         use_sequence_parallel: bool = False,
         use_gradient_checkpointing: bool = False,
@@ -79,6 +90,7 @@ class ProfileLayers:
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
+        self.model_name = model_name
         self.config = config
         self.backend_config = config_package.ModelBackend(
             type_="ds_train",
@@ -105,7 +117,7 @@ class ProfileLayers:
         self.max_new_tokens = 128
         self.min_new_tokens = 128
 
-        self.stats = {layer_name: defaultdict(list) for layer_name in self.layer_names}
+        self.stats = defaultdict(list)
         self.num_layers = len(self.layers)
 
         self.layers = [
@@ -117,7 +129,15 @@ class ProfileLayers:
         self.layers = [self.backend.initialize(layer, ft_spec) for layer in self.layers]
 
     def reset_stats(self):
-        self.stats = {layer_name: defaultdict(list) for layer_name in self.layer_names}
+        self.stats = defaultdict(list)
+
+    def sync_stats(self):
+        for key, times in self.stats.items():
+            times = torch.tensor(times, dtype=torch.float32, device=self.device)
+            times_list = [torch.zeros_like(times) for _ in range(dist.get_world_size())]
+            dist.all_gather(times_list, times)
+            times = torch.cat(times_list)
+            self.stats[key] = times.cpu().tolist()
 
     @torch.no_grad()
     def fwd_gen(self, bs, seq_len):
@@ -132,11 +152,12 @@ class ProfileLayers:
         ys = [PipeCacheData() for _ in range(self.num_layers)]
         ys[0].input_ids = packed_input_ids
 
-        for name, layer, y in zip(self.layer_names, self.layers, ys):
+        for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             st = time.monotonic_ns()
             x = layer.module(x, y)
             x.pp_input = x.pp_output
-            self.stats[name]["fwd_gen_0"].append(time.monotonic_ns() - st)
+            torch.cuda.synchronize()
+            self.stats[make_stats_key(layer_name, "fwd_gen_0", bs, seq_len)].append(time.monotonic_ns() - st)
 
         prompt_logits = x.pp_output
         logits = prompt_logits[cu_seqlens[1:] - 1]
@@ -172,11 +193,12 @@ class ProfileLayers:
         new_tokens = torch.randint(0, self.config.vocab_size, (bs, 1), dtype=torch.long, device=self.device)
         ys[0].input_ids = new_tokens
         ys[0].position_ids = None
-        for name, layer, y in zip(self.layer_names, self.layers, ys):
+        for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             st = time.monotonic_ns()
             x = layer.module(x, y)
             x.pp_input = x.pp_output
-            self.stats[name]["fwd_gen_1"].append(time.monotonic_ns() - st)
+            torch.cuda.synchronize()
+            self.stats[make_stats_key(layer_name, "fwd_gen_1", bs, seq_len)].append(time.monotonic_ns() - st)
 
     def fwd_bwd_opt(self, bs, seq_len):
         input_ids = torch.randint(0,
@@ -189,33 +211,57 @@ class ProfileLayers:
         ys = [PipeCacheData() for _ in range(self.num_layers)]
         ys[0].input_ids = packed_input_ids
 
-        for name, layer, y in zip(self.layer_names, self.layers, ys):
+        for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             # fwd
             st = time.monotonic_ns()
             x = layer.module(x, y)
-            self.stats[name]["fwd"].append(time.monotonic_ns() - st)
+            torch.cuda.synchronize()
+            self.stats[make_stats_key(layer_name, "fwd", bs, seq_len)].append(time.monotonic_ns() - st)
             # bwd
             r = torch.rand(*x.pp_output.shape, device=x.pp_output.device, dtype=x.pp_output.dtype)
             loss = torch.sum(x.pp_output * r)
             st = time.monotonic_ns()
             layer.module.backward(loss)
-            self.stats[name]["bwd"].append(time.monotonic_ns() - st)
+            torch.cuda.synchronize()
+            self.stats[make_stats_key(layer_name, "bwd", bs, seq_len)].append(time.monotonic_ns() - st)
             # opt
             st = time.monotonic_ns()
             layer.module.step()
-            self.stats[name]["opt"].append(time.monotonic_ns() - st)
+            torch.cuda.synchronize()
+            self.stats[make_stats_key(layer_name, "opt", bs, seq_len)].append(time.monotonic_ns() - st)
             x.pp_input = x.pp_output.clone().detach()
 
     def print_stats(self):
-        for layer_name, stats in self.stats.items():
-            print(f"Layer: {layer_name}: (mean, stdev, max, min) (micro secs)")
-            for name, times in stats.items():
-                print(f"{name}: {mean(times)/1e3}, {stdev(times)/1e3}, "
-                      f"{max(times)/1e3}, {min(times)/1e3}")
+        for key, times in self.stats.items():
+            print(f"{key}: {mean(times)/1e3}, {stdev(times)/1e3}, "
+                  f"{max(times)/1e3}, {min(times)/1e3}")
+
+    def dump_stats(self, world_size, bs, seq_len):
+        if dist.get_global_rank() == 0:
+            # dump full stats
+            dump_path = f"./profile_result/{self.model_name}/full-{world_size}-{bs}-{seq_len}.json"
+            os.makedirs(os.path.dirname(dump_path), exist_ok=True)
+            with open(dump_path, "w") as f:
+                json.dump(self.stats, f)
+
+            # dump stats summary
+            all_summary = {}
+            for k, stats in self.stats.items():
+                key_summary = dict(len=len(stats),
+                                   mean=mean(stats) / 1e3,
+                                   stdev=stdev(stats) / 1e3,
+                                   max=max(stats) / 1e3,
+                                   min=min(stats) / 1e3)
+                all_summary[k] = key_summary
+            dump_path = f"./profile_result/{self.model_name}/summary-{world_size}-{bs}-{seq_len}.json"
+            os.makedirs(os.path.dirname(dump_path), exist_ok=True)
+            with open(dump_path, "w") as f:
+                json.dump(all_summary, f)
 
 
 def make_profile_layers(device: torch.device,
                         model_path: str,
+                        model_name: str,
                         use_sequence_parallel: bool = False,
                         use_gradient_checkpointing: bool = False,
                         dtype: Optional[str] = None):
@@ -235,7 +281,8 @@ def make_profile_layers(device: torch.device,
     if tokenizer is None:
         tokenizer = api.huggingface.load_hf_tokenizer(model_path)
 
-    profile_layers = ProfileLayers(config,
+    profile_layers = ProfileLayers(model_name,
+                                   config,
                                    use_sequence_parallel=use_sequence_parallel,
                                    use_gradient_checkpointing=use_gradient_checkpointing,
                                    tokenizer=tokenizer,

@@ -224,6 +224,7 @@ class ProfileWorker:
     interface: ModelInterface
     backend: ModelBackend
     model_name: str  # the name of this whole model, not this shard
+    device_mesh_name: str
     # parallelism ranks, used to reveal model shard's identity
     dp_rank: int = 0
     mp_rank: int = 0
