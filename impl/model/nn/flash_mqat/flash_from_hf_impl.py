@@ -230,6 +230,8 @@ def convert_config_llama(hf_config: transformers.LlamaConfig) -> FlashMQATConfig
 def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
     # merge k_proj, o_proj, q_proj into a single layer
     for i in range(config.n_layers):
+        if f"model.layers.{i}.self_attn.q_proj.weight" not in state_dict:
+            continue
         q_proj_w = state_dict[f"model.layers.{i}.self_attn.q_proj.weight"]
         k_proj_w = state_dict[f"model.layers.{i}.self_attn.k_proj.weight"]
         v_proj_w = state_dict[f"model.layers.{i}.self_attn.v_proj.weight"]

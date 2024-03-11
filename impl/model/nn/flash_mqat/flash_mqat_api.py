@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
+import time
 
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.nn.flash_mqat.flash_mqat_base import (
@@ -471,6 +472,8 @@ class FlashMQATModel(nn.Module):
 
     def load_from_hf(self, load_dir: str, init_critic_from_actor: bool = False):
         from impl.model.nn.flash_mqat.flash_from_hf_impl import HF_ARCH_TO_MODEL_TYPE
+        
+        tik = time.perf_counter()
         with open(os.path.join(load_dir, "config.json"), "r") as f:
             hf_config = json.load(f)
         model_type = HF_ARCH_TO_MODEL_TYPE[hf_config["architectures"][0]]
@@ -488,14 +491,18 @@ class FlashMQATModel(nn.Module):
 
         if os.path.exists(os.path.join(load_dir, "pytorch_model.bin.index.json")):
             with open(os.path.join(load_dir, "pytorch_model.bin.index.json"), "r") as f:
-                hf_sd_mapping = json.load(f)
+                hf_sd_mapping = json.load(f)['weight_map']
             files_to_load = set(hf_sd_mapping[name] for name in required_hf_sd_names)
         else:
             files_to_load = ["pytorch_model.bin"]
+        setup_time = time.perf_counter() - tik
 
+        load_times, partition_times = [], []
         state_dict = {}
         for fn in files_to_load:
-            sd = torch.load(os.path.join(load_dir, fn), map_location=self.device)
+            load_tik = time.perf_counter()
+            sd = torch.load(os.path.join(load_dir, fn), map_location="cpu")
+            partition_tik = time.perf_counter()
             sd = {k: v for k, v in sd.items() if k in required_hf_sd_names}
             sd = self._convert_helpers[model_type].state_dict_converter(sd, self.config)
             state_dict.update(
@@ -506,12 +513,21 @@ class FlashMQATModel(nn.Module):
                     base.constants.model_parallel_rank(),
                 )
             )
+            load_times.append(partition_tik - load_tik)
+            partition_times.append(time.perf_counter() - partition_tik)
 
+        copy_tik = time.perf_counter()
         if init_critic_from_actor and f"{self.config.n_layers + 1}.weight" in state_dict:
             state_dict.pop(f"{self.config.n_layers + 1}.weight")
             self.load_state_dict(state_dict, strict=False)
         else:
             self.load_state_dict(state_dict, strict=True)
+        copy_time = time.perf_counter() - copy_tik
+        load_times = "[" + ", ".join(f"{t:.2f}" for t in load_times) +"]"
+        partition_times = "[" + ", ".join(f"{t:.2f}" for t in partition_times) +"]"
+        if os.getenv("FLASH_MQAT_LOG_LOAD_TIME", None) == "1":
+            logger.info(f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
+                        f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s")
 
     def load_from_saved_flash_model(self, load_dir: str, init_critic_from_actor: bool = False):
         with open(os.path.join(load_dir, "flash_mqat_config.json"), "r") as f:
@@ -537,7 +553,7 @@ class FlashMQATModel(nn.Module):
             raise RuntimeError(
                 "The partition methods of KV heads of the checkpoint and the current model are not compatible. "
                 "To load the checkpoint, KV heads must be able to evenly partitioned (i.e.,  #kv_heads % mp_size == 0) "
-                "or unable to partitioned (i.e., #kv_heads % mp_size != 0) for both models. "
+                "or unable to be partitioned (i.e., #kv_heads % mp_size != 0) for both models. "
                 f"Number of kv heads={self.config.n_kv_heads}, mp_size={mp_size}, ckpt mp_size={ckpt_spec.mp_size}.",
             )
 
@@ -616,13 +632,13 @@ class FlashMQATModel(nn.Module):
         with open(os.path.join(save_dir, "flash_mqat_config.json"), "w") as f:
             json.dump(dataclasses.asdict(self.config), f)
 
-        # TODO: also save a indexing json file
         save_to_disk(
             self.state_dict(),
             save_dir,
             output_fn=f"pytorch_model-pp-{pp_rank:02d}-mp-{mp_rank:02d}-s-" + "{shard:02d}.bin",
             save_type="pt",
             n_shards=int(os.getenv("FLASH_MQAT_N_SHARDS", "3")),
+            with_hf_format=True,
         )
 
 
@@ -724,7 +740,6 @@ def make_flash_model(
             dtype=dtype,
             device=device,
             is_critic=True,
-            no_param_instantiation=False,
             init_from_scratch=False,
             sequence_parallel=sequence_parallel,
             gradient_accumulation_fusion=gradient_accumulation_fusion,
@@ -737,7 +752,6 @@ def make_flash_model(
             dtype=dtype,
             device=device,
             is_critic=False,
-            no_param_instantiation=False,
             init_from_scratch=False,
             sequence_parallel=sequence_parallel,
             gradient_accumulation_fusion=gradient_accumulation_fusion,
@@ -750,8 +764,8 @@ def make_flash_model(
         config.is_critic = True
         config.sequence_parallel = sequence_parallel
         config.gradient_accumulation_fusion = gradient_accumulation_fusion
-        m = FlashMQATModel(config=config, no_param_instantiation=False, dtype=dtype, device=device)
-        m.load(model_path, init_critic_from_actor=True)
+        m = FlashMQATModel(config=config, dtype=dtype, device=device)
+        m.load_from_saved_flash_model(model_path, init_critic_from_actor=True)
     elif from_type == "random_actor":
         # randomly initialize a actor
         m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
@@ -759,7 +773,6 @@ def make_flash_model(
             dtype=dtype,
             device=device,
             is_critic=False,
-            no_param_instantiation=False,
             init_from_scratch=True,
             sequence_parallel=sequence_parallel,
             gradient_accumulation_fusion=gradient_accumulation_fusion,
@@ -771,44 +784,19 @@ def make_flash_model(
             dtype=dtype,
             device=device,
             is_critic=True,
-            no_param_instantiation=False,
-            init_from_scratch=True,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-        )
-    elif from_type == "empty_actor":
-        # initialize an empty actor, probably used for pipeline module
-        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
-            model_path=tokenizer_path,
-            dtype=dtype,
-            device=device,
-            is_critic=False,
-            no_param_instantiation=True,
-            init_from_scratch=True,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-        )
-    elif from_type == "empty_critic":
-        # initialize a empty critic, probably used for pipeline module
-        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
-            model_path=tokenizer_path,
-            dtype=dtype,
-            device=device,
-            is_critic=True,
-            no_param_instantiation=True,
             init_from_scratch=True,
             sequence_parallel=sequence_parallel,
             gradient_accumulation_fusion=gradient_accumulation_fusion,
         )
     else:
-        # load a non-pipeline actor/critic
+        # actor loads from saved actor or critic loads from saved critic
         assert from_type == "self"
         with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
             config = FlashMQATConfig(**json.load(f))
         config.sequence_parallel = sequence_parallel
         config.gradient_accumulation_fusion = gradient_accumulation_fusion
-        m = FlashMQATModel(config=config, no_param_instantiation=False, dtype=dtype, device=device)
-        m.load(model_path, init_critic_from_actor=False)
+        m = FlashMQATModel(config=config, dtype=dtype, device=device)
+        m.load_from_saved_flash_model(model_path, init_critic_from_actor=False)
 
     if tokenizer is None:
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)

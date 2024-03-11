@@ -68,6 +68,11 @@ def mp_partition_flash_mqat_state_dict(
     mp_rank: Optional[int] = None,
 ) -> List[Dict]:
     # the qkv linear in non-paralleled model is merged. We should split it first.
+    if mp_size == 1:
+        if mp_rank is None:
+            return [state_dict]
+        else:
+            return state_dict
     for i in range(1, config.n_layers + 1):
         for key in ["weight", "bias"]:
             if f"{i}.attn.c_attn.linear.{key}" not in state_dict:
