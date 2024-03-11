@@ -11,8 +11,12 @@ import torch.utils.checkpoint
 import transformers
 
 from impl.model.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
-from impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, parallel_lm_logits,
-                                                           ParallelEmbedding, RowParallelLinear)
+from impl.model.parallelism.model_parallel.modules import (
+    ColumnParallelLinear,
+    parallel_lm_logits,
+    ParallelEmbedding,
+    RowParallelLinear,
+)
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import compute_varlen_position_indices
 from impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
@@ -270,7 +274,8 @@ class VocabPositionEmbedding(nn.Module):
         self.embed_drop = nn.Dropout(config.embd_pdrop)
 
         self.self_attention_mask = torch.tril(
-            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device))
+            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device)
+        )
         self.fixed_abs_position_ids = config.fixed_abs_position_ids
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
@@ -299,9 +304,9 @@ class VocabPositionEmbedding(nn.Module):
                 y.position_ids = y.position_ids.repeat(batch_size, 1)
         elif y.position_ids is None:
             # packed_input_ids is given
-            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0],
-                                                             cu_seqlens=x.cu_seqlens,
-                                                             seqlen_offsets=y.cache_seqlens)
+            y.position_ids = compute_varlen_position_indices(
+                total_seqlen=y.input_ids.shape[0], cu_seqlens=x.cu_seqlens, seqlen_offsets=y.cache_seqlens
+            )
             # lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             # if y.cache_seqlens is None:
             #     y.position_ids = torch.cat(
@@ -324,16 +329,17 @@ class VocabPositionEmbedding(nn.Module):
             # For debugging only.
             attention_mask = x.attention_mask
             if self.fixed_abs_position_ids:
-                y.position_ids = torch.arange(y.input_ids.shape[-1],
-                                              dtype=torch.long,
-                                              device=y.input_ids.device).unsqueeze(0)
+                y.position_ids = torch.arange(
+                    y.input_ids.shape[-1], dtype=torch.long, device=y.input_ids.device
+                ).unsqueeze(0)
             else:
                 y.position_ids = attention_mask.long().cumsum(-1) - 1
                 y.position_ids.masked_fill_(attention_mask == 0, 1)
             seqlen = y.input_ids.shape[-1]
             self_attention_mask = self.self_attention_mask[None, :seqlen, :seqlen]
             self_attention_mask = self_attention_mask * attention_mask.view(batch_size, 1, -1).to(
-                dtype=torch.bool, device=self_attention_mask.device)
+                dtype=torch.bool, device=self_attention_mask.device
+            )
             x.attention_mask = self_attention_mask.unsqueeze(1)
 
         x.pp_output = self._forward(y.input_ids, y.position_ids)
@@ -357,60 +363,6 @@ class VocabPositionEmbedding(nn.Module):
             x = self.embed_drop(inputs_embeds)
         else:
             x = self.embed_drop(inputs_embeds)
-        return x
-
-
-class FlashMQATBase(nn.Module):
-
-    def __init__(
-        self,
-        config: FlashMQATConfig,
-        no_param_instantiation: bool = False,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[str, torch.device]] = None,
-    ):
-        super().__init__()
-        self.config = config
-        self.dtype = dtype
-        self.device = device
-        if not no_param_instantiation:
-            self.embedding_layer = VocabPositionEmbedding(
-                config,
-                dtype=dtype,
-                device=device,
-            )
-            self.h = nn.ModuleList([
-                FlashMQATBlock(
-                    config,
-                    layer_index=i,
-                    output_layernorm=(i == config.n_layers - 1),
-                    dtype=dtype,
-                    device=device,
-                ) for i in range(config.n_layers)
-            ])
-        else:
-            self.embedding_layer = self.h = None
-
-    def to_layers(self) -> List[nn.Module]:
-        return [self.embedding_layer] + list(self.h)
-
-    def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
-        ############## FIXME: we should ensure this outside the model ##############
-        if x.max_seqlen is not None:
-            x.max_seqlen = int(x.max_seqlen)
-        if x.cu_seqlens is not None:
-            x.cu_seqlens = x.cu_seqlens.int()
-        ############## FIXME: we should ensure this outside the model ##############
-        layers = self.to_layers()
-        assert len(ys) == len(layers), (len(ys), len(layers))
-        raw_pp_input = x.pp_input
-        for i, (layer, y) in enumerate(zip(layers, ys)):
-            x = layer(x, y)  # This will set pp_output.
-            x.pp_input = x.pp_output
-        # Finally, pp_input is the input of this pipeline stage,
-        # pp_output is the output of this pipeline stage.
-        # In the first stage, pp_input is None.
-        x.pp_input = raw_pp_input
         return x
 
 
@@ -464,491 +416,52 @@ class SequenceParallelActorHead(ColumnParallelLinear):
         )
 
 
-class FlashMQATModel(nn.Module):
+# Paramter count, used for partitioning pipeline stages
+# Ignoring tensor model parallel since it will evenly partition parameters.
+def flash_model_embed_param_count(config: FlashMQATConfig) -> int:
+    count = config.vocab_size * config.hidden_dim
+    if not config.apply_rotary:
+        count += config.n_positions * config.hidden_dim
+    return count
 
-    def __init__(
-        self,
-        config: FlashMQATConfig,
-        no_param_instantiation: bool = False,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[str, torch.device]] = None,
-    ):
-        super().__init__()
-        if dtype is None:
-            dtype = torch.float16
-        self.config = config
-        self.dtype = dtype
-        self.device = device
-        self.transformer = FlashMQATBase(config,
-                                         no_param_instantiation=no_param_instantiation,
-                                         dtype=dtype,
-                                         device=device)
-        if config.is_critic and config.sequence_parallel:
-            self.head = SequenceParallelCriticHead(
-                config.hidden_dim,
-                1,
-                bias=False,
-                device=device,
-                dtype=dtype,
-            )
-        elif not config.is_critic and base.constants.model_parallel_world_size() > 1:
-            self.head = SequenceParallelActorHead(
-                config.hidden_dim,
-                config.vocab_size,
-                bias=False,
-                sequence_parallel=config.sequence_parallel,
-                async_tensor_model_parallel_allreduce=not config.sequence_parallel,
-                gradient_accumulation_fusion=config.gradient_accumulation_fusion,
-                device=device,
-                dtype=dtype,
-            )
-        else:
-            self.head = OutputHead(
-                config.hidden_dim,
-                1 if config.is_critic else config.vocab_size,
-                bias=False,
-                device=device,
-                dtype=dtype,
-            )
 
-        self.sequence_parallel = config.sequence_parallel
+def flash_model_tblock_param_count(config: FlashMQATConfig, idx: int) -> int:
+    count = 0
+    nq = config.hidden_dim // config.head_dim
 
-    @property
-    def is_critic(self):
-        return self.config.is_critic
+    if config.layer_norm_type is None:
+        # nn.LayerNorm
+        ln_count = 2 * config.hidden_dim
+    elif config.layer_norm_type == "rms":
+        # Llama RMSNorm
+        ln_count = config.hidden_dim
+    else:
+        raise NotImplementedError()
 
-    def to_layers(self) -> List[nn.Module]:
-        return self.transformer.to_layers() + [self.head]
+    # layernorm qkv linear
+    count += ln_count + config.head_dim * (nq + config.n_kv_heads * 2) * config.hidden_dim
+    if config.use_attention_bias:
+        count += config.head_dim * (nq + config.n_kv_heads * 2)
 
-    def gradient_checkpointing_enable(self, attn: Optional[bool] = False, mlp: Optional[bool] = False):
-        for l in self.transformer.h[1:]:
-            # skip the first layer to enable lora together with grad checkpointing
-            l: FlashMQATBlock
-            l.gradient_checkpointing_enable(attn, mlp)
+    # attention projection
+    count += config.hidden_dim * config.hidden_dim
+    if config.use_attention_bias:
+        config += config.hidden_dim
+    # NOTE: we ignore the parameters of RotoaryEmbedding here
 
-    @contextlib.contextmanager
-    def gradient_checkpointing_disable(self):
-        _states = []
-        for l in self.transformer.h[1:]:
-            l: FlashMQATBlock
-            _states.append((l.ckpt_attn, l.ckpt_mlp, l.ckpt_full))
-            l.gradient_checkpointing_disable()
-        yield
-        for l, state in zip(self.transformer.h[1:], _states):
-            l: FlashMQATBlock
-            l.ckpt_attn, l.ckpt_mlp, l.ckpt_full = state
+    # mlp
+    count += ln_count
+    if config.mlp_type is None:
+        count += 2 * config.hidden_dim * config.intermediate_dim
+    elif config.mlp_type == "llama":
+        count += 3 * config.hidden_dim * config.intermediate_dim
+    else:
+        raise NotImplementedError()
 
-    @contextlib.contextmanager
-    def sequence_parallel_disable(self):
-        _states = []
-        for _, m in self.named_modules():
-            if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
-                _states.append(m.sequence_parallel)
-                m.sequence_parallel_enable(False)
-        x = self.sequence_parallel
-        self.sequence_parallel = False
-        yield
-        for _, m in self.named_modules():
-            if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
-                m.sequence_parallel_enable(_states.pop(0))
-        assert len(_states) == 0
-        self.sequence_parallel = x
+    if idx == config.n_layers - 1:
+        count += ln_count
+    return count
 
-    def forward(self, x: PipeTransferData, ys: List[PipeCacheData]) -> PipeTransferData:
-        if self.sequence_parallel:
-            from impl.model.utils.tensor import pad_sequence_parallel_input
 
-            _packed_input_ids = ys[0].input_ids
-            _cu_seqlens = x.cu_seqlens
-            _max_seqlen = x.max_seqlen
-            packed_input_ids, cu_seqlens, max_seqlen, pad_size = pad_sequence_parallel_input(
-                ys[0].input_ids, x.cu_seqlens, x.max_seqlen)
-            ys[0].input_ids = packed_input_ids
-            x.cu_seqlens = cu_seqlens
-            x.max_seqlen = max_seqlen
-        layers = self.to_layers()
-        assert len(ys) == len(layers)
-        raw_pp_input = x.pp_input
-        for layer, y in zip(layers, ys):
-            x = layer(x, y)  # This will set pp_output.
-            x.pp_input = x.pp_output
-        # Finally, pp_input is the input of this pipeline stage (maybe across several layers),
-        # pp_output is the output of this pipeline stage.
-        # In the first stage, pp_input is None.
-        x.pp_input = raw_pp_input
-        if self.sequence_parallel and pad_size > 0:
-            x.pp_output = x.pp_output[:-pad_size]
-            ys[0].input_ids = _packed_input_ids
-            x.cu_seqlens = _cu_seqlens
-            x.max_seqlen = _max_seqlen
-            if x.store_kv_cache:
-                for y in ys:
-                    if y.k_cache is not None:
-                        y.k_cache = y.k_cache[:-pad_size]
-                    if y.v_cache is not None:
-                        y.v_cache = y.v_cache[:-pad_size]
-        return x
-
-    def _forward(
-        self,
-        input_ids: torch.LongTensor,
-        cu_seqlens: torch.IntTensor,
-        position_ids: torch.LongTensor,
-        k_caches: Optional[List[torch.Tensor]],
-        v_caches: Optional[List[torch.Tensor]],
-        cache_seqlens: Optional[torch.IntTensor],
-        max_seqlen: Optional[int],
-    ):
-        layers = self.to_layers()
-        l: VocabPositionEmbedding = layers[0]
-        h = l._forward(input_ids, position_ids)
-        if k_caches is None:
-            k_caches = [None] * (len(layers) - 2)
-            v_caches = [None] * (len(layers) - 2)
-            cache_seqlens = None
-        assert len(k_caches) == len(v_caches) == len(layers) - 2
-        for l, k_cache, v_cache in zip(layers[1:-1], k_caches, v_caches):
-            l: FlashMQATBlock
-            h, _, _ = l._forward(
-                h,
-                cu_seqlens=cu_seqlens,
-                k_cache=k_cache,
-                v_cache=v_cache,
-                cache_seqlens=cache_seqlens,
-                max_seqlen=max_seqlen,
-                attention_mask=None,
-            )
-        return layers[-1]._forward(h)
-
-    @staticmethod
-    def map_to_pipe_state_dict(config: FlashMQATConfig, state_dict: Dict) -> Dict:
-        """Map a FlashMQAT state dict to a state dict for the pipeline module.
-
-        Note that pipeline module assumes a special state dict key format that
-        every key starts with a f"{layer_idx}." prefix, which is different from
-        the default keys of self.state_dict().
-        """
-        pipe_state_dict = {}
-        for k, v in state_dict.items():
-            if k.startswith("transformer.embedding_layer."):
-                new_k = k.replace("transformer.embedding_layer.", "0.")
-            elif k.startswith("transformer.h."):
-                idx = int(k.split(".")[2])
-                new_k = k.replace(f"transformer.h.{idx}.", f"{idx+1}.")
-            elif k.startswith("head"):
-                new_k = k.replace("head.", f"{config.n_layers+1}.")
-            else:
-                raise ValueError(f"Unexpected key: {k}")
-            pipe_state_dict[new_k] = v
-        return pipe_state_dict
-
-    @staticmethod
-    def from_pipe_state_dict(config: FlashMQATConfig, pipe_state_dict: Dict):
-        """The reverse function of map_to_pipe_state_dict."""
-        state_dict = {}
-        for k, v in pipe_state_dict.items():
-            if k.startswith("0."):
-                new_k = k.replace("0.", "transformer.embedding_layer.")
-            elif k.startswith(f"{config.n_layers+1}."):
-                new_k = k.replace(f"{config.n_layers+1}.", "head.")
-            else:
-                idx = int(k.split(".")[0])
-                new_k = k.replace(f"{idx}.", f"transformer.h.{idx-1}.")
-            state_dict[new_k] = v
-        return state_dict
-
-    def state_dict(self):
-        """Get a loadable state dict for the pipeline module."""
-        state_dict = super().state_dict()
-        return FlashMQATModel.map_to_pipe_state_dict(self.config, state_dict)
-
-    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
-        return super().load_state_dict(
-            FlashMQATModel.from_pipe_state_dict(self.config, state_dict),
-            strict=strict,
-            assign=assign,
-        )
-
-    # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
-    def _config_from_hf_template(
-        config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
-        from_model: Optional[transformers.PreTrainedModel] = None,
-        model_path: Optional[str] = None,
-        is_critic: bool = False,
-        sequence_parallel: bool = False,
-        gradient_accumulation_fusion: bool = False,
-    ) -> FlashMQATConfig:
-        if model_path is not None:
-            hf_config = transformers.AutoConfig.from_pretrained(os.path.join(model_path, "config.json"))
-        else:
-            assert from_model is not None
-            hf_config = from_model.config
-        config = config_converter(hf_config)
-        config.is_critic = is_critic
-        config.sequence_parallel = sequence_parallel
-        config.gradient_accumulation_fusion = gradient_accumulation_fusion
-        return config
-
-    # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
-    def _config_and_param_from_hf_template(
-        config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
-        state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None,
-        from_model: Optional[transformers.PreTrainedModel] = None,
-        model_path: Optional[str] = None,
-        is_critic: bool = False,
-        init_from_scratch: bool = False,
-        no_param_instantiation: bool = False,
-        sequence_parallel: bool = False,
-        gradient_accumulation_fusion: bool = False,
-        force_load_from_hf_pretrained: bool = False,
-    ) -> Tuple[FlashMQATConfig, Optional[Dict]]:
-        if not init_from_scratch and not no_param_instantiation:
-            assert state_dict_converter is not None
-        config = FlashMQATModel._config_from_hf_template(
-            config_converter,
-            from_model,
-            model_path,
-            is_critic=is_critic,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-        )
-        if model_path is not None:
-            if init_from_scratch or no_param_instantiation:
-                state_dict = None
-            elif force_load_from_hf_pretrained:
-                logger.warning(f"Force to load from HuggingFace PreTrainedModel...")
-                state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
-            else:
-                try:
-                    state_dict = load_from_disk(model_path)
-                except Exception as e:
-                    logger.critical(f"Failed to load state dict from {model_path}: {e}")
-                    logger.critical("Degenerate to using huggingface model initialization. "
-                                    "This will probably cause (CPU) OOM.")
-                    state_dict = transformers.AutoModelForCausalLM.from_pretrained(model_path).state_dict()
-        else:
-            logger.warning(
-                f"Note that HuggingFace PreTrainedModel may have different state dict keys from the saved one. "
-                "Loading from HuggingFace `model_path` is ensured to be correct but the `from_model` argument may cause key mismatch."
-            )
-            assert from_model is not None
-            state_dict = (from_model.state_dict()
-                          if not init_from_scratch and not no_param_instantiation else None)
-
-        if not init_from_scratch and not no_param_instantiation:
-            state_dict = state_dict_converter(state_dict, config)
-
-        return (
-            config,
-            FlashMQATModel.map_to_pipe_state_dict(config, state_dict) if state_dict is not None else None,
-        )
-
-    # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
-    def _from_hf_template(
-        cls,
-        config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
-        state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None,
-        from_model: Optional[transformers.PreTrainedModel] = None,
-        model_path: Optional[str] = None,
-        init_from_scratch: bool = False,
-        no_param_instantiation: bool = False,
-        is_critic: bool = False,
-        force_load_from_hf_pretrained: bool = False,
-        sequence_parallel: bool = False,
-        gradient_accumulation_fusion: bool = False,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[str, torch.device]] = None,
-    ):
-        if base.constants.pipe_parallel_world_size() > 1 and not no_param_instantiation:
-            raise RuntimeError(
-                "`from_$\{huggingface_model\}` can only be called without pipeline parallelism.")
-        if base.constants.model_parallel_world_size() > 1:
-            config = FlashMQATModel._config_from_hf_template(
-                config_converter=config_converter,
-                model_path=model_path,
-                is_critic=is_critic,
-                sequence_parallel=sequence_parallel,
-                gradient_accumulation_fusion=gradient_accumulation_fusion,
-            )
-        else:
-            config, state_dict = FlashMQATModel._config_and_param_from_hf_template(
-                config_converter=config_converter,
-                state_dict_converter=state_dict_converter,
-                from_model=from_model,
-                model_path=model_path,
-                is_critic=is_critic,
-                init_from_scratch=init_from_scratch,
-                force_load_from_hf_pretrained=force_load_from_hf_pretrained,
-                no_param_instantiation=no_param_instantiation,
-                sequence_parallel=sequence_parallel,
-                gradient_accumulation_fusion=gradient_accumulation_fusion,
-            )
-        model = cls(
-            config=config,
-            dtype=dtype,
-            device=device,
-            no_param_instantiation=no_param_instantiation,
-        )
-        if not init_from_scratch and not no_param_instantiation:
-            if base.constants.model_parallel_world_size() > 1:
-                model.load(model_path, init_critic_from_actor=is_critic)
-            else:
-                if is_critic:
-                    state_dict[f"{config.n_layers+1}.weight"] = model.state_dict(
-                    )[f"{config.n_layers+1}.weight"]
-                model.load_state_dict(state_dict)
-        return model
-
-    # Template function used for FlashMQAT to HF models, similar to C++ template but is ugly in python.
-    def _to_hf_template(config, state_dict, output_dir, hf_base_model_path, state_dict_converter_to_hf):
-        save_to_disk(state_dict_converter_to_hf(FlashMQATModel.from_pipe_state_dict(config, state_dict),
-                                                config),
-                     output_dir,
-                     with_hf_format=True,
-                     hf_base_model_path=hf_base_model_path)
-
-    @staticmethod
-    def register_hf_model(
-        model_name: str,
-        config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
-        state_dict_converter: Callable[[Dict, FlashMQATConfig], Dict],
-        state_dict_converter_to_hf: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None,
-        force_load_from_hf_pretrained: bool = False,
-    ):
-        """Register a HuggingFace model with `model_name`, such that models can be converted back-and-forth.
-
-        Example usage:
-
-        ```
-        # 1. Register a model called `starcoder` with helper functions.
-        # Check `impl/model/nn/flash_mqat/flash_from_hf_impl.py` for details.
-        FlashMQATModel.register_hf_model("starcoder",
-                                         convert_config_starcoder,
-                                         state_dict_from_starcoder,
-                                         state_dict_to_starcoder)
-
-        # 2. Obtain the config
-        config: FlashMQATConfig = FlashMQATModel.config_from_starcoder(model_path)
-
-        # 3. Obtain config and state_dict (also support init_from_scratch=True)
-        config, state_dict = FlashMQATModel.config_and_param_from_starcoder(model_path)
-
-        # 4. Directly construct from HuggingFace model (also support init_from_scratch=True)
-        model = FlashMQATModel.from_starcoder(model_path="/lustre/public/pretrained_model_weights/starcoder-16bit")
-
-        # 5. Dump to HuggingFace model
-        FlashMQATModel.dump_to_starcoder(model.config,
-                                         model.state_dict(),
-                                         save_path,
-                                         "/lustre/public/pretrained_model_weights/starcoder-16bit")
-
-        # 6. Use the dumped weights
-        from impl.model.nn.utils.save_load import load_from_disk
-        config = transformers.AutoConfig.from_pretrained(model_path)
-        hf_model = transformers.AutoModelForCausalLM.from_config(config)
-        hf_model.load_state_dict(load_from_disk(save_path))
-        ```
-
-        """
-        setattr(
-            FlashMQATModel,
-            f"from_{model_name}",
-            classmethod(
-                functools.partial(
-                    FlashMQATModel._from_hf_template,
-                    config_converter=config_converter,
-                    state_dict_converter=state_dict_converter,
-                    force_load_from_hf_pretrained=force_load_from_hf_pretrained,
-                )),
-        )
-        setattr(
-            FlashMQATModel,
-            f"config_from_{model_name}",
-            staticmethod(
-                functools.partial(
-                    FlashMQATModel._config_from_hf_template,
-                    config_converter=config_converter,
-                )),
-        )
-        setattr(
-            FlashMQATModel,
-            f"config_and_param_from_{model_name}",
-            staticmethod(
-                functools.partial(
-                    FlashMQATModel._config_and_param_from_hf_template,
-                    config_converter=config_converter,
-                    state_dict_converter=state_dict_converter,
-                    force_load_from_hf_pretrained=force_load_from_hf_pretrained,
-                )),
-        )
-        if state_dict_converter_to_hf:
-            setattr(
-                FlashMQATModel,
-                f"dump_to_{model_name}",
-                staticmethod(
-                    functools.partial(FlashMQATModel._to_hf_template,
-                                      state_dict_converter_to_hf=state_dict_converter_to_hf)),
-            )
-
-    def load(self, load_dir: str, init_critic_from_actor: bool = False):
-        if base.constants.pipe_parallel_world_size() > 1:
-            raise RuntimeError("`load` should not be called when using pipeline parallelism. "
-                               "Is your configuration correct?")
-        mp_rank = base.constants.model_parallel_rank()
-        mp_size = base.constants.model_parallel_world_size()
-
-        ckpt_spec = get_ckpt_spec(load_dir)
-        if mp_size == 1 and ckpt_spec.mp_size > 1:
-            # Merge from model parallel checkpoint.
-            from .flash_mqat_parallel import mp_merge_flash_mqat_state_dict
-
-            state_dicts = [
-                load_from_disk(load_dir, fn_pattern=r".*" + f"mp-{i:02d}-" + r"s-(\d{2}).*")
-                for i in range(ckpt_spec.mp_size)
-            ]
-            state_dict = mp_merge_flash_mqat_state_dict(state_dicts, self.config)
-        else:
-            assert mp_size == ckpt_spec.mp_size
-            state_dict = load_from_disk(load_dir, fn_pattern=r".*" + f"mp-{mp_rank:02d}-" + r"s-(\d{2}).*")
-
-        if init_critic_from_actor and f"{self.config.n_layers + 1}.weight" in state_dict:
-            state_dict.pop(f"{self.config.n_layers + 1}.weight")
-            self.load_state_dict(state_dict, strict=False)
-        else:
-            self.load_state_dict(state_dict, strict=True)
-
-    def save(
-        self,
-        save_dir: str,
-        epoch: Optional[int] = None,
-        epoch_step: Optional[int] = None,
-        global_step: Optional[int] = None,
-    ):
-        if base.constants.pipe_parallel_world_size() > 1:
-            raise RuntimeError("`save` should not be called when using pipeline parallelism. "
-                               "Is your configuration correct?")
-        dp_rank = base.constants.data_parallel_rank()
-        mp_rank = base.constants.model_parallel_rank()
-        if dp_rank > 0:  # only save on dp_rank = 0
-            return
-
-        subfolder = ""
-        if epoch is not None:
-            subfolder += f"epoch{epoch}"
-        if epoch_step is not None:
-            subfolder += f"epochstep{epoch_step}"
-        if global_step is not None:
-            subfolder += f"globalstep{global_step}"
-        save_dir = os.path.join(save_dir, subfolder)
-        os.makedirs(save_dir, exist_ok=True)
-
-        with open(os.path.join(save_dir, "flash_mqat_config.json"), "w") as f:
-            json.dump(dataclasses.asdict(self.config), f)
-
-        save_to_disk(
-            self.state_dict(),
-            save_dir,
-            output_fn=f"pytorch_model-pp-00-mp-{mp_rank:02d}-s-" + "{shard:02d}.bin",
-            save_type="pt",
-            n_shards=int(os.getenv("FLASH_MQAT_N_SHARDS", "3")),
-        )
+def flash_model_head_param_count(config: FlashMQATConfig) -> int:
+    return config.hidden_dim * config.vocab_size if not config.is_critic else config.hidden_dim

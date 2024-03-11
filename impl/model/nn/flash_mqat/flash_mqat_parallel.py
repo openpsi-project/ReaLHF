@@ -2,12 +2,12 @@ from typing import *
 import os
 
 import torch
+import numpy as np
 
 from .flash_mqat_base import FlashMQATConfig
 from base.monitor import process_memory_mb
-from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, FlashMQATModel,
-                                                      OutputHead, SequenceParallelActorHead,
-                                                      SequenceParallelCriticHead, VocabPositionEmbedding)
+
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 from impl.model.parallelism.pipeline_parallel.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
@@ -65,6 +65,7 @@ def mp_partition_flash_mqat_state_dict(
     state_dict: Dict[str, torch.Tensor],
     config: FlashMQATConfig,
     mp_size: int,
+    mp_rank: Optional[int] = None,
 ) -> List[Dict]:
     # the qkv linear in non-paralleled model is merged. We should split it first.
     for i in range(1, config.n_layers + 1):
@@ -73,9 +74,9 @@ def mp_partition_flash_mqat_state_dict(
                 continue
             w = state_dict[f"{i}.attn.c_attn.linear.{key}"]
             nq = config.hidden_dim // config.head_dim
-            q_proj_w = w[:nq * config.head_dim]
-            k_proj_w = w[nq * config.head_dim:(nq + config.n_kv_heads) * config.head_dim]
-            v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim:]
+            q_proj_w = w[: nq * config.head_dim]
+            k_proj_w = w[nq * config.head_dim : (nq + config.n_kv_heads) * config.head_dim]
+            v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim :]
             state_dict[f"{i}.attn.c_attn.q_attn.{key}"] = q_proj_w
             state_dict[f"{i}.attn.c_attn.k_attn.{key}"] = k_proj_w
             state_dict[f"{i}.attn.c_attn.v_attn.{key}"] = v_proj_w
@@ -90,21 +91,34 @@ def mp_partition_flash_mqat_state_dict(
         # print(f"before partition shape {state_dict[k].shape}")
         if any([ek in k for ek in embedding_keys]):
             if "weight" in k:
-                state_dict[k] = mp_partition(v, None, mp_size, dim=0)
+                state_dict[k] = mp_partition(v, mp_rank, mp_size, dim=0)
         elif any([ck in k for ck in column_linear_keys]):
+            if ("k_attn" or "v_attn" in k) and config.n_kv_heads % mp_size != 0:
+                logger.warning(
+                    f"Cannot split {config.n_kv_heads} kv heads evenly among "
+                    f"{mp_size} model parallel ranks, "
+                    f"use unsplitted linear for kv heads instead"
+                )
+                if mp_rank is None:
+                    state_dict[k] = [state_dict[k] for _ in range(mp_size)]
+                continue
             if "weight" in k:
-                state_dict[k] = mp_partition(v, None, mp_size, dim=0)
+                state_dict[k] = mp_partition(v, mp_rank, mp_size, dim=0)
             if "bias" in k:
-                state_dict[k] = mp_partition(v, None, mp_size, dim=0)
+                state_dict[k] = mp_partition(v, mp_rank, mp_size, dim=0)
         elif any([rk in k for rk in row_linear_keys]):
             if "weight" in k:
-                state_dict[k] = mp_partition(v, None, mp_size, dim=-1)
+                state_dict[k] = mp_partition(v, mp_rank, mp_size, dim=-1)
         else:
             # replicate weights across all models
-            state_dict[k] = [state_dict[k] for _ in range(mp_size)]
+            if mp_rank is None:
+                state_dict[k] = [state_dict[k] for _ in range(mp_size)]
         # print(f"after partition shape {state_dict[k].shape}")
 
-    return [{k: v[mp_rank] for k, v in state_dict.items()} for mp_rank in range(mp_size)]
+    if mp_rank is None:
+        return [{k: v[mp_rank] for k, v in state_dict.items()} for mp_rank in range(mp_size)]
+    else:
+        return state_dict
 
 
 def mp_merge_flash_mqat_state_dict(
@@ -124,8 +138,9 @@ def mp_merge_flash_mqat_state_dict(
         i = int(k.split(".")[0])
         if any([ek in k for ek in embedding_keys]) and "weight" in k:
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
-        elif (any([ck in k for ck in column_linear_keys])
-              and state_dicts[0][k].shape[0] > 1):  # exclude critic head
+        elif (
+            any([ck in k for ck in column_linear_keys]) and state_dicts[0][k].shape[0] > 1
+        ):  # exclude critic head
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
         elif any([rk in k for rk in row_linear_keys]) and "weight" in k:
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=1)
@@ -148,107 +163,51 @@ def mp_merge_flash_mqat_state_dict(
     return state_dict
 
 
-def make_causal_flash_mqat_pipe_module(
+def partition_pipeline_layers(
     config: FlashMQATConfig,
-    partition_method: str = "parameters_balanced",
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[Union[str, torch.device]] = None,
-    output_layer_specs_only: bool = False,
-):
-    layer_specs = []
-    # vocab pos embedding
-    embedding_layer = LayerSpec(VocabPositionEmbedding, config, dtype=dtype, device=device)
+    num_stages: int,
+    embed_param_counter: Callable[[FlashMQATConfig], int],
+    transformer_block_param_counter: Callable[[FlashMQATConfig, int], int],
+    head_param_counter: Callable[[FlashMQATConfig], int],
+    method: str = "uniform",
+) -> Dict[int, Tuple[int, int]]:
+    from deepspeed.runtime import utils as ds_utils
+    from base.datapack import partition_balanced as true_partition_balanced
 
-    layer_specs.append(embedding_layer)
-
-    for i in range(config.n_layers):
-        flash_mqat_block = LayerSpec(
-            FlashMQATBlock,
-            config,
-            layer_index=i,
-            output_layernorm=(i == config.n_layers - 1),
-            dtype=dtype,
-            device=device,
-        )
-        layer_specs.append(flash_mqat_block)
-
-    if config.is_critic and config.sequence_parallel:
-        head = LayerSpec(
-            SequenceParallelCriticHead,
-            config.hidden_dim,
-            # here preserve the original head for critic and swap it in pipeline modules
-            # to preserve same pipe stage division.
-            config.vocab_size,
-            bias=False,
-            device=device,
-            dtype=dtype,
-        )
-    elif not config.is_critic and base.constants.model_parallel_world_size() > 1:
-        head = LayerSpec(
-            SequenceParallelActorHead,
-            config.hidden_dim,
-            config.vocab_size,
-            sequence_parallel=config.sequence_parallel,
-            gradient_accumulation_fusion=config.gradient_accumulation_fusion,
-            async_tensor_model_parallel_allreduce=not config.sequence_parallel,
-            bias=False,
-            device=device,
-            dtype=dtype,
-        )
-    else:
-        head = LayerSpec(
-            OutputHead,
-            config.hidden_dim,
-            # here preserve the original head for critic and swap it in pipeline modules
-            # to preserve same pipe stage division.
-            config.vocab_size,
-            bias=False,
-            device=device,
-            dtype=dtype,
-        )
-
-    layer_specs.append(head)
-
-    if output_layer_specs_only:
-        return layer_specs
-
-    return PipelineModule(
-        layers=layer_specs,
-        is_critic=config.is_critic,
-        partition_method=partition_method,
-        topology=base.constants.grid()._topo,
-        config=config,
-        dtype=dtype,
-        device=device,
+    # Each stage gets a simple uniform number of layers.
+    param_counts = (
+        [embed_param_counter(config)]
+        + [transformer_block_param_counter(config, i) for i in range(config.n_layers)]
+        + [head_param_counter(config)]
     )
+    parts = None
+    if method == "uniform":
+        parts = ds_utils.partition_uniform(num_items=config.n_layers + 2, num_parts=num_stages)
+    elif method == "parameters":
+        parts = ds_utils.partition_balanced(weights=param_counts, num_parts=num_stages)
+    elif method == "parameters_balanced":
+        param_counts = np.array(param_counts)
+        parts = true_partition_balanced(nums=param_counts, k=num_stages)
+    else:
+        raise NotImplementedError(f"Partitioning method {method} not implemented.")
+
+    stage_to_layer_idx = {}
+    for stage in range(num_stages):
+        start = parts[stage]
+        stop = parts[stage + 1]
+        stage_to_layer_idx[stage] = (start, stop)
+    return stage_to_layer_idx
 
 
-def pipe_wrap_fn(
-    model_path: str,
-    partition_method: str = "parameters_balanced",
-    init_critic_from_actor: bool = False,
-    init_from_scratch: bool = False,
+def pipeline_repartition_strategy(
+    layer_mapping1: Dict[int, List[int]],
+    layer_mapping2: Dict[int, List[int]],
 ):
+    assert set(sum(layer_mapping1.values(), [])) == set(sum(layer_mapping2.values(), []))
 
-    def pipe_wrap_fn_(model: api.model.Model) -> api.model.Model:
-        if not isinstance(model.module, FlashMQATModel):
-            raise RuntimeError(f"Only FlashMQAT models can be wrapped as "
-                               f"pipeline module, provided type {type(model.module)}")
-        config = model.module.config
-        module = make_causal_flash_mqat_pipe_module(
-            config,
-            partition_method=partition_method,
-            dtype=model.dtype,
-            device=model.device,
-        )
-        if not init_from_scratch:
-            process_memory_mb("before_load")
-            module.load(model_path, init_critic_from_actor=init_critic_from_actor)
-            process_memory_mb("after_load")
-        model.module = module
-        return model
+    layer_map: Dict[Tuple[int, int], List[int]] = {}
+    for pp_rank2, layer_indices2 in layer_mapping2.items():
+        for pp_rank1, layer_indices1 in layer_mapping1.items():
+            layer_map[(pp_rank1, pp_rank2)] = list(set(layer_indices1).intersection(set(layer_indices2)))
 
-    return pipe_wrap_fn_
-
-
-api.model.register_wrapper("pipe_flash_mqat", pipe_wrap_fn)
+    return layer_map
