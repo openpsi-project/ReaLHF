@@ -410,6 +410,8 @@ try:
     LlamaRMSNorm = _TELlamaRMSNorm
 except ModuleNotFoundError:
     LlamaRMSNorm = _LlamaRMSNorm
+except ImportError:
+    LlamaRMSNorm = _LlamaRMSNorm
 
 try:
     import transformer_engine.pytorch as te
@@ -417,6 +419,7 @@ try:
     TE_ENABLED = True
 except ImportError:
     TE_ENABLED = False
+
 USE_TE_BACKEND = TE_ENABLED and os.getenv("FLASH_MQAT_USE_TE") == "1"
 
 if USE_TE_BACKEND:

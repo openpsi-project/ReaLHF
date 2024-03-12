@@ -212,7 +212,7 @@ class SlurmLaunchInfo:
         """ resolve fractional GPU resource requirement
         """
         gpu_per_worker = self.resource_requirement.gpu
-        assert gpu_per_worker <= 1 and gpu_per_worker >= 0
+        # assert gpu_per_worker <= 1 and gpu_per_worker >= 0
         if gpu_per_worker < 1 and gpu_per_worker > 0:
             self.resource_requirement.gpu = 1
             self.wprocs_per_jobstep = math.floor(1 / gpu_per_worker)
@@ -228,6 +228,9 @@ class SlurmLaunchInfo:
             self.n_jobsteps = 1
         elif gpu_per_worker == 1:
             self.n_jobsteps = self.wprocs_in_job
+            self.wprocs_per_jobstep = 1
+        else:
+            self.n_jobsteps = 1
             self.wprocs_per_jobstep = 1
 
     @property
@@ -306,7 +309,7 @@ class SlurmLaunchInfo:
 
         cmd = self.cmd
 
-        assert gpu == 1 or gpu == 0, "Slurm job GPU requirement should be resolved to a integer."
+        # assert gpu == 1 or gpu == 0, "Slurm job GPU requirement should be resolved to a integer."
         gpu_type = self.resource_requirement.gpu_type
 
         if self.multiprog:
@@ -328,7 +331,7 @@ class SlurmLaunchInfo:
             f'#SBATCH --job-name={self.slurm_name}',
             f'#SBATCH --output={self.log_path}',
             f'#SBATCH --ntasks={ntasks}',
-            f'#SBATCH --gpus-per-task={gpu_type}:1' if gpu == 1 else "",
+            f'#SBATCH --gpus-per-task={gpu_type}:{gpu}' if gpu >= 1 else "",
             f'#SBATCH --cpus-per-task={cpu}',
             f'#SBATCH --mem-per-cpu={mem // max(1, cpu)}M',
             f'#SBATCH --partition={self.partition}' if self.partition else "",
@@ -347,7 +350,7 @@ class SlurmLaunchInfo:
         srun_flags = [
             f"--ntasks={ntasks}",
             f"--cpus-per-task={cpu}",
-            f"--gpus-per-task={gpu_type}:1" if gpu == 1 else "",
+            f"--gpus-per-task={gpu_type}:{gpu}" if gpu >= 1 else "",
             f"--mem-per-cpu={mem // max(1, cpu)}",
             f"--export={','.join(str(k)+'='+str(v) for k, v in self.env_vars.items())}"
             if self.env_vars else "",

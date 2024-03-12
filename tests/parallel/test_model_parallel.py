@@ -11,8 +11,8 @@ from base.monitor import get_tracer
 from tests.utils import *
 import api.config as config_package
 
-NUM_MP = 4
-NUM_PP = 1
+NUM_MP = 1
+NUM_PP = 4
 NUM_DP = 1
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
@@ -526,4 +526,4 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testMixed")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testTrainStep")

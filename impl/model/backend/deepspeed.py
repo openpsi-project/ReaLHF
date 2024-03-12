@@ -139,6 +139,10 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
                                       min_lr_ratio=self.min_lr_ratio)
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
+        if self.gradient_checkpointing:
+            if hasattr(module, "gradient_checkpointing_enable"):
+                module.gradient_checkpointing_enable(self.ckpt_attn, self.ckpt_mlp)
+
         module, *_ = deepspeed_utils.deepspeed_initialize(
             model=module,
             optimizer=optimizer,
@@ -156,9 +160,6 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             assert isinstance(module, DeepSpeedPipelineEngine) or isinstance(module, StreamPipeEngine)
             logger.info(f"PipelineEngine:: ddp rank = {torch.distributed.get_rank()}; "
                         f"pipe id = {module.stage_id}; dp id = {module.dp_id};")
-
-        if self.gradient_checkpointing:
-            module.gradient_checkpointing_enable(self.ckpt_attn, self.ckpt_mlp)
 
         model.module = module
         return model

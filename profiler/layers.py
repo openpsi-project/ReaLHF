@@ -1,6 +1,7 @@
 from collections import defaultdict
 from statistics import mean, stdev
 from typing import List, Optional, Union
+import getpass
 import json
 import os
 import time
@@ -18,6 +19,7 @@ from impl.model.utils.data import PipeCacheData, PipeTransferData
 import api.config as config_package
 import api.huggingface
 import api.model
+import base.cluster
 import base.constants
 
 
@@ -91,6 +93,10 @@ class ProfileLayers:
         device: Optional[Union[str, torch.device]] = None,
     ):
         self.model_name = model_name
+        if use_sequence_parallel:
+            self.model_name += "_sp"
+        if use_gradient_checkpointing:
+            self.model_name += "_gc"
         self.config = config
         self.backend_config = config_package.ModelBackend(
             type_="ds_train",
@@ -236,10 +242,18 @@ class ProfileLayers:
             print(f"{key}: {mean(times)/1e3}, {stdev(times)/1e3}, "
                   f"{max(times)/1e3}, {min(times)/1e3}")
 
-    def dump_stats(self, world_size, bs, seq_len):
-        if dist.get_global_rank() == 0:
+    def dump_stats(self, world_size):
+        if dist.get_rank() == 0:
             # dump full stats
-            dump_path = f"./profile_result/{self.model_name}/full-{world_size}-{bs}-{seq_len}.json"
+            DUMP_DIR = os.path.join(
+                base.cluster.spec.fileroot,
+                "logs",
+                getpass.getuser(),
+                "profile",
+                "profile",
+                "profile_result",
+            )
+            dump_path = os.path.join(DUMP_DIR, self.model_name, f"full-{world_size}.json")
             os.makedirs(os.path.dirname(dump_path), exist_ok=True)
             with open(dump_path, "w") as f:
                 json.dump(self.stats, f)
@@ -253,7 +267,7 @@ class ProfileLayers:
                                    max=max(stats) / 1e3,
                                    min=min(stats) / 1e3)
                 all_summary[k] = key_summary
-            dump_path = f"./profile_result/{self.model_name}/summary-{world_size}-{bs}-{seq_len}.json"
+            dump_path = os.path.join(DUMP_DIR, self.model_name, f"summary-{world_size}.json")
             os.makedirs(os.path.dirname(dump_path), exist_ok=True)
             with open(dump_path, "w") as f:
                 json.dump(all_summary, f)

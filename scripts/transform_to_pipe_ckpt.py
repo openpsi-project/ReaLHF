@@ -156,7 +156,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_dir",
                         type=str,
-                        default="/lustre/public/pretrained_model_weights/Llama-2-7b-hf")
+                        default="/lustre/public/pretrained_model_weights/Llama-2-13b-hf")
     parser.add_argument("--model_type", type=str, default="llama")
     parser.add_argument("--num_pp", type=int, default=1)
     parser.add_argument("--num_mp", type=int, default=4)

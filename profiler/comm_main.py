@@ -20,13 +20,11 @@ CONTROLLER_TIME_LIMIT = None
 TRACE_TIMEOUT = (
     300  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
 )
-EXPERIMENT_NAME = "profile_comm"
-TRIAL_NAME = "profile_comm"
 
 
 def main():
-    trial_name = "profile_comm"
-    expr_name = "profile_comm"
+    trial_name = "profile"
+    expr_name = "profile"
     experiment = config_package.make_experiment(expr_name)
     sched = scheduler.client.make(mode="slurm", expr_name=expr_name, trial_name=trial_name)
 
