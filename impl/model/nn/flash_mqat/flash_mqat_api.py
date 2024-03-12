@@ -1,48 +1,36 @@
-from typing import List, Optional, Union, Callable, Dict, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, Union
+import contextlib
 import copy
 import dataclasses
 import functools
 import json
 import os
-import contextlib
+import time
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
-import time
 
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_base import (
-    FlashMQATConfig,
-    VocabPositionEmbedding,
-    SequenceParallelActorHead,
-    SequenceParallelCriticHead,
-    OutputHead,
-    FlashMQATBlock,
-    flash_model_embed_param_count,
-    flash_model_head_param_count,
-    flash_model_tblock_param_count,
-)
-from impl.model.nn.flash_mqat.flash_mqat_parallel import (
-    mp_partition_flash_mqat_state_dict,
-    partition_pipeline_layers,
-    pipeline_repartition_strategy,
-    mp_merge_flash_mqat_state_dict,
-)
-
+from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
+                                                      flash_model_head_param_count,
+                                                      flash_model_tblock_param_count, FlashMQATBlock,
+                                                      FlashMQATConfig, OutputHead, SequenceParallelActorHead,
+                                                      SequenceParallelCriticHead, VocabPositionEmbedding)
+from impl.model.nn.flash_mqat.flash_mqat_parallel import (mp_merge_flash_mqat_state_dict,
+                                                          mp_partition_flash_mqat_state_dict,
+                                                          partition_pipeline_layers,
+                                                          pipeline_repartition_strategy)
+from impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
+                                                           RowParallelLinear)
 from impl.model.utils.data import DuckGenerationOutput, DuckModelOutput, PipeCacheData, PipeTransferData
-from impl.model.utils.save_load import load_from_disk, get_ckpt_spec, save_to_disk
-from impl.model.parallelism.model_parallel.modules import (
-    ColumnParallelLinear,
-    RowParallelLinear,
-    ParallelEmbedding,
-)
+from impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
 import api.huggingface
 import api.model
-import base.logging as logging
 import base.constants
+import base.logging as logging
 
 try:
     from flash_attn.bert_padding import pad_input, unpad_input
@@ -58,6 +46,7 @@ class FlashMQATParallelismHelper:
     embedding_param_names: Callable[[FlashMQATConfig], List[str]]
     tblock_param_names: Callable[[FlashMQATConfig, int], List[str]]
     head_param_names: Callable[[FlashMQATConfig], List[str]]
+
 
 @dataclasses.dataclass
 class FlashMQATConvertHelper:
@@ -154,6 +143,10 @@ class FlashMQATModel(nn.Module):
         return self.layer_mapping[base.constants.pipe_parallel_rank()][1]
 
     @property
+    def num_stages(self):
+        return base.constants.pipe_parallel_world_size()
+
+    @property
     def is_critic(self):
         return self.config.is_critic
 
@@ -207,7 +200,7 @@ class FlashMQATModel(nn.Module):
         padded_batch_length = (batch_length + mp_size - 1) // mp_size * mp_size
         pad_size = padded_batch_length - batch_length
 
-        if pad_size > 0:
+        if self.sequence_parallel and pad_size > 0 and ys[0].input_ids is not None:
             _cu_seqlens = x.cu_seqlens
             _max_seqlen = x.max_seqlen
             _input_ids = ys[0].input_ids
@@ -217,7 +210,7 @@ class FlashMQATModel(nn.Module):
             x.max_seqlen = max(x.max_seqlen, padded_batch_length - batch_length)
             if ys[0].input_ids is not None:
                 input_ids_buf = base.constants.get_global_memory_buffer().get_tensor(
-                    padded_batch_length,
+                    (padded_batch_length,),
                     dtype=torch.long,
                     name="flash_model_input_ids",
                     force_zero=True,
@@ -227,8 +220,7 @@ class FlashMQATModel(nn.Module):
 
             if x.pp_input is not None:
                 pp_input_buf = base.constants.get_global_memory_buffer().get_tensor(
-                    padded_batch_length,
-                    x.pp_input.shape[1],
+                    (padded_batch_length, *x.pp_input.shape[1:]),
                     dtype=x.pp_input.dtype,
                     name="flash_model_pp_input",
                     force_zero=True,
@@ -240,7 +232,7 @@ class FlashMQATModel(nn.Module):
         layers = self.layers
         assert len(ys) == len(layers)
         raw_pp_input = x.pp_input
-        for layer, y in zip(layers, ys):
+        for i, (layer, y) in enumerate(zip(layers, ys)):
             x = layer(x, y)  # This will set pp_output.
             x.pp_input = x.pp_output
         # Finally, pp_input is the input of this pipeline stage (maybe across several layers),
@@ -249,7 +241,7 @@ class FlashMQATModel(nn.Module):
         x.pp_input = raw_pp_input
 
         # Resume from padding.
-        if pad_size > 0:
+        if self.sequence_parallel and pad_size > 0 and ys[0].input_ids is not None:
             x.pp_output = x.pp_output[:-pad_size]
 
             x.pp_input = _pp_input
@@ -263,13 +255,14 @@ class FlashMQATModel(nn.Module):
                         y.k_cache = y.k_cache[:-pad_size]
                     if y.v_cache is not None:
                         y.v_cache = y.v_cache[:-pad_size]
-        return x
+        return x, ys
 
     def _forward(
         self,
         input_ids: torch.LongTensor,
         cu_seqlens: torch.IntTensor,
         position_ids: torch.LongTensor,
+        hidden_states: Optional[torch.Tensor],
         k_caches: Optional[List[torch.Tensor]],
         v_caches: Optional[List[torch.Tensor]],
         cache_seqlens: Optional[torch.IntTensor],
@@ -281,6 +274,7 @@ class FlashMQATModel(nn.Module):
             k_caches = [None] * self.num_layers
             v_caches = [None] * self.num_layers
 
+        h = hidden_states
         for idx, l in enumerate(self.layers):
             if isinstance(l, VocabPositionEmbedding):
                 h = l._forward(input_ids, position_ids)
@@ -437,8 +431,7 @@ class FlashMQATModel(nn.Module):
                     FlashMQATModel._from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
-                )
-            ),
+                )),
         )
         setattr(
             FlashMQATModel,
@@ -447,8 +440,7 @@ class FlashMQATModel(nn.Module):
                 functools.partial(
                     FlashMQATModel._config_from_hf_template,
                     config_converter=config_converter,
-                )
-            ),
+                )),
         )
         if state_dict_converter_to_hf:
             setattr(
@@ -458,21 +450,20 @@ class FlashMQATModel(nn.Module):
                     functools.partial(
                         FlashMQATModel._to_hf_template,
                         state_dict_converter_to_hf=state_dict_converter_to_hf,
-                    )
-                ),
+                    )),
             )
         FlashMQATModel._parallelism_helpers[model_name] = FlashMQATParallelismHelper(
             embedding_param_names,
             tblock_param_names,
             head_param_names,
         )
-        FlashMQATModel._convert_helpers[model_name] = FlashMQATConvertHelper(
-            config_converter, state_dict_converter, state_dict_converter_to_hf
-        )
+        FlashMQATModel._convert_helpers[model_name] = FlashMQATConvertHelper(config_converter,
+                                                                             state_dict_converter,
+                                                                             state_dict_converter_to_hf)
 
     def load_from_hf(self, load_dir: str, init_critic_from_actor: bool = False):
         from impl.model.nn.flash_mqat.flash_from_hf_impl import HF_ARCH_TO_MODEL_TYPE
-        
+
         tik = time.perf_counter()
         with open(os.path.join(load_dir, "config.json"), "r") as f:
             hf_config = json.load(f)
@@ -491,7 +482,7 @@ class FlashMQATModel(nn.Module):
 
         if os.path.exists(os.path.join(load_dir, "pytorch_model.bin.index.json")):
             with open(os.path.join(load_dir, "pytorch_model.bin.index.json"), "r") as f:
-                hf_sd_mapping = json.load(f)['weight_map']
+                hf_sd_mapping = json.load(f)["weight_map"]
             files_to_load = set(hf_sd_mapping[name] for name in required_hf_sd_names)
         else:
             files_to_load = ["pytorch_model.bin"]
@@ -501,6 +492,7 @@ class FlashMQATModel(nn.Module):
         state_dict = {}
         for fn in files_to_load:
             load_tik = time.perf_counter()
+            # set map_location to be CPU is a little bit faster
             sd = torch.load(os.path.join(load_dir, fn), map_location="cpu")
             partition_tik = time.perf_counter()
             sd = {k: v for k, v in sd.items() if k in required_hf_sd_names}
@@ -511,8 +503,7 @@ class FlashMQATModel(nn.Module):
                     self.config,
                     base.constants.model_parallel_world_size(),
                     base.constants.model_parallel_rank(),
-                )
-            )
+                ))
             load_times.append(partition_tik - load_tik)
             partition_times.append(time.perf_counter() - partition_tik)
 
@@ -523,20 +514,27 @@ class FlashMQATModel(nn.Module):
         else:
             self.load_state_dict(state_dict, strict=True)
         copy_time = time.perf_counter() - copy_tik
-        load_times = "[" + ", ".join(f"{t:.2f}" for t in load_times) +"]"
-        partition_times = "[" + ", ".join(f"{t:.2f}" for t in partition_times) +"]"
+        load_times = "[" + ", ".join(f"{t:.2f}" for t in load_times) + "]"
+        partition_times = "[" + ", ".join(f"{t:.2f}" for t in partition_times) + "]"
         if os.getenv("FLASH_MQAT_LOG_LOAD_TIME", None) == "1":
-            logger.info(f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
-                        f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s")
+            logger.info(
+                f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
+                f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s")
 
     def load_from_saved_flash_model(self, load_dir: str, init_critic_from_actor: bool = False):
         with open(os.path.join(load_dir, "flash_mqat_config.json"), "r") as f:
             ckpt_config = FlashMQATConfig(**json.load(f))
         for k, v in dataclasses.asdict(ckpt_config).items():
-            if v != getattr(self.config, k):
+            if k not in [
+                    "is_critic",
+                    "sequence_parallel",
+                    "gradient_accumulation_fusion",
+                    "ckpt_attn",
+                    "ckpt_mlp",
+            ] and v != getattr(self.config, k):
                 raise ValueError(
-                    f"Can't load a checkpoint with different config (k={k}, ckpt={v}, current={getattr(self.config, k)})."
-                )
+                    f"Can't load a checkpoint with different config (key `{k}`, "
+                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`).")
 
         pp_rank = base.constants.pipe_parallel_rank()
         mp_rank = base.constants.model_parallel_rank()
@@ -544,10 +542,8 @@ class FlashMQATModel(nn.Module):
 
         ckpt_spec = get_ckpt_spec(load_dir)
         if ckpt_spec.mp_size % mp_size != 0 and mp_size % ckpt_spec.mp_size != 0:
-            raise ValueError(
-                f"Trying to load checkpoint {load_dir} with mp_size={ckpt_spec.mp_size}, "
-                f"which is neither the multiple nor a factor of current mp_size={mp_size}."
-            )
+            raise ValueError(f"Trying to load checkpoint {load_dir} with mp_size={ckpt_spec.mp_size}, "
+                             f"which is neither the multiple nor a factor of current mp_size={mp_size}.")
 
         if (self.config.n_kv_heads % mp_size == 0) != (self.config.n_kv_heads % ckpt_spec.mp_size == 0):
             raise RuntimeError(
@@ -579,9 +575,9 @@ class FlashMQATModel(nn.Module):
             for (_, target_pp_rank), global_layer_indices in repartition_strategy.items():
                 mp_sds = []
                 for i in interested_mp_ranks:
-                    sd = load_from_disk(
-                        load_dir, fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{i:02d}-" + r"s-(\d{2}).*"
-                    )
+                    sd = load_from_disk(load_dir,
+                                        fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{i:02d}-" +
+                                        r"s-(\d{2}).*")
                     sd = {k: v for k, v in sd.items() if int(k.split(".")[0]) in global_layer_indices}
                     mp_sds.append(sd)
                 state_dict.update(mp_merge_flash_mqat_state_dict(mp_sds, self.config))
@@ -595,9 +591,10 @@ class FlashMQATModel(nn.Module):
                     fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{target_mp_rank:02d}-" + r"s-(\d{2}).*",
                 )
                 sd = {k: v for k, v in sd.items() if int(k.split(".")[0]) in global_layer_indices}
-                sd = mp_partition_flash_mqat_state_dict(
-                    sd, self.config, mp_size=factor, mp_rank=mp_rank % factor
-                )
+                sd = mp_partition_flash_mqat_state_dict(sd,
+                                                        self.config,
+                                                        mp_size=factor,
+                                                        mp_rank=mp_rank % factor)
                 state_dict.update(sd)
 
         if init_critic_from_actor and f"{self.config.n_layers + 1}.weight" in state_dict:
@@ -644,17 +641,17 @@ class FlashMQATModel(nn.Module):
 
 # a helper function to make flash_mqat look like huggingface model
 def generate_helper(
-    self: FlashMQATModel,
-    tokenizer: transformers.PreTrainedTokenizerFast,
-    input_ids: Optional[torch.Tensor] = None,
-    attention_mask: Optional[torch.Tensor] = None,
-    packed_input_ids: Optional[torch.Tensor] = None,
-    cu_seqlens: Optional[torch.Tensor] = None,
-    max_seqlen: Optional[int] = None,
-    k_caches: Optional[List[torch.Tensor]] = None,
-    v_caches: Optional[List[torch.Tensor]] = None,
-    cache_seqlens: Optional[torch.Tensor] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        self: FlashMQATModel,
+        tokenizer: transformers.PreTrainedTokenizerFast,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        packed_input_ids: Optional[torch.Tensor] = None,
+        cu_seqlens: Optional[torch.Tensor] = None,
+        max_seqlen: Optional[int] = None,
+        k_caches: Optional[List[torch.Tensor]] = None,
+        v_caches: Optional[List[torch.Tensor]] = None,
+        cache_seqlens: Optional[torch.Tensor] = None,
+        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
 ) -> DuckGenerationOutput:
     current_forward = self.forward
     self.forward = functools.partial(FlashMQATModel.forward, self)
@@ -694,13 +691,12 @@ def forward_helper(
         batch_size, seqlen = input_ids.shape[:2]
     if packed_input_ids is not None:
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
-            PipeCacheData() for _ in range(self.config.n_layers + 1)
-        ]
+        ys = [PipeCacheData(input_ids=packed_input_ids)
+              ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
     else:
         x = PipeTransferData()
         ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
-    scores = FlashMQATModel.forward(self, x, ys).pp_output
+    scores = FlashMQATModel.forward(self, x, ys)[0].pp_output
     if build_packed:
         scores = pad_input(scores, indices, batch_size, seqlen)
     return scores
@@ -801,7 +797,8 @@ def make_flash_model(
     if tokenizer is None:
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_path)
 
-    m = add_helper_functions(m)
+    if base.constants.pipe_parallel_world_size() == 1:
+        m = add_helper_functions(m)
     return api.model.Model(name, m, tokenizer, device, dtype=dtype)
 
 

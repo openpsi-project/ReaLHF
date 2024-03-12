@@ -327,10 +327,8 @@ class PPOConfig(Experiment):
                 model_path=cfg.path,
                 hf_model_type=cfg.type,
                 tokenizer_path=cfg.base_model_path,
-                use_pipe=(cfg.parallel.pipeline_parallel_size > 1),
                 dtype="bf16" if cfg.enable_bf16 else "fp16",
                 sequence_parallel=cfg.parallel.use_sequence_parallel,
-                partition_method=cfg.parallel.partition_method,
                 lora=cfg.lora,
             )
 

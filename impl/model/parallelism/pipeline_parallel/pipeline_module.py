@@ -376,8 +376,8 @@ class PipelineModule(nn.Module):
 
     @contextlib.contextmanager
     def sequence_parallel_disable(self):
-        from impl.model.parallelism.model_parallel.modules import RowParallelLinear, ColumnParallelLinear
         from impl.model.nn.flash_mqat.flash_mqat_base import VocabPositionEmbedding
+        from impl.model.parallelism.model_parallel.modules import ColumnParallelLinear, RowParallelLinear
         _states = []
         for l in self.forward_funcs:
             for _, m in l.named_modules():
@@ -410,15 +410,21 @@ class PipelineModule(nn.Module):
 
         return x, ys
 
-    def _forward(self, input_ids: torch.LongTensor, position_ids: torch.LongTensor,
-                 hidden_states: torch.Tensor,
-                 cu_seqlens: torch.IntTensor,
-                 max_seqlen: int,
+    def _forward(
+        self,
+        input_ids: torch.LongTensor,
+        position_ids: torch.LongTensor,
+        hidden_states: torch.Tensor,
+        cu_seqlens: torch.IntTensor,
+        max_seqlen: int,
         k_caches: Optional[List[Optional[torch.Tensor]]],
         v_caches: Optional[List[Optional[torch.Tensor]]],
         cache_seqlens: Optional[torch.Tensor],
-        ):
-        from impl.model.nn.flash_mqat.flash_mqat_base import VocabPositionEmbedding, FlashMQATBlock, OutputHead, SequenceParallelCriticHead, SequenceParallelActorHead
+    ):
+        from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, OutputHead,
+                                                              SequenceParallelActorHead,
+                                                              SequenceParallelCriticHead,
+                                                              VocabPositionEmbedding)
         local_micro_offset = self.micro_offset + 1
 
         if k_caches is None:
@@ -440,7 +446,13 @@ class PipelineModule(nn.Module):
             if isinstance(layer, VocabPositionEmbedding):
                 hidden_states = layer._forward(input_ids, position_ids)
             elif isinstance(layer, FlashMQATBlock):
-                hidden_states, _, _ = layer._forward(hidden_states, cu_seqlens, k_cache=k_caches[idx], v_cache=v_caches[idx], cache_seqlens=cache_seqlens, max_seqlen=max_seqlen, attention_mask=None)
+                hidden_states, _, _ = layer._forward(hidden_states,
+                                                     cu_seqlens,
+                                                     k_cache=k_caches[idx],
+                                                     v_cache=v_caches[idx],
+                                                     cache_seqlens=cache_seqlens,
+                                                     max_seqlen=max_seqlen,
+                                                     attention_mask=None)
             elif isinstance(layer, (OutputHead, SequenceParallelCriticHead, SequenceParallelActorHead)):
                 hidden_states = layer._forward(hidden_states)
             else:

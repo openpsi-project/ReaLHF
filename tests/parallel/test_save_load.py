@@ -160,7 +160,14 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
                 save_pp_size,
                 load_mp_size,
                 load_pp_size,
-            ) in itertools.product([False], [False], [1, 2], [1, 3], [1, 2], [3]):
+            ) in itertools.product([True, False], [False, True], [1, 2], [2, 4], [1, 2], [1, 3]):
+                print(
+                    ">>>>>>>>>>>>>",
+                    save_mp_size,
+                    save_pp_size,
+                    load_mp_size,
+                    load_pp_size,
+                )
                 if save_critic and not load_critic:
                     continue
                 self._testSaveThenLoad(

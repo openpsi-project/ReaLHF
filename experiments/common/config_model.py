@@ -167,13 +167,10 @@ def get_flash_mqat_model_config(
     model_path: str,
     hf_model_type: str,
     tokenizer_path: str,
-    use_pipe: bool,
     dtype: Optional[str] = None,
     # model parallelism optimization
     sequence_parallel: bool = False,
     gradient_accumulation_fusion: bool = False,
-    # pipeline partition method
-    partition_method: Optional[str] = "parameters_balanced",
     # LoRA config
     lora: Optional[LoRAConfig] = None,
     is_sft_lora: bool = False,
@@ -194,26 +191,22 @@ def get_flash_mqat_model_config(
     """
     if gradient_accumulation_fusion:
         raise RuntimeError("gradient_accumulation_fusion is not supported yet")
-    if (lora is not None or is_sft_lora or is_rew_lora) and use_pipe:
-        raise NotImplementedError("LORA is not supported in pipeline model")
 
-    try:
+    if os.path.exists(os.path.join(model_path, "flash_mqat_config.json")):
+        # This is a saved model from a previous run
         with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
             original_is_critic = json.load(f)["is_critic"]
-    except FileNotFoundError:
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model path {model_path} does not exist")
-        original_is_critic = False
+        # correct from_type if necessary
+        if from_type == "hf_as_critic":
+            from_type = "self" if original_is_critic else "actor_as_critic"
+        if from_type == "hf_as_actor":
+            from_type = "self"
+    else:
+        # This is a checkpoint from HuggingFace.
         if from_type == "actor_as_critic":
             from_type = "hf_as_critic"
         if from_type == "self":
             from_type = "hf_as_actor"
-
-    if use_pipe:
-        pipe_init_from_scratch = from_type == "random_actor" or from_type == "random_critic"
-        pipe_init_critic_from_actor = from_type == "actor_as_critic" or from_type == "hf_as_critic"
-        is_critic = original_is_critic or pipe_init_critic_from_actor or from_type == "random_critic"
-        from_type = "empty_critic" if is_critic else "empty_actor"
 
     model = Model(
         "flash_mqat",
@@ -270,17 +263,5 @@ def get_flash_mqat_model_config(
                     additional_module_names_to_opt=["v_head"],
                 ),
             ),
-        ]
-    if use_pipe:
-        model.wrappers += [
-            ModelWrapper(
-                "pipe_flash_mqat",
-                args=dict(
-                    model_path=model_path,
-                    partition_method=partition_method,
-                    init_from_scratch=pipe_init_from_scratch,
-                    init_critic_from_actor=pipe_init_critic_from_actor,
-                ),
-            )
         ]
     return model

@@ -11,12 +11,8 @@ import torch.utils.checkpoint
 import transformers
 
 from impl.model.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
-from impl.model.parallelism.model_parallel.modules import (
-    ColumnParallelLinear,
-    parallel_lm_logits,
-    ParallelEmbedding,
-    RowParallelLinear,
-)
+from impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, parallel_lm_logits,
+                                                           ParallelEmbedding, RowParallelLinear)
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import compute_varlen_position_indices
 from impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
@@ -274,8 +270,7 @@ class VocabPositionEmbedding(nn.Module):
         self.embed_drop = nn.Dropout(config.embd_pdrop)
 
         self.self_attention_mask = torch.tril(
-            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device)
-        )
+            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device))
         self.fixed_abs_position_ids = config.fixed_abs_position_ids
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
@@ -304,9 +299,9 @@ class VocabPositionEmbedding(nn.Module):
                 y.position_ids = y.position_ids.repeat(batch_size, 1)
         elif y.position_ids is None:
             # packed_input_ids is given
-            y.position_ids = compute_varlen_position_indices(
-                total_seqlen=y.input_ids.shape[0], cu_seqlens=x.cu_seqlens, seqlen_offsets=y.cache_seqlens
-            )
+            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0],
+                                                             cu_seqlens=x.cu_seqlens,
+                                                             seqlen_offsets=y.cache_seqlens)
             # lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             # if y.cache_seqlens is None:
             #     y.position_ids = torch.cat(
@@ -329,17 +324,16 @@ class VocabPositionEmbedding(nn.Module):
             # For debugging only.
             attention_mask = x.attention_mask
             if self.fixed_abs_position_ids:
-                y.position_ids = torch.arange(
-                    y.input_ids.shape[-1], dtype=torch.long, device=y.input_ids.device
-                ).unsqueeze(0)
+                y.position_ids = torch.arange(y.input_ids.shape[-1],
+                                              dtype=torch.long,
+                                              device=y.input_ids.device).unsqueeze(0)
             else:
                 y.position_ids = attention_mask.long().cumsum(-1) - 1
                 y.position_ids.masked_fill_(attention_mask == 0, 1)
             seqlen = y.input_ids.shape[-1]
             self_attention_mask = self.self_attention_mask[None, :seqlen, :seqlen]
             self_attention_mask = self_attention_mask * attention_mask.view(batch_size, 1, -1).to(
-                dtype=torch.bool, device=self_attention_mask.device
-            )
+                dtype=torch.bool, device=self_attention_mask.device)
             x.attention_mask = self_attention_mask.unsqueeze(1)
 
         x.pp_output = self._forward(y.input_ids, y.position_ids)
@@ -464,4 +458,7 @@ def flash_model_tblock_param_count(config: FlashMQATConfig, idx: int) -> int:
 
 
 def flash_model_head_param_count(config: FlashMQATConfig) -> int:
-    return config.hidden_dim * config.vocab_size if not config.is_critic else config.hidden_dim
+    # NOTE: To hold consistent partitions between actor and critic models,
+    # we count the number of parameters of the critic head as config.hidden_dim * config.vocab_size.
+    # This is the intended behavior rather than a bug.
+    return config.hidden_dim * config.vocab_size

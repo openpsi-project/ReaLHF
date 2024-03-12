@@ -1,12 +1,11 @@
 from typing import *
 import os
 
-import torch
 import numpy as np
+import torch
 
 from .flash_mqat_base import FlashMQATConfig
 from base.monitor import process_memory_mb
-
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 from impl.model.parallelism.pipeline_parallel.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
@@ -79,9 +78,9 @@ def mp_partition_flash_mqat_state_dict(
                 continue
             w = state_dict[f"{i}.attn.c_attn.linear.{key}"]
             nq = config.hidden_dim // config.head_dim
-            q_proj_w = w[: nq * config.head_dim]
-            k_proj_w = w[nq * config.head_dim : (nq + config.n_kv_heads) * config.head_dim]
-            v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim :]
+            q_proj_w = w[:nq * config.head_dim]
+            k_proj_w = w[nq * config.head_dim:(nq + config.n_kv_heads) * config.head_dim]
+            v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim:]
             state_dict[f"{i}.attn.c_attn.q_attn.{key}"] = q_proj_w
             state_dict[f"{i}.attn.c_attn.k_attn.{key}"] = k_proj_w
             state_dict[f"{i}.attn.c_attn.v_attn.{key}"] = v_proj_w
@@ -99,11 +98,13 @@ def mp_partition_flash_mqat_state_dict(
                 state_dict[k] = mp_partition(v, mp_rank, mp_size, dim=0)
         elif any([ck in k for ck in column_linear_keys]):
             if ("k_attn" or "v_attn" in k) and config.n_kv_heads % mp_size != 0:
-                logger.warning(
-                    f"Cannot split {config.n_kv_heads} kv heads evenly among "
-                    f"{mp_size} model parallel ranks, "
-                    f"use unsplitted linear for kv heads instead"
-                )
+                logger.warning(f"Cannot split {config.n_kv_heads} kv heads evenly among "
+                               f"{mp_size} model parallel ranks, "
+                               f"use unsplitted linear for kv heads instead")
+                if mp_rank is None:
+                    state_dict[k] = [state_dict[k] for _ in range(mp_size)]
+                continue
+            if k == f"{config.n_layers + 1}.weight" and v.shape[0] == 1:
                 if mp_rank is None:
                     state_dict[k] = [state_dict[k] for _ in range(mp_size)]
                 continue
@@ -143,9 +144,8 @@ def mp_merge_flash_mqat_state_dict(
         i = int(k.split(".")[0])
         if any([ek in k for ek in embedding_keys]) and "weight" in k:
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
-        elif (
-            any([ck in k for ck in column_linear_keys]) and state_dicts[0][k].shape[0] > 1
-        ):  # exclude critic head
+        elif (any([ck in k for ck in column_linear_keys])
+              and state_dicts[0][k].shape[0] > 1):  # exclude critic head
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
         elif any([rk in k for rk in row_linear_keys]) and "weight" in k:
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=1)
@@ -177,14 +177,13 @@ def partition_pipeline_layers(
     method: str = "uniform",
 ) -> Dict[int, Tuple[int, int]]:
     from deepspeed.runtime import utils as ds_utils
+
     from base.datapack import partition_balanced as true_partition_balanced
 
     # Each stage gets a simple uniform number of layers.
-    param_counts = (
-        [embed_param_counter(config)]
-        + [transformer_block_param_counter(config, i) for i in range(config.n_layers)]
-        + [head_param_counter(config)]
-    )
+    param_counts = ([embed_param_counter(config)] +
+                    [transformer_block_param_counter(config, i)
+                     for i in range(config.n_layers)] + [head_param_counter(config)])
     parts = None
     if method == "uniform":
         parts = ds_utils.partition_uniform(num_items=config.n_layers + 2, num_parts=num_stages)
@@ -213,6 +212,7 @@ def pipeline_repartition_strategy(
     layer_map: Dict[Tuple[int, int], List[int]] = {}
     for pp_rank2, layer_indices2 in layer_mapping2.items():
         for pp_rank1, layer_indices1 in layer_mapping1.items():
-            layer_map[(pp_rank1, pp_rank2)] = list(set(layer_indices1).intersection(set(layer_indices2)))
+            layer_map[(pp_rank1,
+                       pp_rank2)] = sorted(list(set(layer_indices1).intersection(set(layer_indices2))))
 
     return layer_map

@@ -1,29 +1,20 @@
 # /lustre/public/pretrained_model_weights/sharded/Llama-2-70b-hf_8pp_3s
 
-base_model_path="/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
-actor_model_path="/lustre/public/pretrained_model_weights/sharded_new/Llama-2-7b-hf_1pp_2mp/"
-# actor_model_path=$base_model_path
-# critic_model_path="/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
-# reward_model_path="/lustre/public/pretrained_model_weights/sharded_new/Llama-2-7b-hf_4pp_1mp/"
-critic_model_path="/lustre/public/pretrained_model_weights/sharded_new/Llama-2-7b-hf_3pp_1mp/"
-reward_model_path="/lustre/public/pretrained_model_weights/sharded_new/Llama-2-7b-hf_3pp_1mp/"
-ref_model_path="/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
+model_path="/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
 
 python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240227 \
     trace=False \
     actor.type=llama \
-    actor.path=$actor_model_path \
-    actor.base_model_path=$actor_model_path \
-    actor.parallel.pipeline_parallel_size=1 \
+    actor.path=$model_path \
+    actor.parallel.pipeline_parallel_size=2 \
     actor.parallel.model_parallel_size=2 \
-    actor.parallel.data_parallel_size=2 \
+    actor.parallel.data_parallel_size=1 \
     actor.gradient_checkpointing=True \
     actor.parallel.use_sequence_parallel=True \
     actor.enable_async_p2p=True \
     actor.optimizer.offload=False \
     critic.type=llama \
-    critic.path=$critic_model_path \
-    critic.base_model_path=$critic_model_path \
+    critic.path=$model_path \
     critic.parallel.pipeline_parallel_size=3 \
     critic.parallel.model_parallel_size=1 \
     critic.parallel.data_parallel_size=1 \
@@ -31,13 +22,11 @@ python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240
     critic.parallel.use_sequence_parallel=False \
     critic.optimizer.offload=True \
     ref.type=llama \
-    ref.path=$ref_model_path  \
-    ref.base_model_path=$ref_model_path \
+    ref.path=$model_path  \
     ref.parallel.data_parallel_size=3 \
     ref.parallel.pipeline_parallel_size=1 \
     rew.type=llama \
-    rew.path=$reward_model_path \
-    rew.base_model_path=$reward_model_path \
+    rew.path=$model_path \
     rew.parallel.data_parallel_size=1 \
     rew.parallel.pipeline_parallel_size=3 \
     save_freq_steps=null \
