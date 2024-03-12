@@ -71,19 +71,6 @@ def mp_partition_flash_mqat_state_dict(
             return [state_dict]
         else:
             return state_dict
-    for i in range(1, config.n_layers + 1):
-        for key in ["weight", "bias"]:
-            if f"{i}.attn.c_attn.linear.{key}" not in state_dict:
-                continue
-            w = state_dict[f"{i}.attn.c_attn.linear.{key}"]
-            nq = config.hidden_dim // config.head_dim
-            q_proj_w = w[:nq * config.head_dim]
-            k_proj_w = w[nq * config.head_dim:(nq + config.n_kv_heads) * config.head_dim]
-            v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim:]
-            state_dict[f"{i}.attn.c_attn.q_attn.{key}"] = q_proj_w
-            state_dict[f"{i}.attn.c_attn.k_attn.{key}"] = k_proj_w
-            state_dict[f"{i}.attn.c_attn.v_attn.{key}"] = v_proj_w
-            state_dict.pop(f"{i}.attn.c_attn.linear.{key}")
 
     embedding_keys = _embedding_keys(config)
     column_linear_keys = _column_linear_keys(config)
@@ -173,7 +160,7 @@ def partition_pipeline_layers(
     embed_param_counter: Callable[[FlashMQATConfig], int],
     transformer_block_param_counter: Callable[[FlashMQATConfig, int], int],
     head_param_counter: Callable[[FlashMQATConfig], int],
-    method: str = "uniform",
+    method: str = "parameters_balanced",
 ) -> Dict[int, Tuple[int, int]]:
     from deepspeed.runtime import utils as ds_utils
 

@@ -66,10 +66,23 @@ class LayerNormQKVLinear(nn.Module):
         self.model_parallel = model_parallel
         self.layer_index = layer_index
         if not model_parallel:
-            output_dim = head_dim * (n_q_heads + 2 * n_kv_heads)
-            self.linear = nn.Linear(
+            self.q_attn = nn.Linear(
                 input_dim,
-                output_dim,
+                head_dim * n_q_heads,
+                bias=use_attention_bias,
+                dtype=dtype,
+                device=device,
+            )
+            self.k_attn = nn.Linear(
+                input_dim,
+                head_dim * n_kv_heads,
+                bias=use_attention_bias,
+                dtype=dtype,
+                device=device,
+            )
+            self.v_attn = nn.Linear(
+                input_dim,
+                head_dim * n_kv_heads,
                 bias=use_attention_bias,
                 dtype=dtype,
                 device=device,
@@ -160,8 +173,11 @@ class LayerNormQKVLinear(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         hidden_states = self.ln(x)
         if not self.model_parallel:
-            qkv = self.linear(hidden_states)
-            q, k, v = torch.split(qkv, (self.d * self.nq, self.d * self.nkv, self.d * self.nkv), dim=-1)
+            q = self.q_attn(hidden_states)
+            k = self.k_attn(hidden_states)
+            v = self.v_attn(hidden_states)
+            # qkv = self.linear(hidden_states)
+            # q, k, v = torch.split(qkv, (self.d * self.nq, self.d * self.nkv, self.d * self.nkv), dim=-1)
             q = q.view(*q.shape[:-1], self.nq, self.d)
             k = k.view(*k.shape[:-1], self.nkv, self.d)
             v = v.view(*v.shape[:-1], self.nkv, self.d)

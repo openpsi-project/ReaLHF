@@ -224,19 +224,6 @@ def convert_config_llama(hf_config: transformers.LlamaConfig) -> FlashMQATConfig
 
 
 def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
-    # merge k_proj, o_proj, q_proj into a single layer
-    for i in range(config.n_layers):
-        if f"model.layers.{i}.self_attn.q_proj.weight" not in state_dict:
-            continue
-        q_proj_w = state_dict[f"model.layers.{i}.self_attn.q_proj.weight"]
-        k_proj_w = state_dict[f"model.layers.{i}.self_attn.k_proj.weight"]
-        v_proj_w = state_dict[f"model.layers.{i}.self_attn.v_proj.weight"]
-        w = torch.cat([q_proj_w, k_proj_w, v_proj_w], dim=0)
-        state_dict[f"model.layers.{i}.attn.c_attn.linear.weight"] = w
-        state_dict.pop(f"model.layers.{i}.self_attn.q_proj.weight")
-        state_dict.pop(f"model.layers.{i}.self_attn.k_proj.weight")
-        state_dict.pop(f"model.layers.{i}.self_attn.v_proj.weight")
-
     new_state_dict = {}
     for k, v in state_dict.items():
         if k == "model.embed_tokens.weight":
@@ -255,6 +242,9 @@ def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
                 ("post_attention_layernorm.", "mlp.ln."),
                 ("input_layernorm.", "attn.c_attn.ln."),
                 ("attn.o_proj.", "attn.c_proj."),
+                ("q_proj.", "c_attn.q_attn."),
+                ("k_proj.", "c_attn.k_attn."),
+                ("v_proj.", "c_attn.v_attn."),
             ]
             for k1, k2 in replace_pairs:
                 if k1 in name:
