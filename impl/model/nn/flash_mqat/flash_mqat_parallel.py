@@ -7,7 +7,6 @@ import torch
 from .flash_mqat_base import FlashMQATConfig
 from base.monitor import process_memory_mb
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
-from impl.model.parallelism.pipeline_parallel.pipeline_module import LayerSpec, PipelineModule
 import api.huggingface
 import api.model
 import base.constants

@@ -181,6 +181,7 @@ def get_decoding_cuda_graph(
         cache_seqlens=cache_seqlens.clone(),
         max_seqlen=None,
         cu_seqlens=None,
+        hidden_states=None,
     )
     model._forward(**input_buffers)
     torch.cuda.synchronize()
