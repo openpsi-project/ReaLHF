@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Tuple, List
 import gc
 import itertools
 import multiprocessing as mp
@@ -98,6 +98,7 @@ class ModelWorker(worker_base.Worker):
             model_topos=self.config.model_topos,
             msid2mwid=self.config.msid2mwid,
             mw_bcast_groups=self.config.mw_bcast_groups,
+            param_sync_pairs=self.config.sync_param_pairs,
         )
 
         base.constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
@@ -321,7 +322,13 @@ class ModelWorker(worker_base.Worker):
                     res = None
                     if self._is_dp_head:
                         res = self.__gather_tensor_reply(request)
-                elif request.handle_name in ["offload", "load_to_device", "send_param", "recv_param"]:
+                # FIXME: if model worker poll exits with an unfinished send/recv, the following parameter synchronization
+                # call will get stuck. We need to ensure that all previous send/recv calls are finished before param sync.
+                elif request.handle_name == "send_param":
+                    res = self.__send_params_to_sync(request.data)
+                elif request.handle_name == "recv_param":
+                    res = self.__recv_params_to_sync(request.data)
+                elif request.handle_name in ["offload", "load_to_device"]:
                     print(f">>>>>>> model worker {self.__worker_index} model name "
                           f"{request.handler.model_name} receive {request.handle_name} "
                           f"request, which is not implemented yet.")
@@ -355,6 +362,168 @@ class ModelWorker(worker_base.Worker):
 
         sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
         self.__request_sample_size[request.request_id] = sample_count
+
+    def __sync_param_repartition(self, other_model_name: str) -> Dict[int, List[int]]:
+        """Get the right parameters to sync."""
+        from impl.model.nn.flash_mqat.flash_mqat_parallel import (
+            partition_pipeline_layers,
+            pipeline_repartition_strategy,
+        )
+        from impl.model.nn.flash_mqat.flash_mqat_base import (
+            flash_model_embed_param_count,
+            flash_model_head_param_count,
+            flash_model_tblock_param_count,
+        )
+
+        self_model_name = base.constants.model_name()
+        other_pp_size = self.config.model_topos[other_model_name].get_dim("pipe")
+
+        mconfig = self.__models[self_model_name].module.module.config
+        src_layer_partition = partition_pipeline_layers(
+            mconfig,
+            base.constants.pipe_parallel_world_size(),
+            flash_model_embed_param_count,
+            flash_model_tblock_param_count,
+            flash_model_head_param_count,
+        )
+        src_layer_mapping = {k: list(range(v[0], v[1])) for k, v in src_layer_partition.items()}
+
+        dst_layer_partition = partition_pipeline_layers(
+            mconfig,
+            other_pp_size,
+            flash_model_embed_param_count,
+            flash_model_tblock_param_count,
+            flash_model_head_param_count,
+        )
+        dst_layer_mapping = {k: list(range(v[0], v[1])) for k, v in dst_layer_partition.items()}
+
+        repartition_strategy = pipeline_repartition_strategy(src_layer_mapping, dst_layer_mapping)
+        rs = {k[1]: v for k, v in repartition_strategy.items() if k[0] == base.constants.pipe_parallel_rank()}
+        return {k: sorted(rs[k]) for k in sorted(rs.keys())}
+
+    def __send_params_to_sync(self, dst: str):
+        from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+        from impl.model.nn.flash_mqat.flash_mqat_parallel import mp_partition_flash_mqat_state_dict
+
+        rs = self.__sync_param_repartition(dst)
+
+        src = base.constants.model_name()
+        src_mp_size = base.constants.model_parallel_world_size()
+        dst_mp_size = self.config.model_topos[dst].get_dim("model")
+
+        m: FlashMQATModel = self.__models[src].module.module
+        state_dict = m.state_dict()
+
+        _comm_handles = []
+        for dst_pp_rank, global_layer_indices in rs.items():
+            sub_sd = {k: v for k, v in state_dict.items() if int(k.split(".")[0]) in global_layer_indices}
+            for k, v in sub_sd.items():
+
+                if dst_mp_size > src_mp_size:
+                    factor = dst_mp_size // src_mp_size
+                    sds = mp_partition_flash_mqat_state_dict({k: v}, m.config, factor)
+                    assert all(len(sd) == 1 for sd in sds)
+                    dst_mp_ranks = [i + factor * base.constants.model_parallel_rank() for i in range(factor)]
+                    params = [list(sd.values())[0] for sd in sds]
+                else:
+                    factor = src_mp_size // dst_mp_size
+                    dst_mp_ranks = [base.constants.model_parallel_rank() // factor]
+                    params = [v]
+
+                assert len(dst_mp_ranks) == len(params)
+                for dst_mp_rank, param in zip(dst_mp_ranks, params):
+                    key = gpu_utils.ParamSyncPair(
+                        src=src,
+                        dst=dst,
+                        src_mp_rank=base.constants.model_parallel_rank(),
+                        src_pp_rank=base.constants.pipe_parallel_rank(),
+                        dst_pp_rank=dst_pp_rank,
+                        dst_mp_rank=dst_mp_rank,
+                    )
+
+                    handle = dist.broadcast(
+                        param,
+                        src=self.__pg_info.param_sync_src_ranks[key],
+                        group=self.__pg_info.param_sync_groups[key],
+                        async_op=True,
+                    )
+                    _comm_handles.append(handle)
+
+        [h.wait() for h in _comm_handles]
+
+    def __recv_params_to_sync(self, src: str):
+        from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+        from impl.model.nn.flash_mqat.flash_mqat_parallel import (
+            mp_merge_flash_mqat_state_dict,
+            mp_partition_flash_mqat_state_dict,
+        )
+
+        rs = self.__sync_param_repartition(src)
+
+        dst = base.constants.model_name()
+        dst_mp_size = base.constants.model_parallel_world_size()
+        src_mp_size = self.config.model_topos[src].get_dim("model")
+
+        pp_recv_srcs = {}
+        for _src_pp_rank, layer_indices in rs.items():
+            pp_recv_srcs.update({i: _src_pp_rank for i in layer_indices})
+
+        m: FlashMQATModel = self.__models[dst].module.module
+        state_dict = m.state_dict()
+
+        new_state_dict = {}
+        for layer_idx in range(m.layer_idx_start, m.layer_idx_end):
+            sub_sd = {k: v for k, v in state_dict.items() if int(k.split(".")[0]) == layer_idx}
+            for k, v in sub_sd.items():
+                src_pp_rank = pp_recv_srcs[layer_idx]
+
+                if dst_mp_size >= src_mp_size:
+                    factor = dst_mp_size // src_mp_size
+                    src_mp_ranks = [base.constants.model_parallel_rank() // factor]
+                    bufs = [
+                        base.constants.get_global_memory_buffer().get_tensor(v.shape,
+                                                                             v.dtype,
+                                                                             name="param_sync_0")
+                    ]
+                else:
+                    factor = src_mp_size // dst_mp_size
+                    src_mp_ranks = [i + factor * base.constants.model_parallel_rank() for i in range(factor)]
+                    shape = list(
+                        mp_partition_flash_mqat_state_dict({
+                            k: v
+                        }, m.config, factor, mp_rank=0).values())[0].shape
+                    bufs = [
+                        base.constants.get_global_memory_buffer().get_tensor(shape,
+                                                                             v.dtype,
+                                                                             name=f"param_sync_{i}")
+                        for i in range(factor)
+                    ]
+
+                _comm_handles = []
+                assert len(src_mp_ranks) == len(bufs)
+                for src_mp_rank, buf in zip(src_mp_ranks, bufs):
+                    key = gpu_utils.ParamSyncPair(
+                        src=src,
+                        dst=dst,
+                        src_mp_rank=src_mp_rank,
+                        src_pp_rank=src_pp_rank,
+                        dst_pp_rank=base.constants.pipe_parallel_rank(),
+                        dst_mp_rank=base.constants.model_parallel_rank(),
+                    )
+                    handle = dist.broadcast(
+                        buf,
+                        src=self.__pg_info.param_sync_src_ranks[key],
+                        group=self.__pg_info.param_sync_groups[key],
+                        async_op=True,
+                    )
+                    _comm_handles.append(handle)
+
+                [h.wait() for h in _comm_handles]
+
+                new_v = mp_merge_flash_mqat_state_dict([{k: buf} for buf in bufs], m.config)
+                new_state_dict.update(new_v)
+
+        m.load_state_dict(new_state_dict)
 
     def __gather_tensor_reply(self, request: request_reply_stream.Payload):
         # This is not the ID of "gather" request, but the ID of the original RPC, e.g., generate

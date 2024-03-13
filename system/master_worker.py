@@ -158,19 +158,24 @@ def handle_rpc_hook(
             config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
             for j in range(topo.world_size())
         ]
-        request_ids = request_all(stream, handlers, "offload" if isinstance(hook, api.dfg.OffloadHook) else "load_to_device", [None for _ in handlers])
+        request_ids = request_all(stream, handlers,
+                                  "offload" if isinstance(hook, api.dfg.OffloadHook) else "load_to_device",
+                                  [None for _ in handlers])
     elif isinstance(hook, api.dfg.SyncParamHook):
         print(">>>>>>>>>>>>>>>>>>", hook_counter)
         # Since the counter is increased after the hook is handled, we add one here.
         if (hook_counter + 1) % hook.interval != 0:
             return
+        # FIXME: if model worker poll exits with an unfinished send/recv, the following parameter synchronization
+        # call will get stuck. We need to ensure that all previous send/recv calls are finished before param sync.
         src_topo = model_topos[model_name]
         src_handlers = [
             config_pkg.ModelShardID.from_parallelism_rank(model_name, src_topo, j)
             for j in range(src_topo.world_size())
         ]
         src_payloads = [
-            request_reply_stream.Payload(handler=h, handle_name="send_param") for h in src_handlers
+            request_reply_stream.Payload(handler=h, handle_name="send_param", data=hook.target)
+            for h in src_handlers
         ]
         dst_topo = model_topos[hook.target]
         dst_handlers = [
@@ -178,13 +183,15 @@ def handle_rpc_hook(
             for j in range(dst_topo.world_size())
         ]
         dst_payloads = [
-            request_reply_stream.Payload(handler=h, handle_name="recv_param") for h in dst_handlers
+            request_reply_stream.Payload(handler=h, handle_name="recv_param", data=model_name)
+            for h in dst_handlers
         ]
         request_ids = [stream.post(p) for p in src_payloads + dst_payloads]
     else:
         raise NotImplementedError()
     [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in request_ids]
     logger.info(f"RPC hook {hook} receives responses from model worker.")
+
 
 @dataclasses.dataclass
 class RPCCorountineControl:
@@ -704,6 +711,7 @@ class MasterWorker(worker_base.Worker):
             model_topos=self.config.model_topos,
             msid2mwid=self.config.msid2mwid,
             mw_bcast_groups=self.config.mw_bcast_groups,
+            param_sync_pairs=self.config.sync_param_pairs,
         )
         deepspeed.init_distributed()
         self.logger.info("deepspeed init distributed on master worker")

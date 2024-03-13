@@ -241,6 +241,7 @@ class ModelWorker:
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology] = None
     mw_bcast_groups: List[List[int]] = None
     msid2mwid: Dict[ModelShardID, int] = None
+    sync_param_pairs: List[Tuple[str, str]] = None
     worker_info: Optional[WorkerInformation] = None
 
     def __post_init__(self):
@@ -280,6 +281,7 @@ class MasterWorker:
     benchmark_steps: int
     msid2mwid: Dict[ModelShardID, int] = None
     mw_bcast_groups: List[List[int]] = None
+    sync_param_pairs: List[Tuple[str, str]] = None
     worker_info: Optional[WorkerInformation] = None
 
 
@@ -325,6 +327,7 @@ class ExperimentConfig:
             model_names = model_names.union([s.id.model_name for s in w.shards])
 
         model_topos = {}
+        model_configs: Dict[str, Model] = {}
         for model_name in model_names:
             _this_mws = list(
                 filter(lambda mw: any(x.id.model_name == model_name for x in mw.shards), self.model_worker))
@@ -332,6 +335,7 @@ class ExperimentConfig:
                 next(filter(lambda x: x.id.model_name == model_name, mw.shards)) for mw in _this_mws
             ]
             model_topos[model_name] = all_shards[0].id.topo
+            model_configs[model_name] = all_shards[0].model
 
             ##### Sanity check of parallelism ranks. #####
             ranks = [s.id.parallelism_rank for s in all_shards]
@@ -342,17 +346,23 @@ class ExperimentConfig:
                                  f"model shard ids={[s.id for s in all_shards]}.")
             ##### Sanity check of parallelism ranks. #####
 
+        sync_param_pairs: List[Tuple[str, str]] = []
         ######### sanity check of sync param hooks #########
         for rpc in self.model_rpcs:
             for hook in rpc.pre_hooks + rpc.post_hooks:
                 if not isinstance(hook, api.dfg.SyncParamHook):
                     continue
+                if not model_configs[rpc.model_name].type_ == model_configs[hook.target].type_ == "flash_mqat":
+                    raise ValueError("To synchronize parameters between two models, "
+                                     "both models must be FlashMQATModel.")
                 target_topo = model_topos[hook.target]
                 self_topo = model_topos[rpc.model_name]
                 if (self_topo.get_dim("model") % target_topo.get_dim("model") != 0 and 
                     target_topo.get_dim("model") % self_topo.get_dim("model") !=0):
                     raise ValueError("To synchronize parameters between two models, "
                                      "their model parallel size must be a multiple of each other.")
+                if not (rpc.model_name, hook.target) in sync_param_pairs:
+                    sync_param_pairs.append((rpc.model_name, hook.target))
         ######### sanity check of sync param hooks #########
 
         msid2mwid = {}
@@ -362,6 +372,7 @@ class ExperimentConfig:
                 msid2mwid[m.id] = i
         for m in self.model_worker:
             m.msid2mwid = msid2mwid
+            m.sync_param_pairs = sync_param_pairs
 
         def can_bcast_together(mw1: ModelWorker, mw2: ModelWorker):
             # If there does not exist a model that crosses pipeline parallelism ranks along mw1 and mw2,
@@ -408,6 +419,7 @@ class ExperimentConfig:
                 n_model_workers=len(self.model_worker),
                 msid2mwid=msid2mwid,
                 mw_bcast_groups=mw_bcast_groups,
+                sync_param_pairs=sync_param_pairs,
                 benchmark_steps=self.benchmark_steps,  # only used for benchmark
             )
         ]

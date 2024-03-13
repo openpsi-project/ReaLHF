@@ -24,7 +24,7 @@ rollout = ModelRPC(
         "prompt_mask",
     ],
     dp_broker_type="packed",
-    pre_hooks=[LoadToDeviceHook()],  # NOTE: just for testing
+    pre_hooks=[LoadToDeviceHook(), SyncParamHook(target="ref", interval=1)],  # NOTE: just for testing
     post_hooks=[OffloadHook()],  # NOTE: just for testing
 )
 
@@ -76,7 +76,7 @@ train_actor = ModelRPC(
     ],
     log_return_value=True,
     dp_broker_type="packed",
-    post_hooks=[SyncParamHook(target="critic", interval=4)],  # NOTE: just for testing
+    # post_hooks=[SyncParamHook(target="ref", interval=4)],  # NOTE: just for testing
 )
 
 train_critic = ModelRPC(

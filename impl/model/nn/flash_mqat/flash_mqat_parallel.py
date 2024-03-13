@@ -138,19 +138,6 @@ def mp_merge_flash_mqat_state_dict(
         else:
             state_dict[k] = state_dicts[0][k]
 
-    # the qkv linear in non-paralleled model is merged.
-    for i in range(1, config.n_layers + 1):
-        for key in ["weight", "bias"]:
-            if f"{i}.attn.c_attn.q_attn.{key}" not in state_dict:
-                continue
-            qw = state_dict[f"{i}.attn.c_attn.q_attn.{key}"]
-            kw = state_dict[f"{i}.attn.c_attn.k_attn.{key}"]
-            vw = state_dict[f"{i}.attn.c_attn.v_attn.{key}"]
-            state_dict[f"{i}.attn.c_attn.linear.{key}"] = torch.cat([qw, kw, vw], dim=0)
-            state_dict.pop(f"{i}.attn.c_attn.q_attn.{key}")
-            state_dict.pop(f"{i}.attn.c_attn.k_attn.{key}")
-            state_dict.pop(f"{i}.attn.c_attn.v_attn.{key}")
-
     return state_dict
 
 

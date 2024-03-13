@@ -23,8 +23,8 @@ python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240
     critic.optimizer.offload=True \
     ref.type=llama \
     ref.path=$model_path  \
-    ref.parallel.data_parallel_size=3 \
-    ref.parallel.pipeline_parallel_size=1 \
+    ref.parallel.data_parallel_size=1 \
+    ref.parallel.pipeline_parallel_size=3 \
     rew.type=llama \
     rew.path=$model_path \
     rew.parallel.data_parallel_size=1 \
