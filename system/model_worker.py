@@ -18,8 +18,8 @@ import torch.utils.data
 from base.monitor import gpu_utilization_monitor, time_mark
 from base.topology import ParallelGrid
 from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
-from base.constants import GlobalMemoryBuffer
 import api.config as config
+from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 import api.data
 import api.model
 import base.constants
@@ -103,12 +103,12 @@ class ModelWorker(worker_base.Worker):
 
         base.constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
 
-        logger.info(f"SetUp Information - Model worker index {self.__worker_index} located at "
-                    f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}.")
+        # logger.info(f"SetUp Information - Model worker index {self.__worker_index} located at "
+        #             f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}.")
 
         # if self.config.backend.type_ in ["ds_train", "ds_inference"]:
         deepspeed.init_distributed()
-        self.logger.info("deepspeed init distributed on model worker")
+        # self.logger.info("deepspeed init distributed on model worker")
         self.__device = torch.device("cuda:0")
 
         for model_name_, topo_ in self.config.model_topos.items():
@@ -307,7 +307,8 @@ class ModelWorker(worker_base.Worker):
                     self.__engines[request.handler.model_name] = self._model.module
                     if self._is_stream_pipe:
                         assert isinstance(self._engine, StreamPipeEngine)
-                    res = None
+                    m = self.__models[request.handler.model_name].module.module
+                    res = None if not isinstance(m, FlashMQATModel) else m.config
                 elif request.handle_name == "save":
                     res = self._interface.save(self._model, data)  # -> None
                 elif request.handle_name == "inference":
@@ -661,11 +662,11 @@ class ModelWorker(worker_base.Worker):
                 blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
 
             tik = time.perf_counter()
-            blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
-                ",".join(self.model_names),
-                round(get_accelerator().memory_allocated() / 1024**3, 2),
-                round(get_accelerator().max_memory_allocated() / 1024**3, 2),
-            )))
+            # blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
+            #     ",".join(self.model_names),
+            #     round(get_accelerator().memory_allocated() / 1024**3, 2),
+            #     round(get_accelerator().max_memory_allocated() / 1024**3, 2),
+            # )))
             blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
             if os.environ.get("DLLM_TRACE", "0") == "1":
                 self.tracer.save()

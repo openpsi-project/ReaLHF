@@ -23,6 +23,7 @@ from base.asyncio_utils import raise_asyncio_exception, setup_run_until_complete
 from base.buffer import AsyncIOSequenceBuffer
 from base.cluster import spec as cluster_spec
 from base.constants import MODEL_SAVE_ROOT, GlobalMemoryBuffer
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 import api.config as config_pkg
 import api.data as data_api
 import api.dfg
@@ -150,6 +151,7 @@ def handle_rpc_hook(
     model_name: str,
     stream: request_reply_stream.IpRequestClient,
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
+    model_configs: Dict[str, None | FlashMQATConfig],
 ):
     logger.info(f"Dealing with RPC hook {hook}.")
     if isinstance(hook, (api.dfg.OffloadHook, api.dfg.LoadToDeviceHook)):
@@ -158,17 +160,48 @@ def handle_rpc_hook(
             config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
             for j in range(topo.world_size())
         ]
-        request_ids = request_all(stream, handlers,
-                                  "offload" if isinstance(hook, api.dfg.OffloadHook) else "load_to_device",
-                                  [None for _ in handlers])
+        request_ids = request_all(
+            stream,
+            handlers,
+            "offload" if isinstance(hook, api.dfg.OffloadHook) else "load_to_device",
+            [None for _ in handlers],
+        )
     elif isinstance(hook, api.dfg.SyncParamHook):
         print(">>>>>>>>>>>>>>>>>>", hook_counter)
         # Since the counter is increased after the hook is handled, we add one here.
         if (hook_counter + 1) % hook.interval != 0:
             return
+
+        src_topo = model_topos[model_name]
+        dst_topo = model_topos[hook.target]
+
+        #################### Sanity check of model configs. ####################
+        src_config = model_configs[model_name]
+        dst_config = model_configs[hook.target]
+        assert src_config is not None and dst_config is not None
+        for k, v in dataclasses.asdict(src_config).items():
+            if k not in [
+                    "sequence_parallel",
+                    "gradient_accumulation_fusion",
+                    "ckpt_attn",
+                    "ckpt_mlp",
+            ] and v != getattr(dst_config, k):
+                raise ValueError(
+                    f"Can't synchronize a checkpoint with different config (key `{k}`, "
+                    f"value of src model is `{v}`, value of dst model is `{getattr(dst_config, k)}`).")
+        src_mp_size = src_topo.get_dim("model")
+        dst_mp_size = src_topo.get_dim("model")
+        if (src_config.n_kv_heads % src_mp_size == 0) != (dst_config.n_kv_heads % dst_mp_size == 0):
+            raise ValueError(
+                "The partition methods of KV heads of the src and dst model are not compatible. "
+                "To load the checkpoint, KV heads must be able to evenly partitioned (i.e.,  #kv_heads % mp_size == 0) "
+                "or unable to be partitioned (i.e., #kv_heads % mp_size != 0) for both models. "
+                f"Number of kv heads={src_config.n_kv_heads}, src mp_size={src_mp_size}, dst mp_size={dst_mp_size}.",
+            )
+        #################### Sanity check of model configs. ####################
+
         # FIXME: if model worker poll exits with an unfinished send/recv, the following parameter synchronization
         # call will get stuck. We need to ensure that all previous send/recv calls are finished before param sync.
-        src_topo = model_topos[model_name]
         src_handlers = [
             config_pkg.ModelShardID.from_parallelism_rank(model_name, src_topo, j)
             for j in range(src_topo.world_size())
@@ -177,7 +210,6 @@ def handle_rpc_hook(
             request_reply_stream.Payload(handler=h, handle_name="send_param", data=hook.target)
             for h in src_handlers
         ]
-        dst_topo = model_topos[hook.target]
         dst_handlers = [
             config_pkg.ModelShardID.from_parallelism_rank(hook.target, dst_topo, j)
             for j in range(dst_topo.world_size())
@@ -308,6 +340,7 @@ async def model_rpc_request_func(
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     buffer: AsyncIOSequenceBuffer,
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
+    model_configs: Dict[str, None | FlashMQATConfig],
     ctrl: RPCCorountineControl,
 ):
     topo = model_topos[rpc.model_name]
@@ -373,6 +406,7 @@ async def model_rpc_request_func(
                 model_name=rpc.model_name,
                 stream=stream,
                 model_topos=model_topos,
+                model_configs=model_configs,
             )
             pre_hook_counters[i] += 1
 
@@ -496,6 +530,7 @@ async def model_rpc_reply_func(
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     buffer: AsyncIOSequenceBuffer,
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
+    model_configs: Dict[str, None | FlashMQATConfig],
     ctrl: RPCCorountineControl,
 ):
     topo = model_topos[rpc.model_name]
@@ -548,11 +583,14 @@ async def model_rpc_reply_func(
             await buffer.amend_batch(buffer_indices, xs)
 
         for i, post_hook in enumerate(rpc.post_hooks):
-            handle_rpc_hook(post_hook,
-                            hook_counter=post_hook_counters[i],
-                            model_name=rpc.model_name,
-                            stream=stream,
-                            model_topos=model_topos)
+            handle_rpc_hook(
+                post_hook,
+                hook_counter=post_hook_counters[i],
+                model_name=rpc.model_name,
+                stream=stream,
+                model_topos=model_topos,
+                model_configs=model_configs,
+            )
             post_hook_counters[i] += 1
 
         logger.info(f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - tik:.4f}s.")
@@ -761,8 +799,8 @@ class MasterWorker(worker_base.Worker):
         asyncio.set_event_loop(event_loop)
 
         model_ft_specs = []
-        self.__all_model_handlers = []
-        self.__dp0_model_handlers = []
+        self.__all_model_handlers: List[config_pkg.ModelShardID] = []
+        self.__dp0_model_handlers: List[config_pkg.ModelShardID] = []
         for model_name, topo in self.config.model_topos.items():
             num_dp = topo.get_dim("data")
             model_ft_spec = copy.deepcopy(ft_spec)
@@ -785,7 +823,15 @@ class MasterWorker(worker_base.Worker):
                 handle_type="initialize",
                 datas=model_ft_specs,
             ))
-        event_loop.run_until_complete(asyncio.gather(_task))
+        init_res = event_loop.run_until_complete(asyncio.gather(_task))[0]
+        self.__model_configs: Dict[str, None | FlashMQATConfig] = {}
+        assert len(init_res) == len(self.__all_model_handlers), (
+            len(init_res),
+            len(self.__all_model_handlers),
+        )
+        for h, r in zip(self.__all_model_handlers, init_res):
+            if h.model_name not in self.__model_configs:
+                self.__model_configs[h.model_name] = r
         # logger.info("initialize complete")
 
         self.__rpc_ctrl = RPCCorountineControl(
@@ -833,6 +879,7 @@ class MasterWorker(worker_base.Worker):
                     msid2mwid=self.config.msid2mwid,
                     buffer=self.__seqbuffer,
                     model_topos=self.__model_topos,
+                    model_configs=self.__model_configs,
                     ctrl=self.__rpc_ctrl,
                 ))
             reply_tasks = []
@@ -847,6 +894,7 @@ class MasterWorker(worker_base.Worker):
                         msid2mwid=self.config.msid2mwid,
                         buffer=self.__seqbuffer,
                         model_topos=self.__model_topos,
+                        model_configs=self.__model_configs,
                         ctrl=self.__rpc_ctrl,
                     ))
                 reply_tasks.append(_reply_task)
