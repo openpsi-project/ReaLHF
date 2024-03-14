@@ -3,12 +3,13 @@ from typing import *
 import contextlib
 import copy
 import getpass
+
 import numpy as np
 
 from base.cluster import spec as cluster_spec
 
 if TYPE_CHECKING:
-    from api.config import ModelShardID
+    from api.config.config_system import ModelShardID
     from base.topology import ParallelGrid, PipeModelDataParallelTopology
 
 
@@ -25,13 +26,13 @@ class GlobalMemoryBuffer:
 
         required_len = int(np.prod(tensor_shape))
         if self.buffer.get((name, dtype), None) is None:
-            self.buffer[(name, dtype)] = torch.empty(
-                required_len, dtype=dtype, device=torch.cuda.current_device(), requires_grad=False
-            )
+            self.buffer[(name, dtype)] = torch.empty(required_len,
+                                                     dtype=dtype,
+                                                     device=torch.cuda.current_device(),
+                                                     requires_grad=False)
         elif self.buffer[(name, dtype)].numel() < required_len:
             self.buffer[(name, dtype)] = torch.nn.functional.pad(
-                self.buffer[(name, dtype)], (0, required_len - self.buffer[(name, dtype)].numel()), value=0
-            )
+                self.buffer[(name, dtype)], (0, required_len - self.buffer[(name, dtype)].numel()), value=0)
         res = self.buffer[(name, dtype)][0:required_len].view(*tensor_shape)
         if force_zero:
             res.zero_()
@@ -86,6 +87,7 @@ def set_max_seqlen(max_seqlen: int):
     global _max_seqlen
     _max_seqlen = max_seqlen
 
+
 def set_experiment_trial_names(expr_name: str, trial_name: str):
     global _experiment_name, _trial_name
     _experiment_name = expr_name
@@ -124,6 +126,7 @@ def dataset_max_seqlen() -> int:
     if _max_seqlen is None:
         raise RuntimeError("Global constant `max_seqlen` is accessed before set.")
     return _max_seqlen
+
 
 def model_name():
     if _model_name == None:

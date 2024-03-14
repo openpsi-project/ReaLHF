@@ -7,12 +7,13 @@ python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240
     actor.type=llama \
     actor.path=$model_path \
     actor.parallel.pipeline_parallel_size=2 \
-    actor.parallel.model_parallel_size=2 \
-    actor.parallel.data_parallel_size=1 \
+    actor.parallel.model_parallel_size=1 \
+    actor.parallel.data_parallel_size=2 \
     actor.gradient_checkpointing=True \
-    actor.parallel.use_sequence_parallel=True \
+    actor.parallel.use_sequence_parallel=False \
     actor.enable_async_p2p=True \
     actor.optimizer.offload=False \
+    actor.optimizer.type=adam \
     critic.type=llama \
     critic.path=$model_path \
     critic.parallel.pipeline_parallel_size=3 \
@@ -21,6 +22,7 @@ python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240
     critic.gradient_checkpointing=True \
     critic.parallel.use_sequence_parallel=False \
     critic.optimizer.offload=True \
+    critic.optimizer.type=adam \
     ref.type=llama \
     ref.path=$model_path  \
     ref.parallel.data_parallel_size=1 \

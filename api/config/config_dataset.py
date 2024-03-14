@@ -1,3 +1,4 @@
+from typing import Union
 import dataclasses
 
 
@@ -95,3 +96,6 @@ class PromptOnlyDatasetConfig:
     n_tokens_per_batch: int = 65536
     batch_size: int = 256
     path: str = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl"
+
+
+DatasetType = Union[PromptOnlyDatasetConfig, PromptAnswerDatasetConfig, PairedComparisonDatasetConfig]

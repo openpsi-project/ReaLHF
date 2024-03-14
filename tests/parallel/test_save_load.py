@@ -8,7 +8,7 @@ import torch.distributed
 import torch.multiprocessing as mp
 
 from tests.utils import *
-import api.config as config_package
+import api.config.config_system as config_package
 import base.constants
 
 MODEL_TYPE = "llama"

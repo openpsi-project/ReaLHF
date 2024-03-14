@@ -10,7 +10,7 @@ import time
 import torch
 import torch.distributed
 
-import api.config
+import api.config.config_system
 import base.logging as logging
 import base.name_resolve as name_resolve
 import base.names as names
@@ -120,17 +120,17 @@ class NCCLProcessGroupInfo:
 def _filter_match_mwids(
     model_name: str,
     topo: topology.PipeModelDataParallelTopology,
-    msid2mwid: Dict[api.config.ModelShardID, int],
+    msid2mwid: Dict[api.config.config_system.ModelShardID, int],
     **conditions,
 ) -> List[int]:
     if len(conditions) == 0:
         mwids_this_model = [
-            msid2mwid[api.config.ModelShardID.from_parallelism_rank(model_name, topo, j)] + 1
+            msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(model_name, topo, j)] + 1
             for j in range(topo.world_size())
         ]
     else:
         mwids_this_model = [
-            msid2mwid[api.config.ModelShardID.from_parallelism_rank(model_name, topo, j)] + 1
+            msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(model_name, topo, j)] + 1
             for j in topo.filter_match(**conditions)
         ]
     mwids_this_model = sorted(mwids_this_model)
@@ -138,9 +138,8 @@ def _filter_match_mwids(
     return list(mwids_this_model)
 
 
-def _partition_into_sub_bcast_groups(
-    group_ranks: List[int], bcast_groups: List[List[int]]
-) -> List[List[int]]:
+def _partition_into_sub_bcast_groups(group_ranks: List[int],
+                                     bcast_groups: List[List[int]]) -> List[List[int]]:
     bcast_sub_group_ranks = defaultdict(list)
     # -1 here because the rank in the model worker broadcast group starts from 0.
     group_ids = [next(filter(lambda jg: r - 1 in jg[1], enumerate(bcast_groups)))[0] for r in group_ranks]
@@ -154,7 +153,7 @@ def setup_ddp(
     trial_name: str,
     worker_index: int,
     model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
-    msid2mwid: Optional[Dict[api.config.ModelShardID, int]] = None,
+    msid2mwid: Optional[Dict[api.config.config_system.ModelShardID, int]] = None,
     mw_bcast_groups: Optional[List[List[int]]] = None,
     param_sync_pairs: Optional[List[Tuple[str, str]]] = None,
 ) -> NCCLProcessGroupInfo:
@@ -163,11 +162,8 @@ def setup_ddp(
             map(
                 int,
                 name_resolve.get_subtree(
-                    names.trainer_ddp_peer(expr_name, trial_name, GLOBAL_PROCESS_GROUP_NAME)
-                ),
-            )
-        )
-    )
+                    names.trainer_ddp_peer(expr_name, trial_name, GLOBAL_PROCESS_GROUP_NAME)),
+            )))
     assert len(peers) == len(set(peers)), f"Duplicated trainer worker index. {peers}"
     world_size = len(peers)
     global_rank = peers.index(worker_index)
@@ -180,9 +176,11 @@ def setup_ddp(
         assert msid2mwid is not None
         for model_name, topo in model_topos.items():
             mw_ranks[model_name] = _filter_match_mwids(model_name, topo, msid2mwid)
-            mw_head_ranks[model_name] = _filter_match_mwids(
-                model_name, topo, msid2mwid, pipe=topo.get_dim("pipe") - 1, model=0
-            )
+            mw_head_ranks[model_name] = _filter_match_mwids(model_name,
+                                                            topo,
+                                                            msid2mwid,
+                                                            pipe=topo.get_dim("pipe") - 1,
+                                                            model=0)
             pp_size = topo.get_dim("pipe")
             mp_size = topo.get_dim("model")
             for pp_i, mp_i in itertools.product(range(pp_size), range(mp_size)):
@@ -220,8 +218,7 @@ def setup_ddp(
             ddp_init_address = name_resolve.wait(ddp_master_name, timeout=300)
         except TimeoutError:
             raise TimeoutError(
-                f"global_rank={global_rank} worker_index={worker_index} wait for ddp_init_method timeout."
-            )
+                f"global_rank={global_rank} worker_index={worker_index} wait for ddp_init_method timeout.")
 
     torch_dist_kwargs = dict(
         world_size=world_size,
@@ -257,12 +254,10 @@ def setup_ddp(
         for src, dst in param_sync_pairs:
             src_topo = model_topos[src]
             dst_topo = model_topos[dst]
-            for src_pp_i, src_mp_i in itertools.product(
-                range(src_topo.get_dim("pipe")), range(src_topo.get_dim("model"))
-            ):
-                for dst_pp_i, dst_mp_i in itertools.product(
-                    range(dst_topo.get_dim("pipe")), range(dst_topo.get_dim("model"))
-                ):
+            for src_pp_i, src_mp_i in itertools.product(range(src_topo.get_dim("pipe")),
+                                                        range(src_topo.get_dim("model"))):
+                for dst_pp_i, dst_mp_i in itertools.product(range(dst_topo.get_dim("pipe")),
+                                                            range(dst_topo.get_dim("model"))):
                     key = ParamSyncPair(
                         src,
                         src_mp_rank=src_mp_i,
@@ -275,13 +270,11 @@ def setup_ddp(
                     dst_ranks = mw_pp_mp_ranks[dst, dst_pp_i, dst_mp_i]
                     _ranks = [src_rank] + dst_ranks
                     if len(set(_ranks)) != len(_ranks):
-                        raise RuntimeError(
-                            f"Trying to synchronize parameters from {src} to {dst}, "
-                            f"but their GPUs are overlapped. src topo={src_topo}, "
-                            f"occupying process group/model worker ranks {mw_ranks[src]}. "
-                            f"dst topo={dst_topo}, occupying process group/model worker"
-                            f" ranks {mw_ranks[dst]}."
-                        )
+                        raise RuntimeError(f"Trying to synchronize parameters from {src} to {dst}, "
+                                           f"but their GPUs are overlapped. src topo={src_topo}, "
+                                           f"occupying process group/model worker ranks {mw_ranks[src]}. "
+                                           f"dst topo={dst_topo}, occupying process group/model worker"
+                                           f" ranks {mw_ranks[dst]}.")
                     param_sync_groups[key] = torch.distributed.new_group(_ranks, backend="nccl")
                     param_sync_src_ranks[key] = src_rank
     # logger.info(f"Setup process group finishes for worker_index={worker_index}")
@@ -322,9 +315,8 @@ def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment
 
     name_resolve_identifier = f"__type_{worker_type}"
     name_resolve.add_subentry(
-        names.trainer_ddp_local_peer(
-            experiment_name, trial_name, socket.gethostname(), name_resolve_identifier
-        ),
+        names.trainer_ddp_local_peer(experiment_name, trial_name, socket.gethostname(),
+                                     name_resolve_identifier),
         rank,
         keepalive_ttl=60,
     )
@@ -334,14 +326,9 @@ def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment
         keepalive_ttl=30,
     )
     logger.info(f"Worker type {worker_type} rank {rank} waiting for peers, world size {world_size}...")
-    while (
-        len(
+    while (len(
             name_resolve.get_subtree(
-                names.trainer_ddp_peer(experiment_name, trial_name, name_resolve_identifier)
-            )
-        )
-        < world_size
-    ):
+                names.trainer_ddp_peer(experiment_name, trial_name, name_resolve_identifier))) < world_size):
         time.sleep(0.1)
     # logger.info(f"Rank {rank} discovers all peers, resolving local rank...")
     local_peer_name = names.trainer_ddp_local_peer(
@@ -362,8 +349,7 @@ def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment
         if not os.environ.get("DLLM_MODE") == "LOCAL":
             raise RuntimeError(
                 f"Unresolvable CUDA_VISIBLE_DEVICES {os.environ['CUDA_VISIBLE_DEVICES']} on host {network.gethostname()}, "
-                f"local peers (global ranks) {local_peers}, local peer index {local_peer_index}."
-            )
+                f"local peers (global ranks) {local_peers}, local peer index {local_peer_index}.")
         devices = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
         local_gpu_id = int(devices[local_peer_index % len(devices)])
 
@@ -389,8 +375,7 @@ def setup_ddp_single_model(expr_name: str, trial_name: str, model_name: str, wor
     # logger.info(f"Setup DDP {worker_index} for model {model_name}")
 
     global_peers = list(
-        sorted(map(int, name_resolve.get_subtree(names.trainer_ddp_peer(expr_name, trial_name, model_name))))
-    )
+        sorted(map(int, name_resolve.get_subtree(names.trainer_ddp_peer(expr_name, trial_name, model_name)))))
     assert len(global_peers) == len(set(global_peers)), f"Duplicated trainer worker index. {global_peers}"
     world_size = len(global_peers)
     ddp_rank = global_peers.index(worker_index)
@@ -412,14 +397,13 @@ def setup_ddp_single_model(expr_name: str, trial_name: str, model_name: str, wor
         try:
             ddp_init_address = name_resolve.wait(ddp_master_name, timeout=60)
         except TimeoutError:
-            raise TimeoutError(
-                f"DDP trainer(index:{worker_index}), rank {ddp_rank} for model "
-                f"{model_name} wait for ddp_init_method timeout."
-            )
+            raise TimeoutError(f"DDP trainer(index:{worker_index}), rank {ddp_rank} for model "
+                               f"{model_name} wait for ddp_init_method timeout.")
 
-    torch_dist_kwargs = dict(
-        world_size=world_size, rank=ddp_rank, init_method=ddp_init_address, backend="nccl"
-    )
+    torch_dist_kwargs = dict(world_size=world_size,
+                             rank=ddp_rank,
+                             init_method=ddp_init_address,
+                             backend="nccl")
     torch.cuda.set_device(0)  # initialize CUDA here with only a single visible device
     # This environment variable is used by DeepSpeed.
     os.environ["LOCAL_RANK"] = "0"

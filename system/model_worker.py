@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple, List
+from typing import Any, Dict, List, Tuple
 import gc
 import itertools
 import multiprocessing as mp
@@ -18,8 +18,8 @@ import torch.utils.data
 from base.monitor import gpu_utilization_monitor, time_mark
 from base.topology import ParallelGrid
 from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
-import api.config as config
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+import api.config.config_system as config_system
 import api.data
 import api.model
 import base.constants
@@ -53,7 +53,7 @@ class ModelWorker(worker_base.Worker):
         self.__total_time = 0.01
         self.__engine_poll_time = 0
 
-    def _configure(self, cfg: config.ModelWorker):
+    def _configure(self, cfg: config_system.ModelWorker):
         self.config = cfg
         self.model_names = [s.id.model_name for s in cfg.shards]
         self.shard_indices = [
@@ -135,7 +135,11 @@ class ModelWorker(worker_base.Worker):
                 self.__models[s.id.model_name] = api.model.make_model(s.model,
                                                                       name=s.id.model_name,
                                                                       device=self.__device)
-                self.__interfaces[s.id.model_name] = api.model.make_interface(s.interface)
+                interface_impl = [
+                    rpc.interface_impl for rpc in self.config.model_rpcs if rpc.model_name == s.id.model_name
+                ]
+                assert all(x == interface_impl[0] for x in interface_impl)
+                self.__interfaces[s.id.model_name] = api.model.make_interface(interface_impl[0])
                 self.__backends[s.id.model_name] = api.model.make_backend(s.backend)
 
             if s.eval_datasets is not None and s.eval_dataloader is not None:
@@ -326,7 +330,9 @@ class ModelWorker(worker_base.Worker):
                 # FIXME: if model worker poll exits with an unfinished send/recv, the following parameter synchronization
                 # call will get stuck. We need to ensure that all previous send/recv calls are finished before param sync.
                 elif request.handle_name == "send_param":
-                    res = self.__send_params_to_sync(request.data)
+                    res = None
+                    if self._dp_rank == 0:
+                        res = self.__send_params_to_sync(request.data)
                 elif request.handle_name == "recv_param":
                     res = self.__recv_params_to_sync(request.data)
                 elif request.handle_name in ["offload", "load_to_device"]:
@@ -366,15 +372,11 @@ class ModelWorker(worker_base.Worker):
 
     def __sync_param_repartition(self, other_model_name: str) -> Dict[int, List[int]]:
         """Get the right parameters to sync."""
-        from impl.model.nn.flash_mqat.flash_mqat_parallel import (
-            partition_pipeline_layers,
-            pipeline_repartition_strategy,
-        )
-        from impl.model.nn.flash_mqat.flash_mqat_base import (
-            flash_model_embed_param_count,
-            flash_model_head_param_count,
-            flash_model_tblock_param_count,
-        )
+        from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
+                                                              flash_model_head_param_count,
+                                                              flash_model_tblock_param_count)
+        from impl.model.nn.flash_mqat.flash_mqat_parallel import (partition_pipeline_layers,
+                                                                  pipeline_repartition_strategy)
 
         self_model_name = base.constants.model_name()
         other_pp_size = self.config.model_topos[other_model_name].get_dim("pipe")
@@ -454,10 +456,8 @@ class ModelWorker(worker_base.Worker):
 
     def __recv_params_to_sync(self, src: str):
         from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
-        from impl.model.nn.flash_mqat.flash_mqat_parallel import (
-            mp_merge_flash_mqat_state_dict,
-            mp_partition_flash_mqat_state_dict,
-        )
+        from impl.model.nn.flash_mqat.flash_mqat_parallel import (mp_merge_flash_mqat_state_dict,
+                                                                  mp_partition_flash_mqat_state_dict)
 
         rs = self.__sync_param_repartition(src)
 

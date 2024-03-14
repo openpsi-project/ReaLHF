@@ -19,14 +19,14 @@ import numpy as np
 import torch
 import torch.distributed
 
+from api.config.config_flash_model import FlashMQATConfig
 from base.asyncio_utils import raise_asyncio_exception, setup_run_until_complete, teardown_run_util_complete
 from base.buffer import AsyncIOSequenceBuffer
 from base.cluster import spec as cluster_spec
-from base.constants import MODEL_SAVE_ROOT, GlobalMemoryBuffer
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
-import api.config as config_pkg
+from base.constants import GlobalMemoryBuffer, MODEL_SAVE_ROOT
+import api.config.config_system as config_pkg
+import api.config.dfg
 import api.data as data_api
-import api.dfg
 import api.model as model_api
 import base.constants
 import base.dataparallel as dataparallel
@@ -146,7 +146,7 @@ def split_packed_batch_into_seqs(
 
 
 def handle_rpc_hook(
-    hook: api.dfg.RPCHook,
+    hook: api.config.dfg.RPCHook,
     hook_counter: int,
     model_name: str,
     stream: request_reply_stream.IpRequestClient,
@@ -154,7 +154,7 @@ def handle_rpc_hook(
     model_configs: Dict[str, None | FlashMQATConfig],
 ):
     logger.info(f"Dealing with RPC hook {hook}.")
-    if isinstance(hook, (api.dfg.OffloadHook, api.dfg.LoadToDeviceHook)):
+    if isinstance(hook, (api.config.dfg.OffloadHook, api.config.dfg.LoadToDeviceHook)):
         topo = model_topos[model_name]
         handlers = [
             config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
@@ -163,10 +163,10 @@ def handle_rpc_hook(
         request_ids = request_all(
             stream,
             handlers,
-            "offload" if isinstance(hook, api.dfg.OffloadHook) else "load_to_device",
+            "offload" if isinstance(hook, api.config.dfg.OffloadHook) else "load_to_device",
             [None for _ in handlers],
         )
-    elif isinstance(hook, api.dfg.SyncParamHook):
+    elif isinstance(hook, api.config.dfg.SyncParamHook):
         print(">>>>>>>>>>>>>>>>>>", hook_counter)
         # Since the counter is increased after the hook is handled, we add one here.
         if (hook_counter + 1) % hook.interval != 0:
@@ -246,7 +246,7 @@ class RPCCorountineControl:
 
 
 async def scatter_tensor_to_mws(
-    rpc: api.dfg.ModelRPC,
+    rpc: api.config.dfg.ModelRPC,
     stream: request_reply_stream.RequestReplyStream,
     handlers: List[config_pkg.ModelShardID],
     handler_mw_ids: List[int],
@@ -333,7 +333,7 @@ async def scatter_tensor_to_mws(
 
 
 async def model_rpc_request_func(
-    rpc: api.dfg.ModelRPC,
+    rpc: api.config.dfg.ModelRPC,
     pre_hook_counters: List[int],
     stream: request_reply_stream.RequestReplyStream,
     scatter_groups: List[torch.distributed.ProcessGroup],
@@ -358,7 +358,7 @@ async def model_rpc_request_func(
     while not ctrl.stop.is_set():
         await can_do_rpc.acquire()
 
-        # The following two lines are used to ensure staleness=1, but it may be unnecessary when enabling the stream engine.
+        # The following two lines are used to ensure staleness=0, but it may be unnecessary when enabling the stream engine.
         # NOTE: max-min-flow-tokens is not used here because the number of tokens can change (e.g. after generate)
         while data_amount_seqs >= (ctrl.model_traversal[rpc.model_name] + 1) * rpc.max_min_flow_seqs:
             await asyncio.sleep(0.1)
@@ -370,9 +370,15 @@ async def model_rpc_request_func(
 
         # logger.info(f"Model rpc {rpc.name} requesting.")
         dp_size = topo.get_dim("data")
+        if rpc.balanced_dp:
+            assert len(sample.seqlens) % dp_size == 0
+            min_n_seqes_per_dp = len(sample.seqlens) // dp_size
+        else:
+            min_n_seqes_per_dp = 1
         datas, n_seqs = dataparallel.get_broker(rpc.dp_broker_type).scatter_to(
             sample.data,
             dp_size,
+            min_size=min_n_seqes_per_dp,
             return_sizes=True,
         )
         all_buffer_indices = []
@@ -382,16 +388,6 @@ async def model_rpc_request_func(
             all_buffer_indices.append(sample.indices[offset:offset + n_seq])
             all_seqlens.append(sample.seqlens[offset:offset + n_seq])
             offset += n_seq
-
-        # sanity check for pipeline parallel
-        pp_size = topo.get_dim("pipe")
-        try:
-            for d in datas:
-                dataparallel.get_broker(rpc.dp_broker_type).scatter_to(d, pp_size)
-        except Exception as e:
-            raise RuntimeError(
-                f"Data in each data parallel rank cannot be "
-                f"partitioned further into {pp_size} mini-batches for pipeline parallel. Exiting.") from e
 
         # replicate data for each model shard
         data_replica_ids = [topo.get_coord(j).data for j in range(topo.world_size())]
@@ -428,7 +424,7 @@ async def model_rpc_request_func(
 
 
 async def gather_tensor_from_mws(
-    rpc: api.dfg.ModelRPC,
+    rpc: api.config.dfg.ModelRPC,
     stream: request_reply_stream.RequestReplyStream,
     req_ids: List[uuid.UUID],
     dp_head_indices: List[int],
@@ -523,7 +519,7 @@ async def gather_tensor_from_mws(
 
 async def model_rpc_reply_func(
     corountine_idx: int,
-    rpc: api.dfg.ModelRPC,
+    rpc: api.config.dfg.ModelRPC,
     post_hook_counters: List[int],
     stream: request_reply_stream.RequestReplyStream,
     gather_groups: List[torch.distributed.ProcessGroup],
@@ -691,7 +687,7 @@ class MasterWorker(worker_base.Worker):
         self.__model_topos: Dict[str, topology.PipeModelDataParallelTopology] = config.model_topos
 
         # Build execution graph and initialize concurrency utilities.
-        self.__model_rpcs, _ = api.dfg.build_graph(config.model_rpcs)
+        self.__model_rpcs, _ = api.config.dfg.build_graph(config.model_rpcs)
         for rpc in self.__model_rpcs:
             _dp_size = self.__model_topos[rpc.model_name].get_dim("data")
             _pp_size = self.__model_topos[rpc.model_name].get_dim("pipe")
@@ -703,16 +699,16 @@ class MasterWorker(worker_base.Worker):
         self.__n_rpc_dsts = len(self.__rpc_dsts)
 
         # Save and eval control.
-        self.__total_train_epochs = config.total_train_epochs
+        self.__total_train_epochs = config.exp_ctrl.total_train_epochs
         self.__save_ctl = base.timeutil.EpochStepTimeFreqCtl(
-            freq_epoch=config.save_frequency_epochs,
-            freq_step=config.save_frequency_steps,
-            freq_sec=config.save_frequency_seconds,
+            freq_epoch=config.exp_ctrl.save_frequency_epochs,
+            freq_step=config.exp_ctrl.save_frequency_steps,
+            freq_sec=config.exp_ctrl.save_frequency_seconds,
         )
         self.__eval_ctl = base.timeutil.EpochStepTimeFreqCtl(
-            freq_epoch=config.eval_frequency_epochs,
-            freq_step=config.eval_frequency_steps,
-            freq_sec=config.eval_frequency_seconds,
+            freq_epoch=config.exp_ctrl.eval_frequency_epochs,
+            freq_step=config.exp_ctrl.eval_frequency_steps,
+            freq_sec=config.exp_ctrl.eval_frequency_seconds,
         )
 
         self.MODEL_SAVE_ROOT = os.path.join(
@@ -729,7 +725,7 @@ class MasterWorker(worker_base.Worker):
         )
 
         # Used only for benchmark
-        self.__benchmark_steps = config.benchmark_steps
+        self.__benchmark_steps = config.exp_ctrl.benchmark_steps
 
         return config.worker_info
 
@@ -779,7 +775,7 @@ class MasterWorker(worker_base.Worker):
                                f" {list(x.steps_per_epoch for x in ft_specs)}. "
                                "Consider launching less data workers.")
         ft_spec = ft_specs[0]
-        ft_spec.total_train_epochs = self.config.total_train_epochs
+        ft_spec.total_train_epochs = self.config.exp_ctrl.total_train_epochs
         ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
 
         batch_size = ft_spec.batch_size_per_device
@@ -995,7 +991,7 @@ class MasterWorker(worker_base.Worker):
         e2e_time = time.perf_counter() - execution_start
         self.e2e_time_history.append(e2e_time)
         logger.info(
-            f"Epoch {self._epoch + 1}/{self.config.total_train_epochs} "
+            f"Epoch {self._epoch + 1}/{self.config.exp_ctrl.total_train_epochs} "
             f"step {self._epoch_step + 1} "
             f"(global step {self._global_step + 1}) finishes. "
             f"#End to end# execution time: *{e2e_time:.3f}*s. "

@@ -1,6 +1,6 @@
 import torch.utils.data
 
-import api.config as config_pkg
+import api.config.config_system as config_pkg
 import api.data as data_api
 import api.model as model_api
 import base.seeding as seeding

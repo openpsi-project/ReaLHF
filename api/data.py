@@ -10,7 +10,7 @@ import torch.utils.data
 import transformers
 
 from base.cluster import spec as cluster_spec
-import api.config
+import api.config.config_system
 import api.huggingface
 import base.logging as logging
 
@@ -60,7 +60,7 @@ def register_dataset(name, dataset_cls):
 
 
 def make_dataset(
-    cfg: Union[str, api.config.Dataset],
+    cfg: Union[str, api.config.config_system.Dataset],
     seed: int,
     ddp_rank: int,
     world_size: int,
@@ -70,7 +70,7 @@ def make_dataset(
     cache_root: Optional[str] = None,
 ) -> torch.utils.data.Dataset:
     if isinstance(cfg, str):
-        cfg = api.config.Dataset(type_=cfg)
+        cfg = api.config.config_system.Dataset(type_=cfg)
 
     if isinstance(tokenizer_or_tokenizer_name, str):
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_or_tokenizer_name)
@@ -121,10 +121,10 @@ def register_dataloader(name, dataloader_cls):
     ALL_DATALOADER_CLASSES[name] = dataloader_cls
 
 
-def make_dataloader(cfg: Union[str, api.config.DataLoader],
+def make_dataloader(cfg: Union[str, api.config.config_system.DataLoader],
                     dataset: torch.utils.data.Dataset) -> torch.utils.data.DataLoader:
     if isinstance(cfg, str):
-        cfg = api.config.DataLoader(type_=cfg)
+        cfg = api.config.config_system.DataLoader(type_=cfg)
     dataloader_cls = ALL_DATALOADER_CLASSES[cfg.type_]
     return dataloader_cls(dataset, **cfg.args)
 

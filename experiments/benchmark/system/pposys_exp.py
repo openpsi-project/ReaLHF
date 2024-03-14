@@ -2,8 +2,8 @@ import functools
 
 from omegaconf import MISSING
 
-from api.config import *
-from api.dfg import ModelInterfaceType, ModelRPC
+from api.config.config_system import *
+from api.config.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
 from experiments.common.config_dataset import PromptOnlyDatasetConfig
 from experiments.common.config_model import get_flash_mqat_model_config, ModelConfig

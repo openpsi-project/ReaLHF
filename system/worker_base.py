@@ -9,7 +9,7 @@ import socket
 import threading
 import time
 
-from api import config as config_pkg
+from api.config import config_system as config_pkg
 from base.gpu_utils import set_cuda_device
 import base.cluster
 import base.logging as logging

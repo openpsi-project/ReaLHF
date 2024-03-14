@@ -13,8 +13,8 @@ import uuid
 import torch
 import zmq
 
-import api.config
-import api.dfg
+import api.config.config_system
+import api.config.dfg
 import base.logging as logging
 import base.name_resolve as name_resolve
 import base.namedarray as namedarray
@@ -32,7 +32,7 @@ class NoMessage(Exception):
 
 @dataclasses.dataclass
 class Payload:
-    handler: Union[api.config.ModelShardID, str]
+    handler: Union[api.config.config_system.ModelShardID, str]
     handle_name: str
     is_tensor: bool = False
 
@@ -297,7 +297,7 @@ class NameResolvingReplyServer(IpReplyServer):
 
 
 def make_master_stream(
-    worker_info: api.config.WorkerInformation,
+    worker_info: api.config.config_system.WorkerInformation,
     n_subscribers: int,
 ) -> NameResolvingRequstClient:
     return NameResolvingRequstClient(
@@ -308,8 +308,8 @@ def make_master_stream(
 
 
 def make_worker_stream(
-    worker_info: api.config.WorkerInformation,
-    sub_patterns: List[Union[str, api.config.ModelShardID]],
+    worker_info: api.config.config_system.WorkerInformation,
+    sub_patterns: List[Union[str, api.config.config_system.ModelShardID]],
 ) -> NameResolvingReplyServer:
     return NameResolvingReplyServer(
         experiment_name=worker_info.experiment_name,

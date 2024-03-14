@@ -13,11 +13,12 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
+from api.config.config_flash_model import FlashMQATConfig
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
                                                       flash_model_head_param_count,
                                                       flash_model_tblock_param_count, FlashMQATBlock,
-                                                      FlashMQATConfig, OutputHead, SequenceParallelActorHead,
+                                                      OutputHead, SequenceParallelActorHead,
                                                       SequenceParallelCriticHead, VocabPositionEmbedding)
 from impl.model.nn.flash_mqat.flash_mqat_parallel import (mp_merge_flash_mqat_state_dict,
                                                           mp_partition_flash_mqat_state_dict,

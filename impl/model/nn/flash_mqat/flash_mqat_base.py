@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.utils.checkpoint
 import transformers
 
+from api.config.config_flash_model import FlashMQATConfig
 from impl.model.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
 from impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, parallel_lm_logits,
                                                            ParallelEmbedding, RowParallelLinear)
@@ -21,45 +22,6 @@ import base.logging as logging
 import impl.model.parallelism.model_parallel.mappings as tensor_parallel
 
 logger = logging.getLogger("FlashMQATBase")
-
-
-@dataclasses.dataclass
-class FlashMQATConfig:
-    n_layers: int
-    n_kv_heads: int
-    head_dim: int
-    hidden_dim: int
-    intermediate_dim: int  # for mlp, usually 4*h
-    vocab_size: int
-    n_positions: Optional[int] = None
-    embd_pdrop: float = 0.1
-    resid_pdrop: float = 0.1
-    attn_pdrop: float = 0.1
-    layer_norm_epsilon: float = 1e-5
-    activation_function: str = "gelu"
-    scale_attn_by_inverse_layer_idx: bool = True
-    # llama does not use attention bias and uses special MLP/LayerNorm layers
-    use_attention_bias: bool = True
-    layer_norm_type: Optional[str] = None
-    mlp_type: Optional[str] = None
-    # rotary embedding
-    apply_rotary: bool = False
-    rotary_base: float = 10000.0
-    rotary_interleaved: bool = False
-    rotary_scaling: Optional[float] = None
-    rotary_scaling_type: Optional[str] = None
-    # parallelism optimization
-    sequence_parallel: bool = False
-    gradient_accumulation_fusion: bool = False
-
-    is_critic: bool = False
-
-    # only used for debugging, True for GPT2
-    fixed_abs_position_ids: bool = False
-
-    # remained for compatibility, not used any more
-    ckpt_attn: bool = False
-    ckpt_mlp: bool = False
 
 
 class FlashMQATBlock(nn.Module):

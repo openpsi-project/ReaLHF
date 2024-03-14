@@ -4,12 +4,7 @@ import os
 import numpy as np
 import torch
 
-from .flash_mqat_base import FlashMQATConfig
-from base.monitor import process_memory_mb
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
-import api.huggingface
-import api.model
-import base.constants
+from api.config.config_flash_model import FlashMQATConfig
 import base.logging as logging
 
 try:

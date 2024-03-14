@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 
-import api.dfg
+import api.config.dfg
 import base.dataparallel as dataparallel
 import base.logging as logging
 import base.namedarray as namedarray
@@ -127,7 +127,7 @@ class AsyncIOSequenceBuffer:
 
     def __init__(
         self,
-        rpcs: List[api.dfg.ModelRPC],
+        rpcs: List[api.config.dfg.ModelRPC],
         max_size: int,
         fetch_ctl: asyncio.Queue,
         fetch_master_ctl: asyncio.Queue,
@@ -244,7 +244,7 @@ class AsyncIOSequenceBuffer:
         except asyncio.QueueFull:
             pass
 
-    async def get_batch_for_rpc(self, rpc: api.dfg.ModelRPC) -> SequenceSample:
+    async def get_batch_for_rpc(self, rpc: api.config.dfg.ModelRPC) -> SequenceSample:
         rpc_idx = self._rpc_names.index(rpc.name)
 
         def _can_do_rpc() -> bool:

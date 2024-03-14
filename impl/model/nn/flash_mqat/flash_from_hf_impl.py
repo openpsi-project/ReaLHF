@@ -4,9 +4,9 @@ import os
 import torch
 import transformers
 
+from api.config.config_flash_model import (convert_config_llama, convert_config_starcoder, FlashMQATConfig,
+                                           gpt2_config_converter)
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
-import base.constants
 
 try:
     import transformer_engine.pytorch as te
@@ -23,22 +23,6 @@ HF_ARCH_TO_MODEL_TYPE = {
 }
 
 ################################ StarCoder Begin ################################
-
-
-def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig) -> FlashMQATConfig:
-    return FlashMQATConfig(
-        n_layers=starcoder_config.n_layer,
-        n_kv_heads=1,
-        attn_pdrop=starcoder_config.attn_pdrop,
-        embd_pdrop=starcoder_config.embd_pdrop,
-        layer_norm_epsilon=starcoder_config.layer_norm_epsilon,
-        hidden_dim=starcoder_config.n_embd,
-        head_dim=starcoder_config.n_embd // starcoder_config.n_head,
-        intermediate_dim=starcoder_config.n_inner,
-        n_positions=starcoder_config.n_positions,
-        resid_pdrop=starcoder_config.resid_pdrop,
-        vocab_size=starcoder_config.vocab_size,
-    )
 
 
 def _starcoder_key_mapping_fn(config: FlashMQATConfig) -> Dict[str, str]:
@@ -90,25 +74,6 @@ def state_dict_to_starcoder(state_dict, config):
 ################################ StarCoder End ################################
 
 ################################ GPT2 Begin ################################
-
-
-def gpt2_config_converter(gpt2config: transformers.GPT2Config) -> FlashMQATConfig:
-    return FlashMQATConfig(
-        n_layers=gpt2config.n_layer,
-        n_kv_heads=gpt2config.n_head,
-        attn_pdrop=gpt2config.attn_pdrop,
-        embd_pdrop=gpt2config.embd_pdrop,
-        layer_norm_epsilon=gpt2config.layer_norm_epsilon,
-        hidden_dim=gpt2config.n_embd,
-        head_dim=gpt2config.n_embd // gpt2config.n_head,
-        intermediate_dim=gpt2config.n_inner if gpt2config.n_inner is not None else 4 * gpt2config.n_embd,
-        n_positions=gpt2config.n_positions,
-        resid_pdrop=gpt2config.resid_pdrop,
-        vocab_size=gpt2config.vocab_size,
-        activation_function=gpt2config.activation_function,
-        scale_attn_by_inverse_layer_idx=False,
-        fixed_abs_position_ids=True,
-    )
 
 
 def gpt2_state_dict_converter(state_dict: Dict, config: FlashMQATConfig) -> Dict:
@@ -196,31 +161,6 @@ def state_dict_to_gpt2(state_dict, config):
 ################################ GPT2 End ################################
 
 ################################ LLaMa Begin ################################
-
-
-def convert_config_llama(hf_config: transformers.LlamaConfig) -> FlashMQATConfig:
-    return FlashMQATConfig(
-        n_layers=hf_config.num_hidden_layers,
-        n_kv_heads=hf_config.num_key_value_heads,
-        hidden_dim=hf_config.hidden_size,
-        head_dim=hf_config.hidden_size // hf_config.num_attention_heads,
-        intermediate_dim=hf_config.intermediate_size,
-        vocab_size=hf_config.vocab_size,
-        n_positions=hf_config.max_position_embeddings,
-        embd_pdrop=0.0,
-        attn_pdrop=hf_config.attention_dropout if hasattr(hf_config, "attention_dropout") else 0.1,
-        layer_norm_epsilon=hf_config.rms_norm_eps,
-        activation_function=hf_config.hidden_act,
-        use_attention_bias=hf_config.attention_bias,
-        scale_attn_by_inverse_layer_idx=False,
-        layer_norm_type="rms",
-        mlp_type="llama",
-        apply_rotary=True,
-        rotary_base=hf_config.rope_theta,
-        rotary_interleaved=False,
-        rotary_scaling=None if hf_config.rope_scaling is None else hf_config.rope_scaling["factor"],
-        rotary_scaling_type=None if hf_config.rope_scaling is None else hf_config.rope_scaling["type"],
-    )
 
 
 def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:

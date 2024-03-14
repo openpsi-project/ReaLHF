@@ -1,6 +1,6 @@
 import functools
 
-from api.config import register_experiment
+from api.config.config_system import register_experiment
 from experiments.common.sft_exp import SFTExperiment
 
 seeds = range(1, 64)

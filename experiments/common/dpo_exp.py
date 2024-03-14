@@ -3,30 +3,14 @@ import functools
 
 from omegaconf import MISSING
 
-from .config_dataset import PairedComparisonDatasetConfig
-from .config_model import get_flash_mqat_model_config, ModelConfig, OptimizerConfig
-from api.config import *
-from api.dfg import ModelInterfaceType, ModelRPC
+from api.config.config_dataset import PairedComparisonDatasetConfig
+from api.config.config_flash_model import get_flash_mqat_model_config, ModelTrainEvalConfig, OptimizerConfig
+from api.config.config_system import *
+from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
 from base.topology import PipeModelDataParallelTopology
 import base.logging as logging
 
 logger = logging.getLogger("DPO Experiment")
-
-ref_inf = ModelRPC(
-    "ref",
-    ModelInterfaceType.INFERENCE,
-    input_data=["packed_input_ids", "input_lens", "pair_input_lens", "prompt_lens"],
-    output_data=["seqlogp"],
-    output_key_remap={"seqlogp": "pair_ref_seqlogp"},
-    dp_broker_type="packed",
-)
-dpo = ModelRPC(
-    "actor",
-    ModelInterfaceType.TRAIN_STEP,
-    input_data=["packed_input_ids", "input_lens", "pair_input_lens", "pair_ref_seqlogp", "prompt_lens"],
-    dp_broker_type="packed",
-    log_return_value=True,
-)
 
 
 @dataclasses.dataclass
@@ -39,8 +23,8 @@ class DPOConfig(Experiment):
     save_freq_steps: Optional[int] = 20
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
-    actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
-    ref: ModelConfig = dataclasses.field(default_factory=ModelConfig)
+    actor: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
+    ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
     dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
     beta: float = 0.1
 
@@ -206,6 +190,28 @@ class DPOConfig(Experiment):
                 cuda_cache_clear_freq=1,
             )
             model_worker.append(mw)
+
+        ref_inf = ModelRPC(
+            model_name="ref",
+            interface_type=ModelInterfaceType.INFERENCE,
+            interface_impl=ref_interface,
+            model_type=ModelType("llama", 7, False),
+            input_data=["packed_input_ids", "input_lens", "pair_input_lens", "prompt_lens"],
+            output_data=["seqlogp"],
+            output_key_remap={"seqlogp": "pair_ref_seqlogp"},
+            dp_broker_type="packed",
+        )
+        dpo = ModelRPC(
+            model_name="actor",
+            interface_type=ModelInterfaceType.TRAIN_STEP,
+            interface_impl=interface,
+            model_type=ModelType("llama", 7, False),
+            input_data=[
+                "packed_input_ids", "input_lens", "pair_input_lens", "pair_ref_seqlogp", "prompt_lens"
+            ],
+            dp_broker_type="packed",
+            log_return_value=True,
+        )
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,

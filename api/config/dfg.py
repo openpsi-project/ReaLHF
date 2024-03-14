@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Optional, Tuple, Any, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 import dataclasses
 import enum
 import itertools
@@ -28,6 +28,15 @@ class SyncParamHook:
 RPCHook = Union[OffloadHook, LoadToDeviceHook, SyncParamHook]
 
 
+@dataclasses.dataclass
+class ModelInterface:
+    type_: str
+    args: Dict[str, Any] = dataclasses.field(default_factory=dict)
+
+    def __eq__(self, other: "ModelInterface"):
+        return self.type_ == other.type_ and self.args == other.args
+
+
 class ModelInterfaceType(enum.Enum):
     GENERATE = "generate"
     TRAIN_STEP = "train_step"
@@ -36,20 +45,36 @@ class ModelInterfaceType(enum.Enum):
 
 
 @dataclasses.dataclass
+class ModelType:
+    _class: str
+    size: int
+    is_critic: bool
+
+    def __hash__(self):
+        return (self._class, self.size, self.is_critic).__hash__()
+
+    def __eq__(self, other):
+        return self._class == other._class and self.size == other.size and self.is_critic == other.is_critic
+
+
+@dataclasses.dataclass
 class ModelRPC:
     model_name: str
+    model_type: ModelType
     interface_type: ModelInterfaceType
+    interface_impl: ModelInterface
 
     input_data: List[str] = dataclasses.field(default_factory=lambda: [])
     input_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
     output_data: List[str] = dataclasses.field(default_factory=lambda: [])
     output_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
 
-    dp_broker_type: str = "padded_batch"
+    dp_broker_type: str = "packed"
 
     log_return_value: bool = False
 
     min_n_seqs_per_dp: int = 1
+    balanced_dp: bool = False
 
     min_n_seqs: int = 1
     max_n_seqs: int = 1024
@@ -79,8 +104,7 @@ class ModelRPC:
                 "The maximum batch size of the source node in the dataflow graph is too large. "
                 f"The maximum number of sequences is {self.max_n_seqs} > budget {int(1e4)} and "
                 f"the maximum number of tokens is {self.max_n_tokens} > budget {int(1e8)}. "
-                "Please set a smaller value."
-            )
+                "Please set a smaller value.")
 
     @property
     def name(self):
@@ -100,12 +124,10 @@ class ModelRPC:
         def _has_children_of_model_name(rpc: "ModelRPC", model_name: str):
             if rpc.is_dst:
                 return False
-            return any(
-                [
-                    r.model_name == model_name or _has_children_of_model_name(r, model_name)
-                    for r in rpc.children_rpcs
-                ]
-            )
+            return any([
+                r.model_name == model_name or _has_children_of_model_name(r, model_name)
+                for r in rpc.children_rpcs
+            ])
 
         return not _has_children_of_model_name(self, self.model_name)
 
@@ -161,12 +183,10 @@ def build_graph(rpcs: List[ModelRPC]) -> Tuple[List[ModelRPC], List[List[Tuple[s
                         children_rpcs[j].append(rpc)
                     edges[i][j] = (*edges[i][j], k)
                     logger.info(
-                        f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`."
-                    )
+                        f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`.")
     for i, rpc in enumerate(rpcs):
         logger.info(
-            f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }."
-        )
+            f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }.")
     for rpc, p, c, pr, cr in zip(rpcs, parents, children, parent_rpcs, children_rpcs):
         rpc.parents = p
         rpc.children = c

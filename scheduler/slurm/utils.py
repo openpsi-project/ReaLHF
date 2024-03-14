@@ -1,16 +1,17 @@
 from __future__ import annotations  # python3.7+ feature to allow self-referencing type hints
 
 from typing import Callable, Dict, List, Literal, Optional, Union
+import collections
 import dataclasses
 import datetime
 import getpass
 import math
 import os
 import shutil
-import pandas as pd
-import collections
 import socket
 import subprocess
+
+import pandas as pd
 
 from base.constants import LOG_ROOT
 from scheduler.client import JobException, JobInfo, JobState

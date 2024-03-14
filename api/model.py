@@ -9,8 +9,8 @@ import torch.utils.data
 import transformers
 
 from base.namedarray import NamedArray
-import api.config
-import api.huggingface
+import api.config.config_system
+import api.config.dfg
 import base.logging as logging
 
 logger = logging.getLogger("model")
@@ -146,12 +146,12 @@ def register_wrapper(name, cls_):
     ALL_WRAPPER_CLASSES[name] = cls_
 
 
-def make_model_wrapper(cfg: api.config.ModelWrapper) -> Callable[[Model], Model]:
+def make_model_wrapper(cfg: api.config.config_system.ModelWrapper) -> Callable[[Model], Model]:
     cls_ = ALL_WRAPPER_CLASSES[cfg.type_]
     return cls_(**cfg.args)
 
 
-def make_model(cfg: api.config.Model, name: str, device: Union[str, torch.device]) -> Model:
+def make_model(cfg: api.config.config_system.Model, name: str, device: Union[str, torch.device]) -> Model:
     logger.info(f"making model {cfg.type_} on {device}")
     model_cls = ALL_MODEL_CLASSES[cfg.type_]
     model = model_cls(**cfg.args, name=name, device=device)
@@ -162,11 +162,11 @@ def make_model(cfg: api.config.Model, name: str, device: Union[str, torch.device
     return model
 
 
-def make_interface(cfg: api.config.ModelInterface) -> ModelInterface:
+def make_interface(cfg: api.config.dfg.ModelInterface) -> ModelInterface:
     cls_ = ALL_INTERFACE_CLASSES[cfg.type_]
     return cls_(**cfg.args)
 
 
-def make_backend(cfg: api.config.ModelBackend) -> ModelBackend:
+def make_backend(cfg: api.config.config_system.ModelBackend) -> ModelBackend:
     cls_ = ALL_BACKEND_CLASSES[cfg.type_]
     return cls_(**cfg.args)

@@ -12,7 +12,7 @@ import sys
 from base.cluster import spec as cluster_spec
 from base.constants import (DATASET_CACHE_PATH, PYTORCH_KERNEL_CACHE_PATH, TORCH_EXTENSIONS_DIR,
                             TRITON_CACHE_PATH)
-import api.dfg
+import api.config.dfg
 import base.topology
 
 _LLM_ENVVARS = {
@@ -158,12 +158,6 @@ class Model:
 
 
 @dataclasses.dataclass
-class ModelInterface:
-    type_: str
-    args: Dict[str, Any] = dataclasses.field(default_factory=dict)
-
-
-@dataclasses.dataclass
 class ModelBackend:
     type_: str
     args: Dict[str, Any] = dataclasses.field(default_factory=dict)
@@ -219,7 +213,6 @@ class StandaloneModelShard:
 
     id: ModelShardID
     model: Model
-    interface: ModelInterface
     backend: ModelBackend
     # evaluation
     eval_datasets: Optional[List[Dataset]] = None
@@ -238,6 +231,7 @@ class ModelWorker:
     cuda_cache_cleanliness: bool = True
     cuda_cache_clear_freq: int = 10
     # model_topos and worker_info will be configured automatically
+    model_rpcs: List[api.config.dfg.ModelRPC] = None
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology] = None
     mw_bcast_groups: List[List[int]] = None
     msid2mwid: Dict[ModelShardID, int] = None
@@ -264,21 +258,27 @@ class DataWorker:
 
 
 @dataclasses.dataclass
-class MasterWorker:
-    total_train_epochs: int
+class ExperimentSaveEvalControl:
+    total_train_epochs: int = 1
     # save control
-    save_frequency_epochs: int
-    save_frequency_steps: int
-    save_frequency_seconds: int
+    save_frequency_epochs: Optional[int] = None
+    save_frequency_steps: Optional[int] = None
+    save_frequency_seconds: Optional[int] = None
     # eval control
-    eval_frequency_epochs: int
-    eval_frequency_steps: int
-    eval_frequency_seconds: int
+    eval_frequency_epochs: Optional[int] = None
+    eval_frequency_steps: Optional[int] = None
+    eval_frequency_seconds: Optional[int] = None
+    # benchmark
+    benchmark_steps: Optional[int] = None
+
+
+@dataclasses.dataclass
+class MasterWorker:
+    exp_ctrl: ExperimentSaveEvalControl
     # main components
-    model_rpcs: List[api.dfg.ModelRPC]
+    model_rpcs: List[api.config.dfg.ModelRPC]
     n_model_workers: int
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology]
-    benchmark_steps: int
     msid2mwid: Dict[ModelShardID, int] = None
     mw_bcast_groups: List[List[int]] = None
     sync_param_pairs: List[Tuple[str, str]] = None
@@ -301,20 +301,11 @@ class ExperimentScheduling:
 
 @dataclasses.dataclass
 class ExperimentConfig:
-    total_train_epochs: int
+    exp_ctrl: ExperimentSaveEvalControl
     # dataflow
-    model_rpcs: List[api.dfg.ModelRPC]
+    model_rpcs: List[api.config.dfg.ModelRPC]
     data_worker: List[DataWorker] = dataclasses.field(default_factory=list)
     model_worker: List[ModelWorker] = dataclasses.field(default_factory=list)
-    # eval control
-    save_frequency_epochs: Optional[int] = None
-    save_frequency_steps: Optional[int] = None
-    save_frequency_seconds: int = 3600
-    # save control
-    eval_frequency_epochs: Optional[int] = None
-    eval_frequency_steps: Optional[int] = None
-    eval_frequency_seconds: Optional[int] = None
-    benchmark_steps: Optional[int] = None  # only used for benchmark
     # master_worker will be set automatically
     master_worker: Optional[List[MasterWorker]] = None
     config: Optional[Any] = None
@@ -350,15 +341,16 @@ class ExperimentConfig:
         ######### sanity check of sync param hooks #########
         for rpc in self.model_rpcs:
             for hook in rpc.pre_hooks + rpc.post_hooks:
-                if not isinstance(hook, api.dfg.SyncParamHook):
+                if not isinstance(hook, api.config.dfg.SyncParamHook):
                     continue
-                if not model_configs[rpc.model_name].type_ == model_configs[hook.target].type_ == "flash_mqat":
+                if (not model_configs[rpc.model_name].type_ == model_configs[hook.target].type_ ==
+                        "flash_mqat"):
                     raise ValueError("To synchronize parameters between two models, "
                                      "both models must be FlashMQATModel.")
                 target_topo = model_topos[hook.target]
                 self_topo = model_topos[rpc.model_name]
-                if (self_topo.get_dim("model") % target_topo.get_dim("model") != 0 and 
-                    target_topo.get_dim("model") % self_topo.get_dim("model") !=0):
+                if (self_topo.get_dim("model") % target_topo.get_dim("model") != 0
+                        and target_topo.get_dim("model") % self_topo.get_dim("model") != 0):
                     raise ValueError("To synchronize parameters between two models, "
                                      "their model parallel size must be a multiple of each other.")
                 if not (rpc.model_name, hook.target) in sync_param_pairs:
@@ -401,26 +393,20 @@ class ExperimentConfig:
 
         for m in self.model_worker:
             m.mw_bcast_groups = mw_bcast_groups
+            m.model_rpcs = self.model_rpcs
 
         if len(self.data_worker) != 1:
             raise RuntimeError("Only one data worker is supported now.")
 
         self.master_worker = [
             MasterWorker(
-                total_train_epochs=self.total_train_epochs,
-                save_frequency_epochs=self.save_frequency_epochs,
-                save_frequency_steps=self.save_frequency_steps,
-                save_frequency_seconds=self.save_frequency_seconds,
-                eval_frequency_epochs=self.eval_frequency_epochs,
-                eval_frequency_steps=self.eval_frequency_steps,
-                eval_frequency_seconds=self.eval_frequency_seconds,
+                exp_ctrl=self.exp_ctrl,
                 model_topos=model_topos,
                 model_rpcs=self.model_rpcs,
                 n_model_workers=len(self.model_worker),
                 msid2mwid=msid2mwid,
                 mw_bcast_groups=mw_bcast_groups,
                 sync_param_pairs=sync_param_pairs,
-                benchmark_steps=self.benchmark_steps,  # only used for benchmark
             )
         ]
 

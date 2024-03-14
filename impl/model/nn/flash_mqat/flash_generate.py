@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+from api.config.config_flash_model import FlashMQATConfig
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import mask_eos_token
 from impl.model.utils.logits_warper import top_k_top_p_logits

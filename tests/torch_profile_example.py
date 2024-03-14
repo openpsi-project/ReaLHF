@@ -23,7 +23,7 @@ import torch.distributed
 import torch.profiler
 
 from base.monitor import gpu_memory_mb
-import api.config as config_package
+import api.config.config_system as config_package
 import base.constants
 import base.gpu_utils
 import base.namedarray
@@ -39,10 +39,10 @@ MODEL_NAME = "default"
 # parallelism config
 NUM_MP = 1
 NUM_PP = 4
-NUM_DP = 2
+NUM_DP = 1
 assert batch_size >= NUM_DP
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
-MODEL_TYPE = "codellama"
+MODEL_TYPE = "llama"
 # MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded/CodeLlama-34b-hf_2pp_2mp_3s"
 MODEL_PARALLEL_PATH = "/lustre/public/pretrained_model_weights/sharded_new/CodeLlama-34b-hf_4pp_1mp"
 BASE_MODEL_PATH = "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf/"
