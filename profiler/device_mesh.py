@@ -37,12 +37,18 @@ class DeviceMesh:
         else:
             assert self.n_gpus == self.n_nodes * self.n_gpus_per_node
 
+    def __repr__(self):
+        return self.device_mesh_name
+
 
 @dataclasses.dataclass
 class ModelParallelStrategy:
     num_pp: int
     num_mp: int
     num_dp: int
+
+    def __repr__(self):
+        return f"pp{self.num_pp}_mp{self.num_mp}_dp{self.num_dp}"
 
 
 @dataclasses.dataclass
@@ -55,6 +61,36 @@ class ModelDeviceMapping:
     model_device_mapping: Optional[Dict[str, DeviceMesh]] = None
     # model_rpc_name -> ModelParallelStrategy
     model_parallel_strategy: Optional[Dict[str, ModelParallelStrategy]] = None
+
+
+def is_overlap(device_mesh: DeviceMesh, other: DeviceMesh):
+    if device_mesh.n_nodes > 1:
+        return any([node_name in device_mesh.node_names for node_name in other.node_names])
+    else:
+        if device_mesh.node_names[0] not in other.device_mesh_name:
+            return False
+        if other.gpu_ids is None:
+            other.gpu_ids = list(range(8))
+        return any([gpu_id in device_mesh.gpu_ids for gpu_id in other.gpu_ids])
+
+
+def is_contain(device_mesh: DeviceMesh, other: DeviceMesh):
+    # other contain device mesh
+    if device_mesh.n_nodes > 1:
+        return all([node_name in device_mesh.node_names for node_name in other.node_names])
+    else:
+        if device_mesh.node_names[0] not in other.device_mesh_name:
+            return False
+        if other.gpu_ids is None:
+            other.gpu_ids = list(range(8))
+        return all([gpu_id in device_mesh.gpu_ids for gpu_id in other.gpu_ids])
+
+
+def is_all_overlap(device_meshes: List[DeviceMesh], other: DeviceMesh):
+    for i in range(len(device_meshes)):
+        if not is_overlap(device_meshes[i], other):
+            return False
+    return True
 
 
 def parse_node_id(node_name: str) -> int:

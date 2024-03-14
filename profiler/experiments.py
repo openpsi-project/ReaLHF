@@ -23,9 +23,9 @@ rollout = ModelRPC(
         "prompt_mask",
     ],
     dp_broker_type="packed",
-    min_n_seqs=32,
-    max_n_seqs=33,
-    max_n_tokens=128 * 32,  # generate 256 tokens
+    min_n_seqs=256,
+    max_n_seqs=257,
+    max_n_tokens=256 * 256,  # generate 256 tokens
     max_concurrent_calls=4,
 )
 
@@ -37,9 +37,9 @@ inf_reward = ModelRPC(
     output_data=["scores"],
     output_key_remap={"scores": "rewards"},
     dp_broker_type="packed",
-    min_n_seqs=32,
-    max_n_seqs=33,
-    max_n_tokens=256 * 32,
+    min_n_seqs=256,
+    max_n_seqs=257,
+    max_n_tokens=512 * 256,
     max_concurrent_calls=1,
 )
 
@@ -54,9 +54,9 @@ inf_ref_logits = ModelRPC(
     output_data=["logprobs"],
     output_key_remap={"logprobs": "packed_ref_logprobs"},
     dp_broker_type="packed",
-    min_n_seqs=32,
-    max_n_seqs=33,
-    max_n_tokens=256 * 32,
+    min_n_seqs=256,
+    max_n_seqs=257,
+    max_n_tokens=512 * 256,
     max_concurrent_calls=1,
 )
 
@@ -67,9 +67,9 @@ inf_values = ModelRPC(
     output_data=["scores"],
     output_key_remap={"scores": "values"},
     dp_broker_type="packed",
-    min_n_seqs=32,
-    max_n_seqs=33,
-    max_n_tokens=256 * 32,
+    min_n_seqs=256,
+    max_n_seqs=257,
+    max_n_tokens=512 * 256,
     max_concurrent_calls=1,
 )
 
@@ -89,9 +89,9 @@ train_actor = ModelRPC(
     ],
     log_return_value=True,
     dp_broker_type="packed",
-    min_n_seqs=32,
-    max_n_seqs=33,
-    max_n_tokens=256 * 32,
+    min_n_seqs=256,
+    max_n_seqs=257,
+    max_n_tokens=512 * 256,
     max_concurrent_calls=1,
 )
 
@@ -110,14 +110,15 @@ train_critic = ModelRPC(
     ],
     dp_broker_type="packed",
     log_return_value=True,
-    min_n_seqs=32,
-    max_n_seqs=33,
-    max_n_tokens=256 * 32,
+    min_n_seqs=256,
+    max_n_seqs=257,
+    max_n_tokens=512 * 256,
     max_concurrent_calls=1,
 )
 
 NUM_GPUS_PER_NODE = 8
 LLAMA_2_7B_PATH = "/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf_4pp_3s"
+LLAMA_2_13B_PATH = "/lustre/public/pretrained_model_weights/sharded/Llama-2-13b-hf_4mp_3s"
 
 
 @dataclasses.dataclass
@@ -130,21 +131,21 @@ class ProfileExperiment(Experiment):
 
     seed: int = 1
     n_nodes: int = 4
-    nodelist: str = "QH-com[40-43]"
-    device_mesh_name: str = "QH-com[40-43]"
+    nodelist: str = "QH-com[07-08]"
+    device_mesh_name: str = "QH-com[07-08]"
 
     def __post_init__(self):
         self.n_workers = self.n_nodes * NUM_GPUS_PER_NODE
 
         if self.model_paths is None:
             # example
-            self.model_paths = [LLAMA_2_7B_PATH]
-            self.model_types = ["Llama-2-7b"]
+            self.model_paths = [LLAMA_2_13B_PATH, LLAMA_2_7B_PATH]
+            self.model_types = ["Llama-2-13b", "Llama-2-7b"]
             self.model_names = ["actor", "reward", "ref", "critic"]
             self.model_names_to_types = {
-                "actor": "Llama-2-7b",
+                "actor": "Llama-2-13b",
                 "reward": "Llama-2-7b",
-                "ref": "Llama-2-7b",
+                "ref": "Llama-2-13b",
                 "critic": "Llama-2-7b",
             }
             self.model_rpcs = [rollout, inf_reward, inf_ref_logits, inf_values, train_actor, train_critic]

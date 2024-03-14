@@ -12,8 +12,8 @@ from tests.utils import *
 import api.config as config_package
 
 NUM_MP = 1
-NUM_PP = 4
-NUM_DP = 1
+NUM_PP = 1
+NUM_DP = 4
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
@@ -28,13 +28,16 @@ if MODEL_TYPE == "llama":
     # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
     BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 128
-MIN_NEW_TOKENS = 128
-MAX_NEW_TOKENS = 128
+
+if NUM_PP == NUM_MP == 1:
+    MODEL_PARALLEL_PATH = BASELINE_MODEL_PATH
+BATCH_SIZE = 256
+MIN_NEW_TOKENS = 256
+MAX_NEW_TOKENS = 256
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
-USE_SEQ_PARALLEL = True
+USE_SEQ_PARALLEL = False
 GRADIENT_ACCUMULATION_FUSION = False
 ASYNC_P2P = False
 
@@ -90,11 +93,15 @@ def make_model(device):
     import api.model
     import impl.model.nn.flash_mqat.flash_mqat_api
 
+    from_type = "self" if NUM_PP == 1 else "empty_actor"
+    if NUM_MP == NUM_PP == 1:
+        from_type = "random_actor"
+
     model_config = config_package.Model(
         "flash_mqat",
         args=dict(
             model_path=MODEL_PARALLEL_PATH,
-            from_type="self" if NUM_PP == 1 else "empty_actor",
+            from_type=from_type,
             dtype="bf16" if USE_BF16 else "fp16",
             hf_model_type=MODEL_TYPE,
             tokenizer_path=MODEL_PARALLEL_PATH,
@@ -102,7 +109,7 @@ def make_model(device):
             gradient_accumulation_fusion=False,
         ),
     )
-    assert NUM_PP > 1 or NUM_MP > 1, "can not test model without mp or dp"
+    # assert NUM_PP > 1 or NUM_MP > 1, "can not test model without mp or dp"
     if NUM_PP > 1:
         model_config.wrappers += [
             config_package.ModelWrapper(

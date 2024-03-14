@@ -76,8 +76,23 @@ def parse_comm_stats_files(stats_file_dir):
     return res
 
 
+def find_nearest_key(k, d):
+    keys = list(d.keys())
+    op_keys = []
+    for ik in keys:
+        if k[0] == ik[0]:
+            op_keys.append(ik)
+    op_keys.sort()
+    for i in range(len(op_keys)):
+        if k < op_keys[i]:
+            return op_keys[i]
+    return op_keys[-1]
+
+
 def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen):
     op_key = (op_name, bs, seqlen)
+    if op_key not in op_cost["embedding_layer"]:
+        op_key = find_nearest_key(op_key, op_cost["embedding_layer"])
     return (op_cost["embedding_layer"][op_key] +\
            num_layers * op_cost["flash_mqat_block_0"][op_key] +\
            op_cost["head"][op_key]) / num_pp # micro seconds
@@ -101,6 +116,7 @@ def estimate_instruction_cost(
     layer_stats = parse_layer_stats_files(layer_stats_path)
     num_mp = parallel_strategy.num_mp
     num_pp = parallel_strategy.num_pp
+    num_dp = parallel_strategy.num_dp
     num_gpus = parallel_strategy.num_dp * num_mp * num_pp
     layer_stats = layer_stats[num_mp]
     op_cost = {}
@@ -115,44 +131,48 @@ def estimate_instruction_cost(
     for layer_name in layer_names:
         assert layer_name in op_cost
 
+    train_mbs = batch_size // (2 * num_pp * num_dp)
+    gen_mbs = batch_size // (num_pp * num_dp)
+    # print(f"batch size {batch_size} num_pp {num_pp} num_dp {num_dp} num_mp {num_mp}"
+    #       f"train mbs {train_mbs} gen_mbs {gen_mbs}")
+
     inst_cost = {}
-    inst_cost["gen_fwd_0"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_0", batch_size, seq_len)
-    inst_cost["gen_fwd_1"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_1", batch_size, seq_len)
-    inst_cost["inf_fwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd", batch_size, seq_len)
-    inst_cost["train_fwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd", batch_size, seq_len)
-    inst_cost["train_bwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "bwd", batch_size, seq_len)
-    inst_cost["train_opt"] = compute_inst_cost(op_cost, num_layers, num_pp, "opt", batch_size, seq_len)
+    inst_cost["gen_fwd_0"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_0", gen_mbs, seq_len)
+    inst_cost["gen_fwd_1"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_1", gen_mbs, seq_len)
+    inst_cost["inf_fwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd", gen_mbs, seq_len)
+    inst_cost["train_fwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd", train_mbs, seq_len)
+    inst_cost["train_bwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "bwd", train_mbs, seq_len)
+    inst_cost["train_opt"] = compute_inst_cost(op_cost, num_layers, num_pp, "opt", train_mbs, seq_len)
 
     comm_type = "crosshost_p2p" if num_gpus // num_pp > 8 else "localhost_p2p"
     # print(type(hidden_dim), type(bs), type(seq_len))
-    inst_cost["act_p2p"] = comm_inst_cost(comm_stats, 2 * hidden_dim * batch_size * seq_len, comm_type)
-    inst_cost["grad_p2p"] = comm_inst_cost(comm_stats, 2 * hidden_dim * batch_size * seq_len, comm_type)
-    inst_cost["gen_act_p2p"] = comm_inst_cost(comm_stats, 2 * hidden_dim * batch_size, comm_type)
+    inst_cost["act_p2p"] = comm_inst_cost(comm_stats, 2 * hidden_dim * train_mbs * seq_len, comm_type)
+    inst_cost["grad_p2p"] = comm_inst_cost(comm_stats, 2 * hidden_dim * train_mbs * seq_len, comm_type)
+    inst_cost["gen_act_p2p"] = comm_inst_cost(comm_stats, 2 * hidden_dim * gen_mbs, comm_type)
     return inst_cost
 
 
-def estimate_rpc_cost(
+def _estimate_rpc_cost(
         inst_cost,
         parallel_strategy: ModelParallelStrategy,
         model_interface_type: ModelInterfaceType,
         # model function call args
-        num_micro_batches=None,
-        num_gen_tokens=None):
+        num_gen_tokens=256):
     num_pp = parallel_strategy.num_pp
     if model_interface_type == ModelInterfaceType.INFERENCE:
-        num_micro_batches = num_pp if num_micro_batches is None else num_micro_batches
+        num_micro_batches = num_pp
         return inst_cost["inf_fwd"] * (num_pp + num_micro_batches - 1) +\
                inst_cost["act_p2p"] * (num_pp + num_micro_batches - 2) * 2
     elif model_interface_type == ModelInterfaceType.TRAIN_STEP:
         # TODO: add reduce grads, add ppo micro batches
-        num_micro_batches = num_pp * 2 if num_micro_batches is None else num_micro_batches
+        num_micro_batches = num_pp * 2
         return (inst_cost["train_fwd"] + inst_cost["train_bwd"]) * (num_pp + num_micro_batches - 1) +\
                inst_cost["train_opt"] +\
                (inst_cost["grad_p2p"] + inst_cost["act_p2p"]) * (num_pp + num_micro_batches - 2) * 2
     elif model_interface_type == ModelInterfaceType.GENERATE:
-        num_micro_batches = num_pp if num_micro_batches is None else num_micro_batches
-        num_gen_tokens = 128 if num_gen_tokens is None else num_gen_tokens
-        return inst_cost["gen_fwd_0"] + inst_cost["gen_fwd_1"] * (num_pp + num_micro_batches - 1) +\
+        num_micro_batches = num_pp
+        num_gen_tokens = num_gen_tokens
+        return inst_cost["gen_fwd_0"] * (num_pp + num_micro_batches - 1) +\
                inst_cost["act_p2p"] * (num_pp + num_micro_batches - 2) * 2 +\
                inst_cost["gen_fwd_1"] * (num_gen_tokens - 1) * num_micro_batches +\
                inst_cost["gen_act_p2p"] * (num_gen_tokens - 1) * num_micro_batches * 2
@@ -164,7 +184,22 @@ def load_model_config(model_path):
     return FlashMQATConfig(**config_json)
 
 
-def estimate(exp: ProfileExperiment, mdm: ModelDeviceMapping) -> float:
+def estimate_rpc_cost(exp: ProfileExperiment, rpc: ModelRPC, model_config: FlashMQATConfig,
+                      parallel_strategy: ModelParallelStrategy):
+    # print(f"estimating rpc cost for {model_rpc_name(rpc)}")
+    model_type = exp.model_names_to_types[rpc.model_name]
+    layer_stats_path = os.path.join(PROFILE_RESULT_PATH, model_type)
+    # comm_stats_path = os.path.join(PROFILE_RESULT_PATH, exp.device_mesh_name)
+    comm_stats_path = os.path.join(PROFILE_RESULT_PATH, "QH-com[40-43]")
+    bs = rpc.min_n_seqs
+    seq_len = rpc.max_n_tokens // bs
+    inst_cost = estimate_instruction_cost(layer_stats_path, comm_stats_path, model_config.n_layers,
+                                          parallel_strategy, model_config.hidden_dim, bs, seq_len)
+    # print(inst_cost)
+    return _estimate_rpc_cost(inst_cost, parallel_strategy, rpc.interface_type)
+
+
+def estimate_model_device_mapping_cost(exp: ProfileExperiment, mdm: ModelDeviceMapping) -> float:
     assert mdm.model_device_mapping is not None
     assert mdm.model_parallel_strategy is not None
     # TODO: change to auto
@@ -179,19 +214,20 @@ def estimate(exp: ProfileExperiment, mdm: ModelDeviceMapping) -> float:
         for model_type in exp.model_types
     }
 
-    comm_stats_paths = os.path.join(PROFILE_RESULT_PATH, exp.device_mesh_name)
+    # comm_stats_path = os.path.join(PROFILE_RESULT_PATH, exp.device_mesh_name)
+    comm_stats_path = os.path.join(PROFILE_RESULT_PATH, "QH-com[40-43]")
 
     costs = {}
     for rpc_name, rpc in mdm.model_rpc_mapping.items():
         batch_size = rpc.min_n_seqs
         seq_len = rpc.max_n_tokens // batch_size
         model_type = exp.model_names_to_types[rpc.model_name]
-        inst_cost = estimate_instruction_cost(layer_stats_paths[model_type], comm_stats_paths,
+        inst_cost = estimate_instruction_cost(layer_stats_paths[model_type], comm_stats_path,
                                               model_configs[model_type].n_layers,
                                               mdm.model_parallel_strategy[model_rpc_name(rpc)],
                                               model_configs[model_type].hidden_dim, batch_size, seq_len)
-        costs[rpc_name] = estimate_rpc_cost(inst_cost, mdm.model_parallel_strategy[model_rpc_name(rpc)],
-                                            rpc.interface_type)
+        costs[rpc_name] = _estimate_rpc_cost(inst_cost, mdm.model_parallel_strategy[model_rpc_name(rpc)],
+                                             rpc.interface_type)
     return costs
 
 
@@ -215,7 +251,7 @@ def main():
                              model_rpc_mapping=model_rpc_mapping,
                              model_device_mapping=model_device_mapping,
                              model_parallel_strategy=model_parallel_strategy)
-    print(estimate(profiler_experiment, mdm))
+    print(estimate_model_device_mapping_cost(profiler_experiment, mdm))
 
 
 if __name__ == "__main__":
