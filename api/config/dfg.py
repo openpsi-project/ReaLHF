@@ -26,7 +26,14 @@ class SyncParamHook:
     interval: int = 1
 
 
-RPCHook = Union[OffloadHook, LoadToDeviceHook, SyncParamHook]
+@dataclasses.dataclass
+class ReparallelizeHook:
+    dp_size: int
+    mp_size: int
+    pp_size: int
+
+
+RPCHook = Union[OffloadHook, LoadToDeviceHook, SyncParamHook, ReparallelizeHook]
 
 
 @dataclasses.dataclass

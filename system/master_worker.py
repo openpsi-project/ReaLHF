@@ -222,8 +222,6 @@ def handle_rpc_hook(
             )
         #################### Sanity check of model configs. ####################
 
-        # FIXME: if model worker poll exits with an unfinished send/recv, the following parameter synchronization
-        # call will get stuck. We need to ensure that all previous send/recv calls are finished before param sync.
         src_handlers = [
             config_pkg.ModelShardID.from_parallelism_rank(model_name, src_topo, j)
             for j in range(src_topo.world_size())

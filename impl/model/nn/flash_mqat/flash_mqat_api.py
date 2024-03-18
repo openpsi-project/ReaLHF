@@ -8,6 +8,7 @@ import os
 import time
 
 import torch
+import torch.distributed
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
@@ -28,10 +29,13 @@ from impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear,
                                                            RowParallelLinear)
 from impl.model.utils.data import DuckGenerationOutput, DuckModelOutput, PipeCacheData, PipeTransferData
 from impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
+import api.config.config_system
 import api.huggingface
 import api.model
 import base.constants
+import base.gpu_utils as gpu_utils
 import base.logging as logging
+import base.topology
 
 try:
     from flash_attn.bert_padding import pad_input, unpad_input
@@ -87,45 +91,7 @@ class FlashMQATModel(nn.Module):
         # Tensor model parallel will be done during layer construction.
         layers = []
         for idx in range(self.layer_idx_start, self.layer_idx_end):
-            if idx == 0:
-                l = VocabPositionEmbedding(config, dtype, device)
-            elif idx == config.n_layers + 1:
-                if config.is_critic and config.sequence_parallel:
-                    l = SequenceParallelCriticHead(
-                        config.hidden_dim,
-                        1,
-                        bias=False,
-                        device=device,
-                        dtype=dtype,
-                    )
-                elif not config.is_critic and base.constants.model_parallel_world_size() > 1:
-                    l = SequenceParallelActorHead(
-                        config.hidden_dim,
-                        config.vocab_size,
-                        bias=False,
-                        sequence_parallel=config.sequence_parallel,
-                        async_tensor_model_parallel_allreduce=not config.sequence_parallel,
-                        gradient_accumulation_fusion=config.gradient_accumulation_fusion,
-                        device=device,
-                        dtype=dtype,
-                    )
-                else:
-                    l = OutputHead(
-                        config.hidden_dim,
-                        1 if config.is_critic else config.vocab_size,
-                        bias=False,
-                        device=device,
-                        dtype=dtype,
-                    )
-            else:
-                l = FlashMQATBlock(
-                    config=config,
-                    layer_index=idx - 1,
-                    output_layernorm=(idx == config.n_layers),
-                    dtype=dtype,
-                    device=device,
-                )
-            layers.append(l)
+            layers.append(self._build_layer(idx))
 
         self.layers = nn.ModuleList(layers)
 
@@ -150,6 +116,57 @@ class FlashMQATModel(nn.Module):
     @property
     def is_critic(self):
         return self.config.is_critic
+
+    def _build_layer(self, idx: int) -> nn.Module:
+        config = self.config
+        dtype = self.dtype
+        device = self.device
+        if idx == 0:
+            l = VocabPositionEmbedding(config, dtype, device)
+        elif idx == config.n_layers + 1:
+            l = self._build_output_head()
+        else:
+            l = FlashMQATBlock(
+                config=config,
+                layer_index=idx - 1,
+                output_layernorm=(idx == config.n_layers),
+                dtype=dtype,
+                device=device,
+            )
+        return l
+
+    def _build_output_head(self) -> nn.Module:
+        config = self.config
+        dtype = self.dtype
+        device = self.device
+        if config.is_critic and config.sequence_parallel:
+            l = SequenceParallelCriticHead(
+                config.hidden_dim,
+                1,
+                bias=False,
+                device=device,
+                dtype=dtype,
+            )
+        elif not config.is_critic and base.constants.model_parallel_world_size() > 1:
+            l = SequenceParallelActorHead(
+                config.hidden_dim,
+                config.vocab_size,
+                bias=False,
+                sequence_parallel=config.sequence_parallel,
+                async_tensor_model_parallel_allreduce=not config.sequence_parallel,
+                gradient_accumulation_fusion=config.gradient_accumulation_fusion,
+                device=device,
+                dtype=dtype,
+            )
+        else:
+            l = OutputHead(
+                config.hidden_dim,
+                1 if config.is_critic else config.vocab_size,
+                bias=False,
+                device=device,
+                dtype=dtype,
+            )
+        return l
 
     def gradient_checkpointing_enable(self, attn: Optional[bool] = False, mlp: Optional[bool] = False):
         for l in self.layers:
@@ -638,6 +655,118 @@ class FlashMQATModel(nn.Module):
             n_shards=int(os.getenv("FLASH_MQAT_N_SHARDS", "3")),
             with_hf_format=True,
         )
+
+    def to_reparallelized_model(
+        self,
+        from_shard_id: api.config.config_system.ModelShardID,
+        to_shard_id: api.config.config_system.ModelShardID,
+        pg_info: gpu_utils.NCCLProcessGroupInfo,
+    ) -> "FlashMQATModel":
+        # TODO: unfinished
+        assert from_shard_id.topo.world_size() == to_shard_id.topo.world_size()
+        src_mp_size = from_shard_id.topo.get_dim("model")
+        dst_mp_size = to_shard_id.topo.get_dim("model")
+        assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
+        if (self.config.n_kv_heads % src_mp_size == 0) != (self.config.n_kv_heads % dst_mp_size == 0):
+            raise ValueError("Whether to partition kv heads should remain the same.")
+
+        state_dict = self.state_dict()
+        self.layers = None
+        new_layers = {}
+
+        from_layer_mapping = {k: list(range(v[0], v[1])) for k, v in self.layer_mapping.items()}
+
+        self.layer_mapping = partition_pipeline_layers(
+            self.config,
+            to_shard_id.topo.get_dim("pipe"),
+            flash_model_embed_param_count,
+            flash_model_tblock_param_count,
+            flash_model_head_param_count,
+            method=self.pipeline_partition_method,
+        )
+        to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in self.layer_mapping.items()}
+
+        repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
+        # TODO: we can omit sending if we have parameters locally
+        for (pp_i, pp_j), layer_indices in repart_strat.items():
+            if len(layer_indices) == 0:
+                continue
+
+            if pp_i == from_shard_id.pp_rank and from_shard_id.dp_rank == 0:
+                # sender
+                sub_sd = {k: v for k, v in state_dict.items() if int(k.split(".")[0]) in layer_indices}
+
+                for k, v in sub_sd.items():
+                    if dst_mp_size > src_mp_size:
+                        factor = dst_mp_size // src_mp_size
+                        sds = mp_partition_flash_mqat_state_dict({k: v}, self.config, factor)
+                        assert all(len(sd) == 1 for sd in sds)
+                        dst_mp_ranks = [i + factor * from_shard_id.mp_rank for i in range(factor)]
+                        params = [list(sd.values())[0] for sd in sds]
+                    else:
+                        factor = src_mp_size // dst_mp_size
+                        dst_mp_ranks = [from_shard_id.mp_rank // factor]
+                        params = [v]
+                    assert len(dst_mp_ranks) == len(params)
+                    for dst_mp_rank, param in zip(dst_mp_ranks, params):
+                        key = gpu_utils.ParamSyncPair(
+                            src=from_shard_id.model_name,
+                            dst=to_shard_id.model_name,
+                            src_mp_rank=from_shard_id.mp_rank,
+                            src_pp_rank=from_shard_id.pp_rank,
+                            dst_pp_rank=pp_j,
+                            dst_mp_rank=dst_mp_rank,
+                        )
+
+                        torch.distributed.broadcast(
+                            param,
+                            src=pg_info.param_sync_src_ranks[key],
+                            group=pg_info.param_sync_groups[key],
+                        )
+                    state_dict.pop(k)
+                del sub_sd
+
+            if pp_j == to_shard_id.pp_rank:
+                # receiver
+                sub_sd = {}
+                for layer_idx in layer_indices:
+                    l = self._build_layer(layer_idx)
+                    new_layers[layer_idx] = l
+                    sub_sd.update(l.state_dict())
+
+                for k, v in sub_sd.items():
+                    if dst_mp_size > src_mp_size:
+                        factor = dst_mp_size // src_mp_size
+                        src_mp_ranks = [to_shard_id.mp_rank // factor]
+                        bufs = [v]
+                    else:
+                        factor = src_mp_size // dst_mp_size
+                        src_mp_ranks = [i + factor * to_shard_id.mp_rank for i in range(factor)]
+                        bufs = list(
+                            mp_partition_flash_mqat_state_dict({
+                                k: v
+                            }, self.config, factor, mp_rank=0).values())
+
+                    assert len(src_mp_ranks) == len(bufs)
+
+                    for src_mp_rank, buf in zip(src_mp_ranks, bufs):
+                        key = gpu_utils.ParamSyncPair(
+                            src=from_shard_id.model_name,
+                            dst=to_shard_id.model_name,
+                            src_pp_rank=pp_i,
+                            src_mp_rank=src_mp_rank,
+                            dst_pp_rank=to_shard_id.pp_rank,
+                            dst_mp_rank=to_shard_id.mp_rank,
+                        )
+                        torch.distributed.broadcast(buf,
+                                                    src=pg_info.param_sync_src_ranks[key],
+                                                    group=pg_info.param_sync_groups[key])
+                    if len(bufs) > 1:
+                        v = mp_merge_flash_mqat_state_dict([{k: buf} for buf in bufs], self.config)
+                    this_layer_idx = int(k.split(".")[0])
+                    new_layers[this_layer_idx].load_state_dict({k: v}, strict=False)
+
+        self.layers = nn.ModuleList(new_layers)
 
 
 # a helper function to make flash_mqat look like huggingface model
