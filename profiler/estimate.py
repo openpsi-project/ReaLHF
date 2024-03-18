@@ -11,6 +11,7 @@ import os
 
 from profiler.device_mesh import *
 from profiler.experiments import ProfileExperiment
+from profiler.rpc import model_rpc_name
 
 from api.dfg import ModelInterfaceType
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig

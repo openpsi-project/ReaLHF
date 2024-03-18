@@ -14,6 +14,6 @@
 	path = thirdparty/Megatron-LM
 	url = https://github.com/NVIDIA/Megatron-LM.git
 	branch = main
-[submodule "profiler/search"]
-	path = profiler/search
+[submodule "profiler/cppsearch"]
+	path = profiler/cppsearch
 	url = git@github.com:nuzant/model_device_mapping_search.git

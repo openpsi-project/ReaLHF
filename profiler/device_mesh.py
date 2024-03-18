@@ -4,10 +4,6 @@ import dataclasses
 from api.dfg import ModelRPC
 
 
-def model_rpc_name(model_rpc: ModelRPC):
-    return f"{model_rpc.model_name}:{model_rpc.interface_type.value}"
-
-
 @dataclasses.dataclass
 class DeviceMesh:
     """

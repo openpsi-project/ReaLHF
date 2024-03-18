@@ -1,27 +1,13 @@
+import time
+
 from profiler.device_mesh import *
 from profiler.estimate import *
 from profiler.experiments import *
+from profiler.rpc import *
 
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 
 GPU_MEM_CAP = 80 * (1024**3)
-
-
-@dataclasses.dataclass
-class RPCExecution:
-    rpc: ModelRPC
-    device_mesh: DeviceMesh
-    parallel_strategy: ModelParallelStrategy
-    time_cost: float = None
-    mem: float = None
-    static_mem: float = None
-    rpc_name: str = None
-
-    def __post_init__(self):
-        self.rpc_name = model_rpc_name(self.rpc)
-
-    def __hash__(self):
-        return hash((self.rpc_name, self.device_mesh, self.parallel_strategy))
 
 
 class GroupedRPCExecutions:
@@ -119,9 +105,13 @@ def enumerate_rpc_executions(exp: ProfileExperiment, rpc: ModelRPC, device_mesh:
             mem_cost, static_mem = estimate_function_call_memory(rpc.interface_type, rpc.min_n_seqs,
                                                                  rpc.max_n_tokens // rpc.min_n_seqs,
                                                                  model_config, p)
+            mem_cost = int(mem_cost)
+            static_mem = int(static_mem)
             time_cost = estimate_rpc_cost(exp, rpc, model_config, p)
+            time_cost = int(time_cost)
             if mem_cost * 1.2 < GPU_MEM_CAP:
-                feasible.append(RPCExecution(rpc, sub_device_mesh, p, time_cost, mem_cost, static_mem))
+                rep_rpc = RPC(rpc)
+                feasible.append(RPCExecution(rep_rpc, sub_device_mesh, p, time_cost, mem_cost, static_mem))
     return feasible
 
 
@@ -131,7 +121,7 @@ def enumerate_model_device_mappings(exp: ProfileExperiment):
     avg_time_cost = []
     min_time_cost_sum = 0
 
-    for rpc in exp.model_rpcs:
+    for i, rpc in enumerate(exp.model_rpcs):
         model_type = exp.model_names_to_types[rpc.model_name]
         flash_mqat_config = load_model_config(exp.model_paths[exp.model_types.index(model_type)])
         feasible = enumerate_rpc_executions(exp, rpc, device_mesh, flash_mqat_config)
@@ -141,16 +131,20 @@ def enumerate_model_device_mappings(exp: ProfileExperiment):
 
         for rpc_exe in feasible[:10]:
             rpc_exe: RPCExecution
-            print(f"time_cost: {rpc_exe.time_cost/(1e3)} ms, "
+            print(f"time_cost: {rpc_exe.time_cost/(1e3)} ms, {rpc_exe.time_cost} "
                   f"sub_device_mesh: {rpc_exe.device_mesh}, "
                   f"parallel_strategy: {rpc_exe.parallel_strategy}, "
                   f"mem_cost: {rpc_exe.mem/(1024*1024*1024):02f} GB, "
                   f"static_mem_cost: {rpc_exe.static_mem/(1024*1024*1024):02f} GB")
+        print(
+            f"time cost sum {sum([x.time_cost for x in feasible][:10])} {sum([x.time_cost for x in feasible][:10]) / 10}"
+        )
 
         rpc_exe_table[model_rpc_name(rpc)] = feasible
-        avg_time_cost.append((sum([x.time_cost for x in feasible][:10]) / 10, model_rpc_name(rpc)))
+        avg_time_cost.append((sum([x.time_cost for x in feasible][:10]) / 10 + i, model_rpc_name(rpc)))
         min_time_cost_sum += feasible[0].time_cost
 
+    st = time.monotonic_ns()
     avg_time_cost.sort(key=lambda x: x[0], reverse=True)
     sorted_model_rpc_names = [x[1] for x in avg_time_cost]
     print(sorted_model_rpc_names)
@@ -159,93 +153,62 @@ def enumerate_model_device_mappings(exp: ProfileExperiment):
     valid_count = 0
     index = [0 for _ in range(len(exp.model_rpcs))]
     # prune by memory
+
+    add_time = 0
     while True:
         grouped_rpc_exe = GroupedRPCExecutions()
         time_cost_sum = 0
+        break_flag = False
+        bi = len(exp.model_rpcs) - 1
         for i in range(len(exp.model_rpcs)):
             rpc_name = sorted_model_rpc_names[i]
             rpc_exe: RPCExecution = rpc_exe_table[rpc_name][index[i]]
             time_cost_sum += rpc_exe.time_cost
-            if time_cost_sum > 1.5 * min_time_cost_sum:
-                break
+            # if time_cost_sum > 1.5 * min_time_cost_sum:
+            #     break
             # check overlap situation
+            t0 = time.monotonic_ns()
             grouped_rpc_exe.add(rpc_exe)
+            add_time += time.monotonic_ns() - t0
             inner_count += 1
             current_mem = grouped_rpc_exe.total_mem_cost()
             # if count % 10 == 0:
             #     print(f"{count} {index} {i} {current_mem/(1024*1024*1024):02f} GB")
             if current_mem > GPU_MEM_CAP * 1.2:  # offload space
+                break_flag = True
+                bi = i
                 break
-        else:
+
+        if not break_flag:
+            # if i != len(exp.model_rpcs) - 1:
+            #     print("!1")
             valid_count += 1
-            print(f"{index} {current_mem/(1024*1024*1024):02f} GB")
+            print(f"{index} {current_mem/(1024*1024):.2f} MB valid count {valid_count}")
 
         outer_loop_break_flag = True
-        while i >= 0:
-            if index[i] + 1 < len(rpc_exe_table[sorted_model_rpc_names[i]]):
-                index[i] += 1
+        while bi >= 0:
+            if index[bi] + 1 < len(rpc_exe_table[sorted_model_rpc_names[bi]]):
+                index[bi] += 1
                 outer_loop_break_flag = False
                 break
             else:
-                i -= 1
+                # if not break_flag:
+                #     # valid_count += 1
+                #     print(f"{index} {current_mem/(1024*1024):.2f} MB valid count {valid_count}")
+                bi -= 1
 
-        for j in range(i + 1, len(exp.model_rpcs)):
+        for j in range(bi + 1, len(exp.model_rpcs)):
             index[j] = 0
 
         count += 1
-        if outer_loop_break_flag:
+        if outer_loop_break_flag or inner_count >= 200000:
             print(f"index {index}, i {i}")
             break
 
-    print(valid_count)
-
-    # train and share back bone
-    # time_cost_list = []
-    # model_type = exp.model_names_to_types[actor_train.model_name]
-    # flash_mqat_config = load_model_config(exp.model_paths[exp.model_types.index(model_type)])
-    # feasible = enumerate_rpc(actor_train, device_mesh, flash_mqat_config)
-    # print(f"{model_rpc_name(actor_train)} feasible: {len(feasible)}")
-
-    # for sub_device_mesh, p, mem_cost in feasible:
-    #     time_cost = estimate_rpc_cost(exp, actor_train, flash_mqat_config, p)
-    #     time_cost_list.append((time_cost, sub_device_mesh, p, mem_cost))
-
-    # time_cost_list.sort(key=lambda x: x[0])
-    # for t, s, p, mem_cost in time_cost_list[:10]:
-    #     print(f"time_cost: {t}, sub_device_mesh: {s}, parallel_strategy: {p}, "
-    #           f"mem_cost: {mem_cost/(1024*1024*1024):02f} GB")
-    #     mem_cost =  estimate_function_call_memory(actor_generate.interface_type,
-    #                                               actor_generate.min_n_seqs,
-    #                                               actor_generate.max_n_tokens // actor_generate.min_n_seqs,
-    #                                               flash_mqat_config,
-    #                                               p)
-    #     time_cost = estimate_rpc_cost(exp, actor_generate, flash_mqat_config, p)
-    #     print(f"share backbone generate: time_cost {time_cost} "
-    #           f"mem_cost {mem_cost/(1024*1024*1024):02f}")
-
-    # # generate and share backbone
-    # time_cost_list = []
-    # model_type = exp.model_names_to_types[actor_generate.model_name]
-    # flash_mqat_config = load_model_config(exp.model_paths[exp.model_types.index(model_type)])
-    # feasible = enumerate_rpc(actor_generate, device_mesh, flash_mqat_config)
-    # print(f"{model_rpc_name(actor_generate)} feasible: {len(feasible)}")
-
-    # for sub_device_mesh, p, mem_cost in feasible:
-    #     time_cost = estimate_rpc_cost(exp, actor_generate, flash_mqat_config, p)
-    #     time_cost_list.append((time_cost, sub_device_mesh, p, mem_cost))
-
-    # time_cost_list.sort(key=lambda x: x[0])
-    # for t, s, p, mem_cost in time_cost_list[:10]:
-    #     print(f"time_cost: {t}, sub_device_mesh: {s}, parallel_strategy: {p}, "
-    #           f"mem_cost: {mem_cost/(1024*1024*1024):02f} GB")
-    #     mem_cost =  estimate_function_call_memory(actor_train.interface_type,
-    #                                               actor_train.min_n_seqs,
-    #                                               actor_train.max_n_tokens // actor_train.min_n_seqs,
-    #                                               flash_mqat_config,
-    #                                               p)
-    #     time_cost = estimate_rpc_cost(exp, actor_train, flash_mqat_config, p)
-    #     print(f"share backbone generate: time_cost {time_cost}, "
-    #           f"mem_cost {mem_cost/(1024*1024*1024):02f} GB")
+    print(
+        f"time cost {(time.monotonic_ns() - st)/1e9:.3f} s to search {valid_count} valid mappings, count {count}, inner count {inner_count}"
+    )
+    print(f"add time {add_time/1e9:.3f} s")
 
 
 if __name__ == "__main__":
