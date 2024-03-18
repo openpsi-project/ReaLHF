@@ -1,4 +1,5 @@
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+import collections
 import dataclasses
 import enum
 import itertools
@@ -68,14 +69,12 @@ class ModelRPC:
     input_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
     output_data: List[str] = dataclasses.field(default_factory=lambda: [])
     output_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
-
-    dp_broker_type: str = "packed"
-
     log_return_value: bool = False
 
     min_n_seqs_per_dp: int = 1
     balanced_dp: bool = False
 
+    # batch sizes
     min_n_seqs: int = 1
     max_n_seqs: int = 1024
     min_n_tokens: int = 1
@@ -83,10 +82,11 @@ class ModelRPC:
 
     max_concurrent_calls: int = 1
 
+    # hooks
     pre_hooks: List[RPCHook] = dataclasses.field(default_factory=lambda: [])
     post_hooks: List[RPCHook] = dataclasses.field(default_factory=lambda: [])
 
-    # Will be automatically filled.
+    # The followings will be automatically filled.
     max_min_flow_seqs: int = 1
     max_min_flow_tokens: int = 1
 
@@ -95,6 +95,11 @@ class ModelRPC:
 
     parent_rpcs: List["ModelRPC"] = dataclasses.field(default_factory=lambda: [])
     children_rpcs: List["ModelRPC"] = dataclasses.field(default_factory=lambda: [])
+
+    # data key -> model name
+    data_producers: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
+    # data key -> rpc names
+    data2required_rpc_names: Dict[str, List[str]] = dataclasses.field(default_factory=lambda: {})
 
     def __post_init__(self):
         if self.min_n_seqs >= self.max_n_seqs or self.min_n_tokens >= self.max_n_tokens:
@@ -105,6 +110,9 @@ class ModelRPC:
                 f"The maximum number of sequences is {self.max_n_seqs} > budget {int(1e4)} and "
                 f"the maximum number of tokens is {self.max_n_tokens} > budget {int(1e8)}. "
                 "Please set a smaller value.")
+
+    def __repr__(self):
+        return f"ModelRPC({self.model_name}, {self.interface_type})"
 
     @property
     def name(self):
@@ -152,7 +160,7 @@ class ModelRPC:
         return namedarray.from_dict(res_data)
 
 
-def build_graph(rpcs: List[ModelRPC]) -> Tuple[List[ModelRPC], List[List[Tuple[str]]]]:
+def build_graph(rpcs: List[ModelRPC], verbose: bool = False) -> Tuple[List[ModelRPC], List[List[Tuple[str]]]]:
     # Resolve dependencies between model interfaces.
     children: List[List[str]] = [[] for _ in rpcs]
     parents: List[List[str]] = [[] for _ in rpcs]
@@ -168,6 +176,14 @@ def build_graph(rpcs: List[ModelRPC]) -> Tuple[List[ModelRPC], List[List[Tuple[s
             *generated_data_entries[i],
             *[k if k not in rpc.output_key_remap else rpc.output_key_remap[k] for k in rpc.output_data],
         )
+    data_producers = {}
+    for rpc, gd in zip(rpcs, generated_data_entries):
+        for k in gd:
+            data_producers[k] = rpc.model_name
+    data2required_rpc_names = collections.defaultdict(list)
+    for rpc, data_keys in zip(rpcs, required_data_entries):
+        for k in data_keys:
+            data2required_rpc_names[k].append(rpc.name)
 
     for i, rpc in enumerate(rpcs):
         for k in required_data_entries[i]:
@@ -182,11 +198,13 @@ def build_graph(rpcs: List[ModelRPC]) -> Tuple[List[ModelRPC], List[List[Tuple[s
                         children[j].append(rpc.name)
                         children_rpcs[j].append(rpc)
                     edges[i][j] = (*edges[i][j], k)
-                    logger.info(
-                        f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`.")
-    for i, rpc in enumerate(rpcs):
-        logger.info(
-            f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }.")
+                    if verbose:
+                        logger.info(
+                            f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`.")
+    if verbose:
+        for i, rpc in enumerate(rpcs):
+            logger.info(
+                f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }.")
     for rpc, p, c, pr, cr in zip(rpcs, parents, children, parent_rpcs, children_rpcs):
         rpc.parents = p
         rpc.children = c
@@ -196,6 +214,8 @@ def build_graph(rpcs: List[ModelRPC]) -> Tuple[List[ModelRPC], List[List[Tuple[s
     for rpc in rpcs:
         rpc.max_min_flow_seqs = max([r.min_n_seqs for r in rpcs if r.model_name == rpc.model_name])
         rpc.max_min_flow_tokens = max([r.min_n_tokens for r in rpcs if r.model_name == rpc.model_name])
+        rpc.data_producers = data_producers
+        rpc.data2required_rpc_names = data2required_rpc_names
 
     # sanity check of hooks
     for rpc in rpcs:

@@ -156,7 +156,6 @@ class SFTConfig(Experiment):
             interface_impl=interface,
             model_type=ModelType("llama", 7, False),
             input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
-            dp_broker_type="packed",
             log_return_value=True,
             min_n_tokens=100000,
             max_n_tokens=131072,

@@ -1,7 +1,7 @@
 # Request-reply stream between model workers and the master worker.
 # The stream is composed of a pair of ZMQ sockets, one PUSH and one PULL, for asynchronous communication,
 # i.e., the model worker can buffer requests from the master and execute them in any order under the hood.
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import asyncio
 import dataclasses
 import pickle
@@ -34,7 +34,6 @@ class NoMessage(Exception):
 class Payload:
     handler: Union[api.config.config_system.ModelShardID, str]
     handle_name: str
-    is_tensor: bool = False
 
     request_id: uuid.UUID = None
     ack_reply_id: uuid.UUID = None
@@ -45,9 +44,6 @@ class Payload:
     data: Any = None
 
     # Specs of tensor data. Tensors will be trasnferred with NCCL.
-    dtypes: Optional[Dict[str, str]] = None
-    buf_shapes: Optional[Dict[str, List[int]]] = None
-    actual_shapes: Optional[Dict[str, List[int]]] = None
     buffer_indices: Optional[List[int]] = None
     seqlens: Optional[List[int]] = None
 
@@ -120,11 +116,6 @@ class IpRequestClient(RequestReplyStream):
 
     def post(self, payload: Payload) -> uuid.UUID:
         assert payload.request_id is not None and payload.handle_name is not None
-        if payload.is_tensor:
-            assert payload.data is None
-            assert payload.dtypes is not None
-            assert payload.actual_shapes is not None
-            assert payload.buf_shapes is not None
         payload.send_time = time.monotonic()
         self.send_socket.send_multipart([str(payload.handler).encode("utf-8"), pickle.dumps(payload)])
         return payload.request_id
@@ -213,11 +204,6 @@ class IpReplyServer(RequestReplyStream):
 
     def post(self, payload: Payload) -> uuid.UUID:
         assert payload.request_id is not None and payload.handle_name is not None
-        if payload.is_tensor:
-            assert payload.data is None
-            assert payload.dtypes is not None
-            assert payload.actual_shapes is not None
-            assert payload.buf_shapes is not None
         payload.send_time = time.monotonic()
         self.send_socket.send(pickle.dumps(payload))
         return payload.request_id

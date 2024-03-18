@@ -23,14 +23,13 @@ from api.config.config_flash_model import FlashMQATConfig
 from base.asyncio_utils import raise_asyncio_exception, setup_run_until_complete, teardown_run_util_complete
 from base.buffer import AsyncIOSequenceBuffer
 from base.cluster import spec as cluster_spec
-from base.constants import GlobalMemoryBuffer, MODEL_SAVE_ROOT
+from base.constants import MODEL_SAVE_ROOT
 import api.config.config_system as config_pkg
 import api.config.dfg
 import api.data as data_api
 import api.model as model_api
-import base.constants
+import base.datapack as datapack
 import base.dataparallel as dataparallel
-import base.gpu_utils as gpu_utils
 import base.logging as logging
 import base.namedarray as namedarray
 import base.numpy_utils
@@ -42,6 +41,25 @@ import system.worker_base as worker_base
 
 logger = logging.getLogger("master worker", "system")
 blogger = logging.getLogger("benchmark")
+
+
+def _get_n_seqs_from_batch_sample(sample: namedarray.NamedArray) -> int:
+    assert ("input_lens" in sample.keys() or "cu_seqlens" in sample.keys()
+            or "prompt_cu_seqlens" in sample.keys() or "prompt_lens" in sample.keys()), (
+                list(sample.keys()),
+                sample,
+            )
+    if "input_lens" in sample.keys():
+        return len(sample["input_lens"])
+    elif "cu_seqlens" in sample.keys():
+        return len(sample["cu_seqlens"]) - 1
+    # NOTE: The order matters. We should first try to get the length of the generated text rather than prompts.
+    elif "prompt_lens" in sample.keys():
+        return len(sample["prompt_lens"])
+    elif "prompt_cu_seqlens" in sample.keys():
+        return len(sample["prompt_cu_seqlens"]) - 1
+    else:
+        raise NotImplementedError(f"Unknown seqlens keys: {list(sample.keys())}.")
 
 
 class ExperimentComplete(Exception):
@@ -65,7 +83,6 @@ def request_all(
         request_reply_stream.Payload(
             handler=handler,
             handle_name=handle_type,
-            is_tensor=False,
             data=data,
         ) for handler, data in zip(handlers, datas)
     ]
@@ -127,6 +144,7 @@ async def group_rpc_blocked(
 def split_packed_batch_into_seqs(
     sample: namedarray.NamedArray,
     input_lens: Optional[torch.Tensor] = None,
+    return_seqlens: bool = False,
 ) -> List[namedarray.NamedArray]:
     if input_lens is None:
         if "input_lens" in sample:
@@ -140,9 +158,13 @@ def split_packed_batch_into_seqs(
 
     partitions = [(i, i + 1) for i in range(input_lens.shape[0])]
     sample["input_lens"] = input_lens
-    return dataparallel.PackedParallelDataBroker.scatter_to(sample,
-                                                            n_dp=len(input_lens),
-                                                            partitions=partitions)
+    res = dataparallel.PackedParallelDataBroker.scatter_to(sample,
+                                                           n_dp=len(input_lens),
+                                                           partitions=partitions)
+    if not return_seqlens:
+        return res
+    else:
+        return res, input_lens
 
 
 def handle_rpc_hook(
@@ -245,100 +267,75 @@ class RPCCorountineControl:
     request_queues: Dict[str, List[asyncio.Queue]]
 
 
-async def scatter_tensor_to_mws(
+def scatter_tensor_to_mws(
     rpc: api.config.dfg.ModelRPC,
     stream: request_reply_stream.RequestReplyStream,
+    msid2mwid: Dict[config_pkg.ModelShardID, int],
+    producer_names: Dict[str, str],
+    producer_name2producer_handlers: Dict[str, List[config_pkg.ModelShardID]],
+    producer_mappings: Dict[str, Dict[str, List[int]]],
+    target_mapping: Dict[str, List[int]],
+    buffer_indices: List[int],
+    seqlens: List[int],
     handlers: List[config_pkg.ModelShardID],
-    handler_mw_ids: List[int],
-    scatter_groups: List[torch.distributed.ProcessGroup],
-    data_replica_ids: List[int],
-    datas: List[namedarray.NamedArray],
-    all_buffer_indices: List[List[int]],
-    all_seqlens: List[List[int]],
 ) -> List[uuid.UUID]:
-    assert len(handler_mw_ids) == len(handlers) == len(datas) == len(all_buffer_indices) == len(all_seqlens)
+
+    dt_data = {
+        "keys": rpc.input_data,
+        "target": rpc.model_name,
+        "producer_names": producer_names,
+        "producer_mappings": producer_mappings,
+        "target_mapping": target_mapping,
+        "handle_name": rpc.interface_type.value,
+        "input_key_remap": rpc.input_key_remap,
+        "output_key_remap": rpc.output_key_remap,
+        "rpc_name": rpc.name,
+    }
+
+    all_handlers = copy.deepcopy(handlers)
+    all_handler_mwids = set([msid2mwid[h] for h in all_handlers])
+    for producer_name in producer_names.values():
+        for h in producer_name2producer_handlers[producer_name]:
+            if msid2mwid[h] not in all_handler_mwids:
+                all_handlers.append(h)
+                all_handler_mwids.add(msid2mwid[h])
+
+    dt_request_ids = []
+    for handler in all_handlers:
+        req = request_reply_stream.Payload(
+            handler=handler,
+            handle_name="data_transfer",
+            buffer_indices=buffer_indices,
+            seqlens=seqlens,
+            data=dt_data,
+        )
+        dt_request_ids.append(stream.post(req))
+
+    # logger.info(f"Waiting for ack from stage {pp_rank}")
+    # Wait for the ack message from model worker
+    [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in dt_request_ids]
 
     request_ids = []
-    for scatter_group in scatter_groups:
-        # Get handlers and datas belonging to this scatter group.
-        assert all(torch.distributed.get_rank(scatter_group) != -1 for scatter_group in scatter_groups)
-        # Since master must belong to all scatter groups, it is safe to call get_process_group_ranks here.
-        scatter_mw_ids = [r - 1 for r in torch.distributed.get_process_group_ranks(scatter_group)]
-        handler_indices = list(
-            map(lambda x: x[0], filter(lambda ix: ix[1] in scatter_mw_ids, enumerate(handler_mw_ids))))
-
-        this_handlers = [handlers[i] for i in handler_indices]
-        this_datas = [datas[i] for i in handler_indices]
-        this_all_buffer_indices = [all_buffer_indices[i] for i in handler_indices]
-        this_all_seqlens = [all_seqlens[i] for i in handler_indices]
-        this_replica_ids = [data_replica_ids[i] for i in handler_indices]
-
-        dtypes = {k: v.dtype for k, v in this_datas[0].items()}
-        all_shapes = [{k: v.shape for k, v in data.items()} for data in this_datas]
-        buf_shapes = {}
-        for k in dtypes:
-            buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s[k]) for s in all_shapes])
-
-        ack_ids = []
-        for handler, shapes, buffer_indices, seqlens in zip(this_handlers, all_shapes,
-                                                            this_all_buffer_indices, this_all_seqlens):
-            req = request_reply_stream.Payload(
-                handler=handler,
-                handle_name=rpc.interface_type.value,
-                actual_shapes=shapes,
-                buf_shapes=buf_shapes,
-                dtypes=dtypes,
-                is_tensor=True,
-                buffer_indices=buffer_indices,
-                seqlens=seqlens,
-            )
-            request_ids.append(stream.post(req))
-            ack_ids.append(req.ack_reply_id)
-
-        # logger.info(f"Waiting for ack from stage {pp_rank}")
-        # Wait for the ack message from model worker
-        [stream.poll(pattern=create_exact_match_pattern([ack_id]), block=True) for ack_id in ack_ids]
-        # await asyncio.gather(
-        #     *[_awaitable_response(stream, pattern=create_exact_match_pattern([ack_id])) for ack_id in ack_ids]
-        # )
-        # logger.info(f"Scatter data to stage {pp_rank}")
-
-        for (k, buf_shape), dtype in zip(buf_shapes.items(), dtypes.values()):
-            scatter_buffer = dict(master=base.constants.get_global_memory_buffer().get_tensor(
-                buf_shape, dtype, name=f"scatter_gather_master"))
-            for j in this_replica_ids:
-                scatter_buffer[f"data{j}"] = base.constants.get_global_memory_buffer().get_tensor(
-                    buf_shape, dtype, name=f"scatter_gather_dp{j}")
-            copied_replica_ids = []
-            for data, replica_id in zip(this_datas, this_replica_ids):
-                if replica_id in copied_replica_ids:
-                    continue
-                buf = scatter_buffer[f"data{replica_id}"]
-                v = data[k]
-                s = tuple(slice(0, x) for x in v.shape)
-                buf[s] = v
-                copied_replica_ids.append(replica_id)
-
-            scatter_list = [scatter_buffer["master"]] + [scatter_buffer[f"data{j}"] for j in this_replica_ids]
-
-            # Scatter to dp_rank=*, pp_rank=pp_rank, mp_rank=*
-            torch.distributed.scatter(
-                scatter_list[0],
-                scatter_list=scatter_list,
-                src=0,
-                group=scatter_group,
-            )
+    for handler in handlers:
+        req = request_reply_stream.Payload(
+            handler=handler,
+            handle_name=rpc.interface_type.value,
+            buffer_indices=buffer_indices,
+            seqlens=seqlens,
+        )
+        request_ids.append(stream.post(req))
 
     return request_ids
 
 
 async def model_rpc_request_func(
     rpc: api.config.dfg.ModelRPC,
+    msid2mwid: Dict[config_pkg.ModelShardID, int],
+    src_rpc_model_name: str,
     pre_hook_counters: List[int],
     stream: request_reply_stream.RequestReplyStream,
-    scatter_groups: List[torch.distributed.ProcessGroup],
-    msid2mwid: Dict[config_pkg.ModelShardID, int],
     buffer: AsyncIOSequenceBuffer,
+    data_owner: Dict[Tuple[int, str], Tuple[str, int]],
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
     model_configs: Dict[str, None | FlashMQATConfig],
     ctrl: RPCCorountineControl,
@@ -348,7 +345,24 @@ async def model_rpc_request_func(
         config_pkg.ModelShardID.from_parallelism_rank(rpc.model_name, topo, j)
         for j in range(topo.world_size())
     ]
-    handler_mw_ids = [msid2mwid[h] for h in handlers]
+
+    producer_names = {}  # data key -> model name
+    for k in rpc.input_data:
+        if k in rpc.data_producers:
+            producer_names[k] = rpc.data_producers[k]
+        else:
+            producer_names[k] = src_rpc_model_name
+    keys_to_send = defaultdict(list)  # model name -> List[keys] to send
+    for k in producer_names:
+        keys_to_send[producer_names[k]].append(k)
+
+    # convert producer model name to ModelShardID
+    producer_name2producer_handlers = {}
+    for producer_name in keys_to_send:
+        producer_name2producer_handlers[producer_name] = [
+            config_pkg.ModelShardID.from_parallelism_rank(producer_name, model_topos[producer_name], j)
+            for j in range(model_topos[producer_name].world_size())
+        ]
 
     can_do_rpc = ctrl.can_do_rpc[rpc.name]
     request_queues = ctrl.request_queues[rpc.name]
@@ -372,28 +386,37 @@ async def model_rpc_request_func(
         dp_size = topo.get_dim("data")
         if rpc.balanced_dp:
             assert len(sample.seqlens) % dp_size == 0
-            min_n_seqes_per_dp = len(sample.seqlens) // dp_size
+            min_n_seqs_per_dp = len(sample.seqlens) // dp_size
         else:
-            min_n_seqes_per_dp = 1
-        datas, n_seqs = dataparallel.get_broker(rpc.dp_broker_type).scatter_to(
-            sample.data,
-            dp_size,
-            min_size=min_n_seqes_per_dp,
-            return_sizes=True,
-        )
-        all_buffer_indices = []
-        all_seqlens = []
-        offset = 0
-        for n_seq in n_seqs:
-            all_buffer_indices.append(sample.indices[offset:offset + n_seq])
-            all_seqlens.append(sample.seqlens[offset:offset + n_seq])
-            offset += n_seq
+            min_n_seqs_per_dp = 1
+        partitions = datapack.min_abs_diff_partition(np.array(sample.seqlens, dtype=np.int32),
+                                                     dp_size,
+                                                     min_size=min_n_seqs_per_dp)
+        target_mapping = {i: list(range(v[0], v[1])) for i, v in enumerate(partitions)}
 
-        # replicate data for each model shard
-        data_replica_ids = [topo.get_coord(j).data for j in range(topo.world_size())]
-        datas = [datas[topo.get_coord(j).data] for j in range(topo.world_size())]
-        all_buffer_indices = [all_buffer_indices[topo.get_coord(j).data] for j in range(topo.world_size())]
-        all_seqlens = [all_seqlens[topo.get_coord(j).data] for j in range(topo.world_size())]
+        # Set data owner of produced data by this RPC, such that downstream RPCs can know
+        # whether to fetch these data.
+        for dp_idx, (st, ed) in enumerate(partitions):
+            for i in range(st, ed):
+                for k in rpc.output_data:
+                    if k in rpc.output_key_remap:
+                        k = rpc.output_key_remap[k]
+                    data_owner[sample.indices[i], k] = (rpc.model_name, dp_idx)
+
+        # Get the data owner of this RPC's input data.
+        producer_mappings: Dict[Tuple[str, str], List[Tuple[int, int]]] = {}
+        for k in rpc.input_data:
+            names, dp_indices = [], []
+            for buf_idx in sample.indices:
+                owner_name, dp_idx = data_owner[(buf_idx, k)]
+                names.append(owner_name)
+                dp_indices.append(dp_idx)
+            assert len(set(names)) == 1
+            producer_mapping = defaultdict(list)
+            for i, dp_idx in enumerate(dp_indices):
+                producer_mapping[dp_idx].append(i)
+            producer_mapping = {k: sorted(v) for k, v in producer_mapping.items()}
+            producer_mappings[names[0], k] = producer_mapping
 
         for i, pre_hook in enumerate(rpc.pre_hooks):
             handle_rpc_hook(
@@ -407,114 +430,21 @@ async def model_rpc_request_func(
             pre_hook_counters[i] += 1
 
         # send partitioned data to model workers
-        req_ids = await scatter_tensor_to_mws(
+        req_ids = scatter_tensor_to_mws(
             rpc=rpc,
             stream=stream,
+            msid2mwid=msid2mwid,
+            producer_names=producer_names,
+            producer_name2producer_handlers=producer_name2producer_handlers,
+            producer_mappings=producer_mappings,
+            target_mapping=target_mapping,
+            buffer_indices=sample.indices,
+            seqlens=sample.seqlens,
             handlers=handlers,
-            handler_mw_ids=handler_mw_ids,
-            scatter_groups=scatter_groups,
-            data_replica_ids=data_replica_ids,
-            datas=datas,
-            all_buffer_indices=all_buffer_indices,
-            all_seqlens=all_seqlens,
         )
         await request_queues[response_coroutine_idx].put((req_ids, time.perf_counter()))
         response_coroutine_idx = (response_coroutine_idx + 1) % len(request_queues)
         logger.info(f"Model rpc {rpc.name} requested.")
-
-
-async def gather_tensor_from_mws(
-    rpc: api.config.dfg.ModelRPC,
-    stream: request_reply_stream.RequestReplyStream,
-    req_ids: List[uuid.UUID],
-    dp_head_indices: List[int],
-    dp_head_mw_ids: List[int],
-    dp_head_handlers: List[config_pkg.ModelShardID],
-    gather_groups: List[torch.distributed.ProcessGroup],
-) -> Tuple[List[request_reply_stream.Payload], Union[dict, namedarray.NamedArray]]:
-    # logger.info(f"rpc {rpc.name} waiting for responses {req_ids}")
-    responses = await asyncio.gather(
-        *[_awaitable_response(stream, pattern=create_exact_match_pattern([req_id])) for req_id in req_ids])
-    # logger.info(f"rpc {rpc.name} received responses {req_ids}")
-
-    responses = [responses[i] for i in dp_head_indices]
-    recv_tik = time.perf_counter()
-
-    if not responses[-1].is_tensor:
-        res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(
-            [response.data for response in responses])
-        # logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
-        return responses, res
-
-    assert all(len(r.buf_shapes) == 0 for r in responses)
-    buf_shapes = {}
-    for k in responses[0].dtypes.keys():
-        buf_shapes[k] = base.numpy_utils.shape_union(*[tuple(s.actual_shapes[k]) for s in responses])
-
-    all_res = [dict() for _ in range(len(responses))]
-    for gather_group in gather_groups:
-        assert all(torch.distributed.get_rank(gather_group) != -1 for gather_group in gather_groups)
-        gather_mw_ids = [r - 1 for r in torch.distributed.get_process_group_ranks(gather_group)]
-
-        gather_response_indices = [i for i, mw_id in enumerate(dp_head_mw_ids) if mw_id in gather_mw_ids]
-        this_responses = [responses[i] for i in gather_response_indices]
-        this_handlers = [dp_head_handlers[i] for i in gather_response_indices]
-        this_request_indices = [dp_head_indices[i] for i in gather_response_indices]
-        dtypes = this_responses[-1].dtypes
-
-        gather_requests = [
-            request_reply_stream.Payload(
-                handler=h,
-                handle_name="gather_tensor_reply",
-                actual_shapes=None,
-                buf_shapes=buf_shapes,
-                dtypes=None,
-                is_tensor=False,
-                data=req_ids[j],
-            ) for h, j in zip(this_handlers, this_request_indices)
-        ]
-        [stream.post(x) for x in gather_requests]
-        gather_ack_ids = [r.ack_reply_id for r in gather_requests]
-
-        # wait for the ack message from model workers
-        # await asyncio.gather(
-        #     *[
-        #         _awaitable_response(stream, pattern=create_exact_match_pattern([ack_id]))
-        #         for ack_id in gather_ack_ids
-        #     ]
-        # )
-        [stream.poll(pattern=create_exact_match_pattern([ack_id]), block=True) for ack_id in gather_ack_ids]
-
-        for k, buf_shape in buf_shapes.items():
-            gather_buffer = [
-                base.constants.get_global_memory_buffer().get_tensor(
-                    buf_shape, dtypes[k], name="scatter_gather_master")
-            ] + [
-                base.constants.get_global_memory_buffer().get_tensor(
-                    buf_shape, dtypes[k], name=f"scatter_gather_dp{i}") for i in gather_response_indices
-            ]
-
-            # Only gather from DP heads, ignoring the MP/PP dimension.
-            torch.distributed.gather(
-                gather_buffer[0],
-                gather_list=gather_buffer,
-                dst=0,
-                group=gather_group,
-            )
-
-            assert len(this_responses) == len(gather_response_indices) == len(gather_buffer) - 1
-            for idx, v, actual_shape in zip(
-                    gather_response_indices,
-                    gather_buffer[1:],
-                [r.actual_shapes[k] for r in this_responses],
-            ):
-                s = tuple(slice(0, x) for x in actual_shape)
-                all_res[idx][k] = v[s].clone()
-
-    # logger.info(f"rpc {rpc.name} finished tensor gather {req_ids}")
-    res = dataparallel.get_broker(rpc.dp_broker_type).gather_from(list(map(namedarray.from_dict, all_res)))
-    # logger.info(f"Master worker return from model worker time: {time.perf_counter() - recv_tik:.4f}s")
-    return responses, rpc.remap_output_keys(res)
 
 
 async def model_rpc_reply_func(
@@ -522,8 +452,6 @@ async def model_rpc_reply_func(
     rpc: api.config.dfg.ModelRPC,
     post_hook_counters: List[int],
     stream: request_reply_stream.RequestReplyStream,
-    gather_groups: List[torch.distributed.ProcessGroup],
-    msid2mwid: Dict[config_pkg.ModelShardID, int],
     buffer: AsyncIOSequenceBuffer,
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
     model_configs: Dict[str, None | FlashMQATConfig],
@@ -532,10 +460,6 @@ async def model_rpc_reply_func(
     topo = model_topos[rpc.model_name]
     dp_size = topo.get_dim("data")
     dp_head_indices = [topo.get_rank(data=i, pipe=topo.get_dim("pipe") - 1, model=0) for i in range(dp_size)]
-    dp_head_mw_ids = [
-        msid2mwid[config_pkg.ModelShardID.from_parallelism_rank(rpc.model_name, topo, i)]
-        for i in dp_head_indices
-    ]
     dp_head_handlers = [
         config_pkg.ModelShardID.from_parallelism_rank(rpc.model_name, topo, i) for i in dp_head_indices
     ]
@@ -546,15 +470,24 @@ async def model_rpc_reply_func(
     while not ctrl.stop.is_set():
         req_ids, tik = await request_queue.get()
 
-        responses, res = await gather_tensor_from_mws(
-            rpc=rpc,
-            stream=stream,
-            req_ids=req_ids,
-            dp_head_indices=dp_head_indices,
-            dp_head_mw_ids=dp_head_mw_ids,
-            dp_head_handlers=dp_head_handlers,
-            gather_groups=gather_groups,
-        )
+        responses = await asyncio.gather(
+            *
+            [_awaitable_response(stream, pattern=create_exact_match_pattern([req_id])) for req_id in req_ids])
+        # logger.info(f"rpc {rpc.name} received responses {req_ids}")
+
+        responses: List[request_reply_stream.Payload] = [responses[i] for i in dp_head_indices]
+        recv_tik = time.perf_counter()
+
+        if responses[-1].seqlens is None:
+            assert responses[-1].buffer_indices is None
+            res = dataparallel.PackedParallelDataBroker.gather_from([response.data for response in responses])
+        else:
+            res = []
+            for k in responses[0].data:
+                if k in rpc.output_key_remap:
+                    res.append(rpc.output_key_remap[k])
+                else:
+                    res.append(k)
 
         if rpc.log_return_value:
             logger.info(f"RPC name {rpc.name} returns {res}")
@@ -567,16 +500,10 @@ async def model_rpc_reply_func(
         if rpc.is_dst:
             await ctrl.train_count.put(1)
         else:
-            assert responses[0].is_tensor
-            if "input_lens" in res:
-                seqlens = res["input_lens"]
-            elif "cu_seqlens" in res:
-                seqlens = res["cu_seqlens"][1:] - res["cu_seqlens"][:-1]
-            else:
-                seqlens = torch.from_numpy(np.concatenate([r.seqlens for r in responses]))
-            buffer_indices = torch.from_numpy(np.concatenate([r.buffer_indices for r in responses]))
-            xs = split_packed_batch_into_seqs(res, input_lens=seqlens)
-            await buffer.amend_batch(buffer_indices, xs)
+            buffer_indices = sum([response.buffer_indices for response in responses], [])
+            keys = res
+            seqlens = sum([response.seqlens for response in responses], [])
+            await buffer.amend_batch(buffer_indices, [(keys, seqlen) for seqlen in seqlens])
 
         for i, post_hook in enumerate(rpc.post_hooks):
             handle_rpc_hook(
@@ -593,7 +520,10 @@ async def model_rpc_reply_func(
 
 
 async def load_data_func(
+    src_rpc_dp_size: int,
+    src_rpc_model_name: str,
     buffer: AsyncIOSequenceBuffer,
+    data_owner: Dict[Tuple[int, str], Tuple[str, int]],
     stream: request_reply_stream.RequestReplyStream,
     fetch_ctl: asyncio.Queue,
     stop_ctl: asyncio.Event,
@@ -607,14 +537,11 @@ async def load_data_func(
         while cur_epoch is None or cur_epoch == latest_epoch:
             data_batches: List[data_api.DataBatch] = await group_rpc_blocked(
                 stream,
-                handlers=["__data__"],
+                handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
                 handle_type="fetch",
-                datas=[None],
+                datas=[None for _ in range(src_rpc_dp_size)],
                 verbose=False,
             )
-            assert len(set(x.epoch for x in data_batches)) == 1
-            assert len(set(x.epoch_step for x in data_batches)) == 1
-            assert len(set(x.global_step for x in data_batches)) == 1
 
             # Update counters. All starting from 0.
             if cur_epoch is None:
@@ -624,9 +551,29 @@ async def load_data_func(
 
             # Merge fetched data. We assume fetched data is a flattened dict.
             datas = [x.data for x in data_batches]
+            n_seqs = [_get_n_seqs_from_batch_sample(d) for d in datas]
             sample = dataparallel.ParallelDataBroker.gather_from([namedarray.from_dict(x) for x in datas])
-            xs = split_packed_batch_into_seqs(sample)
-            await buffer.put_batch(xs)
+            xs, seqlens = split_packed_batch_into_seqs(sample, return_seqlens=True)
+            buffer_indices = await buffer.put_batch([(list(x.keys()), seqlen)
+                                                     for x, seqlen in zip(xs, seqlens)])
+            assert len(buffer_indices) == sum(n_seqs)
+
+            for dp_i, (st, ed) in enumerate(
+                    zip([0] + list(itertools.accumulate(n_seqs)), itertools.accumulate(n_seqs))):
+                for buf_idx in buffer_indices[st:ed]:
+                    for k in sample.keys():
+                        data_owner[(buf_idx, k)] = (src_rpc_model_name, dp_i)
+
+            await group_rpc_blocked(
+                stream,
+                handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
+                handle_type="store",
+                datas=[
+                    buffer_indices[st:ed]
+                    for st, ed in zip([0] + list(itertools.accumulate(n_seqs)), itertools.accumulate(n_seqs))
+                ],
+                verbose=False,
+            )
 
         async with buffer.lock:
             buffer.lock.notify(buffer.n_rpcs)
@@ -665,22 +612,6 @@ async def model_save_thread_func(
 class MasterWorker(worker_base.Worker):
     os.makedirs(MODEL_SAVE_ROOT, exist_ok=True)
 
-    def __init__(self, server=None):
-        super().__init__(server)
-        self.__initialized = False
-
-        self._data_registry = {}
-
-        self._epoch = -1
-        self._epoch_step = self._global_step = 0
-
-        self._train_start_time = None
-        self.__exp_complete_msg = None
-
-        # for benchmark
-        self.e2e_time_history = []
-        self.level_time_history = defaultdict(list)
-
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
 
@@ -691,7 +622,12 @@ class MasterWorker(worker_base.Worker):
         for rpc in self.__model_rpcs:
             _dp_size = self.__model_topos[rpc.model_name].get_dim("data")
             _pp_size = self.__model_topos[rpc.model_name].get_dim("pipe")
-            rpc.min_n_seqs = max(rpc.min_n_seqs, _dp_size * _pp_size)
+            if rpc.min_n_seqs < _dp_size * _pp_size:
+                logger.warning(f"The batch size of RPC `{rpc.name}` in terms of #seqs is smaller than "
+                               f"dp_size * pp_size ({_dp_size}*{_pp_size}). Forcely enlarge the batch size "
+                               f"to {_dp_size * _pp_size} (dp_size * pp_size). (original: {rpc.min_n_seqs})")
+                rpc.min_n_seqs_per_dp = 1
+                rpc.min_n_seqs = _dp_size * _pp_size
 
         self.__rpc_srcs = list(filter(lambda rpc: rpc.is_src, self.__model_rpcs))
         self.__rpc_dsts = list(filter(lambda rpc: rpc.is_dst, self.__model_rpcs))
@@ -718,13 +654,13 @@ class MasterWorker(worker_base.Worker):
         )
         os.makedirs(self.MODEL_SAVE_ROOT, exist_ok=True)
 
-        gpu_utils.reveal_ddp_identity(
-            expr_name=self.config.worker_info.experiment_name,
-            trial_name=self.config.worker_info.trial_name,
-            worker_index=0,
-        )
+        self.__initialized = False
+        self._epoch = -1
+        self._epoch_step = self._global_step = 0
 
-        # Used only for benchmark
+        # for benchmark
+        self.e2e_time_history = []
+        self.level_time_history = defaultdict(list)
         self.__benchmark_steps = config.exp_ctrl.benchmark_steps
 
         return config.worker_info
@@ -733,48 +669,16 @@ class MasterWorker(worker_base.Worker):
         # Set up streams.
         self.__stream = request_reply_stream.make_master_stream(
             self.config.worker_info,
-            n_subscribers=self.config.n_model_workers + 1,  # all model workers and data worker
+            n_subscribers=self.config.n_model_workers,
         )
         self.__stream: request_reply_stream.RequestReplyStream
 
-        # Set up the global process group.
-        self.__pg_info = gpu_utils.setup_ddp(
-            expr_name=self.config.worker_info.experiment_name,
-            trial_name=self.config.worker_info.trial_name,
-            worker_index=0,
-            model_topos=self.config.model_topos,
-            msid2mwid=self.config.msid2mwid,
-            mw_bcast_groups=self.config.mw_bcast_groups,
-            param_sync_pairs=self.config.sync_param_pairs,
-        )
-        deepspeed.init_distributed()
-        self.logger.info("deepspeed init distributed on master worker")
-        self.__device = torch.device("cuda:0")
-
-        for model_name_, topo_ in self.config.model_topos.items():
-            base.constants.set_parallelism_group(
-                model_name_,
-                self.__pg_info.model_groups[model_name_],
-            )
-            base.constants.set_rank_mapping(model_name_, topo_, self.config.msid2mwid)
-            grid = base.topology.ParallelGrid(
-                topology=topo_,
-                process_group=self.__pg_info.model_groups[model_name_],
-                rank_mapping=base.constants.rank_mapping_of_model(model_name_),
-            )
-            base.constants.set_grid(model_name_, grid)
-
         # Request training specification from data workers, e.g. batch size and total train steps.
         self.__stream.post(request_reply_stream.Payload(
-            handler="__data__",
+            handler="__data0__",
             handle_name="spec",
         ))
-        ft_specs: List[model_api.FinetuneSpec] = [self.__stream.poll(block=True).data]
-        if len(set(x.steps_per_epoch for x in ft_specs)) != 1:
-            raise RuntimeError(f"steps_per_epoch not equal among data workers:"
-                               f" {list(x.steps_per_epoch for x in ft_specs)}. "
-                               "Consider launching less data workers.")
-        ft_spec = ft_specs[0]
+        ft_spec: model_api.FinetuneSpec = self.__stream.poll(block=True).data
         ft_spec.total_train_epochs = self.config.exp_ctrl.total_train_epochs
         ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
 
@@ -856,10 +760,16 @@ class MasterWorker(worker_base.Worker):
             fetch_master_ctl=self.__fetch_master_ctl,
         )
 
+        self.__data_owner: Dict[Tuple[int, str], Tuple[str, int]] = {}
+
         logger.info(f"Creating asyncio coroutines...")
 
         self.__pre_hook_counters = [[0 for _ in rpc.pre_hooks] for rpc in self.__model_rpcs]
         self.__post_hook_counters = [[0 for _ in rpc.post_hooks] for rpc in self.__model_rpcs]
+
+        src_rpc = [rpc for rpc in self.config.model_rpcs][0]
+        src_rpc_model_name = src_rpc.model_name
+        src_rpc_dp_size = self.config.model_topos[src_rpc.model_name].get_dim("data")
 
         coroutine_tasks = []
         for rpc, pre_hook_counters, post_hook_counters in zip(self.__model_rpcs, self.__pre_hook_counters,
@@ -869,10 +779,11 @@ class MasterWorker(worker_base.Worker):
             request_task = event_loop.create_task(
                 model_rpc_request_func(
                     rpc=rpc,
-                    pre_hook_counters=pre_hook_counters,
-                    stream=self.__stream,
-                    scatter_groups=self.__pg_info.scatter_groups[rpc.model_name],
                     msid2mwid=self.config.msid2mwid,
+                    src_rpc_model_name=src_rpc_model_name,
+                    pre_hook_counters=pre_hook_counters,
+                    data_owner=self.__data_owner,
+                    stream=self.__stream,
                     buffer=self.__seqbuffer,
                     model_topos=self.__model_topos,
                     model_configs=self.__model_configs,
@@ -886,8 +797,6 @@ class MasterWorker(worker_base.Worker):
                         rpc=rpc,
                         post_hook_counters=post_hook_counters,
                         stream=self.__stream,
-                        gather_groups=self.__pg_info.gather_groups[rpc.model_name],
-                        msid2mwid=self.config.msid2mwid,
                         buffer=self.__seqbuffer,
                         model_topos=self.__model_topos,
                         model_configs=self.__model_configs,
@@ -898,6 +807,9 @@ class MasterWorker(worker_base.Worker):
 
         load_data_task = event_loop.create_task(
             load_data_func(
+                src_rpc_dp_size=src_rpc_dp_size,
+                src_rpc_model_name=src_rpc_model_name,
+                data_owner=self.__data_owner,
                 buffer=self.__seqbuffer,
                 stream=self.__stream,
                 fetch_ctl=self.__rpc_ctrl.fetch_data_queue,

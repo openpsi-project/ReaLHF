@@ -157,7 +157,6 @@ class RWConfig(Experiment):
             "default",
             ModelInterfaceType.TRAIN_STEP,
             input_data=["packed_input_ids", "input_lens", "group_factor", "pair_input_lens"],
-            dp_broker_type="packed",
             log_return_value=True,
         )
 

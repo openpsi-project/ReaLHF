@@ -126,7 +126,6 @@ train_critic = ModelRPC(
         "values",
         "seq_no_eos_mask",
     ],
-    dp_broker_type="packed",
     log_return_value=True,
 )
 

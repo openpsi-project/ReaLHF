@@ -21,7 +21,6 @@ rollout = ModelRPC(
         "packed_logprobs",
         "prompt_mask",
     ],
-    dp_broker_type="packed",
 )
 
 inf_reward = ModelRPC(
@@ -31,7 +30,6 @@ inf_reward = ModelRPC(
     input_key_remap={"packed_seq": "packed_input_ids"},
     output_data=["scores"],
     output_key_remap={"scores": "rewards"},
-    dp_broker_type="packed",
 )
 
 inf_ref_logits = ModelRPC(
@@ -43,7 +41,6 @@ inf_ref_logits = ModelRPC(
     ],
     output_data=["logprobs"],
     output_key_remap={"logprobs": "packed_ref_logprobs"},
-    dp_broker_type="packed",
 )
 
 inf_values = ModelRPC(
@@ -52,7 +49,6 @@ inf_values = ModelRPC(
     input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
     output_data=["scores"],
     output_key_remap={"scores": "values"},
-    dp_broker_type="packed",
 )
 
 train_actor = ModelRPC(
@@ -69,7 +65,6 @@ train_actor = ModelRPC(
         "seq_no_eos_mask",
     ],
     log_return_value=True,
-    dp_broker_type="packed",
 )
 
 train_critic = ModelRPC(
@@ -85,7 +80,6 @@ train_critic = ModelRPC(
         "prompt_mask",
         "seq_no_eos_mask",
     ],
-    dp_broker_type="packed",
     log_return_value=True,
 )
 

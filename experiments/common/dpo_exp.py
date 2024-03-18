@@ -199,7 +199,6 @@ class DPOConfig(Experiment):
             input_data=["packed_input_ids", "input_lens", "pair_input_lens", "prompt_lens"],
             output_data=["seqlogp"],
             output_key_remap={"seqlogp": "pair_ref_seqlogp"},
-            dp_broker_type="packed",
         )
         dpo = ModelRPC(
             model_name="actor",
@@ -209,7 +208,6 @@ class DPOConfig(Experiment):
             input_data=[
                 "packed_input_ids", "input_lens", "pair_input_lens", "pair_ref_seqlogp", "prompt_lens"
             ],
-            dp_broker_type="packed",
             log_return_value=True,
         )
 

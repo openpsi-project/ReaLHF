@@ -60,7 +60,15 @@ def reveal_ddp_identity(expr_name, trial_name, worker_index):
     # name_resolve.add_subentry(local_peer_name, peer_index, keepalive_ttl=30)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(unsafe_hash=True)
+class DataTransferPair:
+    src: str
+    src_dp_rank: int
+    dst: str
+    dst_dp_rank: int
+
+
+@dataclasses.dataclass(unsafe_hash=True)
 class ParamSyncPair:
     src: str
     src_mp_rank: int
@@ -68,33 +76,6 @@ class ParamSyncPair:
     dst: str
     dst_mp_rank: int
     dst_pp_rank: int
-
-    def __hash__(self):
-        return (
-            self.src,
-            self.src_mp_rank,
-            self.src_pp_rank,
-            self.dst,
-            self.dst_mp_rank,
-            self.dst_pp_rank,
-        ).__hash__()
-
-    def __eq__(self, other: "ParamSyncPair"):
-        return (
-            self.src,
-            self.src_mp_rank,
-            self.src_pp_rank,
-            self.dst,
-            self.dst_mp_rank,
-            self.dst_pp_rank,
-        ) == (
-            other.src,
-            other.src_mp_rank,
-            other.src_pp_rank,
-            other.dst,
-            other.dst_mp_rank,
-            other.dst_pp_rank,
-        )
 
 
 @dataclasses.dataclass
@@ -104,14 +85,9 @@ class NCCLProcessGroupInfo:
     local_gpu_id: int
     # 3D parallelism groups of each model.
     model_groups: Dict[str, torch.distributed.ProcessGroup]
-    # Groups to broadcast data to model workers, which contains master and all model workers of the same name.
-    # Model workers are further partitioned into several groups to avoid scattering to different
-    # pipeline parallelism ranks simultaneously.
-    scatter_groups: Dict[str, List[torch.distributed.ProcessGroup]]
-    # Groups to gather returned data from model workers, which contains master and DP heads of model workers
-    # with the same name. DP head => dp_rank=*, pp_rank=pp_size-1, mp_rank=0.
-    # Similar to scatter groups, gather groups are also partitioned to avoid synchronization across pp ranks.
-    gather_groups: Dict[str, List[torch.distributed.ProcessGroup]]
+    # Groups for data transfer among model workers.
+    data_transfer_groups: Dict[DataTransferPair, torch.distributed.ProcessGroup]
+    data_transfer_src_ranks: Dict[DataTransferPair, int]
     # Groups for parameter synchronization.
     param_sync_groups: Dict[ParamSyncPair, torch.distributed.ProcessGroup]
     param_sync_src_ranks: Dict[ParamSyncPair, int]
@@ -125,12 +101,12 @@ def _filter_match_mwids(
 ) -> List[int]:
     if len(conditions) == 0:
         mwids_this_model = [
-            msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(model_name, topo, j)] + 1
+            msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in range(topo.world_size())
         ]
     else:
         mwids_this_model = [
-            msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(model_name, topo, j)] + 1
+            msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in topo.filter_match(**conditions)
         ]
     mwids_this_model = sorted(mwids_this_model)
@@ -138,14 +114,14 @@ def _filter_match_mwids(
     return list(mwids_this_model)
 
 
-def _partition_into_sub_bcast_groups(group_ranks: List[int],
-                                     bcast_groups: List[List[int]]) -> List[List[int]]:
-    bcast_sub_group_ranks = defaultdict(list)
-    # -1 here because the rank in the model worker broadcast group starts from 0.
-    group_ids = [next(filter(lambda jg: r - 1 in jg[1], enumerate(bcast_groups)))[0] for r in group_ranks]
-    for r, gid in zip(group_ranks, group_ids):
-        bcast_sub_group_ranks[gid].append(r)
-    return list(map(sorted, bcast_sub_group_ranks.values()))
+# def _partition_into_sub_bcast_groups(group_ranks: List[int],
+#                                      bcast_groups: List[List[int]]) -> List[List[int]]:
+#     bcast_sub_group_ranks = defaultdict(list)
+#     # -1 here because the rank in the model worker broadcast group starts from 0.
+#     group_ids = [next(filter(lambda jg: r - 1 in jg[1], enumerate(bcast_groups)))[0] for r in group_ranks]
+#     for r, gid in zip(group_ranks, group_ids):
+#         bcast_sub_group_ranks[gid].append(r)
+#     return list(map(sorted, bcast_sub_group_ranks.values()))
 
 
 def setup_ddp(
@@ -156,6 +132,7 @@ def setup_ddp(
     msid2mwid: Optional[Dict[api.config.config_system.ModelShardID, int]] = None,
     mw_bcast_groups: Optional[List[List[int]]] = None,
     param_sync_pairs: Optional[List[Tuple[str, str]]] = None,
+    data_transfer_pairs: Optional[List[Tuple[str, str]]] = None,
 ) -> NCCLProcessGroupInfo:
     peers: List[int] = list(
         sorted(
@@ -169,18 +146,27 @@ def setup_ddp(
     global_rank = peers.index(worker_index)
 
     mw_ranks = {}
-    mw_head_ranks = {}
+    mw_dp_ranks: Dict[Tuple[str, int], List[int]] = {}
+    mw_dp_head_ranks: Dict[str, List[int]] = {}
     mw_pp_mp_ranks: Dict[Tuple[str, int, int], List[int]] = {}
     mw_pp_mp_head_rank: Dict[Tuple[str, int, int], int] = {}
     if model_topos is not None:
         assert msid2mwid is not None
         for model_name, topo in model_topos.items():
             mw_ranks[model_name] = _filter_match_mwids(model_name, topo, msid2mwid)
-            mw_head_ranks[model_name] = _filter_match_mwids(model_name,
-                                                            topo,
-                                                            msid2mwid,
-                                                            pipe=topo.get_dim("pipe") - 1,
-                                                            model=0)
+            mw_dp_head_ranks[model_name] = _filter_match_mwids(model_name,
+                                                               topo,
+                                                               msid2mwid,
+                                                               pipe=topo.get_dim("pipe") - 1,
+                                                               model=0)
+            dp_size = topo.get_dim("data")
+            for dp_i in range(dp_size):
+                mw_dp_ranks[model_name, dp_i] = _filter_match_mwids(
+                    model_name,
+                    topo,
+                    msid2mwid,
+                    data=dp_i,
+                )
             pp_size = topo.get_dim("pipe")
             mp_size = topo.get_dim("model")
             for pp_i, mp_i in itertools.product(range(pp_size), range(mp_size)):
@@ -233,20 +219,37 @@ def setup_ddp(
     torch.distributed.init_process_group(**torch_dist_kwargs, group_name=GLOBAL_PROCESS_GROUP_NAME)
 
     model_groups = {}
-    scatter_groups = defaultdict(list)
+    # scatter_groups = defaultdict(list)
     for model_name, ranks in mw_ranks.items():
         model_groups[model_name] = torch.distributed.new_group(ranks, backend="nccl")
-        all_group_ranks = _partition_into_sub_bcast_groups(ranks, mw_bcast_groups)
-        for group_ranks in all_group_ranks:
-            scatter_groups[model_name].append(torch.distributed.new_group([0] + group_ranks, backend="nccl"))
+        # all_group_ranks = _partition_into_sub_bcast_groups(ranks, mw_bcast_groups)
+        # for group_ranks in all_group_ranks:
+        #     scatter_groups[model_name].append(torch.distributed.new_group([0] + group_ranks, backend="nccl"))
         # logger.info("Created process group for model %s with ranks %s", model_name, ranks)
 
-    gather_groups = defaultdict(list)
-    for model_name, ranks in mw_head_ranks.items():
-        all_group_ranks = _partition_into_sub_bcast_groups(ranks, mw_bcast_groups)
-        for group_ranks in all_group_ranks:
-            gather_groups[model_name].append(torch.distributed.new_group([0] + group_ranks, backend="nccl"))
-        # logger.info("Created master-DP head group for model %s with ranks %s", model_name, ranks)
+    # gather_groups = defaultdict(list)
+    # for model_name, ranks in mw_head_ranks.items():
+    #     all_group_ranks = _partition_into_sub_bcast_groups(ranks, mw_bcast_groups)
+    #     for group_ranks in all_group_ranks:
+    #         gather_groups[model_name].append(torch.distributed.new_group([0] + group_ranks, backend="nccl"))
+    # logger.info("Created master-DP head group for model %s with ranks %s", model_name, ranks)
+
+    data_transfer_groups, data_transfer_src_ranks = {}, {}
+    if data_transfer_pairs is not None:
+        for src, dst in data_transfer_pairs:
+            src_topo = model_topos[src]
+            dst_topo = model_topos[dst]
+            for src_dp, dst_dp in itertools.product(range(src_topo.get_dim("data")),
+                                                    range(dst_topo.get_dim("data"))):
+                key = DataTransferPair(src=src, src_dp_rank=src_dp, dst=dst, dst_dp_rank=dst_dp)
+                src_mw_rank = mw_dp_head_ranks[src][src_dp]
+                dst_mw_ranks = mw_dp_ranks[dst, dst_dp]
+                if src_mw_rank not in dst_mw_ranks:
+                    _ranks = [src_mw_rank] + dst_mw_ranks
+                else:
+                    _ranks = dst_mw_ranks
+                data_transfer_groups[key] = torch.distributed.new_group(_ranks, backend="nccl")
+                data_transfer_src_ranks[key] = src_mw_rank
 
     param_sync_groups = {}
     param_sync_src_ranks = {}
@@ -284,8 +287,8 @@ def setup_ddp(
         global_rank=global_rank,
         local_gpu_id=local_gpu_id,
         model_groups=model_groups,
-        scatter_groups=scatter_groups,
-        gather_groups=gather_groups,
+        data_transfer_groups=data_transfer_groups,
+        data_transfer_src_ranks=data_transfer_src_ranks,
         param_sync_groups=param_sync_groups,
         param_sync_src_ranks=param_sync_src_ranks,
     )

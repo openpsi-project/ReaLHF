@@ -40,7 +40,7 @@ def register_auto_ppo_experiment(
     class AutoPPOExperiment:
         seed: int = 1
         exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=ExperimentSaveEvalControl(
-            benchmark_steps=20))
+            benchmark_steps=20,),)
         ppo: PPOHyperparmeters = dataclasses.field(default_factory=PPOHyperparmeters)
 
         @property

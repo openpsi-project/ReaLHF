@@ -1,16 +1,15 @@
 from dataclasses import dataclass, field
 from typing import *
 import asyncio
-import bisect
 import time
 
 import numpy as np
 
 import api.config.dfg
-import base.dataparallel as dataparallel
+# import base.dataparallel as dataparallel
 import base.logging as logging
-import base.namedarray as namedarray
 
+# import base.namedarray as namedarray
 logger = logging.getLogger("buffer")
 
 
@@ -22,26 +21,30 @@ class BufferFull(Exception):
 class _ReplayEntry:
     reuses_left: int
     receive_time: float
-    sample: namedarray.NamedArray
+    # We don't save data explicitly, but store metadata.
+    # We can know shape and dtype from seqlen and key,
+    # just as we implemented in base/dataparallel.py
+    keys: List[str]
+    seqlen: int
 
 
-def _get_seqlen_from_sample(sample: namedarray.NamedArray) -> int:
-    assert ("input_lens" in sample.keys() or "cu_seqlens" in sample.keys()
-            or "prompt_cu_seqlens" in sample.keys() or "prompt_lens" in sample.keys()), (
-                list(sample.keys()),
-                sample,
-            )
-    if "input_lens" in sample.keys():
-        return sample["input_lens"].item()
-    elif "cu_seqlens" in sample.keys():
-        return int(sample["cu_seqlens"][1] - 1)
-    # NOTE: The order matters. We should first try to get the length of the generated text rather than prompts.
-    elif "prompt_lens" in sample.keys():
-        return sample["prompt_lens"].item()
-    elif "prompt_cu_seqlens" in sample.keys():
-        return int(sample["prompt_cu_seqlens"][1] - 1)
-    else:
-        return None
+# def _get_seqlen_from_sample(sample: namedarray.NamedArray) -> int:
+#     assert ("input_lens" in sample.keys() or "cu_seqlens" in sample.keys()
+#             or "prompt_cu_seqlens" in sample.keys() or "prompt_lens" in sample.keys()), (
+#                 list(sample.keys()),
+#                 sample,
+#             )
+#     if "input_lens" in sample.keys():
+#         return sample["input_lens"].item()
+#     elif "cu_seqlens" in sample.keys():
+#         return int(sample["cu_seqlens"][1] - 1)
+#     # NOTE: The order matters. We should first try to get the length of the generated text rather than prompts.
+#     elif "prompt_lens" in sample.keys():
+#         return sample["prompt_lens"].item()
+#     elif "prompt_cu_seqlens" in sample.keys():
+#         return int(sample["prompt_cu_seqlens"][1] - 1)
+#     else:
+#         return None
 
 
 class _TensorDictSequenceBuffer:
@@ -65,36 +68,39 @@ class _TensorDictSequenceBuffer:
         self.__reuses = reuses
 
     def _update_seqlen(self, indices: int):
-        self.__seqlens[indices] = [_get_seqlen_from_sample(self.__storage[idx].sample) for idx in indices]
+        self.__seqlens[indices] = [self.__storage[idx].seqlen for idx in indices]
 
     def _get_seqlen(self, indices: int) -> np.ndarray:
         return self.__seqlens[indices]
 
     def _update_has_keys(self, indices: List[int]):
         for idx in indices:
-            x = self.__storage[idx].sample
-            self.__has_keys[idx] = [k in x.keys() and x[k] is not None for k in self.__keys]
+            self.__has_keys[idx] = [k in self.__storage[idx].keys for k in self.__keys]
 
     def _get_has_keys(self, indices):
         return self.__has_keys[indices, :]
 
-    def put_batch(self, indices: List[int], xs: List[namedarray.NamedArray]):
+    def put_batch(self, indices: List[int], xs: List[Tuple[List[str], int]]):
         assert len(indices) == len(xs)
         # Can be parallelized.
         for idx, x in zip(indices, xs):
+            keys, seqlen = x
             self.__storage[idx] = _ReplayEntry(
                 reuses_left=self.__reuses,
-                sample=x,
                 receive_time=time.time(),
+                keys=keys,
+                seqlen=seqlen,
             )
 
-    def amend_batch(self, indices: List[int], new_datas: namedarray.NamedArray):
+    def amend_batch(self, indices: List[int], new_datas: List[Tuple[List[str], int]]):
         assert len(indices) == len(new_datas)
         # Can be parallelized.
         for idx, new_data in zip(indices, new_datas):
-            d = self.__storage[idx].sample.to_dict()
-            d.update(new_data)
-            self.__storage[idx].sample = namedarray.from_dict(d)
+            new_keys, new_seqlen = new_data
+            assert len(set(new_keys).intersection(self.__storage[idx].keys)) == 0, (new_keys,
+                                                                                    self.__storage[idx].keys)
+            self.__storage[idx].keys += new_keys
+            self.__storage[idx].seqlen = new_seqlen
 
     def get_batch(self, indices: List[int]) -> List[_ReplayEntry]:
         # Can be parallelized.
@@ -118,7 +124,6 @@ class _TensorDictSequenceBuffer:
 
 @dataclass
 class SequenceSample:
-    data: namedarray.NamedArray
     indices: List[int]
     seqlens: List[int]
 
@@ -154,7 +159,7 @@ class AsyncIOSequenceBuffer:
         self._ready_for_rpcs = np.zeros((max_size, len(rpcs)), dtype=bool)
         self._completed_rpc = np.zeros((max_size, len(rpcs)), dtype=bool)
 
-        rpc_data_keys = list(set().union(*[rpc.input_data for rpc in rpcs]))
+        self._rpc_data_keys = rpc_data_keys = list(set().union(*[rpc.input_data for rpc in rpcs]))
         # We can efficiently compute whether an RPC is ready using this mask
         self._rpc_key_mask = np.stack(
             [np.array([k in rpc.input_data for k in rpc_data_keys], dtype=bool) for rpc in rpcs], axis=1)
@@ -183,7 +188,7 @@ class AsyncIOSequenceBuffer:
         assert (self._is_empty[:, None] * self._ready_for_rpcs).sum() == 0
         assert (self._is_empty[:, None] * self._completed_rpc).sum() == 0
 
-    async def put_batch(self, samples: List[namedarray.NamedArray]):
+    async def put_batch(self, samples: List[Tuple[List[str], int]]):
         async with self._lock:
             self._assert_valid_indicator()
             n = len(samples)
@@ -208,8 +213,9 @@ class AsyncIOSequenceBuffer:
 
             self._buf_size += len(samples)
             self._n_tokens += self.__buffer._get_seqlen(indices).sum()
+        return indices
 
-    async def amend_batch(self, indices: List[int], new_datas: List[namedarray.NamedArray]):
+    async def amend_batch(self, indices: List[int], new_datas: List[Tuple[List[str], int]]):
         async with self._lock:
             await self._lock.wait_for(
                 lambda: (self._is_idle[indices] | self._is_being_amended[indices]).all(),)
@@ -279,11 +285,6 @@ class AsyncIOSequenceBuffer:
                                        & ~self._completed_rpc[:, rpc_idx])[0]
             seqlens = self.__buffer._get_seqlen(ready_indices)
 
-            if rpc.is_src:
-                # *2 because we want to fetch new data as long as the *next* RPC does not have enough data.
-                if len(ready_indices) < rpc.min_n_seqs * 2 or seqlens.sum() < rpc.min_n_tokens * 2:
-                    self._request_load_data()
-
             token_cumsum = np.cumsum(seqlens, axis=0)
             token_valid_mask = (token_cumsum >= rpc.min_n_tokens) & (token_cumsum <= rpc.max_n_tokens)
             token_intervals = token_valid_mask.nonzero()[0]
@@ -318,8 +319,6 @@ class AsyncIOSequenceBuffer:
         pop_tokens = self.__buffer._get_seqlen(pop_indices).sum()
         if len(pop_indices) > 0:
             self.__buffer.pop_batch(pop_indices)
-        data = dataparallel.PackedParallelDataBroker.gather_from(
-            [rpc.remap_input_keys(x.sample) for x in entries])
 
         async with self._lock:
             self._n_readers[indices] -= 1
@@ -338,4 +337,4 @@ class AsyncIOSequenceBuffer:
 
             if self._is_idle[indices].any():
                 self._lock.notify(len(self._rpc_names))
-        return SequenceSample(data=data, indices=indices, seqlens=seqlens)
+        return SequenceSample(indices=indices, seqlens=seqlens)

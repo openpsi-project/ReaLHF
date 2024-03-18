@@ -82,6 +82,15 @@ def model_scope(model_name: str):
     _model_name = None
 
 
+@contextlib.contextmanager
+def model_scope_disabled():
+    global _model_name
+    assert _model_name is not None
+    t, _model_name = _model_name, None
+    yield
+    _model_name = t
+
+
 ################# setter functions #################
 def set_max_seqlen(max_seqlen: int):
     global _max_seqlen
@@ -115,7 +124,7 @@ def set_rank_mapping(
     else:
         msid2mwid = {k: v for k, v in msid2mwid.items() if k.model_name == model_name}
         _rank_mapping[model_name] = {
-            topo.get_rank(data=s.dp_rank, model=s.mp_rank, pipe=s.pp_rank): mw_id + 1
+            topo.get_rank(data=s.dp_rank, model=s.mp_rank, pipe=s.pp_rank): mw_id
             for s, mw_id in msid2mwid.items()
         }
 

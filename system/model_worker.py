@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+import collections
 import gc
 import itertools
 import multiprocessing as mp
@@ -20,9 +21,12 @@ from base.topology import ParallelGrid
 from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 import api.config.config_system as config_system
+import api.config.dfg
 import api.data
 import api.model
 import base.constants
+import base.datapack as datapack
+import base.dataparallel as dataparallel
 import base.gpu_utils as gpu_utils
 import base.logging as logging
 import base.namedarray as namedarray
@@ -38,6 +42,110 @@ import impl.dataset  # isort:skip
 
 logger = logging.getLogger("Model Worker", "colored")
 blogger = logging.getLogger("benchmark")
+
+
+class NoRequestToHandle(Exception):
+    pass
+
+
+def _get_seqlens_from_batch_sample(sample: namedarray.NamedArray) -> np.ndarray | None:
+    if "input_lens" in sample.keys():
+        return sample["input_lens"].cpu().numpy()
+    elif "cu_seqlens" in sample.keys():
+        return (sample["cu_seqlens"][1:] - sample["cu_seqlens"][:-1]).cpu().numpy()
+    # NOTE: The order matters. We should first try to get the length of the generated text rather than prompts.
+    elif "prompt_lens" in sample.keys():
+        return sample["prompt_lens"].cpu().numpy()
+    elif "prompt_cu_seqlens" in sample.keys():
+        return (sample["prompt_cu_seqlens"][1:] - sample["prompt_cu_seqlens"][:-1]).cpu().numpy()
+    else:
+        return None
+
+
+def split_packed_batch_into_seqs(
+    sample: namedarray.NamedArray,
+    input_lens: Optional[torch.Tensor] = None,
+    return_seqlens: bool = False,
+) -> List[namedarray.NamedArray]:
+    if input_lens is None:
+        if "input_lens" in sample:
+            input_lens = sample["input_lens"]
+        elif "prompt_lens" in sample:
+            input_lens = sample["prompt_lens"]
+        elif "cu_seqlens" in sample:
+            input_lens = sample["cu_seqlens"][1:] - sample["cu_seqlens"][:-1]
+        elif "prompt_cu_seqlens" in sample:
+            input_lens = sample["prompt_cu_seqlens"][1:] - sample["prompt_cu_seqlens"][:-1]
+
+    partitions = [(i, i + 1) for i in range(input_lens.shape[0])]
+    sample["input_lens"] = input_lens
+    res = dataparallel.PackedParallelDataBroker.scatter_to(sample,
+                                                           n_dp=len(input_lens),
+                                                           partitions=partitions)
+    if not return_seqlens:
+        return res
+    else:
+        return res, input_lens
+
+
+def _get_shape_from_key_and_seqlen(k: str, seqlen: int):
+    if k in ["input_lens", "prompt_lens", "seq_no_eos_mask", "rewards", "reward_score", "group_factor"]:
+        shape = (1,)
+    elif k in ["cu_seqlens", "prompt_cu_seqlens"]:
+        shape = (2,)
+    elif k in ["packed_seq", "prompt_mask", "packed_input_ids", "values", "packed_prompts"]:
+        shape = (seqlen,)
+    elif k in [
+            "packed_logprobs",
+            "packed_ref_logprobs",
+            "old_logp",
+            "ref_logp",
+            "advantages",
+            "ppo_loss_mask",
+            "kl_rewards",
+            "returns",
+    ]:
+        shape = (seqlen - 1,)
+    else:
+        raise NotImplementedError(f"Unknown key {k} in packed data.")
+    return shape
+
+
+def _get_dtype_from_key(k: str):
+    if k in [
+            "seq_no_eos_mask",
+            "ppo_loss_mask",
+            "prompt_mask",
+    ]:
+        dtype = torch.bool
+    elif k in [
+            "rewards",
+            "reward_score",
+            "packed_logprobs",
+            "packed_ref_logprobs",
+            "old_logp",
+            "ref_logp",
+            "advantages",
+            "kl_rewards",
+            "returns",
+            "values",
+    ]:
+        dtype = torch.float16
+    elif k in ["input_lens", "prompt_lens", "cu_seqlens", "prompt_cu_seqlens"]:
+        dtype = torch.int32
+    elif k in ["packed_seq", "packed_input_ids", "packed_prompts"]:
+        dtype = torch.int64
+    elif k in ["group_factor"]:
+        dtype = torch.float32
+    else:
+        raise NotImplementedError(f"Unknown key {k} in packed data.")
+    return dtype
+
+
+def _get_tensor_buffer_from_key_and_seqlen(k: str, seqlen: int):
+    shape = _get_shape_from_key_and_seqlen(k, seqlen)
+    dtype = _get_dtype_from_key(k)
+    return base.constants.get_global_memory_buffer().get_tensor(shape, dtype, name="data_transfer")
 
 
 class ModelWorker(worker_base.Worker):
@@ -65,6 +173,9 @@ class ModelWorker(worker_base.Worker):
         self.__experiment_name = self.config.worker_info.experiment_name
         self.__trial_name = self.config.worker_info.trial_name
 
+        self.config.model_rpcs, _ = api.config.dfg.build_graph(self.config.model_rpcs)
+        self.data2required_rpc_names = self.config.model_rpcs[0].data2required_rpc_names
+
         # NOTE: here worker_index is different from peer/ddp rank
         self.__worker_index = cfg.worker_info.worker_index
 
@@ -74,8 +185,7 @@ class ModelWorker(worker_base.Worker):
         seeding.set_random_seed(cfg.seed)
 
         # Reveal DDP identity of this worker to world.
-        # NOTE: We include master worker in the process group, so the global rank is model_worker_index + 1
-        gpu_utils.reveal_ddp_identity(self.__experiment_name, self.__trial_name, self.__worker_index + 1)
+        gpu_utils.reveal_ddp_identity(self.__experiment_name, self.__trial_name, self.__worker_index)
         self.__dist_env_resolved = False
 
         self.__clear_cache_frequency = base.timeutil.FrequencyControl(
@@ -83,103 +193,6 @@ class ModelWorker(worker_base.Worker):
 
         r = self.config.worker_info
         return r
-
-    def __lazy_setup(self):
-        """Setup pytorch ddp processes, and algorithms."""
-        self.__stream = request_reply_stream.make_worker_stream(
-            self.config.worker_info,
-            sub_patterns=[s.id for s in self.config.shards],
-        )
-
-        self.__pg_info = gpu_utils.setup_ddp(
-            expr_name=self.__experiment_name,
-            trial_name=self.__trial_name,
-            worker_index=self.__worker_index + 1,
-            model_topos=self.config.model_topos,
-            msid2mwid=self.config.msid2mwid,
-            mw_bcast_groups=self.config.mw_bcast_groups,
-            param_sync_pairs=self.config.sync_param_pairs,
-        )
-
-        base.constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
-
-        # logger.info(f"SetUp Information - Model worker index {self.__worker_index} located at "
-        #             f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}.")
-
-        # if self.config.backend.type_ in ["ds_train", "ds_inference"]:
-        deepspeed.init_distributed()
-        # self.logger.info("deepspeed init distributed on model worker")
-        self.__device = torch.device("cuda:0")
-
-        for model_name_, topo_ in self.config.model_topos.items():
-            base.constants.set_parallelism_group(
-                model_name_,
-                self.__pg_info.model_groups[model_name_],
-            )
-            base.constants.set_rank_mapping(model_name_, topo_, self.config.msid2mwid)
-            grid = ParallelGrid(
-                topology=topo_,
-                rank_mapping=base.constants.rank_mapping_of_model(model_name_),
-                process_group=self.__pg_info.model_groups[model_name_],
-            )
-            base.constants.set_grid(model_name_, grid)
-
-        self.__models: Dict[str, api.model.Model] = dict()
-        self.__interfaces: Dict[str, api.model.ModelInterface] = dict()
-        self.__backends: Dict[str, api.model.ModelBackend] = dict()
-        self.__eval_dataloaders: Dict[str, torch.utils.data.DataLoader] = dict()
-        self.__engines: Dict[str, Any] = dict()
-
-        for s in self.config.shards:
-            with base.constants.model_scope(s.id.model_name):
-                self.__models[s.id.model_name] = api.model.make_model(s.model,
-                                                                      name=s.id.model_name,
-                                                                      device=self.__device)
-                interface_impl = [
-                    rpc.interface_impl for rpc in self.config.model_rpcs if rpc.model_name == s.id.model_name
-                ]
-                assert all(x == interface_impl[0] for x in interface_impl)
-                self.__interfaces[s.id.model_name] = api.model.make_interface(interface_impl[0])
-                self.__backends[s.id.model_name] = api.model.make_backend(s.backend)
-
-            if s.eval_datasets is not None and s.eval_dataloader is not None:
-                eval_datasets = [
-                    api.data.make_dataset(
-                        d,
-                        self.config.seed,
-                        s.id.dp_rank,
-                        s.id.topo.get_dim("data"),
-                        self.__models[s.id.model_name].tokenizer,
-                        self.config.worker_info.experiment_name,
-                        self.config.worker_info.trial_name,
-                        cache_root=(None
-                                    if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
-                    ) for d in s.eval_datasets
-                ]
-                if len(eval_datasets) > 1:
-                    eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
-                else:
-                    eval_dataset = eval_datasets[0]
-                eval_dataloader = api.data.make_dataloader(self.config.eval_dataloader, eval_dataset)
-            else:
-                eval_dataloader = None
-            self.__eval_dataloaders[s.id.model_name] = eval_dataloader
-
-        self.__request_queue = queue.Queue(maxsize=8)
-        self.__reply_queue = queue.Queue(maxsize=8)
-        self.__request_sample_size = dict()
-
-        self.__request_storage = dict()  # mapping from request id to requests
-        self.__future_storage = dict()  # mapping from request id to corresponding future
-        self.__post_hook_data_storage = dict()
-        self.__request_time = dict()
-
-        self.__reply_storage: Dict[uuid.UUID, namedarray.NamedArray] = dict()
-
-        # A monitoring process.
-        self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor,
-                                        args=(self.__pg_info.local_gpu_id, 7200))
-        self.__gpu_util_mp.start()
 
     @property
     def _is_stream_pipe(self) -> bool:
@@ -233,6 +246,170 @@ class ModelWorker(worker_base.Worker):
     def _eval_dataloader(self) -> torch.utils.data.DataLoader:
         return self.__eval_dataloaders[base.constants.model_name()]
 
+    def __lazy_setup(self):
+        # Add an additional subscript pattern for source RPCs.
+        self.__has_dataset = False
+        self.__dataset_dp_size = self.__dataset_dp_rank = 0
+        sub_patterns = [s.id for s in self.config.shards]
+        src_rpc = [rpc for rpc in self.config.model_rpcs if rpc.is_src][0]
+        self.__src_rpc_model_name = src_rpc.model_name
+        for s in self.config.shards:
+            _pp_size = s.id.topo.get_dim("pipe")
+            if not (s.id.mp_rank == 0 and s.id.pp_rank == _pp_size - 1):
+                continue
+            if src_rpc.model_name == s.id.model_name:
+                self.__has_dataset = True
+                self.__dataset_dp_size = s.id.topo.get_dim("data")
+                self.__dataset_dp_rank = s.id.dp_rank
+                sub_patterns.append(f"__data{self.__dataset_dp_rank}__")
+                break
+
+        # Build stream connecting with master workers.
+        self.__stream = request_reply_stream.make_worker_stream(
+            self.config.worker_info,
+            sub_patterns=sub_patterns,
+        )
+
+        self.__pg_info = gpu_utils.setup_ddp(
+            expr_name=self.__experiment_name,
+            trial_name=self.__trial_name,
+            worker_index=self.__worker_index,
+            model_topos=self.config.model_topos,
+            msid2mwid=self.config.msid2mwid,
+            mw_bcast_groups=self.config.mw_bcast_groups,
+            param_sync_pairs=self.config.sync_param_pairs,
+            data_transfer_pairs=self.config.data_transfer_pairs,
+        )
+
+        base.constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
+
+        # logger.info(f"SetUp Information - Model worker index {self.__worker_index} located at "
+        #             f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}.")
+
+        deepspeed.init_distributed()
+        # self.logger.info("deepspeed init distributed on model worker")
+        self.__device = torch.device("cuda:0")
+
+        for model_name_, topo_ in self.config.model_topos.items():
+            base.constants.set_parallelism_group(
+                model_name_,
+                self.__pg_info.model_groups[model_name_],
+            )
+            base.constants.set_rank_mapping(model_name_, topo_, self.config.msid2mwid)
+            grid = ParallelGrid(
+                topology=topo_,
+                rank_mapping=base.constants.rank_mapping_of_model(model_name_),
+                process_group=self.__pg_info.model_groups[model_name_],
+            )
+            base.constants.set_grid(model_name_, grid)
+
+        # Set up training dataset for source RPCs.
+        if self.__has_dataset:
+            datasets = [
+                api.data.make_dataset(
+                    d,
+                    self.config.seed,
+                    self.__dataset_dp_rank,
+                    self.__dataset_dp_size,
+                    self.config.tokenizer_name_or_path,
+                    self.config.worker_info.experiment_name,
+                    self.config.worker_info.trial_name,
+                    cache_root=(None
+                                if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
+                ) for d in self.config.datasets
+            ]
+            if len(self.config.datasets) == 1:
+                self.__dataset = datasets[0]
+            else:
+                self.__dataset = torch.utils.data.ConcatDataset(datasets)
+            self.__max_seqlen = max(d.max_seqlen for d in datasets)
+            self.__dataloader = api.data.make_dataloader(self.config.dataloader, self.__dataset)
+            self.__data_generator = enumerate([])
+
+            self.__dataset_epoch = -1
+            self.__dataset_global_step = self.__dataset_epoch_step = 0
+            self.__dict_sample = None
+
+            self.__fetched_data = None
+
+        self.__models: Dict[str, api.model.Model] = dict()
+        self.__interfaces: Dict[str, api.model.ModelInterface] = dict()
+        self.__backends: Dict[str, api.model.ModelBackend] = dict()
+        self.__eval_dataloaders: Dict[str, torch.utils.data.DataLoader] = dict()
+        self.__engines: Dict[str, Any] = dict()
+
+        for s in self.config.shards:
+            with base.constants.model_scope(s.id.model_name):
+                self.__models[s.id.model_name] = api.model.make_model(s.model,
+                                                                      name=s.id.model_name,
+                                                                      device=self.__device)
+                interface_impl = [
+                    rpc.interface_impl for rpc in self.config.model_rpcs if rpc.model_name == s.id.model_name
+                ]
+                assert all(x == interface_impl[0] for x in interface_impl)
+                self.__interfaces[s.id.model_name] = api.model.make_interface(interface_impl[0])
+                self.__backends[s.id.model_name] = api.model.make_backend(s.backend)
+
+            if s.eval_datasets is not None and s.eval_dataloader is not None:
+                eval_datasets = [
+                    api.data.make_dataset(
+                        d,
+                        self.config.seed,
+                        s.id.dp_rank,
+                        s.id.topo.get_dim("data"),
+                        self.__models[s.id.model_name].tokenizer,
+                        self.config.worker_info.experiment_name,
+                        self.config.worker_info.trial_name,
+                        cache_root=(None
+                                    if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
+                    ) for d in s.eval_datasets
+                ]
+                if len(eval_datasets) > 1:
+                    eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
+                else:
+                    eval_dataset = eval_datasets[0]
+                eval_dataloader = api.data.make_dataloader(self.config.eval_dataloader, eval_dataset)
+            else:
+                eval_dataloader = None
+            self.__eval_dataloaders[s.id.model_name] = eval_dataloader
+
+        self.__request_queue = queue.Queue(maxsize=8)
+        self.__reply_queue = queue.Queue(maxsize=8)
+        self.__request_sample_size = dict()
+
+        self.__request_storage = dict()  # mapping from request id to requests
+        self.__future_storage = dict()  # mapping from request id to corresponding future
+        self.__post_hook_data_storage = dict()
+        self.__request_time = dict()
+
+        # Storing model function call outputs. Model worker will serve as
+        # the data producer when other model workers require this data.
+        self.__data_owner_storage = dict()
+        # Record which RPCs have received the data.
+        # After all RPCs have received the data, remove it from storage.
+        self.__data_send_record = collections.defaultdict(list)
+
+        self.__compute_input_queues = dict(
+            train_step=queue.Queue(4),
+            inference=queue.Queue(4),
+            generate=queue.Queue(4),
+            evaluate=queue.Queue(4),
+        )
+
+        # A monitoring process.
+        self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor,
+                                        args=(self.__pg_info.local_gpu_id, 7200))
+        # self.__gpu_util_mp.start()
+
+    def __prefetch_from_dataset(self):
+        if self.__dict_sample is None:
+            try:
+                self.__dataset_epoch_step, self.__dict_sample = next(self.__data_generator)
+            except StopIteration:
+                self.__dataset_epoch += 1
+                self.__data_generator = enumerate(self.__dataloader)
+                self.__dataset_epoch_step, self.__dict_sample = next(self.__data_generator)
+
     def __maybe_receive_request(self):
         recv_tik = time.perf_counter()
         try:
@@ -240,111 +417,122 @@ class ModelWorker(worker_base.Worker):
         except request_reply_stream.NoMessage:
             return
 
-        # logger.info(f"(dp, mp, pp)=({self._dp_rank}, {self._mp_rank}, {self._pp_rank}) receive request")
         self.__request_storage[request.request_id] = request
-        handler = request.handler
-        # ACK message to indicate ready to run dist.scatter
-        if request.is_tensor:
-            # logger.info(
-            #     f"(dp, mp, pp)=({self._dp_rank}, {self._mp_rank}, {self._pp_rank}) receive tensor request {request.handle_name}, send ack"
-            # )
-            assert request.ack_reply_id is not None
-            ack = request_reply_stream.Payload(
-                handler="master",
-                handle_name=request.handle_name,
-                request_id=request.ack_reply_id,
-            )
-            self.__stream.post(ack)
-
-        data = request.data
-        if request.is_tensor:
-            assert data is None
-
-            data = {}
-            # Maybe create or extend the size of scatter buffer.
-            pg_idx = [
-                dist.get_rank(group) != -1 for group in self.__pg_info.scatter_groups[handler.model_name]
-            ].index(True)
-            scatter_group = self.__pg_info.scatter_groups[handler.model_name][pg_idx]
-            for (k, buf_shape), dtype, actual_shape in zip(request.buf_shapes.items(),
-                                                           request.dtypes.values(),
-                                                           request.actual_shapes.values()):
-                buf = base.constants.get_global_memory_buffer().get_tensor(buf_shape, dtype, "scatter_gather")
-                dist.scatter(
-                    buf,
-                    scatter_list=None,
-                    src=0,
-                    group=scatter_group,
-                )
-                s = tuple(slice(0, target_size) for target_size in actual_shape)
-                data[k] = buf[s].clone()
-            data = namedarray.from_dict(data)
-
-        # with base.constants.model_scope(handler.model_name):
-        #     if self._is_dp_head:
-        #         self.logger.info(
-        #             f"Model {handler.model_name} receive request {request.handle_name} time: {time.perf_counter() - recv_tik}"
-        #         )
-
-        self.__request_queue.put_nowait((request, data))
+        self.__request_queue.put_nowait((request, request.data))
 
     def __model_poll_step(self) -> worker_base.PollResult:
-        # interface
-        try:
-            request, data = self.__request_queue.get_nowait()
-        except queue.Empty:
-            return
-
-        request: request_reply_stream.Payload
         tik = time.perf_counter()
 
-        # self.logger.info(
-        #     f"Model worker {self.__worker_index} #{request.handler}# "
-        #     f"start handle request *{request.handle_name}*, "
-        #     f"request_id {request.request_id}."
-        # )
-        with base.constants.model_scope(request.handler.model_name):
-            try:
-                if request.handle_name == "initialize":
-                    base.constants.set_max_seqlen(data.max_seqlen)
-                    self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
-                    self.__engines[request.handler.model_name] = self._model.module
-                    if self._is_stream_pipe:
-                        assert isinstance(self._engine, StreamPipeEngine)
-                    m = self.__models[request.handler.model_name].module.module
-                    res = None if not isinstance(m, FlashMQATModel) else m.config
-                elif request.handle_name == "save":
-                    res = self._interface.save(self._model, data)  # -> None
-                elif request.handle_name == "inference":
-                    res = self._interface.inference(self._model, data)  # -> NamedArray
-                elif request.handle_name == "train_step":
-                    res = self._interface.train_step(self._model, data)  # -> Dict
-                elif request.handle_name == "generate":
-                    res = self._interface.generate(self._model, data)  # -> NamedArray
-                elif request.handle_name == "evaluate":
-                    res = self._interface.evaluate(self._model, self._eval_dataloader)  # -> Dict
-                elif request.handle_name == "gather_tensor_reply":
-                    res = None
-                    if self._is_dp_head:
-                        res = self.__gather_tensor_reply(request)
-                # FIXME: if model worker poll exits with an unfinished send/recv, the following parameter synchronization
-                # call will get stuck. We need to ensure that all previous send/recv calls are finished before param sync.
-                elif request.handle_name == "send_param":
-                    res = None
-                    if self._dp_rank == 0:
-                        res = self.__send_params_to_sync(request.data)
-                elif request.handle_name == "recv_param":
-                    res = self.__recv_params_to_sync(request.data)
-                elif request.handle_name in ["offload", "load_to_device"]:
-                    print(f">>>>>>> model worker {self.__worker_index} model name "
-                          f"{request.handler.model_name} receive {request.handle_name} "
-                          f"request, which is not implemented yet.")
-                    res = None
+        try:
+            request, data = self.__request_queue.get_nowait()
+            request: request_reply_stream.Payload
+        except queue.Empty:
+            return
+        # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
+        #                  f"start handle request *{request.handle_name}*, "
+        #                  f"request_id {request.request_id}.")
+
+        if isinstance(request.handler, str):
+            assert request.handler == f"__data{self.__dataset_dp_rank}__"
+            handler_model_name = self.__src_rpc_model_name
+        else:
+            handler_model_name = request.handler.model_name
+
+        with base.constants.model_scope(handler_model_name):
+            res = None
+            if request.handle_name == "initialize":
+                base.constants.set_max_seqlen(data.max_seqlen)  # used by generate cuda graph buffer
+                self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
+                self.__engines[request.handler.model_name] = self._model.module
+                if self._is_stream_pipe:
+                    assert isinstance(self._engine, StreamPipeEngine)
+                m = self.__models[request.handler.model_name].module.module
+                res = None if not isinstance(m, FlashMQATModel) else m.config
+            ############## data loading ##############
+            elif request.handle_name == "fetch":
+                assert self.__fetched_data is None
+                res = api.data.DataBatch(
+                    data=self.__dict_sample,
+                    epoch=self.__dataset_epoch,
+                    epoch_step=self.__dataset_epoch_step,
+                    global_step=self.__dataset_global_step,
+                )
+                self.__fetched_data = split_packed_batch_into_seqs(namedarray.from_dict(self.__dict_sample))
+                self.__dict_sample = None
+                self.__dataset_global_step += 1
+            elif request.handle_name == "store":
+                buffer_indices = request.data
+                assert len(buffer_indices) == len(self.__fetched_data)
+                for buf_idx, x in zip(buffer_indices, self.__fetched_data):
+                    for k, v in x.items():
+                        self.__data_owner_storage[(buf_idx, k)] = v.to(self.__device)
+                self.__fetched_data = None
+                res = None
+            elif request.handle_name == "spec":
+                if self.__dataloader.batch_size is not None:
+                    batch_size = self.__dataloader.batch_size
                 else:
-                    raise NotImplementedError(f"Unknown request type: {request.handle_name}.")
-            except RuntimeError as e:
-                # We may print some info here.
-                raise e
+                    # We assume that this is a packed dataset. Batch size equals to the number of tokens in the batch.
+                    assert isinstance(self.__dataloader.dataset, torch.utils.data.IterableDataset)
+                    batch_size = list(self.__dict_sample.values())[0].shape[0]
+                res = api.model.FinetuneSpec(
+                    total_train_epochs=-1,  # place-holder, to be filled by master worker
+                    total_train_steps=-1,  # place-holder, to be filled by master worker
+                    steps_per_epoch=len(self.__dataloader),
+                    batch_size_per_device=batch_size,
+                    max_seqlen=self.__max_seqlen,
+                )
+            ############## data transfer ##############
+            elif request.handle_name == "data_transfer":
+                with base.constants.model_scope_disabled():
+                    self.__data_transfer_among_workers(request)
+            ############## parameter synchronization ##############
+            elif request.handle_name == "send_param":
+                if self._dp_rank == 0:
+                    self.__send_params_to_sync(request.data)
+            elif request.handle_name == "recv_param":
+                self.__recv_params_to_sync(request.data)
+            ############## offload ##############
+            elif request.handle_name in ["offload", "load_to_device"]:
+                print(f">>>>>>> model worker {self.__worker_index} model name "
+                      f"{request.handler.model_name} receive {request.handle_name} "
+                      f"request, which is not implemented yet.")
+            ############## computation function calls ##############
+            elif request.handle_name == "inference":
+                data, buffer_indices, seqlens, output_key_remap = self.__compute_input_queues[
+                    request.handle_name].get_nowait()
+                res = self._interface.inference(self._model, data)  # -> NamedArray
+                if res is not None:
+                    new_res = {}
+                    for k, v in res.items():
+                        if k in output_key_remap:
+                            new_res[output_key_remap[k]] = v
+                        else:
+                            new_res[k] = v
+                    new_res = namedarray.from_dict(new_res)
+                    res = new_res, buffer_indices, seqlens
+            elif request.handle_name == "train_step":
+                data, *_ = self.__compute_input_queues[request.handle_name].get_nowait()
+                res = self._interface.train_step(self._model, data)  # -> Dict
+            elif request.handle_name == "generate":
+                data, buffer_indices, seqlens, output_key_remap = self.__compute_input_queues[
+                    request.handle_name].get_nowait()
+                res = self._interface.generate(self._model, data)  # -> NamedArray
+                if res is not None:
+                    new_res = {}
+                    for k, v in res.items():
+                        if k in output_key_remap:
+                            new_res[output_key_remap[k]] = v
+                        else:
+                            new_res[k] = v
+                    new_res = namedarray.from_dict(new_res)
+                    res = new_res, buffer_indices, seqlens
+            elif request.handle_name == "evaluate":
+                res = self._interface.evaluate(self._model, self._eval_dataloader)  # -> Dict
+            elif request.handle_name == "save":
+                res = self._interface.save(self._model, data)  # -> None
+            else:
+                raise NotImplementedError(f"Unknown request type: {request.handle_name}.")
 
             if self._is_stream_pipe and isinstance(res, tuple):
                 # When using stream pipe engine and future interface,
@@ -358,13 +546,11 @@ class ModelWorker(worker_base.Worker):
                 self.__post_hook_data_storage[request.request_id] = cache_data
                 self.__request_time[request.request_id] = tik
                 self.logger.info(
-                    f"Model worker #{request.handler.model_name}# issued future request *{request.handle_name}*."
-                )
+                    f"Model worker #{handler_model_name}# issued future request *{request.handle_name}*.")
             else:
                 if self._is_dp_head and self._dp_rank == 0:
-                    blogger.info(
-                        f"Model worker #{request.handler.model_name}# handle request *{request.handle_name}*"
-                        f" in ${time.perf_counter() - tik:.4f}$s")
+                    blogger.info(f"Model worker #{handler_model_name}# handle request *{request.handle_name}*"
+                                 f" in ${time.perf_counter() - tik:.4f}$s")
                 self.__reply_queue.put_nowait((request, res))
 
         sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
@@ -526,41 +712,112 @@ class ModelWorker(worker_base.Worker):
 
         m.load_state_dict(new_state_dict)
 
-    def __gather_tensor_reply(self, request: request_reply_stream.Payload):
-        # This is not the ID of "gather" request, but the ID of the original RPC, e.g., generate
-        # Used to index the reply storage.
-        request_id = request.data
-        handler = request.handler
-        buf_shapes = request.buf_shapes
+    def __data_transfer_among_workers(self, request: request_reply_stream.Payload):
+        from impl.model.nn.flash_mqat.flash_mqat_parallel import pipeline_repartition_strategy
 
-        ack = request_reply_stream.Payload(
-            handler="master",
-            handle_name="gather_tensor_reply",
-            request_id=request.ack_reply_id,
-        )
-        self.__stream.post(ack)
-        res: namedarray.NamedArray = self.__reply_storage.pop(request_id)
+        keys = request.data["keys"]
+        target = request.data["target"]
+        global_buffer_indices = request.buffer_indices
+        global_seqlens = request.seqlens
 
-        pg_idx = [dist.get_rank(group) != -1
-                  for group in self.__pg_info.gather_groups[handler.model_name]].index(True)
-        gather_group = self.__pg_info.gather_groups[handler.model_name][pg_idx]
+        data = collections.defaultdict(list)
+        for k in keys:
+            local_buffer_indices = []
+            local_seqlens = []
 
-        # Copy data to the gather buffer.
-        for k, v in res.items():
-            # logger.info(f"handle_name {request.handle_name} "
-            #             f"Gathering {k} with shape {v.shape}, req id = {request.request_id}")
-            if v is None:
+            producer_name = request.data["producer_names"][k]
+            producer_mapping = request.data["producer_mappings"][(producer_name, k)]
+            target_mapping = request.data["target_mapping"]
+            if producer_name not in self.__models and target not in self.__models:
                 continue
-            buf_shape = buf_shapes[k]
-            buf = base.constants.get_global_memory_buffer().get_tensor(buf_shape, v.dtype, "scatter_gather")
-            s = tuple(slice(0, size) for size in v.shape)
-            buf[s] = v
-            dist.gather(
-                buf,
-                gather_list=None,
-                dst=0,
-                group=gather_group,
-            )
+
+            # partition mapping starts from zero, which is different from buffer indices
+            repart_strat = pipeline_repartition_strategy(producer_mapping, target_mapping)
+
+            target_dp_rank = producer_dp_rank = None
+            if target in self.__models:
+                with base.constants.model_scope(target):
+                    target_dp_rank = base.constants.data_parallel_rank()
+            if producer_name in self.__models:
+                with base.constants.model_scope(producer_name):
+                    producer_dp_rank = base.constants.data_parallel_rank()
+                    producer_mp_rank = base.constants.model_parallel_rank()
+                    producer_pp_rank = base.constants.pipe_parallel_rank()
+                    producer_pp_size = base.constants.pipe_parallel_world_size()
+                producer_is_dp_head = producer_mp_rank == 0 and producer_pp_rank == producer_pp_size - 1
+
+            for (dp_i, dp_j), comm_slots in repart_strat.items():
+                if len(comm_slots) == 0:
+                    continue
+                if target_dp_rank == dp_j:
+                    # receiver
+                    group_key = gpu_utils.DataTransferPair(
+                        src=producer_name,
+                        src_dp_rank=dp_i,
+                        dst=target,
+                        dst_dp_rank=dp_j,
+                    )
+                    bcast_src = self.__pg_info.data_transfer_src_ranks[group_key]
+                    group = self.__pg_info.data_transfer_groups[group_key]
+                    for _i in comm_slots:
+                        buf_idx = global_buffer_indices[_i]
+                        seqlen = global_seqlens[_i]
+                        if bcast_src == dist.get_rank():
+                            v = self.__data_owner_storage[(buf_idx, k)]
+                        else:
+                            buf = _get_tensor_buffer_from_key_and_seqlen(k, seqlen)
+                            dist.broadcast(buf, src=bcast_src, group=group)
+                            v = buf.clone()
+                        data[k].append(v)
+                        local_buffer_indices.append(buf_idx)
+                        local_seqlens.append(seqlen)
+                if producer_dp_rank == dp_i and producer_is_dp_head:
+                    # sender
+                    group_key = gpu_utils.DataTransferPair(
+                        src=producer_name,
+                        src_dp_rank=dp_i,
+                        dst=target,
+                        dst_dp_rank=dp_j,
+                    )
+                    bcast_src = self.__pg_info.data_transfer_src_ranks[group_key]
+                    group = self.__pg_info.data_transfer_groups[group_key]
+                    for _i in comm_slots:
+                        buf_idx = global_buffer_indices[_i]
+                        v = self.__data_owner_storage[(buf_idx, k)]
+                        dist.broadcast(v, src=bcast_src, group=group)
+                        # Mark data as sent and remove it from storage if all targets have received it.
+                        rpc_name = request.data["rpc_name"]
+                        if rpc_name not in self.__data_send_record[(buf_idx, k)]:
+                            self.__data_send_record[(buf_idx, k)].append(rpc_name)
+                        if not set(self.data2required_rpc_names[k]).difference(
+                                self.__data_send_record[(buf_idx, k)]):
+                            self.__data_owner_storage.pop((buf_idx, k))
+                            self.__data_send_record.pop((buf_idx, k))
+
+        # TODO: is this barrier necessary?
+        # if target in self.__models:
+        #     with base.constants.model_scope(target):
+        #         dist.barrier(group=base.constants.parallelism_group())
+        # for producer_name in request.data['producer_names'].keys():
+        #     if producer_name in self.__models:
+        #         with base.constants.model_scope(target):
+        #             dist.barrier(group=base.constants.parallelism_group())
+
+        if len(data) > 0:
+            assert target_dp_rank is not None
+            input_key_remap = request.data["input_key_remap"]
+            _data = []
+            l = len(list(data.values())[0])
+            for i in range(l):
+                d = {}
+                for k, v in data.items():
+                    if k in input_key_remap:
+                        k = input_key_remap[k]
+                    d[k] = v[i]
+                _data.append(namedarray.from_dict(d))
+            r = dataparallel.PackedParallelDataBroker.gather_from(_data)
+            self.__compute_input_queues[request.data["handle_name"]].put_nowait(
+                (r, local_buffer_indices, local_seqlens, request.data['output_key_remap']))
 
     def __maybe_engine_poll_step(self):
         for model_name in self.model_names:
@@ -570,35 +827,37 @@ class ModelWorker(worker_base.Worker):
                     self._engine.poll_one_step()
 
     def __post_one_response(self, request: request_reply_stream.Payload, res):
-        if isinstance(res, namedarray.NamedArray):
-            shapes = {k: v.shape for k, v in res.items() if v is not None}
-            dtypes = {k: v.dtype for k, v in res.items() if v is not None}
+        if isinstance(res, tuple) and isinstance(res[0], namedarray.NamedArray):
+            res, buffer_indices, seqlens = res
+            new_seqlens = _get_seqlens_from_batch_sample(res)
+            if new_seqlens is None:
+                new_seqlens = np.array(seqlens)
             reply = request_reply_stream.Payload(
                 handler="master",
                 request_id=request.request_id,
                 handle_name=request.handle_name,
-                is_tensor=True,
-                actual_shapes=shapes,
-                buf_shapes=dict(),
-                dtypes=dtypes,
-                seqlens=request.seqlens,
-                buffer_indices=request.buffer_indices,
+                data=list(res.keys()),
+                seqlens=list(new_seqlens),
+                buffer_indices=list(buffer_indices),
             )
         else:
             reply = request_reply_stream.Payload(
                 handler="master",
                 request_id=request.request_id,
                 handle_name=request.handle_name,
-                is_tensor=False,
                 data=res,
             )
 
         self.__stream.post(reply)
         # logger.info(f"handle_name {request.handle_name} Posted req id = {request.request_id}")
 
-        with base.constants.model_scope(request.handler.model_name):
-            if reply.is_tensor and self._is_dp_head:
-                self.__reply_storage[request.request_id] = res
+        if isinstance(request.handler, config_system.ModelShardID) and isinstance(res, namedarray.NamedArray):
+            with base.constants.model_scope(request.handler.model_name):
+                if self._is_dp_head:
+                    xs = split_packed_batch_into_seqs(res, torch.from_numpy(new_seqlens).cuda())
+                    for buffer_idx, x in zip(buffer_indices, xs):
+                        for k, v in x.items():
+                            self.__data_owner_storage[(buffer_idx, k)] = v
 
     def __maybe_post_responses(self):
         ready_to_post = []
@@ -626,11 +885,12 @@ class ModelWorker(worker_base.Worker):
             request: request_reply_stream.Payload
             self.__post_one_response(request, res)
 
-            with base.constants.model_scope(request.handler.model_name):
-                if self._is_stream_pipe:
-                    self.__request_storage.pop(request.request_id)
-                    if request.request_id in self.__future_storage:
-                        self.__future_storage.pop(request.request_id)
+            if isinstance(request.handler, config_system.ModelShardID):
+                with base.constants.model_scope(request.handler.model_name):
+                    if self._is_stream_pipe:
+                        self.__request_storage.pop(request.request_id)
+                        if request.request_id in self.__future_storage:
+                            self.__future_storage.pop(request.request_id)
             sample_size += self.__request_sample_size.pop(request.request_id)
             batch_size += 1
         return worker_base.PollResult(sample_count=sample_size, batch_count=batch_size)
@@ -640,6 +900,9 @@ class ModelWorker(worker_base.Worker):
             self.__lazy_setup()
             self.__dist_env_resolved = True
             self.tracer.start()
+
+        if self.__has_dataset:
+            self.__prefetch_from_dataset()
 
         st = time.monotonic()
         self.__maybe_receive_request()

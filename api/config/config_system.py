@@ -28,9 +28,9 @@ _LLM_ENVVARS = {
     # "NCCL_SOCKET_IFNAME": "ibp71s0",
     # "GLOO_SOCKET_IFNAME": "ibp71s0",
     # "TORCH_USE_CUDA_DSA": "1",
-    # "CUDA_LAUNCH_BLOCKING": "1",
-    # "NCCL_COMM_BLOCKING": "1",
-    # "NCCL_BLOCKING_WAIT": "1",
+    "CUDA_LAUNCH_BLOCKING": "1",
+    "NCCL_COMM_BLOCKING": "1",
+    "NCCL_BLOCKING_WAIT": "1",
     # "TORCH_SHOW_CPP_STACKTRACES": "1",
     "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
     "CUDA_DEVICE_MAX_CONNECTIONS": "1",
@@ -68,23 +68,7 @@ class Scheduling:
 
     @staticmethod
     def master_worker_default(**kwargs):
-        return Scheduling(**{
-            "cpu": 16,
-            "gpu": 1,
-            "mem": 20 * 1024,
-            "container_image": _LLM_GPU_IMAGE,
-            **kwargs
-        })
-
-    @staticmethod
-    def data_worker_default(**kwargs):
-        return Scheduling(**{
-            "cpu": 4,
-            "gpu": 0,
-            "mem": 20 * 1024,
-            "container_image": _LLM_CPU_IMAGE,
-            **kwargs
-        })
+        return Scheduling(**{"cpu": 16, "mem": 20 * 1024, "container_image": _LLM_GPU_IMAGE, **kwargs})
 
     @staticmethod
     def model_worker_default(**kwargs):
@@ -223,6 +207,10 @@ class StandaloneModelShard:
 class ModelWorker:
     seed: int
     shards: List[StandaloneModelShard]
+    # dataset, for source model workers
+    tokenizer_name_or_path: Optional[str] = None
+    datasets: Optional[List[Union[str, Dataset]]] = None
+    dataloader: Union[str, DataLoader] = "default"
     use_dataset_cache: bool = False
     dataset_cahce_root: str = DATASET_CACHE_PATH
     # cuda & cudnn config
@@ -235,6 +223,7 @@ class ModelWorker:
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology] = None
     mw_bcast_groups: List[List[int]] = None
     msid2mwid: Dict[ModelShardID, int] = None
+    data_transfer_pairs: List[Tuple[str, str]] = None
     sync_param_pairs: List[Tuple[str, str]] = None
     worker_info: Optional[WorkerInformation] = None
 
@@ -242,19 +231,6 @@ class ModelWorker:
         model_names = [s.id.model_name for s in self.shards]
         if len(set(model_names)) != len(model_names):
             raise ValueError("ModelWorker cannot have multiple shards of the same model name.")
-
-
-@dataclasses.dataclass
-class DataWorker:
-    tokenizer_name_or_path: str
-    datasets: List[Union[str, Dataset]]
-    dataloader: Union[str, DataLoader] = "default"
-    seed: int = 1
-    # dataset cache
-    use_dataset_cache: bool = False
-    dataset_cahce_root: str = DATASET_CACHE_PATH
-    # worker_info will be configured automatically
-    worker_info: Optional[WorkerInformation] = None
 
 
 @dataclasses.dataclass
@@ -281,6 +257,7 @@ class MasterWorker:
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology]
     msid2mwid: Dict[ModelShardID, int] = None
     mw_bcast_groups: List[List[int]] = None
+    data_transfer_pairs: List[Tuple[str, str]] = None
     sync_param_pairs: List[Tuple[str, str]] = None
     worker_info: Optional[WorkerInformation] = None
 
@@ -293,7 +270,6 @@ class TasksGroup:
 
 @dataclasses.dataclass
 class ExperimentScheduling:
-    data_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
     model_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
     master_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
     controller_image: str = _LLM_CPU_IMAGE
@@ -304,7 +280,6 @@ class ExperimentConfig:
     exp_ctrl: ExperimentSaveEvalControl
     # dataflow
     model_rpcs: List[api.config.dfg.ModelRPC]
-    data_worker: List[DataWorker] = dataclasses.field(default_factory=list)
     model_worker: List[ModelWorker] = dataclasses.field(default_factory=list)
     # master_worker will be set automatically
     master_worker: Optional[List[MasterWorker]] = None
@@ -337,6 +312,14 @@ class ExperimentConfig:
                                  f"model shard ids={[s.id for s in all_shards]}.")
             ##### Sanity check of parallelism ranks. #####
 
+        data_transfer_pairs: List[Tuple[str, str]] = []
+        _, edges = api.config.dfg.build_graph(self.model_rpcs, verbose=True)
+        for i in range(len(self.model_rpcs)):
+            for j in range(len(self.model_rpcs)):
+                if i != j and len(edges[i][j]) > 0:
+                    # NOTE: dependencies are reversed here
+                    data_transfer_pairs.append((self.model_rpcs[j].model_name, self.model_rpcs[i].model_name))
+
         sync_param_pairs: List[Tuple[str, str]] = []
         ######### sanity check of sync param hooks #########
         for rpc in self.model_rpcs:
@@ -364,6 +347,7 @@ class ExperimentConfig:
                 msid2mwid[m.id] = i
         for m in self.model_worker:
             m.msid2mwid = msid2mwid
+            m.data_transfer_pairs = data_transfer_pairs
             m.sync_param_pairs = sync_param_pairs
 
         def can_bcast_together(mw1: ModelWorker, mw2: ModelWorker):
@@ -395,9 +379,6 @@ class ExperimentConfig:
             m.mw_bcast_groups = mw_bcast_groups
             m.model_rpcs = self.model_rpcs
 
-        if len(self.data_worker) != 1:
-            raise RuntimeError("Only one data worker is supported now.")
-
         self.master_worker = [
             MasterWorker(
                 exp_ctrl=self.exp_ctrl,
@@ -407,6 +388,7 @@ class ExperimentConfig:
                 msid2mwid=msid2mwid,
                 mw_bcast_groups=mw_bcast_groups,
                 sync_param_pairs=sync_param_pairs,
+                data_transfer_pairs=data_transfer_pairs,
             )
         ]
 
@@ -415,7 +397,6 @@ class ExperimentConfig:
         for worker_type, workers in [
             ("model_worker", self.model_worker),
             ("master_worker", self.master_worker),
-            ("data_worker", self.data_worker),
         ]:
             for i, worker in enumerate(workers):
                 system_worker_info = dict(

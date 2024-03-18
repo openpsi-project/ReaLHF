@@ -119,13 +119,6 @@ class PPOConfig(Experiment):
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
-            data_worker=TasksGroup(
-                count=1,
-                scheduling=Scheduling.data_worker_default(
-                    cpu=2,
-                    mem=10000,
-                ),
-            ),
             master_worker=TasksGroup(
                 count=1,
                 scheduling=Scheduling.master_worker_default(
@@ -170,15 +163,6 @@ class PPOConfig(Experiment):
                 max_length=self.dataset.max_prompt_len,
             ),
         )
-        dataloader = DataLoader("iterable_dataset_loader")
-        data_worker = [
-            DataWorker(
-                tokenizer_name_or_path=self.actor.base_model_path,
-                datasets=[dataset],
-                dataloader=dataloader,
-                seed=self.seed,
-            )
-        ]
 
         generation_kwargs = dict(
             max_new_tokens=self.ppo.max_new_tokens,
@@ -279,7 +263,7 @@ class PPOConfig(Experiment):
                 **copy.deepcopy(ppo_kwargs),
                 "generation_config": generation_kwargs,
                 "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
-                "force_no_logits_mask": False,
+                "force_no_logits_mask": True,
                 "adv_norm": self.ppo.adv_norm,
             },
         )
@@ -349,6 +333,9 @@ class PPOConfig(Experiment):
                         backend=actor_backend,
                     ),
                 ],
+                tokenizer_name_or_path=self.actor.base_model_path,
+                datasets=[dataset],
+                dataloader=DataLoader("iterable_dataset_loader"),
                 cuda_cache_cleanliness=True,
             ) for i in range(self.n_actors)
         ] + [
@@ -407,12 +394,10 @@ class PPOConfig(Experiment):
                 "packed_seq",
                 "cu_seqlens",
                 "packed_logprobs",
-                "packed_logits_mask",
                 "prompt_mask",
             ],
-            dp_broker_type="packed",
-            pre_hooks=[LoadToDeviceHook(), SyncParamHook(target="ref", interval=1)],  # NOTE: just for testing
-            post_hooks=[OffloadHook()],  # NOTE: just for testing
+            # pre_hooks=[LoadToDeviceHook(), SyncParamHook(target="ref", interval=1)],  # NOTE: just for testing
+            # post_hooks=[OffloadHook()],  # NOTE: just for testing
         )
 
         inf_reward = ModelRPC(
@@ -424,7 +409,6 @@ class PPOConfig(Experiment):
             input_key_remap={"packed_seq": "packed_input_ids"},
             output_data=["scores"],
             output_key_remap={"scores": "rewards"},
-            dp_broker_type="packed",
         )
 
         inf_ref_logits = ModelRPC(
@@ -435,11 +419,9 @@ class PPOConfig(Experiment):
             input_data=[
                 "packed_seq",
                 "cu_seqlens",
-                "packed_logits_mask",
             ],
             output_data=["logprobs"],
             output_key_remap={"logprobs": "packed_ref_logprobs"},
-            dp_broker_type="packed",
         )
 
         inf_values = ModelRPC(
@@ -450,7 +432,6 @@ class PPOConfig(Experiment):
             input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
             output_data=["scores"],
             output_key_remap={"scores": "values"},
-            dp_broker_type="packed",
         )
 
         train_actor = ModelRPC(
@@ -467,10 +448,8 @@ class PPOConfig(Experiment):
                 "values",
                 "prompt_mask",
                 "seq_no_eos_mask",
-                "packed_logits_mask",
             ],
             log_return_value=True,
-            dp_broker_type="packed",
             # post_hooks=[SyncParamHook(target="ref", interval=4)],  # NOTE: just for testing
         )
 
@@ -489,7 +468,6 @@ class PPOConfig(Experiment):
                 "prompt_mask",
                 "seq_no_eos_mask",
             ],
-            dp_broker_type="packed",
             log_return_value=True,
         )
 
@@ -520,6 +498,5 @@ class PPOConfig(Experiment):
         return ExperimentConfig(
             exp_ctrl=ExperimentSaveEvalControl(total_train_epochs=self.total_train_epochs),
             model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
-            data_worker=data_worker,
             model_worker=model_worker,
         )
