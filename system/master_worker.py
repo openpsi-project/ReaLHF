@@ -267,7 +267,7 @@ class RPCCorountineControl:
     request_queues: Dict[str, List[asyncio.Queue]]
 
 
-def scatter_tensor_to_mws(
+async def scatter_tensor_to_mws(
     rpc: api.config.dfg.ModelRPC,
     stream: request_reply_stream.RequestReplyStream,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
@@ -313,7 +313,8 @@ def scatter_tensor_to_mws(
 
     # logger.info(f"Waiting for ack from stage {pp_rank}")
     # Wait for the ack message from model worker
-    [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in dt_request_ids]
+    await gather_all_replies(stream, dt_request_ids, verbose=False)
+    # [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in dt_request_ids]
 
     request_ids = []
     for handler in handlers:
@@ -430,7 +431,7 @@ async def model_rpc_request_func(
             pre_hook_counters[i] += 1
 
         # send partitioned data to model workers
-        req_ids = scatter_tensor_to_mws(
+        req_ids = await scatter_tensor_to_mws(
             rpc=rpc,
             stream=stream,
             msid2mwid=msid2mwid,

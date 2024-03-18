@@ -215,10 +215,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 pair_input_lens=pair_input_lens,
                 input_lens=input_lens_for_partition,
             )
+            n_seqs = input_lens_for_partition.shape[0]
         else:
             data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
+            n_seqs = cu_seqlens.shape[0] - 1
         n_mbs = self.num_micro_batches
-        splitted = PackedParallelDataBroker.scatter_to(data, n_mbs)
+        splitted = PackedParallelDataBroker.scatter_to(data, n_mbs, min_size=n_seqs // n_mbs)
         if input_lens_for_partition is not None:
             splitted = [
                 NamedArray(
@@ -784,8 +786,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 bs = self.tensor_buffer.get("batch_lengths", micro_batch_id)
                 if self._gd_graph is None:
                     self.capture_generate_decoding_steps(ys)
-                assert self._gd_graph_bs >= bs
-                assert self._gd_graph_seqlen >= kvcache_seqlen
+                assert self._gd_graph_bs >= bs, (self._gd_graph_bs, bs)
+                assert self._gd_graph_seqlen >= kvcache_seqlen, (self._gd_graph_seqlen, kvcache_seqlen)
                 first_y = ys[1] if self.is_first_stage() else ys[0]
                 if ys[0].input_ids is not None:
                     self._gd_input_buffers["input_ids"][:bs].copy_(ys[0].input_ids, non_blocking=True)

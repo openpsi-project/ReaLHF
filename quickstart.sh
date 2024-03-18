@@ -7,8 +7,8 @@ python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240
     actor.type=llama \
     actor.path=$model_path \
     actor.parallel.pipeline_parallel_size=2 \
-    actor.parallel.model_parallel_size=1 \
-    actor.parallel.data_parallel_size=2 \
+    actor.parallel.model_parallel_size=2 \
+    actor.parallel.data_parallel_size=1 \
     actor.gradient_checkpointing=True \
     actor.parallel.use_sequence_parallel=False \
     actor.enable_async_p2p=True \
@@ -16,9 +16,9 @@ python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240
     actor.optimizer.type=adam \
     critic.type=llama \
     critic.path=$model_path \
-    critic.parallel.pipeline_parallel_size=1 \
+    critic.parallel.pipeline_parallel_size=4 \
     critic.parallel.model_parallel_size=1 \
-    critic.parallel.data_parallel_size=4 \
+    critic.parallel.data_parallel_size=1 \
     critic.gradient_checkpointing=True \
     critic.parallel.use_sequence_parallel=False \
     critic.optimizer.offload=False \
@@ -29,8 +29,8 @@ python3 -m apps.quickstart ppo experiment_name=quickstart-debug trial_name=20240
     ref.parallel.pipeline_parallel_size=2 \
     rew.type=llama \
     rew.path=$model_path \
-    rew.parallel.data_parallel_size=2 \
-    rew.parallel.pipeline_parallel_size=2 \
+    rew.parallel.data_parallel_size=1 \
+    rew.parallel.pipeline_parallel_size=4 \
     save_freq_steps=null \
     dataset.max_prompt_len=256 \
     dataset.n_tokens_per_batch=8192 \

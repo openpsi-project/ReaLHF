@@ -119,9 +119,9 @@ def _get_dtype_from_key(k: str):
     ]:
         dtype = torch.bool
     elif k in [
-            "rewards",
+            
             "reward_score",
-            "packed_logprobs",
+            
             "packed_ref_logprobs",
             "old_logp",
             "ref_logp",
@@ -135,7 +135,7 @@ def _get_dtype_from_key(k: str):
         dtype = torch.int32
     elif k in ["packed_seq", "packed_input_ids", "packed_prompts"]:
         dtype = torch.int64
-    elif k in ["group_factor"]:
+    elif k in ["rewards","packed_logprobs","group_factor"]:
         dtype = torch.float32
     else:
         raise NotImplementedError(f"Unknown key {k} in packed data.")
@@ -553,6 +553,9 @@ class ModelWorker(worker_base.Worker):
                                  f" in ${time.perf_counter() - tik:.4f}$s")
                 self.__reply_queue.put_nowait((request, res))
 
+        # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
+        #                          f"finish handling request *{request.handle_name}*, "
+        #                          f"request_id {request.request_id}.")
         sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
         self.__request_sample_size[request.request_id] = sample_count
 
@@ -784,6 +787,8 @@ class ModelWorker(worker_base.Worker):
                     for _i in comm_slots:
                         buf_idx = global_buffer_indices[_i]
                         v = self.__data_owner_storage[(buf_idx, k)]
+                        assert v.dtype == _get_dtype_from_key(k), (k, v.dtype, _get_dtype_from_key(k))
+                        assert v.shape == _get_shape_from_key_and_seqlen(k, global_seqlens[_i]), (k, v.shape, global_seqlens[_i])
                         dist.broadcast(v, src=bcast_src, group=group)
                         # Mark data as sent and remove it from storage if all targets have received it.
                         rpc_name = request.data["rpc_name"]
@@ -794,7 +799,6 @@ class ModelWorker(worker_base.Worker):
                             self.__data_owner_storage.pop((buf_idx, k))
                             self.__data_send_record.pop((buf_idx, k))
 
-        # TODO: is this barrier necessary?
         # if target in self.__models:
         #     with base.constants.model_scope(target):
         #         dist.barrier(group=base.constants.parallelism_group())

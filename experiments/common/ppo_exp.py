@@ -396,6 +396,7 @@ class PPOConfig(Experiment):
                 "packed_logprobs",
                 "prompt_mask",
             ],
+            balanced_dp=True,
             # pre_hooks=[LoadToDeviceHook(), SyncParamHook(target="ref", interval=1)],  # NOTE: just for testing
             # post_hooks=[OffloadHook()],  # NOTE: just for testing
         )
