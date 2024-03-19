@@ -14,6 +14,7 @@ from api.config.config_flash_model import FlashMQATConfig
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import mask_eos_token
 from impl.model.utils.logits_warper import top_k_top_p_logits
+# import impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
 import base.constants
 import base.logging as logging
 
@@ -84,8 +85,9 @@ def genstep(
             _vocab_indices = _batch_indices.new_zeros((1, next_token_logits.shape[1]))
             if tokenizer.eos_token_id is not None:
                 _vocab_indices[:, tokenizer.eos_token_id] = 1
-            next_token_logits.masked_fill_(_batch_indices * _vocab_indices,
-                                           torch.finfo(next_token_logits.dtype).min)
+            next_token_logits.masked_fill_(
+                _batch_indices * _vocab_indices, torch.finfo(next_token_logits.dtype).min
+            )
 
     if not gconfig.greedy:
         next_token_logits /= gconfig.temperature
@@ -111,9 +113,9 @@ def genstep(
             async_op=True,
             group=base.constants.model_parallel_group(),
         )
-        torch.distributed.all_reduce(next_tokens,
-                                     torch.distributed.ReduceOp.SUM,
-                                     group=base.constants.model_parallel_group())
+        torch.distributed.all_reduce(
+            next_tokens, torch.distributed.ReduceOp.SUM, group=base.constants.model_parallel_group()
+        )
 
     if tokenizer.eos_token_id is not None:
         if tokenizer.pad_token_id is None:
@@ -140,66 +142,70 @@ def genstep(
     return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
 
 
-_DECODING_CUDA_GRAPH: torch.cuda.CUDAGraph = None
-_DECODING_CUDA_GRAPH_BS: int = None
-_DECODING_CUDA_GRAPH_SEQLEN: int = None
-_DECODING_CUDA_GRAPH_INPUT_BUFFER: Dict[str, torch.Tensor] = None
-_DECODING_CUDA_GRAPH_OUTPUT_BUFFER: Dict[str, torch.Tensor] = None
+# _DECODING_CUDA_GRAPH: torch.cuda.CUDAGraph = None
+# _DECODING_CUDA_GRAPH_BS: int = None
+# _DECODING_CUDA_GRAPH_SEQLEN: int = None
+# _DECODING_CUDA_GRAPH_INPUT_BUFFER: Dict[str, torch.Tensor] = None
+# _DECODING_CUDA_GRAPH_OUTPUT_BUFFER: Dict[str, torch.Tensor] = None
 
 
-@torch.no_grad()
-def get_decoding_cuda_graph(
-    model: "FlashMQATModel",
-    bs: int,
-    k_caches: List[torch.Tensor],
-    v_caches: List[torch.Tensor],
-    cache_seqlens: torch.Tensor,
-    force_recapture: bool = False,
-) -> Tuple[torch.cuda.CUDAGraph, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-    global _DECODING_CUDA_GRAPH
-    global _DECODING_CUDA_GRAPH_BS
-    global _DECODING_CUDA_GRAPH_INPUT_BUFFER
-    global _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
-    global _DECODING_CUDA_GRAPH_SEQLEN
-    if k_caches[0] is None:
-        # In case the first layer is the embedding layer, which does not have kv cache.
-        seqlen = k_caches[1].shape[1]
-    else:
-        seqlen = k_caches[0].shape[1]
-    if not force_recapture and _DECODING_CUDA_GRAPH is not None:
-        assert _DECODING_CUDA_GRAPH_BS >= bs
-        assert _DECODING_CUDA_GRAPH_SEQLEN >= seqlen
-        return _DECODING_CUDA_GRAPH, _DECODING_CUDA_GRAPH_INPUT_BUFFER, _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
-    torch.cuda.synchronize()
-    # Build a CUDAGraph for decoding inference.
-    input_buffers = dict(
-        input_ids=torch.ones(bs, 1, dtype=torch.long, device=model.device),
-        position_ids=cache_seqlens.clone()[:, None],
-        k_caches=k_caches,
-        v_caches=v_caches,
-        # NOTE: here cache_seqlens should be the real cache_seqlens, otherwise k/v cache will be changed in-place during capturing
-        cache_seqlens=cache_seqlens.clone(),
-        max_seqlen=None,
-        cu_seqlens=None,
-        hidden_states=None,
-    )
-    model._forward(**input_buffers)
-    torch.cuda.synchronize()
+# @torch.no_grad()
+# def get_decoding_cuda_graph(
+#     model: "FlashMQATModel",
+#     bs: int,
+#     k_caches: List[torch.Tensor],
+#     v_caches: List[torch.Tensor],
+#     cache_seqlens: torch.Tensor,
+#     force_recapture: bool = False,
+# ) -> Tuple[torch.cuda.CUDAGraph, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+#     global _DECODING_CUDA_GRAPH
+#     global _DECODING_CUDA_GRAPH_BS
+#     global _DECODING_CUDA_GRAPH_INPUT_BUFFER
+#     global _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
+#     global _DECODING_CUDA_GRAPH_SEQLEN
+#     if k_caches[0] is None:
+#         # In case the first layer is the embedding layer, which does not have kv cache.
+#         seqlen = k_caches[1].shape[1]
+#     else:
+#         seqlen = k_caches[0].shape[1]
+#     if not force_recapture and _DECODING_CUDA_GRAPH is not None:
+#         assert _DECODING_CUDA_GRAPH_BS >= bs
+#         assert _DECODING_CUDA_GRAPH_SEQLEN >= seqlen
+#         return _DECODING_CUDA_GRAPH, _DECODING_CUDA_GRAPH_INPUT_BUFFER, _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
 
-    graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
-        output = model._forward(**input_buffers)
-    torch.cuda.synchronize()
-    output_buffers = dict(logits=output)
-    gc.collect()
-    torch.cuda.empty_cache()
+#     input_buffers = dict(
+#         input_ids=torch.ones(bs, 1, dtype=torch.long, device=model.device),
+#         position_ids=cache_seqlens.clone()[:, None],
+#         k_caches=k_caches,
+#         v_caches=v_caches,
+#         # NOTE: here cache_seqlens should be the real cache_seqlens, otherwise k/v cache will be changed in-place during capturing
+#         cache_seqlens=cache_seqlens.clone(),
+#         max_seqlen=None,
+#         cu_seqlens=None,
+#         hidden_states=None,
+#     )
+#     assert custom_all_reduce.is_initialized()
+#     with custom_all_reduce.capture():
+#         torch.cuda.synchronize()
+#         # Build a CUDAGraph for decoding inference.
+#         model._forward(**input_buffers)
+#         torch.cuda.synchronize()
 
-    _DECODING_CUDA_GRAPH = graph
-    _DECODING_CUDA_GRAPH_INPUT_BUFFER = input_buffers
-    _DECODING_CUDA_GRAPH_OUTPUT_BUFFER = output_buffers
-    _DECODING_CUDA_GRAPH_BS = bs
-    _DECODING_CUDA_GRAPH_SEQLEN = seqlen
-    return graph, input_buffers, output_buffers
+#         graph = torch.cuda.CUDAGraph()
+#         with torch.cuda.graph(graph):
+#             output = model._forward(**input_buffers)
+#         torch.cuda.synchronize()
+
+#     output_buffers = dict(logits=output)
+#     gc.collect()
+#     torch.cuda.empty_cache()
+
+#     _DECODING_CUDA_GRAPH = graph
+#     _DECODING_CUDA_GRAPH_INPUT_BUFFER = input_buffers
+#     _DECODING_CUDA_GRAPH_OUTPUT_BUFFER = output_buffers
+#     _DECODING_CUDA_GRAPH_BS = bs
+#     _DECODING_CUDA_GRAPH_SEQLEN = seqlen
+#     return graph, input_buffers, output_buffers
 
 
 @torch.no_grad()
@@ -263,16 +269,22 @@ def generate(
             attention_mask = attention_mask.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
         elif k_caches is not None:
             for k_cache, v_cache in zip(k_caches, v_caches):
-                assert (k_cache.shape[0] == v_cache.shape[0] == input_ids.shape[0] == attention_mask.shape[0]
-                        == cache_seqlens.shape[0])
+                assert (
+                    k_cache.shape[0]
+                    == v_cache.shape[0]
+                    == input_ids.shape[0]
+                    == attention_mask.shape[0]
+                    == cache_seqlens.shape[0]
+                )
         bs = input_ids.shape[0]
     else:
         assert attention_mask is None
         assert packed_input_ids is not None
         assert cu_seqlens is not None
         assert gconfig.num_samples == 1, "packed_input_ids input is not supported for num_samples > 1"
-        assert (k_caches is None
-                and v_caches is None), "Continuing generation with packed_input_ids is not supported."
+        assert (
+            k_caches is None and v_caches is None
+        ), "Continuing generation with packed_input_ids is not supported."
         bs = cu_seqlens.shape[0] - 1
 
     device = torch.cuda.current_device()
@@ -295,13 +307,14 @@ def generate(
         if input_ids is not None:
             packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
         else:
-            max_seqlen = cu_seqlens.max().item()
+            max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True)
         # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(input_ids=packed_input_ids)
-              ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
+        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
+            PipeCacheData() for _ in range(mconfig.n_layers + 1)
+        ]
         # Model forward will set k/v cache in PipeCacheData.
         with model.gradient_checkpointing_disable():
             prompt_logits = model(x, ys)[0].pp_output
@@ -314,33 +327,38 @@ def generate(
                 base.constants.dataset_max_seqlen() + gconfig.max_new_tokens,
                 mconfig.hidden_dim // mconfig.head_dim + 10,
             )
-            global _DECODING_CUDA_GRAPH
-            if _DECODING_CUDA_GRAPH is not None:
-                global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
-                global _DECODING_CUDA_GRAPH_INPUT_BUFFER
-                if not (_DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= kvcache_seqlen):
-                    raise RuntimeError(
-                        f"CUDAGraph batch size {_DECODING_CUDA_GRAPH_BS} or seqlen {_DECODING_CUDA_GRAPH_SEQLEN} "
-                        f"is smaller than the data batch size {bs} or seqlen {kvcache_seqlen}. "
-                        "Have you correctly set the `max_seqlen` constant and set a `min_n_seqs_per_dp` in RPC config?"
-                    )
-                k_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["k_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
-                v_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["v_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
-            else:
-                k_cache = base.constants.get_global_memory_buffer().get_tensor(
-                    tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-                    dtype=y.k_cache.dtype,
-                    name=f"kv_cache_{layer_idx}_k",
-                    force_zero=True,
-                )
-                v_cache = base.constants.get_global_memory_buffer().get_tensor(
-                    tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-                    dtype=y.v_cache.dtype,
-                    name=f"kv_cache_{layer_idx}_v",
-                    force_zero=True,
-                )
-            indices = (torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
-                                    dtype=torch.long)[None, :] < input_lens[:, None])
+            # TODO: since pytorch all-reduce has bug during capturing and vllm all-reduce does not support >8 GPUs,
+            # we defer the implementation of CUDAGraph generation in the future
+            
+            # global _DECODING_CUDA_GRAPH
+            # if _DECODING_CUDA_GRAPH is not None:
+            #     global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
+            #     global _DECODING_CUDA_GRAPH_INPUT_BUFFER
+            #     if not (_DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= kvcache_seqlen):
+            #         raise RuntimeError(
+            #             f"CUDAGraph batch size {_DECODING_CUDA_GRAPH_BS} or seqlen {_DECODING_CUDA_GRAPH_SEQLEN} "
+            #             f"is smaller than the data batch size {bs} or seqlen {kvcache_seqlen}. "
+            #             "Have you correctly set the `max_seqlen` constant and set a `min_n_seqs_per_dp` in RPC config?"
+            #         )
+            #     k_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["k_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
+            #     v_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["v_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
+            # else:
+            k_cache = base.constants.get_global_memory_buffer().get_tensor(
+                tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+                dtype=y.k_cache.dtype,
+                name=f"kv_cache_{layer_idx}_k",
+                force_zero=True,
+            )
+            v_cache = base.constants.get_global_memory_buffer().get_tensor(
+                tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+                dtype=y.v_cache.dtype,
+                name=f"kv_cache_{layer_idx}_v",
+                force_zero=True,
+            )
+            indices = (
+                torch.arange(kvcache_seqlen, device=torch.cuda.current_device(), dtype=torch.long)[None, :]
+                < input_lens[:, None]
+            )
             k_cache[indices] = y.k_cache
             v_cache[indices] = y.v_cache
             y.k_cache = k_cache
@@ -351,7 +369,8 @@ def generate(
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+        )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -368,35 +387,47 @@ def generate(
             if v_caches[i].shape[1] < max_seqlen:
                 v_caches[i] = nn.functional.pad(v_caches[i], pad)
         x = PipeTransferData(store_kv_cache=torch.tensor(1))
-        ys = ([PipeCacheData(cache_seqlens=cache_seqlens)] + [
-            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens)
-            for k, v in zip(k_caches, v_caches)
-        ] + [PipeCacheData()])
+        ys = (
+            [PipeCacheData(cache_seqlens=cache_seqlens)]
+            + [
+                PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens)
+                for k, v in zip(k_caches, v_caches)
+            ]
+            + [PipeCacheData()]
+        )
         next_tokens = input_ids[:, -1]
 
-    graph, input_buffers, output_buffers = get_decoding_cuda_graph(
-        model,
-        bs,
-        [y.k_cache for y in ys],
-        [y.v_cache for y in ys],
-        cache_seqlens,
-        force_recapture=k_caches is not None,  # FIXME: this is not the usual use case
-    )
+    # graph, input_buffers, output_buffers = get_decoding_cuda_graph(
+    #     model,
+    #     bs,
+    #     [y.k_cache for y in ys],
+    #     [y.v_cache for y in ys],
+    #     cache_seqlens,
+    #     force_recapture=k_caches is not None,  # FIXME: this is not the usual use case
+    # )
 
     # The main loop.
     with model.gradient_checkpointing_disable(), model.sequence_parallel_disable():
         while not terminate:
             # the next round of inference
-            input_buffers["input_ids"][:bs].copy_(next_tokens.unsqueeze(-1), non_blocking=True)
-            input_buffers["position_ids"][:bs].copy_(cache_seqlens.unsqueeze(-1), non_blocking=True)
-            input_buffers["cache_seqlens"][:bs].copy_(cache_seqlens, non_blocking=True)
-            # # K/v cache will be changed in-place with flash attention.
-            graph.replay()
-            logits = output_buffers["logits"][:bs].squeeze(1)
+            # input_buffers["input_ids"][:bs].copy_(next_tokens.unsqueeze(-1), non_blocking=True)
+            # input_buffers["position_ids"][:bs].copy_(cache_seqlens.unsqueeze(-1), non_blocking=True)
+            # input_buffers["cache_seqlens"][:bs].copy_(cache_seqlens, non_blocking=True)
+            # # # K/v cache will be changed in-place with flash attention.
+            # graph.replay()
+            # logits = output_buffers["logits"][:bs].squeeze(1)
+            # cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
+            
+            # the next round of inference
+            ys[0].input_ids = next_tokens.unsqueeze(-1)  # [bs, 1], seqlen=1
+            ys[0].position_ids = None
+            # K/v cache will be changed in-place with flash attention.
+            logits = model(x, ys)[0].pp_output.squeeze(dim=1)
             cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
 
             next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-                logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+                logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+            )
             gen_token_ph.append(next_tokens)
             gen_logprob_ph.append(logprob)
             gen_logits_mask_ph.append(logits_mask)
@@ -438,15 +469,17 @@ def vanilla_packed_generate(
         packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
         # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(input_ids=packed_input_ids)
-              ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
+        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
+            PipeCacheData() for _ in range(mconfig.n_layers + 1)
+        ]
         # Model forward will set k/v cache in PipeCacheData.
         logits = model(x, ys).pp_output
         logits = logits[cu_seqlens[1:] - 1]
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+        )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -501,7 +534,8 @@ def vanilla_cpu_generate(
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+        )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -549,8 +583,9 @@ class InflightBatchingGenerator:
         self.batch_size = batch_size
         self.max_prompt_len = max_prompt_len
 
-        kvcache_seqlen = max(max_prompt_len + gconfig.max_new_tokens,
-                             mconfig.hidden_dim // mconfig.head_dim + 10)
+        kvcache_seqlen = max(
+            max_prompt_len + gconfig.max_new_tokens, mconfig.hidden_dim // mconfig.head_dim + 10
+        )
         _p = next(self.model.parameters())
         dtype, device = _p.dtype, _p.device
 
@@ -565,7 +600,8 @@ class InflightBatchingGenerator:
                 ),
                 dtype=dtype,
                 device=device,
-            ) for _ in range(self.mconfig.n_layers)
+            )
+            for _ in range(self.mconfig.n_layers)
         ]
         self.v_caches = [
             torch.zeros(
@@ -577,7 +613,8 @@ class InflightBatchingGenerator:
                 ),
                 dtype=dtype,
                 device=device,
-            ) for _ in range(self.mconfig.n_layers)
+            )
+            for _ in range(self.mconfig.n_layers)
         ]
         self.cache_seqlens = torch.zeros((batch_size,), dtype=torch.int32, device=device)
 
@@ -592,10 +629,18 @@ class InflightBatchingGenerator:
         self.generate_idx = torch.zeros((batch_size,), dtype=torch.int32, device=device)
         self.unfinished_sequences = torch.zeros((batch_size,), dtype=torch.float32, device=device)
 
-        self.ys = ([PipeCacheData(cache_seqlens=self.cache_seqlens,)] + [
-            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens)
-            for k, v in zip(self.k_caches, self.v_caches)
-        ] + [PipeCacheData()])
+        self.ys = (
+            [
+                PipeCacheData(
+                    cache_seqlens=self.cache_seqlens,
+                )
+            ]
+            + [
+                PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens)
+                for k, v in zip(self.k_caches, self.v_caches)
+            ]
+            + [PipeCacheData()]
+        )
 
         # output buffers
         self.output_tokens_buf = [[] for _ in range(batch_size)]
@@ -661,14 +706,15 @@ class InflightBatchingGenerator:
                 try:
                     prompt = self.inqueue.get_nowait()
                     self.prompt_tokens[i] = prompt
-                    self.input_buf[i, :prompt.shape[0]] = prompt
+                    self.input_buf[i, : prompt.shape[0]] = prompt
                     self.input_buf_lens[i] = prompt.shape[0]
                 except queue.Empty as e:
                     raise RuntimeError("Input queue is empty. This should not happen.") from e
 
         input_lens = self.input_buf_lens
-        valid_input_mask = torch.arange(self.max_prompt_len, device=self.input_buf.device,
-                                        dtype=torch.int32).unsqueeze(0) < input_lens.unsqueeze(-1)
+        valid_input_mask = torch.arange(
+            self.max_prompt_len, device=self.input_buf.device, dtype=torch.int32
+        ).unsqueeze(0) < input_lens.unsqueeze(-1)
         indices = torch.nonzero(valid_input_mask.flatten(), as_tuple=False).flatten()
         packed_input_ids = self.input_buf.flatten()[indices]
         max_seqlen = int(max(input_lens))
@@ -691,7 +737,8 @@ class InflightBatchingGenerator:
             logits = self._get_non_eos_logits()
 
         next_tokens, logprob, logits_mask, _, self.unfinished_sequences = genstep(
-            logits, self.tokenizer, self.unfinished_sequences, self.generate_idx, self.gconfig)
+            logits, self.tokenizer, self.unfinished_sequences, self.generate_idx, self.gconfig
+        )
 
         for i in range(self.batch_size):
             self.output_tokens_buf[i].append(next_tokens[i].long())

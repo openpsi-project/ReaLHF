@@ -808,6 +808,7 @@ class ModelWorker(worker_base.Worker):
 
         if len(data) > 0:
             assert target_dp_rank is not None
+            assert len(set(local_buffer_indices)) == len(local_buffer_indices), local_buffer_indices
             input_key_remap = request.data["input_key_remap"]
             _data = []
             l = len(list(data.values())[0])

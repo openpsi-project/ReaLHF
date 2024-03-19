@@ -63,13 +63,12 @@ RUN pip3 uninstall -y flash_attn && pip3 install /tmp/flash_attn-2.3.6-cp310-cp3
 COPY thirdparty/cugae/dist/cugae-0.1.0-cp310-cp310-linux_x86_64.whl /tmp/cugae-0.1.0-cp310-cp310-linux_x86_64.whl
 RUN pip3 install /tmp/cugae-0.1.0-cp310-cp310-linux_x86_64.whl
 
-COPY thirdparty/DeepSpeed /DeepSpeed
-RUN pip3 install -e /DeepSpeed
-
 # final clean up
 WORKDIR /app
 RUN rm -rf /tmp/TransformerEngine /tmp/flash_attn-2.3.6-cp310-cp310-linux_x86_64.whl /tmp/cugae-0.1.0-cp310-cp310-linux_x86_64.whl /tmp/pytorch
 
+COPY dist/dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl /dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl
+RUN pip3 install /dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl && rm /dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl
 # install zmq with pgm
 # COPY ./zeromq-4.3.4.tar.gz /
 # WORKDIR /

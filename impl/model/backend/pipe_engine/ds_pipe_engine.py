@@ -785,29 +785,31 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._zero_grads(x)
         self._zero_grads(ys)
 
-        if self._generate_mode and self.tensor_buffer.get("kv_cache_reserved", micro_batch_id):
-            kvcache_seqlen = max(
-                base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
-                self.hidden_dim // self.head_dim + 10,
-            )
-            with torch.no_grad():
-                bs = self.tensor_buffer.get("batch_lengths", micro_batch_id)
-                if self._gd_graph is None:
-                    self.capture_generate_decoding_steps(ys)
-                assert self._gd_graph_bs >= bs, (self._gd_graph_bs, bs)
-                assert self._gd_graph_seqlen >= kvcache_seqlen, (self._gd_graph_seqlen, kvcache_seqlen)
-                first_y = ys[1] if self.is_first_stage() else ys[0]
-                if ys[0].input_ids is not None:
-                    self._gd_input_buffers["input_ids"][:bs].copy_(ys[0].input_ids, non_blocking=True)
-                if x.pp_input is not None:
-                    self._gd_input_buffers["hidden_states"][:bs].copy_(x.pp_input, non_blocking=True)
-                self._gd_input_buffers["position_ids"][:bs].copy_(first_y.cache_seqlens.unsqueeze(-1),
-                                                                  non_blocking=True)
-                self._gd_input_buffers["cache_seqlens"][:bs].copy_(first_y.cache_seqlens, non_blocking=True)
-                self._gd_graph.replay()
-            x.pp_output = self._gd_output_buffers["output"][:bs]
-        else:
-            x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
+        # TODO: since pytorch all-reduce has bug during capturing and vllm all-reduce does not support >8 GPUs,
+        # we defer the implementation of CUDAGraph generation in the future
+        # if self._generate_mode and self.tensor_buffer.get("kv_cache_reserved", micro_batch_id):
+        #     kvcache_seqlen = max(
+        #         base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
+        #         self.hidden_dim // self.head_dim + 10,
+        #     )
+        #     with torch.no_grad():
+        #         bs = self.tensor_buffer.get("batch_lengths", micro_batch_id)
+        #         if self._gd_graph is None:
+        #             self.capture_generate_decoding_steps(ys)
+        #         assert self._gd_graph_bs >= bs, (self._gd_graph_bs, bs)
+        #         assert self._gd_graph_seqlen >= kvcache_seqlen, (self._gd_graph_seqlen, kvcache_seqlen)
+        #         first_y = ys[1] if self.is_first_stage() else ys[0]
+        #         if ys[0].input_ids is not None:
+        #             self._gd_input_buffers["input_ids"][:bs].copy_(ys[0].input_ids, non_blocking=True)
+        #         if x.pp_input is not None:
+        #             self._gd_input_buffers["hidden_states"][:bs].copy_(x.pp_input, non_blocking=True)
+        #         self._gd_input_buffers["position_ids"][:bs].copy_(first_y.cache_seqlens.unsqueeze(-1),
+        #                                                           non_blocking=True)
+        #         self._gd_input_buffers["cache_seqlens"][:bs].copy_(first_y.cache_seqlens, non_blocking=True)
+        #         self._gd_graph.replay()
+        #     x.pp_output = self._gd_output_buffers["output"][:bs]
+        # else:
+        x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
 
         # logger.info(f"rank {self.global_rank} mbid {micro_batch_id} step {step_id} x.pp_output shape {x.pp_output.shape}")
         is_first_step = self.__maybe_init_kv_cache(x, ys, micro_batch_id)

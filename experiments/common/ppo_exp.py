@@ -47,11 +47,11 @@ class PPOHyperparmeters:
         use_stream_pipe_engine (bool): Whether to use stream pipe engine for actor model.
     """
 
-    max_new_tokens: int = 512
-    min_new_tokens: int = 10
+    max_new_tokens: int = 256
+    min_new_tokens: int = 256
     greedy: bool = False
-    top_p: float = 1.0
-    top_k: int = 200
+    top_p: float = 0.9
+    top_k: int = 1024
     temperature: float = 1.0
     ppo_n_minibatches: int = 4
     kl_ctl: float = 0.1
@@ -64,8 +64,8 @@ class PPOHyperparmeters:
     reward_output_bias: float = 0.0
     early_stop_imp_ratio: float = 5.0
     use_adaptive_kl_ctl: bool = False
-    adv_norm: bool = False
-    value_norm: bool = False
+    adv_norm: bool = True
+    value_norm: bool = True
     value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
