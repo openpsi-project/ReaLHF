@@ -276,9 +276,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             )
             self.tensor_buffer.put("pipe_transfer_infos", mbid, others_cache)
 
-    def _prepare_loss_input(self, **loss_kwargs):
+    def _prepare_loss_input(self, n_seqs: int, **loss_kwargs):
         data = NamedArray(**loss_kwargs)
-        splitted = PackedParallelDataBroker.scatter_to(data, self.num_micro_batches)
+        splitted = PackedParallelDataBroker.scatter_to(data, self.num_micro_batches, min_size=n_seqs // self.num_micro_batches)
         for mbid, x in enumerate(splitted):
             self.tensor_buffer.put("loss_inputs", mbid, x)
 
@@ -456,8 +456,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
         self._set_eval_batch_states()
         self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
+        if input_lens_for_partition is not None:
+            n_seqs = input_lens_for_partition.shape[0]
+        else:
+            n_seqs = cu_seqlens.shape[0] - 1
         self._loss_fn = loss_fn
-        self._prepare_loss_input(**loss_fn_kwargs)
+        self._prepare_loss_input(n_seqs=n_seqs, **loss_fn_kwargs)
         self._pre_eval_batch()
 
         # Do the work
@@ -505,7 +509,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._set_train_batch_states()
         self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
         self._loss_fn = loss_fn
-        self._prepare_loss_input(**loss_fn_kwargs)
+        if input_lens_for_partition is not None:
+            n_seqs = input_lens_for_partition.shape[0]
+        else:
+            n_seqs = cu_seqlens.shape[0] - 1
+        self._prepare_loss_input(n_seqs=n_seqs, **loss_fn_kwargs)
         self._pre_train_batch()
 
         # Do the work

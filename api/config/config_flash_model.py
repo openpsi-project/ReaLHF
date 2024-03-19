@@ -277,7 +277,9 @@ class ModelTrainEvalConfig:
         if self.optimizer is not None and self.optimizer.offload and self.zero_stage != 3:
             raise ValueError("offload optimizer is only supported when zero stage=3.")
         if self.parallel.pipeline_parallel_size > 1 and self.zero_stage > 1:
-            raise ValueError("zero stage should be at most 1 when pipeline parallelism is used.")
+            logger.warning(f"ZeRO stage should be at most 1 when pipeline parallelism is used. "
+                           f"Force to set it to 1. (original {self.zero_stage})")
+            self.zero_stage = 1
 
 
 def get_flash_mqat_model_config(

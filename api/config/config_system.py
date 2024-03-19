@@ -68,7 +68,8 @@ class Scheduling:
 
     @staticmethod
     def master_worker_default(**kwargs):
-        return Scheduling(**{"cpu": 16, "mem": 20 * 1024, "container_image": _LLM_GPU_IMAGE, **kwargs})
+        # TODO: change to cpu image?
+        return Scheduling(**{"cpu": 16, "mem": 20 * 1024, "gpu":0, "container_image": _LLM_GPU_IMAGE, **kwargs})
 
     @staticmethod
     def model_worker_default(**kwargs):

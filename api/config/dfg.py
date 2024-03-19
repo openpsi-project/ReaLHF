@@ -109,7 +109,7 @@ class ModelRPC:
     data2required_rpc_names: Dict[str, List[str]] = dataclasses.field(default_factory=lambda: {})
 
     def __post_init__(self):
-        if self.min_n_seqs >= self.max_n_seqs or self.min_n_tokens >= self.max_n_tokens:
+        if self.min_n_seqs > self.max_n_seqs or self.min_n_tokens > self.max_n_tokens:
             raise RuntimeError("Invalid min/max n_seqs/n_tokens.")
         if self.is_src and self.max_n_seqs > 1e4 and self.max_n_tokens > 1e8:
             raise RuntimeError(
@@ -117,13 +117,15 @@ class ModelRPC:
                 f"The maximum number of sequences is {self.max_n_seqs} > budget {int(1e4)} and "
                 f"the maximum number of tokens is {self.max_n_tokens} > budget {int(1e8)}. "
                 "Please set a smaller value.")
+        if "@" in self.model_name or "@" in self.interface_type.value:
+            raise ValueError(f"Invalid model name or interface type: {self.model_name}, {self.interface_type}.")
 
     def __repr__(self):
         return f"ModelRPC({self.model_name}, {self.interface_type})"
 
     @property
     def name(self):
-        return f"{self.model_name}_{self.interface_type.value}"
+        return f"{self.model_name}@{self.interface_type.value}"
 
     @property
     def is_src(self):

@@ -7,5 +7,6 @@ import experiments.common.dpo_exp
 import experiments.common.ppo_exp
 import experiments.common.rw_exp
 import experiments.common.sft_exp
+import experiments.autoexp.auto_ppo
 
 # import experiments.packed_gen_score_exp

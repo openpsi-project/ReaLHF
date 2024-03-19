@@ -74,6 +74,8 @@ def make_dataset(
 
     if isinstance(tokenizer_or_tokenizer_name, str):
         tokenizer = api.huggingface.load_hf_tokenizer(tokenizer_or_tokenizer_name)
+    elif tokenizer_or_tokenizer_name is None:
+        raise RuntimeError("tokenizer_or_tokenizer_name cannot be None.")
     else:
         tokenizer = tokenizer_or_tokenizer_name
     util = DatasetUtility(

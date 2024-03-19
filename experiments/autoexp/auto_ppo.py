@@ -2,9 +2,8 @@ import functools
 
 from omegaconf import MISSING
 
-from .device_mapping import auto_device_mapping, DeviceMesh
+from .device_mapping import auto_device_mapping, ClusterDeviceMesh
 from api.config.config_dataset import DatasetType, PromptOnlyDatasetConfig
-from api.config.config_flash_model import ModelConfig
 from api.config.config_system import *
 from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
 from base.topology import PipeModelDataParallelTopology
@@ -16,40 +15,46 @@ logger = logging.getLogger("Auto PPO exp", "colored")
 
 def register_auto_ppo_experiment(
     size: int,
-    nodelist: str,
     gen_bs: int,
     train_bs: int,
 ):
     assert size in [7, 13, 34, 70]
     if size == 7:
         n_nodes = 1
+        nodelist = "QH-com13"
     elif size == 13:
         n_nodes = 2
+        nodelist = "QH-com[13-14]"
     elif size == 34:
         n_nodes = 4
+        nodelist = "QH-com[13-16]"
     elif size == 70:
         n_nodes = 8
+        nodelist = "QH-com[13-20]"
 
     model_class = "llama" if size != 34 else "codellama"
 
     @auto_device_mapping(
-        device_mesh=DeviceMesh(n_nodes=n_nodes, n_gpus_per_node=8, mem=80),
+        device_mesh=ClusterDeviceMesh(n_nodes=n_nodes, n_gpus_per_node=8, mem=80),
         nodelist=nodelist,
     )
     @dataclasses.dataclass
     class AutoPPOExperiment:
         seed: int = 1
-        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=ExperimentSaveEvalControl(
-            benchmark_steps=20,),)
+        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(
+            default_factory=functools.partial(ExperimentSaveEvalControl,
+                benchmark_steps=20,
+            ),
+        )
         ppo: PPOHyperparmeters = dataclasses.field(default_factory=PPOHyperparmeters)
 
         @property
         def dataset(self) -> DatasetType:
             return PromptOnlyDatasetConfig(
                 max_prompt_len=256,
-                n_tokens_per_batch=65536,
-                batch_size=256,
+                n_tokens_per_batch=1048576,
                 path="/lustre/fw/datasets/antropic-hh/ppo_prompt_only.jsonl",
+                # path="/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl",
             )
 
         @property
@@ -82,7 +87,7 @@ def register_auto_ppo_experiment(
                     **copy.deepcopy(ppo_kwargs),
                     "generation_config": generation_kwargs,
                     "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
-                    "force_no_logits_mask": False,
+                    "force_no_logits_mask": True,
                     "adv_norm": self.ppo.adv_norm,
                 },
             )
@@ -96,7 +101,7 @@ def register_auto_ppo_experiment(
                         **copy.deepcopy(ppo_kwargs),
                         "generation_config": generation_kwargs,
                         "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
-                        "force_no_logits_mask": False,
+                        "force_no_logits_mask": True,
                         "adv_norm": self.ppo.adv_norm,
                     },
                 )
@@ -116,7 +121,7 @@ def register_auto_ppo_experiment(
             return [
                 ModelRPC(
                     model_name="actor",
-                    model_type=ModelType(model_class, size),
+                    model_type=ModelType(model_class, size, is_critic=False),
                     interface_type=ModelInterfaceType.GENERATE,
                     interface_impl=actor_interface,
                     input_data=["packed_prompts", "prompt_cu_seqlens"],
@@ -125,7 +130,6 @@ def register_auto_ppo_experiment(
                         "packed_seq",
                         "cu_seqlens",
                         "packed_logprobs",
-                        "packed_logits_mask",
                         "prompt_mask",
                     ],
                     balanced_dp=True,
@@ -134,7 +138,7 @@ def register_auto_ppo_experiment(
                 ),
                 ModelRPC(
                     model_name="reward",
-                    model_type=ModelType("llama", 7),
+                    model_type=ModelType("llama", 7, is_critic=True),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=rw_interface,
                     input_data=["packed_seq", "cu_seqlens"],
@@ -146,13 +150,12 @@ def register_auto_ppo_experiment(
                 ),
                 ModelRPC(
                     model_name="ref",
-                    model_type=ModelType(model_class, size),
+                    model_type=ModelType(model_class, size, is_critic=False),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=ref_interface,
                     input_data=[
                         "packed_seq",
                         "cu_seqlens",
-                        "packed_logits_mask",
                     ],
                     output_data=["logprobs"],
                     output_key_remap={"logprobs": "packed_ref_logprobs"},
@@ -161,7 +164,7 @@ def register_auto_ppo_experiment(
                 ),
                 ModelRPC(
                     model_name="critic",
-                    model_type=ModelType("llama", 7),
+                    model_type=ModelType("llama", 7, is_critic=True),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=critic_interface,
                     input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
@@ -172,7 +175,7 @@ def register_auto_ppo_experiment(
                 ),
                 ModelRPC(
                     model_name="actor",
-                    model_type=ModelType(model_class, size),
+                    model_type=ModelType(model_class, size, is_critic=False),
                     interface_type=ModelInterfaceType.TRAIN_STEP,
                     interface_impl=actor_interface,
                     input_data=[
@@ -184,17 +187,17 @@ def register_auto_ppo_experiment(
                         "values",
                         "prompt_mask",
                         "seq_no_eos_mask",
-                        "packed_logits_mask",
                     ],
                     log_return_value=True,
                     min_n_seqs_per_dp=self.ppo.ppo_n_minibatches,
                     min_n_seqs=train_bs,
                     max_n_seqs=train_bs,
+                    balanced_dp=True,
                 ),
                 ModelRPC(
                     model_name="critic",
                     interface_type=ModelInterfaceType.TRAIN_STEP,
-                    model_type=ModelType("llama", 7),
+                    model_type=ModelType("llama", 7, is_critic=True),
                     interface_impl=critic_interface,
                     input_data=[
                         "packed_seq",
@@ -210,5 +213,14 @@ def register_auto_ppo_experiment(
                     min_n_seqs_per_dp=self.ppo.ppo_n_minibatches,
                     min_n_seqs=train_bs,
                     max_n_seqs=train_bs,
+                    balanced_dp=True,
                 ),
             ]
+
+    register_experiment(f"sosp-a{size}g{gen_bs}t{train_bs}", AutoPPOExperiment)
+
+
+for size in [7, 13, 34, 70]:
+    for gen_bs in [8, 16, 32, 64]:
+        train_bs = gen_bs
+        register_auto_ppo_experiment(size, gen_bs, train_bs)
