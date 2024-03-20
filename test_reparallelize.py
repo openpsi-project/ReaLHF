@@ -13,8 +13,8 @@ from base.topology import PipeModelDataParallelTopology
 import itertools
 
 
-param_size = 8
-n_layers = 16
+param_size = 24
+n_layers = 24
 
 
 def repartition_strategy(
@@ -55,28 +55,28 @@ def get_param_dtype(layer_idx):
     return torch.float32
 
 
-def setup_comm_groups(from_shard_id: ModelShardID, to_shard_id: ModelShardID):
+def setup_comm_groups(from_topo: PipeModelDataParallelTopology, to_topo: PipeModelDataParallelTopology):
     comm_groups = {}
     comm_src = {}
     comm_dst_ranks = {}
     for src_pp_rank, dst_pp_rank in itertools.product(
-        range(from_shard_id.topo.get_dim("pipe")), range(to_shard_id.topo.get_dim("pipe"))
+        range(from_topo.get_dim("pipe")), range(to_topo.get_dim("pipe"))
     ):
         # create tensor reshard groups
-        src_mp_size = from_shard_id.topo.get_dim("model")
-        dst_mp_size = to_shard_id.topo.get_dim("model")
+        src_mp_size = from_topo.get_dim("model")
+        dst_mp_size = to_topo.get_dim("model")
 
         for mp_j in range(dst_mp_size):
-            _all_dst_ranks = to_shard_id.topo.filter_match(pipe=dst_pp_rank, model=mp_j)
+            _all_dst_ranks = to_topo.filter_match(pipe=dst_pp_rank, model=mp_j)
             if src_mp_size > dst_mp_size:
                 factor = src_mp_size // dst_mp_size
                 mp_is = list(range(factor * mp_j, factor * (mp_j + 1)))
                 _all_src_ranks = [
-                    from_shard_id.topo.filter_match(model=mp_i, pipe=src_pp_rank) for mp_i in mp_is
+                    from_topo.filter_match(model=mp_i, pipe=src_pp_rank) for mp_i in mp_is
                 ]
             else:
                 factor = dst_mp_size // src_mp_size
-                _all_src_ranks = [from_shard_id.topo.filter_match(model=mp_j // factor, pipe=src_pp_rank)]
+                _all_src_ranks = [from_topo.filter_match(model=mp_j // factor, pipe=src_pp_rank)]
             for receiver_portion_id, _src_ranks in enumerate(_all_src_ranks):
                 # All GPUs in _src_ranks have the data required by (pp_j, mp_j)
                 # We split _dst_ranks evenly among the GPUs in _src_ranks, such that they can broadcast in parallel.
@@ -85,13 +85,16 @@ def setup_comm_groups(from_shard_id: ModelShardID, to_shard_id: ModelShardID):
                     _dst_ranks = _all_dst_ranks[
                         subgroup_id * subgroup_size : (subgroup_id + 1) * subgroup_size
                     ]
+                    _dst_ranks = [_x + 8 - to_topo.world_size() for _x in _dst_ranks]
+
                     dp_i, mp_i = (
-                        from_shard_id.topo.get_coord(_src_rank).data,
-                        from_shard_id.topo.get_coord(_src_rank).model,
+                        from_topo.get_coord(_src_rank).data,
+                        from_topo.get_coord(_src_rank).model,
                     )
                     comm_dst_ranks[(dp_i, mp_i, src_pp_rank, mp_j, dst_pp_rank)] = _dst_ranks
                     if _src_rank not in _dst_ranks:
                         _dst_ranks = [_src_rank] + _dst_ranks
+                    assert len(set(_dst_ranks)) == len(_dst_ranks)
                     if len(_dst_ranks) > 1:
                         comm_groups[(dp_i, mp_i, src_pp_rank, mp_j, dst_pp_rank)] = dist.new_group(_dst_ranks)
                     else:
@@ -102,33 +105,40 @@ def setup_comm_groups(from_shard_id: ModelShardID, to_shard_id: ModelShardID):
 
 
 def worker(idx: int, from_topo: PipeModelDataParallelTopology, to_topo: PipeModelDataParallelTopology):
+    # The first from_topo.world_size() processes own the first model, which will send its parameters
+    # the the last to_topo.world_size() processes that host the second model.
     torch.cuda.set_device(idx)
     dist.init_process_group(backend="nccl", init_method="tcp://localhost:7777", rank=idx, world_size=8)
     torch.cuda.set_device(idx)
 
     global_state_dict = create_global_param(param_size, n_layers)
 
-    from_shard_id = ModelShardID.from_parallelism_rank("default", from_topo, idx)
-    to_shard_id = ModelShardID.from_parallelism_rank("default", to_topo, idx)
+    if idx < from_topo.world_size():
+        from_shard_id = ModelShardID.from_parallelism_rank("default", from_topo, idx)
+    if idx >= 8-to_topo.world_size():
+        to_shard_id = ModelShardID.from_parallelism_rank("default", to_topo, idx - (8-to_topo.world_size()))
 
-    dst_mp_size = to_shard_id.topo.get_dim("model")
-    src_mp_size = from_shard_id.topo.get_dim("model")
+    dst_mp_size = to_topo.get_dim("model")
+    src_mp_size = from_topo.get_dim("model")
 
-    from_layer_idx_start = n_layers // from_topo.get_dim("pipe") * from_shard_id.pp_rank
-    from_layer_idx_end = n_layers // from_topo.get_dim("pipe") * (from_shard_id.pp_rank + 1)
+    if idx < from_topo.world_size():
+        from_layer_idx_start = n_layers // from_topo.get_dim("pipe") * from_shard_id.pp_rank
+        from_layer_idx_end = n_layers // from_topo.get_dim("pipe") * (from_shard_id.pp_rank + 1)
 
-    _param_size_per_mp = param_size // from_topo.get_dim("model")
-    state_dict = {
-        i: x[from_shard_id.mp_rank * _param_size_per_mp : (from_shard_id.mp_rank + 1) * _param_size_per_mp]
-        for i, x in global_state_dict.items()
-        if i in range(from_layer_idx_start, from_layer_idx_end)
-    }
+        _param_size_per_mp = param_size // from_topo.get_dim("model")
+        state_dict = {
+            i: x[from_shard_id.mp_rank * _param_size_per_mp : (from_shard_id.mp_rank + 1) * _param_size_per_mp]
+            for i, x in global_state_dict.items()
+            if i in range(from_layer_idx_start, from_layer_idx_end)
+        }
+    else:
+        state_dict = {}
 
     # initialize groups for communication
-    comm_groups, comm_src, comm_dst_ranks = setup_comm_groups(from_shard_id, to_shard_id)
+    comm_groups, comm_src, comm_dst_ranks = setup_comm_groups(from_topo, to_topo)
 
-    from_layer_mapping = get_layer_mapping(from_shard_id.topo.get_dim("pipe"))
-    to_layer_mapping = get_layer_mapping(to_shard_id.topo.get_dim("pipe"))
+    from_layer_mapping = get_layer_mapping(from_topo.get_dim("pipe"))
+    to_layer_mapping = get_layer_mapping(to_topo.get_dim("pipe"))
     repart_strat = repartition_strategy(from_layer_mapping, to_layer_mapping)
     print(repart_strat)
 
@@ -155,13 +165,13 @@ def worker(idx: int, from_topo: PipeModelDataParallelTopology, to_topo: PipeMode
 
     comm_plan = []
 
-    src_dp_size = from_shard_id.topo.get_dim("data")
-    dst_dp_size = to_shard_id.topo.get_dim("data")
+    src_dp_size = from_topo.get_dim("data")
+    dst_dp_size = to_topo.get_dim("data")
 
     # derive a global NCCL communication plan
     for (pp_i, pp_j), layer_indices in repart_strat.items():
         sub_sd = {
-            i: (get_param_shape(i, from_shard_id.topo.get_dim("model")), get_param_dtype(i))
+            i: (get_param_shape(i, from_topo.get_dim("model")), get_param_dtype(i))
             for i in layer_indices
         }
         for k, (shape, dtype) in sub_sd.items():
@@ -241,7 +251,7 @@ def worker(idx: int, from_topo: PipeModelDataParallelTopology, to_topo: PipeMode
         if isinstance(step, ReceverStep) and step.rank == idx:
             if step.param_key not in new_state_dict:
                 new_state_dict[step.param_key] = torch.zeros(
-                    param_size // to_shard_id.topo.get_dim("model"), dtype=step.param_dtype, device="cuda"
+                    param_size // to_topo.get_dim("model"), dtype=step.param_dtype, device="cuda"
                 )
 
             if step.rank == step.src:
@@ -265,20 +275,21 @@ def worker(idx: int, from_topo: PipeModelDataParallelTopology, to_topo: PipeMode
                 state_dict.pop(step.param_key)
 
     assert len(state_dict) == 0, (idx, state_dict.keys(), new_state_dict.keys())
-    assert len(new_state_dict) == n_layers // to_shard_id.topo.get_dim("pipe"), len(new_state_dict)
 
-    to_layer_idx_start = n_layers // to_topo.get_dim("pipe") * to_shard_id.pp_rank
-    to_layer_idx_end = n_layers // to_topo.get_dim("pipe") * (to_shard_id.pp_rank + 1)
-    for i in range(to_layer_idx_start, to_layer_idx_end):
-        to_mp_rank = to_shard_id.mp_rank
-        a = global_state_dict[i][
-            param_size
-            // to_shard_id.topo.get_dim("model")
-            * to_mp_rank : param_size
-            // to_shard_id.topo.get_dim("model")
-            * (to_mp_rank + 1)
-        ]
-        assert torch.allclose(new_state_dict[i], a), (new_state_dict[i], a, i)
+    if idx >= 8-to_topo.world_size():
+        assert len(new_state_dict) == n_layers // to_topo.get_dim("pipe"), len(new_state_dict)
+        to_layer_idx_start = n_layers // to_topo.get_dim("pipe") * to_shard_id.pp_rank
+        to_layer_idx_end = n_layers // to_topo.get_dim("pipe") * (to_shard_id.pp_rank + 1)
+        for i in range(to_layer_idx_start, to_layer_idx_end):
+            to_mp_rank = to_shard_id.mp_rank
+            a = global_state_dict[i][
+                param_size
+                // to_topo.get_dim("model")
+                * to_mp_rank : param_size
+                // to_topo.get_dim("model")
+                * (to_mp_rank + 1)
+            ]
+            assert torch.allclose(new_state_dict[i], a), (new_state_dict[i], a, i)
 
     torch.distributed.barrier()
     if idx == 0:
@@ -297,8 +308,10 @@ def decompose_to_three_factors(n: int):
 
 
 if __name__ == "__main__":
-    decompositions = decompose_to_three_factors(8)
+    decompositions = decompose_to_three_factors(6)
     for x1, x2 in itertools.product(decompositions, decompositions):
+        if not (x1[1] % x2[1] == 0 or x2[1] % x1[1] == 0):
+            continue
         print(f"testing from {x1} to {x2}")
         from_topo = PipeModelDataParallelTopology(num_pp=x1[0], num_mp=x1[1], num_dp=x1[2])
         to_topo = PipeModelDataParallelTopology(num_pp=x2[0], num_mp=x2[1], num_dp=x2[2])
