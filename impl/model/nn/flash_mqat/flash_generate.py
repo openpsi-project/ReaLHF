@@ -85,9 +85,8 @@ def genstep(
             _vocab_indices = _batch_indices.new_zeros((1, next_token_logits.shape[1]))
             if tokenizer.eos_token_id is not None:
                 _vocab_indices[:, tokenizer.eos_token_id] = 1
-            next_token_logits.masked_fill_(
-                _batch_indices * _vocab_indices, torch.finfo(next_token_logits.dtype).min
-            )
+            next_token_logits.masked_fill_(_batch_indices * _vocab_indices,
+                                           torch.finfo(next_token_logits.dtype).min)
 
     if not gconfig.greedy:
         next_token_logits /= gconfig.temperature
@@ -113,9 +112,9 @@ def genstep(
             async_op=True,
             group=base.constants.model_parallel_group(),
         )
-        torch.distributed.all_reduce(
-            next_tokens, torch.distributed.ReduceOp.SUM, group=base.constants.model_parallel_group()
-        )
+        torch.distributed.all_reduce(next_tokens,
+                                     torch.distributed.ReduceOp.SUM,
+                                     group=base.constants.model_parallel_group())
 
     if tokenizer.eos_token_id is not None:
         if tokenizer.pad_token_id is None:
@@ -147,7 +146,6 @@ def genstep(
 # _DECODING_CUDA_GRAPH_SEQLEN: int = None
 # _DECODING_CUDA_GRAPH_INPUT_BUFFER: Dict[str, torch.Tensor] = None
 # _DECODING_CUDA_GRAPH_OUTPUT_BUFFER: Dict[str, torch.Tensor] = None
-
 
 # @torch.no_grad()
 # def get_decoding_cuda_graph(
@@ -269,22 +267,16 @@ def generate(
             attention_mask = attention_mask.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
         elif k_caches is not None:
             for k_cache, v_cache in zip(k_caches, v_caches):
-                assert (
-                    k_cache.shape[0]
-                    == v_cache.shape[0]
-                    == input_ids.shape[0]
-                    == attention_mask.shape[0]
-                    == cache_seqlens.shape[0]
-                )
+                assert (k_cache.shape[0] == v_cache.shape[0] == input_ids.shape[0] == attention_mask.shape[0]
+                        == cache_seqlens.shape[0])
         bs = input_ids.shape[0]
     else:
         assert attention_mask is None
         assert packed_input_ids is not None
         assert cu_seqlens is not None
         assert gconfig.num_samples == 1, "packed_input_ids input is not supported for num_samples > 1"
-        assert (
-            k_caches is None and v_caches is None
-        ), "Continuing generation with packed_input_ids is not supported."
+        assert (k_caches is None
+                and v_caches is None), "Continuing generation with packed_input_ids is not supported."
         bs = cu_seqlens.shape[0] - 1
 
     device = torch.cuda.current_device()
@@ -312,9 +304,8 @@ def generate(
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True)
         # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
-            PipeCacheData() for _ in range(mconfig.n_layers + 1)
-        ]
+        ys = [PipeCacheData(input_ids=packed_input_ids)
+              ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
         # Model forward will set k/v cache in PipeCacheData.
         with model.gradient_checkpointing_disable():
             prompt_logits = model(x, ys)[0].pp_output
@@ -329,7 +320,7 @@ def generate(
             )
             # TODO: since pytorch all-reduce has bug during capturing and vllm all-reduce does not support >8 GPUs,
             # we defer the implementation of CUDAGraph generation in the future
-            
+
             # global _DECODING_CUDA_GRAPH
             # if _DECODING_CUDA_GRAPH is not None:
             #     global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
@@ -355,10 +346,8 @@ def generate(
                 name=f"kv_cache_{layer_idx}_v",
                 force_zero=True,
             )
-            indices = (
-                torch.arange(kvcache_seqlen, device=torch.cuda.current_device(), dtype=torch.long)[None, :]
-                < input_lens[:, None]
-            )
+            indices = (torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
+                                    dtype=torch.long)[None, :] < input_lens[:, None])
             k_cache[indices] = y.k_cache
             v_cache[indices] = y.v_cache
             y.k_cache = k_cache
@@ -369,8 +358,7 @@ def generate(
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
-        )
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -387,14 +375,10 @@ def generate(
             if v_caches[i].shape[1] < max_seqlen:
                 v_caches[i] = nn.functional.pad(v_caches[i], pad)
         x = PipeTransferData(store_kv_cache=torch.tensor(1))
-        ys = (
-            [PipeCacheData(cache_seqlens=cache_seqlens)]
-            + [
-                PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens)
-                for k, v in zip(k_caches, v_caches)
-            ]
-            + [PipeCacheData()]
-        )
+        ys = ([PipeCacheData(cache_seqlens=cache_seqlens)] + [
+            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens)
+            for k, v in zip(k_caches, v_caches)
+        ] + [PipeCacheData()])
         next_tokens = input_ids[:, -1]
 
     # graph, input_buffers, output_buffers = get_decoding_cuda_graph(
@@ -417,7 +401,7 @@ def generate(
             # graph.replay()
             # logits = output_buffers["logits"][:bs].squeeze(1)
             # cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
-            
+
             # the next round of inference
             ys[0].input_ids = next_tokens.unsqueeze(-1)  # [bs, 1], seqlen=1
             ys[0].position_ids = None
@@ -426,8 +410,7 @@ def generate(
             cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
 
             next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-                logits, tokenizer, unfinished_sequences, generated_idx, gconfig
-            )
+                logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
             gen_token_ph.append(next_tokens)
             gen_logprob_ph.append(logprob)
             gen_logits_mask_ph.append(logits_mask)
@@ -469,17 +452,15 @@ def vanilla_packed_generate(
         packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
         # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
-            PipeCacheData() for _ in range(mconfig.n_layers + 1)
-        ]
+        ys = [PipeCacheData(input_ids=packed_input_ids)
+              ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
         # Model forward will set k/v cache in PipeCacheData.
         logits = model(x, ys).pp_output
         logits = logits[cu_seqlens[1:] - 1]
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
-        )
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -534,8 +515,7 @@ def vanilla_cpu_generate(
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
-        )
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -583,9 +563,8 @@ class InflightBatchingGenerator:
         self.batch_size = batch_size
         self.max_prompt_len = max_prompt_len
 
-        kvcache_seqlen = max(
-            max_prompt_len + gconfig.max_new_tokens, mconfig.hidden_dim // mconfig.head_dim + 10
-        )
+        kvcache_seqlen = max(max_prompt_len + gconfig.max_new_tokens,
+                             mconfig.hidden_dim // mconfig.head_dim + 10)
         _p = next(self.model.parameters())
         dtype, device = _p.dtype, _p.device
 
@@ -600,8 +579,7 @@ class InflightBatchingGenerator:
                 ),
                 dtype=dtype,
                 device=device,
-            )
-            for _ in range(self.mconfig.n_layers)
+            ) for _ in range(self.mconfig.n_layers)
         ]
         self.v_caches = [
             torch.zeros(
@@ -613,8 +591,7 @@ class InflightBatchingGenerator:
                 ),
                 dtype=dtype,
                 device=device,
-            )
-            for _ in range(self.mconfig.n_layers)
+            ) for _ in range(self.mconfig.n_layers)
         ]
         self.cache_seqlens = torch.zeros((batch_size,), dtype=torch.int32, device=device)
 
@@ -629,18 +606,10 @@ class InflightBatchingGenerator:
         self.generate_idx = torch.zeros((batch_size,), dtype=torch.int32, device=device)
         self.unfinished_sequences = torch.zeros((batch_size,), dtype=torch.float32, device=device)
 
-        self.ys = (
-            [
-                PipeCacheData(
-                    cache_seqlens=self.cache_seqlens,
-                )
-            ]
-            + [
-                PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens)
-                for k, v in zip(self.k_caches, self.v_caches)
-            ]
-            + [PipeCacheData()]
-        )
+        self.ys = ([PipeCacheData(cache_seqlens=self.cache_seqlens,)] + [
+            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens)
+            for k, v in zip(self.k_caches, self.v_caches)
+        ] + [PipeCacheData()])
 
         # output buffers
         self.output_tokens_buf = [[] for _ in range(batch_size)]
@@ -706,15 +675,14 @@ class InflightBatchingGenerator:
                 try:
                     prompt = self.inqueue.get_nowait()
                     self.prompt_tokens[i] = prompt
-                    self.input_buf[i, : prompt.shape[0]] = prompt
+                    self.input_buf[i, :prompt.shape[0]] = prompt
                     self.input_buf_lens[i] = prompt.shape[0]
                 except queue.Empty as e:
                     raise RuntimeError("Input queue is empty. This should not happen.") from e
 
         input_lens = self.input_buf_lens
-        valid_input_mask = torch.arange(
-            self.max_prompt_len, device=self.input_buf.device, dtype=torch.int32
-        ).unsqueeze(0) < input_lens.unsqueeze(-1)
+        valid_input_mask = torch.arange(self.max_prompt_len, device=self.input_buf.device,
+                                        dtype=torch.int32).unsqueeze(0) < input_lens.unsqueeze(-1)
         indices = torch.nonzero(valid_input_mask.flatten(), as_tuple=False).flatten()
         packed_input_ids = self.input_buf.flatten()[indices]
         max_seqlen = int(max(input_lens))
@@ -737,8 +705,7 @@ class InflightBatchingGenerator:
             logits = self._get_non_eos_logits()
 
         next_tokens, logprob, logits_mask, _, self.unfinished_sequences = genstep(
-            logits, self.tokenizer, self.unfinished_sequences, self.generate_idx, self.gconfig
-        )
+            logits, self.tokenizer, self.unfinished_sequences, self.generate_idx, self.gconfig)
 
         for i in range(self.batch_size):
             self.output_tokens_buf[i].append(next_tokens[i].long())

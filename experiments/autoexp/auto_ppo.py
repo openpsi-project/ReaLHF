@@ -41,11 +41,10 @@ def register_auto_ppo_experiment(
     @dataclasses.dataclass
     class AutoPPOExperiment:
         seed: int = 1
-        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(
-            default_factory=functools.partial(ExperimentSaveEvalControl,
-                benchmark_steps=20,
-            ),
-        )
+        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=functools.partial(
+            ExperimentSaveEvalControl,
+            benchmark_steps=20,
+        ),)
         ppo: PPOHyperparmeters = dataclasses.field(default_factory=PPOHyperparmeters)
 
         @property
@@ -93,18 +92,6 @@ def register_auto_ppo_experiment(
             )
             ref_interface = copy.deepcopy(actor_interface)
             ref_interface.args["enable_save"] = False
-
-            if self.ppo.use_stream_pipe_engine:
-                actor_interface = ModelInterface(
-                    "stream_pipe_ppo_actor",
-                    args={
-                        **copy.deepcopy(ppo_kwargs),
-                        "generation_config": generation_kwargs,
-                        "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
-                        "force_no_logits_mask": True,
-                        "adv_norm": self.ppo.adv_norm,
-                    },
-                )
 
             critic_interface = ModelInterface(
                 "flash_critic",

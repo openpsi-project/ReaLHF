@@ -225,7 +225,8 @@ def min_abs_diff_partition(arr: Union[np.ndarray, List], k: int, min_size: int =
                          err_hint)
     if len(arr) < k * min_size:
         raise ValueError(
-            f"Length of the array to be partitioned must be at least k * min_size ({k} * {min_size}), current length {len(arr)}.")
+            f"Length of the array to be partitioned must be at least k * min_size ({k} * {min_size}), current length {len(arr)}."
+        )
     partitions = partition_balanced_tuples(arr, k, min_size)
     last_end = 0
 

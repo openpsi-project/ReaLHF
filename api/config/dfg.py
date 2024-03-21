@@ -4,6 +4,9 @@ import dataclasses
 import enum
 import itertools
 
+import numpy as np
+
+from api.config.config_base import ModelName, ModelType
 import base.logging as logging
 import base.namedarray as namedarray
 
@@ -22,18 +25,11 @@ class LoadToDeviceHook:
 
 @dataclasses.dataclass
 class SyncParamHook:
-    target: str
+    target: ModelName
     interval: int = 1
 
 
-@dataclasses.dataclass
-class ReparallelizeHook:
-    dp_size: int
-    mp_size: int
-    pp_size: int
-
-
-RPCHook = Union[OffloadHook, LoadToDeviceHook, SyncParamHook, ReparallelizeHook]
+RPCHook = Union[OffloadHook, LoadToDeviceHook, SyncParamHook]
 
 
 @dataclasses.dataclass
@@ -53,21 +49,8 @@ class ModelInterfaceType(enum.Enum):
 
 
 @dataclasses.dataclass
-class ModelType:
-    _class: str
-    size: int
-    is_critic: bool
-
-    def __hash__(self):
-        return (self._class, self.size, self.is_critic).__hash__()
-
-    def __eq__(self, other):
-        return self._class == other._class and self.size == other.size and self.is_critic == other.is_critic
-
-
-@dataclasses.dataclass
 class ModelRPC:
-    model_name: str
+    model_name: ModelName
     model_type: ModelType
     interface_type: ModelInterfaceType
     interface_impl: ModelInterface
@@ -104,11 +87,14 @@ class ModelRPC:
     children_rpcs: List["ModelRPC"] = dataclasses.field(default_factory=lambda: [])
 
     # data key -> model name
-    data_producers: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
+    data_producers: Dict[str, ModelName] = dataclasses.field(default_factory=lambda: {})
     # data key -> rpc names
     data2required_rpc_names: Dict[str, List[str]] = dataclasses.field(default_factory=lambda: {})
 
     def __post_init__(self):
+        if isinstance(self.model_name, str):
+            self.model_name = ModelName(self.model_name, 0)
+        assert isinstance(self.model_name, ModelName)
         if self.min_n_seqs > self.max_n_seqs or self.min_n_tokens > self.max_n_tokens:
             raise RuntimeError("Invalid min/max n_seqs/n_tokens.")
         if self.is_src and self.max_n_seqs > 1e4 and self.max_n_tokens > 1e8:
@@ -117,8 +103,9 @@ class ModelRPC:
                 f"The maximum number of sequences is {self.max_n_seqs} > budget {int(1e4)} and "
                 f"the maximum number of tokens is {self.max_n_tokens} > budget {int(1e8)}. "
                 "Please set a smaller value.")
-        if "@" in self.model_name or "@" in self.interface_type.value:
-            raise ValueError(f"Invalid model name or interface type: {self.model_name}, {self.interface_type}.")
+        if "@" in self.model_name.role or "@" in self.interface_type.value:
+            raise ValueError(
+                f"Invalid model name or interface type: {self.model_name}, {self.interface_type}.")
 
     def __repr__(self):
         return f"ModelRPC({self.model_name}, {self.interface_type})"

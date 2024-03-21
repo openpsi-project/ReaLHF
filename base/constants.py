@@ -6,6 +6,7 @@ import getpass
 
 import numpy as np
 
+from api.config.config_base import ModelName
 from base.cluster import spec as cluster_spec
 
 if TYPE_CHECKING:
@@ -53,15 +54,15 @@ TORCH_EXTENSIONS_DIR = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torc
 QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/quickstart.pkl"
 
 # _model_name will be changed in the model_scope context manager
-_model_name: str = None
+_model_name: ModelName = None
 
 # constants in worker/process scope
 _experiment_name = None
 _trial_name = None
 
-_grids: Dict[str, "ParallelGrid"] = {}
-_pgroups: Dict[str, Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
-_rank_mapping: Dict[str, Dict["ModelShardID", int]] = {}
+_grids: Dict[ModelName, "ParallelGrid"] = {}
+_pgroups: Dict[ModelName, Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
+_rank_mapping: Dict[ModelName, Dict["ModelShardID", int]] = {}
 _global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
 _max_seqlen: int = None
 
@@ -73,7 +74,7 @@ _fake_mp_rank = None
 
 
 @contextlib.contextmanager
-def model_scope(model_name: str):
+def model_scope(model_name: ModelName):
     global _model_name
     assert _model_name is None
     _model_name = model_name
@@ -103,18 +104,18 @@ def set_experiment_trial_names(expr_name: str, trial_name: str):
     _trial_name = trial_name
 
 
-def set_grid(model_name: str, grid: "ParallelGrid"):
+def set_grid(model_name: ModelName, grid: "ParallelGrid"):
     global _grids
     _grids[model_name] = grid
 
 
-def set_parallelism_group(model_name: str, pgroup):
+def set_parallelism_group(model_name: ModelName, pgroup):
     global _pgroups
     _pgroups[model_name] = pgroup
 
 
 def set_rank_mapping(
-    model_name: str,
+    model_name: ModelName,
     topo: "PipeModelDataParallelTopology",
     msid2mwid: Optional[Dict["ModelShardID", int]] = None,
 ):

@@ -107,6 +107,37 @@ def mp_partition_flash_mqat_state_dict(
     else:
         return state_dict
 
+def get_flash_model_param_shape(k: str, config: FlashMQATConfig, mp_size: int):
+    column_linear_keys = _column_linear_keys(config)
+    row_linear_keys = _row_linear_keys(config)
+
+    if "wte.weight" in k:
+        assert config.vocab_size % mp_size == 0
+        return (config.vocab_size // mp_size, config.hidden_dim )
+    elif "wpe.weight" in k:
+        assert config.n_positions % mp_size == 0
+        return (config.n_positions // mp_size, config.hidden_dim)
+    elif any([ck in k for ck in column_linear_keys]):
+        if "k_attn" in k or "v_attn" in k:
+            if "weight" in k:
+                if config.n_kv_heads % mp_size == 0:
+                    return (config.head_dim * config.n_kv_heads // mp_size, config.hidden_dim)
+                else:
+                    return (config.head_dim * config.n_kv_heads, config.hidden_dim)
+        if k == f"{config.n_layers + 1}.weight":
+            return (config.hidden_dim, )
+        if "weight" in k:
+            assert config.hidden_dim // config.head_dim % mp_size == 0
+            return (config.hidden_dim // mp_size, config.hidden_dim)
+    elif any([rk in k for rk in row_linear_keys]):
+        if "mlp" in k and "weight" in k:
+            return (config.hidden_dim, config.intermediate_dim // mp_size)
+        elif "attn" in k and "weight" in k:
+            return (config.hidden_dim, config.hidden_dim // mp_size)
+        elif "bias" in k:
+            return (config.hidden_dim // mp_size, )
+    else:
+        raise NotImplementedError(f"unkown shape of key {k}.")
 
 def mp_merge_flash_mqat_state_dict(
     state_dicts: List[Dict[str, torch.Tensor]],

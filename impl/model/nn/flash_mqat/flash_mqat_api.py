@@ -14,19 +14,34 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
+from api.config.config_base import ModelName
 from api.config.config_flash_model import FlashMQATConfig
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
-                                                      flash_model_head_param_count,
-                                                      flash_model_tblock_param_count, FlashMQATBlock,
-                                                      OutputHead, SequenceParallelActorHead,
-                                                      SequenceParallelCriticHead, VocabPositionEmbedding)
-from impl.model.nn.flash_mqat.flash_mqat_parallel import (mp_merge_flash_mqat_state_dict,
-                                                          mp_partition_flash_mqat_state_dict,
-                                                          partition_pipeline_layers,
-                                                          pipeline_repartition_strategy)
-from impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
-                                                           RowParallelLinear)
+from impl.model.nn.flash_mqat.flash_mqat_base import (
+    flash_model_embed_param_count,
+    flash_model_head_param_count,
+    flash_model_tblock_param_count,
+    FlashMQATBlock,
+    OutputHead,
+    SequenceParallelActorHead,
+    SequenceParallelCriticHead,
+    VocabPositionEmbedding,
+    flash_model_head_param_keys,
+    flash_model_tblock_param_keys,
+    flash_model_embedding_param_keys,
+)
+from impl.model.nn.flash_mqat.flash_mqat_parallel import (
+    mp_merge_flash_mqat_state_dict,
+    mp_partition_flash_mqat_state_dict,
+    partition_pipeline_layers,
+    pipeline_repartition_strategy,
+    get_flash_model_param_shape,
+)
+from impl.model.parallelism.model_parallel.modules import (
+    ColumnParallelLinear,
+    ParallelEmbedding,
+    RowParallelLinear,
+)
 from impl.model.utils.data import DuckGenerationOutput, DuckModelOutput, PipeCacheData, PipeTransferData
 from impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
 import api.config.config_system
@@ -449,7 +464,8 @@ class FlashMQATModel(nn.Module):
                     FlashMQATModel._from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
-                )),
+                )
+            ),
         )
         setattr(
             FlashMQATModel,
@@ -458,7 +474,8 @@ class FlashMQATModel(nn.Module):
                 functools.partial(
                     FlashMQATModel._config_from_hf_template,
                     config_converter=config_converter,
-                )),
+                )
+            ),
         )
         if state_dict_converter_to_hf:
             setattr(
@@ -468,16 +485,17 @@ class FlashMQATModel(nn.Module):
                     functools.partial(
                         FlashMQATModel._to_hf_template,
                         state_dict_converter_to_hf=state_dict_converter_to_hf,
-                    )),
+                    )
+                ),
             )
         FlashMQATModel._parallelism_helpers[model_name] = FlashMQATParallelismHelper(
             embedding_param_names,
             tblock_param_names,
             head_param_names,
         )
-        FlashMQATModel._convert_helpers[model_name] = FlashMQATConvertHelper(config_converter,
-                                                                             state_dict_converter,
-                                                                             state_dict_converter_to_hf)
+        FlashMQATModel._convert_helpers[model_name] = FlashMQATConvertHelper(
+            config_converter, state_dict_converter, state_dict_converter_to_hf
+        )
 
     def load_from_hf(self, load_dir: str, init_critic_from_actor: bool = False):
         from impl.model.nn.flash_mqat.flash_from_hf_impl import HF_ARCH_TO_MODEL_TYPE
@@ -521,7 +539,8 @@ class FlashMQATModel(nn.Module):
                     self.config,
                     base.constants.model_parallel_world_size(),
                     base.constants.model_parallel_rank(),
-                ))
+                )
+            )
             load_times.append(partition_tik - load_tik)
             partition_times.append(time.perf_counter() - partition_tik)
 
@@ -537,22 +556,24 @@ class FlashMQATModel(nn.Module):
         if os.getenv("FLASH_MQAT_LOG_LOAD_TIME", None) == "1":
             logger.info(
                 f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
-                f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s")
+                f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s"
+            )
 
     def load_from_saved_flash_model(self, load_dir: str, init_critic_from_actor: bool = False):
         with open(os.path.join(load_dir, "flash_mqat_config.json"), "r") as f:
             ckpt_config = FlashMQATConfig(**json.load(f))
         for k, v in dataclasses.asdict(ckpt_config).items():
             if k not in [
-                    "is_critic",
-                    "sequence_parallel",
-                    "gradient_accumulation_fusion",
-                    "ckpt_attn",
-                    "ckpt_mlp",
+                "is_critic",
+                "sequence_parallel",
+                "gradient_accumulation_fusion",
+                "ckpt_attn",
+                "ckpt_mlp",
             ] and v != getattr(self.config, k):
                 raise ValueError(
                     f"Can't load a checkpoint with different config (key `{k}`, "
-                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`).")
+                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`)."
+                )
 
         pp_rank = base.constants.pipe_parallel_rank()
         mp_rank = base.constants.model_parallel_rank()
@@ -560,8 +581,10 @@ class FlashMQATModel(nn.Module):
 
         ckpt_spec = get_ckpt_spec(load_dir)
         if ckpt_spec.mp_size % mp_size != 0 and mp_size % ckpt_spec.mp_size != 0:
-            raise ValueError(f"Trying to load checkpoint {load_dir} with mp_size={ckpt_spec.mp_size}, "
-                             f"which is neither the multiple nor a factor of current mp_size={mp_size}.")
+            raise ValueError(
+                f"Trying to load checkpoint {load_dir} with mp_size={ckpt_spec.mp_size}, "
+                f"which is neither the multiple nor a factor of current mp_size={mp_size}."
+            )
 
         if (self.config.n_kv_heads % mp_size == 0) != (self.config.n_kv_heads % ckpt_spec.mp_size == 0):
             raise RuntimeError(
@@ -593,9 +616,9 @@ class FlashMQATModel(nn.Module):
             for (_, target_pp_rank), global_layer_indices in repartition_strategy.items():
                 mp_sds = []
                 for i in interested_mp_ranks:
-                    sd = load_from_disk(load_dir,
-                                        fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{i:02d}-" +
-                                        r"s-(\d{2}).*")
+                    sd = load_from_disk(
+                        load_dir, fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{i:02d}-" + r"s-(\d{2}).*"
+                    )
                     sd = {k: v for k, v in sd.items() if int(k.split(".")[0]) in global_layer_indices}
                     mp_sds.append(sd)
                 state_dict.update(mp_merge_flash_mqat_state_dict(mp_sds, self.config))
@@ -609,10 +632,9 @@ class FlashMQATModel(nn.Module):
                     fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{target_mp_rank:02d}-" + r"s-(\d{2}).*",
                 )
                 sd = {k: v for k, v in sd.items() if int(k.split(".")[0]) in global_layer_indices}
-                sd = mp_partition_flash_mqat_state_dict(sd,
-                                                        self.config,
-                                                        mp_size=factor,
-                                                        mp_rank=mp_rank % factor)
+                sd = mp_partition_flash_mqat_state_dict(
+                    sd, self.config, mp_size=factor, mp_rank=mp_rank % factor
+                )
                 state_dict.update(sd)
 
         if init_critic_from_actor and f"{self.config.n_layers + 1}.weight" in state_dict:
@@ -658,130 +680,213 @@ class FlashMQATModel(nn.Module):
 
     def to_reparallelized_model(
         self,
-        from_shard_id: api.config.config_system.ModelShardID,
-        to_shard_id: api.config.config_system.ModelShardID,
+        from_model_name: ModelName,
+        to_model_name: ModelName,
+        from_topo: base.topology.PipeModelDataParallelTopology,
+        to_topo: base.topology.PipeModelDataParallelTopology,
         pg_info: gpu_utils.NCCLProcessGroupInfo,
     ) -> "FlashMQATModel":
-        # TODO: unfinished
-        assert from_shard_id.topo.world_size() == to_shard_id.topo.world_size()
-        src_mp_size = from_shard_id.topo.get_dim("model")
-        dst_mp_size = to_shard_id.topo.get_dim("model")
+        src_mp_size = from_topo.get_dim("model")
+        dst_mp_size = to_topo.get_dim("model")
         assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
         if (self.config.n_kv_heads % src_mp_size == 0) != (self.config.n_kv_heads % dst_mp_size == 0):
             raise ValueError("Whether to partition kv heads should remain the same.")
 
+        # Get the current state dict and delete all modules.
+        # Pointers to the current parameters will remain in the state dict until not needed.
         state_dict = self.state_dict()
-        self.layers = None
-        new_layers = {}
+        del self.layers
 
         from_layer_mapping = {k: list(range(v[0], v[1])) for k, v in self.layer_mapping.items()}
-
         self.layer_mapping = partition_pipeline_layers(
             self.config,
-            to_shard_id.topo.get_dim("pipe"),
+            to_topo.get_dim("pipe"),
             flash_model_embed_param_count,
             flash_model_tblock_param_count,
             flash_model_head_param_count,
             method=self.pipeline_partition_method,
         )
         to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in self.layer_mapping.items()}
-
         repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
-        # TODO: we can omit sending if we have parameters locally
+
+        @dataclasses.dataclass
+        class SenderStep:
+            rank: int
+            sender_mp_portion_id: int
+            receiver_mp_portion_id: int
+            param_key: str | int
+            group: torch.distributed.ProcessGroup
+            dst_ranks: List[int]
+            remove: bool = False
+
+        @dataclasses.dataclass
+        class ReceverStep:
+            rank: int
+            sender_mp_portion_id: int
+            receiver_mp_portion_id: int
+            param_key: str | int
+            param_shape: torch.Size
+            param_dtype: torch.dtype
+            src: int
+            group: torch.distributed.ProcessGroup
+
+        comm_plan = []
+
+        src_dp_size = from_topo.get_dim("data")
+
+        # derive a global NCCL communication plan
         for (pp_i, pp_j), layer_indices in repart_strat.items():
-            if len(layer_indices) == 0:
-                continue
-
-            if pp_i == from_shard_id.pp_rank and from_shard_id.dp_rank == 0:
-                # sender
-                sub_sd = {k: v for k, v in state_dict.items() if int(k.split(".")[0]) in layer_indices}
-
-                for k, v in sub_sd.items():
+            sd_keys = []
+            for layer_idx in layer_indices:
+                if layer_idx == 0:
+                    sd_keys += flash_model_embedding_param_keys(self.config)
+                elif layer_idx == self.config.n_layers + 1:
+                    sd_keys += flash_model_head_param_keys(self.config)
+                else:
+                    sd_keys += flash_model_tblock_param_keys(self.config, layer_idx - 1)
+            sub_sd = {
+                k: (get_flash_model_param_shape(k, self.config, from_topo.get_dim("model")), self.dtype)
+                for k in sd_keys
+            }
+            for k, (shape, dtype) in sub_sd.items():
+                for mp_i in range(src_mp_size):
                     if dst_mp_size > src_mp_size:
                         factor = dst_mp_size // src_mp_size
-                        sds = mp_partition_flash_mqat_state_dict({k: v}, self.config, factor)
-                        assert all(len(sd) == 1 for sd in sds)
-                        dst_mp_ranks = [i + factor * from_shard_id.mp_rank for i in range(factor)]
-                        params = [list(sd.values())[0] for sd in sds]
+                        mp_js = [i + factor * mp_i for i in range(factor)]
+                        dtypes = [dtype for _ in range(factor)]
+                        shapes = [
+                            get_flash_model_param_shape(k, self.config, to_topo.get_dim("model"))
+                            for _ in range(factor)
+                        ]
+                        receiver_mp_portion_id = 0
                     else:
                         factor = src_mp_size // dst_mp_size
-                        dst_mp_ranks = [from_shard_id.mp_rank // factor]
-                        params = [v]
-                    assert len(dst_mp_ranks) == len(params)
-                    for dst_mp_rank, param in zip(dst_mp_ranks, params):
-                        key = gpu_utils.ParamSyncPair(
-                            src=from_shard_id.model_name,
-                            dst=to_shard_id.model_name,
-                            src_mp_rank=from_shard_id.mp_rank,
-                            src_pp_rank=from_shard_id.pp_rank,
-                            dst_pp_rank=pp_j,
-                            dst_mp_rank=dst_mp_rank,
-                        )
+                        mp_js = [mp_i // factor]
+                        dtypes = [dtype]
+                        shapes = [shape]
+                        receiver_mp_portion_id = mp_i % factor
+                    for sender_mp_portion_id, (mp_j, _dtype, _shape) in enumerate(zip(mp_js, dtypes, shapes)):
+                        for dp_i in range(src_dp_size):
+                            key = gpu_utils.ParamSyncPair(
+                                src=from_model_name,
+                                src_dp_rank=dp_i,
+                                src_mp_rank=mp_i,
+                                src_pp_rank=pp_i,
+                                dst=to_model_name,
+                                dst_mp_rank=mp_j,
+                                dst_pp_rank=pp_j,
+                            )
+                            src = pg_info.param_sync_src_ranks[key]
+                            group = pg_info.param_sync_groups[key]
+                            dst_ranks = pg_info.param_sync_groups[key]
 
-                        torch.distributed.broadcast(
-                            param,
-                            src=pg_info.param_sync_src_ranks[key],
-                            group=pg_info.param_sync_groups[key],
-                        )
-                    state_dict.pop(k)
-                del sub_sd
+                            for dst_rank in dst_ranks:
+                                comm_plan.append(
+                                    ReceverStep(
+                                        rank=dst_rank,
+                                        sender_mp_portion_id=sender_mp_portion_id,
+                                        receiver_mp_portion_id=receiver_mp_portion_id,
+                                        param_key=k,
+                                        param_shape=_shape,
+                                        param_dtype=_dtype,
+                                        src=src,
+                                        group=group,
+                                    )
+                                )
+                            comm_plan.append(
+                                SenderStep(
+                                    rank=src,
+                                    sender_mp_portion_id=sender_mp_portion_id,
+                                    receiver_mp_portion_id=receiver_mp_portion_id,
+                                    param_key=k,
+                                    group=group,
+                                    dst_ranks=dst_ranks,
+                                )
+                            )
+        for i, step in enumerate(comm_plan):
+            if isinstance(step, ReceverStep):
+                continue
+            step: SenderStep
+            required_by_nex_steps = False
+            for nex_step in comm_plan[i + 1 :]:
+                if (
+                    isinstance(nex_step, SenderStep)
+                    and nex_step.rank == step.rank
+                    and nex_step.param_key == step.param_key
+                ):
+                    required_by_nex_steps = True
+                    break
+            step.remove = not required_by_nex_steps
 
-            if pp_j == to_shard_id.pp_rank:
-                # receiver
-                sub_sd = {}
-                for layer_idx in layer_indices:
+        comm_volume = 0
+        new_layers = {}
+
+        n_receiver_portions = max(src_mp_size // dst_mp_size, 1)
+        tmp_portion_storage = {}
+        for step in comm_plan:
+            layer_idx = int(step.param_key.split(".")[0])
+            if isinstance(step, ReceverStep) and step.rank == torch.distributed.get_rank():
+                if layer_idx not in new_layers:
                     l = self._build_layer(layer_idx)
                     new_layers[layer_idx] = l
-                    sub_sd.update(l.state_dict())
 
-                for k, v in sub_sd.items():
-                    if dst_mp_size > src_mp_size:
-                        factor = dst_mp_size // src_mp_size
-                        src_mp_ranks = [to_shard_id.mp_rank // factor]
-                        bufs = [v]
-                    else:
-                        factor = src_mp_size // dst_mp_size
-                        src_mp_ranks = [i + factor * to_shard_id.mp_rank for i in range(factor)]
-                        bufs = list(
-                            mp_partition_flash_mqat_state_dict({
-                                k: v
-                            }, self.config, factor, mp_rank=0).values())
+                if step.rank == step.src:
+                    buf = mp_partition_flash_mqat_state_dict(
+                        {step.param_key: state_dict[step.param_key]},
+                        self.config,
+                        mp_size=max(dst_mp_size // src_mp_size, 1),
+                        mp_rank=step.sender_mp_portion_id,
+                    )[step.param_key]
+                else:
+                    buf = torch.zeros(step.param_shape, dtype=step.param_dtype, device="cuda")
+                    comm_volume += buf.numel()
+                    torch.distributed.broadcast(buf, src=step.src, group=step.group)
 
-                    assert len(src_mp_ranks) == len(bufs)
+                tmp_portion_storage[(step.param_key, step.receiver_mp_portion_id)] = buf
+                if all((step.param_key, i) in tmp_portion_storage for i in range(n_receiver_portions)):
+                    buf = mp_merge_flash_mqat_state_dict(
+                        [
+                            {
+                                step.param_key: tmp_portion_storage[(step.param_key, i)]
+                                for i in range(n_receiver_portions)
+                            }
+                        ],
+                        self.config,
+                    )
+                    assert step.param_key in new_layers[layer_idx].state_dict()
+                    new_layers[layer_idx].load_state_dict({step.param_key: buf}, strict=False)
+                    for i in range(n_receiver_portions):
+                        del tmp_portion_storage[(step.param_key, i)]
 
-                    for src_mp_rank, buf in zip(src_mp_ranks, bufs):
-                        key = gpu_utils.ParamSyncPair(
-                            src=from_shard_id.model_name,
-                            dst=to_shard_id.model_name,
-                            src_pp_rank=pp_i,
-                            src_mp_rank=src_mp_rank,
-                            dst_pp_rank=to_shard_id.pp_rank,
-                            dst_mp_rank=to_shard_id.mp_rank,
-                        )
-                        torch.distributed.broadcast(buf,
-                                                    src=pg_info.param_sync_src_ranks[key],
-                                                    group=pg_info.param_sync_groups[key])
-                    if len(bufs) > 1:
-                        v = mp_merge_flash_mqat_state_dict([{k: buf} for buf in bufs], self.config)
-                    this_layer_idx = int(k.split(".")[0])
-                    new_layers[this_layer_idx].load_state_dict({k: v}, strict=False)
+            if isinstance(step, SenderStep) and step.rank == torch.distributed.get_rank():
+                if step.group is not None:
+                    buf = buf = mp_partition_flash_mqat_state_dict(
+                        {step.param_key: state_dict[step.param_key]},
+                        self.config,
+                        mp_size=max(dst_mp_size // src_mp_size, 1),
+                        mp_rank=step.sender_mp_portion_id,
+                    )[step.param_key]
+                    torch.distributed.broadcast(buf, src=step.rank, group=step.group)
+                if step.remove:
+                    del state_dict[step.param_key]
 
-        self.layers = nn.ModuleList(new_layers)
+        assert len(state_dict) == 0
+        self.layers = nn.ModuleList([new_layers[i] for i in range(len(new_layers))])
 
 
 # a helper function to make flash_mqat look like huggingface model
 def generate_helper(
-        self: FlashMQATModel,
-        tokenizer: transformers.PreTrainedTokenizerFast,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        packed_input_ids: Optional[torch.Tensor] = None,
-        cu_seqlens: Optional[torch.Tensor] = None,
-        max_seqlen: Optional[int] = None,
-        k_caches: Optional[List[torch.Tensor]] = None,
-        v_caches: Optional[List[torch.Tensor]] = None,
-        cache_seqlens: Optional[torch.Tensor] = None,
-        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    self: FlashMQATModel,
+    tokenizer: transformers.PreTrainedTokenizerFast,
+    input_ids: Optional[torch.Tensor] = None,
+    attention_mask: Optional[torch.Tensor] = None,
+    packed_input_ids: Optional[torch.Tensor] = None,
+    cu_seqlens: Optional[torch.Tensor] = None,
+    max_seqlen: Optional[int] = None,
+    k_caches: Optional[List[torch.Tensor]] = None,
+    v_caches: Optional[List[torch.Tensor]] = None,
+    cache_seqlens: Optional[torch.Tensor] = None,
+    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
 ) -> DuckGenerationOutput:
     current_forward = self.forward
     self.forward = functools.partial(FlashMQATModel.forward, self)
@@ -821,8 +926,9 @@ def forward_helper(
         batch_size, seqlen = input_ids.shape[:2]
     if packed_input_ids is not None:
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        ys = [PipeCacheData(input_ids=packed_input_ids)
-              ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
+            PipeCacheData() for _ in range(self.config.n_layers + 1)
+        ]
     else:
         x = PipeTransferData()
         ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
@@ -839,7 +945,7 @@ def add_helper_functions(m: FlashMQATModel):
 
 
 def make_flash_model(
-    name: str,
+    name: ModelName,
     device: torch.device,
     model_path: str,
     from_type: str,

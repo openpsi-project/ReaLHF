@@ -278,7 +278,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def _prepare_loss_input(self, n_seqs: int, **loss_kwargs):
         data = NamedArray(**loss_kwargs)
-        splitted = PackedParallelDataBroker.scatter_to(data, self.num_micro_batches, min_size=n_seqs // self.num_micro_batches)
+        splitted = PackedParallelDataBroker.scatter_to(data,
+                                                       self.num_micro_batches,
+                                                       min_size=n_seqs // self.num_micro_batches)
         for mbid, x in enumerate(splitted):
             self.tensor_buffer.put("loss_inputs", mbid, x)
 

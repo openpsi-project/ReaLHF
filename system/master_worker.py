@@ -19,6 +19,7 @@ import numpy as np
 import torch
 import torch.distributed
 
+from api.config.config_base import ModelName
 from api.config.config_flash_model import FlashMQATConfig
 from base.asyncio_utils import raise_asyncio_exception, setup_run_until_complete, teardown_run_util_complete
 from base.buffer import AsyncIOSequenceBuffer
@@ -330,7 +331,7 @@ async def scatter_tensor_to_mws(
 async def model_rpc_request_func(
     rpc: api.config.dfg.ModelRPC,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
-    src_rpc_model_name: str,
+    src_rpc_model_name: ModelName,
     pre_hook_counters: List[int],
     stream: request_reply_stream.RequestReplyStream,
     buffer: AsyncIOSequenceBuffer,
@@ -614,7 +615,7 @@ class MasterWorker(worker_base.Worker):
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
 
-        self.__model_topos: Dict[str, topology.PipeModelDataParallelTopology] = config.model_topos
+        self.__model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = config.model_topos
 
         # Build execution graph and initialize concurrency utilities.
         self.__model_rpcs, _ = api.config.dfg.build_graph(config.model_rpcs)
@@ -723,7 +724,7 @@ class MasterWorker(worker_base.Worker):
                 datas=model_ft_specs,
             ))
         init_res = event_loop.run_until_complete(asyncio.gather(_task))[0]
-        self.__model_configs: Dict[str, None | FlashMQATConfig] = {}
+        self.__model_configs: Dict[ModelName, None | FlashMQATConfig] = {}
         assert len(init_res) == len(self.__all_model_handlers), (
             len(init_res),
             len(self.__all_model_handlers),

@@ -1,11 +1,11 @@
 from typing import *
 import dataclasses
 import json
+import os
 
 import transformers
 
-from api.config.config_system import *
-from api.config.dfg import ModelType
+from api.config.config_base import Model, ModelWrapper, SUPPORTED_MODELS
 import base.logging as logging
 
 logger = logging.getLogger("Flash Model Config")
@@ -110,8 +110,6 @@ def convert_config_llama(hf_config: transformers.LlamaConfig) -> FlashMQATConfig
     )
 
 
-SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "deepseek", "codellama"]
-
 FLASH_MODEL_CONFIG_CONVERTER: Dict[str, Callable[[Any], FlashMQATConfig]] = {
     "starcoder": convert_config_starcoder,
     "gpt2": gpt2_config_converter,
@@ -119,19 +117,6 @@ FLASH_MODEL_CONFIG_CONVERTER: Dict[str, Callable[[Any], FlashMQATConfig]] = {
     "codellama": convert_config_llama,
     "deepseek": convert_config_llama,
 }
-
-MODEL_TYPE_TO_PATH: Dict[ModelType, str] = {
-    ModelType("llama", 7, True): "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/",
-    ModelType("llama", 13, True): "/lustre/public/pretrained_model_weights/Llama-2-13b-hf/",
-    ModelType("llama", 70, True): "/lustre/public/pretrained_model_weights/Llama-2-70b-hf/",
-    ModelType("codellama", 34, True): "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf",
-}
-_d = {}
-for k, v in MODEL_TYPE_TO_PATH.items():
-    k_ = copy.deepcopy(k)
-    k_.is_critic = False
-    _d[k_] = v
-MODEL_TYPE_TO_PATH.update(_d)
 
 
 @dataclasses.dataclass
@@ -267,8 +252,9 @@ class ModelTrainEvalConfig:
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
-        if self.enable_bf16 and (self.parallel.model_parallel_size > 1
-                                 or self.parallel.pipeline_parallel_size > 1):
+        if self.enable_bf16 and (
+            self.parallel.model_parallel_size > 1 or self.parallel.pipeline_parallel_size > 1
+        ):
             raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
         if self.parallel.pipeline_parallel_size > 1 and self.lora is not None:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
@@ -277,8 +263,10 @@ class ModelTrainEvalConfig:
         if self.optimizer is not None and self.optimizer.offload and self.zero_stage != 3:
             raise ValueError("offload optimizer is only supported when zero stage=3.")
         if self.parallel.pipeline_parallel_size > 1 and self.zero_stage > 1:
-            logger.warning(f"ZeRO stage should be at most 1 when pipeline parallelism is used. "
-                           f"Force to set it to 1. (original {self.zero_stage})")
+            logger.warning(
+                f"ZeRO stage should be at most 1 when pipeline parallelism is used. "
+                f"Force to set it to 1. (original {self.zero_stage})"
+            )
             self.zero_stage = 1
 
 

@@ -11,6 +11,7 @@ import transformers
 from base.namedarray import NamedArray
 import api.config.config_system
 import api.config.dfg
+from api.config.config_base import ModelName
 import base.logging as logging
 
 logger = logging.getLogger("model")
@@ -36,7 +37,7 @@ class FinetuneSpec:
 
 @dataclasses.dataclass
 class Model:
-    name: str
+    name: ModelName
     module: NeuralNetwork
     tokenizer: transformers.PreTrainedTokenizerFast
     device: Union[str, torch.device]
@@ -151,7 +152,7 @@ def make_model_wrapper(cfg: api.config.config_system.ModelWrapper) -> Callable[[
     return cls_(**cfg.args)
 
 
-def make_model(cfg: api.config.config_system.Model, name: str, device: Union[str, torch.device]) -> Model:
+def make_model(cfg: api.config.config_system.Model, name: ModelName, device: Union[str, torch.device]) -> Model:
     logger.info(f"making model {cfg.type_} on {device}")
     model_cls = ALL_MODEL_CLASSES[cfg.type_]
     model = model_cls(**cfg.args, name=name, device=device)
