@@ -91,7 +91,7 @@ def setup_comm_groups(from_topo: PipeModelDataParallelTopology, to_topo: PipeMod
             else:
                 factor = dst_mp_size // src_mp_size
                 _all_src_ranks = [from_topo.filter_match(model=mp_j // factor, pipe=pp_i)]
-            for receiver_portion_id, _src_ranks in enumerate(_all_src_ranks):
+            for _src_ranks in _all_src_ranks:
                 # All GPUs in _src_ranks have the data required by (pp_j, mp_j)
                 # We split _dst_ranks evenly among the GPUs in _src_ranks, such that they can broadcast in parallel.
                 subgroup_size = (len(_all_dst_ranks) + len(_src_ranks) - 1) // len(_src_ranks)
