@@ -11,6 +11,7 @@ import torch.distributed
 from api.config.config_system import ModelShardID, ModelName
 from base.topology import PipeModelDataParallelTopology
 import itertools
+import queue
 
 
 param_size = 24
@@ -55,6 +56,21 @@ def get_param_dtype(layer_idx):
     return torch.float32
 
 
+def _max_match(_src_ranks: List[int], _grouped_dst_ranks: List[List[int]]):
+    from scipy.optimize import linear_sum_assignment
+
+    cost_matrix = []
+    for source in _src_ranks:
+        costs = []
+        for destinations in _grouped_dst_ranks:
+            cost = 0 if source in destinations else 1
+            costs.append(cost)
+        cost_matrix.append(costs)
+
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+    return row_ind, col_ind
+
+
 def setup_comm_groups(from_topo: PipeModelDataParallelTopology, to_topo: PipeModelDataParallelTopology):
     comm_groups = {}
     comm_src = {}
@@ -65,7 +81,9 @@ def setup_comm_groups(from_topo: PipeModelDataParallelTopology, to_topo: PipeMod
         dst_mp_size = to_topo.get_dim("model")
 
         for mp_j in range(dst_mp_size):
-            _all_dst_ranks = to_topo.filter_match(pipe=pp_j, model=mp_j)
+            _all_dst_ranks = [
+                _x + 8 - to_topo.world_size() for _x in to_topo.filter_match(pipe=pp_j, model=mp_j)
+            ]
             if src_mp_size > dst_mp_size:
                 factor = src_mp_size // dst_mp_size
                 mp_is = list(range(factor * mp_j, factor * (mp_j + 1)))
@@ -77,33 +95,30 @@ def setup_comm_groups(from_topo: PipeModelDataParallelTopology, to_topo: PipeMod
                 # All GPUs in _src_ranks have the data required by (pp_j, mp_j)
                 # We split _dst_ranks evenly among the GPUs in _src_ranks, such that they can broadcast in parallel.
                 subgroup_size = (len(_all_dst_ranks) + len(_src_ranks) - 1) // len(_src_ranks)
-                _grouped_dst_ranks = [
-                    [
-                        _x + 8 - to_topo.world_size()
-                        for _x in _all_dst_ranks[
-                            subgroup_id * subgroup_size : (subgroup_id + 1) * subgroup_size
-                        ]
-                    ]
-                    for subgroup_id in range(len(_src_ranks))
-                ]
-                # prioritize the _src_rank that is also in _dst_ranks
-                _src_rank_orders = []
-                for _dst_ranks in _grouped_dst_ranks:
-                    appended = False
-                    for j, _src_rank in enumerate(_src_ranks):
-                        if j in _src_rank_orders:
+                _grouped_dst_ranks = [[] for _ in range(len(_src_ranks))]
+                counter = 0
+                for _src_rank in _src_ranks:
+                    if _src_rank in _all_dst_ranks:
+                        _grouped_dst_ranks[counter].append(_src_rank)
+                        counter += 1
+                for _dst_rank in _all_dst_ranks:
+                    if _dst_rank in _src_ranks:
+                        continue
+                    for _this_group in _grouped_dst_ranks:
+                        if len(_this_group) >= subgroup_size:
                             continue
-                        if _src_rank in _dst_ranks:
-                            _src_rank_orders.append(j)
-                            appended = True
-                            break
-                    if not appended:
-                        _src_rank_orders.append(
-                            next(j for j in range(len(_src_ranks)) if j not in _src_rank_orders)
-                        )
-                assert set(_src_rank_orders) == set(range(len(_src_ranks)))
-                for _dst_ranks, _src_rank_id in zip(_grouped_dst_ranks, _src_rank_orders):
+                        _this_group.append(_dst_rank)
+                        break
+                assert all(len(_x) <= subgroup_size for _x in _grouped_dst_ranks), (
+                    _grouped_dst_ranks,
+                    _all_dst_ranks,
+                    _src_ranks,
+                )
+                # prioritize the _src_rank that is also in _dst_ranks
+                src_rank_ids, group_dst_rank_ids = _max_match(_src_ranks, _grouped_dst_ranks)
+                for _src_rank_id, _dst_ranks_group_id in zip(src_rank_ids, group_dst_rank_ids):
                     _src_rank = _src_ranks[_src_rank_id]
+                    _dst_ranks = _grouped_dst_ranks[_dst_ranks_group_id]
 
                     dp_i, mp_i = (
                         from_topo.get_coord(_src_rank).data,
@@ -122,7 +137,24 @@ def setup_comm_groups(from_topo: PipeModelDataParallelTopology, to_topo: PipeMod
     return comm_groups, comm_src, comm_dst_ranks
 
 
-def worker(idx: int, from_topo: PipeModelDataParallelTopology, to_topo: PipeModelDataParallelTopology):
+def worker(
+    idx: int,
+    from_topo: PipeModelDataParallelTopology,
+    to_topo: PipeModelDataParallelTopology,
+    err_queue: mp.Queue,
+):
+    try:
+        _worker(idx, from_topo, to_topo)
+    except Exception as e:
+        err_queue.put_nowait(1)
+        raise
+
+
+def _worker(
+    idx: int,
+    from_topo: PipeModelDataParallelTopology,
+    to_topo: PipeModelDataParallelTopology,
+):
     # The first from_topo.world_size() processes own the first model, which will send its parameters
     # the the last to_topo.world_size() processes that host the second model.
     torch.cuda.set_device(idx)
@@ -261,8 +293,8 @@ def worker(idx: int, from_topo: PipeModelDataParallelTopology, to_topo: PipeMode
                 break
         step.remove = not required_by_nex_steps
 
-    if idx == 0:
-        print(comm_plan)
+    # if idx == 0:
+    #     print(comm_plan)
 
     # input()
 
@@ -385,16 +417,26 @@ def decompose_to_three_factors(n: int):
 
 
 if __name__ == "__main__":
-    for x1, x2 in itertools.product(decompose_to_three_factors(8), decompose_to_three_factors(8)):
-        if not (x1[1] % x2[1] == 0 or x2[1] % x1[1] == 0):
-            continue
-        print(f"testing from {x1} to {x2}")
-        from_topo = PipeModelDataParallelTopology(num_pp=x1[0], num_mp=x1[1], num_dp=x1[2])
-        to_topo = PipeModelDataParallelTopology(num_pp=x2[0], num_mp=x2[1], num_dp=x2[2])
-        procs = []
-        for i in range(8):
-            proc = mp.Process(target=worker, args=(i, from_topo, to_topo))
-            procs.append(proc)
-            proc.start()
-        for proc in procs:
-            proc.join()
+    err_queue = mp.Queue(8)
+    for a, b in [(6, 6), (4, 4)]:
+        for x1, x2 in itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)):
+        # for x1, x2 in itertools.product([(1,3,2)], [(2,1,3)]):
+            if not (x1[1] % x2[1] == 0 or x2[1] % x1[1] == 0):
+                continue
+            print(f"testing from {x1} to {x2}")
+            from_topo = PipeModelDataParallelTopology(num_pp=x1[0], num_mp=x1[1], num_dp=x1[2])
+            to_topo = PipeModelDataParallelTopology(num_pp=x2[0], num_mp=x2[1], num_dp=x2[2])
+            procs = []
+            for i in range(8):
+                proc = mp.Process(target=worker, args=(i, from_topo, to_topo, err_queue))
+                procs.append(proc)
+                proc.start()
+            for proc in procs:
+                proc.join()
+            for i in range(8):
+                try:
+                    err_code = err_queue.get_nowait()
+                    print("error!!!!!!!!!!!!")
+                    exit(0)
+                except queue.Empty:
+                    pass
