@@ -47,54 +47,6 @@ class GroupedRPCExecutions:
         return sum(self.mem_costs)
 
 
-def estimate_function_call_memory(interface_type: ModelInterfaceType,
-                                  batch_size: int,
-                                  seq_len: int,
-                                  model_config: FlashMQATConfig,
-                                  parallel_strategy: ModelParallelStrategy,
-                                  gradient_checkpointing: bool = False):
-    h = model_config.hidden_dim
-    i = model_config.intermediate_dim
-    v = model_config.vocab_size
-    s = seq_len
-    b = batch_size
-    L = model_config.n_layers
-    # for llama actor only
-    n_params = 3 * v * h + (3 * h * i + 4 * h * h) * L
-    param_mem = 2 * n_params
-    grad_mem = 2 * n_params
-    optimizer_mem = 16 * n_params
-
-    num_pp = parallel_strategy.num_pp
-    num_mp = parallel_strategy.num_mp
-    num_dp = parallel_strategy.num_dp
-    # print(f"Parallel strategy: num_pp: {num_pp}, num_mp: {num_mp}, num_dp: {num_dp}")
-    # zero1, pp and mp divide evenly
-    # enable sequence parallel
-    if interface_type == ModelInterfaceType.TRAIN_STEP:
-        static_mem = (param_mem + grad_mem) // (num_pp * num_mp) +\
-                     optimizer_mem // (num_pp * num_dp * num_mp)
-        micro_bs = b // (2 * num_pp * num_dp)
-        active_mem = (micro_bs * s * h * num_pp * 2) * 2 * L // (num_pp * num_mp)
-        # enabled gradient ckpt
-        # print(f"train static_mem: {static_mem/(1024*1024*1024):02f} GB, "
-        #       f"active_mem: {active_mem/(1024*1024*1024):02f} GB, "
-        #       f"total: {(static_mem + active_mem)/(1024*1024*1024):02f} GB")
-        return static_mem + active_mem, static_mem
-    elif interface_type == ModelInterfaceType.INFERENCE:
-        static_mem = param_mem // (num_pp * num_mp)
-        active_mem = 0  # no tensor need to be stored in inference
-        # print(f"inference static_mem: {static_mem/(1024*1024*1024):02f} GB")
-        return static_mem, static_mem
-    elif interface_type == ModelInterfaceType.GENERATE:
-        static_mem = param_mem // (num_pp * num_mp)
-        active_mem = 2 * (2 * b * s * h) * L // (num_pp * num_mp * num_dp)  # kv cache
-        # print(f"generate static_mem: {static_mem/(1024*1024*1024):02f} GB, "
-        #       f"kv_cache_mem: {kv_cache_mem/(1024*1024*1024):02f} GB, "
-        #       f"total: {(static_mem + kv_cache_mem)/(1024*1024*1024):02f} GB")
-        return static_mem + active_mem, static_mem
-
-
 def enumerate_rpc_executions(exp: ProfileExperiment, rpc: ModelRPC, device_mesh: DeviceMesh,
                              model_config: FlashMQATConfig) -> List[RPCExecution]:
     sub_device_meshes = find_sub_device_meshes(device_mesh)
@@ -125,7 +77,7 @@ def enumerate_model_device_mappings(exp: ProfileExperiment):
         model_type = exp.model_names_to_types[rpc.model_name]
         flash_mqat_config = load_model_config(exp.model_paths[exp.model_types.index(model_type)])
         feasible = enumerate_rpc_executions(exp, rpc, device_mesh, flash_mqat_config)
-        print(f"{model_rpc_name(rpc)} feasible: {len(feasible)}")
+        print(f"{rpc.name} feasible: {len(feasible)}")
         feasible.sort(key=lambda x: x.time_cost)
         # feasible = feasible[:10]
 
@@ -140,8 +92,8 @@ def enumerate_model_device_mappings(exp: ProfileExperiment):
             f"time cost sum {sum([x.time_cost for x in feasible][:10])} {sum([x.time_cost for x in feasible][:10]) / 10}"
         )
 
-        rpc_exe_table[model_rpc_name(rpc)] = feasible
-        avg_time_cost.append((sum([x.time_cost for x in feasible][:10]) / 10 + i, model_rpc_name(rpc)))
+        rpc_exe_table[rpc.name] = feasible
+        avg_time_cost.append((sum([x.time_cost for x in feasible][:10]) / 10 + i, rpc.name))
         min_time_cost_sum += feasible[0].time_cost
 
     st = time.monotonic_ns()
@@ -211,6 +163,56 @@ def enumerate_model_device_mappings(exp: ProfileExperiment):
     print(f"add time {add_time/1e9:.3f} s")
 
 
+def build_graph(exp: ProfileExperiment,
+                num_epoch: int = 5,
+                epoch_dependency_interval: int = 2,
+                if_print=False):
+    """ Build model function call graph of multiple training epochs,
+    
+    args:
+        exp: ProfileExperiment, the experiment object
+        num_epoch: int, number of training epochs
+        epoch_dependency_interval: int, the interval of epoch dependency, 
+            e.g. if epoch_dependency_interval = 2, then the graph will have 
+            edges between epoch i and epoch i+2, i+4, ...
+    """
+    rpcs = exp.model_rpcs
+    # one epoch dependency graph
+    rpcs, edges = api.dfg.build_graph(rpcs)
+
+    exp.model_names_to_types
+    rpc_names_mapping = {rpc.name: rpc for rpc in rpcs}
+    rpc_instances = []
+
+    # multi epoch graph
+    for epoch_id in range(num_epoch):
+        for rpc in rpcs:
+            children = []
+            parents = []
+            if rpc.is_src and epoch_id >= epoch_dependency_interval:
+                for other in rpcs:
+                    if other.is_dst:
+                        parents.append(RPCInstance(RPC(other), epoch_id - epoch_dependency_interval, [], []))
+            if rpc.is_dst:
+                for other in rpcs:
+                    if other.is_src and epoch_id + epoch_dependency_interval < num_epoch:
+                        children.append(RPCInstance(RPC(other), epoch_id + epoch_dependency_interval, [], []))
+            for parent in rpc.parents:
+                p = RPC(rpc_names_mapping[parent])
+                parents.append(RPCInstance(p, epoch_id, [], []))
+            for child in rpc.children:
+                c = RPC(rpc_names_mapping[child])
+                children.append(RPCInstance(c, epoch_id, [], []))
+            rpc_instance = RPCInstance(RPC(rpc), epoch_id, parents, children)
+            print(rpc_instance)
+            rpc_instances.append(rpc_instance)
+    if if_print:
+        for ri in rpc_instances:
+            print(ri)
+    return rpc_instances
+
+
 if __name__ == "__main__":
     exp = ProfileExperiment()
-    enumerate_model_device_mappings(exp)
+    # enumerate_model_device_mappings(exp)
+    rpc_instances = build_graph(exp)

@@ -119,6 +119,7 @@ train_critic = ModelRPC(
 NUM_GPUS_PER_NODE = 8
 LLAMA_2_7B_PATH = "/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf_4pp_3s"
 LLAMA_2_13B_PATH = "/lustre/public/pretrained_model_weights/sharded/Llama-2-13b-hf_4mp_3s"
+LLAMA_2_70B_PATH = "/lustre/public/pretrained_model_weights/sharded/Llama-2-70b-hf_8pp_3s"
 
 
 @dataclasses.dataclass
@@ -130,23 +131,23 @@ class ProfileExperiment(Experiment):
     model_names_to_types: Optional[Dict[str, str]] = None
 
     seed: int = 1
-    n_nodes: int = 4
-    nodelist: str = "QH-com[07-08]"
-    device_mesh_name: str = "QH-com[07-08]"
+    n_nodes: int = 6
+    nodelist: str = "QH-com[41-46]"
+    device_mesh_name: str = "QH-com[41-46]"
 
     def __post_init__(self):
         self.n_workers = self.n_nodes * NUM_GPUS_PER_NODE
 
         if self.model_paths is None:
             # example
-            self.model_paths = [LLAMA_2_13B_PATH, LLAMA_2_7B_PATH]
-            self.model_types = ["Llama-2-13b", "Llama-2-7b"]
+            self.model_paths = [LLAMA_2_70B_PATH, LLAMA_2_13B_PATH]
+            self.model_types = ["Llama-2-70b", "Llama-2-13b"]
             self.model_names = ["actor", "reward", "ref", "critic"]
             self.model_names_to_types = {
-                "actor": "Llama-2-13b",
-                "reward": "Llama-2-7b",
-                "ref": "Llama-2-13b",
-                "critic": "Llama-2-7b",
+                "actor": "Llama-2-70b",
+                "reward": "Llama-2-13b",
+                "ref": "Llama-2-70b",
+                "critic": "Llama-2-13b",
             }
             self.model_rpcs = [rollout, inf_reward, inf_ref_logits, inf_values, train_actor, train_critic]
         else:

@@ -123,6 +123,10 @@ class ProfileLayers:
         self.max_new_tokens = 128
         self.min_new_tokens = 128
 
+        # print("hidden_dim: ", self.hidden_dim)
+        # print("head_dim: ", self.head_dim)
+        # print("n_layers", config.n_layers)
+
         self.stats = defaultdict(list)
         self.num_layers = len(self.layers)
 
@@ -219,6 +223,8 @@ class ProfileLayers:
 
         for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             # fwd
+            # if self.device == "cpu":
+            #     layer.cuda()
             st = time.monotonic_ns()
             x = layer.module(x, y)
             torch.cuda.synchronize()
@@ -236,6 +242,8 @@ class ProfileLayers:
             torch.cuda.synchronize()
             self.stats[make_stats_key(layer_name, "opt", bs, seq_len)].append(time.monotonic_ns() - st)
             x.pp_input = x.pp_output.clone().detach()
+            # if self.device == "cpu":
+            #     layer.cpu()
 
     def print_stats(self):
         for key, times in self.stats.items():

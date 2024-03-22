@@ -19,7 +19,7 @@ def profile():
     exp = ProfileExperiment()
     device_mesh_size = exp.n_nodes * 8
     # find factors of device mesh size
-    factors = find_factors(device_mesh_size)  # possible num_dp and num_pp
+    # factors = find_factors(device_mesh_size)  # possible num_dp and num_pp
 
     base_environs = {
         "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
@@ -38,22 +38,25 @@ def profile():
                f"--batch_size_list {batch_size_list} --seq_len_list {seq_len_list}"
 
     for model_path, model_type in zip(exp.model_paths, exp.model_types):
-        bs_sl_set = set()
-        for rpc in exp.model_rpcs:
-            rpc_model_type = exp.model_names_to_types[rpc.model_name]
-            if rpc_model_type == model_type:
-                # bs_sl_set.add((rpc.min_n_seqs, rpc.max_n_tokens // rpc.min_n_seqs))
-                bs = rpc.min_n_seqs
-                sl = rpc.max_n_tokens // rpc.min_n_seqs
-                for factor in factors:
-                    mbs = math.ceil(bs / factor)
-                    bs_sl_set.add((mbs, sl))
-                    if factor * 2 not in factors:
-                        mbs = math.ceil(bs / (factor * 2))
-                        bs_sl_set.add((mbs, sl))
+        # bs_sl_set = set()
+        # for rpc in exp.model_rpcs:
+        #     rpc_model_type = exp.model_names_to_types[rpc.model_name]
+        #     if rpc_model_type == model_type:
+        #         # bs_sl_set.add((rpc.min_n_seqs, rpc.max_n_tokens // rpc.min_n_seqs))
+        #         bs = rpc.min_n_seqs
+        #         sl = rpc.max_n_tokens // rpc.min_n_seqs
+        #         for factor in factors:
+        #             mbs = math.ceil(bs / factor)
+        #             bs_sl_set.add((mbs, sl))
+        #             if factor * 2 not in factors:
+        #                 mbs = math.ceil(bs / (factor * 2))
+        #                 bs_sl_set.add((mbs, sl))
 
-        bs_list = [bs for bs, _ in bs_sl_set]
-        sl_list = [sl for _, sl in bs_sl_set]
+        # bs_list = [bs for bs, _ in bs_sl_set]
+        # sl_list = [sl for _, sl in bs_sl_set]
+
+        bs_list = [2**i for i in range(7)] * 2
+        sl_list = [128] * 7 + [256] * 7
 
         print(f"Profiling {model_type} layers, model path {model_path}, "
               f"cmd {profile_layers_cmd(model_path, model_type, bs_list, sl_list)}")
