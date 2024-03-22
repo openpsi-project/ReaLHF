@@ -152,6 +152,9 @@ def _create_param_sync_groups(
     param_sync_src_ranks: Dict[ParamSyncPair, int],
     param_sync_dst_ranks: Dict[ParamSyncPair, List[int]],
 ):
+    mwid2msid: Dict[int, Dict[ModelName, api.config.config_system.ModelShardID]] = defaultdict(dict)
+    for k, v in msid2mwid.items():
+        mwid2msid[v][k.model_name] = k
     for pp_i, pp_j in itertools.product(range(from_topo.get_dim("pipe")), range(to_topo.get_dim("pipe"))):
         # create tensor reshard groups
         src_mp_size = from_topo.get_dim("model")
@@ -199,9 +202,10 @@ def _create_param_sync_groups(
                     _src_rank = _src_ranks[_src_rank_id]
                     _dst_ranks = _grouped_dst_ranks[_dst_ranks_group_id]
 
+                    
                     dp_i, mp_i = (
-                        from_topo.get_coord(_src_rank).data,
-                        from_topo.get_coord(_src_rank).model,
+                        from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).data,
+                        from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).model,
                     )
                     key = ParamSyncPair(
                         src=src,

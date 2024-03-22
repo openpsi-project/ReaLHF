@@ -69,6 +69,14 @@ class ProcessTopology:
             # for example, {ProcessCoord(row=0, col=1) : 1}
             self.mapping[key] = global_rank
 
+    def __eq__(self, other):
+        if not isinstance(other, ProcessTopology):
+            return False
+        return self.mapping == other.mapping
+    
+    def __repr__(self):
+        return f"ProcessTopology(axes={self.axes}, dims={self.dims})"
+
     def get_rank(self, **coord_kwargs):
         """Return the global rank of a process via its coordinates.
 

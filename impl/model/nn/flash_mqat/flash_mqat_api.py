@@ -84,7 +84,6 @@ class FlashMQATModel(nn.Module):
         config: FlashMQATConfig,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
-        pipeline_partition_method: str = "parameters_balanced",
     ):
         super().__init__()
         if dtype is None:
@@ -92,7 +91,6 @@ class FlashMQATModel(nn.Module):
         self.config = config
         self.dtype = dtype
         self.device = device
-        self.pipeline_partition_method = pipeline_partition_method
 
         self.layer_mapping = partition_pipeline_layers(
             config,
@@ -100,46 +98,46 @@ class FlashMQATModel(nn.Module):
             flash_model_embed_param_count,
             flash_model_tblock_param_count,
             flash_model_head_param_count,
-            method=pipeline_partition_method,
         )
+        self.layer_idx_start = self.layer_mapping[base.constants.pipe_parallel_rank()][0]
+        self.layer_idx_end = self.layer_mapping[base.constants.pipe_parallel_rank()][1]
+        self.num_stages = base.constants.pipe_parallel_world_size()
 
-        # Tensor model parallel will be done during layer construction.
+        self.layers = nn.ModuleList()
+        self.sequence_parallel = config.sequence_parallel
+
+        self._instantiated = False
+        self._instantiation_hooks = []
+
+    def instantiate(self):
+        assert not self._instantiated
         layers = []
         for idx in range(self.layer_idx_start, self.layer_idx_end):
-            layers.append(self._build_layer(idx))
+            layers.append(self._build_layer(idx, self.config))
 
         self.layers = nn.ModuleList(layers)
 
-        self.sequence_parallel = config.sequence_parallel
+        for h in self._instantiation_hooks:
+            h()
+
+        self._instantiated = True
+        self._instantiation_hooks = []
 
     @property
     def num_layers(self):
         return len(self.layers)
 
     @property
-    def layer_idx_start(self):
-        return self.layer_mapping[base.constants.pipe_parallel_rank()][0]
-
-    @property
-    def layer_idx_end(self):
-        return self.layer_mapping[base.constants.pipe_parallel_rank()][1]
-
-    @property
-    def num_stages(self):
-        return base.constants.pipe_parallel_world_size()
-
-    @property
     def is_critic(self):
         return self.config.is_critic
 
-    def _build_layer(self, idx: int) -> nn.Module:
-        config = self.config
+    def _build_layer(self, idx: int, config: FlashMQATConfig) -> nn.Module:
         dtype = self.dtype
         device = self.device
         if idx == 0:
             l = VocabPositionEmbedding(config, dtype, device)
         elif idx == config.n_layers + 1:
-            l = self._build_output_head()
+            l = self._build_output_head(config)
         else:
             l = FlashMQATBlock(
                 config=config,
@@ -150,8 +148,7 @@ class FlashMQATModel(nn.Module):
             )
         return l
 
-    def _build_output_head(self) -> nn.Module:
-        config = self.config
+    def _build_output_head(self, config: FlashMQATConfig) -> nn.Module:
         dtype = self.dtype
         device = self.device
         if config.is_critic and config.sequence_parallel:
@@ -394,11 +391,16 @@ class FlashMQATModel(nn.Module):
             gradient_accumulation_fusion=gradient_accumulation_fusion,
         )
         model = cls(config=config, dtype=dtype, device=device)
+        assert not model._instantiated
         if not init_from_scratch:
             if model_path is not None:
-                model.load_from_hf(model_path, init_critic_from_actor=is_critic)
+                model._instantiation_hooks.append(
+                    lambda: model.load_from_hf(model_path, init_critic_from_actor=is_critic)
+                )
             else:
-                model.load_state_dict(state_dict_converter(from_model.state_dict(), config))
+                model._instantiation_hooks.append(
+                    lambda: model.load_state_dict(state_dict_converter(from_model.state_dict(), config))
+                )
         return model
 
     # Template function used for FlashMQAT to HF models, similar to C++ template but is ugly in python.
@@ -600,7 +602,6 @@ class FlashMQATModel(nn.Module):
             flash_model_embed_param_count,
             flash_model_tblock_param_count,
             flash_model_head_param_count,
-            method=self.pipeline_partition_method,
         )
 
         ckpt_layer_mapping_list = {k: list(range(v[0], v[1])) for k, v in ckpt_layer_partition.items()}
@@ -684,29 +685,49 @@ class FlashMQATModel(nn.Module):
         to_model_name: ModelName,
         from_topo: base.topology.PipeModelDataParallelTopology,
         to_topo: base.topology.PipeModelDataParallelTopology,
+        to_model_config: FlashMQATConfig,
         pg_info: gpu_utils.NCCLProcessGroupInfo,
     ) -> "FlashMQATModel":
         src_mp_size = from_topo.get_dim("model")
         dst_mp_size = to_topo.get_dim("model")
         assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
+        for k, v in dataclasses.asdict(to_model_config).items():
+            if k not in [
+                "is_critic",
+                "sequence_parallel",
+                "gradient_accumulation_fusion",
+                "ckpt_attn",
+                "ckpt_mlp",
+            ] and v != getattr(self.config, k):
+                raise ValueError(
+                    f"Can't load a checkpoint with different config (key `{k}`, "
+                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`)."
+                )
         if (self.config.n_kv_heads % src_mp_size == 0) != (self.config.n_kv_heads % dst_mp_size == 0):
             raise ValueError("Whether to partition kv heads should remain the same.")
 
         # Get the current state dict and delete all modules.
         # Pointers to the current parameters will remain in the state dict until not needed.
         state_dict = self.state_dict()
+        # TODO: remote synchronization deletes the local model, but sometimes it is uncessary.
         del self.layers
 
-        from_layer_mapping = {k: list(range(v[0], v[1])) for k, v in self.layer_mapping.items()}
-        self.layer_mapping = partition_pipeline_layers(
+        from_layer_mapping = partition_pipeline_layers(
             self.config,
+            from_topo.get_dim("pipe"),
+            flash_model_embed_param_count,
+            flash_model_tblock_param_count,
+            flash_model_head_param_count,
+        )
+        from_layer_mapping = {k: list(range(v[0], v[1])) for k, v in from_layer_mapping.items()}
+        to_layer_mapping = partition_pipeline_layers(
+            to_model_config,
             to_topo.get_dim("pipe"),
             flash_model_embed_param_count,
             flash_model_tblock_param_count,
             flash_model_head_param_count,
-            method=self.pipeline_partition_method,
         )
-        to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in self.layer_mapping.items()}
+        to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in to_layer_mapping.items()}
         repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
 
         @dataclasses.dataclass
@@ -744,6 +765,13 @@ class FlashMQATModel(nn.Module):
                     sd_keys += flash_model_head_param_keys(self.config)
                 else:
                     sd_keys += flash_model_tblock_param_keys(self.config, layer_idx - 1)
+
+            for k in sd_keys:
+                if k in state_dict:
+                    shape1 = state_dict[k].shape
+                    shape2 = get_flash_model_param_shape(k, self.config, from_topo.get_dim("model"))
+                    assert shape1 == shape2, (k, shape1, shape2, from_topo.get_dim("model"), self.config)
+
             sub_sd = {
                 k: (get_flash_model_param_shape(k, self.config, from_topo.get_dim("model")), self.dtype)
                 for k in sd_keys
@@ -755,7 +783,7 @@ class FlashMQATModel(nn.Module):
                         mp_js = [i + factor * mp_i for i in range(factor)]
                         dtypes = [dtype for _ in range(factor)]
                         shapes = [
-                            get_flash_model_param_shape(k, self.config, to_topo.get_dim("model"))
+                            get_flash_model_param_shape(k, to_model_config, to_topo.get_dim("model"))
                             for _ in range(factor)
                         ]
                         receiver_mp_portion_id = 0
@@ -778,7 +806,7 @@ class FlashMQATModel(nn.Module):
                             )
                             src = pg_info.param_sync_src_ranks[key]
                             group = pg_info.param_sync_groups[key]
-                            dst_ranks = pg_info.param_sync_groups[key]
+                            dst_ranks = pg_info.param_sync_dst_ranks[key]
 
                             for dst_rank in dst_ranks:
                                 comm_plan.append(
@@ -827,13 +855,14 @@ class FlashMQATModel(nn.Module):
             layer_idx = int(step.param_key.split(".")[0])
             if isinstance(step, ReceverStep) and step.rank == torch.distributed.get_rank():
                 if layer_idx not in new_layers:
-                    l = self._build_layer(layer_idx)
+                    with base.constants.model_scope(to_model_name):
+                        l = self._build_layer(layer_idx, to_model_config)
                     new_layers[layer_idx] = l
 
                 if step.rank == step.src:
                     buf = mp_partition_flash_mqat_state_dict(
                         {step.param_key: state_dict[step.param_key]},
-                        self.config,
+                        to_model_config,
                         mp_size=max(dst_mp_size // src_mp_size, 1),
                         mp_rank=step.sender_mp_portion_id,
                     )[step.param_key]
@@ -848,13 +877,18 @@ class FlashMQATModel(nn.Module):
                         [
                             {
                                 step.param_key: tmp_portion_storage[(step.param_key, i)]
-                                for i in range(n_receiver_portions)
-                            }
+                                
+                            } for i in range(n_receiver_portions)
                         ],
                         self.config,
+                    )[step.param_key]
+                    layer_param_key = step.param_key.split(".", 1)[1]
+                    assert layer_param_key in new_layers[layer_idx].state_dict(), (
+                        step.param_key,
+                        layer_param_key,
+                        new_layers[layer_idx].state_dict().keys(),
                     )
-                    assert step.param_key in new_layers[layer_idx].state_dict()
-                    new_layers[layer_idx].load_state_dict({step.param_key: buf}, strict=False)
+                    new_layers[layer_idx].load_state_dict({layer_param_key: buf}, strict=False)
                     for i in range(n_receiver_portions):
                         del tmp_portion_storage[(step.param_key, i)]
 
@@ -871,7 +905,8 @@ class FlashMQATModel(nn.Module):
                     del state_dict[step.param_key]
 
         assert len(state_dict) == 0
-        self.layers = nn.ModuleList([new_layers[i] for i in range(len(new_layers))])
+        self.layers = nn.ModuleList([new_layers[i] for i in sorted(new_layers.keys())])
+        return self
 
 
 # a helper function to make flash_mqat look like huggingface model

@@ -388,9 +388,9 @@ def flash_model_embed_param_count(config: FlashMQATConfig) -> int:
 
 
 def flash_model_embedding_param_keys(config: FlashMQATConfig) -> int:
-    keys = ["wte.weight"]
+    keys = ["0.wte.weight"]
     if not config.apply_rotary:
-        keys += ["wpe.weight"]
+        keys += ["0.wpe.weight"]
     return keys
 
 

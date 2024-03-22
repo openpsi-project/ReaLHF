@@ -79,9 +79,11 @@ def mp_partition_flash_mqat_state_dict(
                 state_dict[k] = mp_partition(v, mp_rank, mp_size, dim=0)
         elif any([ck in k for ck in column_linear_keys]):
             if ("k_attn" or "v_attn" in k) and config.n_kv_heads % mp_size != 0:
-                logger.warning(f"Cannot split {config.n_kv_heads} kv heads evenly among "
-                               f"{mp_size} model parallel ranks, "
-                               f"use unsplitted linear for kv heads instead")
+                logger.warning(
+                    f"Cannot split {config.n_kv_heads} kv heads evenly among "
+                    f"{mp_size} model parallel ranks, "
+                    f"use unsplitted linear for kv heads instead"
+                )
                 if mp_rank is None:
                     state_dict[k] = [state_dict[k] for _ in range(mp_size)]
                 continue
@@ -107,16 +109,19 @@ def mp_partition_flash_mqat_state_dict(
     else:
         return state_dict
 
+
 def get_flash_model_param_shape(k: str, config: FlashMQATConfig, mp_size: int):
     column_linear_keys = _column_linear_keys(config)
     row_linear_keys = _row_linear_keys(config)
 
     if "wte.weight" in k:
         assert config.vocab_size % mp_size == 0
-        return (config.vocab_size // mp_size, config.hidden_dim )
+        return (config.vocab_size // mp_size, config.hidden_dim)
     elif "wpe.weight" in k:
         assert config.n_positions % mp_size == 0
         return (config.n_positions // mp_size, config.hidden_dim)
+    elif ".ln." in k or ".ln_f." in k:
+        return (config.hidden_dim,)
     elif any([ck in k for ck in column_linear_keys]):
         if "k_attn" in k or "v_attn" in k:
             if "weight" in k:
@@ -125,7 +130,15 @@ def get_flash_model_param_shape(k: str, config: FlashMQATConfig, mp_size: int):
                 else:
                     return (config.head_dim * config.n_kv_heads, config.hidden_dim)
         if k == f"{config.n_layers + 1}.weight":
-            return (config.hidden_dim, )
+            if config.is_critic and config.sequence_parallel:
+                return (1, config.hidden_dim)
+            elif not config.is_critic and mp_size > 1:
+                assert config.vocab_size % mp_size == 0
+                return (config.vocab_size // mp_size, config.hidden_dim)
+            else:
+                return (config.vocab_size if not config.is_critic else 1, config.hidden_dim)
+        if "mlp" in k:
+            return (config.intermediate_dim // mp_size, config.hidden_dim)
         if "weight" in k:
             assert config.hidden_dim // config.head_dim % mp_size == 0
             return (config.hidden_dim // mp_size, config.hidden_dim)
@@ -135,9 +148,10 @@ def get_flash_model_param_shape(k: str, config: FlashMQATConfig, mp_size: int):
         elif "attn" in k and "weight" in k:
             return (config.hidden_dim, config.hidden_dim // mp_size)
         elif "bias" in k:
-            return (config.hidden_dim // mp_size, )
+            return (config.hidden_dim // mp_size,)
     else:
         raise NotImplementedError(f"unkown shape of key {k}.")
+
 
 def mp_merge_flash_mqat_state_dict(
     state_dicts: List[Dict[str, torch.Tensor]],
@@ -156,8 +170,9 @@ def mp_merge_flash_mqat_state_dict(
         i = int(k.split(".")[0])
         if any([ek in k for ek in embedding_keys]) and "weight" in k:
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
-        elif (any([ck in k for ck in column_linear_keys])
-              and state_dicts[0][k].shape[0] > 1):  # exclude critic head
+        elif (
+            any([ck in k for ck in column_linear_keys]) and state_dicts[0][k].shape[0] > 1
+        ):  # exclude critic head
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=0)
         elif any([rk in k for rk in row_linear_keys]) and "weight" in k:
             state_dict[k] = torch.cat([sd[k] for sd in state_dicts], dim=1)
@@ -180,9 +195,11 @@ def partition_pipeline_layers(
     from base.datapack import partition_balanced as true_partition_balanced
 
     # Each stage gets a simple uniform number of layers.
-    param_counts = ([embed_param_counter(config)] +
-                    [transformer_block_param_counter(config, i)
-                     for i in range(config.n_layers)] + [head_param_counter(config)])
+    param_counts = (
+        [embed_param_counter(config)]
+        + [transformer_block_param_counter(config, i) for i in range(config.n_layers)]
+        + [head_param_counter(config)]
+    )
     parts = None
     if method == "uniform":
         parts = ds_utils.partition_uniform(num_items=config.n_layers + 2, num_parts=num_stages)
@@ -211,7 +228,8 @@ def pipeline_repartition_strategy(
     layer_map: Dict[Tuple[int, int], List[int]] = {}
     for pp_rank2, layer_indices2 in layer_mapping2.items():
         for pp_rank1, layer_indices1 in layer_mapping1.items():
-            layer_map[(pp_rank1,
-                       pp_rank2)] = sorted(list(set(layer_indices1).intersection(set(layer_indices2))))
+            layer_map[(pp_rank1, pp_rank2)] = sorted(
+                list(set(layer_indices1).intersection(set(layer_indices2)))
+            )
 
     return layer_map

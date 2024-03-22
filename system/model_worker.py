@@ -218,15 +218,15 @@ class ModelWorker(worker_base.Worker):
 
     @property
     def _model(self) -> api.model.Model:
-        return self.__models[base.constants.model_name().role]
+        return self.__models[base.constants.model_name()]
 
     @property
     def _interface(self) -> api.model.ModelInterface:
-        return self.__interfaces[base.constants.model_name().role]
+        return self.__interfaces[base.constants.model_name()]
 
     @property
     def _eval_dataloader(self) -> torch.utils.data.DataLoader:
-        return self.__eval_dataloaders[base.constants.model_name().role]
+        return self.__eval_dataloaders[base.constants.model_name()]
 
     @property
     def _module(self) -> torch.nn.Module | FlashMQATModel:
@@ -327,68 +327,64 @@ class ModelWorker(worker_base.Worker):
 
             self.__fetched_data = None
 
-        # NOTE: self.__models, self.__interfaces and self.__eval_dataloaders are indexed by `roles`,
-        # which are strings, because replica of the same role usually share parameters and interface functions.
-        self.__models: Dict[str, api.model.Model] = dict()
-        self.__interfaces: Dict[str, api.model.ModelInterface] = dict()
-        self.__eval_dataloaders: Dict[str, torch.utils.data.DataLoader] = dict()
+        self.__models: Dict[ModelName, api.model.Model] = dict()
+        self.__model_is_handle: Dict[ModelName, bool] = dict()
+        self.__interfaces: Dict[ModelName, api.model.ModelInterface] = dict()
+        self.__eval_dataloaders: Dict[ModelName, torch.utils.data.DataLoader] = dict()
 
-        self.__model_replica_ids: Dict[str, int] = dict()
-
-        # NOTE: self.__backends, self.__unwrapped_models, and self.__engines are indexed by ModelName (both `role` and `replica_id`)
-        # because they involve parallelism strategies (e.g., in pipeline engine) and parallelism transformations (e.g., in FlashMQAT).
         self.__backends: Dict[ModelName, api.model.ModelBackend] = dict()
         self.__unwrapped_models: Dict[ModelName, torch.nn.Module | FlashMQATModel] = dict()
         self.__engines: Dict[str, Any] = dict()
 
         for s in self.config.shards:
             with base.constants.model_scope(s.id.model_name):
-                if s.id.model_name.role in self.__models:
-                    assert s.id.model_name.role in self.__interfaces
-                    assert s.id.model_name.role in self.__eval_dataloaders
-                    prior_model_name = next(k for k in self.__backends if k.role == s.id.model_name.role)
-                    assert prior_model_name.replica_id != s.id.model_name.replica_id
+                self.__models[s.id.model_name] = model = api.model.make_model(
+                    s.model, name=s.id.model_name, device=self.__device
+                )
+                self.__unwrapped_models[s.id.model_name] = model.module
+                if s.id.model_name.replica_id == 0:
+                    assert isinstance(model.module, FlashMQATModel)
+                    model.module.instantiate()
+                    self.__model_is_handle[s.id.model_name] = False
                 else:
-                    self.__models[s.id.model_name.role] = api.model.make_model(
-                        s.model, name=s.id.model_name, device=self.__device
-                    )
-                    self.__model_replica_ids[s.id.model_name.role] = s.id.model_name.replica_id
-                    interface_impl = [
-                        rpc.interface_impl
-                        for rpc in self.config.model_rpcs
-                        if rpc.model_name == s.id.model_name
-                    ]
-                    assert all(x == interface_impl[0] for x in interface_impl)
-                    self.__interfaces[s.id.model_name.role] = api.model.make_interface(interface_impl[0])
-
-                    if s.eval_datasets is not None and s.eval_dataloader is not None:
-                        eval_datasets = [
-                            api.data.make_dataset(
-                                d,
-                                self.config.seed,
-                                s.id.dp_rank,
-                                s.id.topo.get_dim("data"),
-                                self.__models[s.id.model_name].tokenizer,
-                                self.config.worker_info.experiment_name,
-                                self.config.worker_info.trial_name,
-                                cache_root=(
-                                    None
-                                    if not self.config.use_dataset_cache
-                                    else self.config.dataset_cahce_root
-                                ),
-                            )
-                            for d in s.eval_datasets
-                        ]
-                        if len(eval_datasets) > 1:
-                            eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
-                        else:
-                            eval_dataset = eval_datasets[0]
-                        eval_dataloader = api.data.make_dataloader(self.config.eval_dataloader, eval_dataset)
-                    else:
-                        eval_dataloader = None
-                    self.__eval_dataloaders[s.id.model_name.role] = eval_dataloader
-
+                    self.__model_is_handle[s.id.model_name] = True
                 self.__backends[s.id.model_name] = api.model.make_backend(s.backend)
+                interface_impl = [
+                    rpc.interface_impl
+                    for rpc in self.config.model_rpcs
+                    if rpc.model_name == s.id.model_name
+                ]
+                assert all(x == interface_impl[0] for x in interface_impl)
+                self.__interfaces[s.id.model_name] = api.model.make_interface(interface_impl[0])
+
+                if s.eval_datasets is not None and s.eval_dataloader is not None:
+                    eval_datasets = [
+                        api.data.make_dataset(
+                            d,
+                            self.config.seed,
+                            s.id.dp_rank,
+                            s.id.topo.get_dim("data"),
+                            self.__models[s.id.model_name].tokenizer,
+                            self.config.worker_info.experiment_name,
+                            self.config.worker_info.trial_name,
+                            cache_root=(
+                                None
+                                if not self.config.use_dataset_cache
+                                else self.config.dataset_cahce_root
+                            ),
+                        )
+                        for d in s.eval_datasets
+                    ]
+                    if len(eval_datasets) > 1:
+                        eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
+                    else:
+                        eval_dataset = eval_datasets[0]
+                    eval_dataloader = api.data.make_dataloader(self.config.eval_dataloader, eval_dataset)
+                else:
+                    eval_dataloader = None
+                self.__eval_dataloaders[s.id.model_name] = eval_dataloader
+
+                
 
         self.__request_queue = queue.Queue(maxsize=8)
         self.__reply_queue = queue.Queue(maxsize=8)
@@ -451,19 +447,15 @@ class ModelWorker(worker_base.Worker):
             handler_model_name = request.handler.model_name
 
         with base.constants.model_scope(handler_model_name):
-            if self.__model_replica_ids[handler_model_name.role] != handler_model_name.replica_id:
-                raise RuntimeError(
-                    f"Model worker should handle request from {handler_model_name}, "
-                    f"but the current replica id is {self.__model_replica_ids[handler_model_name]}. "
-                    f"Have you called parameter synchronization before invoking RPCs?"
-                )
             res = None
             if request.handle_name == "initialize":
+                assert not self.__model_is_handle[request.handler.model_name]
                 base.constants.set_max_seqlen(data.max_seqlen)  # used by cuda graph buffer for generation
-                self.__unwrapped_models[request.handler.model_name] = m = self._model.module
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
                 self.__engines[request.handler.model_name] = self._model.module
-                res = None if not isinstance(m, FlashMQATModel) else m.config
+            elif request.handle_name == "model_config":
+                assert isinstance(self.__unwrapped_models[request.handler.model_name], FlashMQATModel)
+                res = self.__unwrapped_models[request.handler.model_name].config
             ############## data loading ##############
             elif request.handle_name == "fetch":
                 assert self.__fetched_data is None
@@ -504,20 +496,27 @@ class ModelWorker(worker_base.Worker):
                     self.__data_transfer_among_workers(request)
             ############## parameter synchronization/re-parallelization ##############
             elif request.handle_name == "param_sync":
+                m = self._module
+                assert isinstance(m, FlashMQATModel), type(m)
                 with base.constants.model_scope_disabled():
                     from_model_name: ModelName = request.data["from_model_name"]
                     to_model_name: ModelName = request.data["to_model_name"]
                     from_topo: base.topology.PipeModelDataParallelTopology = request.data["from_topo"]
                     to_topo: base.topology.PipeModelDataParallelTopology = request.data["to_topo"]
-                    assert isinstance(self._module, FlashMQATModel)
-                    self._module.to_reparallelized_model(
+                    to_model_config = request.data['to_model_config']
+                    m = m.to_reparallelized_model(
                         from_model_name=from_model_name,
                         to_model_name=to_model_name,
                         from_topo=from_topo,
                         to_topo=to_topo,
+                        to_model_config=to_model_config,
                         pg_info=self.__pg_info,
                     )
-                    self.__model_replica_ids[from_model_name.role] = to_model_name.replica_id
+                if from_model_name in self.__models:
+                    self.__model_is_handle[from_model_name] = True
+                if to_model_name in self.__models:
+                    self.__unwrapped_models[to_model_name].layers = m.layers
+                    self.__model_is_handle[to_model_name] = False
             ############## offload ##############
             elif request.handle_name in ["offload", "load_to_device"]:
                 print(
@@ -527,6 +526,7 @@ class ModelWorker(worker_base.Worker):
                 )
             ############## computation function calls ##############
             elif request.handle_name == "inference":
+                assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 data, buffer_indices, seqlens, output_key_remap = self.__compute_input_queues[
                     request.handle_name
                 ].get_nowait()
@@ -541,9 +541,11 @@ class ModelWorker(worker_base.Worker):
                     new_res = namedarray.from_dict(new_res)
                     res = new_res, buffer_indices, seqlens
             elif request.handle_name == "train_step":
+                assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 data, *_ = self.__compute_input_queues[request.handle_name].get_nowait()
                 res = self._interface.train_step(self._model, data)  # -> Dict
             elif request.handle_name == "generate":
+                assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 data, buffer_indices, seqlens, output_key_remap = self.__compute_input_queues[
                     request.handle_name
                 ].get_nowait()
@@ -558,8 +560,10 @@ class ModelWorker(worker_base.Worker):
                     new_res = namedarray.from_dict(new_res)
                     res = new_res, buffer_indices, seqlens
             elif request.handle_name == "evaluate":
+                assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 res = self._interface.evaluate(self._model, self._eval_dataloader)  # -> Dict
             elif request.handle_name == "save":
+                assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 res = self._interface.save(self._model, data)  # -> None
             else:
                 raise NotImplementedError(f"Unknown request type: {request.handle_name}.")

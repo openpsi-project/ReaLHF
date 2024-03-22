@@ -2,7 +2,7 @@ import functools
 
 from omegaconf import MISSING
 
-from .device_mapping import auto_device_mapping, ClusterDeviceMesh
+from .device_mapping import auto_device_mapping as auto, ClusterDeviceMesh
 from api.config.config_dataset import DatasetType, PromptOnlyDatasetConfig
 from api.config.config_system import *
 from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
@@ -34,17 +34,16 @@ def register_auto_ppo_experiment(
 
     model_class = "llama" if size != 34 else "codellama"
 
-    @auto_device_mapping(
-        device_mesh=ClusterDeviceMesh(n_nodes=n_nodes, n_gpus_per_node=8, mem=80),
-        nodelist=nodelist,
-    )
+    @auto(n_nodes=n_nodes, nodelist=nodelist)
     @dataclasses.dataclass
     class AutoPPOExperiment:
         seed: int = 1
-        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=functools.partial(
-            ExperimentSaveEvalControl,
-            benchmark_steps=20,
-        ),)
+        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(
+            default_factory=functools.partial(
+                ExperimentSaveEvalControl,
+                benchmark_steps=20,
+            ),
+        )
         ppo: PPOHyperparmeters = dataclasses.field(default_factory=PPOHyperparmeters)
 
         @property
@@ -208,6 +207,6 @@ def register_auto_ppo_experiment(
 
 
 for size in [7, 13, 34, 70]:
-    for gen_bs in [32, 64, 128, 160, 256]:
+    for gen_bs in [16, 32, 64, 128, 160, 256]:
         train_bs = gen_bs
         register_auto_ppo_experiment(size, gen_bs, train_bs)

@@ -25,7 +25,8 @@ class LoadToDeviceHook:
 
 @dataclasses.dataclass
 class SyncParamHook:
-    target: ModelName
+    source: Optional[ModelName] = None
+    target: Optional[ModelName] = None
     interval: int = 1
 
 
@@ -208,8 +209,8 @@ def build_graph(rpcs: List[ModelRPC], verbose: bool = False) -> Tuple[List[Model
         rpc.children_rpcs = cr
 
     for rpc in rpcs:
-        rpc.max_min_flow_seqs = max([r.min_n_seqs for r in rpcs if r.model_name == rpc.model_name])
-        rpc.max_min_flow_tokens = max([r.min_n_tokens for r in rpcs if r.model_name == rpc.model_name])
+        rpc.max_min_flow_seqs = max([r.min_n_seqs for r in rpcs if r.model_name.role == rpc.model_name.role])
+        rpc.max_min_flow_tokens = max([r.min_n_tokens for r in rpcs if r.model_name.role == rpc.model_name.role])
         rpc.data_producers = data_producers
         rpc.data2required_rpc_names = data2required_rpc_names
 
@@ -218,5 +219,5 @@ def build_graph(rpcs: List[ModelRPC], verbose: bool = False) -> Tuple[List[Model
         for h in itertools.chain(rpc.pre_hooks, rpc.post_hooks):
             assert isinstance(h, RPCHook), type(h)
             if isinstance(h, SyncParamHook):
-                assert any(h.target == r.model_name for r in rpcs)
+                assert any(h.target == r.model_name for r in rpcs) or (h.source == r.model_name for r in rpcs)
     return rpcs, edges

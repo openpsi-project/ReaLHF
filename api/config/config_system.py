@@ -212,6 +212,15 @@ class ExperimentConfig:
         model_names = set()
         for w in self.model_worker:
             model_names = model_names.union([s.id.model_name for s in w.shards])
+        model_names = sorted(list(model_names))
+
+        ############### Sanity check of model names ###############
+        _roles = set(mn.role for mn in model_names)
+        _replica_ids = {_role: sorted([mn.replica_id for mn in model_names if mn.role == _role]) for _role in _roles}
+        for v in _replica_ids.values():
+            if list(sorted(v)) != list(range(len(v))):
+                raise ValueError(f"Model replica ids should be 0, 1, 2, ... for each role: {_replica_ids}.")
+        ############### Sanity check of model names ###############
 
         model_topos: Dict[ModelName, base.topology.PipeModelDataParallelTopology] = {}
         model_configs: Dict[ModelName, Model] = {}
@@ -222,6 +231,12 @@ class ExperimentConfig:
             all_shards: List[StandaloneModelShard] = [
                 next(filter(lambda x: x.id.model_name == model_name, mw.shards)) for mw in _this_mws
             ]
+            for k, v in model_topos.items():
+                if k.role == model_name.role and v == all_shards[0].id.topo:
+                    raise ValueError(
+                        f"If different RPCs have the same topology, "
+                        f"they don't need to use multiple model names ({k}, {model_name})."
+                    )
             model_topos[model_name] = all_shards[0].id.topo
             model_configs[model_name] = all_shards[0].model
 
@@ -241,9 +256,10 @@ class ExperimentConfig:
         _, edges = api.config.dfg.build_graph(self.model_rpcs, verbose=True)
         for i in range(len(self.model_rpcs)):
             for j in range(len(self.model_rpcs)):
-                if i != j and len(edges[i][j]) > 0:
+                if len(edges[i][j]) > 0:
                     # NOTE: dependencies are reversed here
                     data_transfer_pairs.append((self.model_rpcs[j].model_name, self.model_rpcs[i].model_name))
+        data_transfer_pairs += [(mn, mn) for mn in model_names]
 
         sync_param_pairs: List[Tuple[ModelName, ModelName]] = []
         ######### sanity check of sync param hooks #########
@@ -251,26 +267,48 @@ class ExperimentConfig:
             for hook in rpc.pre_hooks + rpc.post_hooks:
                 if not isinstance(hook, api.config.dfg.SyncParamHook):
                     continue
-                if (
-                    not model_configs[rpc.model_name].type_
+                if (hook.target is not None and
+                    not (model_configs[rpc.model_name].type_
                     == model_configs[hook.target].type_
-                    == "flash_mqat"
-                ):
+                    == "flash_mqat")
+                ) or (hook.source is not None and not (model_configs[rpc.model_name].type_ == model_configs[hook.source].type_ == "flash_mqat")):
                     raise ValueError(
-                        "To synchronize parameters between two models, " "both models must be FlashMQATModel."
+                        "To synchronize parameters between two models, both models must be FlashMQATModel."
                     )
-                target_topo = model_topos[hook.target]
+                other_model_name = hook.target if hook.target is not None else hook.source
+                other_topo = model_topos[hook.target] if hook.target is not None else model_topos[hook.source]
                 self_topo = model_topos[rpc.model_name]
                 if (
-                    self_topo.get_dim("model") % target_topo.get_dim("model") != 0
-                    and target_topo.get_dim("model") % self_topo.get_dim("model") != 0
+                    self_topo.get_dim("model") % other_topo.get_dim("model") != 0
+                    and other_topo.get_dim("model") % self_topo.get_dim("model") != 0
                 ):
                     raise ValueError(
                         "To synchronize parameters between two models, "
                         "their model parallel size must be a multiple of each other."
                     )
-                if not (rpc.model_name, hook.target) in sync_param_pairs:
-                    sync_param_pairs.append((rpc.model_name, hook.target))
+                if rpc.model_name == other_model_name:
+                    raise ValueError(
+                        f"Cannot synchronize parameters within the same model "
+                        f"(in {rpc}, {rpc.model_name} and {hook.target})."
+                    )
+                if hook.target is not None:
+                    if not (rpc.model_name, hook.target) in sync_param_pairs:
+                        sync_param_pairs.append((rpc.model_name, hook.target))
+                else:
+                    if not (hook.source, rpc.model_name) in sync_param_pairs:
+                        sync_param_pairs.append((hook.source, rpc.model_name))
+        param_senders = set([x[0] for x in sync_param_pairs])
+        assert len(set(param_senders)) == len(param_senders)
+        param_receivers = set([x[1] for x in sync_param_pairs])
+        assert len(set(param_receivers)) == len(param_receivers)
+        for a, b in sync_param_pairs:
+            if (b, a) not in sync_param_pairs:
+                raise ValueError(
+                    "The current implementation of parameter synchronization "
+                    f"will throw local parameters away, "
+                    f"so it is necceary to do bidirectional synchronization. "
+                    f"{(a,b)} found in sync param pairs but not {(b,a)}"
+                )
         ######### sanity check of sync param hooks #########
 
         msid2mwid = {}
