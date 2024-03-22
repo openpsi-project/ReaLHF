@@ -124,13 +124,13 @@ class ModelRPC:
         return len(self.children) == 0
 
     @property
-    def is_dst_of_model(self):
+    def is_dst_of_model_role(self):
 
-        def _has_children_of_model_name(rpc: "ModelRPC", model_name: str):
+        def _has_children_of_model_name(rpc: "ModelRPC", model_name: ModelName):
             if rpc.is_dst:
                 return False
             return any([
-                r.model_name == model_name or _has_children_of_model_name(r, model_name)
+                r.model_name.role == model_name.role or _has_children_of_model_name(r, model_name)
                 for r in rpc.children_rpcs
             ])
 

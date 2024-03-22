@@ -1,4 +1,5 @@
 from typing import Callable, Dict, List, Optional, Tuple, Union
+import gc
 import contextlib
 import copy
 import dataclasses
@@ -906,6 +907,9 @@ class FlashMQATModel(nn.Module):
 
         assert len(state_dict) == 0
         self.layers = nn.ModuleList([new_layers[i] for i in sorted(new_layers.keys())])
+        gc.collect()
+        torch.cuda.empty_cache()
+        gc.collect()
         return self
 
 

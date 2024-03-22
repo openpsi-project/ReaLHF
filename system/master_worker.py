@@ -20,6 +20,7 @@ import torch
 import torch.distributed
 
 from api.config.config_base import ModelName
+import api.config.config_base
 from api.config.config_flash_model import FlashMQATConfig
 from base.asyncio_utils import raise_asyncio_exception, setup_run_until_complete, teardown_run_util_complete
 from base.buffer import AsyncIOSequenceBuffer
@@ -218,92 +219,13 @@ def _request_parameter_sync(
         "to_model_config": to_model_config,
     }
     payloads = [
-        request_reply_stream.Payload(handler=h, handle_name="param_sync", data=ps_data) for h in handlers
+        request_reply_stream.Payload(
+            handler=h, handle_name="empty", pre_hooks=["param_sync"], pre_hook_data=[ps_data]
+        )
+        for h in handlers
     ]
     request_ids = [stream.post(p) for p in payloads]
     [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in request_ids]
-
-
-def handle_rpc_hook(
-    hook: api.config.dfg.RPCHook,
-    hook_counter: int,
-    model_name: ModelName,
-    stream: request_reply_stream.IpRequestClient,
-    msid2mwid: Dict[config_pkg.ModelShardID, int],
-    model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
-    model_configs: Dict[str, None | FlashMQATConfig],
-):
-    logger.info(f"Dealing with RPC hook {hook}.")
-    if isinstance(hook, (api.config.dfg.OffloadHook, api.config.dfg.LoadToDeviceHook)):
-        topo = model_topos[model_name]
-        handlers = [
-            config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
-            for j in range(topo.world_size())
-        ]
-        request_ids = request_all(
-            stream,
-            handlers,
-            "offload" if isinstance(hook, api.config.dfg.OffloadHook) else "load_to_device",
-            [None for _ in handlers],
-        )
-        [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in request_ids]
-    elif isinstance(hook, api.config.dfg.SyncParamHook):
-        # Since the counter is increased after the hook is handled, we add one here.
-        if (hook_counter + 1) % hook.interval != 0:
-            return
-
-        assert (hook.source is None) != (hook.target is None), hook
-        if hook.source is None:
-            src_topo = model_topos[model_name]
-            dst_topo = model_topos[hook.target]
-            src_config = model_configs[model_name]
-            dst_config = model_configs[hook.target]
-            src_model_name, dst_model_name = model_name, hook.target
-        else:
-            src_topo = model_topos[hook.source]
-            dst_topo = model_topos[model_name]
-            src_config = model_configs[hook.source]
-            dst_config = model_configs[model_name]
-            src_model_name, dst_model_name = hook.source, model_name
-
-        #################### Sanity check of model configs. ####################
-        assert src_config is not None and dst_config is not None
-        for k, v in dataclasses.asdict(src_config).items():
-            if k not in [
-                "sequence_parallel",
-                "gradient_accumulation_fusion",
-                "ckpt_attn",
-                "ckpt_mlp",
-            ] and v != getattr(dst_config, k):
-                raise ValueError(
-                    f"Can't synchronize a checkpoint with different config (key `{k}`, "
-                    f"value of src model is `{v}`, value of dst model is `{getattr(dst_config, k)}`)."
-                )
-        src_mp_size = src_topo.get_dim("model")
-        dst_mp_size = src_topo.get_dim("model")
-        if (src_config.n_kv_heads % src_mp_size == 0) != (dst_config.n_kv_heads % dst_mp_size == 0):
-            raise ValueError(
-                "The partition methods of KV heads of the src and dst model are not compatible. "
-                "To load the checkpoint, KV heads must be able to evenly partitioned (i.e.,  #kv_heads % mp_size == 0) "
-                "or unable to be partitioned (i.e., #kv_heads % mp_size != 0) for both models. "
-                f"Number of kv heads={src_config.n_kv_heads}, src mp_size={src_mp_size}, dst mp_size={dst_mp_size}.",
-            )
-        #################### Sanity check of model configs. ####################
-
-        # TODO: send hook + function call + hook all together to avoid desynchronization
-        _request_parameter_sync(
-            stream,
-            msid2mwid=msid2mwid,
-            from_model_name=src_model_name,
-            to_model_name=dst_model_name,
-            from_topo=src_topo,
-            to_topo=dst_topo,
-            to_model_config=dst_config,
-        )
-    else:
-        raise NotImplementedError()
-
-    logger.info(f"RPC hook {hook} receives responses from model worker.")
 
 
 @dataclasses.dataclass
@@ -326,11 +248,79 @@ class RPCCorountineControl:
     request_queues: Dict[str, List[asyncio.Queue]]
 
 
-async def scatter_tensor_to_mws(
+def _attach_payloads_with_hooks(
+    rpc: api.config.dfg.ModelRPC,
+    payloads: Dict[api.config.config_base.ModelShardID, request_reply_stream.Payload],
+    mwids: List[int],
+    msid2mwid: Dict[config_pkg.ModelShardID, int],
+    model_configs: Dict[str, None | FlashMQATConfig],
+    model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
+    main_handlers: List[config_pkg.ModelShardID],
+    hook_type: str,
+) -> Tuple[Dict[api.config.config_base.ModelShardID, request_reply_stream.Payload], List[int]]:
+    assert hook_type in ["pre", "post"], hook_type
+
+    main_mwids = set([msid2mwid[h] for h in main_handlers])
+    for hook in getattr(rpc, f"{hook_type}_hooks"):
+        if isinstance(hook, api.config.dfg.SyncParamHook):
+            assert (hook.source is None) != (hook.target is None), hook
+            if hook.source is None:
+                src_topo = model_topos[rpc.model_name]
+                dst_topo = model_topos[hook.target]
+                dst_config = model_configs[hook.target]
+                src_model_name, dst_model_name = rpc.model_name, hook.target
+                other_model_name = hook.target
+                other_topo = dst_topo
+            else:
+                src_topo = model_topos[hook.source]
+                dst_topo = model_topos[rpc.model_name]
+                dst_config = model_configs[rpc.model_name]
+                src_model_name, dst_model_name = hook.source, rpc.model_name
+                other_model_name = hook.source
+                other_topo = src_topo
+
+            ps_data = {
+                "from_model_name": src_model_name,
+                "to_model_name": dst_model_name,
+                "from_topo": src_topo,
+                "to_topo": dst_topo,
+                "to_model_config": dst_config,
+            }
+            for h in main_handlers:
+                getattr(payloads[h], f"{hook_type}_hooks").append("param_sync")
+                getattr(payloads[h], f"{hook_type}_hook_data").append(ps_data)
+            other_handlers = [
+                api.config.config_base.ModelShardID.from_parallelism_rank(other_model_name, other_topo, j)
+                for j in range(other_topo.world_size())
+            ]
+            for h in other_handlers:
+                if msid2mwid[h] not in mwids:
+                    payloads[h] = request_reply_stream.Payload(
+                        handler=h,
+                        handle_name="empty",
+                    )
+                    setattr(payloads[h], f"{hook_type}_hooks", ["param_sync"])
+                    setattr(payloads[h], f"{hook_type}_hook_data", [ps_data])
+                    mwids.append(msid2mwid[h])
+                elif msid2mwid[h] not in main_mwids:
+                    getattr(payloads[h], f"{hook_type}_hooks").append("param_sync")
+                    getattr(payloads[h], f"{hook_type}_hook_data").append(ps_data)
+
+        elif isinstance(hook, (api.config.dfg.OffloadHook, api.config.dfg.LoadToDeviceHook)):
+            for h in main_handlers:
+                getattr(payloads[h], f"{hook_type}_hooks").append(
+                    "offload" if isinstance(hook, api.config.dfg.OffloadHook) else "load_to_device"
+                )
+                getattr(payloads[h], f"{hook_type}_hook_data").append(None)
+        else:
+            raise NotImplementedError(f"Unknown hook type: {hook}")
+    return payloads, mwids
+
+
+def scatter_tensor_to_mws(
     rpc: api.config.dfg.ModelRPC,
     stream: request_reply_stream.RequestReplyStream,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
-    pre_hook_counters: List[int],
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
     model_configs: Dict[str, None | FlashMQATConfig],
     producer_names: Dict[str, str],
@@ -352,62 +342,60 @@ async def scatter_tensor_to_mws(
         "input_key_remap": rpc.input_key_remap,
         "output_key_remap": rpc.output_key_remap,
         "rpc_name": rpc.name,
+        "buffer_indices": buffer_indices,
+        "seqlens": seqlens,
     }
 
-    all_handlers = copy.deepcopy(handlers)
-    all_handler_mwids = set([msid2mwid[h] for h in all_handlers])
-    for producer_name in producer_names.values():
-        for h in producer_name2producer_handlers[producer_name]:
-            if msid2mwid[h] not in all_handler_mwids:
-                all_handlers.append(h)
-                all_handler_mwids.add(msid2mwid[h])
-
-    dt_request_ids = []
-    for handler in all_handlers:
-        req = request_reply_stream.Payload(
-            handler=handler,
-            handle_name="data_transfer",
-            buffer_indices=buffer_indices,
-            seqlens=seqlens,
-            data=dt_data,
-        )
-        dt_request_ids.append(stream.post(req))
-
-    # logger.info(f"Waiting for ack from stage {pp_rank}")
-    # Wait for the ack message from model worker
-    await gather_all_replies(stream, dt_request_ids, verbose=False)
-    # [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in dt_request_ids]
-
-    for i, pre_hook in enumerate(rpc.pre_hooks):
-        handle_rpc_hook(
-            pre_hook,
-            hook_counter=pre_hook_counters[i],
-            model_name=rpc.model_name,
-            stream=stream,
-            msid2mwid=msid2mwid,
-            model_topos=model_topos,
-            model_configs=model_configs,
-        )
-        pre_hook_counters[i] += 1
-
-    request_ids = []
-    for handler in handlers:
-        req = request_reply_stream.Payload(
+    payloads = {
+        handler: request_reply_stream.Payload(
             handler=handler,
             handle_name=rpc.interface_type.value,
-            buffer_indices=buffer_indices,
-            seqlens=seqlens,
+            pre_hooks=["data_transfer"],
+            pre_hook_data=[dt_data],
         )
-        request_ids.append(stream.post(req))
+        for handler in handlers
+    }
+    mwids = [msid2mwid[h] for h in handlers]
+    assert len(mwids) == len(set(mwids))
 
-    return request_ids
+    for producer_name in producer_names.values():
+        for h in producer_name2producer_handlers[producer_name]:
+            if msid2mwid[h] not in mwids:
+                payloads[h] = request_reply_stream.Payload(
+                    handler=h,
+                    handle_name="empty",
+                    pre_hooks=["data_transfer"],
+                    pre_hook_data=[dt_data],
+                )
+                mwids.append(msid2mwid[h])
+
+    payloads, mwids = _attach_payloads_with_hooks(
+        rpc,
+        payloads,
+        mwids,
+        msid2mwid=msid2mwid,
+        model_configs=model_configs,
+        model_topos=model_topos,
+        main_handlers=handlers,
+        hook_type="pre",
+    )
+    payloads, mwids = _attach_payloads_with_hooks(
+        rpc,
+        payloads,
+        mwids,
+        msid2mwid=msid2mwid,
+        model_configs=model_configs,
+        model_topos=model_topos,
+        main_handlers=handlers,
+        hook_type="post",
+    )
+    return [stream.post(p) for p in payloads.values()]
 
 
 async def model_rpc_request_func(
     rpc: api.config.dfg.ModelRPC,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     src_rpc_model_name: ModelName,
-    pre_hook_counters: List[int],
     stream: request_reply_stream.RequestReplyStream,
     buffer: AsyncIOSequenceBuffer,
     data_owner: Dict[Tuple[int, str], Tuple[str, int]],
@@ -494,11 +482,10 @@ async def model_rpc_request_func(
             producer_mappings[names[0], k] = producer_mapping
 
         # send partitioned data to model workers
-        req_ids = await scatter_tensor_to_mws(
+        req_ids = scatter_tensor_to_mws(
             rpc=rpc,
             stream=stream,
             msid2mwid=msid2mwid,
-            pre_hook_counters=pre_hook_counters,
             model_topos=model_topos,
             model_configs=model_configs,
             producer_names=producer_names,
@@ -517,12 +504,9 @@ async def model_rpc_request_func(
 async def model_rpc_reply_func(
     corountine_idx: int,
     rpc: api.config.dfg.ModelRPC,
-    post_hook_counters: List[int],
     stream: request_reply_stream.RequestReplyStream,
     buffer: AsyncIOSequenceBuffer,
-    msid2mwid: Dict[config_pkg.ModelShardID, int],
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
-    model_configs: Dict[str, None | FlashMQATConfig],
     ctrl: RPCCorountineControl,
 ):
     topo = model_topos[rpc.model_name]
@@ -546,43 +530,30 @@ async def model_rpc_reply_func(
         responses: List[request_reply_stream.Payload] = [responses[i] for i in dp_head_indices]
         recv_tik = time.perf_counter()
 
-        if responses[-1].seqlens is None:
-            assert responses[-1].buffer_indices is None
-            res = dataparallel.PackedParallelDataBroker.gather_from([response.data for response in responses])
-        else:
+        if isinstance(responses[-1].data, dict) and responses[-1].data.get("seqlens") is not None:
             res = []
-            for k in responses[0].data:
+            for k in responses[0].data['keys']:
                 if k in rpc.output_key_remap:
                     res.append(rpc.output_key_remap[k])
                 else:
                     res.append(k)
+        else:
+            res = dataparallel.PackedParallelDataBroker.gather_from([response.data for response in responses])
 
         if rpc.log_return_value:
             logger.info(f"RPC name {rpc.name} returns {res}")
 
         can_do_rpc.release()
 
-        if rpc.is_dst_of_model:
+        if rpc.is_dst_of_model_role:
             ctrl.model_traversal[rpc.model_name.role] += 1
-
-        for i, post_hook in enumerate(rpc.post_hooks):
-            handle_rpc_hook(
-                post_hook,
-                hook_counter=post_hook_counters[i],
-                model_name=rpc.model_name,
-                stream=stream,
-                msid2mwid=msid2mwid,
-                model_topos=model_topos,
-                model_configs=model_configs,
-            )
-            post_hook_counters[i] += 1
 
         if rpc.is_dst:
             await ctrl.train_count.put(1)
         else:
-            buffer_indices = sum([response.buffer_indices for response in responses], [])
+            buffer_indices = sum([response.data["buffer_indices"] for response in responses], [])
             keys = res
-            seqlens = sum([response.seqlens for response in responses], [])
+            seqlens = sum([response.data["seqlens"] for response in responses], [])
             await buffer.amend_batch(buffer_indices, [(keys, seqlen) for seqlen in seqlens])
 
         logger.info(f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - tik:.4f}s.")
@@ -849,7 +820,9 @@ class MasterWorker(worker_base.Worker):
             fetch_data_queue=asyncio.Queue(1),
             eval_queue=asyncio.Queue(1),
             save_queue=asyncio.Queue(1),
-            model_traversal={model_name: 0 for model_name in set(r.model_name.role for r in self.__model_rpcs)},
+            model_traversal={
+                model_name: 0 for model_name in set(r.model_name.role for r in self.__model_rpcs)
+            },
             can_do_rpc={rpc.name: asyncio.Semaphore(rpc.max_concurrent_calls) for rpc in self.__model_rpcs},
             request_queues={
                 rpc.name: [asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)]
@@ -871,17 +844,12 @@ class MasterWorker(worker_base.Worker):
 
         logger.info(f"Creating asyncio coroutines...")
 
-        self.__pre_hook_counters = [[0 for _ in rpc.pre_hooks] for rpc in self.__model_rpcs]
-        self.__post_hook_counters = [[0 for _ in rpc.post_hooks] for rpc in self.__model_rpcs]
-
         src_rpc = [rpc for rpc in self.config.model_rpcs][0]
         src_rpc_model_name = src_rpc.model_name
         src_rpc_dp_size = self.config.model_topos[src_rpc.model_name].get_dim("data")
 
         coroutine_tasks = []
-        for rpc, pre_hook_counters, post_hook_counters in zip(
-            self.__model_rpcs, self.__pre_hook_counters, self.__post_hook_counters
-        ):
+        for rpc in self.__model_rpcs:
             # should be a dict: pp_rank to streams
 
             request_task = event_loop.create_task(
@@ -889,7 +857,6 @@ class MasterWorker(worker_base.Worker):
                     rpc=rpc,
                     msid2mwid=self.config.msid2mwid,
                     src_rpc_model_name=src_rpc_model_name,
-                    pre_hook_counters=pre_hook_counters,
                     data_owner=self.__data_owner,
                     stream=self.__stream,
                     buffer=self.__seqbuffer,
@@ -904,12 +871,9 @@ class MasterWorker(worker_base.Worker):
                     model_rpc_reply_func(
                         corountine_idx=j,
                         rpc=rpc,
-                        post_hook_counters=post_hook_counters,
                         stream=self.__stream,
                         buffer=self.__seqbuffer,
-                        msid2mwid=self.config.msid2mwid,
                         model_topos=self.__model_topos,
-                        model_configs=self.__model_configs,
                         ctrl=self.__rpc_ctrl,
                     )
                 )

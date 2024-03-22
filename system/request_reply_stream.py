@@ -42,10 +42,13 @@ class Payload:
 
     # Non-tensor data
     data: Any = None
+    
+    # RPC hooks
+    pre_hooks: List[str] = dataclasses.field(default_factory=list)
+    pre_hook_data: List[Any] = dataclasses.field(default_factory=list)
 
-    # Specs of tensor data. Tensors will be trasnferred with NCCL.
-    buffer_indices: Optional[List[int]] = None
-    seqlens: Optional[List[int]] = None
+    post_hooks: List[str] = dataclasses.field(default_factory=list)
+    post_hook_data: List[Any] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         if self.request_id is None:

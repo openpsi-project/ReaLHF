@@ -43,6 +43,8 @@ import impl.dataset  # isort:skip
 logger = logging.getLogger("Model Worker", "colored")
 blogger = logging.getLogger("benchmark")
 
+TIME_RECORD_RPCS = ["generate", "inference", "train_step", "save", "evaluate", "initialize"]
+
 
 class NoRequestToHandle(Exception):
     pass
@@ -350,9 +352,7 @@ class ModelWorker(worker_base.Worker):
                     self.__model_is_handle[s.id.model_name] = True
                 self.__backends[s.id.model_name] = api.model.make_backend(s.backend)
                 interface_impl = [
-                    rpc.interface_impl
-                    for rpc in self.config.model_rpcs
-                    if rpc.model_name == s.id.model_name
+                    rpc.interface_impl for rpc in self.config.model_rpcs if rpc.model_name == s.id.model_name
                 ]
                 assert all(x == interface_impl[0] for x in interface_impl)
                 self.__interfaces[s.id.model_name] = api.model.make_interface(interface_impl[0])
@@ -368,9 +368,7 @@ class ModelWorker(worker_base.Worker):
                             self.config.worker_info.experiment_name,
                             self.config.worker_info.trial_name,
                             cache_root=(
-                                None
-                                if not self.config.use_dataset_cache
-                                else self.config.dataset_cahce_root
+                                None if not self.config.use_dataset_cache else self.config.dataset_cahce_root
                             ),
                         )
                         for d in s.eval_datasets
@@ -383,8 +381,6 @@ class ModelWorker(worker_base.Worker):
                 else:
                     eval_dataloader = None
                 self.__eval_dataloaders[s.id.model_name] = eval_dataloader
-
-                
 
         self.__request_queue = queue.Queue(maxsize=8)
         self.__reply_queue = queue.Queue(maxsize=8)
@@ -420,13 +416,48 @@ class ModelWorker(worker_base.Worker):
                 self.__dataset_epoch_step, self.__dict_sample = next(self.__data_generator)
 
     def __maybe_receive_request(self):
-        recv_tik = time.perf_counter()
         try:
             request: request_reply_stream.Payload = self.__stream.poll()
         except request_reply_stream.NoMessage:
             return
 
         self.__request_queue.put_nowait((request, request.data))
+
+    def __handle_rpc_hooks(self, hooks: List[str], hook_data: List[Any]):
+        assert len(hooks) == len(hook_data)
+        for hook, hook_data in zip(hooks, hook_data):
+            if hook == "data_transfer":
+                self.__data_transfer_among_workers(hook_data)
+            elif hook == "param_sync":
+                from_model_name: ModelName = hook_data["from_model_name"]
+                to_model_name: ModelName = hook_data["to_model_name"]
+                from_topo: base.topology.PipeModelDataParallelTopology = hook_data["from_topo"]
+                to_topo: base.topology.PipeModelDataParallelTopology = hook_data["to_topo"]
+                to_model_config = hook_data["to_model_config"]
+                if from_model_name in self.__unwrapped_models:
+                    m = self.__unwrapped_models[from_model_name]
+                else:
+                    m = self.__unwrapped_models[to_model_name]
+                assert isinstance(m, FlashMQATModel), type(m)
+                m = m.to_reparallelized_model(
+                    from_model_name=from_model_name,
+                    to_model_name=to_model_name,
+                    from_topo=from_topo,
+                    to_topo=to_topo,
+                    to_model_config=to_model_config,
+                    pg_info=self.__pg_info,
+                )
+                if from_model_name in self.__models:
+                    self.__model_is_handle[from_model_name] = True
+                if to_model_name in self.__models:
+                    self.__unwrapped_models[to_model_name].layers = m.layers
+                    self.__model_is_handle[to_model_name] = False
+            elif hook == "offload":
+                print("offload hook is not implemented yet")
+            elif hook == "load_to_device":
+                print("load to device hook is not implemented yet")
+            else:
+                raise NotImplementedError(f"Unknown hook {hook}.")
 
     def __model_poll_step(self) -> worker_base.PollResult:
         tik = time.perf_counter()
@@ -446,9 +477,15 @@ class ModelWorker(worker_base.Worker):
         else:
             handler_model_name = request.handler.model_name
 
+        self.__handle_rpc_hooks(request.pre_hooks, request.pre_hook_data)
+
         with base.constants.model_scope(handler_model_name):
             res = None
-            if request.handle_name == "initialize":
+            if request.handle_name == "empty":
+                # Empty request is used for executing hooks, e.g., data transfer, parameter syncrhonization.
+                pass
+            ############## initialization ##############
+            elif request.handle_name == "initialize":
                 assert not self.__model_is_handle[request.handler.model_name]
                 base.constants.set_max_seqlen(data.max_seqlen)  # used by cuda graph buffer for generation
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
@@ -489,40 +526,6 @@ class ModelWorker(worker_base.Worker):
                     steps_per_epoch=len(self.__dataloader),
                     batch_size_per_device=batch_size,
                     max_seqlen=self.__max_seqlen,
-                )
-            ############## data transfer ##############
-            elif request.handle_name == "data_transfer":
-                with base.constants.model_scope_disabled():
-                    self.__data_transfer_among_workers(request)
-            ############## parameter synchronization/re-parallelization ##############
-            elif request.handle_name == "param_sync":
-                m = self._module
-                assert isinstance(m, FlashMQATModel), type(m)
-                with base.constants.model_scope_disabled():
-                    from_model_name: ModelName = request.data["from_model_name"]
-                    to_model_name: ModelName = request.data["to_model_name"]
-                    from_topo: base.topology.PipeModelDataParallelTopology = request.data["from_topo"]
-                    to_topo: base.topology.PipeModelDataParallelTopology = request.data["to_topo"]
-                    to_model_config = request.data['to_model_config']
-                    m = m.to_reparallelized_model(
-                        from_model_name=from_model_name,
-                        to_model_name=to_model_name,
-                        from_topo=from_topo,
-                        to_topo=to_topo,
-                        to_model_config=to_model_config,
-                        pg_info=self.__pg_info,
-                    )
-                if from_model_name in self.__models:
-                    self.__model_is_handle[from_model_name] = True
-                if to_model_name in self.__models:
-                    self.__unwrapped_models[to_model_name].layers = m.layers
-                    self.__model_is_handle[to_model_name] = False
-            ############## offload ##############
-            elif request.handle_name in ["offload", "load_to_device"]:
-                print(
-                    f">>>>>>> model worker {self.__worker_index} model name "
-                    f"{request.handler.model_name} receive {request.handle_name} "
-                    f"request, which is not implemented yet."
                 )
             ############## computation function calls ##############
             elif request.handle_name == "inference":
@@ -568,11 +571,14 @@ class ModelWorker(worker_base.Worker):
             else:
                 raise NotImplementedError(f"Unknown request type: {request.handle_name}.")
 
-            if self._is_dp_head and self._dp_rank == 0:
+            if request.handle_name in TIME_RECORD_RPCS and self._is_dp_head and self._dp_rank == 0:
                 blogger.info(
                     f"Model worker #{handler_model_name}# handle request *{request.handle_name}*"
                     f" in ${time.perf_counter() - tik:.4f}$s"
                 )
+
+        self.__handle_rpc_hooks(request.post_hooks, request.post_hook_data)
+
         self.__reply_queue.put_nowait((request, res))
 
         # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
@@ -581,22 +587,22 @@ class ModelWorker(worker_base.Worker):
         sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
         self.__request_sample_size[request.request_id] = sample_count
 
-    def __data_transfer_among_workers(self, request: request_reply_stream.Payload):
+    def __data_transfer_among_workers(self, hook_data: Dict[str, Any]):
         from impl.model.nn.flash_mqat.flash_mqat_parallel import pipeline_repartition_strategy
 
-        keys = request.data["keys"]
-        target = request.data["target"]
-        global_buffer_indices = request.buffer_indices
-        global_seqlens = request.seqlens
+        keys = hook_data["keys"]
+        target = hook_data["target"]
+        global_buffer_indices = hook_data["buffer_indices"]
+        global_seqlens = hook_data["seqlens"]
 
         data = collections.defaultdict(list)
         for k in keys:
             local_buffer_indices = []
             local_seqlens = []
 
-            producer_name = request.data["producer_names"][k]
-            producer_mapping = request.data["producer_mappings"][(producer_name, k)]
-            target_mapping = request.data["target_mapping"]
+            producer_name = hook_data["producer_names"][k]
+            producer_mapping = hook_data["producer_mappings"][(producer_name, k)]
+            target_mapping = hook_data["target_mapping"]
             if producer_name not in self.__models and target not in self.__models:
                 continue
 
@@ -661,7 +667,7 @@ class ModelWorker(worker_base.Worker):
                         )
                         dist.broadcast(v, src=bcast_src, group=group)
                         # Mark data as sent and remove it from storage if all targets have received it.
-                        rpc_name = request.data["rpc_name"]
+                        rpc_name = hook_data["rpc_name"]
                         if rpc_name not in self.__data_send_record[(buf_idx, k)]:
                             self.__data_send_record[(buf_idx, k)].append(rpc_name)
                         if not set(self.data2required_rpc_names[k]).difference(
@@ -673,7 +679,7 @@ class ModelWorker(worker_base.Worker):
         # if target in self.__models:
         #     with base.constants.model_scope(target):
         #         dist.barrier(group=base.constants.parallelism_group())
-        # for producer_name in request.data['producer_names'].keys():
+        # for producer_name in hook_data['producer_names'].keys():
         #     if producer_name in self.__models:
         #         with base.constants.model_scope(target):
         #             dist.barrier(group=base.constants.parallelism_group())
@@ -681,7 +687,7 @@ class ModelWorker(worker_base.Worker):
         if len(data) > 0:
             assert target_dp_rank is not None
             assert len(set(local_buffer_indices)) == len(local_buffer_indices), local_buffer_indices
-            input_key_remap = request.data["input_key_remap"]
+            input_key_remap = hook_data["input_key_remap"]
             _data = []
             l = len(list(data.values())[0])
             for i in range(l):
@@ -692,8 +698,8 @@ class ModelWorker(worker_base.Worker):
                     d[k] = v[i]
                 _data.append(namedarray.from_dict(d))
             r = dataparallel.PackedParallelDataBroker.gather_from(_data)
-            self.__compute_input_queues[request.data["handle_name"]].put_nowait(
-                (r, local_buffer_indices, local_seqlens, request.data["output_key_remap"])
+            self.__compute_input_queues[hook_data["handle_name"]].put_nowait(
+                (r, local_buffer_indices, local_seqlens, hook_data["output_key_remap"])
             )
 
     def __post_one_response(self, request: request_reply_stream.Payload, res):
@@ -706,9 +712,7 @@ class ModelWorker(worker_base.Worker):
                 handler="master",
                 request_id=request.request_id,
                 handle_name=request.handle_name,
-                data=list(res.keys()),
-                seqlens=list(new_seqlens),
-                buffer_indices=list(buffer_indices),
+                data={"keys": list(res.keys()), "seqlens":list(new_seqlens), "buffer_indices":list(buffer_indices)},
             )
         else:
             reply = request_reply_stream.Payload(
