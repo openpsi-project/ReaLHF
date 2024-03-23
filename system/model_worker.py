@@ -50,16 +50,16 @@ class NoRequestToHandle(Exception):
     pass
 
 
-def _get_seqlens_from_batch_sample(sample: namedarray.NamedArray) -> np.ndarray | None:
+def _get_seqlens_from_batch_sample(sample: namedarray.NamedArray) -> torch.Tensor | None:
     if "input_lens" in sample.keys():
         return sample["input_lens"].cpu().numpy()
     elif "cu_seqlens" in sample.keys():
-        return (sample["cu_seqlens"][1:] - sample["cu_seqlens"][:-1]).cpu().numpy()
+        return sample["cu_seqlens"][1:] - sample["cu_seqlens"][:-1]
     # NOTE: The order matters. We should first try to get the length of the generated text rather than prompts.
     elif "prompt_lens" in sample.keys():
-        return sample["prompt_lens"].cpu().numpy()
+        return sample["prompt_lens"]
     elif "prompt_cu_seqlens" in sample.keys():
-        return (sample["prompt_cu_seqlens"][1:] - sample["prompt_cu_seqlens"][:-1]).cpu().numpy()
+        return sample["prompt_cu_seqlens"][1:] - sample["prompt_cu_seqlens"][:-1]
     else:
         return None
 
@@ -263,7 +263,7 @@ class ModelWorker(worker_base.Worker):
         # Build stream connecting with master workers.
         self.__stream = request_reply_stream.make_worker_stream(
             self.config.worker_info,
-            sub_patterns=sub_patterns,
+            idx=self.__worker_index,
         )
 
         self.__pg_info = gpu_utils.setup_ddp(
@@ -338,8 +338,12 @@ class ModelWorker(worker_base.Worker):
         self.__unwrapped_models: Dict[ModelName, torch.nn.Module | FlashMQATModel] = dict()
         self.__engines: Dict[str, Any] = dict()
 
+        self.__backend_initialized: Dict[ModelName, bool] = dict()
+        self.__profiler_launched = False
+
         for s in self.config.shards:
             with base.constants.model_scope(s.id.model_name):
+                self.__backend_initialized[s.id.model_name] = False
                 self.__models[s.id.model_name] = model = api.model.make_model(
                     s.model, name=s.id.model_name, device=self.__device
                 )
@@ -382,6 +386,9 @@ class ModelWorker(worker_base.Worker):
                     eval_dataloader = None
                 self.__eval_dataloaders[s.id.model_name] = eval_dataloader
 
+        self.__request_cache = []
+        self.__ack_cache = {}
+
         self.__request_queue = queue.Queue(maxsize=8)
         self.__reply_queue = queue.Queue(maxsize=8)
         self.__request_sample_size = dict()
@@ -415,59 +422,47 @@ class ModelWorker(worker_base.Worker):
                 self.__data_generator = enumerate(self.__dataloader)
                 self.__dataset_epoch_step, self.__dict_sample = next(self.__data_generator)
 
-    def __maybe_receive_request(self):
-        try:
-            request: request_reply_stream.Payload = self.__stream.poll()
-        except request_reply_stream.NoMessage:
-            raise NoRequestToHandle()
-
-        self.__stream.post(
-            request_reply_stream.Payload(
-                handler="master",
-                handle_name="ack",
-                request_id=request.ack_reply_id,
-            ),
-        )
-
-        self.__request_queue.put_nowait((request, request.data))
-
-    def __handle_rpc_hooks(self, hooks: List[str], hook_data: List[Any]):
-        assert len(hooks) == len(hook_data)
-        for hook, hook_data in zip(hooks, hook_data):
-            if hook == "data_transfer":
-                self.__data_transfer_among_workers(hook_data)
-            elif hook == "param_sync":
-                from_model_name: ModelName = hook_data["from_model_name"]
-                to_model_name: ModelName = hook_data["to_model_name"]
-                from_topo: base.topology.PipeModelDataParallelTopology = hook_data["from_topo"]
-                to_topo: base.topology.PipeModelDataParallelTopology = hook_data["to_topo"]
-                to_model_config = hook_data["to_model_config"]
-                if from_model_name in self.__unwrapped_models:
-                    m = self.__unwrapped_models[from_model_name]
-                else:
-                    m = self.__unwrapped_models[to_model_name]
-                assert isinstance(m, FlashMQATModel), type(m)
-                m = m.to_reparallelized_model(
-                    from_model_name=from_model_name,
-                    to_model_name=to_model_name,
-                    from_topo=from_topo,
-                    to_topo=to_topo,
-                    to_model_config=to_model_config,
-                    pg_info=self.__pg_info,
-                )
-                if from_model_name in self.__models:
-                    self.__model_is_handle[from_model_name] = True
-                if to_model_name in self.__models:
-                    self.__unwrapped_models[to_model_name].layers = m.layers
-                    self.__model_is_handle[to_model_name] = False
-            elif hook == "offload":
-                print("offload hook is not implemented yet")
-            elif hook == "load_to_device":
-                print("load to device hook is not implemented yet")
+    def __handle_one_rpc_hook(self, hook: str, hook_data: Any):
+        if hook == "data_transfer":
+            # torch.cuda.synchronize()
+            self.__data_transfer_among_workers(hook_data)
+            # torch.cuda.synchronize()
+        elif hook == "param_sync":
+            # torch.cuda.synchronize()
+            from_model_name: ModelName = hook_data["from_model_name"]
+            to_model_name: ModelName = hook_data["to_model_name"]
+            from_topo: base.topology.PipeModelDataParallelTopology = hook_data["from_topo"]
+            to_topo: base.topology.PipeModelDataParallelTopology = hook_data["to_topo"]
+            to_model_config = hook_data["to_model_config"]
+            if from_model_name in self.__unwrapped_models:
+                m = self.__unwrapped_models[from_model_name]
             else:
-                raise NotImplementedError(f"Unknown hook {hook}.")
+                m = self.__unwrapped_models[to_model_name]
+            assert isinstance(m, FlashMQATModel), type(m)
+            m = m.to_reparallelized_model(
+                from_model_name=from_model_name,
+                to_model_name=to_model_name,
+                from_topo=from_topo,
+                to_topo=to_topo,
+                to_model_config=to_model_config,
+                pg_info=self.__pg_info,
+            )
+            if from_model_name in self.__models:
+                self.__model_is_handle[from_model_name] = True
+            if to_model_name in self.__models:
+                self.__unwrapped_models[to_model_name].layers = m.layers
+                self.__model_is_handle[to_model_name] = False
+            # torch.cuda.synchronize()
+        elif hook == "offload":
+            print("offload hook is not implemented yet")
+        elif hook == "load_to_device":
+            print("load to device hook is not implemented yet")
+        else:
+            raise NotImplementedError(f"Unknown hook {hook}.")
 
-    def __model_poll_step(self, request: request_reply_stream.Payload, data: Any) -> worker_base.PollResult:
+    def __model_poll_step(
+        self, request: request_reply_stream.Payload, data: Any, handled: bool, res: Optional[Any]
+    ) -> worker_base.PollResult:
         tik = time.perf_counter()
         # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
         #                  f"start handle request *{request.handle_name}*, "
@@ -479,7 +474,28 @@ class ModelWorker(worker_base.Worker):
         else:
             handler_model_name = request.handler.model_name
 
-        self.__handle_rpc_hooks(request.pre_hooks, request.pre_hook_data)
+        if len(request.pre_hooks) > 0:
+            assert len(request.pre_hooks) == len(request.pre_hook_data)
+            assert not handled and res is None
+            self.__handle_one_rpc_hook(request.pre_hooks.pop(0), request.pre_hook_data.pop(0))
+            self.__request_queue.put_nowait((request, data, False, None))
+            return
+        if handled and len(request.post_hooks) > 0:
+            assert len(request.post_hooks) == len(request.post_hook_data)
+            self.__handle_one_rpc_hook(request.post_hooks.pop(0), request.post_hook_data.pop(0))
+            self.__request_queue.put_nowait((request, data, True, res))
+            return
+        if handled and len(request.post_hooks) == 0:
+            self.__reply_queue.put_nowait((request, res))
+
+            # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
+            #                          f"finish handling request *{request.handle_name}*, "
+            #                          f"request_id {request.request_id}.")
+            sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
+            self.__request_sample_size[request.request_id] = sample_count
+            return
+
+        assert not handled and res is None
 
         with base.constants.model_scope(handler_model_name):
             res = None
@@ -492,6 +508,7 @@ class ModelWorker(worker_base.Worker):
                 base.constants.set_max_seqlen(data.max_seqlen)  # used by cuda graph buffer for generation
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
                 self.__engines[request.handler.model_name] = self._model.module
+                self.__backend_initialized[request.handler.model_name] = True
             elif request.handle_name == "model_config":
                 assert isinstance(self.__unwrapped_models[request.handler.model_name], FlashMQATModel)
                 res = self.__unwrapped_models[request.handler.model_name].config
@@ -579,15 +596,7 @@ class ModelWorker(worker_base.Worker):
                     f" in ${time.perf_counter() - tik:.4f}$s"
                 )
 
-        self.__handle_rpc_hooks(request.post_hooks, request.post_hook_data)
-
-        self.__reply_queue.put_nowait((request, res))
-
-        # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
-        #                          f"finish handling request *{request.handle_name}*, "
-        #                          f"request_id {request.request_id}.")
-        sample_count = data.length(0) if isinstance(data, namedarray.NamedArray) else 1
-        self.__request_sample_size[request.request_id] = sample_count
+        self.__request_queue.put_nowait((request, data, True, res))
 
     def __data_transfer_among_workers(self, hook_data: Dict[str, Any]):
         from impl.model.nn.flash_mqat.flash_mqat_parallel import pipeline_repartition_strategy
@@ -708,15 +717,13 @@ class ModelWorker(worker_base.Worker):
         if isinstance(res, tuple) and isinstance(res[0], namedarray.NamedArray):
             res, buffer_indices, seqlens = res
             new_seqlens = _get_seqlens_from_batch_sample(res)
-            if new_seqlens is None:
-                new_seqlens = np.array(seqlens)
             reply = request_reply_stream.Payload(
                 handler="master",
                 request_id=request.request_id,
                 handle_name=request.handle_name,
                 data={
                     "keys": list(res.keys()),
-                    "seqlens": list(new_seqlens),
+                    "seqlens": list(seqlens) if new_seqlens is None else new_seqlens.cpu().numpy().tolist(),
                     "buffer_indices": list(buffer_indices),
                 },
             )
@@ -734,7 +741,10 @@ class ModelWorker(worker_base.Worker):
         if isinstance(request.handler, config_system.ModelShardID) and isinstance(res, namedarray.NamedArray):
             with base.constants.model_scope(request.handler.model_name):
                 if self._is_dp_head:
-                    xs = split_packed_batch_into_seqs(res, torch.from_numpy(new_seqlens).cuda())
+                    if new_seqlens is None:
+                        xs = split_packed_batch_into_seqs(res, torch.tensor(seqlens, device='cuda', dtype=torch.int32))
+                    else:
+                        xs = split_packed_batch_into_seqs(res, new_seqlens)
                     for buffer_idx, x in zip(buffer_indices, xs):
                         for k, v in x.items():
                             self.__data_owner_storage[(buffer_idx, k)] = v
@@ -755,37 +765,69 @@ class ModelWorker(worker_base.Worker):
             batch_size += 1
         return worker_base.PollResult(sample_count=sample_size, batch_count=batch_size)
 
+    def __maybe_receive_one_request(self):
+        try:
+            r: request_reply_stream.Payload = self.__stream.poll()
+            if r.handle_name == "ack":
+                self.__ack_cache[r.request_id] = r
+            else:
+                self.__stream.post(
+                    request_reply_stream.Payload(
+                        handler="master",
+                        request_id=r.syn_reply_id,
+                        handle_name="syn",
+                    ),
+                )
+                self.__request_cache.append(r)
+        except request_reply_stream.NoMessage:
+            return
+
+    def __maybe_receive_requests(self):
+        for _ in range(8):
+            self.__maybe_receive_one_request()
+
+        while len(self.__request_cache) > 0:
+            request: request_reply_stream.Payload = self.__request_cache[0]
+            while request.ack_reply_id not in self.__ack_cache:
+                self.__maybe_receive_one_request()
+
+            self.__ack_cache.pop(request.ack_reply_id)
+            self.__request_cache.pop(0)
+
+            self.__request_queue.put_nowait((request, request.data, False, None))
+
     def _poll(self):
         if not self.__dist_env_resolved:
             self.__lazy_setup()
             self.__dist_env_resolved = True
-            self.tracer.start()
+            # self.tracer.start()
+            # self.__profiler = torch.profiler.profile(
+            #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            #     # with_stack=True,
+            #     # with_flops=True,
+            # )
 
         if self.__has_dataset:
             self.__prefetch_from_dataset()
 
         st = time.monotonic()
-        for _ in range(8):
-            try:
-                self.__maybe_receive_request()
-            except NoRequestToHandle:
-                time.sleep(0.05)
+        self.__maybe_receive_requests()
 
-        request_cache: List[Tuple[request_reply_stream.Payload, Any]] = []
-        for _ in range(8):
+        for _ in range(16):
+            # TODO: we can have a smarter scheduling plan, the current plan is basically round-robin
             try:
-                request, data = self.__request_queue.get_nowait()
-                request_cache.append((request, data))
+                request, data, handled, res = self.__request_queue.get_nowait()
+                if (
+                    request.handle_name in ["train_step", "inference", "generate"]
+                    and not self.__profiler_launched
+                ):
+                    self.tracer.start()
+                    # self.__profiler.start()
+                    self.__profiler_launched = True
+                    self.__profiler_ctl = base.timeutil.FrequencyControl(frequency_seconds=10)
+                self.__model_poll_step(request, data, handled, res)
             except queue.Empty:
                 break
-
-        # if len(request_cache) > 0:
-        #     print(
-        #         f"model worker {self.__worker_index} request cache length {len(request_cache)} handle names {[v.handle_name for v, _ in request_cache]}"
-        #     )
-        # TODO: we can interleave handle hooks and receive requests
-        for request, data in request_cache:
-            self.__model_poll_step(request, data)
 
         r = self.__maybe_post_responses()
 
@@ -799,15 +841,24 @@ class ModelWorker(worker_base.Worker):
                 et = time.monotonic()
                 blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
 
-            tik = time.perf_counter()
+            # tik = time.perf_counter()
             # blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
             #     ",".join(self.model_names),
             #     round(get_accelerator().memory_allocated() / 1024**3, 2),
             #     round(get_accelerator().max_memory_allocated() / 1024**3, 2),
             # )))
-            blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
-            if os.environ.get("DLLM_TRACE", "0") == "1":
+            # blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
+            # if os.environ.get("DLLM_TRACE", "0") == "1":
+            #     self.tracer.save()
+            if self.__profiler_launched and self.__profiler_ctl.check():
                 self.tracer.save()
+                # import torch.autograd.profiler as prof
+                # self.__profiler.stop()
+                # prof.KinetoStepTracker.erase_step_count("ProfilerStep")
+                # self.__profiler
+                # self.__profiler.stop_trace()
+                # self.__profiler_launched = False
+                # self.__profiler.export_chrome_trace(self._tracer_output_file)
 
         t = time.monotonic() - st
         self.__total_time += t

@@ -76,6 +76,29 @@ class FlashMQATConvertHelper:
     state_dict_converter_to_hf: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None
 
 
+@dataclasses.dataclass
+class ReparallelizeSenderStep:
+    rank: int
+    sender_mp_portion_id: int
+    receiver_mp_portion_id: int
+    param_key: str | int
+    group: torch.distributed.ProcessGroup
+    dst_ranks: List[int]
+    remove: bool = False
+
+
+@dataclasses.dataclass
+class ReparallelizeReceiverStep:
+    rank: int
+    sender_mp_portion_id: int
+    receiver_mp_portion_id: int
+    param_key: str | int
+    param_shape: torch.Size
+    param_dtype: torch.dtype
+    src: int
+    group: torch.distributed.ProcessGroup
+
+
 class FlashMQATModel(nn.Module):
     _parallelism_helpers: Dict[str, FlashMQATParallelismHelper] = {}
     _convert_helpers: Dict[str, FlashMQATConvertHelper] = {}
@@ -109,6 +132,8 @@ class FlashMQATModel(nn.Module):
 
         self._instantiated = False
         self._instantiation_hooks = []
+
+        self._reparallelize_comm_plans = {}
 
     def instantiate(self):
         assert not self._instantiated
@@ -680,7 +705,7 @@ class FlashMQATModel(nn.Module):
             with_hf_format=True,
         )
 
-    def to_reparallelized_model(
+    def _derive_reparallelize_comm_plan(
         self,
         from_model_name: ModelName,
         to_model_name: ModelName,
@@ -688,7 +713,7 @@ class FlashMQATModel(nn.Module):
         to_topo: base.topology.PipeModelDataParallelTopology,
         to_model_config: FlashMQATConfig,
         pg_info: gpu_utils.NCCLProcessGroupInfo,
-    ) -> "FlashMQATModel":
+    ):
         src_mp_size = from_topo.get_dim("model")
         dst_mp_size = to_topo.get_dim("model")
         assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
@@ -707,12 +732,7 @@ class FlashMQATModel(nn.Module):
         if (self.config.n_kv_heads % src_mp_size == 0) != (self.config.n_kv_heads % dst_mp_size == 0):
             raise ValueError("Whether to partition kv heads should remain the same.")
 
-        # Get the current state dict and delete all modules.
-        # Pointers to the current parameters will remain in the state dict until not needed.
         state_dict = self.state_dict()
-        # TODO: remote synchronization deletes the local model, but sometimes it is uncessary.
-        del self.layers
-
         from_layer_mapping = partition_pipeline_layers(
             self.config,
             from_topo.get_dim("pipe"),
@@ -730,27 +750,6 @@ class FlashMQATModel(nn.Module):
         )
         to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in to_layer_mapping.items()}
         repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
-
-        @dataclasses.dataclass
-        class SenderStep:
-            rank: int
-            sender_mp_portion_id: int
-            receiver_mp_portion_id: int
-            param_key: str | int
-            group: torch.distributed.ProcessGroup
-            dst_ranks: List[int]
-            remove: bool = False
-
-        @dataclasses.dataclass
-        class ReceverStep:
-            rank: int
-            sender_mp_portion_id: int
-            receiver_mp_portion_id: int
-            param_key: str | int
-            param_shape: torch.Size
-            param_dtype: torch.dtype
-            src: int
-            group: torch.distributed.ProcessGroup
 
         comm_plan = []
 
@@ -811,7 +810,7 @@ class FlashMQATModel(nn.Module):
 
                             for dst_rank in dst_ranks:
                                 comm_plan.append(
-                                    ReceverStep(
+                                    ReparallelizeReceiverStep(
                                         rank=dst_rank,
                                         sender_mp_portion_id=sender_mp_portion_id,
                                         receiver_mp_portion_id=receiver_mp_portion_id,
@@ -823,7 +822,7 @@ class FlashMQATModel(nn.Module):
                                     )
                                 )
                             comm_plan.append(
-                                SenderStep(
+                                ReparallelizeSenderStep(
                                     rank=src,
                                     sender_mp_portion_id=sender_mp_portion_id,
                                     receiver_mp_portion_id=receiver_mp_portion_id,
@@ -833,13 +832,13 @@ class FlashMQATModel(nn.Module):
                                 )
                             )
         for i, step in enumerate(comm_plan):
-            if isinstance(step, ReceverStep):
+            if isinstance(step, ReparallelizeReceiverStep):
                 continue
-            step: SenderStep
+            step: ReparallelizeSenderStep
             required_by_nex_steps = False
             for nex_step in comm_plan[i + 1 :]:
                 if (
-                    isinstance(nex_step, SenderStep)
+                    isinstance(nex_step, ReparallelizeSenderStep)
                     and nex_step.rank == step.rank
                     and nex_step.param_key == step.param_key
                 ):
@@ -847,6 +846,33 @@ class FlashMQATModel(nn.Module):
                     break
             step.remove = not required_by_nex_steps
 
+        self._reparallelize_comm_plans[(from_model_name, to_model_name)] = comm_plan
+        return comm_plan
+
+    def to_reparallelized_model(
+        self,
+        from_model_name: ModelName,
+        to_model_name: ModelName,
+        from_topo: base.topology.PipeModelDataParallelTopology,
+        to_topo: base.topology.PipeModelDataParallelTopology,
+        to_model_config: FlashMQATConfig,
+        pg_info: gpu_utils.NCCLProcessGroupInfo,
+    ) -> "FlashMQATModel":
+        src_mp_size = from_topo.get_dim("model")
+        dst_mp_size = to_topo.get_dim("model")
+
+        # Get the current state dict and delete all modules.
+        # Pointers to the current parameters will remain in the state dict until not needed.
+        state_dict = self.state_dict()
+        # TODO: remote synchronization deletes the local model, but sometimes it is uncessary.
+        del self.layers
+
+        if (from_model_name, to_model_name) in self._reparallelize_comm_plans:
+            comm_plan = self._reparallelize_comm_plans[(from_model_name, to_model_name)]
+        else:
+            comm_plan = self._derive_reparallelize_comm_plan(
+                from_model_name, to_model_name, from_topo, to_topo, to_model_config, pg_info
+            )
         comm_volume = 0
         new_layers = {}
 
@@ -854,7 +880,7 @@ class FlashMQATModel(nn.Module):
         tmp_portion_storage = {}
         for step in comm_plan:
             layer_idx = int(step.param_key.split(".")[0])
-            if isinstance(step, ReceverStep) and step.rank == torch.distributed.get_rank():
+            if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
                 if layer_idx not in new_layers:
                     with base.constants.model_scope(to_model_name):
                         l = self._build_layer(layer_idx, to_model_config)
@@ -876,10 +902,8 @@ class FlashMQATModel(nn.Module):
                 if all((step.param_key, i) in tmp_portion_storage for i in range(n_receiver_portions)):
                     buf = mp_merge_flash_mqat_state_dict(
                         [
-                            {
-                                step.param_key: tmp_portion_storage[(step.param_key, i)]
-                                
-                            } for i in range(n_receiver_portions)
+                            {step.param_key: tmp_portion_storage[(step.param_key, i)]}
+                            for i in range(n_receiver_portions)
                         ],
                         self.config,
                     )[step.param_key]
@@ -893,7 +917,7 @@ class FlashMQATModel(nn.Module):
                     for i in range(n_receiver_portions):
                         del tmp_portion_storage[(step.param_key, i)]
 
-            if isinstance(step, SenderStep) and step.rank == torch.distributed.get_rank():
+            if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
                 if step.group is not None:
                     buf = buf = mp_partition_flash_mqat_state_dict(
                         {step.param_key: state_dict[step.param_key]},
@@ -907,9 +931,9 @@ class FlashMQATModel(nn.Module):
 
         assert len(state_dict) == 0
         self.layers = nn.ModuleList([new_layers[i] for i in sorted(new_layers.keys())])
-        gc.collect()
-        torch.cuda.empty_cache()
-        gc.collect()
+        # gc.collect()
+        # torch.cuda.empty_cache()
+        # gc.collect()
         return self
 
 

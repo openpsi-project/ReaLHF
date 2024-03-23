@@ -247,7 +247,7 @@ def mw_config_from_allocations(
             mw = ModelWorker(
                 seed=seed,
                 shards=[],
-                cuda_cache_cleanliness=True,
+                cuda_cache_cleanliness=False,
                 datasets=datasets,
                 dataloader=dataloader,
                 tokenizer_name_or_path=tokenizer_path,

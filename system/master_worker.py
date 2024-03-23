@@ -88,7 +88,7 @@ class ExperimentComplete(Exception):
 
 
 def request_all(
-    stream: request_reply_stream.RequestReplyStream,
+    stream: request_reply_stream.NameResolvingRequstClient,
     handlers: List[str],
     handle_type: str,
     datas: List[namedarray.NamedArray],
@@ -107,8 +107,13 @@ def request_all(
         blogger.debug(f"master worker #request_all# *end* time ${time.time_ns()}$")
     tik = time.perf_counter()
     [stream.post(r) for r in requests]
-    ack_ids = [r.ack_reply_id for r in requests]
-    [stream.poll(pattern=create_exact_match_pattern([ack_id]), block=True) for ack_id in ack_ids]
+    [stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id])) for p in requests]
+    [
+        stream.post(
+            request_reply_stream.Payload(handler=r.handler, handle_name="ack", request_id=r.ack_reply_id)
+        )
+        for r in requests
+    ]
     t = time.perf_counter() - tik
     if verbose:
         blogger.debug(
@@ -124,7 +129,7 @@ def create_exact_match_pattern(string_list: List[Union[uuid.UUID, str]]) -> re.P
 
 
 async def _awaitable_response(
-    stream: request_reply_stream.RequestReplyStream,
+    stream: request_reply_stream.NameResolvingRequstClient,
     pattern: re.Pattern | None,
 ) -> request_reply_stream.Payload:
     while True:
@@ -136,7 +141,7 @@ async def _awaitable_response(
 
 
 async def gather_all_replies(
-    stream: request_reply_stream.RequestReplyStream,
+    stream: request_reply_stream.NameResolvingRequstClient,
     request_ids: List[str],
     verbose: bool = True,
 ) -> List:
@@ -150,7 +155,7 @@ async def gather_all_replies(
 
 
 async def group_rpc_blocked(
-    stream: request_reply_stream.RequestReplyStream,
+    stream: request_reply_stream.NameResolvingRequstClient,
     handlers: List[Union[config_pkg.ModelShardID, str]],
     handle_type: str,
     datas: List[namedarray.NamedArray],
@@ -189,7 +194,7 @@ def split_packed_batch_into_seqs(
 
 
 def _request_parameter_sync(
-    stream: request_reply_stream.IpRequestClient,
+    stream: request_reply_stream.NameResolvingRequstClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     from_model_name: ModelName,
     to_model_name: ModelName,
@@ -227,8 +232,13 @@ def _request_parameter_sync(
         for h in handlers
     ]
     request_ids = [stream.post(p) for p in payloads]
-    ack_reply_ids = [p.ack_reply_id for p in payloads]
-    [stream.poll(pattern=create_exact_match_pattern([ack_id]), block=True) for ack_id in ack_reply_ids]
+    [stream.poll(pattern=create_exact_match_pattern([p.syn_reply_id]), block=True) for p in payloads]
+    [
+        stream.post(
+            request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id)
+        )
+        for p in payloads
+    ]
     [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in request_ids]
 
 
@@ -321,9 +331,9 @@ def _attach_payloads_with_hooks(
     return payloads, mwids
 
 
-def scatter_tensor_to_mws(
+async def scatter_tensor_to_mws(
     rpc: api.config.dfg.ModelRPC,
-    stream: request_reply_stream.RequestReplyStream,
+    stream: request_reply_stream.NameResolvingRequstClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
     model_configs: Dict[str, None | FlashMQATConfig],
@@ -393,17 +403,28 @@ def scatter_tensor_to_mws(
         main_handlers=handlers,
         hook_type="post",
     )
-    req_ids = [stream.post(p) for p in payloads.values()]
-    ack_ids = [p.ack_reply_id for p in payloads.values()]
-    [stream.poll(pattern=create_exact_match_pattern([ack_id]), block=True) for ack_id in ack_ids]
-    return req_ids
+    req_ids = [stream.post(p) for h, p in payloads.items() if h in handlers]
+    other_req_ids = [stream.post(p) for h, p in payloads.items() if h not in handlers]
+    await asyncio.gather(
+        *[
+            _awaitable_response(stream, pattern=create_exact_match_pattern([p.syn_reply_id]))
+            for p in payloads.values()
+        ]
+    )
+    [
+        stream.post(
+            request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id)
+        )
+        for p in payloads.values()
+    ]
+    return req_ids, other_req_ids
 
 
 async def model_rpc_request_func(
     rpc: api.config.dfg.ModelRPC,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     src_rpc_model_name: ModelName,
-    stream: request_reply_stream.RequestReplyStream,
+    stream: request_reply_stream.NameResolvingRequstClient,
     buffer: AsyncIOSequenceBuffer,
     data_owner: Dict[Tuple[int, str], Tuple[str, int]],
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
@@ -489,7 +510,7 @@ async def model_rpc_request_func(
             producer_mappings[names[0], k] = producer_mapping
 
         # send partitioned data to model workers
-        req_ids = scatter_tensor_to_mws(
+        req_ids, other_req_ids = await scatter_tensor_to_mws(
             rpc=rpc,
             stream=stream,
             msid2mwid=msid2mwid,
@@ -503,7 +524,7 @@ async def model_rpc_request_func(
             seqlens=sample.seqlens,
             handlers=handlers,
         )
-        await request_queues[response_coroutine_idx].put((req_ids, time.perf_counter()))
+        await request_queues[response_coroutine_idx].put((req_ids, other_req_ids, time.perf_counter()))
         response_coroutine_idx = (response_coroutine_idx + 1) % len(request_queues)
         logger.info(f"Model rpc {rpc.name} requested.")
 
@@ -511,7 +532,7 @@ async def model_rpc_request_func(
 async def model_rpc_reply_func(
     corountine_idx: int,
     rpc: api.config.dfg.ModelRPC,
-    stream: request_reply_stream.RequestReplyStream,
+    stream: request_reply_stream.NameResolvingRequstClient,
     buffer: AsyncIOSequenceBuffer,
     model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
     ctrl: RPCCorountineControl,
@@ -527,7 +548,15 @@ async def model_rpc_reply_func(
     can_do_rpc = ctrl.can_do_rpc[rpc.name]
 
     while not ctrl.stop.is_set():
-        req_ids, tik = await request_queue.get()
+        req_ids, other_req_ids, tik = await request_queue.get()
+
+        # empty requests with parameter synchronization hooks may be issued
+        await asyncio.gather(
+            *[
+                _awaitable_response(stream, pattern=create_exact_match_pattern([req_id]))
+                for req_id in other_req_ids
+            ]
+        )
 
         responses = await asyncio.gather(
             *[_awaitable_response(stream, pattern=create_exact_match_pattern([req_id])) for req_id in req_ids]
@@ -539,7 +568,7 @@ async def model_rpc_reply_func(
 
         if isinstance(responses[-1].data, dict) and responses[-1].data.get("seqlens") is not None:
             res = []
-            for k in responses[0].data['keys']:
+            for k in responses[0].data["keys"]:
                 if k in rpc.output_key_remap:
                     res.append(rpc.output_key_remap[k])
                 else:
@@ -571,7 +600,7 @@ async def load_data_func(
     src_rpc_model_name: str,
     buffer: AsyncIOSequenceBuffer,
     data_owner: Dict[Tuple[int, str], Tuple[str, int]],
-    stream: request_reply_stream.RequestReplyStream,
+    stream: request_reply_stream.NameResolvingRequstClient,
     fetch_ctl: asyncio.Queue,
     stop_ctl: asyncio.Event,
 ):
@@ -633,7 +662,7 @@ async def load_data_func(
 
 
 async def model_eval_thread_func(
-    stream: List[request_reply_stream.RequestReplyStream],
+    stream: List[request_reply_stream.NameResolvingRequstClient],
     handlers: List[config_pkg.ModelShardID],
     eval_queue: asyncio.Queue,
     stop_ctl: asyncio.Event,
@@ -647,7 +676,7 @@ async def model_eval_thread_func(
 
 
 async def model_save_thread_func(
-    stream: request_reply_stream.RequestReplyStream,
+    stream: request_reply_stream.NameResolvingRequstClient,
     handlers: List[config_pkg.ModelShardID],
     model_save_root: str,
     save_queue: asyncio.Queue,
@@ -720,22 +749,38 @@ class MasterWorker(worker_base.Worker):
 
     def __lazy_init(self):
         # Set up streams.
+        handler_routing = copy.deepcopy(self.config.msid2mwid)
+        src_rpc = self.__rpc_srcs[0]
+        src_rpc_topo = self.config.model_topos[src_rpc.model_name]
+        src_rpc_dp_size = src_rpc_topo.get_dim("data")
+        src_rpc_pp_size = src_rpc_topo.get_dim("pipe")
+        for i in range(src_rpc_dp_size):
+            rank = src_rpc_topo.get_rank(data=i, pipe=src_rpc_pp_size - 1, model=0)
+            handler_routing[f"__data{i}__"] = self.config.msid2mwid[
+                config_pkg.ModelShardID.from_parallelism_rank(
+                    model_name=src_rpc.model_name, topo=src_rpc_topo, parallelism_rank=rank
+                )
+            ]
         self.__stream = request_reply_stream.make_master_stream(
             self.config.worker_info,
             n_subscribers=self.config.n_model_workers,
+            handler_routing=handler_routing,
         )
-        self.__stream: request_reply_stream.RequestReplyStream
+        self.__stream: request_reply_stream.NameResolvingRequstClient
 
         # Request training specification from data workers, e.g. batch size and total train steps.
         p = request_reply_stream.Payload(
-                handler="__data0__",
-                handle_name="spec",
-            )
-        self.__stream.post(
-            p
+            handler="__data0__",
+            handle_name="spec",
         )
-        self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.ack_reply_id]))
-        ft_spec: model_api.FinetuneSpec = self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.request_id])).data
+        self.__stream.post(p)
+        self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
+        self.__stream.post(
+            request_reply_stream.Payload(handler="__data0__", handle_name="ack", request_id=p.ack_reply_id)
+        )
+        ft_spec: model_api.FinetuneSpec = self.__stream.poll(
+            block=True, pattern=create_exact_match_pattern([p.request_id])
+        ).data
         ft_spec.total_train_epochs = self.config.exp_ctrl.total_train_epochs
         ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
 
@@ -771,9 +816,15 @@ class MasterWorker(worker_base.Worker):
         # logger.info("before create task initialize")
         self.__model_configs: Dict[ModelName, None | FlashMQATConfig] = {}
         for model_name in self.config.model_topos:
-            p = request_reply_stream.Payload(handler=config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, 0), handle_name="model_config")
+            p = request_reply_stream.Payload(
+                handler=config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, 0),
+                handle_name="model_config",
+            )
             self.__stream.post(p)
-            self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.ack_reply_id]))
+            self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
+            self.__stream.post(
+                request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id)
+            )
             self.__model_configs[model_name] = self.__stream.poll(
                 pattern=create_exact_match_pattern([p.request_id]), block=True
             ).data
@@ -990,22 +1041,36 @@ class MasterWorker(worker_base.Worker):
         time_per_step = total_time_consumption / (self._global_step + 1)
         e2e_time = time.perf_counter() - execution_start
         self.e2e_time_history.append(e2e_time)
-        
+
         # calculate flops
         #########################################
         from base.monitor import calculate_train_flops, caculuate_inference_gen_flops
+
         flops = 0
         for rpc in self.__model_rpcs:
             flash_config = self.__model_configs[rpc.model_name]
             if rpc.interface_type == api.config.dfg.ModelInterfaceType.TRAIN_STEP:
                 # TODO: count seqlen
-                flops += calculate_train_flops(checkpoint_activations_factor=4, batch_size=rpc.min_n_seqs, seq_length=280, num_layers=flash_config.n_layers, hidden_size=flash_config.hidden_dim, vocab_size=flash_config.vocab_size)
+                flops += calculate_train_flops(
+                    checkpoint_activations_factor=4,
+                    batch_size=rpc.min_n_seqs,
+                    seq_length=280,
+                    num_layers=flash_config.n_layers,
+                    hidden_size=flash_config.hidden_dim,
+                    vocab_size=flash_config.vocab_size,
+                )
             else:
                 # TODO: count minibatch
-                flops += caculuate_inference_gen_flops(batch_size=rpc.min_n_seqs, seq_length=280, num_layers=flash_config.n_layers, hidden_size=flash_config.hidden_dim, vocab_size=flash_config.vocab_size)
+                flops += caculuate_inference_gen_flops(
+                    batch_size=rpc.min_n_seqs,
+                    seq_length=280,
+                    num_layers=flash_config.n_layers,
+                    hidden_size=flash_config.hidden_dim,
+                    vocab_size=flash_config.vocab_size,
+                )
         tflops = flops / (e2e_time * 8 * (10**12))
         #########################################
-        
+
         logger.info(
             f"Epoch {self._epoch + 1}/{self.config.exp_ctrl.total_train_epochs} "
             f"step {self._epoch_step + 1} "
