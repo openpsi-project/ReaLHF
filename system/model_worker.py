@@ -419,7 +419,15 @@ class ModelWorker(worker_base.Worker):
         try:
             request: request_reply_stream.Payload = self.__stream.poll()
         except request_reply_stream.NoMessage:
-            return
+            raise NoRequestToHandle()
+
+        self.__stream.post(
+            request_reply_stream.Payload(
+                handler="master",
+                handle_name="ack",
+                request_id=request.ack_reply_id,
+            ),
+        )
 
         self.__request_queue.put_nowait((request, request.data))
 
@@ -459,14 +467,8 @@ class ModelWorker(worker_base.Worker):
             else:
                 raise NotImplementedError(f"Unknown hook {hook}.")
 
-    def __model_poll_step(self) -> worker_base.PollResult:
+    def __model_poll_step(self, request: request_reply_stream.Payload, data: Any) -> worker_base.PollResult:
         tik = time.perf_counter()
-
-        try:
-            request, data = self.__request_queue.get_nowait()
-            request: request_reply_stream.Payload
-        except queue.Empty:
-            return
         # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
         #                  f"start handle request *{request.handle_name}*, "
         #                  f"request_id {request.request_id}.")
@@ -712,7 +714,11 @@ class ModelWorker(worker_base.Worker):
                 handler="master",
                 request_id=request.request_id,
                 handle_name=request.handle_name,
-                data={"keys": list(res.keys()), "seqlens":list(new_seqlens), "buffer_indices":list(buffer_indices)},
+                data={
+                    "keys": list(res.keys()),
+                    "seqlens": list(new_seqlens),
+                    "buffer_indices": list(buffer_indices),
+                },
             )
         else:
             reply = request_reply_stream.Payload(
@@ -759,9 +765,27 @@ class ModelWorker(worker_base.Worker):
             self.__prefetch_from_dataset()
 
         st = time.monotonic()
-        self.__maybe_receive_request()
+        for _ in range(8):
+            try:
+                self.__maybe_receive_request()
+            except NoRequestToHandle:
+                time.sleep(0.05)
 
-        self.__model_poll_step()
+        request_cache: List[Tuple[request_reply_stream.Payload, Any]] = []
+        for _ in range(8):
+            try:
+                request, data = self.__request_queue.get_nowait()
+                request_cache.append((request, data))
+            except queue.Empty:
+                break
+
+        # if len(request_cache) > 0:
+        #     print(
+        #         f"model worker {self.__worker_index} request cache length {len(request_cache)} handle names {[v.handle_name for v, _ in request_cache]}"
+        #     )
+        # TODO: we can interleave handle hooks and receive requests
+        for request, data in request_cache:
+            self.__model_poll_step(request, data)
 
         r = self.__maybe_post_responses()
 

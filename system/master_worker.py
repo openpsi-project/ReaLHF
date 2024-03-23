@@ -107,6 +107,8 @@ def request_all(
         blogger.debug(f"master worker #request_all# *end* time ${time.time_ns()}$")
     tik = time.perf_counter()
     [stream.post(r) for r in requests]
+    ack_ids = [r.ack_reply_id for r in requests]
+    [stream.poll(pattern=create_exact_match_pattern([ack_id]), block=True) for ack_id in ack_ids]
     t = time.perf_counter() - tik
     if verbose:
         blogger.debug(
@@ -225,6 +227,8 @@ def _request_parameter_sync(
         for h in handlers
     ]
     request_ids = [stream.post(p) for p in payloads]
+    ack_reply_ids = [p.ack_reply_id for p in payloads]
+    [stream.poll(pattern=create_exact_match_pattern([ack_id]), block=True) for ack_id in ack_reply_ids]
     [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in request_ids]
 
 
@@ -389,7 +393,10 @@ def scatter_tensor_to_mws(
         main_handlers=handlers,
         hook_type="post",
     )
-    return [stream.post(p) for p in payloads.values()]
+    req_ids = [stream.post(p) for p in payloads.values()]
+    ack_ids = [p.ack_reply_id for p in payloads.values()]
+    [stream.poll(pattern=create_exact_match_pattern([ack_id]), block=True) for ack_id in ack_ids]
+    return req_ids
 
 
 async def model_rpc_request_func(
@@ -720,13 +727,15 @@ class MasterWorker(worker_base.Worker):
         self.__stream: request_reply_stream.RequestReplyStream
 
         # Request training specification from data workers, e.g. batch size and total train steps.
-        self.__stream.post(
-            request_reply_stream.Payload(
+        p = request_reply_stream.Payload(
                 handler="__data0__",
                 handle_name="spec",
             )
+        self.__stream.post(
+            p
         )
-        ft_spec: model_api.FinetuneSpec = self.__stream.poll(block=True).data
+        self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.ack_reply_id]))
+        ft_spec: model_api.FinetuneSpec = self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.request_id])).data
         ft_spec.total_train_epochs = self.config.exp_ctrl.total_train_epochs
         ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
 
@@ -762,10 +771,11 @@ class MasterWorker(worker_base.Worker):
         # logger.info("before create task initialize")
         self.__model_configs: Dict[ModelName, None | FlashMQATConfig] = {}
         for model_name in self.config.model_topos:
-            _handlers = [config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, 0)]
-            req_id = request_all(self.__stream, _handlers, "model_config", [None])
+            p = request_reply_stream.Payload(handler=config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, 0), handle_name="model_config")
+            self.__stream.post(p)
+            self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.ack_reply_id]))
             self.__model_configs[model_name] = self.__stream.poll(
-                pattern=create_exact_match_pattern(req_id), block=True
+                pattern=create_exact_match_pattern([p.request_id]), block=True
             ).data
 
         _param_senders = [v[0] for v in self.config.sync_param_pairs]
@@ -980,12 +990,28 @@ class MasterWorker(worker_base.Worker):
         time_per_step = total_time_consumption / (self._global_step + 1)
         e2e_time = time.perf_counter() - execution_start
         self.e2e_time_history.append(e2e_time)
+        
+        # calculate flops
+        #########################################
+        from base.monitor import calculate_train_flops, caculuate_inference_gen_flops
+        flops = 0
+        for rpc in self.__model_rpcs:
+            flash_config = self.__model_configs[rpc.model_name]
+            if rpc.interface_type == api.config.dfg.ModelInterfaceType.TRAIN_STEP:
+                # TODO: count seqlen
+                flops += calculate_train_flops(checkpoint_activations_factor=4, batch_size=rpc.min_n_seqs, seq_length=280, num_layers=flash_config.n_layers, hidden_size=flash_config.hidden_dim, vocab_size=flash_config.vocab_size)
+            else:
+                # TODO: count minibatch
+                flops += caculuate_inference_gen_flops(batch_size=rpc.min_n_seqs, seq_length=280, num_layers=flash_config.n_layers, hidden_size=flash_config.hidden_dim, vocab_size=flash_config.vocab_size)
+        tflops = flops / (e2e_time * 8 * (10**12))
+        #########################################
+        
         logger.info(
             f"Epoch {self._epoch + 1}/{self.config.exp_ctrl.total_train_epochs} "
             f"step {self._epoch_step + 1} "
             f"(global step {self._global_step + 1}) finishes. "
             f"#End to end# execution time: *{e2e_time:.3f}*s. "
-            f"Total time consumption: {total_time_consumption:.3f}s. "
+            f"Total time consumption: {total_time_consumption:.3f}s. TFLOPs: {tflops:.2f}."
             # f"Estimated remaining time of this epoch: {self._buffer_size_tokens / buffer_size_decre_per_step * time_per_step:.3f}s."
         )
 
