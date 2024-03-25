@@ -238,6 +238,9 @@ class ProfileWorker:
     cuda_cache_clear_freq: int = 10
     # worker info
     worker_info: Optional[WorkerInformation] = None
+    # profile options
+    profile_model_function_call: bool = False
+    profile_communication: bool = False
 
     def __post_init__(self):
         assert "@" not in self.model_name

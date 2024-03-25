@@ -17,6 +17,7 @@ import torch.distributed as dist
 import torch.utils.data
 
 from profiler.comm import ProfileCommunication
+from profiler.engine import ProfileEngine
 from profiler.utils import random_sample
 
 from base.monitor import gpu_utilization_monitor, time_mark
@@ -111,14 +112,61 @@ class ProfileWorker(worker_base.Worker):
         self.logger.info("deepspeed init distributed on model worker")
         self.__device = torch.device("cuda:0")
 
-        self.__profile_comm = ProfileCommunication(self.device_mesh_name, self.__device,
-                                                   self.__pg_info.local_gpu_id, self.__pg_info.global_rank,
-                                                   self.__pg_info.world_size)
+        if self.config.profile_communication:
+            self.__profile_comm = ProfileCommunication(self.device_mesh_name, self.__device,
+                                                       self.__pg_info.local_gpu_id,
+                                                       self.__pg_info.global_rank, self.__pg_info.world_size)
+
+        if self.config.profile_model_function_call:
+            topo = self.config.topo
+            grid = PipelineParallelGrid(
+                topology=topo,
+                world_size=self.__pg_info.world_size,
+                process_group=dist.group.WORLD,
+                process_group_offset=0,
+            )
+            base.constants.set_grid(self.model_name, grid)
+
+            self.__model = api.model.make_model(
+                self.config.model,
+                name=self.model_name,
+                device=self.__device,
+            )
+            self.__model_config = self.__model.module.config
+            self.__interface = api.model.make_interface(self.config.interface)
+            self.__backend = api.model.make_backend(self.config.backend)
+            self.__engine = None
+
+            self.__vocab_size = self.__model.module.config.vocab_size
+            self.batch_sizes = [32, 64, 128, 256, 512]
+            self.seq_lens = [128, 256, 512, 1024, 2048]
+            self.func_types = ["train_step", "inference", "generate"]
+
+            self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor,
+                                            args=(self.__pg_info.local_gpu_id, 7200))
+            self.__gpu_util_mp.start()
 
         self.profile_rounds = 7
         self.warmup_rounds = 2
         self.current_profile_round = 0
         self.profile_start = None
+
+    def __run_model_function_call(self, type_, data, batch_size=32) -> worker_base.PollResult:
+        # initialize
+        if self.__engine is None:
+            ft_spec = api.model.FinetuneSpec(10, 100, 10, batch_size)
+            self.__model = self.__backend.initialize(self.__model, ft_spec)
+            self.__engine = self.__model.module
+            assert isinstance(self.__engine, ProfileEngine)
+        # data = random_sample(self.batch_size, self.seq_len, self.vocab_size)
+
+        func = getattr(self.__interface, type_)
+        func(self.__model, data)
+        # instruction profiles
+        # self.__interface.inference(self.__model, data)
+        # self.__interface.train_step(self.__model, data)
+        # self.__interface.generate(self.__model, data)
+        return worker_base.PollResult(sample_count=1, batch_count=1)
 
     def _poll(self):
         if not self.__ddp_env_resolved:
@@ -129,12 +177,29 @@ class ProfileWorker(worker_base.Worker):
         if self.profile_start is None:
             self.profile_start = time.monotonic()
 
-        self.__profile_comm.profile_comm()
+        r = worker_base.PollResult(0, 0)
+        if self.config.profile_model_function_call:
+            bs_seq_len = itertools.product(self.batch_sizes, self.seq_lens)
+            for func_type in self.func_types:
+                for bs, seq_len in bs_seq_len:
+                    data = random_sample(bs, seq_len, self.__vocab_size)
+                    r = self.__run_model_function_call(func_type, data, bs)
+
+        if self.config.profile_model_function_call:
+            self.__profile_comm.profile_comm()
+
+        if r.batch_count > 0:
+            if self.config.cuda_cache_cleanliness:
+                # following huggingface trl # ALWAYS COST 0.3+ SEC
+                gc.collect()
+                torch.cuda.empty_cache()
+                gc.collect()
 
         self.current_profile_round += 1
         blogger.debug("Current profile round done: {}".format(self.current_profile_round))
         if self.current_profile_round <= self.warmup_rounds:
-            self.__profile_comm.reset_stats()
+            if self.config.profile_communication:
+                self.__profile_comm.reset_stats()
             logger.info("Warmup round {} done.".format(self.current_profile_round))
 
         if self.current_profile_round >= self.warmup_rounds + self.profile_rounds:

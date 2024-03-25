@@ -131,23 +131,35 @@ class ProfileExperiment(Experiment):
     model_names_to_types: Optional[Dict[str, str]] = None
 
     seed: int = 1
-    n_nodes: int = 6
-    nodelist: str = "QH-com[41-46]"
-    device_mesh_name: str = "QH-com[41-46]"
+    n_nodes: int = 2
+    nodelist: str = "QH-com[17-18]"
+    device_mesh_name: str = "QH-com[17-18]"
+
+    num_pp: int = 2
+    num_mp: int = 1
+    num_dp: int = 8
+
+    profile_communication: bool = False
+    profile_model_function_call: bool = True
+    profile_mfc_path: str = LLAMA_2_13B_PATH
+
+    use_sequence_parallel: bool = False
+    use_gradient_checkpointing: bool = False
 
     def __post_init__(self):
         self.n_workers = self.n_nodes * NUM_GPUS_PER_NODE
+        assert self.num_dp * self.num_pp * self.num_mp == self.n_workers
 
         if self.model_paths is None:
             # example
-            self.model_paths = [LLAMA_2_70B_PATH, LLAMA_2_13B_PATH]
-            self.model_types = ["Llama-2-70b", "Llama-2-13b"]
+            self.model_paths = [LLAMA_2_13B_PATH, LLAMA_2_7B_PATH]
+            self.model_types = ["Llama-2-13b", "Llama-2-7b"]
             self.model_names = ["actor", "reward", "ref", "critic"]
             self.model_names_to_types = {
-                "actor": "Llama-2-70b",
-                "reward": "Llama-2-13b",
-                "ref": "Llama-2-70b",
-                "critic": "Llama-2-13b",
+                "actor": "Llama-2-13b",
+                "reward": "Llama-2-7b",
+                "ref": "Llama-2-13b",
+                "critic": "Llama-2-7b",
             }
             self.model_rpcs = [rollout, inf_reward, inf_ref_logits, inf_values, train_actor, train_critic]
         else:
@@ -168,17 +180,49 @@ class ProfileExperiment(Experiment):
 
     def initial_setup(self) -> ExperimentConfig:
         topo = PipeModelDataParallelTopology(
-            num_pp=1,
-            num_mp=1,
-            num_dp=self.n_workers,
+            num_pp=self.num_pp,
+            num_mp=self.num_mp,
+            num_dp=self.num_dp,
         )
+
+        model = get_flash_mqat_model_config(
+            from_type="self",
+            model_path=self.profile_mfc_path,
+            hf_model_type="llama",
+            tokenizer_path=self.profile_mfc_path,
+            use_pipe=True,
+            dtype="fp16",
+            sequence_parallel=self.use_sequence_parallel,
+            partition_method="parameters_balanced",
+            lora=None,
+        )
+
+        backend = ModelBackend(
+            type_="ds_train",
+            args=dict(
+                optimizer_name="adam",
+                optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
+                warmup_steps_proportion=0.0,
+                min_lr_ratio=0.0,
+                zero_stage=1,
+                engine_type="profile",
+                gradient_checkpointing=self.use_gradient_checkpointing,
+                num_pipeline_stages=self.num_pp,
+                enable_fp16=True,
+                enable_bf16=False,
+                sequence_parallel=self.use_sequence_parallel,
+                enable_async_p2p_communication=False,
+            ),
+        )
+
+        interface = ModelInterface(type_="profile", args=dict())
 
         profile_workers = [
             ProfileWorker(
                 seed=self.seed,
-                model=None,
-                backend=None,
-                interface=None,
+                model=model,
+                backend=backend,
+                interface=interface,
                 model_name="profile",
                 device_mesh_name=self.device_mesh_name,
                 topo=topo,
@@ -186,6 +230,8 @@ class ProfileExperiment(Experiment):
                 pp_rank=topo.get_coord(i).pipe,
                 mp_rank=topo.get_coord(i).model,
                 cuda_cache_cleanliness=True,
+                profile_communication=self.profile_communication,
+                profile_model_function_call=self.profile_model_function_call,
             ) for i in range(self.n_workers)
         ]
 
