@@ -5,19 +5,11 @@ import random
 
 from omegaconf import MISSING
 
-from .config_dataset import PairedComparisonDatasetConfig
-from .config_model import get_flash_mqat_model_config, ModelConfig, OptimizerConfig
-from api.config import *
-from api.dfg import ModelInterfaceType, ModelRPC
+from api.config.config_dataset import PairedComparisonDatasetConfig
+from api.config.config_flash_model import get_flash_mqat_model_config, ModelTrainEvalConfig, OptimizerConfig
+from api.config.config_system import *
+from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
-
-rw_modeling = ModelRPC(
-    "default",
-    ModelInterfaceType.TRAIN_STEP,
-    input_data=["packed_input_ids", "input_lens", "group_factor", "pair_input_lens"],
-    dp_broker_type="packed",
-    log_return_value=True,
-)
 
 
 @dataclasses.dataclass
@@ -31,7 +23,7 @@ class RWConfig(Experiment):
     eval_freq_epochs: Optional[int] = 1
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
-    model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
+    model: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
     dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
 
     def __post_init__(self):
@@ -160,6 +152,13 @@ class RWConfig(Experiment):
                 cuda_cache_clear_freq=1,
             )
             model_worker.append(mw)
+
+        rw_modeling = ModelRPC(
+            "default",
+            ModelInterfaceType.TRAIN_STEP,
+            input_data=["packed_input_ids", "input_lens", "group_factor", "pair_input_lens"],
+            log_return_value=True,
+        )
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,

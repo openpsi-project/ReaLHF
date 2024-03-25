@@ -2,8 +2,8 @@ import dataclasses
 import functools
 import itertools
 
-from api.config import *
-from api.config import register_experiment
+from api.config.config_system import *
+from api.config.config_system import register_experiment
 from experiments.common.ppo_exp import PPOConfig
 
 EXPR_DEADLINE = None

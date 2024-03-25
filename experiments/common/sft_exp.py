@@ -2,21 +2,11 @@ import dataclasses
 
 from omegaconf import MISSING
 
-from .config_dataset import PromptAnswerDatasetConfig
-from .config_model import get_flash_mqat_model_config, ModelConfig, OptimizerConfig
-from api.config import *
-from api.dfg import ModelInterfaceType, ModelRPC
+from api.config.config_dataset import PromptAnswerDatasetConfig
+from api.config.config_flash_model import get_flash_mqat_model_config, ModelTrainEvalConfig, OptimizerConfig
+from api.config.config_system import *
+from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
 from base.topology import PipeModelDataParallelTopology
-
-sft = ModelRPC(
-    "default",
-    ModelInterfaceType.TRAIN_STEP,
-    input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
-    dp_broker_type="packed",
-    log_return_value=True,
-    min_n_tokens=100000,
-    max_n_tokens=131072,
-)
 
 
 @dataclasses.dataclass
@@ -30,7 +20,7 @@ class SFTConfig(Experiment):
     total_train_epochs: int = 1
     save_freq_steps: Optional[int] = 50
     eval_freq_epochs: Optional[int] = 1
-    model: ModelConfig = dataclasses.field(default_factory=ModelConfig)
+    model: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
     dataset: PromptAnswerDatasetConfig = dataclasses.field(default_factory=PromptAnswerDatasetConfig)
 
     def __post_init__(self):
@@ -159,6 +149,17 @@ class SFTConfig(Experiment):
                 cuda_cache_clear_freq=1,
             )
             model_worker.append(mw)
+
+        sft = ModelRPC(
+            model_name="default",
+            interface_type=ModelInterfaceType.TRAIN_STEP,
+            interface_impl=interface,
+            model_type=ModelType("llama", 7, False),
+            input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
+            log_return_value=True,
+            min_n_tokens=100000,
+            max_n_tokens=131072,
+        )
 
         cfg = ExperimentConfig(
             total_train_epochs=self.total_train_epochs,

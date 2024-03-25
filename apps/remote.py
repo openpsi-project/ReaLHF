@@ -104,15 +104,13 @@ def main_controller(args):
             config_index: the index of experiment configuration (experiment may return multiple configurations)
             ignore_worker_error: bool, if False, stop the experiment when any worker(s) fail.
     """
-    import profiler.experiments
-
-    import api.config
+    import api.config.config_system
     import experiments
     import system
 
     if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
         with open(QUICKSTART_EXPR_CACHE_PATH, 'rb') as f:
-            api.config.register_experiment(*pickle.load(f))
+            api.config.config_system.register_experiment(*pickle.load(f))
         os.system(f"rm -rf {QUICKSTART_EXPR_CACHE_PATH}")
     logger.info("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
@@ -141,7 +139,7 @@ def main_controller(args):
     controller = system.make_controller(type_=args.type,
                                         experiment_name=args.experiment_name,
                                         trial_name=args.trial_name)
-    experiment = api.config.make_experiment(args.experiment_name)
+    experiment = api.config.config_system.make_experiment(args.experiment_name)
     controller.start(
         experiment=experiment,
         ignore_worker_error=args.ignore_worker_error,

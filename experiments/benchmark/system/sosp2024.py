@@ -3,7 +3,7 @@ import functools
 import os
 
 from .pposys_exp import PPOSysExperiment
-from api.config import *
+from api.config.config_system import *
 from experiments.common import ModelBackend, ModelConfig, OptimizerConfig, ParallelismConfig
 from experiments.common.ppo_exp import PPOConfig, PPOHyperparmeters
 

@@ -3,14 +3,14 @@ import importlib
 import os
 import traceback
 
-import api.config
+import api.config.config_system
 import base.logging as logging
 
 logger = logging.getLogger("system")
 
 # NOTE: Workers are configured in the following order.
 # Take special care when adding a new worker type.
-WORKER_TYPES = ["data_worker", "master_worker", "model_worker", "profile_worker"]
+WORKER_TYPES = ["model_worker", "master_worker", "profile_worker"]
 
 
 def load_worker(worker_type: str) -> Type:

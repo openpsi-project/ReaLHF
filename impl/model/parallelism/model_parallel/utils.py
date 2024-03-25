@@ -205,27 +205,3 @@ class VocabUtility:
         per_partition_vocab_size = divide(global_vocab_size, world_size)
         return VocabUtility.vocab_range_from_per_partition_vocab_size(per_partition_vocab_size, rank,
                                                                       world_size)
-
-
-class GlobalMemoryBuffer:
-    """Global buffer to avoid dynamic memory allocations.
-    Caller should ensure that buffers of the same name
-    are not used concurrently."""
-
-    def __init__(self):
-        self.buffer = {}
-
-    def get_tensor(self, tensor_shape, dtype, name, force_zero: bool = False):
-        required_len = int(np.prod(tensor_shape))
-        if self.buffer.get((name, dtype), None) is None:
-            self.buffer[(name, dtype)] = torch.empty(required_len,
-                                                     dtype=dtype,
-                                                     device=torch.cuda.current_device(),
-                                                     requires_grad=False)
-        elif self.buffer[(name, dtype)].numel() < required_len:
-            self.buffer[(name, dtype)] = torch.nn.functional.pad(
-                self.buffer[(name, dtype)], (0, required_len - self.buffer[(name, dtype)].numel()), value=0)
-        res = self.buffer[(name, dtype)][0:required_len].view(*tensor_shape)
-        if force_zero:
-            res.zero_()
-        return res

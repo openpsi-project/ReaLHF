@@ -1,6 +1,6 @@
 import functools
 
-from api.config import register_experiment
+from api.config.config_system import register_experiment
 from experiments.benchmark.system.rlhf_benchmark import ChatRLHFBenchmarkConfig, get_exp_cls
 
 resource_config = dict(

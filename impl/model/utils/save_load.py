@@ -134,8 +134,8 @@ def save_to_disk(
     hf_base_model_path: Optional[str] = None,
 ):
     os.makedirs(output_dir, exist_ok=True)
+    param_size = sum([value.numel() * value.element_size() for value in state_dict.values()])
     if n_shards is None:
-        param_size = sum([value.numel() * value.element_size() for value in state_dict.values()])
         n_shards = (param_size + max_shard_size_byte - 1) // max_shard_size_byte
 
     if no_shard_suffix:
@@ -190,7 +190,7 @@ def save_to_disk(
     else:
         raise NotImplementedError(f"save_type {save_type} is not supported")
 
-    if with_hf_format:
+    if with_hf_format and hf_base_model_path is not None:
         copy_hf_configs(hf_base_model_path, output_dir)
 
 

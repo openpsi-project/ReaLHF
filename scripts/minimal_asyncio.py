@@ -11,9 +11,9 @@ import torch
 import viztracer
 import zmq
 
-from api.dfg import ModelInterfaceType, ModelRPC
+from api.config.dfg import ModelInterfaceType, ModelRPC
 from system.request_reply_stream import NameResolvingRequstReplyStream, Payload
-import api.dfg
+import api.config.dfg
 import api.model
 import base.dataparallel as dataparallel
 import base.name_resolve
@@ -126,7 +126,6 @@ train_critic = ModelRPC(
         "values",
         "seq_no_eos_mask",
     ],
-    dp_broker_type="packed",
     log_return_value=True,
 )
 
@@ -171,7 +170,7 @@ def model_worker(model_type):
 
 
 async def model_rpc_func(
-    rpc_config: api.dfg.ModelRPC,
+    rpc_config: api.config.dfg.ModelRPC,
     rpc_futures: Dict[str, asyncio.Future],
     parent_rpc_names: List[str],
     data_registry: Dict[str, torch.Tensor],
@@ -221,7 +220,7 @@ def main():
     )
     tracer.start()
     model_rpcs = [rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic]
-    parents, _ = api.dfg.build_graph(model_rpcs)
+    parents, _ = api.config.dfg.build_graph(model_rpcs)
 
     data_registry = {}
 

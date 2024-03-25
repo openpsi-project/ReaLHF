@@ -41,7 +41,6 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
     engine_type: str = "deepspeed"
     # parallelism args
-    num_pipeline_stages: int = 1
     sequence_parallel: bool = False
     enable_async_p2p_communication: bool = False
     enable_async_instruction: bool = False
@@ -62,9 +61,6 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
         if self.engine_type == "pipe" or self.engine_type == "stream_pipe":
             assert self.zero_stage < 2
             assert self.enable_hybrid_engine is False
-            assert self.num_pipeline_stages > 1
-        else:
-            assert self.num_pipeline_stages == 1
 
     def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -174,7 +170,6 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
     # pipeline inference
     engine_type: str = "deepspeed"
-    num_pipeline_stages: int = 1
     sequence_parallel: bool = False
     enable_async_p2p_communication: bool = False
 

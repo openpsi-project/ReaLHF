@@ -1,17 +1,122 @@
 from typing import *
 import dataclasses
 import json
+import os
 
-from api.config import *
+import transformers
 
-SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "deepseek", "codellama"]
+from api.config.config_base import Model, ModelWrapper, SUPPORTED_MODELS
+import base.logging as logging
+
+logger = logging.getLogger("Flash Model Config")
 
 
 @dataclasses.dataclass
-class PipelineMicroBatchConfig:
-    generate: Optional[int] = None
-    inference: Optional[int] = None
-    train_step: Optional[int] = None
+class FlashMQATConfig:
+    n_layers: int
+    n_kv_heads: int
+    head_dim: int
+    hidden_dim: int
+    intermediate_dim: int  # for mlp, usually 4*h
+    vocab_size: int
+    n_positions: Optional[int] = None
+    embd_pdrop: float = 0.1
+    resid_pdrop: float = 0.1
+    attn_pdrop: float = 0.1
+    layer_norm_epsilon: float = 1e-5
+    activation_function: str = "gelu"
+    scale_attn_by_inverse_layer_idx: bool = True
+    # llama does not use attention bias and uses special MLP/LayerNorm layers
+    use_attention_bias: bool = True
+    layer_norm_type: Optional[str] = None
+    mlp_type: Optional[str] = None
+    # rotary embedding
+    apply_rotary: bool = False
+    rotary_base: float = 10000.0
+    rotary_interleaved: bool = False
+    rotary_scaling: Optional[float] = None
+    rotary_scaling_type: Optional[str] = None
+    # parallelism optimization
+    sequence_parallel: bool = False
+    gradient_accumulation_fusion: bool = False
+
+    is_critic: bool = False
+
+    # only used for debugging, True for GPT2
+    fixed_abs_position_ids: bool = False
+
+    # remained for compatibility, not used any more
+    ckpt_attn: bool = False
+    ckpt_mlp: bool = False
+
+
+def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig) -> FlashMQATConfig:
+    return FlashMQATConfig(
+        n_layers=starcoder_config.n_layer,
+        n_kv_heads=1,
+        attn_pdrop=starcoder_config.attn_pdrop,
+        embd_pdrop=starcoder_config.embd_pdrop,
+        layer_norm_epsilon=starcoder_config.layer_norm_epsilon,
+        hidden_dim=starcoder_config.n_embd,
+        head_dim=starcoder_config.n_embd // starcoder_config.n_head,
+        intermediate_dim=starcoder_config.n_inner,
+        n_positions=starcoder_config.n_positions,
+        resid_pdrop=starcoder_config.resid_pdrop,
+        vocab_size=starcoder_config.vocab_size,
+    )
+
+
+def gpt2_config_converter(gpt2config: transformers.GPT2Config) -> FlashMQATConfig:
+    return FlashMQATConfig(
+        n_layers=gpt2config.n_layer,
+        n_kv_heads=gpt2config.n_head,
+        attn_pdrop=gpt2config.attn_pdrop,
+        embd_pdrop=gpt2config.embd_pdrop,
+        layer_norm_epsilon=gpt2config.layer_norm_epsilon,
+        hidden_dim=gpt2config.n_embd,
+        head_dim=gpt2config.n_embd // gpt2config.n_head,
+        intermediate_dim=gpt2config.n_inner if gpt2config.n_inner is not None else 4 * gpt2config.n_embd,
+        n_positions=gpt2config.n_positions,
+        resid_pdrop=gpt2config.resid_pdrop,
+        vocab_size=gpt2config.vocab_size,
+        activation_function=gpt2config.activation_function,
+        scale_attn_by_inverse_layer_idx=False,
+        fixed_abs_position_ids=True,
+    )
+
+
+def convert_config_llama(hf_config: transformers.LlamaConfig) -> FlashMQATConfig:
+    return FlashMQATConfig(
+        n_layers=hf_config.num_hidden_layers,
+        n_kv_heads=hf_config.num_key_value_heads,
+        hidden_dim=hf_config.hidden_size,
+        head_dim=hf_config.hidden_size // hf_config.num_attention_heads,
+        intermediate_dim=hf_config.intermediate_size,
+        vocab_size=hf_config.vocab_size,
+        n_positions=hf_config.max_position_embeddings,
+        embd_pdrop=0.0,
+        attn_pdrop=hf_config.attention_dropout if hasattr(hf_config, "attention_dropout") else 0.1,
+        layer_norm_epsilon=hf_config.rms_norm_eps,
+        activation_function=hf_config.hidden_act,
+        use_attention_bias=hf_config.attention_bias,
+        scale_attn_by_inverse_layer_idx=False,
+        layer_norm_type="rms",
+        mlp_type="llama",
+        apply_rotary=True,
+        rotary_base=hf_config.rope_theta,
+        rotary_interleaved=False,
+        rotary_scaling=None if hf_config.rope_scaling is None else hf_config.rope_scaling["factor"],
+        rotary_scaling_type=None if hf_config.rope_scaling is None else hf_config.rope_scaling["type"],
+    )
+
+
+FLASH_MODEL_CONFIG_CONVERTER: Dict[str, Callable[[Any], FlashMQATConfig]] = {
+    "starcoder": convert_config_starcoder,
+    "gpt2": gpt2_config_converter,
+    "llama": convert_config_llama,
+    "codellama": convert_config_llama,
+    "deepseek": convert_config_llama,
+}
 
 
 @dataclasses.dataclass
@@ -31,14 +136,13 @@ class ParallelismConfig:
     pipeline_parallel_size: int = 1
     data_parallel_size: int = 1
     use_sequence_parallel: bool = False
-    partition_method: Optional[str] = "parameters_balanced"
-    pipe_mbs_config: PipelineMicroBatchConfig = dataclasses.field(default_factory=PipelineMicroBatchConfig)
 
     def __post_init__(self):
         if self.pipeline_parallel_size < 1 or self.data_parallel_size < 1 or self.model_parallel_size < 1:
             raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
         if self.use_sequence_parallel and self.model_parallel_size <= 1:
-            raise ValueError("Sequence parallelism requires model parallelism.")
+            logger.warning("Sequence parallelism requires model parallelism.")
+            self.use_sequence_parallel = False
 
 
 @dataclasses.dataclass
@@ -65,7 +169,6 @@ class OptimizerConfig:
         beta1 (float): Adam beta1.
         beta2 (float): Adam beta2.
         eps (float): Adam epsilon in the denominator.
-        zero_stage (int): Stage of DeepSpeed ZeRO optimization. Should be one of 0, 1, 2, 3.
             If pipeline parallelism is used, this should be at most 1.
         min_lr_ratio (float): Minimum learning rate ratio after learning rate annealing.
             Should be in the interval of [0.0, 1.0].
@@ -75,18 +178,14 @@ class OptimizerConfig:
     """
 
     type: str = dataclasses.field(
-        metadata={"choices": ["adam"]},
-        default="adam",
+        metadata={"choices": ["adam", "empty"]},
+        default="empty",
     )
     lr: float = 1e-6
     weight_decay: float = 0.05
     beta1: float = 0.9
     beta2: float = 0.95
     eps: float = 1e-5
-    zero_stage: int = dataclasses.field(
-        metadata={"choices": [0, 1, 2, 3]},
-        default=2,
-    )
     min_lr_ratio: float = 0.0
     lr_scheduler_type: str = dataclasses.field(
         metadata={"choices": ["linear", "cosine"]},
@@ -94,19 +193,16 @@ class OptimizerConfig:
     )
     warmup_steps_proportion: float = 0.02
     offload: bool = False
-    use_hybrid_engine: bool = False
 
     def __post_init__(self):
         if self.min_lr_ratio < 0.0 or self.min_lr_ratio > 1.0:
             raise ValueError(f"Invalid min_lr_ratio: {self.min_lr_ratio}")
         if self.warmup_steps_proportion < 0.0 or self.warmup_steps_proportion > 1.0:
             raise ValueError(f"Invalid warmup_steps_proportion: {self.warmup_steps_proportion}")
-        if self.use_hybrid_engine and self.zero_stage != 3:
-            raise ValueError("Hybrid engine is only supported when zero stage=3.")
 
 
 @dataclasses.dataclass
-class ModelConfig:
+class ModelTrainEvalConfig:
     """Model configuration.
 
     We use customized model class, i.e., impl.nn.model.flash_mqat, instead of HuggingFace's.
@@ -128,6 +224,7 @@ class ModelConfig:
         enable_bf16 (bool): Whether to use bf16. Mutual exclusive with fp16.
         offload (bool): Whether to offload model to CPU.
         parallel (ParallelismConfig): Parallelism configuration.
+        zero_stage (int): Stage of DeepSpeed ZeRO optimization. Should be one of 0, 1, 2, 3.
         optimizer (OptimizerConfig): Optimizer configuration.
         enable_async_p2p (bool): Whether to use async p2p, only effective when using pipeline parallelism.
     """
@@ -145,7 +242,11 @@ class ModelConfig:
     enable_bf16: bool = False
     offload: bool = False
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
-    optimizer: OptimizerConfig = dataclasses.field(default_factory=OptimizerConfig)
+    zero_stage: int = dataclasses.field(
+        metadata={"choices": [0, 1, 2, 3]},
+        default=2,
+    )
+    optimizer: Optional[OptimizerConfig] = dataclasses.field(default_factory=OptimizerConfig)
     enable_async_p2p: bool = False
 
     def __post_init__(self):
@@ -156,10 +257,14 @@ class ModelConfig:
             raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
         if self.parallel.pipeline_parallel_size > 1 and self.lora is not None:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
-        if self.offload and not self.optimizer.zero_stage != 3:
+        if self.offload and self.zero_stage != 3:
             raise ValueError("offload model is only supported when zero stage=3.")
-        if self.parallel.pipeline_parallel_size > 1 and self.optimizer.zero_stage > 1:
-            raise ValueError("zero stage should be at most 1 when pipeline parallelism is used.")
+        if self.optimizer is not None and self.optimizer.offload and self.zero_stage != 3:
+            raise ValueError("offload optimizer is only supported when zero stage=3.")
+        if self.parallel.pipeline_parallel_size > 1 and self.zero_stage > 1:
+            logger.warning(f"ZeRO stage should be at most 1 when pipeline parallelism is used. "
+                           f"Force to set it to 1. (original {self.zero_stage})")
+            self.zero_stage = 1
 
 
 def get_flash_mqat_model_config(
@@ -167,20 +272,17 @@ def get_flash_mqat_model_config(
     model_path: str,
     hf_model_type: str,
     tokenizer_path: str,
-    use_pipe: bool,
     dtype: Optional[str] = None,
     # model parallelism optimization
     sequence_parallel: bool = False,
     gradient_accumulation_fusion: bool = False,
-    # pipeline partition method
-    partition_method: Optional[str] = "parameters_balanced",
     # LoRA config
     lora: Optional[LoRAConfig] = None,
     is_sft_lora: bool = False,
     sft_lora_path: Optional[str] = None,
     is_rew_lora: bool = False,
     rew_lora_path: Optional[str] = None,
-):
+) -> Model:
     """Make a configuration to build model.
 
     Possible values of `from_type`:
@@ -194,24 +296,22 @@ def get_flash_mqat_model_config(
     """
     if gradient_accumulation_fusion:
         raise RuntimeError("gradient_accumulation_fusion is not supported yet")
-    if (lora is not None or is_sft_lora or is_rew_lora) and use_pipe:
-        raise NotImplementedError("LORA is not supported in pipeline model")
 
-    try:
+    if os.path.exists(os.path.join(model_path, "flash_mqat_config.json")):
+        # This is a saved model from a previous run
         with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
             original_is_critic = json.load(f)["is_critic"]
-    except FileNotFoundError:
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model path {model_path} does not exist")
-        original_is_critic = False
+        # correct from_type if necessary
+        if from_type == "hf_as_critic":
+            from_type = "self" if original_is_critic else "actor_as_critic"
+        if from_type == "hf_as_actor":
+            from_type = "self"
+    else:
+        # This is a checkpoint from HuggingFace.
         if from_type == "actor_as_critic":
             from_type = "hf_as_critic"
-
-    if use_pipe:
-        pipe_init_from_scratch = from_type == "random_actor" or from_type == "random_critic"
-        pipe_init_critic_from_actor = from_type == "actor_as_critic" or from_type == "hf_as_critic"
-        is_critic = original_is_critic or pipe_init_critic_from_actor or from_type == "random_critic"
-        from_type = "empty_critic" if is_critic else "empty_actor"
+        if from_type == "self":
+            from_type = "hf_as_actor"
 
     model = Model(
         "flash_mqat",
@@ -268,17 +368,5 @@ def get_flash_mqat_model_config(
                     additional_module_names_to_opt=["v_head"],
                 ),
             ),
-        ]
-    if use_pipe:
-        model.wrappers += [
-            ModelWrapper(
-                "pipe_flash_mqat",
-                args=dict(
-                    model_path=model_path,
-                    partition_method=partition_method,
-                    init_from_scratch=pipe_init_from_scratch,
-                    init_critic_from_actor=pipe_init_critic_from_actor,
-                ),
-            )
         ]
     return model

@@ -1,5 +1,6 @@
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 import dataclasses
+import gc
 import queue
 
 import torch
@@ -9,10 +10,11 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig, FlashMQATModel
+from api.config.config_flash_model import FlashMQATConfig
 from impl.model.utils.data import PipeCacheData, PipeTransferData
 from impl.model.utils.functional import mask_eos_token
 from impl.model.utils.logits_warper import top_k_top_p_logits
+# import impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
 import base.constants
 import base.logging as logging
 
@@ -20,7 +22,9 @@ try:
     from flash_attn.bert_padding import index_first_axis, unpad_input
 except ModuleNotFoundError:
     pass
-import base.logging as logging
+
+if TYPE_CHECKING:
+    from .flash_mqat_api import FlashMQATModel
 
 logger = logging.getLogger("FlashMQAT Generation")
 
@@ -66,6 +70,7 @@ def genstep(
     """
     if base.constants.model_parallel_world_size() > 1:
         from impl.model.parallelism.model_parallel.mappings import gather_from_tensor_model_parallel_region
+
         next_token_logits = gather_from_tensor_model_parallel_region(next_token_logits)
 
     unfinished_sequences = unfinished_sequences.bool()
@@ -101,10 +106,12 @@ def genstep(
         if base.constants.model_parallel_rank() > 0:
             logprob[:] = 0
             next_tokens[:] = 0
-        handle = torch.distributed.all_reduce(logprob,
-                                              torch.distributed.ReduceOp.SUM,
-                                              async_op=True,
-                                              group=base.constants.model_parallel_group())
+        handle = torch.distributed.all_reduce(
+            logprob,
+            torch.distributed.ReduceOp.SUM,
+            async_op=True,
+            group=base.constants.model_parallel_group(),
+        )
         torch.distributed.all_reduce(next_tokens,
                                      torch.distributed.ReduceOp.SUM,
                                      group=base.constants.model_parallel_group())
@@ -134,9 +141,74 @@ def genstep(
     return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
 
 
+# _DECODING_CUDA_GRAPH: torch.cuda.CUDAGraph = None
+# _DECODING_CUDA_GRAPH_BS: int = None
+# _DECODING_CUDA_GRAPH_SEQLEN: int = None
+# _DECODING_CUDA_GRAPH_INPUT_BUFFER: Dict[str, torch.Tensor] = None
+# _DECODING_CUDA_GRAPH_OUTPUT_BUFFER: Dict[str, torch.Tensor] = None
+
+# @torch.no_grad()
+# def get_decoding_cuda_graph(
+#     model: "FlashMQATModel",
+#     bs: int,
+#     k_caches: List[torch.Tensor],
+#     v_caches: List[torch.Tensor],
+#     cache_seqlens: torch.Tensor,
+#     force_recapture: bool = False,
+# ) -> Tuple[torch.cuda.CUDAGraph, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+#     global _DECODING_CUDA_GRAPH
+#     global _DECODING_CUDA_GRAPH_BS
+#     global _DECODING_CUDA_GRAPH_INPUT_BUFFER
+#     global _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
+#     global _DECODING_CUDA_GRAPH_SEQLEN
+#     if k_caches[0] is None:
+#         # In case the first layer is the embedding layer, which does not have kv cache.
+#         seqlen = k_caches[1].shape[1]
+#     else:
+#         seqlen = k_caches[0].shape[1]
+#     if not force_recapture and _DECODING_CUDA_GRAPH is not None:
+#         assert _DECODING_CUDA_GRAPH_BS >= bs
+#         assert _DECODING_CUDA_GRAPH_SEQLEN >= seqlen
+#         return _DECODING_CUDA_GRAPH, _DECODING_CUDA_GRAPH_INPUT_BUFFER, _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
+
+#     input_buffers = dict(
+#         input_ids=torch.ones(bs, 1, dtype=torch.long, device=model.device),
+#         position_ids=cache_seqlens.clone()[:, None],
+#         k_caches=k_caches,
+#         v_caches=v_caches,
+#         # NOTE: here cache_seqlens should be the real cache_seqlens, otherwise k/v cache will be changed in-place during capturing
+#         cache_seqlens=cache_seqlens.clone(),
+#         max_seqlen=None,
+#         cu_seqlens=None,
+#         hidden_states=None,
+#     )
+#     assert custom_all_reduce.is_initialized()
+#     with custom_all_reduce.capture():
+#         torch.cuda.synchronize()
+#         # Build a CUDAGraph for decoding inference.
+#         model._forward(**input_buffers)
+#         torch.cuda.synchronize()
+
+#         graph = torch.cuda.CUDAGraph()
+#         with torch.cuda.graph(graph):
+#             output = model._forward(**input_buffers)
+#         torch.cuda.synchronize()
+
+#     output_buffers = dict(logits=output)
+#     gc.collect()
+#     torch.cuda.empty_cache()
+
+#     _DECODING_CUDA_GRAPH = graph
+#     _DECODING_CUDA_GRAPH_INPUT_BUFFER = input_buffers
+#     _DECODING_CUDA_GRAPH_OUTPUT_BUFFER = output_buffers
+#     _DECODING_CUDA_GRAPH_BS = bs
+#     _DECODING_CUDA_GRAPH_SEQLEN = seqlen
+#     return graph, input_buffers, output_buffers
+
+
 @torch.no_grad()
 def generate(
-    model: FlashMQATModel,
+    model: "FlashMQATModel",
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: Optional[torch.Tensor] = None,
     attention_mask: Optional[torch.Tensor] = None,
@@ -203,7 +275,8 @@ def generate(
         assert packed_input_ids is not None
         assert cu_seqlens is not None
         assert gconfig.num_samples == 1, "packed_input_ids input is not supported for num_samples > 1"
-        assert k_caches is None and v_caches is None, "Continuing generation with packed_input_ids is not supported."
+        assert (k_caches is None
+                and v_caches is None), "Continuing generation with packed_input_ids is not supported."
         bs = cu_seqlens.shape[0] - 1
 
     device = torch.cuda.current_device()
@@ -226,7 +299,7 @@ def generate(
         if input_ids is not None:
             packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
         else:
-            max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
+            max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True)
@@ -234,27 +307,47 @@ def generate(
         ys = [PipeCacheData(input_ids=packed_input_ids)
               ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
         # Model forward will set k/v cache in PipeCacheData.
-        prompt_logits = model(x, ys).pp_output
+        with model.gradient_checkpointing_disable():
+            prompt_logits = model(x, ys)[0].pp_output
         logits = prompt_logits[cu_seqlens[1:] - 1]
         cache_seqlens = input_lens.clone().to(dtype=torch.int32)
-        layer_indices = range(len(ys))
-        for y, layer_idx in zip(ys[1:-1], layer_indices[1:-1]):
+        for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
-            kvcache_seqlen = max(max_seqlen + gconfig.max_new_tokens,
-                                 mconfig.hidden_dim // mconfig.head_dim + 10)
             # fix of a flash attention bug
+            kvcache_seqlen = max(
+                base.constants.dataset_max_seqlen() + gconfig.max_new_tokens,
+                mconfig.hidden_dim // mconfig.head_dim + 10,
+            )
+            # TODO: since pytorch all-reduce has bug during capturing and vllm all-reduce does not support >8 GPUs,
+            # we defer the implementation of CUDAGraph generation in the future
+
+            # global _DECODING_CUDA_GRAPH
+            # if _DECODING_CUDA_GRAPH is not None:
+            #     global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
+            #     global _DECODING_CUDA_GRAPH_INPUT_BUFFER
+            #     if not (_DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= kvcache_seqlen):
+            #         raise RuntimeError(
+            #             f"CUDAGraph batch size {_DECODING_CUDA_GRAPH_BS} or seqlen {_DECODING_CUDA_GRAPH_SEQLEN} "
+            #             f"is smaller than the data batch size {bs} or seqlen {kvcache_seqlen}. "
+            #             "Have you correctly set the `max_seqlen` constant and set a `min_n_seqs_per_dp` in RPC config?"
+            #         )
+            #     k_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["k_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
+            #     v_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["v_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
+            # else:
             k_cache = base.constants.get_global_memory_buffer().get_tensor(
                 tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
                 dtype=y.k_cache.dtype,
                 name=f"kv_cache_{layer_idx}_k",
-                force_zero=True)
+                force_zero=True,
+            )
             v_cache = base.constants.get_global_memory_buffer().get_tensor(
                 tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
                 dtype=y.v_cache.dtype,
                 name=f"kv_cache_{layer_idx}_v",
-                force_zero=True)
-            indices = torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
-                                   dtype=torch.long)[None, :] < input_lens[:, None]
+                force_zero=True,
+            )
+            indices = (torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
+                                    dtype=torch.long)[None, :] < input_lens[:, None])
             k_cache[indices] = y.k_cache
             v_cache[indices] = y.v_cache
             y.k_cache = k_cache
@@ -288,21 +381,40 @@ def generate(
         ] + [PipeCacheData()])
         next_tokens = input_ids[:, -1]
 
-    # The main loop.
-    while not terminate:
-        # the next round of inference
-        ys[0].input_ids = next_tokens.unsqueeze(-1)  # [bs, 1], seqlen=1
-        ys[0].position_ids = None
-        # K/v cache will be changed in-place with flash attention.
-        logits = model(x, ys).pp_output.squeeze(dim=1)
-        cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
+    # graph, input_buffers, output_buffers = get_decoding_cuda_graph(
+    #     model,
+    #     bs,
+    #     [y.k_cache for y in ys],
+    #     [y.v_cache for y in ys],
+    #     cache_seqlens,
+    #     force_recapture=k_caches is not None,  # FIXME: this is not the usual use case
+    # )
 
-        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
-        gen_token_ph.append(next_tokens)
-        gen_logprob_ph.append(logprob)
-        gen_logits_mask_ph.append(logits_mask)
-        generated_idx += 1
+    # The main loop.
+    with model.gradient_checkpointing_disable(), model.sequence_parallel_disable():
+        while not terminate:
+            # the next round of inference
+            # input_buffers["input_ids"][:bs].copy_(next_tokens.unsqueeze(-1), non_blocking=True)
+            # input_buffers["position_ids"][:bs].copy_(cache_seqlens.unsqueeze(-1), non_blocking=True)
+            # input_buffers["cache_seqlens"][:bs].copy_(cache_seqlens, non_blocking=True)
+            # # # K/v cache will be changed in-place with flash attention.
+            # graph.replay()
+            # logits = output_buffers["logits"][:bs].squeeze(1)
+            # cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
+
+            # the next round of inference
+            ys[0].input_ids = next_tokens.unsqueeze(-1)  # [bs, 1], seqlen=1
+            ys[0].position_ids = None
+            # K/v cache will be changed in-place with flash attention.
+            logits = model(x, ys)[0].pp_output.squeeze(dim=1)
+            cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
+
+            next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
+                logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+            gen_token_ph.append(next_tokens)
+            gen_logprob_ph.append(logprob)
+            gen_logits_mask_ph.append(logits_mask)
+            generated_idx += 1
 
     gen_tokens = torch.stack(gen_token_ph, -1)
     log_probs = torch.stack(gen_logprob_ph, -1)
@@ -318,7 +430,7 @@ def generate(
 
 @torch.no_grad()
 def vanilla_packed_generate(
-    model: FlashMQATModel,
+    model: "FlashMQATModel",
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
@@ -375,7 +487,7 @@ def vanilla_packed_generate(
 
 @torch.no_grad()
 def vanilla_cpu_generate(
-    model: FlashMQATModel,
+    model: "FlashMQATModel",
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
@@ -434,7 +546,7 @@ class InflightBatchingGenerator:
         self,
         inqueue: queue.Queue,
         outqueue: queue.Queue,
-        model: FlashMQATModel,
+        model: "FlashMQATModel",
         tokenizer: transformers.PreTrainedTokenizerFast,
         gconfig: GenerationConfig,
         batch_size: int,

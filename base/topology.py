@@ -1,10 +1,9 @@
-# Copyright (c) Microsoft Corporation.
-# SPDX-License-Identifier: Apache-2.0
-
-# DeepSpeed Team
+# Modified from https://github.com/microsoft/DeepSpeed/blob/aed599b4422b1cdf7397abb05a58c3726523a333/deepspeed/runtime/pipe/topology.py#
 
 from itertools import product as cartesian_product
-from typing import NamedTuple
+from typing import Dict, NamedTuple, Optional
+
+import torch.distributed
 
 import base.logging as logging
 
@@ -69,6 +68,14 @@ class ProcessTopology:
             key = self.ProcessCoord(**key)
             # for example, {ProcessCoord(row=0, col=1) : 1}
             self.mapping[key] = global_rank
+
+    def __eq__(self, other):
+        if not isinstance(other, ProcessTopology):
+            return False
+        return self.mapping == other.mapping
+
+    def __repr__(self):
+        return f"ProcessTopology(axes={self.axes}, dims={self.dims})"
 
     def get_rank(self, **coord_kwargs):
         """Return the global rank of a process via its coordinates.
@@ -272,7 +279,7 @@ class PipeModelDataParallelTopology(ProcessTopology):
         super().__init__(axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp])
 
 
-class PipelineParallelGrid:
+class ParallelGrid:
     """Implements a grid object that stores the data parallel ranks
     corresponding to each of the model parallel stages
 
@@ -297,10 +304,9 @@ class PipelineParallelGrid:
 
     def __init__(
         self,
-        topology=None,
-        process_group=None,
-        world_size=None,
-        process_group_offset=None,
+        topology: PipeModelDataParallelTopology,
+        process_group: torch.distributed.ProcessGroup,
+        rank_mapping: Optional[Dict[int, int]] = None,
     ):
         from deepspeed import comm as dist
 
@@ -309,28 +315,19 @@ class PipelineParallelGrid:
         # E.g., self.global_rank is not the global rank of the whole world including the master worker,
         # but the rank in the 3D parallelism group of this specific model.
 
+        if rank_mapping is None:
+            rank_mapping = {i: i for i in range(topology.world_size())}
+
         self.global_rank = dist.get_rank(group=process_group)
+        # NOTE: we don't use dist.get_world_size(process_group) because it will only return the true
+        # world size when this process belongs to the process group, otherwise it will return -1.
+        # self.world_size=-1 will trigger assertion errors.
+        self.world_size = topology.world_size()
 
-        if world_size is not None:
-            assert process_group_offset is not None
-            self.world_size = world_size
-        else:
-            process_group_offset = dist.get_global_rank(group=process_group, group_rank=0)
-            self.world_size = dist.get_world_size(process_group)
+        if self.global_rank == 0:
+            print("Using topology:", topology)
+        self._topo = topology
 
-        if topology is not None:
-            if self.global_rank == 0:
-                print("Using topology:", topology)
-            self._topo = topology
-        else:
-            num_pp = 1
-            num_dp = 1
-            for idx, prime in enumerate(_prime_factors(self.world_size)):
-                if idx % 2 == 0:
-                    num_pp *= prime
-                else:
-                    num_dp *= prime
-            self._topo = PipeDataParallelTopology(num_dp=num_dp, num_pp=num_pp)
         self.data_parallel_size = max(self._topo.get_dim("data"), 1)
         self.pipe_parallel_size = max(self._topo.get_dim("pipe"), 1)
         self.model_parallel_size = max(self._topo.get_dim("model"), 1)
@@ -346,7 +343,7 @@ class PipelineParallelGrid:
         self.ds_model_rank = -1
         for dp in range(self.data_parallel_size):
             ranks = sorted(self._topo.get_axis_list(axis="data", idx=dp))
-            proc_group = dist.new_group(ranks=[rank + process_group_offset for rank in ranks])
+            proc_group = dist.new_group(ranks=[rank_mapping[rank] for rank in ranks])
             if self.global_rank in ranks:
                 self.ds_model_proc_group = proc_group
                 self.ds_model_world_size = len(ranks)
@@ -365,7 +362,7 @@ class PipelineParallelGrid:
         self.dp_group = []
         self.dp_groups = self._topo.get_axis_comm_lists("data")
         for g in self.dp_groups:
-            proc_group = dist.new_group(ranks=[x + process_group_offset for x in g])
+            proc_group = dist.new_group(ranks=[rank_mapping[x] for x in g])
             if self.global_rank in g:
                 self.dp_group = g
                 self.dp_proc_group = proc_group
@@ -383,7 +380,7 @@ class PipelineParallelGrid:
             if self.global_rank == 0:
                 # print(f'RANK={self.global_rank} building pipeline group: {ranks}')
                 pass
-            proc_group = dist.new_group(ranks=[rank + process_group_offset for rank in ranks])
+            proc_group = dist.new_group(ranks=[rank_mapping[rank] for rank in ranks])
             if self.global_rank in ranks:
                 self.pp_group = ranks
                 self.pp_proc_group = proc_group
@@ -398,17 +395,10 @@ class PipelineParallelGrid:
         self.mp_group = []
         self.model_groups = self._topo.get_axis_comm_lists("model")
         for g in self.model_groups:
-            proc_group = dist.new_group(ranks=[x + process_group_offset for x in g])
+            proc_group = dist.new_group(ranks=[rank_mapping[x] for x in g])
             if self.global_rank in g:
                 self.slice_group = g
                 self.slice_proc_group = proc_group
-
-        dp_head_ranks = self._topo.filter_match(model=0, pipe=self._topo.get_dim("pipe") - 1)
-        dp_head_group = dist.new_group(ranks=[rank + process_group_offset for rank in dp_head_ranks])
-        if self.global_rank in dp_head_ranks:
-            self.dp_head_group = dp_head_group
-        else:
-            self.dp_head_group = None
 
     def get_stage_id(self):
         if self.global_rank == -1:
@@ -454,7 +444,7 @@ class PipelineParallelGrid:
         transform = me._replace(pipe=stage_id, **kwargs)._asdict()
         return self._topo.get_rank(**transform)
 
-    def topology(self):
+    def topology(self) -> PipeModelDataParallelTopology:
         return self._topo
 
     # MPU functions for DeepSpeed integration

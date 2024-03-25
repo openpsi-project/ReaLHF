@@ -16,7 +16,7 @@ import ray.util.queue as rq
 from base.cluster import spec as cluster_spec
 from system import load_worker, WORKER_TYPES
 from system.worker_base import WorkerServerStatus as Wss
-import api.config
+import api.config.config_system
 import base.logging as logging
 import base.name_resolve
 import base.names as names
@@ -70,7 +70,7 @@ class Controller:
         """
         self.__control.auto_connect()
 
-    def start(self, experiment: api.config.Experiment, ignore_worker_error=False):
+    def start(self, experiment: api.config.config_system.Experiment, ignore_worker_error=False):
         if ignore_worker_error:
             check_worker_status = ()
             remove_worker_status = (Wss.COMPLETED, Wss.ERROR, Wss.LOST, Wss.UNKNOWN)
@@ -78,7 +78,7 @@ class Controller:
             check_worker_status = (Wss.ERROR, Wss.LOST, Wss.UNKNOWN)
             remove_worker_status = (Wss.COMPLETED,)
 
-        scheduling: api.config.ExperimentScheduling = experiment.scheduling_setup()
+        scheduling: api.config.config_system.ExperimentScheduling = experiment.scheduling_setup()
         setup = experiment.initial_setup()
         setup.set_worker_information(experiment_name=self.experiment_name, trial_name=self.trial_name)
 
@@ -252,7 +252,7 @@ class RayController:
 
         self.__local_mode = local_mode
 
-    def _launch_workers(self, workers_configs: List[Tuple[str, List, api.config.TasksGroup]]):
+    def _launch_workers(self, workers_configs: List[Tuple[str, List, api.config.config_system.TasksGroup]]):
         # Launch remote workers.
         logger.info("Launching remote workers using Ray...")
         self.__workers_ref: Dict[str, ray.ObjectRef] = {}
@@ -260,7 +260,7 @@ class RayController:
         self.__workers_reply_comm: Dict[str, rq.Queue] = dict()
         for worker_type, config, schedule in workers_configs:
             count = len(config)
-            all_schedules: List[api.config.TasksGroup] = []
+            all_schedules: List[api.config.config_system.TasksGroup] = []
             if isinstance(schedule, List):
                 for s in schedule:
                     for _ in range(s.count):
@@ -300,12 +300,12 @@ class RayController:
         self.__base_controller = Controller(self.__experiment_name, self.__trial_name, panel)
         logger.info("All Ray workers are lauched.")
 
-    def start(self, experiment: api.config.Experiment, ignore_worker_error=False):
-        scheduling: api.config.ExperimentScheduling = experiment.scheduling_setup()
+    def start(self, experiment: api.config.config_system.Experiment, ignore_worker_error=False):
+        scheduling: api.config.config_system.ExperimentScheduling = experiment.scheduling_setup()
         setup = experiment.initial_setup()
         setup.set_worker_information(experiment_name=self.__experiment_name, trial_name=self.__trial_name)
         workers_configs = [(k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES]
-        workers_configs: List[Tuple[str, List, api.config.TasksGroup]]
+        workers_configs: List[Tuple[str, List, api.config.config_system.TasksGroup]]
 
         if self.__local_mode:
             ray.init()

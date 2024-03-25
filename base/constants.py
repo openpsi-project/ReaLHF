@@ -1,9 +1,44 @@
 # log format constants
-from typing import Any, Dict
+from typing import *
+import contextlib
 import copy
 import getpass
 
+import numpy as np
+
+from api.config.config_base import ModelName
 from base.cluster import spec as cluster_spec
+
+if TYPE_CHECKING:
+    from api.config.config_system import ModelShardID
+    from base.topology import ParallelGrid, PipeModelDataParallelTopology
+
+
+class GlobalMemoryBuffer:
+    """Global buffer to avoid dynamic memory allocations.
+    Caller should ensure that buffers of the same name
+    are not used concurrently."""
+
+    def __init__(self):
+        self.buffer = {}
+
+    def get_tensor(self, tensor_shape, dtype, name, force_zero: bool = False):
+        import torch
+
+        required_len = int(np.prod(tensor_shape))
+        if self.buffer.get((name, dtype), None) is None:
+            self.buffer[(name, dtype)] = torch.empty(required_len,
+                                                     dtype=dtype,
+                                                     device=torch.cuda.current_device(),
+                                                     requires_grad=False)
+        elif self.buffer[(name, dtype)].numel() < required_len:
+            self.buffer[(name, dtype)] = torch.nn.functional.pad(
+                self.buffer[(name, dtype)], (0, required_len - self.buffer[(name, dtype)].numel()), value=0)
+        res = self.buffer[(name, dtype)][0:required_len].view(*tensor_shape)
+        if force_zero:
+            res.zero_()
+        return res
+
 
 # constants in experiment instance scope
 MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
@@ -18,14 +53,96 @@ TORCH_EXTENSIONS_DIR = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torc
 
 QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/quickstart.pkl"
 
+# _model_name will be changed in the model_scope context manager
+_model_name: ModelName = None
+
+# constants in worker/process scope
 _experiment_name = None
 _trial_name = None
+
+_grids: Dict[ModelName, "ParallelGrid"] = {}
+_pgroups: Dict[ModelName,
+               Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
+_rank_mapping: Dict[ModelName, Dict["ModelShardID", int]] = {}
+_global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
+_max_seqlen: int = None
+
+# used only in scripts and tests
+_fake_mp_world_size = None
+_fake_mp_rank = None
+
+# TODO: As in Megatron, we can set NCCL group options. Is it necessary?
+
+
+@contextlib.contextmanager
+def model_scope(model_name: ModelName):
+    global _model_name
+    assert _model_name is None
+    _model_name = model_name
+    yield
+    assert _model_name == model_name
+    _model_name = None
+
+
+@contextlib.contextmanager
+def model_scope_disabled():
+    global _model_name
+    assert _model_name is not None
+    t, _model_name = _model_name, None
+    yield
+    _model_name = t
+
+
+################# setter functions #################
+def set_max_seqlen(max_seqlen: int):
+    global _max_seqlen
+    _max_seqlen = max_seqlen
 
 
 def set_experiment_trial_names(expr_name: str, trial_name: str):
     global _experiment_name, _trial_name
     _experiment_name = expr_name
     _trial_name = trial_name
+
+
+def set_grid(model_name: ModelName, grid: "ParallelGrid"):
+    global _grids
+    _grids[model_name] = grid
+
+
+def set_parallelism_group(model_name: ModelName, pgroup):
+    global _pgroups
+    _pgroups[model_name] = pgroup
+
+
+def set_rank_mapping(
+    model_name: ModelName,
+    topo: "PipeModelDataParallelTopology",
+    msid2mwid: Optional[Dict["ModelShardID", int]] = None,
+):
+    global _rank_mapping
+    if msid2mwid is None:
+        _rank_mapping[model_name] = {i: i for i in range(topo.world_size())}
+    else:
+        msid2mwid = {k: v for k, v in msid2mwid.items() if k.model_name == model_name}
+        _rank_mapping[model_name] = {
+            topo.get_rank(data=s.dp_rank, model=s.mp_rank, pipe=s.pp_rank): mw_id
+            for s, mw_id in msid2mwid.items()
+        }
+
+
+################# attribute functions #################
+def dataset_max_seqlen() -> int:
+    global _max_seqlen
+    if _max_seqlen is None:
+        raise RuntimeError("Global constant `max_seqlen` is accessed before set.")
+    return _max_seqlen
+
+
+def model_name():
+    if _model_name == None:
+        raise RuntimeError("Global constant `model_name` should be accessed in the `model_scope` context.")
+    return _model_name
 
 
 def experiment_name():
@@ -40,39 +157,7 @@ def trial_name():
     return _trial_name
 
 
-# constants in worker/process scope
-
-_model_name: str = None
-_grids: Dict[str, Any] = {}  # PipelineParallelGrid, not type hint here to avoid circular import
-_pgroups: Dict[str, Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
-
-_global_memory_buffer = None  # type GlobalMemoryBuffer, not type hint here to avoid circular import
-
-# used only in scripts and tests
-_fake_mp_world_size = None
-_fake_mp_rank = None
-
-# TODO: As in Megatron, we can set NCCL group options. Is it necessary?
-
-
-def set_model_name(model_name: str):
-    global _model_name
-    assert _model_name is None, "Cannot set model_name twice."
-    from impl.model.parallelism.model_parallel.utils import GlobalMemoryBuffer
-    set_global_memory_buffer(GlobalMemoryBuffer())
-    _model_name = copy.deepcopy(model_name)
-
-
-def model_name():
-    return _model_name
-
-
-def set_grid(model_name: str, grid):
-    global _grids
-    _grids[model_name] = grid
-
-
-def grid():
+def grid() -> "ParallelGrid":
     if _model_name is None:
         raise RuntimeError("Global constant `model_name` is accessed before set.")
     if _grids.get(_model_name, None) is None:
@@ -80,15 +165,10 @@ def grid():
     return _grids[_model_name]
 
 
-def grid_of_model(model_name: str):
+def grid_of_model(model_name: str) -> "ParallelGrid":
     if _grids.get(model_name, None) is None:
         raise RuntimeError(f"Grid for model {model_name} is not set.")
     return _grids[model_name]
-
-
-def set_parallelism_group(model_name: str, pgroup):
-    global _pgroups
-    _pgroups[model_name] = pgroup
 
 
 def parallelism_group():
@@ -114,11 +194,18 @@ def parallelism_rank() -> int:
     return dist.get_rank(group=parallelism_group())
 
 
-def process_group_offset() -> int:
-    """Return the offset of the model's parallelism group w.r.t. the global process group (all models + master)."""
-    import torch.distributed as dist
+def to_global_pg_rank(local_rank: int) -> int:
+    global _rank_mapping
+    if _rank_mapping is None or model_name() not in _rank_mapping:
+        raise RuntimeError("Rank mapping is not set.")
+    return _rank_mapping[model_name()][local_rank]
 
-    return dist.get_global_rank(group=parallelism_group(), group_rank=0)
+
+def rank_mapping_of_model(model_name: str) -> Dict["ModelShardID", int]:
+    global _rank_mapping
+    if _rank_mapping is None or _rank_mapping.get(model_name, None) is None:
+        raise RuntimeError(f"Rank mapping for model {model_name} is not set.")
+    return _rank_mapping[model_name]
 
 
 def pipe_parallel_rank() -> int:
@@ -187,12 +274,6 @@ def set_fake_grid(model_name, rank, topo):
 
     global _grids
     _grids[model_name] = FakeGrid(rank=rank, topo=topo)
-
-
-def set_global_memory_buffer(buffer):
-    global _global_memory_buffer
-    assert _global_memory_buffer is None, "cannot set global memory buffer twice"
-    _global_memory_buffer = buffer
 
 
 def get_global_memory_buffer():

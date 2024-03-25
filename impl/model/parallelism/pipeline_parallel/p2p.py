@@ -11,10 +11,7 @@ from packaging.version import Version
 import torch
 import torch.distributed
 
-from base.constants import process_group_offset
-
-_groups = None
-_grid = None
+import base.constants
 
 _async = []
 
@@ -46,61 +43,64 @@ def can_send_recv() -> bool:
     return torch_version >= sendrecv_min
 
 
+assert can_send_recv()
+
 # initializes adjacent process groups
 # run this only after deepspeed.init_distributed() has been called
-def init_process_groups(grid):
-    if grid.pipe_parallel_size <= 1:
-        return
-    global _groups, _grid
-    _grid = grid
+# def init_process_groups(grid):
+#     if grid.pipe_parallel_size <= 1:
+#         return
+#     global _groups, _grid
+#     _grid = grid
 
-    assert _grid.pipe_parallel_size > 1, "There is no pipeline parallelism"
+#     assert base.constants.grid().pipe_parallel_size > 1, "There is no pipeline parallelism"
 
-    if not can_send_recv():
-        # _groups = [dist.new_group(ranks=[g + process_group_offset() for g in group]) for group in _grid.p2p_groups]
-        raise NotImplementedError("Cannot use send/recv with torch version < 1.8."
-                                  f" PyTorch version {Version(torch.__version__)}.")
+#     if not can_send_recv():
+#         # _groups = [dist.new_group(ranks=[base.constants.to_global_pg_rank(g) for g in group]) for group in base.constants.grid().p2p_groups]
+#         raise NotImplementedError("Cannot use send/recv with torch version < 1.8."
+#                                   f" PyTorch version {Version(torch.__version__)}.")
 
 
 def _is_valid_send_recv(src_stage, dest_stage):
     first_stage = 0
-    last_stage = _grid.pipe_parallel_size - 1
-    assert (abs(src_stage - dest_stage) == 1 or (src_stage == first_stage and dest_stage == last_stage)
-            or (src_stage == last_stage and dest_stage == first_stage)
-            ), "Functionality currently limited to send and receive between adjacent ranks only"
+    last_stage = base.constants.grid().pipe_parallel_size - 1
+    assert (
+        abs(src_stage - dest_stage) == 1 or (src_stage == first_stage and dest_stage == last_stage)
+        or (src_stage == last_stage and dest_stage == first_stage)
+    ), f"Functionality currently limited to send and receive between adjacent ranks only (src={src_stage}, dst={dest_stage})"
 
 
 def send(tensor, dest_stage, async_op=False):
     # NOTE: The input is the stage id rather than the global rank
-    global _groups
+    # global _groups
     # assert async_op == False, "Doesn't support async_op true"
-    src_stage = _grid.get_stage_id()
+    src_stage = base.constants.grid().get_stage_id()
     _is_valid_send_recv(src_stage, dest_stage)
 
-    dest_rank = _grid.stage_to_global(stage_id=dest_stage)
-    if can_send_recv():
-        send_method = torch.distributed.isend if async_op else dist.send
-        return send_method(tensor, dest_rank + process_group_offset())
-    else:
-        group = _get_send_recv_group(src_stage, dest_stage)
-        src_rank = _grid.stage_to_global(stage_id=src_stage)
-        return dist.broadcast(tensor, src_rank + process_group_offset(), group=group, async_op=async_op)
+    dest_rank = base.constants.grid().stage_to_global(stage_id=dest_stage)
+    # if can_send_recv():
+    send_method = torch.distributed.isend if async_op else dist.send
+    return send_method(tensor, base.constants.to_global_pg_rank(dest_rank))
+    # else:
+    #     group = _get_send_recv_group(src_stage, dest_stage)
+    #     src_rank = base.constants.grid().stage_to_global(stage_id=src_stage)
+    #     return dist.broadcast(tensor, base.constants.to_global_pg_rank(src_rank), group=group, async_op=async_op)
 
 
 def recv(tensor, src_stage, async_op=False):
     # NOTE: The input is the stage id rather than the global rank
-    global _groups
+    # global _groups
     # assert async_op == False, "Doesn't support async_op true"
-    dest_stage = _grid.get_stage_id()
+    dest_stage = base.constants.grid().get_stage_id()
     _is_valid_send_recv(src_stage, dest_stage)
 
-    src_rank = _grid.stage_to_global(stage_id=src_stage)
-    if can_send_recv():
-        recv_method = torch.distributed.irecv if async_op else dist.recv
-        return recv_method(tensor, src_rank + process_group_offset())
-    else:
-        group = _get_send_recv_group(src_stage, dest_stage)
-        return dist.broadcast(tensor, src_rank + process_group_offset(), group=group, async_op=async_op)
+    src_rank = base.constants.grid().stage_to_global(stage_id=src_stage)
+    # if can_send_recv():
+    recv_method = torch.distributed.irecv if async_op else dist.recv
+    return recv_method(tensor, base.constants.to_global_pg_rank(src_rank))
+    # else:
+    #     group = _get_send_recv_group(src_stage, dest_stage)
+    #     return dist.broadcast(tensor, base.constants.to_global_pg_rank(src_rank), group=group, async_op=async_op)
 
 
 def wait():
@@ -187,28 +187,28 @@ def recv_obj(sender: int) -> typing.Any:
     raise RuntimeError("commented")
 
 
-def _get_send_recv_group(src_stage, dest_stage):
-    """the group id is always the smaller rank unless its a wrap around"""
+# def _get_send_recv_group(src_stage, dest_stage):
+#     """the group id is always the smaller rank unless its a wrap around"""
 
-    stage_id = None
+#     stage_id = None
 
-    first_stage = 0
-    last_stage = _grid.pipe_parallel_size - 1
+#     first_stage = 0
+#     last_stage = base.constants.grid().pipe_parallel_size - 1
 
-    if (src_stage == first_stage and dest_stage == last_stage
-            or dest_stage == first_stage and src_stage == last_stage):
-        stage_id = last_stage
-    elif src_stage > dest_stage:
-        stage_id = dest_stage
-    else:
-        stage_id = src_stage
-    """group_id corresponds to group of [group_id, group_id+1]
-     unless group_id is the rank of the last stage
-     in which case group_id corresponds to group[group_id-num_stages+1, group_id]
-     """
-    group_id = _grid.stage_to_global(stage_id=stage_id)
+#     if (src_stage == first_stage and dest_stage == last_stage
+#             or dest_stage == first_stage and src_stage == last_stage):
+#         stage_id = last_stage
+#     elif src_stage > dest_stage:
+#         stage_id = dest_stage
+#     else:
+#         stage_id = src_stage
+#     """group_id corresponds to group of [group_id, group_id+1]
+#      unless group_id is the rank of the last stage
+#      in which case group_id corresponds to group[group_id-num_stages+1, group_id]
+#      """
+#     group_id = base.constants.grid().stage_to_global(stage_id=stage_id)
 
-    return _groups[group_id]
+#     return _groups[group_id]
 
 
 def send_tensor_tuple_meta(tensor_tuple, recv_stage):

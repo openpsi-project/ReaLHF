@@ -103,19 +103,20 @@ MATPLOTLIB_COLORS = [
 ]
 
 
-def summary_time_points(start_keys,
-                        end_keys,
-                        identifiers,
-                        dir_name=None,
-                        file_name=None,
-                        start_time=None,
-                        figsize=(12, 4),
-                        end_time=None,
-                        step_range=None,
-                        save_fig_path="time_points.png",
-                        draw_boundary=False):
-    """ Plot and summary time marks in logs
-    """
+def summary_time_points(
+        start_keys,
+        end_keys,
+        identifiers,
+        dir_name=None,
+        file_name=None,
+        start_time=None,
+        figsize=(12, 4),
+        end_time=None,
+        step_range=None,
+        save_fig_path="time_points.png",
+        draw_boundary=False,
+):
+    """Plot and summary time marks in logs"""
     import matplotlib.pyplot as plt
 
     assert file_name or dir_name, "dir or file name must be specified"
@@ -178,22 +179,30 @@ def summary_time_points(start_keys,
 
                 # print(f"id={identifier} start_key={start_key} left={stp%1000} width={etp-stp}")
                 # print((etp-stp)//1e6)
-                ax.barh(y=id_index,
-                        width=etp - stp,
-                        left=stp,
-                        height=0.8,
-                        color=MATPLOTLIB_COLORS[start_key_idx],
-                        label=label)
+                ax.barh(
+                    y=id_index,
+                    width=etp - stp,
+                    left=stp,
+                    height=0.8,
+                    color=MATPLOTLIB_COLORS[start_key_idx],
+                    label=label,
+                )
 
                 if draw_boundary:
-                    ax.plot([stp, stp], [id_index - 0.4, id_index + 0.4],
-                            color='black',
-                            linestyle='-',
-                            linewidth=0.5)
-                    ax.plot([etp, etp], [id_index - 0.4, id_index + 0.4],
-                            color='black',
-                            linestyle='-',
-                            linewidth=0.5)
+                    ax.plot(
+                        [stp, stp],
+                        [id_index - 0.4, id_index + 0.4],
+                        color="black",
+                        linestyle="-",
+                        linewidth=0.5,
+                    )
+                    ax.plot(
+                        [etp, etp],
+                        [id_index - 0.4, id_index + 0.4],
+                        color="black",
+                        linestyle="-",
+                        linewidth=0.5,
+                    )
 
         infos[identifier] = (time_sum, time_list)
 
@@ -301,3 +310,25 @@ def gpu_utilization_monitor(gpu_idx: int, ttl: float):
         )
         time.sleep(10)
     pynvml.nvmlShutdown()
+
+
+# Helper function to calculate FLOPs using the Megatron-LM paper's formula
+def calculate_train_flops(
+    checkpoint_activations_factor: int,
+    batch_size: int,
+    seq_length: int,
+    num_layers: int,
+    hidden_size: int,
+    vocab_size: int,
+):
+    flops_per_iteration = (24 * checkpoint_activations_factor * batch_size * seq_length * num_layers *
+                           (hidden_size**2)) * (1.0 + (seq_length / (6.0 * hidden_size)) +
+                                                (vocab_size / (16.0 * num_layers * hidden_size)))
+    return flops_per_iteration
+
+
+def caculuate_inference_gen_flops(batch_size: int, seq_length: int, num_layers: int, hidden_size: int,
+                                  vocab_size: int):
+    return (24 * batch_size * seq_length * num_layers *
+            (hidden_size**2)) * (1.0 + (seq_length / (6.0 * hidden_size)) +
+                                 (vocab_size / (16.0 * num_layers * hidden_size)))

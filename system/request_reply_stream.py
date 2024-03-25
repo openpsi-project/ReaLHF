@@ -1,7 +1,7 @@
 # Request-reply stream between model workers and the master worker.
 # The stream is composed of a pair of ZMQ sockets, one PUSH and one PULL, for asynchronous communication,
 # i.e., the model worker can buffer requests from the master and execute them in any order under the hood.
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import asyncio
 import dataclasses
 import pickle
@@ -13,8 +13,8 @@ import uuid
 import torch
 import zmq
 
-import api.config
-import api.dfg
+import api.config.config_system
+import api.config.dfg
 import base.logging as logging
 import base.name_resolve as name_resolve
 import base.namedarray as namedarray
@@ -23,7 +23,7 @@ import base.names as names
 logger = logging.getLogger("Request-Replay Stream")
 ZMQ_IO_THREADS = 8
 
-PUBSUB_BARRIER_NAME = "__{name}_pubsub_barrier__"
+PUBSUB_BARRIER_NAME = "__pubsub_barrier__"
 
 
 class NoMessage(Exception):
@@ -32,10 +32,11 @@ class NoMessage(Exception):
 
 @dataclasses.dataclass
 class Payload:
+    handler: Union[api.config.config_system.ModelShardID, str]
     handle_name: str
-    is_tensor: bool = False
 
     request_id: uuid.UUID = None
+    syn_reply_id: uuid.UUID = None
     ack_reply_id: uuid.UUID = None
 
     send_time: float = None
@@ -43,94 +44,83 @@ class Payload:
     # Non-tensor data
     data: Any = None
 
-    # Specs of tensor data. Tensors will be trasnferred with NCCL.
-    dtypes: Optional[Dict[str, str]] = None
-    buf_shapes: Optional[Dict[str, List[int]]] = None
-    actual_shapes: Optional[Dict[str, List[int]]] = None
-    buffer_indices: Optional[List[int]] = None
-    seqlens: Optional[List[int]] = None
+    # RPC hooks
+    pre_hooks: List[str] = dataclasses.field(default_factory=list)
+    pre_hook_data: List[Any] = dataclasses.field(default_factory=list)
+
+    post_hooks: List[str] = dataclasses.field(default_factory=list)
+    post_hook_data: List[Any] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         if self.request_id is None:
             self.request_id = uuid.uuid4()
+        if self.syn_reply_id is None:
+            self.syn_reply_id = uuid.uuid4()
         if self.ack_reply_id is None:
             self.ack_reply_id = uuid.uuid4()
 
 
-class RequestReplyStream:
+class NameResolvingRequstClient:
 
-    def post(self, payload: Payload) -> uuid.UUID:
-        raise NotImplementedError()
+    def __init__(
+        self,
+        experiment_name: str,
+        trial_name: str,
+        n_subscribers: int,
+        handler_routing: Dict[str | api.config.config_system.ModelShardID, int],
+    ):
 
-    def post_batch(self, payloads: List[Payload]) -> List[uuid.UUID]:
-        raise NotImplementedError()
+        self.context = zmq.Context.instance(io_threads=ZMQ_IO_THREADS)
+        host_ip = socket.gethostbyname(socket.gethostname())
 
-    def poll(self, pattern: re.Pattern | None = None, block: bool = False) -> Payload:
-        raise NotImplementedError()
+        self.send_sockets: List[zmq.Socket] = []
+        for i in range(n_subscribers):
+            s: zmq.Socket = self.context.socket(zmq.PUSH)
+            send_port = s.bind_to_random_port(f"tcp://{host_ip}")
+            s.setsockopt(zmq.LINGER, 0)
 
-    def poll_batch(self, pattern: re.Pattern | None = None, block: bool = False) -> List[Payload]:
-        raise NotImplementedError()
+            master_send_name = names.request_reply_stream(experiment_name, trial_name, f"master_send_{i}")
+            name_resolve.add(name=master_send_name, value=f"{host_ip}:{send_port}")
+            logger.info(f"Add master send address {host_ip}:{send_port} as {master_send_name}")
+            self.send_sockets.append(s)
 
-    @property
-    def context(self) -> zmq.Context:
-        return self._context
+        self.recv_socket: zmq.Socket = self.context.socket(zmq.PULL)
+        recv_port = self.recv_socket.bind_to_random_port(f"tcp://{host_ip}")
+        self.recv_socket.setsockopt(zmq.LINGER, 0)
+        self.recv_address = f"{host_ip}:{recv_port}"
 
-    @property
-    def address(self) -> str:
-        return self._send_address
+        master_recv_name = names.request_reply_stream(experiment_name, trial_name, "master_recv")
+        name_resolve.add(name=master_recv_name, value=self.recv_address)
+        logger.info(f"Add master send address {self.recv_address} as {master_recv_name}")
 
-    @property
-    def send_socket(self) -> zmq.Socket:
-        return self._send_socket
+        self._response_buffer: Dict[uuid.UUID, Payload] = {}
+        self._handler_routing = handler_routing
 
-    @property
-    def recv_socket(self) -> zmq.Socket:
-        return self._recv_socket
-
-    @property
-    def serialization_method(self) -> str:
-        return self._serialization_method
+        # master needs to wait all peers (subscribers) to connect
+        while (len(
+                name_resolve.get_subtree(
+                    names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME)))
+               < n_subscribers):
+            time.sleep(0.1)
+        logger.info(
+            f"Master discovered all {n_subscribers} "
+            f"subscribers: {name_resolve.get_subtree(names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME))}."
+        )
 
     def close(self):
-        if hasattr(self, "_recv_socket"):
-            self.recv_socket.close()
-        if hasattr(self, "_send_socket"):
-            self.send_socket.close()
-        if hasattr(self, "_context"):
-            self.context.destroy()
+        self.recv_socket.close()
+        for send_socket in self.send_sockets:
+            send_socket.close()
+        self.context.destroy()
 
     def __del__(self):
         self.close()
 
-
-class IpRequestClient(RequestReplyStream):
-
-    def __init__(self):
-        self._context = zmq.Context.instance(io_threads=ZMQ_IO_THREADS)
-
-        self._send_socket = self._context.socket(zmq.PUB)
-        host_ip = socket.gethostbyname(socket.gethostname())
-        send_port = self._send_socket.bind_to_random_port(f"tcp://{host_ip}")
-        # self._send_socket.setsockopt(zmq.LINGER, 0)
-        self._send_address = f"{host_ip}:{send_port}"
-
-        self._response_buffer: Dict[uuid.UUID, Payload] = {}
-
-    def accept(self, server_addr: str):
-        recv_socket = self.context.socket(zmq.PULL)
-        recv_socket.connect(f"tcp://{server_addr}")
-        recv_socket.setsockopt(zmq.LINGER, 0)
-        self._recv_socket = recv_socket
-
     def post(self, payload: Payload) -> uuid.UUID:
         assert payload.request_id is not None and payload.handle_name is not None
-        if payload.is_tensor:
-            assert payload.data is None
-            assert payload.dtypes is not None
-            assert payload.actual_shapes is not None
-            assert payload.buf_shapes is not None
         payload.send_time = time.monotonic()
-        self.send_socket.send(pickle.dumps(payload))
+        idx = self._handler_routing[payload.handler]
+        self.send_sockets[idx].send(pickle.dumps(payload))
         return payload.request_id
 
     def poll(self, pattern: re.Pattern | None = None, block: bool = False) -> Payload:
@@ -196,31 +186,51 @@ class IpRequestClient(RequestReplyStream):
         raise NoMessage()
 
 
-class IpReplyServer(RequestReplyStream):
+class NameResolvingReplyServer:
 
-    def __init__(self):
-        self._context = zmq.Context.instance(io_threads=ZMQ_IO_THREADS)
+    def __init__(
+        self,
+        experiment_name: str,
+        trial_name: str,
+        idx: int,
+    ):
+        self.context = zmq.Context.instance(io_threads=ZMQ_IO_THREADS)
 
-        self._send_socket = self._context.socket(zmq.PUSH)
-        host_ip = socket.gethostbyname(socket.gethostname())
-        send_port = self._send_socket.bind_to_random_port(f"tcp://{host_ip}")
-        # self._send_socket.setsockopt(zmq.LINGER, 0)
-        self._send_address = f"{host_ip}:{send_port}"
+        send_name = names.request_reply_stream(experiment_name, trial_name, "master_recv")
+        try:
+            master_recv_addr = name_resolve.wait(send_name, timeout=300)
+        except TimeoutError as e:
+            logger.error(f"Worker timeout waiting for master receive stream.")
+            raise e
 
-    def accept(self, server_addr: str):
-        recv_socket: zmq.Socket = self.context.socket(zmq.SUB)
-        recv_socket.connect(f"tcp://{server_addr}")
-        recv_socket.setsockopt(zmq.SUBSCRIBE, b"")
+        recv_name = names.request_reply_stream(experiment_name, trial_name, f"master_send_{idx}")
+        try:
+            master_send_addr = name_resolve.wait(recv_name, timeout=300)
+        except TimeoutError as e:
+            logger.error(f"Worker timeout waiting for master send stream")
+            raise e
+
+        self.accept(master_send_addr, master_recv_addr)
+
+        name_resolve.add_subentry(
+            name=names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME),
+            value=socket.gethostbyname(socket.gethostname()),
+            keepalive_ttl=60,
+        )
+
+    def accept(self, server_send_addr: str, server_recv_addr: str):
+        recv_socket: zmq.Socket = self.context.socket(zmq.PULL)
+        recv_socket.connect(f"tcp://{server_send_addr}")
         recv_socket.setsockopt(zmq.LINGER, 0)
-        self._recv_socket = recv_socket
+        self.recv_socket = recv_socket
+
+        send_socket: zmq.Socket = self.context.socket(zmq.PUSH)
+        send_socket.connect(f"tcp://{server_recv_addr}")
+        send_socket.setsockopt(zmq.LINGER, 0)
+        self.send_socket = send_socket
 
     def post(self, payload: Payload) -> uuid.UUID:
         assert payload.request_id is not None and payload.handle_name is not None
-        if payload.is_tensor:
-            assert payload.data is None
-            assert payload.dtypes is not None
-            assert payload.actual_shapes is not None
-            assert payload.buf_shapes is not None
         payload.send_time = time.monotonic()
         self.send_socket.send(pickle.dumps(payload))
         return payload.request_id
@@ -235,102 +245,34 @@ class IpReplyServer(RequestReplyStream):
         # logger.debug(f"Payload transfer time: {time.monotonic() - payload.send_time:.4f}s")
         return payload
 
+    def close(self):
+        self.recv_socket.close()
+        self.send_socket.close()
+        self.context.destroy()
 
-class NameResolvingRequstClient(IpRequestClient):
-
-    def __init__(
-        self,
-        experiment_name: str,
-        trial_name: str,
-        push_stream_name: str,
-        pull_stream_name: str,
-        n_subscribers: int,
-    ):
-        super().__init__()
-        assert isinstance(push_stream_name, str), push_stream_name
-        assert isinstance(pull_stream_name, str), pull_stream_name
-
-        master_send_name = names.request_reply_stream(experiment_name, trial_name, push_stream_name)
-        name_resolve.add(name=master_send_name, value=self.address)
-
-        logger.info(f"Add master send address {self.address} as {master_send_name}")
-
-        master_recv_name = names.request_reply_stream(experiment_name, trial_name, pull_stream_name)
-        try:
-            master_recv_address = name_resolve.wait(master_recv_name, timeout=300)
-        except TimeoutError as e:
-            logger.error(f"Master timeout waiting for worker send stream {pull_stream_name}")
-            raise e
-        self.accept(master_recv_address)
-        logger.info(f"Get master receive address: {master_recv_address} from {master_recv_name}")
-
-        # master needs to wait all peers (subscribers) to connect
-        while (len(
-                name_resolve.get_subtree(
-                    names.request_reply_stream(experiment_name, trial_name,
-                                               PUBSUB_BARRIER_NAME.format(name=push_stream_name))))
-               < n_subscribers):
-            time.sleep(0.1)
-        logger.info(
-            f"Master discovered all {n_subscribers} "
-            f"subscribers: {name_resolve.get_subtree(names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME.format(name=push_stream_name)))}."
-        )
-
-
-class NameResolvingReplyServer(IpReplyServer):
-
-    def __init__(
-        self,
-        experiment_name: str,
-        trial_name: str,
-        push_stream_name: str,
-        pull_stream_name: str,
-    ):
-        super().__init__()
-
-        send_name = names.request_reply_stream(experiment_name, trial_name, push_stream_name)
-        name_resolve.add(name=send_name, value=self.address)
-
-        logger.info(f"Add worker send address {self.address} as {send_name}")
-
-        recv_name = names.request_reply_stream(experiment_name, trial_name, pull_stream_name)
-        try:
-            master_send_addr = name_resolve.wait(recv_name, timeout=300)
-        except TimeoutError as e:
-            logger.error(f"Worker timeout waiting for master send stream {pull_stream_name}")
-            raise e
-        self.accept(master_send_addr)
-        logger.info(f"Get worker receive address: {master_send_addr} from {recv_name}")
-
-        name_resolve.add_subentry(
-            name=names.request_reply_stream(experiment_name, trial_name,
-                                            PUBSUB_BARRIER_NAME.format(name=pull_stream_name)),
-            value=self.address,
-            keepalive_ttl=60,
-        )
+    def __del__(self):
+        self.close()
 
 
 def make_master_stream(
-    worker_info: api.config.WorkerInformation,
-    config: api.config.RequestReplyStream,
+    worker_info: api.config.config_system.WorkerInformation,
     n_subscribers: int,
+    handler_routing: Dict[str | api.config.config_system.ModelShardID, int],
 ) -> NameResolvingRequstClient:
     return NameResolvingRequstClient(
         experiment_name=worker_info.experiment_name,
         trial_name=worker_info.trial_name,
-        push_stream_name=config.push_stream_name,
-        pull_stream_name=config.pull_stream_name,
         n_subscribers=n_subscribers,
+        handler_routing=handler_routing,
     )
 
 
 def make_worker_stream(
-    worker_info: api.config.WorkerInformation,
-    config: api.config.RequestReplyStream,
+    worker_info: api.config.config_system.WorkerInformation,
+    idx: int,
 ) -> NameResolvingReplyServer:
     return NameResolvingReplyServer(
         experiment_name=worker_info.experiment_name,
         trial_name=worker_info.trial_name,
-        push_stream_name=config.push_stream_name,
-        pull_stream_name=config.pull_stream_name,
+        idx=idx,
     )

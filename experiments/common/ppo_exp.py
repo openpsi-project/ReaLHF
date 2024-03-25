@@ -2,113 +2,15 @@ import functools
 
 from omegaconf import MISSING
 
-from .config_dataset import PromptOnlyDatasetConfig
-from .config_model import get_flash_mqat_model_config, ModelConfig
-from api.config import *
-from api.dfg import ModelInterfaceType, ModelRPC
+from api.config.config_dataset import PromptOnlyDatasetConfig
+from api.config.config_flash_model import get_flash_mqat_model_config, ModelTrainEvalConfig
+from api.config.config_system import *
+from api.config.dfg import (LoadToDeviceHook, ModelInterface, ModelInterfaceType, ModelRPC, ModelType,
+                            OffloadHook, SyncParamHook)
 from base.topology import PipeModelDataParallelTopology
 import base.logging as logging
 
 logger = logging.getLogger("PPO exp", "colored")
-
-rollout = ModelRPC(
-    "actor",
-    ModelInterfaceType.GENERATE,
-    input_data=["packed_prompts", "prompt_cu_seqlens"],
-    output_data=[
-        "seq_no_eos_mask",
-        "packed_seq",
-        "cu_seqlens",
-        "packed_logprobs",
-        "packed_logits_mask",
-        "prompt_mask",
-    ],
-    dp_broker_type="packed",
-    min_n_seqs=256,
-    max_n_seqs=257,
-    max_concurrent_calls=4,
-)
-
-inf_reward = ModelRPC(
-    "reward",
-    ModelInterfaceType.INFERENCE,
-    input_data=["packed_seq", "cu_seqlens"],
-    input_key_remap={"packed_seq": "packed_input_ids"},
-    output_data=["scores"],
-    output_key_remap={"scores": "rewards"},
-    dp_broker_type="packed",
-    min_n_seqs=256,
-    max_concurrent_calls=1,
-)
-
-inf_ref_logits = ModelRPC(
-    "ref",
-    ModelInterfaceType.INFERENCE,
-    input_data=[
-        "packed_seq",
-        "cu_seqlens",
-        "packed_logits_mask",
-    ],
-    output_data=["logprobs"],
-    output_key_remap={"logprobs": "packed_ref_logprobs"},
-    dp_broker_type="packed",
-    min_n_seqs=256,
-    max_concurrent_calls=1,
-)
-
-inf_values = ModelRPC(
-    "critic",
-    ModelInterfaceType.INFERENCE,
-    input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
-    output_data=["scores"],
-    output_key_remap={"scores": "values"},
-    dp_broker_type="packed",
-    min_n_seqs=256,
-    max_concurrent_calls=1,
-)
-
-train_actor = ModelRPC(
-    "actor",
-    ModelInterfaceType.TRAIN_STEP,
-    input_data=[
-        "packed_seq",
-        "cu_seqlens",
-        "packed_logprobs",
-        "packed_ref_logprobs",
-        "rewards",
-        "values",
-        "prompt_mask",
-        "seq_no_eos_mask",
-        "packed_logits_mask",
-    ],
-    log_return_value=True,
-    dp_broker_type="packed",
-    min_n_seqs=256,
-    max_n_seqs=257,
-    min_n_tokens=1,
-    max_concurrent_calls=1,
-)
-
-train_critic = ModelRPC(
-    "critic",
-    ModelInterfaceType.TRAIN_STEP,
-    input_data=[
-        "packed_seq",
-        "cu_seqlens",
-        "packed_logprobs",
-        "packed_ref_logprobs",
-        "rewards",
-        "values",
-        "prompt_mask",
-        "seq_no_eos_mask",
-    ],
-    dp_broker_type="packed",
-    log_return_value=True,
-    min_n_seqs=256,
-    max_n_seqs=257,
-    min_n_tokens=1,
-    max_concurrent_calls=1,
-)
 
 
 @dataclasses.dataclass
@@ -145,11 +47,11 @@ class PPOHyperparmeters:
         use_stream_pipe_engine (bool): Whether to use stream pipe engine for actor model.
     """
 
-    max_new_tokens: int = 512
-    min_new_tokens: int = 10
+    max_new_tokens: int = 256
+    min_new_tokens: int = 256
     greedy: bool = False
-    top_p: float = 1.0
-    top_k: int = 200
+    top_p: float = 0.9
+    top_k: int = 1024
     temperature: float = 1.0
     ppo_n_minibatches: int = 4
     kl_ctl: float = 0.1
@@ -162,8 +64,8 @@ class PPOHyperparmeters:
     reward_output_bias: float = 0.0
     early_stop_imp_ratio: float = 5.0
     use_adaptive_kl_ctl: bool = False
-    adv_norm: bool = False
-    value_norm: bool = False
+    adv_norm: bool = True
+    value_norm: bool = True
     value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
@@ -186,12 +88,15 @@ class PPOConfig(Experiment):
     rew_lora_path: Optional[str] = None
     rew_head_path: Optional[str] = None
 
-    actor: ModelConfig = dataclasses.field(default_factory=ModelConfig)
-    critic: ModelConfig = dataclasses.field(default_factory=ModelConfig)
-    ref: ModelConfig = dataclasses.field(default_factory=ModelConfig)
-    rew: ModelConfig = dataclasses.field(default_factory=ModelConfig)
+    actor: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
+    critic: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
+    ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
+    rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
     ppo: PPOHyperparmeters = dataclasses.field(default_factory=PPOHyperparmeters)
+
+    actor_per_device_generate_batch_size: int = 1
+    actor_per_device_train_batch_size: int = 1
 
     def __post_init__(self):
         if self.is_sft_lora and (self.sft_lora_path is None or self.actor.type is None):
@@ -214,30 +119,26 @@ class PPOConfig(Experiment):
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
-            data_worker=TasksGroup(
-                count=1,
-                scheduling=Scheduling.data_worker_default(
-                    cpu=2,
-                    mem=10000,
-                ),
-            ),
             master_worker=TasksGroup(
                 count=1,
                 scheduling=Scheduling.master_worker_default(
-                    cpu=16,
+                    cpu=4,
                     mem=100000,
                     gpu=1,
                     gpu_type="tesla",
+                    nodelist="QH-com[13-14]",
                 ),
             ),
             model_worker=[
+                #### another strategy used for testing
                 TasksGroup(
                     count=self.n_actors,
                     scheduling=Scheduling.model_worker_default(
                         cpu=4,
                         gpu=1,
                         gpu_type="tesla",
-                        mem=50000,
+                        mem=100000,
+                        nodelist="QH-com[13-14]",
                     ),
                 ),
                 TasksGroup(
@@ -247,24 +148,7 @@ class PPOConfig(Experiment):
                         gpu=1,
                         gpu_type="tesla",
                         mem=100000,
-                    ),
-                ),
-                TasksGroup(
-                    count=self.n_rewards,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type="tesla",
-                        mem=100000,
-                    ),
-                ),
-                TasksGroup(
-                    count=self.n_refs,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type="tesla",
-                        mem=100000,
+                        nodelist="QH-com[13-14]",
                     ),
                 ),
             ],
@@ -279,15 +163,6 @@ class PPOConfig(Experiment):
                 max_length=self.dataset.max_prompt_len,
             ),
         )
-        dataloader = DataLoader("iterable_dataset_loader")
-        data_worker = [
-            DataWorker(
-                tokenizer_name_or_path=self.actor.base_model_path,
-                datasets=[dataset],
-                dataloader=dataloader,
-                seed=self.seed,
-            )
-        ]
 
         generation_kwargs = dict(
             max_new_tokens=self.ppo.max_new_tokens,
@@ -298,16 +173,14 @@ class PPOConfig(Experiment):
             temperature=self.ppo.temperature,
         )
 
-        def _make_model_config(cfg: ModelConfig, from_type: str):
+        def _make_model_config(cfg: ModelTrainEvalConfig, from_type: str):
             return get_flash_mqat_model_config(
                 from_type=from_type,
                 model_path=cfg.path,
                 hf_model_type=cfg.type,
                 tokenizer_path=cfg.base_model_path,
-                use_pipe=(cfg.parallel.pipeline_parallel_size > 1),
                 dtype="bf16" if cfg.enable_bf16 else "fp16",
                 sequence_parallel=cfg.parallel.use_sequence_parallel,
-                partition_method=cfg.parallel.partition_method,
                 lora=cfg.lora,
             )
 
@@ -318,7 +191,7 @@ class PPOConfig(Experiment):
         critic_model = _make_model_config(self.critic, critic_type)
         rw_model = _make_model_config(self.rew, critic_type)
 
-        def _make_train_backend_config(cfg: ModelConfig, use_stream_pipe_engine: bool):
+        def _make_train_backend_config(cfg: ModelTrainEvalConfig, use_stream_pipe_engine: bool):
             if cfg.parallel.pipeline_parallel_size > 1:
                 engine_type = "stream_pipe" if use_stream_pipe_engine else "pipe"
             else:
@@ -336,8 +209,8 @@ class PPOConfig(Experiment):
                     lr_scheduler_type=cfg.optimizer.lr_scheduler_type,
                     warmup_steps_proportion=cfg.optimizer.warmup_steps_proportion,
                     min_lr_ratio=cfg.optimizer.min_lr_ratio,
-                    zero_stage=(cfg.optimizer.zero_stage if cfg.parallel.pipeline_parallel_size == 1 else min(
-                        cfg.optimizer.zero_stage, 1)),
+                    zero_stage=(cfg.zero_stage if cfg.parallel.pipeline_parallel_size == 1 else min(
+                        cfg.zero_stage, 1)),
                     gradient_checkpointing=cfg.gradient_checkpointing,
                     num_pipeline_stages=cfg.parallel.pipeline_parallel_size,
                     engine_type=engine_type,
@@ -353,7 +226,7 @@ class PPOConfig(Experiment):
         actor_backend = _make_train_backend_config(self.actor, self.ppo.use_stream_pipe_engine)
         critic_backend = _make_train_backend_config(self.critic, False)
 
-        def make_inf_backend(cfg: ModelConfig):
+        def make_inf_backend(cfg: ModelTrainEvalConfig):
             return ModelBackend(
                 "ds_inference",
                 args=dict(
@@ -390,7 +263,7 @@ class PPOConfig(Experiment):
                 **copy.deepcopy(ppo_kwargs),
                 "generation_config": generation_kwargs,
                 "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
-                "force_no_logits_mask": False,
+                "force_no_logits_mask": True,
                 "adv_norm": self.ppo.adv_norm,
             },
         )
@@ -443,65 +316,188 @@ class PPOConfig(Experiment):
             num_dp=self.rew.parallel.data_parallel_size,
         )
 
-        model_worker = ([
+        # Another random strategy for testing
+        model_worker = [
             ModelWorker(
                 seed=self.seed,
-                model=actor_model,
-                backend=actor_backend,
-                interface=actor_interface,
-                model_name="actor",
-                topo=actor_topo,
-                dp_rank=actor_topo.get_coord(i).data,
-                pp_rank=actor_topo.get_coord(i).pipe,
-                mp_rank=actor_topo.get_coord(i).model,
+                shards=[
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            model_name="actor",
+                            topo=actor_topo,
+                            dp_rank=actor_topo.get_coord(i).data,
+                            pp_rank=actor_topo.get_coord(i).pipe,
+                            mp_rank=actor_topo.get_coord(i).model,
+                        ),
+                        model=actor_model,
+                        backend=actor_backend,
+                    ),
+                ],
+                tokenizer_name_or_path=self.actor.base_model_path,
+                datasets=[dataset],
+                dataloader=DataLoader("iterable_dataset_loader"),
                 cuda_cache_cleanliness=True,
             ) for i in range(self.n_actors)
         ] + [
             ModelWorker(
                 seed=self.seed,
-                model=critic_model,
-                backend=critic_backend,
-                interface=critic_interface,
-                model_name="critic",
-                topo=critic_topo,
-                dp_rank=critic_topo.get_coord(i).data,
-                pp_rank=critic_topo.get_coord(i).pipe,
-                mp_rank=critic_topo.get_coord(i).model,
+                shards=[
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            model_name="critic",
+                            topo=critic_topo,
+                            dp_rank=critic_topo.get_coord(i).data,
+                            pp_rank=critic_topo.get_coord(i).pipe,
+                            mp_rank=critic_topo.get_coord(i).model,
+                        ),
+                        model=critic_model,
+                        backend=critic_backend,
+                    ),
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            model_name="reward",
+                            topo=rw_topo,
+                            dp_rank=rw_topo.get_coord(i).data,
+                            pp_rank=rw_topo.get_coord(i).pipe,
+                            mp_rank=rw_topo.get_coord(i).model,
+                        ),
+                        model=rw_model,
+                        backend=rw_backend,
+                    ),
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            model_name="ref",
+                            topo=ref_topo,
+                            dp_rank=ref_topo.get_coord(i).data,
+                            pp_rank=ref_topo.get_coord(i).pipe,
+                            mp_rank=ref_topo.get_coord(i).model,
+                        ),
+                        model=ref_model,
+                        backend=ref_backend,
+                    ),
+                ],
                 cuda_cache_cleanliness=True,
             ) for i in range(self.n_critics)
-        ] + [
-            ModelWorker(
-                seed=self.seed,
-                model=ref_model,
-                backend=ref_backend,
-                interface=ref_interface,
-                model_name="ref",
-                dp_rank=ref_topo.get_coord(i).data,
-                pp_rank=ref_topo.get_coord(i).pipe,
-                mp_rank=ref_topo.get_coord(i).model,
-                topo=ref_topo,
-                cuda_cache_cleanliness=True,
-            ) for i in range(self.n_refs)
-        ] + [
-            ModelWorker(
-                seed=self.seed,
-                model=rw_model,
-                backend=rw_backend,
-                interface=rw_interface,
-                model_name="reward",
-                dp_rank=rw_topo.get_coord(i).data,
-                pp_rank=rw_topo.get_coord(i).pipe,
-                mp_rank=rw_topo.get_coord(i).model,
-                topo=rw_topo,
-                cuda_cache_cleanliness=True,
-            ) for i in range(self.n_rewards)
-        ])
+        ]
+
+        global_train_bs = self.actor_per_device_train_batch_size * self.n_actors
+        global_gen_bs = self.actor_per_device_generate_batch_size * self.n_actors
+
+        rollout = ModelRPC(
+            model_name="actor",
+            interface_type=ModelInterfaceType.GENERATE,
+            model_type=ModelType("llama", 7, False),
+            interface_impl=actor_interface,
+            input_data=["packed_prompts", "prompt_cu_seqlens"],
+            output_data=[
+                "seq_no_eos_mask",
+                "packed_seq",
+                "cu_seqlens",
+                "packed_logprobs",
+                "prompt_mask",
+            ],
+            balanced_dp=True,
+            # pre_hooks=[LoadToDeviceHook(), SyncParamHook(target="ref", interval=1)],  # NOTE: just for testing
+            # post_hooks=[OffloadHook()],  # NOTE: just for testing
+        )
+
+        inf_reward = ModelRPC(
+            model_name="reward",
+            interface_type=ModelInterfaceType.INFERENCE,
+            interface_impl=rw_interface,
+            model_type=ModelType("llama", 7, True),
+            input_data=["packed_seq", "cu_seqlens"],
+            input_key_remap={"packed_seq": "packed_input_ids"},
+            output_data=["scores"],
+            output_key_remap={"scores": "rewards"},
+        )
+
+        inf_ref_logits = ModelRPC(
+            model_name="ref",
+            interface_type=ModelInterfaceType.INFERENCE,
+            model_type=ModelType("llama", 7, False),
+            interface_impl=ref_interface,
+            input_data=[
+                "packed_seq",
+                "cu_seqlens",
+            ],
+            output_data=["logprobs"],
+            output_key_remap={"logprobs": "packed_ref_logprobs"},
+        )
+
+        inf_values = ModelRPC(
+            model_name="critic",
+            interface_type=ModelInterfaceType.INFERENCE,
+            interface_impl=critic_interface,
+            model_type=ModelType("llama", 7, True),
+            input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
+            output_data=["scores"],
+            output_key_remap={"scores": "values"},
+        )
+
+        train_actor = ModelRPC(
+            model_name="actor",
+            interface_type=ModelInterfaceType.TRAIN_STEP,
+            model_type=ModelType("llama", 7, False),
+            interface_impl=actor_interface,
+            input_data=[
+                "packed_seq",
+                "cu_seqlens",
+                "packed_logprobs",
+                "packed_ref_logprobs",
+                "rewards",
+                "values",
+                "prompt_mask",
+                "seq_no_eos_mask",
+            ],
+            log_return_value=True,
+            # post_hooks=[SyncParamHook(target="ref", interval=4)],  # NOTE: just for testing
+        )
+
+        train_critic = ModelRPC(
+            model_name="critic",
+            interface_type=ModelInterfaceType.TRAIN_STEP,
+            interface_impl=critic_interface,
+            model_type=ModelType("llama", 7, True),
+            input_data=[
+                "packed_seq",
+                "cu_seqlens",
+                "packed_logprobs",
+                "packed_ref_logprobs",
+                "rewards",
+                "values",
+                "prompt_mask",
+                "seq_no_eos_mask",
+            ],
+            log_return_value=True,
+        )
+
+        if self.actor.parallel.pipeline_parallel_size > 1:
+            pp_nmbs = self.actor.parallel.pipeline_parallel_size * 2
+            train_actor.min_n_seqs_per_dp = self.ppo.ppo_n_minibatches * pp_nmbs
+        else:
+            train_actor.min_n_seqs_per_dp = self.ppo.ppo_n_minibatches
+        train_actor.min_n_seqs = global_train_bs
+        train_actor.max_n_seqs = global_train_bs
+
+        train_critic.min_n_seqs = global_train_bs
+        train_critic.max_n_seqs = global_train_bs
+
+        rollout.min_n_seqs = global_gen_bs
+        rollout.max_n_seqs = global_gen_bs
+        rollout.min_n_seqs_per_dp = global_gen_bs // actor_topo.get_dim("data")
+
+        inf_ref_logits.min_n_seqs = global_gen_bs
+        inf_ref_logits.max_n_seqs = global_gen_bs
+
+        inf_reward.min_n_seqs = global_gen_bs
+        inf_reward.max_n_seqs = global_gen_bs
+
+        inf_values.min_n_seqs = global_gen_bs
+        inf_values.max_n_seqs = global_gen_bs
 
         return ExperimentConfig(
-            total_train_epochs=self.total_train_epochs,
-            benchmark_steps=getattr(self, "benchmark_steps", None),
-            save_frequency_steps=self.save_freq_steps,
+            exp_ctrl=ExperimentSaveEvalControl(total_train_epochs=self.total_train_epochs),
             model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
-            data_worker=data_worker,
             model_worker=model_worker,
         )

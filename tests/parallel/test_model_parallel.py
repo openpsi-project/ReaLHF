@@ -9,7 +9,7 @@ import torch.multiprocessing as mp
 
 from base.monitor import get_tracer
 from tests.utils import *
-import api.config as config_package
+import api.config.config_system as config_package
 
 NUM_MP = 1
 NUM_PP = 1

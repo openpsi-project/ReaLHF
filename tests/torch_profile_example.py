@@ -4,7 +4,6 @@ Bash script to run this example:
 ```bash
 #!/bin/sh
 python3 -m apps.remote reset_name_resolve -e test -f test
-FLASH_MQAT_USE_TE=1 \
 CUDA_DEVICE_MAX_CONNECTIONS=1 \
 OMP_NUM_THREADS=8 \
 MASTER_ADDR=localhost \
@@ -24,7 +23,7 @@ import torch.distributed
 import torch.profiler
 
 from base.monitor import gpu_memory_mb
-import api.config as config_package
+import api.config.config_system as config_package
 import base.constants
 import base.gpu_utils
 import base.namedarray
@@ -261,34 +260,36 @@ def main(rank: int = None, world_size: int = None):
     # cu_seqlens = torch.arange(batch_size + 1, dtype=torch.int32, device=device) * seqlen
     # prompt_mask = torch.randint(0, 2, (batch_size * seqlen,), dtype=torch.bool, device=device)
 
-    if base.constants.model_parallel_rank() == 0:
-        gpu_memory_mb("before model initialization")
-    model = make_model(device)
-    # cnt = 0
-    # params_to_mem = {}
-    # for k, m in model.module.named_parameters():
-    #     if m.is_cuda:
-    #         if m.dtype == torch.float16:
-    #             factor = 2
-    #         elif m.dtype == torch.float32:
-    #             factor = 4
-    #         else:
-    #             raise NotImplementedError(m.dtype)
-    #         cnt += m.numel() * factor
-    #         params_to_mem[k] = m.numel() * factor
-    # print(cnt / 1024**2)
-    # pretty_dict = json.dumps({k: v / 1024**2 for k, v in params_to_mem.items()}, indent=4)
-    # print(pretty_dict)
-    data = make_batch(model.tokenizer, device)
-    if USE_GRADIENT_CHECKPOINTING:
-        model.module.gradient_checkpointing_enable()
-    if base.constants.model_parallel_rank() == 0:
-        gpu_memory_mb("after model initialization")
-    backend = make_backend()
-    ft_spec = make_finetune_spec(512)
-    interface = make_interface()
+    with base.constants.model_scope(MODEL_NAME):
+        if base.constants.model_parallel_rank() == 0:
+            gpu_memory_mb("before model initialization")
 
-    model = backend.initialize(model, ft_spec)
+        model = make_model(device)
+        # cnt = 0
+        # params_to_mem = {}
+        # for k, m in model.module.named_parameters():
+        #     if m.is_cuda:
+        #         if m.dtype == torch.float16:
+        #             factor = 2
+        #         elif m.dtype == torch.float32:
+        #             factor = 4
+        #         else:
+        #             raise NotImplementedError(m.dtype)
+        #         cnt += m.numel() * factor
+        #         params_to_mem[k] = m.numel() * factor
+        # print(cnt / 1024**2)
+        # pretty_dict = json.dumps({k: v / 1024**2 for k, v in params_to_mem.items()}, indent=4)
+        # print(pretty_dict)
+        data = make_batch(model.tokenizer, device)
+        if USE_GRADIENT_CHECKPOINTING:
+            model.module.gradient_checkpointing_enable()
+        if base.constants.model_parallel_rank() == 0:
+            gpu_memory_mb("after model initialization")
+        backend = make_backend()
+        ft_spec = make_finetune_spec(512)
+        interface = make_interface()
+
+        model = backend.initialize(model, ft_spec)
 
     s = torch.profiler.schedule(skip_first=0, warmup=1, active=1, repeat=1, wait=0)
 
@@ -318,18 +319,17 @@ def main(rank: int = None, world_size: int = None):
             else:
                 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 
-                gconfig = GenerationConfig(min_new_tokens=10, max_new_tokens=10)
-                res = interface.generate(model, data, gconfig)
-            torch.cuda.synchronize()
-            if (base.constants.model_parallel_rank() == 0
-                    and base.constants.pipe_parallel_rank() == NUM_PP - 1):
-                if PROFILE_INTERFACE_TYPE == "generate":
-                    print(
-                        f"generate {res['gen_tokens'].shape[1]} tokens * batch size {res['gen_tokens'].shape[0]}, "
-                        f"time: {time.monotonic() - st}")
-                else:
-                    print(f"{PROFILE_INTERFACE_TYPE} time: {time.monotonic() - st}")
-            prof.step()
+            gconfig = GenerationConfig(min_new_tokens=10, max_new_tokens=10)
+            res = interface.generate(model, data, gconfig)
+        torch.cuda.synchronize()
+        if (base.constants.model_parallel_rank() == 0 and base.constants.pipe_parallel_rank() == NUM_PP - 1):
+            if PROFILE_INTERFACE_TYPE == "generate":
+                print(
+                    f"generate {res['gen_tokens'].shape[1]} tokens * batch size {res['gen_tokens'].shape[0]}, "
+                    f"time: {time.monotonic() - st}")
+            else:
+                print(f"{PROFILE_INTERFACE_TYPE} time: {time.monotonic() - st}")
+        prof.step()
 
 
 if __name__ == "__main__":

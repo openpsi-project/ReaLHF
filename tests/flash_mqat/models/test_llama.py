@@ -3,13 +3,18 @@ import os
 import unittest
 
 import torch
+import torch.distributed
 import transformers
 
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
-from tests.utils import *
+from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
+from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
+                                                      flash_model_head_param_count,
+                                                      flash_model_tblock_param_count, FlashMQATBlock,
+                                                      OutputHead, VocabPositionEmbedding)
+from tests.utils import init_global_constants, MODEL_NAME
 import api.huggingface
+import base.constants
 
 torch.cuda.manual_seed_all(2)
 
@@ -51,12 +56,38 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
             dtype=torch.float16, device=device)
         cls.llama.eval()
 
-        cls.hf_like_model = FlashMQATModel.from_llama(from_model=cls.llama,
-                                                      dtype=torch.float16,
-                                                      device=device)
-        cls.hf_like_model = add_helper_functions(cls.hf_like_model)
-        cls.hf_like_model.eval()
+        with base.constants.model_scope(MODEL_NAME):
+            cls.hf_like_model = FlashMQATModel.from_llama(from_model=cls.llama,
+                                                          dtype=torch.float16,
+                                                          device=device)
+            cls.hf_like_model = add_helper_functions(cls.hf_like_model)
+            cls.hf_like_model.eval()
         cls.config = cls.hf_like_model.config
+
+    def testCountLayerParams(self):
+
+        def count_nn_module_params(m):
+            return sum(p.data.numel() for p in m.parameters())
+
+        layers = self.hf_like_model.layers
+        for idx, l in enumerate(layers):
+            if isinstance(l, VocabPositionEmbedding):
+                self.assertEqual(
+                    count_nn_module_params(l),
+                    flash_model_embed_param_count(self.hf_like_model.config),
+                )
+            elif isinstance(l, FlashMQATBlock):
+                self.assertEqual(
+                    count_nn_module_params(l),
+                    flash_model_tblock_param_count(self.hf_like_model.config, idx - 1),
+                )
+            elif isinstance(l, OutputHead):
+                self.assertEqual(
+                    count_nn_module_params(l),
+                    flash_model_head_param_count(self.hf_like_model.config),
+                )
+            else:
+                raise NotImplementedError()
 
     @torch.no_grad()
     def _hf_like_forward(self, with_mask: bool, seqlen: int):
@@ -79,8 +110,9 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
     def testForward(self):
         seqlen_c = [20, 128]
         with_mask_c = [False, True]
-        for with_mask, seqlen in itertools.product(with_mask_c, seqlen_c):
-            self._hf_like_forward(with_mask, seqlen)
+        with base.constants.model_scope(MODEL_NAME):
+            for with_mask, seqlen in itertools.product(with_mask_c, seqlen_c):
+                self._hf_like_forward(with_mask, seqlen)
 
     @torch.no_grad()
     def _generate(self, max_prompt_len: int, with_mask: bool):
@@ -116,8 +148,9 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
     def testGenerate(self):
         max_prompt_len_c = [10, 32, 64]
         with_mask_c = [False, True]
-        for max_prompt_len, with_mask in itertools.product(max_prompt_len_c, with_mask_c):
-            self._generate(max_prompt_len, with_mask)
+        with base.constants.model_scope(MODEL_NAME):
+            for max_prompt_len, with_mask in itertools.product(max_prompt_len_c, with_mask_c):
+                self._generate(max_prompt_len, with_mask)
 
     @unittest.skip("skip because it is slow")
     def testDumpLoad(self):

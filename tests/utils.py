@@ -11,7 +11,7 @@ import base.names as names
 
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
-MODEL_NAME = "pipedatamodel"
+MODEL_NAME = "default"
 WORKER_TYPE = "model_worker"
 
 BARRIER = None
@@ -89,17 +89,18 @@ def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
 def init_global_constants(num_dp, num_mp, num_pp, model_name=None):
     if model_name is None:
         model_name = MODEL_NAME
-    from base.topology import PipelineParallelGrid, PipeModelDataParallelTopology
+    from base.topology import ParallelGrid, PipeModelDataParallelTopology
     topo = PipeModelDataParallelTopology(num_dp=num_dp, num_mp=num_mp, num_pp=num_pp)
     ws = num_dp * num_mp * num_pp
     import torch.distributed as dist
     wg = dist.new_group(ranks=range(ws))
     import base.constants
-    base.constants.set_model_name(MODEL_NAME)
     base.constants.set_parallelism_group(model_name=MODEL_NAME, pgroup=wg)
-    grid = PipelineParallelGrid(process_group=wg, topology=topo)
+    grid = ParallelGrid(process_group=wg, topology=topo)
     base.constants.set_grid(model_name=MODEL_NAME, grid=grid)
     base.constants.set_experiment_trial_names(EXPR_NAME, TRIAL_NAME)
+    base.constants.set_rank_mapping(model_name, topo)
+    base.constants.set_max_seqlen(1024)
 
 
 def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):

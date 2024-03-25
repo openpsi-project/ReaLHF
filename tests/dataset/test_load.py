@@ -1,10 +1,10 @@
-import api.config
+import api.config.config_system
 import api.data
 import impl.dataset
 import impl.model
 
 if __name__ == "__main__":
-    dataset_config = api.config.Dataset(
+    dataset_config = api.config.config_system.Dataset(
         "wpsf_plrw_packed",
         args=dict(
             contrastive_dim=6,
@@ -14,7 +14,7 @@ if __name__ == "__main__":
             max_length=1024,
             json_path="/data/aigc/llm/datasets/wps-formula-rw/dataset_val.jsonl",
         ))
-    dataloader_cfg = api.config.DataLoader('iterable_dataset_loader')
+    dataloader_cfg = api.config.config_system.DataLoader('iterable_dataset_loader')
     dataset = api.data.make_dataset(dataset_config,
                                     seed=1,
                                     ddp_rank=0,
