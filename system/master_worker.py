@@ -205,6 +205,10 @@ def _request_parameter_sync(
 
     model_name = from_model_name
     target = to_model_name
+    # Prioritize handlers of `from_model`, then handlers of `to_model`.
+    # As a result, if both `from_model` and `to_model` reside in a model worker,
+    # the handler in the received request will be `from_model`. Layers will also built in `from_model`.
+    # After that, we assign layers of the `from_model` to `to_model`.
     handlers = [
         config_pkg.ModelShardID.from_parallelism_rank(model_name, from_topo, j)
         for j in range(from_topo.world_size())
@@ -320,12 +324,10 @@ def _attach_payloads_with_hooks(
                     getattr(payloads[h], f"{hook_type}_hooks").append("param_sync")
                     getattr(payloads[h], f"{hook_type}_hook_data").append(ps_data)
 
-        elif isinstance(hook, (api.config.dfg.OffloadHook, api.config.dfg.LoadToDeviceHook)):
+        elif isinstance(hook, api.config.dfg.OffloadHook):
             for h in main_handlers:
-                getattr(payloads[h], f"{hook_type}_hooks").append(
-                    "offload" if isinstance(hook, api.config.dfg.OffloadHook) else "load_to_device"
-                )
-                getattr(payloads[h], f"{hook_type}_hook_data").append(None)
+                getattr(payloads[h], f"{hook_type}_hooks").append("offload")
+                getattr(payloads[h], f"{hook_type}_hook_data").append(dict(model_name=h.model_name))
         else:
             raise NotImplementedError(f"Unknown hook type: {hook}")
     return payloads, mwids

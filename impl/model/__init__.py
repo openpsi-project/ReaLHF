@@ -40,3 +40,4 @@ import impl.model.nn.flash_mqat.flash_mqat_api
 import impl.model.nn.flash_mqat.flash_mqat_base
 import impl.model.nn.flash_mqat.flash_mqat_parallel
 import impl.model.nn.lora
+import impl.model.backend.pipe_inf

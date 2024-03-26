@@ -5,7 +5,7 @@ from omegaconf import MISSING
 from api.config.config_dataset import PromptOnlyDatasetConfig
 from api.config.config_flash_model import get_flash_mqat_model_config, ModelTrainEvalConfig
 from api.config.config_system import *
-from api.config.dfg import (LoadToDeviceHook, ModelInterface, ModelInterfaceType, ModelRPC, ModelType,
+from api.config.dfg import (ModelInterface, ModelInterfaceType, ModelRPC, ModelType,
                             OffloadHook, SyncParamHook)
 from base.topology import PipeModelDataParallelTopology
 import base.logging as logging
@@ -397,7 +397,7 @@ class PPOConfig(Experiment):
                 "prompt_mask",
             ],
             balanced_dp=True,
-            # pre_hooks=[LoadToDeviceHook(), SyncParamHook(target="ref", interval=1)],  # NOTE: just for testing
+            # pre_hooks=[SyncParamHook(target="ref", interval=1)],  # NOTE: just for testing
             # post_hooks=[OffloadHook()],  # NOTE: just for testing
         )
 

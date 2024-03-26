@@ -6,10 +6,10 @@ import colorama
 import deepspeed
 import torch
 import tqdm
-
+from deepspeed import DeepSpeedEngine
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-from impl.model.utils.save_load import save_hf_or_lora_model
+from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 import api.model
 import base.logging as logging
 
@@ -56,15 +56,15 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
 
         module.eval()
 
-        if isinstance(module, DeepSpeedPipelineEngine):
-            r = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
-            if r is None:
-                return
-            scores = r.float()
-        else:
+        if isinstance(module, (DeepSpeedEngine, FlashMQATModel)):
             scores: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
                                                cu_seqlens=cu_seqlens,
                                                max_seqlen=max_seqlen).float()
+        else:
+            r = module.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
+            if r is None:
+                return
+            scores = r.float()
 
         scores = (scores.squeeze(-1) - self.output_bias) * self.output_scaling
         chosen_end_scores = scores[cu_seqlens[1:] - 1]  # [bs]

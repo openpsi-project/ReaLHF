@@ -186,7 +186,6 @@ class ModelWorker(worker_base.Worker):
 
         # log info
         self.__total_time = 0.01
-        self.__engine_poll_time = 0
 
         return r
 
@@ -237,10 +236,6 @@ class ModelWorker(worker_base.Worker):
     @property
     def _backend(self) -> api.model.ModelBackend:
         return self.__backends[base.constants.model_name()]
-
-    @property
-    def _engine(self):
-        return self.__engines[base.constants.model_name()]
 
     def __lazy_setup(self):
         # Add an additional subscript pattern for source RPCs.
@@ -336,7 +331,6 @@ class ModelWorker(worker_base.Worker):
 
         self.__backends: Dict[ModelName, api.model.ModelBackend] = dict()
         self.__unwrapped_models: Dict[ModelName, torch.nn.Module | FlashMQATModel] = dict()
-        self.__engines: Dict[str, Any] = dict()
 
         self.__backend_initialized: Dict[ModelName, bool] = dict()
         self.__profiler_launched = False
@@ -439,7 +433,7 @@ class ModelWorker(worker_base.Worker):
             else:
                 m = self.__unwrapped_models[to_model_name]
             assert isinstance(m, FlashMQATModel), type(m)
-            m = m.to_reparallelized_model(
+            new_layers, new_contiguous_param_mem = m.build_reparallelized_layers(
                 from_model_name=from_model_name,
                 to_model_name=to_model_name,
                 from_topo=from_topo,
@@ -450,13 +444,13 @@ class ModelWorker(worker_base.Worker):
             if from_model_name in self.__models:
                 self.__model_is_handle[from_model_name] = True
             if to_model_name in self.__models:
-                self.__unwrapped_models[to_model_name].layers = m.layers
+                self.__unwrapped_models[to_model_name].layers = new_layers
+                self.__unwrapped_models[to_model_name].contiguous_param = new_contiguous_param_mem
                 self.__model_is_handle[to_model_name] = False
-            # torch.cuda.synchronize()
         elif hook == "offload":
-            print("offload hook is not implemented yet")
-        elif hook == "load_to_device":
-            print("load to device hook is not implemented yet")
+            m = self.__unwrapped_models[hook_data["model_name"]]
+            assert isinstance(m, FlashMQATModel), type(m)
+            m.async_offload()
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
 
@@ -507,7 +501,6 @@ class ModelWorker(worker_base.Worker):
                 assert not self.__model_is_handle[request.handler.model_name]
                 base.constants.set_max_seqlen(data.max_seqlen)  # used by cuda graph buffer for generation
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
-                self.__engines[request.handler.model_name] = self._model.module
                 self.__backend_initialized[request.handler.model_name] = True
             elif request.handle_name == "model_config":
                 assert isinstance(self.__unwrapped_models[request.handler.model_name], FlashMQATModel)

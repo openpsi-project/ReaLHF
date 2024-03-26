@@ -70,6 +70,10 @@ class ModelBackend(abc.ABC):
         model.ft_spec = spec
         return self._initialize(model, spec)
 
+class NullBackend(ModelBackend):
+    
+    def _initialize(self, model: Model, spec: FinetuneSpec) -> Model:
+        return model
 
 class ModelInterface(abc.ABC):
 
@@ -171,3 +175,5 @@ def make_interface(cfg: api.config.dfg.ModelInterface) -> ModelInterface:
 def make_backend(cfg: api.config.config_system.ModelBackend) -> ModelBackend:
     cls_ = ALL_BACKEND_CLASSES[cfg.type_]
     return cls_(**cfg.args)
+
+register_backend("null", NullBackend)

@@ -6,12 +6,14 @@ import time
 
 import torch
 
+from deepspeed import DeepSpeedEngine
 from base.constants import data_parallel_group
 from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.backend.pipe_engine.stream_pipe_engine import StreamPipeEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
 import api.huggingface
 import api.model
@@ -178,20 +180,7 @@ class PackedActorInterface(api.model.ModelInterface):
         # logger.info(f"packed_prompts shape {packed_prompts.shape}, bs {bs}")
 
         # st = time.monotonic()
-        if isinstance(module, DeepSpeedPipelineEngine):
-            res = module.generate(
-                tokenizer=model.tokenizer,
-                packed_input_ids=packed_prompts,
-                cu_seqlens=cu_seqlens,
-                gconfig=GenerationConfig(**self.generation_config),
-                num_micro_batches=self.pipe_gen_n_mbs,
-            )
-            if res is None:
-                return None
-
-            gen_tokens, logprobs, logits_mask, *_ = res
-            # logger.info(f"gen_tokens shape {gen_tokens.shape}")
-        else:
+        if isinstance(module, (DeepSpeedEngine, FlashMQATModel)):
             # unwrap deepspeed engine here
             module = module.module
             gen_res = module.generate(
@@ -204,6 +193,19 @@ class PackedActorInterface(api.model.ModelInterface):
             gen_tokens = gen_res.sequences
             logprobs = gen_res.scores
             logits_mask = gen_res.logits_mask
+        else:
+            res = module.generate(
+                tokenizer=model.tokenizer,
+                packed_input_ids=packed_prompts,
+                cu_seqlens=cu_seqlens,
+                gconfig=GenerationConfig(**self.generation_config),
+                num_micro_batches=self.pipe_gen_n_mbs,
+            )
+            if res is None:
+                return None
+
+            gen_tokens, logprobs, logits_mask, *_ = res
+            # logger.info(f"gen_tokens shape {gen_tokens.shape}")
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
@@ -278,15 +280,15 @@ class PackedActorInterface(api.model.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        if isinstance(module, DeepSpeedPipelineEngine):
+        if isinstance(module, (DeepSpeedEngine, FlashMQATModel)):
+            res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+            logits = res
+        else:
             res = module.forward(packed_input_ids=data["packed_seq"],
                                  cu_seqlens=cu_seqlens,
                                  num_micro_batches=self.pipe_inf_n_mbs)
             if res is None:
                 return None
-            logits = res
-        else:
-            res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
             logits = res
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
@@ -567,16 +569,16 @@ class PackedCriticInterface(api.model.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        if isinstance(module, DeepSpeedPipelineEngine):
+        if isinstance(module, (DeepSpeedEngine, FlashMQATModel)):
+            scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
+                                               cu_seqlens=cu_seqlens,
+                                               max_seqlen=max_seqlen)
+        else:
             scores = module.forward(packed_input_ids=data["packed_seq"],
                                     cu_seqlens=cu_seqlens,
                                     num_micro_batches=self.pipe_inf_n_mbs)
             if scores is None:
                 return None
-        else:
-            scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen)
         scores = scores.squeeze(-1)
         return from_dict(dict(scores=scores))
 
