@@ -89,12 +89,13 @@ def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
 def init_global_constants(num_dp, num_mp, num_pp, model_name=None):
     if model_name is None:
         model_name = MODEL_NAME
+    # with base.constants.model_scope(model_name):
     from base.topology import ParallelGrid, PipeModelDataParallelTopology
+    import base.constants
     topo = PipeModelDataParallelTopology(num_dp=num_dp, num_mp=num_mp, num_pp=num_pp)
     ws = num_dp * num_mp * num_pp
     import torch.distributed as dist
     wg = dist.new_group(ranks=range(ws))
-    import base.constants
     base.constants.set_parallelism_group(model_name=MODEL_NAME, pgroup=wg)
     grid = ParallelGrid(process_group=wg, topology=topo)
     base.constants.set_grid(model_name=MODEL_NAME, grid=grid)

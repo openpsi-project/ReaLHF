@@ -3,6 +3,7 @@
 from collections import defaultdict
 from statistics import mean
 from typing import Dict, List, Optional
+import argparse
 import dataclasses
 import enum
 import getpass
@@ -13,8 +14,12 @@ from profiler.device_mesh import *
 from profiler.experiments import ProfileExperiment
 from profiler.rpc import CommStats
 
-from api.dfg import ModelInterfaceType
+from api.config.config_base import MODEL_TYPE_TO_PATH
+from api.config.dfg import ModelInterfaceType
+from experiments.autoexp.device_mapping import RPCAllocation
+from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+import api.config.config_system as config_package
 import base.cluster
 
 PROFILE_RESULT_PATH = os.path.join(
@@ -191,70 +196,32 @@ def _estimate_rpc_cost(
     return compute_cost + comm_cost
 
 
-def load_model_config(model_path):
-    config_json_path = os.path.join(model_path, "flash_mqat_config.json")
-    config_json = json.load(open(config_json_path, "r"))
-    return FlashMQATConfig(**config_json)
+def load_model_config(model_path, model_type="llama"):
+    return getattr(FlashMQATModel, f"config_from_{model_type}")(model_path=model_path)
 
 
-def estimate_rpc_cost(exp: ProfileExperiment,
-                      rpc: ModelRPC,
-                      model_config: FlashMQATConfig,
-                      parallel_strategy: ModelParallelStrategy,
+def estimate_rpc_cost(rpc: ModelRPC,
+                      rpc_alloc: RPCAllocation,
                       num_gen_tokens=256,
                       use_gradient_checkpointing=False):
     # print(f"estimating rpc cost for {rpc.name}")
-    model_type = exp.model_names_to_types[rpc.model_name]
-    layer_stats_path = os.path.join(PROFILE_RESULT_PATH, model_type)
+    model_type = rpc.model_type
+    layer_stats_path = os.path.join(PROFILE_RESULT_PATH, str(model_type))
     # comm_stats_path = os.path.join(PROFILE_RESULT_PATH, exp.device_mesh_name)
     comm_stats_path = os.path.join(PROFILE_RESULT_PATH, "default_comm")
+    model_config = load_model_config(MODEL_TYPE_TO_PATH[model_type], model_type._class)
+
     bs = rpc.min_n_seqs
     seq_len = rpc.max_n_tokens // bs
-    inst_cost = estimate_instruction_cost(layer_stats_path, comm_stats_path, model_config.n_layers,
-                                          parallel_strategy, model_config.hidden_dim, bs, seq_len)
+    ps = ModelParallelStrategy.from_config(rpc_alloc.train_eval_config.parallel)
+    inst_cost = estimate_instruction_cost(layer_stats_path, comm_stats_path, model_config.n_layers, ps,
+                                          model_config.hidden_dim, bs, seq_len)
     # print(inst_cost)
     return _estimate_rpc_cost(inst_cost,
-                              parallel_strategy,
+                              ps,
                               rpc.interface_type,
                               num_gen_tokens=num_gen_tokens,
                               use_gradient_checkpointing=use_gradient_checkpointing)
-
-
-def estimate_model_device_mapping_cost(exp: ProfileExperiment, mdm: ModelDeviceMapping) -> float:
-    assert mdm.model_device_mapping is not None
-    assert mdm.model_parallel_strategy is not None
-    # TODO: change to auto
-
-    model_configs = {
-        model_type: load_model_config(model_path)
-        for model_type, model_path in zip(exp.model_types, exp.model_paths)
-    }
-
-    layer_stats_paths = {
-        model_type: os.path.join(PROFILE_RESULT_PATH, model_type)
-        for model_type in exp.model_types
-    }
-
-    # comm_stats_path = os.path.join(PROFILE_RESULT_PATH, exp.device_mesh_name)
-    comm_stats_path = os.path.join(PROFILE_RESULT_PATH, "default_comm")
-
-    costs = {}
-    for rpc_name, rpc in mdm.model_rpc_mapping.items():
-        batch_size = rpc.min_n_seqs
-        seq_len = rpc.max_n_tokens // batch_size
-        model_type = exp.model_names_to_types[rpc.model_name]
-        inst_cost = estimate_instruction_cost(layer_stats_paths[model_type], comm_stats_path,
-                                              model_configs[model_type].n_layers,
-                                              mdm.model_parallel_strategy[rpc.name],
-                                              model_configs[model_type].hidden_dim, batch_size, seq_len)
-        if rpc.model_name == "actor":
-            print(inst_cost)
-        costs[rpc_name] = _estimate_rpc_cost(inst_cost,
-                                             mdm.model_parallel_strategy[rpc.name],
-                                             rpc.interface_type,
-                                             num_gen_tokens=256,
-                                             use_gradient_checkpointing=False)
-    return costs
 
 
 def comm_stats(exp: ProfileExperiment, if_print=False):
@@ -325,26 +292,31 @@ def estimate_function_call_memory(interface_type: ModelInterfaceType,
         return static_mem + active_mem, static_mem
 
 
-def main():
-    profiler_experiment = ProfileExperiment()
-    model_rpc_names = [rpc.name for rpc in profiler_experiment.model_rpcs]
-    model_rpc_mapping = dict(zip(model_rpc_names, profiler_experiment.model_rpcs))
-    device_mesh_name = profiler_experiment.device_mesh_name
-    model_device_mapping = {
-        rpc_name: make_device_mesh_from_name(device_mesh_name)
-        for rpc_name in model_rpc_names
-    }
-    model_parallel_strategy = {
-        rpc_name: ModelParallelStrategy(num_mp=2, num_pp=6, num_dp=4)
-        for rpc_name in model_rpc_names
-    }
-    mdm = ModelDeviceMapping(model_names=profiler_experiment.model_names,
-                             model_rpc_names=model_rpc_names,
-                             model_rpc_mapping=model_rpc_mapping,
-                             model_device_mapping=model_device_mapping,
-                             model_parallel_strategy=model_parallel_strategy)
-    print(estimate_model_device_mapping_cost(profiler_experiment, mdm))
+def main(args):
+    exp: ProfileExperiment = config_package.make_experiment(args.expr_name)
+    rpcs = exp.rpcs
+    rpc_allocations = exp.rpc_allocations
+    # device_mesh = exp.device_mesh_name
+    for rpc, rpc_alloc in zip(rpcs, rpc_allocations):
+        rpc_name = rpc.name
+        rpc_cost = estimate_rpc_cost(rpc, rpc_alloc)
+        print(f"RPC {rpc_name} cost: {rpc_cost}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run a profiling experiment.")
+    parser.add_argument(
+        "-e",
+        "--expr_name",
+        type=str,
+        default=None,
+    )
+    # parser.add_argument(
+    #     "-f",
+    #     "--trial_name",
+    #     type=str,
+    #     default=None,
+    # )
+    args = parser.parse_args()
+
+    main(args)

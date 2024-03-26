@@ -3,7 +3,7 @@ import dataclasses
 
 from profiler.device_mesh import DeviceMesh, ModelParallelStrategy
 
-from api.dfg import ModelRPC
+from api.config.dfg import ModelRPC
 
 
 class RPC:

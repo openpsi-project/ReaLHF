@@ -47,16 +47,7 @@ def compute_packed_sft_loss(
 
 class ProfileInterface(api.model.ModelInterface):
 
-    def __post_init__(self):
-        self.exec_time_stats = defaultdict(list)
-        self.api_time_stats = defaultdict(list)
-
-    def train_step(self,
-                   model: api.model.Model,
-                   data: NamedArray,
-                   parallel_spec=None,
-                   data_spec=None,
-                   if_log=False) -> Dict:
+    def train_step(self, model: api.model.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_input_ids: torch.Tensor = data['packed_input_ids']  # shape [tot_seqlen]
         cu_seqlens: torch.Tensor = data['cu_seqlens']
@@ -65,19 +56,25 @@ class ProfileInterface(api.model.ModelInterface):
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
         module.train()
-        assert isinstance(module, ProfileEngine)
 
         loss_fn_kwargs = dict(
             prompt_mask=prompt_mask,
             input_lens=cu_seqlens[1:] -
             cu_seqlens[:-1],  # this is used to partition other loss_fn_kwargs into microbatches
         )
-        loss, _ = module.train_batch(
-            packed_input_ids=packed_input_ids,
-            cu_seqlens=cu_seqlens,
-            loss_fn=compute_packed_sft_loss,
-            **loss_fn_kwargs,
-        )
+        if isinstance(module, DeepSpeedPipelineEngine):
+            loss, _ = module.train_batch(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                loss_fn=compute_packed_sft_loss,
+                num_micro_batches=2 * base.constants.pipe_parallel_world_size(),
+                **loss_fn_kwargs,
+            )
+        else:
+            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+            loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
+            module.backward(loss)
+            module.step()
 
         cur_epoch = model.version.epoch
         model.inc_version()
@@ -87,80 +84,66 @@ class ProfileInterface(api.model.ModelInterface):
         res = dict()
         if loss is not None:
             res['loss'] = float(loss)
-
-        if if_log:
-            self.exec_time_stats[("train_step", parallel_spec, data_spec)].append(module.last_exec_time_cost)
-            self.api_time_stats[("train_step", parallel_spec, data_spec)].append(module.last_full_time_cost)
         return res
 
     @torch.no_grad()
-    def inference(self,
-                  model: api.model.Model,
-                  data: NamedArray,
-                  parallel_spec=None,
-                  data_spec=None,
-                  if_log=False) -> Dict:
+    def inference(self, model: api.model.Model, data: NamedArray) -> Dict:
         device = model.device
         module = model.module
         module.eval()
-        assert isinstance(module, ProfileEngine)
+        # assert isinstance(module, ProfileEngine)
 
         data = recursive_apply(data, lambda x: x.to(device))
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
         cu_seqlens: torch.Tensor = data["cu_seqlens"]
         max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
 
-        logits = module.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
-        if if_log:
-            self.exec_time_stats[("inference", parallel_spec, data_spec)].append(module.last_exec_time_cost)
-            self.api_time_stats[("inference", parallel_spec, data_spec)].append(module.last_full_time_cost)
+        if isinstance(module, DeepSpeedPipelineEngine):
+            logits = module.forward(packed_input_ids=packed_input_ids,
+                                    cu_seqlens=cu_seqlens,
+                                    num_micro_batches=base.constants.pipe_parallel_world_size())
+        else:
+            logits = model.module(packed_input_ids=packed_input_ids,
+                                  cu_seqlens=cu_seqlens,
+                                  max_seqlen=max_seqlen)
+
         return dict(logits=logits)
 
     @torch.no_grad()
-    def generate(self,
-                 model: api.model.Model,
-                 data: NamedArray,
-                 parallel_spec=None,
-                 data_spec=None,
-                 if_log=False) -> NamedArray:
+    def generate(self, model: api.model.Model, data: NamedArray, gen_tokens: int = 256) -> NamedArray:
         module = model.module
         module.eval()
-        assert isinstance(module, ProfileEngine)
+        # assert isinstance(module, ProfileEngine)
 
         data = recursive_apply(data, lambda x: x.to(model.device))
-        gconfig = GenerationConfig(min_new_tokens=3, max_new_tokens=3)
+        gconfig = GenerationConfig(min_new_tokens=gen_tokens, max_new_tokens=gen_tokens)
 
-        res = module.generate(
-            tokenizer=model.tokenizer,
-            packed_input_ids=data['packed_input_ids'],
-            cu_seqlens=data['cu_seqlens'],
-            gconfig=gconfig,
-        )
-        if res is None:
-            return dict()
-
-        gen_tokens, logprobs, logits_mask, *_ = res
-
-        if if_log:
-            self.exec_time_stats[("generate", parallel_spec, data_spec)].append(module.last_exec_time_cost)
-            self.api_time_stats[("generate", parallel_spec, data_spec)].append(module.last_full_time_cost)
+        if isinstance(module, DeepSpeedPipelineEngine):
+            res = module.generate(
+                tokenizer=model.tokenizer,
+                packed_input_ids=data['packed_input_ids'],
+                cu_seqlens=data['cu_seqlens'],
+                gconfig=gconfig,
+            )
+            if res is None:
+                return dict()
+            gen_tokens, logprobs, logits_mask, *_ = res
+        else:
+            res = module.generate(
+                tokenizer=model.tokenizer,
+                packed_input_ids=data['packed_input_ids'],
+                cu_seqlens=data['cu_seqlens'],
+                gconfig=gconfig,
+            )
+            gen_tokens = res.sequences
+            logprobs = res.scores
+            logits_mask = res.logits_mask
 
         return dict(
             gen_tokens=gen_tokens,
             log_probs=logprobs,
             logits_mask=logits_mask,
         )
-
-    def print_stats(self):
-        print("Execution time stats:")
-        for key, values in self.exec_time_stats.items():
-            print(key, f"{sum(values) / len(values):.2f}")
-        print("API time stats:")
-        for key, values in self.api_time_stats.items():
-            print(key, f"{sum(values) / len(values):.2f}")
-
-    def dump_stats(self):
-        pass
 
 
 api.model.register_interface("profile", ProfileInterface)

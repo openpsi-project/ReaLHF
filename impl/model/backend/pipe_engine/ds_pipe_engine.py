@@ -54,6 +54,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 < 2), "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
 
         self.module: FlashMQATModel
+        # print(f"module cls name {type(self.module)}")
 
         # deepspeed enigne attributes
         self.pipeline_parallelism = True
@@ -132,7 +133,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         self._async_p2p = enable_async_p2p_communication
         self._async_instruction = enable_async_instruction and self._async_p2p
-        # self._use_fast_schedule_controller = use_fast_schedule_controller
 
         self._post_init_logging()
 
@@ -226,6 +226,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             n_seqs = input_lens_for_partition.shape[0]
         else:
             data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
+            # print(f"in _prepare_input cu_seqlens type {type(cu_seqlens)}")
             n_seqs = cu_seqlens.shape[0] - 1
         n_mbs = self.num_micro_batches
         splitted = PackedParallelDataBroker.scatter_to(data, n_mbs, min_size=n_seqs // n_mbs)
@@ -431,6 +432,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
         self._set_forward_states()
         # forward one step and return packed logits
+        # print(f"in forward cu_seqlens type {type(cu_seqlens)}")
         self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
         self._pre_forward()
         sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
@@ -820,6 +822,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         #     x.pp_output = self._gd_output_buffers["output"][:bs]
         # else:
         x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
+        # print(f"module cls name {type(self.module)}, stage {self.stage_id} output: {x.pp_output}")
 
         # logger.info(f"rank {self.global_rank} mbid {micro_batch_id} step {step_id} x.pp_output shape {x.pp_output.shape}")
         is_first_step = self.__maybe_init_kv_cache(x, ys, micro_batch_id)

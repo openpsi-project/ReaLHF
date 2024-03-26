@@ -1,7 +1,10 @@
 from typing import Dict, List, Optional
 import dataclasses
 
-from api.dfg import ModelRPC
+import numpy as np
+
+from api.config.config_flash_model import ParallelismConfig
+from api.config.dfg import ModelRPC
 
 
 @dataclasses.dataclass
@@ -45,6 +48,18 @@ class ModelParallelStrategy:
 
     def __repr__(self):
         return f"pp{self.num_pp}_mp{self.num_mp}_dp{self.num_dp}"
+
+    @classmethod
+    def from_config(cls, parallel: ParallelismConfig):
+        return cls(num_pp=parallel.pipeline_parallel_size,
+                   num_mp=parallel.model_parallel_size,
+                   num_dp=parallel.data_parallel_size)
+
+    def to_config(self):
+        return ParallelismConfig(pipeline_parallel_size=self.num_pp,
+                                 model_parallel_size=self.num_mp,
+                                 data_parallel_size=self.num_dp,
+                                 use_sequence_parallel=self.num_mp > 1)
 
 
 @dataclasses.dataclass

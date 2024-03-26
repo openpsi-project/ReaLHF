@@ -22,20 +22,20 @@ DUMP_PATH = os.path.join(HOME_PATH, "logs/profile_stats")
 
 
 class ProfileEngine(DeepSpeedPipelineEngine):
-    compute_instructions = [OptimizerStep, ForwardPass, BackwardPass]
-    profile_instructions = {
-        "fwd_gen_0": ForwardPass,
-        "fwd_gen_1": ForwardPass,
-        "fwd_inf": ForwardPass,
-        "fwd_train": ForwardPass,
-        "bwd_train": BackwardPass,
-        "reduce_grads": ReduceGrads,
-        "opt": OptimizerStep
-    }
+    # compute_instructions = [OptimizerStep, ForwardPass, BackwardPass]
+    # profile_instructions = {
+    #     "fwd_gen_0": ForwardPass,
+    #     "fwd_gen_1": ForwardPass,
+    #     "fwd_inf": ForwardPass,
+    #     "fwd_train": ForwardPass,
+    #     "bwd_train": BackwardPass,
+    #     "reduce_grads": ReduceGrads,
+    #     "opt": OptimizerStep
+    # }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.profile_gconfig = GenerationConfig(min_new_tokens=1, max_new_tokens=1)
+        # self.profile_gconfig = GenerationConfig(min_new_tokens=1, max_new_tokens=1)
         self._async_p2p = False
         self._async_instruction = False
 
@@ -43,29 +43,11 @@ class ProfileEngine(DeepSpeedPipelineEngine):
         self.profile_stats = defaultdict(list)
 
         self.tensor_specs = []  # hidden_dim
-        self.last_exec_time_cost = None
-        self.last_full_time_cost = None
+        # self.last_exec_time_cost = None
+        # self.last_full_time_cost = None
 
     def __post_init__(self):
         pass
-
-    def generate(self, *args, **kwargs):
-        st = time.monotonic()
-        super().generate(*args, **kwargs)
-        logger.info(f"generate done in {time.monotonic() - st} s")
-        self.last_full_time_cost = time.monotonic() - st
-
-    def forward(self, *args, **kwargs):
-        st = time.monotonic()
-        super().forward(*args, **kwargs)
-        logger.info(f"forward done in {time.monotonic() - st} s")
-        self.last_full_time_cost = time.monotonic() - st
-
-    def train_batch(self, *args, **kwargs):
-        st = time.monotonic()
-        super().train_batch(*args, **kwargs)
-        logger.info(f"train_batch done in {time.monotonic() - st} s")
-        self.last_full_time_cost = time.monotonic() - st
 
     def _exec_schedule(self, pipe_schedule, terminate_condition=None):
         # overrides the original _exec_schedule method
@@ -90,5 +72,6 @@ class ProfileEngine(DeepSpeedPipelineEngine):
                     raise e
                 # logger.info(f"rank {self.global_rank} complete cmd: {cmd}")
             self.step_count += 1
-        self.last_exec_time_cost = time.monotonic() - st
+        # self.last_exec_time_cost = time.monotonic() - st
+        torch.cuda.synchronize()
         logger.info(f"{pipe_schedule} done in {time.monotonic() - st} s")

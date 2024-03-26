@@ -104,6 +104,8 @@ def main_controller(args):
             config_index: the index of experiment configuration (experiment may return multiple configurations)
             ignore_worker_error: bool, if False, stop the experiment when any worker(s) fail.
     """
+    import profiler.experiments
+
     import api.config.config_system
     import experiments
     import system

@@ -12,11 +12,12 @@ import torch.distributed as dist
 import transformers
 
 from base.topology import *
+from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, OutputHead,
                                                       SequenceParallelActorHead, SequenceParallelCriticHead,
                                                       VocabPositionEmbedding)
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-import api.config as config_package
+import api.config.config_system as config_package
 import api.huggingface
 import api.model
 import base.cluster
@@ -135,7 +136,7 @@ class ProfileLayers:
             for layer, name in zip(self.layers, self.layer_names)
         ]
         self.backend = api.model.make_backend(self.backend_config)
-        ft_spec = api.model.FinetuneSpec(10, 100, 10, 32)
+        ft_spec = api.model.FinetuneSpec(10, 100, 10, 32, 256)
         self.layers = [self.backend.initialize(layer, ft_spec) for layer in self.layers]
 
     def reset_stats(self):
@@ -286,7 +287,8 @@ def make_profile_layers(device: torch.device,
                         model_name: str,
                         use_sequence_parallel: bool = False,
                         use_gradient_checkpointing: bool = False,
-                        dtype: Optional[str] = None):
+                        dtype: Optional[str] = None,
+                        hf_model_type: str = "llama"):
     if dtype == "fp16" or dtype == None:
         dtype = torch.float16
     elif dtype == "bf16":
@@ -296,8 +298,9 @@ def make_profile_layers(device: torch.device,
     else:
         raise NotImplementedError(f"Unsupported dtype {dtype}")
     tokenizer = None
-    with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
-        config = FlashMQATConfig(**json.load(f))
+    config: FlashMQATConfig = getattr(FlashMQATModel, f"config_from_{hf_model_type}")(model_path=model_path,)
+    # with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
+    #     config = FlashMQATConfig(**json.load(f))
     config.sequence_parallel = use_sequence_parallel
     # m.load(model_path, init_critic_from_actor=False)
     if tokenizer is None:

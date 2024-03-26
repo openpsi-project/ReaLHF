@@ -7,7 +7,7 @@ import re
 import profiler.experiments
 
 from apps.main import _submit_workers
-import api.config as config_package
+import api.config.config_system as config_package
 import base.logging as logging
 import base.name_resolve
 import base.names
@@ -22,9 +22,9 @@ TRACE_TIMEOUT = (
 )
 
 
-def main():
-    trial_name = "profile"
-    expr_name = "profile"
+def main(args, if_raise=True):
+    trial_name = args.trial_name
+    expr_name = args.expr_name
     experiment = config_package.make_experiment(expr_name)
     sched = scheduler.client.make(mode="slurm", expr_name=expr_name, trial_name=trial_name)
 
@@ -43,7 +43,10 @@ def main():
             base.names.trial_root(experiment_name=expr_name, trial_name=trial_name))
     except Exception as e:
         logger.warning(f"Resetting name resolving repo failed.")
-        raise e
+        if if_raise:
+            raise e
+        else:
+            return False
     logger.info(f"Resetting name resolving repo... Done.")
 
     logger.info(f"Running configuration: {experiment.__class__.__name__}")
@@ -93,8 +96,27 @@ def main():
         sched.wait(timeout=None)
     except (KeyboardInterrupt, scheduler.client.JobException, TimeoutError) as e:
         sched.stop_all()
-        raise e
+        if if_raise:
+            raise e
+        else:
+            logger.warning(f"Experiment {expr_name} {trial_name} failed.")
+            return True
+    return True
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run a profiling experiment.")
+    parser.add_argument(
+        "-e",
+        "--expr_name",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "-f",
+        "--trial_name",
+        type=str,
+        default=None,
+    )
+    args = parser.parse_args()
+    main(args)

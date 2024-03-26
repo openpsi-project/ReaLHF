@@ -1,11 +1,11 @@
-from flash_attn.bert_padding import unpad_input
-import torch
-
 import base.constants
 import base.namedarray
 
 
 def random_sample(bs, seq_len, vocab_size):
+    from flash_attn.bert_padding import unpad_input
+    import torch
+
     input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)
     packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
@@ -18,3 +18,11 @@ def random_sample(bs, seq_len, vocab_size):
         prompt_att_mask=attention_mask,
     )
     return data
+
+
+def find_factors(n):
+    factors = []
+    for i in range(1, n + 1):
+        if n % i == 0:
+            factors.append(i)
+    return factors

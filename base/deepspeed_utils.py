@@ -133,7 +133,6 @@ def deepspeed_initialize(
     sequence_parallel: Optional[bool] = False,
     enable_async_p2p_communication: Optional[bool] = False,
     enable_async_instruction: Optional[bool] = False,
-    use_fast_schedule_controller: Optional[bool] = False,
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
     if mpu is None:
@@ -172,7 +171,6 @@ def deepspeed_initialize(
             sequence_parallel=sequence_parallel,
             enable_async_p2p_communication=enable_async_p2p_communication,
             enable_async_instruction=enable_async_instruction,
-            use_fast_schedule_controller=use_fast_schedule_controller,
             model=model,
             args=None,
             config=config,

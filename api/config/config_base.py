@@ -48,6 +48,9 @@ class ModelType:
     size: int
     is_critic: bool
 
+    def __repr__(self):
+        return f"{self._class}-{self.size}{'-critic' if self.is_critic else ''}"
+
 
 @dataclasses.dataclass
 class ModelShardID:
