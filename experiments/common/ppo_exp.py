@@ -5,8 +5,7 @@ from omegaconf import MISSING
 from api.config.config_dataset import PromptOnlyDatasetConfig
 from api.config.config_flash_model import get_flash_mqat_model_config, ModelTrainEvalConfig
 from api.config.config_system import *
-from api.config.dfg import (ModelInterface, ModelInterfaceType, ModelRPC, ModelType,
-                            OffloadHook, SyncParamHook)
+from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType, OffloadHook, SyncParamHook
 from base.topology import PipeModelDataParallelTopology
 import base.logging as logging
 

@@ -1,9 +1,9 @@
 from typing import Callable, Dict, List, Optional, Tuple, Union
-import gc
 import contextlib
 import copy
 import dataclasses
 import functools
+import gc
 import json
 import os
 import time
@@ -19,31 +19,21 @@ import transformers
 from api.config.config_base import ModelName
 from api.config.config_flash_model import FlashMQATConfig
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_base import (
-    flash_model_embed_param_count,
-    flash_model_head_param_count,
-    flash_model_tblock_param_count,
-    FlashMQATBlock,
-    OutputHead,
-    SequenceParallelActorHead,
-    SequenceParallelCriticHead,
-    VocabPositionEmbedding,
-    flash_model_head_param_keys,
-    flash_model_tblock_param_keys,
-    flash_model_embedding_param_keys,
-)
-from impl.model.nn.flash_mqat.flash_mqat_parallel import (
-    mp_merge_flash_mqat_state_dict,
-    mp_partition_flash_mqat_state_dict,
-    partition_pipeline_layers,
-    pipeline_repartition_strategy,
-    get_flash_model_param_shape,
-)
-from impl.model.parallelism.model_parallel.modules import (
-    ColumnParallelLinear,
-    ParallelEmbedding,
-    RowParallelLinear,
-)
+from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
+                                                      flash_model_embedding_param_keys,
+                                                      flash_model_head_param_count,
+                                                      flash_model_head_param_keys,
+                                                      flash_model_tblock_param_count,
+                                                      flash_model_tblock_param_keys, FlashMQATBlock,
+                                                      OutputHead, SequenceParallelActorHead,
+                                                      SequenceParallelCriticHead, VocabPositionEmbedding)
+from impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape,
+                                                          mp_merge_flash_mqat_state_dict,
+                                                          mp_partition_flash_mqat_state_dict,
+                                                          partition_pipeline_layers,
+                                                          pipeline_repartition_strategy)
+from impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
+                                                           RowParallelLinear)
 from impl.model.utils.data import DuckGenerationOutput, DuckModelOutput, PipeCacheData, PipeTransferData
 from impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
 import api.config.config_system
@@ -138,9 +128,8 @@ def _disable_sequence_parallel_of_module(l: nn.Module):
     assert len(_states) == 0
 
 
-def _build_param_spec(
-    layer_indices: List[int], config: FlashMQATConfig, mp_size: int
-) -> Tuple[Dict[str, ContiguousParamSpec], int]:
+def _build_param_spec(layer_indices: List[int], config: FlashMQATConfig,
+                      mp_size: int) -> Tuple[Dict[str, ContiguousParamSpec], int]:
     if len(layer_indices) == 0:
         return {}, 0
     param_spec = {}
@@ -171,7 +160,7 @@ def map_param_to_contigous_memory(
         layer_idx = local_layer_idx + layer_idx_offset
         for k, v in l.named_parameters():
             spec = param_spec[f"{layer_idx}.{k}"]
-            recursive_getattr(l, k).data = contiguous_param[spec.start_idx : spec.end_idx].view(spec.shape)
+            recursive_getattr(l, k).data = contiguous_param[spec.start_idx:spec.end_idx].view(spec.shape)
 
 
 class FlashMQATModel(nn.Module):
@@ -235,9 +224,8 @@ class FlashMQATModel(nn.Module):
             base.constants.model_parallel_world_size(),
         )
         self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
-        map_param_to_contigous_memory(
-            self.layers, self._param_spec, self.contiguous_param, self.layer_idx_start
-        )
+        map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
+                                      self.layer_idx_start)
 
         for h in self._instantiation_hooks:
             h()
@@ -250,9 +238,10 @@ class FlashMQATModel(nn.Module):
         assert self._instantiated
         assert self.contiguous_param is not None
         if self._offload_buffer is None:
-            self._offload_buffer = torch.empty_like(
-                self.contiguous_param, dtype=self.dtype, device="cpu", pin_memory=True
-            )
+            self._offload_buffer = torch.empty_like(self.contiguous_param,
+                                                    dtype=self.dtype,
+                                                    device="cpu",
+                                                    pin_memory=True)
         else:
             assert self._offload_buffer.shape == self.contiguous_param.shape
         dummy_tensor = torch.tensor((), device=self.device, dtype=self.dtype)
@@ -262,9 +251,8 @@ class FlashMQATModel(nn.Module):
             with torch.cuda.stream(self._offload_stream):
                 for k, p in l.named_parameters():
                     spec = self._param_spec[f"{layer_idx}.{k}"]
-                    self._offload_buffer[spec.start_idx : spec.end_idx].copy_(
-                        p.data.view(-1), non_blocking=True
-                    )
+                    self._offload_buffer[spec.start_idx:spec.end_idx].copy_(p.data.view(-1),
+                                                                            non_blocking=True)
                     p.data = dummy_tensor
         self._offload_event.record(self._offload_stream)
         self._offloaded = True
@@ -370,22 +358,20 @@ class FlashMQATModel(nn.Module):
             self._offload_disable_sequence_parallel = False
         self.sequence_parallel = x
 
-    def __overlapped_load_forward(
-        self, x: PipeTransferData, ys: List[PipeCacheData]
-    ) -> Tuple[PipeTransferData, List[PipeCacheData]]:
+    def __overlapped_load_forward(self, x: PipeTransferData,
+                                  ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
         assert len(ys) == self.num_layers
         raw_pp_input = x.pp_input
         self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
-        map_param_to_contigous_memory(
-            self.layers, self._param_spec, self.contiguous_param, self.layer_idx_start
-        )
+        map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
+                                      self.layer_idx_start)
         for layer_idx, y, l in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers):
             with torch.cuda.stream(self._offload_stream):
                 # TODO: we can do more fine-grained overlapping
                 for k, v in l.named_parameters():
                     spec = self._param_spec[f"{layer_idx}.{k}"]
                     v.data.copy_(
-                        self._offload_buffer[spec.start_idx : spec.end_idx].view(spec.shape),
+                        self._offload_buffer[spec.start_idx:spec.end_idx].view(spec.shape),
                         non_blocking=True,
                     )
             torch.cuda.default_stream().wait_stream(self._offload_stream)
@@ -399,9 +385,8 @@ class FlashMQATModel(nn.Module):
         x.pp_input = raw_pp_input
         return x, ys
 
-    def __forward(
-        self, x: PipeTransferData, ys: List[PipeCacheData]
-    ) -> Tuple[PipeTransferData, List[PipeCacheData]]:
+    def __forward(self, x: PipeTransferData,
+                  ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
         layers = self.layers
         assert len(ys) == len(layers)
         raw_pp_input = x.pp_input
@@ -414,9 +399,8 @@ class FlashMQATModel(nn.Module):
         x.pp_input = raw_pp_input
         return x, ys
 
-    def forward(
-        self, x: PipeTransferData, ys: List[PipeCacheData]
-    ) -> Tuple[PipeTransferData, List[PipeCacheData]]:
+    def forward(self, x: PipeTransferData,
+                ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
         if x.max_seqlen is not None and not isinstance(x.max_seqlen, int):
             x.max_seqlen = int(x.max_seqlen)
         if x.cu_seqlens is not None and not isinstance(x.cu_seqlens, torch.IntTensor):
@@ -592,12 +576,10 @@ class FlashMQATModel(nn.Module):
         if not init_from_scratch:
             if model_path is not None:
                 model._instantiation_hooks.append(
-                    lambda: model.load_from_hf(model_path, init_critic_from_actor=is_critic)
-                )
+                    lambda: model.load_from_hf(model_path, init_critic_from_actor=is_critic))
             else:
                 model._instantiation_hooks.append(
-                    lambda: model.load_state_dict(state_dict_converter(from_model.state_dict(), config))
-                )
+                    lambda: model.load_state_dict(state_dict_converter(from_model.state_dict(), config)))
         return model
 
     # Template function used for FlashMQAT to HF models, similar to C++ template but is ugly in python.
@@ -663,8 +645,7 @@ class FlashMQATModel(nn.Module):
                     FlashMQATModel._from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
-                )
-            ),
+                )),
         )
         setattr(
             FlashMQATModel,
@@ -673,8 +654,7 @@ class FlashMQATModel(nn.Module):
                 functools.partial(
                     FlashMQATModel._config_from_hf_template,
                     config_converter=config_converter,
-                )
-            ),
+                )),
         )
         if state_dict_converter_to_hf:
             setattr(
@@ -684,17 +664,16 @@ class FlashMQATModel(nn.Module):
                     functools.partial(
                         FlashMQATModel._to_hf_template,
                         state_dict_converter_to_hf=state_dict_converter_to_hf,
-                    )
-                ),
+                    )),
             )
         FlashMQATModel._parallelism_helpers[model_name] = FlashMQATParallelismHelper(
             embedding_param_names,
             tblock_param_names,
             head_param_names,
         )
-        FlashMQATModel._convert_helpers[model_name] = FlashMQATConvertHelper(
-            config_converter, state_dict_converter, state_dict_converter_to_hf
-        )
+        FlashMQATModel._convert_helpers[model_name] = FlashMQATConvertHelper(config_converter,
+                                                                             state_dict_converter,
+                                                                             state_dict_converter_to_hf)
 
     def load_from_hf(self, load_dir: str, init_critic_from_actor: bool = False):
         from impl.model.nn.flash_mqat.flash_from_hf_impl import HF_ARCH_TO_MODEL_TYPE
@@ -738,8 +717,7 @@ class FlashMQATModel(nn.Module):
                     self.config,
                     base.constants.model_parallel_world_size(),
                     base.constants.model_parallel_rank(),
-                )
-            )
+                ))
             load_times.append(partition_tik - load_tik)
             partition_times.append(time.perf_counter() - partition_tik)
 
@@ -755,24 +733,22 @@ class FlashMQATModel(nn.Module):
         if os.getenv("FLASH_MQAT_LOG_LOAD_TIME", None) == "1":
             logger.info(
                 f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
-                f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s"
-            )
+                f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s")
 
     def load_from_saved_flash_model(self, load_dir: str, init_critic_from_actor: bool = False):
         with open(os.path.join(load_dir, "flash_mqat_config.json"), "r") as f:
             ckpt_config = FlashMQATConfig(**json.load(f))
         for k, v in dataclasses.asdict(ckpt_config).items():
             if k not in [
-                "is_critic",
-                "sequence_parallel",
-                "gradient_accumulation_fusion",
-                "ckpt_attn",
-                "ckpt_mlp",
+                    "is_critic",
+                    "sequence_parallel",
+                    "gradient_accumulation_fusion",
+                    "ckpt_attn",
+                    "ckpt_mlp",
             ] and v != getattr(self.config, k):
                 raise ValueError(
                     f"Can't load a checkpoint with different config (key `{k}`, "
-                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`)."
-                )
+                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`).")
 
         pp_rank = base.constants.pipe_parallel_rank()
         mp_rank = base.constants.model_parallel_rank()
@@ -780,10 +756,8 @@ class FlashMQATModel(nn.Module):
 
         ckpt_spec = get_ckpt_spec(load_dir)
         if ckpt_spec.mp_size % mp_size != 0 and mp_size % ckpt_spec.mp_size != 0:
-            raise ValueError(
-                f"Trying to load checkpoint {load_dir} with mp_size={ckpt_spec.mp_size}, "
-                f"which is neither the multiple nor a factor of current mp_size={mp_size}."
-            )
+            raise ValueError(f"Trying to load checkpoint {load_dir} with mp_size={ckpt_spec.mp_size}, "
+                             f"which is neither the multiple nor a factor of current mp_size={mp_size}.")
 
         if (self.config.n_kv_heads % mp_size == 0) != (self.config.n_kv_heads % ckpt_spec.mp_size == 0):
             raise RuntimeError(
@@ -814,9 +788,9 @@ class FlashMQATModel(nn.Module):
             for (_, target_pp_rank), global_layer_indices in repartition_strategy.items():
                 mp_sds = []
                 for i in interested_mp_ranks:
-                    sd = load_from_disk(
-                        load_dir, fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{i:02d}-" + r"s-(\d{2}).*"
-                    )
+                    sd = load_from_disk(load_dir,
+                                        fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{i:02d}-" +
+                                        r"s-(\d{2}).*")
                     sd = {k: v for k, v in sd.items() if int(k.split(".")[0]) in global_layer_indices}
                     mp_sds.append(sd)
                 state_dict.update(mp_merge_flash_mqat_state_dict(mp_sds, self.config))
@@ -830,9 +804,10 @@ class FlashMQATModel(nn.Module):
                     fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{target_mp_rank:02d}-" + r"s-(\d{2}).*",
                 )
                 sd = {k: v for k, v in sd.items() if int(k.split(".")[0]) in global_layer_indices}
-                sd = mp_partition_flash_mqat_state_dict(
-                    sd, self.config, mp_size=factor, mp_rank=mp_rank % factor
-                )
+                sd = mp_partition_flash_mqat_state_dict(sd,
+                                                        self.config,
+                                                        mp_size=factor,
+                                                        mp_rank=mp_rank % factor)
                 state_dict.update(sd)
 
         if init_critic_from_actor and f"{self.config.n_layers + 1}.weight" in state_dict:
@@ -890,16 +865,15 @@ class FlashMQATModel(nn.Module):
         assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
         for k, v in dataclasses.asdict(to_model_config).items():
             if k not in [
-                "is_critic",
-                "sequence_parallel",
-                "gradient_accumulation_fusion",
-                "ckpt_attn",
-                "ckpt_mlp",
+                    "is_critic",
+                    "sequence_parallel",
+                    "gradient_accumulation_fusion",
+                    "ckpt_attn",
+                    "ckpt_mlp",
             ] and v != getattr(self.config, k):
                 raise ValueError(
                     f"Can't load a checkpoint with different config (key `{k}`, "
-                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`)."
-                )
+                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`).")
         if (self.config.n_kv_heads % src_mp_size == 0) != (self.config.n_kv_heads % dst_mp_size == 0):
             raise ValueError("Whether to partition kv heads should remain the same.")
 
@@ -983,8 +957,7 @@ class FlashMQATModel(nn.Module):
                                         param_dtype=_dtype,
                                         src=src,
                                         group=group,
-                                    )
-                                )
+                                    ))
                             comm_plan.append(
                                 ReparallelizeSenderStep(
                                     rank=src,
@@ -993,19 +966,15 @@ class FlashMQATModel(nn.Module):
                                     param_key=k,
                                     group=group,
                                     dst_ranks=dst_ranks,
-                                )
-                            )
+                                ))
         for i, step in enumerate(comm_plan):
             if isinstance(step, ReparallelizeReceiverStep):
                 continue
             step: ReparallelizeSenderStep
             required_by_nex_steps = False
-            for nex_step in comm_plan[i + 1 :]:
-                if (
-                    isinstance(nex_step, ReparallelizeSenderStep)
-                    and nex_step.rank == step.rank
-                    and nex_step.param_key == step.param_key
-                ):
+            for nex_step in comm_plan[i + 1:]:
+                if (isinstance(nex_step, ReparallelizeSenderStep) and nex_step.rank == step.rank
+                        and nex_step.param_key == step.param_key):
                     required_by_nex_steps = True
                     break
             step.remove = not required_by_nex_steps
@@ -1029,9 +998,8 @@ class FlashMQATModel(nn.Module):
         if (from_model_name, to_model_name) in self._reparallelize_targets:
             rtgt = self._reparallelize_targets[(from_model_name, to_model_name)]
         else:
-            comm_plan = self._derive_reparallelize_comm_plan(
-                from_model_name, to_model_name, from_topo, to_topo, to_model_config, pg_info
-            )
+            comm_plan = self._derive_reparallelize_comm_plan(from_model_name, to_model_name, from_topo,
+                                                             to_topo, to_model_config, pg_info)
             to_layers_handle_dict = {}
             for step in comm_plan:
                 layer_idx = int(step.param_key.split(".")[0])
@@ -1043,9 +1011,8 @@ class FlashMQATModel(nn.Module):
                             v.data = torch.tensor((), dtype=self.dtype, device=self.device)
                         to_layers_handle_dict[layer_idx] = l
             to_layer_indices = sorted(to_layers_handle_dict.keys())
-            to_param_spec, to_param_size = _build_param_spec(
-                to_layer_indices, to_model_config, to_topo.get_dim("model")
-            )
+            to_param_spec, to_param_size = _build_param_spec(to_layer_indices, to_model_config,
+                                                             to_topo.get_dim("model"))
             if len(to_layer_indices) > 0:
                 to_layer_idx_start = min(to_layer_indices)
                 to_layer_idx_end = max(to_layer_indices) + 1
@@ -1082,9 +1049,8 @@ class FlashMQATModel(nn.Module):
                 if step.rank == step.src:
                     buf = mp_partition_flash_mqat_state_dict(
                         {
-                            step.param_key: recursive_getattr(
-                                self.layers[layer_idx - self.layer_idx_start], step.param_key.split(".", 1)[1]
-                            ).clone()
+                            step.param_key: recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
+                                                              step.param_key.split(".", 1)[1]).clone()
                         },
                         to_model_config,
                         mp_size=max(dst_mp_size // src_mp_size, 1),
@@ -1098,15 +1064,15 @@ class FlashMQATModel(nn.Module):
                 tmp_portion_storage[(step.param_key, step.receiver_mp_portion_id)] = buf
                 if all((step.param_key, i) in tmp_portion_storage for i in range(n_receiver_portions)):
                     buf = mp_merge_flash_mqat_state_dict(
-                        [
-                            {step.param_key: tmp_portion_storage[(step.param_key, i)]}
-                            for i in range(n_receiver_portions)
-                        ],
+                        [{
+                            step.param_key: tmp_portion_storage[(step.param_key, i)]
+                        } for i in range(n_receiver_portions)],
                         self.config,
                     )[step.param_key]
                     layer_param_key = step.param_key.split(".", 1)[1]
                     to_local_layer_idx = layer_idx - rtgt.to_layer_start_idx
-                    recursive_getattr(rtgt.to_layers_handle[to_local_layer_idx], layer_param_key).data.copy_(buf)
+                    recursive_getattr(rtgt.to_layers_handle[to_local_layer_idx],
+                                      layer_param_key).data.copy_(buf)
                     for i in range(n_receiver_portions):
                         del tmp_portion_storage[(step.param_key, i)]
 
@@ -1114,9 +1080,8 @@ class FlashMQATModel(nn.Module):
                 if step.group is not None:
                     buf = buf = mp_partition_flash_mqat_state_dict(
                         {
-                            step.param_key: recursive_getattr(
-                                self.layers[layer_idx - self.layer_idx_start], step.param_key.split(".", 1)[1]
-                            )
+                            step.param_key: recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
+                                                              step.param_key.split(".", 1)[1])
                         },
                         self.config,
                         mp_size=max(dst_mp_size // src_mp_size, 1),
@@ -1138,17 +1103,17 @@ class FlashMQATModel(nn.Module):
 
 # a helper function to make flash_mqat look like huggingface model
 def generate_helper(
-    self: FlashMQATModel,
-    tokenizer: transformers.PreTrainedTokenizerFast,
-    input_ids: Optional[torch.Tensor] = None,
-    attention_mask: Optional[torch.Tensor] = None,
-    packed_input_ids: Optional[torch.Tensor] = None,
-    cu_seqlens: Optional[torch.Tensor] = None,
-    max_seqlen: Optional[int] = None,
-    k_caches: Optional[List[torch.Tensor]] = None,
-    v_caches: Optional[List[torch.Tensor]] = None,
-    cache_seqlens: Optional[torch.Tensor] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        self: FlashMQATModel,
+        tokenizer: transformers.PreTrainedTokenizerFast,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        packed_input_ids: Optional[torch.Tensor] = None,
+        cu_seqlens: Optional[torch.Tensor] = None,
+        max_seqlen: Optional[int] = None,
+        k_caches: Optional[List[torch.Tensor]] = None,
+        v_caches: Optional[List[torch.Tensor]] = None,
+        cache_seqlens: Optional[torch.Tensor] = None,
+        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
 ) -> DuckGenerationOutput:
     current_forward = self.forward
     self.forward = functools.partial(FlashMQATModel.forward, self)
@@ -1188,9 +1153,8 @@ def forward_helper(
         batch_size, seqlen = input_ids.shape[:2]
     if packed_input_ids is not None:
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
-            PipeCacheData() for _ in range(self.config.n_layers + 1)
-        ]
+        ys = [PipeCacheData(input_ids=packed_input_ids)
+              ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
     else:
         x = PipeTransferData()
         ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]

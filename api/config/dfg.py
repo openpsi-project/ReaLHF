@@ -18,7 +18,6 @@ class OffloadHook:
     pass
 
 
-
 @dataclasses.dataclass
 class SyncParamHook:
     source: Optional[ModelName] = None
@@ -206,7 +205,8 @@ def build_graph(rpcs: List[ModelRPC], verbose: bool = False) -> Tuple[List[Model
 
     for rpc in rpcs:
         rpc.max_min_flow_seqs = max([r.min_n_seqs for r in rpcs if r.model_name.role == rpc.model_name.role])
-        rpc.max_min_flow_tokens = max([r.min_n_tokens for r in rpcs if r.model_name.role == rpc.model_name.role])
+        rpc.max_min_flow_tokens = max(
+            [r.min_n_tokens for r in rpcs if r.model_name.role == rpc.model_name.role])
         rpc.data_producers = data_producers
         rpc.data2required_rpc_names = data2required_rpc_names
 

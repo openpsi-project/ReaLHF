@@ -10,13 +10,8 @@ import transformers
 
 from api.config.config_base import MODEL_TYPE_TO_PATH
 from api.config.config_dataset import PromptOnlyDatasetConfig
-from api.config.config_flash_model import (
-    FLASH_MODEL_CONFIG_CONVERTER,
-    FlashMQATConfig,
-    ModelTrainEvalConfig,
-    OptimizerConfig,
-    ParallelismConfig,
-)
+from api.config.config_flash_model import (FLASH_MODEL_CONFIG_CONVERTER, FlashMQATConfig,
+                                           ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig)
 from api.config.config_system import *
 from api.config.dfg import *
 from base.topology import PipeModelDataParallelTopology
@@ -67,10 +62,9 @@ def _is_valid_mapping(mapping: np.ndarray, device_mesh: ClusterDeviceMesh) -> bo
         if not any(mapping.sum() == g for g in one_node_valid_gpus):
             raise RuntimeError(f"Invalid mapping sum {mapping}")
     else:
-        if not (
-            mapping.sum() % device_mesh.n_gpus_per_node == 0
-            and np.all(np.logical_or(mapping.sum(1) == device_mesh.n_gpus_per_node, mapping.sum(1) == 0))
-        ):
+        if not (mapping.sum() % device_mesh.n_gpus_per_node == 0
+                and np.all(np.logical_or(mapping.sum(1) == device_mesh.n_gpus_per_node,
+                                         mapping.sum(1) == 0))):
             raise RuntimeError(f"Invalid mapping sum {mapping}")
     if not _are_ones_contiguous(mapping.flatten()):
         raise RuntimeError(f"mapping devices are not contiguous {mapping}")
@@ -128,26 +122,18 @@ def scheduling_config_from_allocations(
 ) -> ExperimentScheduling:
     if nodelist is not None:
         try:
-            hostnames: List[str] = (
-                subprocess.check_output(
-                    [
-                        "scontrol",
-                        "show",
-                        "hostnames",
-                        nodelist,
-                    ]
-                )
-                .decode("utf-8")
-                .strip()
-                .split("\n")
-            )
+            hostnames: List[str] = (subprocess.check_output([
+                "scontrol",
+                "show",
+                "hostnames",
+                nodelist,
+            ]).decode("utf-8").strip().split("\n"))
             assert len(hostnames) == device_mesh.n_nodes
             hostnames = sorted(hostnames, key=_slurm_hostname_key)
         except FileNotFoundError:
             hostnames = None
-            logger.warning(
-                "scontrol not found, nodelist will be ignored. " "You are probably running in the local mode."
-            )
+            logger.warning("scontrol not found, nodelist will be ignored. "
+                           "You are probably running in the local mode.")
 
     assert all(_is_valid_mapping(m.mapping, device_mesh) for m in allocations.values())
     node2models = _group_models_by_node({m.rpc.name: m for m in allocations.values()})
@@ -165,7 +151,7 @@ def scheduling_config_from_allocations(
     )
     for st, ed in node2models:
         if nodelist is not None and hostnames is not None:
-            _this_nodelist = ",".join(hostnames[st : ed + 1])
+            _this_nodelist = ",".join(hostnames[st:ed + 1])
         else:
             _this_nodelist = None
         node_count = ed - st + 1
@@ -179,8 +165,7 @@ def scheduling_config_from_allocations(
                     mem=100000,
                     nodelist=_this_nodelist,
                 ),
-            ),
-        )
+            ),)
     return sched
 
 
@@ -202,9 +187,8 @@ def _make_train_backend_config(cfg: ModelTrainEvalConfig, use_stream_pipe_engine
             lr_scheduler_type=cfg.optimizer.lr_scheduler_type,
             warmup_steps_proportion=cfg.optimizer.warmup_steps_proportion,
             min_lr_ratio=cfg.optimizer.min_lr_ratio,
-            zero_stage=(
-                cfg.zero_stage if cfg.parallel.pipeline_parallel_size == 1 else min(cfg.zero_stage, 1)
-            ),
+            zero_stage=(cfg.zero_stage if cfg.parallel.pipeline_parallel_size == 1 else min(
+                cfg.zero_stage, 1)),
             gradient_checkpointing=cfg.gradient_checkpointing,
             engine_type=engine_type,
             offload_optimizer_state=cfg.optimizer.offload,
@@ -277,8 +261,7 @@ def mw_config_from_allocations(
                             ),
                             model=model_configs[m.rpc.model_name],
                             backend=backend,
-                        )
-                    )
+                        ))
                     shard_counter[m.rpc.model_name] += 1
             mw_configs.append(mw)
     return mw_configs
@@ -407,6 +390,7 @@ def optimal_device_mapping(
         ),
     }
 
+
 # This is a setting similar to DSchat
 # def optimal_device_mapping(
 #     device_mesh: ClusterDeviceMesh,
@@ -533,6 +517,7 @@ def optimal_device_mapping(
 #         ),
 #     }
 
+
 def auto_device_mapping(
     n_nodes: int,
     n_gpus_per_node: int = 8,
@@ -541,9 +526,7 @@ def auto_device_mapping(
 ):
     device_mesh = ClusterDeviceMesh(n_nodes, n_gpus_per_node, mem)
 
-    def _auto_device_mapping(
-        experiment_cls: Type,
-    ) -> Type[Experiment]:
+    def _auto_device_mapping(experiment_cls: Type,) -> Type[Experiment]:
 
         class AutoMappedExperiment:
 

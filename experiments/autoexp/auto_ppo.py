@@ -2,7 +2,8 @@ import functools
 
 from omegaconf import MISSING
 
-from .device_mapping import auto_device_mapping as auto, ClusterDeviceMesh
+from .device_mapping import auto_device_mapping as auto
+from .device_mapping import ClusterDeviceMesh
 from api.config.config_dataset import DatasetType, PromptOnlyDatasetConfig
 from api.config.config_system import *
 from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
@@ -38,12 +39,10 @@ def register_auto_ppo_experiment(
     @dataclasses.dataclass
     class AutoPPOExperiment:
         seed: int = 1
-        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(
-            default_factory=functools.partial(
-                ExperimentSaveEvalControl,
-                benchmark_steps=20,
-            ),
-        )
+        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=functools.partial(
+            ExperimentSaveEvalControl,
+            benchmark_steps=20,
+        ),)
         ppo: PPOHyperparmeters = dataclasses.field(default_factory=PPOHyperparmeters)
 
         @property

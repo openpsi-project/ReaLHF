@@ -4,9 +4,9 @@ import dataclasses
 import itertools
 import time
 
+from deepspeed import DeepSpeedEngine
 import torch
 
-from deepspeed import DeepSpeedEngine
 from base.constants import data_parallel_group
 from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import from_dict, NamedArray, recursive_apply

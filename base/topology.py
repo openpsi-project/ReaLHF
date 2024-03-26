@@ -73,7 +73,7 @@ class ProcessTopology:
         if not isinstance(other, ProcessTopology):
             return False
         return self.mapping == other.mapping
-    
+
     def __repr__(self):
         return f"ProcessTopology(axes={self.axes}, dims={self.dims})"
 

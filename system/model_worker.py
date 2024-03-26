@@ -18,7 +18,6 @@ import torch.utils.data
 from api.config.config_base import ModelName
 from base.monitor import gpu_utilization_monitor, time_mark
 from base.topology import ParallelGrid
-import base.topology
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 import api.config.config_system as config_system
 import api.config.dfg
@@ -33,6 +32,7 @@ import base.namedarray as namedarray
 import base.numpy_utils
 import base.seeding as seeding
 import base.timeutil
+import base.topology
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
@@ -81,9 +81,9 @@ def split_packed_batch_into_seqs(
 
     partitions = [(i, i + 1) for i in range(input_lens.shape[0])]
     sample["input_lens"] = input_lens
-    res = dataparallel.PackedParallelDataBroker.scatter_to(
-        sample, n_dp=len(input_lens), partitions=partitions
-    )
+    res = dataparallel.PackedParallelDataBroker.scatter_to(sample,
+                                                           n_dp=len(input_lens),
+                                                           partitions=partitions)
     if not return_seqlens:
         return res
     else:
@@ -98,14 +98,14 @@ def _get_shape_from_key_and_seqlen(k: str, seqlen: int):
     elif k in ["packed_seq", "prompt_mask", "packed_input_ids", "values", "packed_prompts"]:
         shape = (seqlen,)
     elif k in [
-        "packed_logprobs",
-        "packed_ref_logprobs",
-        "old_logp",
-        "ref_logp",
-        "advantages",
-        "ppo_loss_mask",
-        "kl_rewards",
-        "returns",
+            "packed_logprobs",
+            "packed_ref_logprobs",
+            "old_logp",
+            "ref_logp",
+            "advantages",
+            "ppo_loss_mask",
+            "kl_rewards",
+            "returns",
     ]:
         shape = (seqlen - 1,)
     else:
@@ -115,20 +115,20 @@ def _get_shape_from_key_and_seqlen(k: str, seqlen: int):
 
 def _get_dtype_from_key(k: str):
     if k in [
-        "seq_no_eos_mask",
-        "ppo_loss_mask",
-        "prompt_mask",
+            "seq_no_eos_mask",
+            "ppo_loss_mask",
+            "prompt_mask",
     ]:
         dtype = torch.bool
     elif k in [
-        "reward_score",
-        "packed_ref_logprobs",
-        "old_logp",
-        "ref_logp",
-        "advantages",
-        "kl_rewards",
-        "returns",
-        "values",
+            "reward_score",
+            "packed_ref_logprobs",
+            "old_logp",
+            "ref_logp",
+            "advantages",
+            "kl_rewards",
+            "returns",
+            "values",
     ]:
         dtype = torch.float16
     elif k in ["input_lens", "prompt_lens", "cu_seqlens", "prompt_cu_seqlens"]:
@@ -154,10 +154,9 @@ class ModelWorker(worker_base.Worker):
         self.config = cfg
         self.model_names = [s.id.model_name for s in cfg.shards]
         self.shard_indices = [
-            cfg.model_topos[s.id.model_name].get_rank(
-                data=s.id.dp_rank, pipe=s.id.pp_rank, model=s.id.mp_rank
-            )
-            for s in cfg.shards
+            cfg.model_topos[s.id.model_name].get_rank(data=s.id.dp_rank,
+                                                      pipe=s.id.pp_rank,
+                                                      model=s.id.mp_rank) for s in cfg.shards
         ]
 
         self.__experiment_name = self.config.worker_info.experiment_name
@@ -179,8 +178,7 @@ class ModelWorker(worker_base.Worker):
         self.__dist_env_resolved = False
 
         self.__clear_cache_frequency = base.timeutil.FrequencyControl(
-            frequency_steps=self.config.cuda_cache_clear_freq
-        )
+            frequency_steps=self.config.cuda_cache_clear_freq)
 
         r = self.config.worker_info
 
@@ -304,11 +302,9 @@ class ModelWorker(worker_base.Worker):
                     self.config.tokenizer_name_or_path,
                     self.config.worker_info.experiment_name,
                     self.config.worker_info.trial_name,
-                    cache_root=(
-                        None if not self.config.use_dataset_cache else self.config.dataset_cahce_root
-                    ),
-                )
-                for d in self.config.datasets
+                    cache_root=(None
+                                if not self.config.use_dataset_cache else self.config.dataset_cahce_root),
+                ) for d in self.config.datasets
             ]
             if len(self.config.datasets) == 1:
                 self.__dataset = datasets[0]
@@ -338,9 +334,9 @@ class ModelWorker(worker_base.Worker):
         for s in self.config.shards:
             with base.constants.model_scope(s.id.model_name):
                 self.__backend_initialized[s.id.model_name] = False
-                self.__models[s.id.model_name] = model = api.model.make_model(
-                    s.model, name=s.id.model_name, device=self.__device
-                )
+                self.__models[s.id.model_name] = model = api.model.make_model(s.model,
+                                                                              name=s.id.model_name,
+                                                                              device=self.__device)
                 self.__unwrapped_models[s.id.model_name] = model.module
                 if s.id.model_name.replica_id == 0:
                     assert isinstance(model.module, FlashMQATModel)
@@ -365,11 +361,9 @@ class ModelWorker(worker_base.Worker):
                             self.__models[s.id.model_name].tokenizer,
                             self.config.worker_info.experiment_name,
                             self.config.worker_info.trial_name,
-                            cache_root=(
-                                None if not self.config.use_dataset_cache else self.config.dataset_cahce_root
-                            ),
-                        )
-                        for d in s.eval_datasets
+                            cache_root=(None if not self.config.use_dataset_cache else
+                                        self.config.dataset_cahce_root),
+                        ) for d in s.eval_datasets
                     ]
                     if len(eval_datasets) > 1:
                         eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
@@ -402,9 +396,8 @@ class ModelWorker(worker_base.Worker):
         )
 
         # A monitoring process.
-        self.__gpu_util_mp = mp.Process(
-            target=gpu_utilization_monitor, args=(self.__pg_info.local_gpu_id, 7200)
-        )
+        self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor,
+                                        args=(self.__pg_info.local_gpu_id, 7200))
         # self.__gpu_util_mp.start()
 
     def __prefetch_from_dataset(self):
@@ -454,9 +447,8 @@ class ModelWorker(worker_base.Worker):
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
 
-    def __model_poll_step(
-        self, request: request_reply_stream.Payload, data: Any, handled: bool, res: Optional[Any]
-    ) -> worker_base.PollResult:
+    def __model_poll_step(self, request: request_reply_stream.Payload, data: Any, handled: bool,
+                          res: Optional[Any]) -> worker_base.PollResult:
         tik = time.perf_counter()
         # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
         #                  f"start handle request *{request.handle_name}*, "
@@ -543,8 +535,7 @@ class ModelWorker(worker_base.Worker):
             elif request.handle_name == "inference":
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 data, buffer_indices, seqlens, output_key_remap = self.__compute_input_queues[
-                    request.handle_name
-                ].get_nowait()
+                    request.handle_name].get_nowait()
                 res = self._interface.inference(self._model, data)  # -> NamedArray
                 if res is not None:
                     new_res = {}
@@ -562,8 +553,7 @@ class ModelWorker(worker_base.Worker):
             elif request.handle_name == "generate":
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 data, buffer_indices, seqlens, output_key_remap = self.__compute_input_queues[
-                    request.handle_name
-                ].get_nowait()
+                    request.handle_name].get_nowait()
                 res = self._interface.generate(self._model, data)  # -> NamedArray
                 if res is not None:
                     new_res = {}
@@ -584,10 +574,8 @@ class ModelWorker(worker_base.Worker):
                 raise NotImplementedError(f"Unknown request type: {request.handle_name}.")
 
             if request.handle_name in TIME_RECORD_RPCS and self._is_dp_head and self._dp_rank == 0:
-                blogger.info(
-                    f"Model worker #{handler_model_name}# handle request *{request.handle_name}*"
-                    f" in ${time.perf_counter() - tik:.4f}$s"
-                )
+                blogger.info(f"Model worker #{handler_model_name}# handle request *{request.handle_name}*"
+                             f" in ${time.perf_counter() - tik:.4f}$s")
 
         self.__request_queue.put_nowait((request, data, True, res))
 
@@ -675,8 +663,7 @@ class ModelWorker(worker_base.Worker):
                         if rpc_name not in self.__data_send_record[(buf_idx, k)]:
                             self.__data_send_record[(buf_idx, k)].append(rpc_name)
                         if not set(self.data2required_rpc_names[k]).difference(
-                            self.__data_send_record[(buf_idx, k)]
-                        ):
+                                self.__data_send_record[(buf_idx, k)]):
                             self.__data_owner_storage.pop((buf_idx, k))
                             self.__data_send_record.pop((buf_idx, k))
 
@@ -703,8 +690,7 @@ class ModelWorker(worker_base.Worker):
                 _data.append(namedarray.from_dict(d))
             r = dataparallel.PackedParallelDataBroker.gather_from(_data)
             self.__compute_input_queues[hook_data["handle_name"]].put_nowait(
-                (r, local_buffer_indices, local_seqlens, hook_data["output_key_remap"])
-            )
+                (r, local_buffer_indices, local_seqlens, hook_data["output_key_remap"]))
 
     def __post_one_response(self, request: request_reply_stream.Payload, res):
         if isinstance(res, tuple) and isinstance(res[0], namedarray.NamedArray):
@@ -735,7 +721,8 @@ class ModelWorker(worker_base.Worker):
             with base.constants.model_scope(request.handler.model_name):
                 if self._is_dp_head:
                     if new_seqlens is None:
-                        xs = split_packed_batch_into_seqs(res, torch.tensor(seqlens, device='cuda', dtype=torch.int32))
+                        xs = split_packed_batch_into_seqs(
+                            res, torch.tensor(seqlens, device='cuda', dtype=torch.int32))
                     else:
                         xs = split_packed_batch_into_seqs(res, new_seqlens)
                     for buffer_idx, x in zip(buffer_indices, xs):
@@ -769,8 +756,7 @@ class ModelWorker(worker_base.Worker):
                         handler="master",
                         request_id=r.syn_reply_id,
                         handle_name="syn",
-                    ),
-                )
+                    ),)
                 self.__request_cache.append(r)
         except request_reply_stream.NoMessage:
             return
@@ -810,10 +796,8 @@ class ModelWorker(worker_base.Worker):
             # TODO: we can have a smarter scheduling plan, the current plan is basically round-robin
             try:
                 request, data, handled, res = self.__request_queue.get_nowait()
-                if (
-                    request.handle_name in ["train_step", "inference", "generate"]
-                    and not self.__profiler_launched
-                ):
+                if (request.handle_name in ["train_step", "inference", "generate"]
+                        and not self.__profiler_launched):
                     self.tracer.start()
                     # self.__profiler.start()
                     self.__profiler_launched = True

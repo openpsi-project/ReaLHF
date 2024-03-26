@@ -61,7 +61,8 @@ _experiment_name = None
 _trial_name = None
 
 _grids: Dict[ModelName, "ParallelGrid"] = {}
-_pgroups: Dict[ModelName, Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
+_pgroups: Dict[ModelName,
+               Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
 _rank_mapping: Dict[ModelName, Dict["ModelShardID", int]] = {}
 _global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
 _max_seqlen: int = None

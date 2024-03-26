@@ -202,7 +202,6 @@ def _create_param_sync_groups(
                     _src_rank = _src_ranks[_src_rank_id]
                     _dst_ranks = _grouped_dst_ranks[_dst_ranks_group_id]
 
-                    
                     dp_i, mp_i = (
                         from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).data,
                         from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).model,
@@ -241,11 +240,8 @@ def setup_ddp(
             map(
                 int,
                 name_resolve.get_subtree(
-                    names.trainer_ddp_peer(expr_name, trial_name, GLOBAL_PROCESS_GROUP_NAME)
-                ),
-            )
-        )
-    )
+                    names.trainer_ddp_peer(expr_name, trial_name, GLOBAL_PROCESS_GROUP_NAME)),
+            )))
     assert len(peers) == len(set(peers)), f"Duplicated trainer worker index. {peers}"
     world_size = len(peers)
     global_rank = peers.index(worker_index)
@@ -257,9 +253,11 @@ def setup_ddp(
         assert msid2mwid is not None
         for model_name, topo in model_topos.items():
             mw_ranks[model_name] = _filter_match_mwids(model_name, topo, msid2mwid)
-            mw_dp_head_ranks[model_name] = _filter_match_mwids(
-                model_name, topo, msid2mwid, pipe=topo.get_dim("pipe") - 1, model=0
-            )
+            mw_dp_head_ranks[model_name] = _filter_match_mwids(model_name,
+                                                               topo,
+                                                               msid2mwid,
+                                                               pipe=topo.get_dim("pipe") - 1,
+                                                               model=0)
             dp_size = topo.get_dim("data")
             for dp_i in range(dp_size):
                 mw_dp_ranks[model_name, dp_i] = _filter_match_mwids(
@@ -287,8 +285,7 @@ def setup_ddp(
             ddp_init_address = name_resolve.wait(ddp_master_name, timeout=300)
         except TimeoutError:
             raise TimeoutError(
-                f"global_rank={global_rank} worker_index={worker_index} wait for ddp_init_method timeout."
-            )
+                f"global_rank={global_rank} worker_index={worker_index} wait for ddp_init_method timeout.")
 
     torch_dist_kwargs = dict(
         world_size=world_size,
@@ -323,9 +320,8 @@ def setup_ddp(
         for src, dst in data_transfer_pairs:
             src_topo = model_topos[src]
             dst_topo = model_topos[dst]
-            for src_dp, dst_dp in itertools.product(
-                range(src_topo.get_dim("data")), range(dst_topo.get_dim("data"))
-            ):
+            for src_dp, dst_dp in itertools.product(range(src_topo.get_dim("data")),
+                                                    range(dst_topo.get_dim("data"))):
                 key = DataTransferPair(src=src, src_dp_rank=src_dp, dst=dst, dst_dp_rank=dst_dp)
                 src_mw_rank = mw_dp_head_ranks[src][src_dp]
                 dst_mw_ranks = mw_dp_ranks[dst, dst_dp]
@@ -391,9 +387,8 @@ def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment
 
     name_resolve_identifier = f"__type_{worker_type}"
     name_resolve.add_subentry(
-        names.trainer_ddp_local_peer(
-            experiment_name, trial_name, socket.gethostname(), name_resolve_identifier
-        ),
+        names.trainer_ddp_local_peer(experiment_name, trial_name, socket.gethostname(),
+                                     name_resolve_identifier),
         rank,
         keepalive_ttl=60,
     )
@@ -403,14 +398,9 @@ def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment
         keepalive_ttl=30,
     )
     logger.info(f"Worker type {worker_type} rank {rank} waiting for peers, world size {world_size}...")
-    while (
-        len(
+    while (len(
             name_resolve.get_subtree(
-                names.trainer_ddp_peer(experiment_name, trial_name, name_resolve_identifier)
-            )
-        )
-        < world_size
-    ):
+                names.trainer_ddp_peer(experiment_name, trial_name, name_resolve_identifier))) < world_size):
         time.sleep(0.1)
     # logger.info(f"Rank {rank} discovers all peers, resolving local rank...")
     local_peer_name = names.trainer_ddp_local_peer(
@@ -431,8 +421,7 @@ def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment
         if not os.environ.get("DLLM_MODE") == "LOCAL":
             raise RuntimeError(
                 f"Unresolvable CUDA_VISIBLE_DEVICES {os.environ['CUDA_VISIBLE_DEVICES']} on host {network.gethostname()}, "
-                f"local peers (global ranks) {local_peers}, local peer index {local_peer_index}."
-            )
+                f"local peers (global ranks) {local_peers}, local peer index {local_peer_index}.")
         devices = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
         local_gpu_id = int(devices[local_peer_index % len(devices)])
 

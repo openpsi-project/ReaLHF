@@ -11,12 +11,8 @@ import sys
 
 from api.config.config_base import *
 from base.cluster import spec as cluster_spec
-from base.constants import (
-    DATASET_CACHE_PATH,
-    PYTORCH_KERNEL_CACHE_PATH,
-    TORCH_EXTENSIONS_DIR,
-    TRITON_CACHE_PATH,
-)
+from base.constants import (DATASET_CACHE_PATH, PYTORCH_KERNEL_CACHE_PATH, TORCH_EXTENSIONS_DIR,
+                            TRITON_CACHE_PATH)
 import api.config.dfg
 import base.topology
 
@@ -74,21 +70,23 @@ class Scheduling:
     @staticmethod
     def master_worker_default(**kwargs):
         # TODO: change to cpu image?
-        return Scheduling(
-            **{"cpu": 16, "mem": 20 * 1024, "gpu": 0, "container_image": _LLM_GPU_IMAGE, **kwargs}
-        )
+        return Scheduling(**{
+            "cpu": 16,
+            "mem": 20 * 1024,
+            "gpu": 0,
+            "container_image": _LLM_GPU_IMAGE,
+            **kwargs
+        })
 
     @staticmethod
     def model_worker_default(**kwargs):
-        return Scheduling(
-            **{
-                "cpu": 2,
-                "gpu": 1,
-                "mem": 60 * 1024,
-                "container_image": _LLM_GPU_IMAGE,
-                **kwargs,
-            }
-        )
+        return Scheduling(**{
+            "cpu": 2,
+            "gpu": 1,
+            "mem": 60 * 1024,
+            "container_image": _LLM_GPU_IMAGE,
+            **kwargs,
+        })
 
 
 @dataclasses.dataclass
@@ -151,8 +149,7 @@ class ModelWorker:
         model_names = [s.id.model_name for s in self.shards]
         if len(set(model_names)) != len(model_names):
             raise ValueError(
-                f"ModelWorker cannot have multiple shards of the same model name: {model_names}."
-            )
+                f"ModelWorker cannot have multiple shards of the same model name: {model_names}.")
 
 
 @dataclasses.dataclass
@@ -216,7 +213,10 @@ class ExperimentConfig:
 
         ############### Sanity check of model names ###############
         _roles = set(mn.role for mn in model_names)
-        _replica_ids = {_role: sorted([mn.replica_id for mn in model_names if mn.role == _role]) for _role in _roles}
+        _replica_ids = {
+            _role: sorted([mn.replica_id for mn in model_names if mn.role == _role])
+            for _role in _roles
+        }
         for v in _replica_ids.values():
             if list(sorted(v)) != list(range(len(v))):
                 raise ValueError(f"Model replica ids should be 0, 1, 2, ... for each role: {_replica_ids}.")
@@ -226,17 +226,14 @@ class ExperimentConfig:
         model_configs: Dict[ModelName, Model] = {}
         for model_name in model_names:
             _this_mws = list(
-                filter(lambda mw: any(x.id.model_name == model_name for x in mw.shards), self.model_worker)
-            )
+                filter(lambda mw: any(x.id.model_name == model_name for x in mw.shards), self.model_worker))
             all_shards: List[StandaloneModelShard] = [
                 next(filter(lambda x: x.id.model_name == model_name, mw.shards)) for mw in _this_mws
             ]
             for k, v in model_topos.items():
                 if k.role == model_name.role and v == all_shards[0].id.topo:
-                    raise ValueError(
-                        f"If different RPCs have the same topology, "
-                        f"they don't need to use multiple model names ({k}, {model_name})."
-                    )
+                    raise ValueError(f"If different RPCs have the same topology, "
+                                     f"they don't need to use multiple model names ({k}, {model_name}).")
             model_topos[model_name] = all_shards[0].id.topo
             model_configs[model_name] = all_shards[0].model
 
@@ -244,12 +241,9 @@ class ExperimentConfig:
             ranks = [s.id.parallelism_rank for s in all_shards]
             _topos = [s.id.topo for s in all_shards]
             if set(ranks) != set(list(range(len(_this_mws)))) or any(
-                _t.world_size() != _topos[0].world_size() for _t in _topos
-            ):
-                raise ValueError(
-                    f"Parallelism rank check failed: model name {model_name}, "
-                    f"model shard ids={[s.id for s in all_shards]}."
-                )
+                    _t.world_size() != _topos[0].world_size() for _t in _topos):
+                raise ValueError(f"Parallelism rank check failed: model name {model_name}, "
+                                 f"model shard ids={[s.id for s in all_shards]}.")
             ##### Sanity check of parallelism ranks. #####
 
         data_transfer_pairs: List[Tuple[ModelName, ModelName]] = []
@@ -267,30 +261,23 @@ class ExperimentConfig:
             for hook in rpc.pre_hooks + rpc.post_hooks:
                 if not isinstance(hook, api.config.dfg.SyncParamHook):
                     continue
-                if (hook.target is not None and
-                    not (model_configs[rpc.model_name].type_
-                    == model_configs[hook.target].type_
-                    == "flash_mqat")
-                ) or (hook.source is not None and not (model_configs[rpc.model_name].type_ == model_configs[hook.source].type_ == "flash_mqat")):
+                if (hook.target is not None
+                        and not (model_configs[rpc.model_name].type_ == model_configs[hook.target].type_ ==
+                                 "flash_mqat")) or (hook.source is not None and
+                                                    not (model_configs[rpc.model_name].type_ ==
+                                                         model_configs[hook.source].type_ == "flash_mqat")):
                     raise ValueError(
-                        "To synchronize parameters between two models, both models must be FlashMQATModel."
-                    )
+                        "To synchronize parameters between two models, both models must be FlashMQATModel.")
                 other_model_name = hook.target if hook.target is not None else hook.source
                 other_topo = model_topos[hook.target] if hook.target is not None else model_topos[hook.source]
                 self_topo = model_topos[rpc.model_name]
-                if (
-                    self_topo.get_dim("model") % other_topo.get_dim("model") != 0
-                    and other_topo.get_dim("model") % self_topo.get_dim("model") != 0
-                ):
-                    raise ValueError(
-                        "To synchronize parameters between two models, "
-                        "their model parallel size must be a multiple of each other."
-                    )
+                if (self_topo.get_dim("model") % other_topo.get_dim("model") != 0
+                        and other_topo.get_dim("model") % self_topo.get_dim("model") != 0):
+                    raise ValueError("To synchronize parameters between two models, "
+                                     "their model parallel size must be a multiple of each other.")
                 if rpc.model_name == other_model_name:
-                    raise ValueError(
-                        f"Cannot synchronize parameters within the same model "
-                        f"(in {rpc}, {rpc.model_name} and {hook.target})."
-                    )
+                    raise ValueError(f"Cannot synchronize parameters within the same model "
+                                     f"(in {rpc}, {rpc.model_name} and {hook.target}).")
                 if hook.target is not None:
                     if not (rpc.model_name, hook.target) in sync_param_pairs:
                         sync_param_pairs.append((rpc.model_name, hook.target))
@@ -303,12 +290,10 @@ class ExperimentConfig:
         assert len(set(param_receivers)) == len(param_receivers)
         for a, b in sync_param_pairs:
             if (b, a) not in sync_param_pairs:
-                raise ValueError(
-                    "The current implementation of parameter synchronization "
-                    f"will throw local parameters away, "
-                    f"so it is necceary to do bidirectional synchronization. "
-                    f"{(a,b)} found in sync param pairs but not {(b,a)}"
-                )
+                raise ValueError("The current implementation of parameter synchronization "
+                                 f"will throw local parameters away, "
+                                 f"so it is necceary to do bidirectional synchronization. "
+                                 f"{(a,b)} found in sync param pairs but not {(b,a)}")
         ######### sanity check of sync param hooks #########
 
         msid2mwid = {}
@@ -395,7 +380,8 @@ def dataclass_to_dict(dc):
         root_name = dc.__class__.__name__
         dc = dict(
             config_class=root_name,
-            config_value={k.name: dataclass_to_dict(getattr(dc, k.name)) for k in dataclasses.fields(dc)},
+            config_value={k.name: dataclass_to_dict(getattr(dc, k.name))
+                          for k in dataclasses.fields(dc)},
         )
     else:
         raise f"{dc} of type {type(dc)} cannot be parse to dict."
@@ -407,9 +393,10 @@ def config_to_dataclass(config: Union[List, Dict]):
         return [config_to_dataclass(c) for c in config]
     elif isinstance(config, dict):
         if "config_class" in config.keys():
-            return getattr(sys.modules[__name__], config["config_class"])(
-                **{k: config_to_dataclass(v) for k, v in config["config_value"].items()}
-            )
+            return getattr(sys.modules[__name__], config["config_class"])(**{
+                k: config_to_dataclass(v)
+                for k, v in config["config_value"].items()
+            })
         else:
             return config
     elif isinstance(config, (str, int, float)) or config is None:

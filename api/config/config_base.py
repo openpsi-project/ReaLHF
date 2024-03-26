@@ -1,6 +1,6 @@
 from typing import *
-import dataclasses
 import copy
+import dataclasses
 
 import base.topology
 
@@ -56,8 +56,7 @@ class ModelShardID:
     mp_rank: int
     pp_rank: int
     topo: base.topology.PipeModelDataParallelTopology = dataclasses.field(
-        default_factory=lambda: base.topology.PipeModelDataParallelTopology(1, 1, 1)
-    )
+        default_factory=lambda: base.topology.PipeModelDataParallelTopology(1, 1, 1))
 
     def __post_init__(self):
         assert self.dp_rank >= 0 and self.mp_rank >= 0 and self.pp_rank >= 0
@@ -91,12 +90,8 @@ class ModelShardID:
     def __eq__(self, other):
         # Compare the key attribute for equality
         if isinstance(other, ModelShardID):
-            return (
-                self.model_name == other.model_name
-                and self.dp_rank == other.dp_rank
-                and self.mp_rank == other.mp_rank
-                and self.pp_rank == other.pp_rank
-            )
+            return (self.model_name == other.model_name and self.dp_rank == other.dp_rank
+                    and self.mp_rank == other.mp_rank and self.pp_rank == other.pp_rank)
         return False
 
 

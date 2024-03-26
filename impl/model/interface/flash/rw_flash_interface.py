@@ -2,11 +2,12 @@ from typing import Dict
 import dataclasses
 import os
 
+from deepspeed import DeepSpeedEngine
 import colorama
 import deepspeed
 import torch
 import tqdm
-from deepspeed import DeepSpeedEngine
+
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel

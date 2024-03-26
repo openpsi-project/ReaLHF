@@ -58,7 +58,6 @@ class Payload:
             self.syn_reply_id = uuid.uuid4()
         if self.ack_reply_id is None:
             self.ack_reply_id = uuid.uuid4()
-        
 
 
 class NameResolvingRequstClient:
@@ -98,14 +97,10 @@ class NameResolvingRequstClient:
         self._handler_routing = handler_routing
 
         # master needs to wait all peers (subscribers) to connect
-        while (
-            len(
+        while (len(
                 name_resolve.get_subtree(
-                    names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME)
-                )
-            )
-            < n_subscribers
-        ):
+                    names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME)))
+               < n_subscribers):
             time.sleep(0.1)
         logger.info(
             f"Master discovered all {n_subscribers} "

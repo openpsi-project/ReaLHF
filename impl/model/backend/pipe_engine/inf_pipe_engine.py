@@ -8,13 +8,13 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 import contextlib
 import dataclasses
 import gc
-import torch.nn as nn
 
 from deepspeed import comm as dist
 from deepspeed.runtime.engine import DeepSpeedEngine, MEMORY_OPT_ALLREDUCE_SIZE
 from deepspeed.runtime.zero.config import ZeroStageEnum
 import numpy as np
 import torch
+import torch.nn as nn
 import transformers
 
 from base.dataparallel import PackedParallelDataBroker
@@ -133,23 +133,19 @@ class InferencePipelineEngine:
         unique_params = params_tensor[1]
 
         if self.global_rank == 0:
-            logger.info(
-                f"CONFIG: default_num_micro_batches={self.default_num_micro_batches} "
-                f"num_layers(this stage)={self.num_layers} "
-                f"pp_size={self.num_stages} "
-                f"dp_size={self.grid.get_data_parallel_world_size()} "
-                f"mp_size={self.grid.get_model_parallel_world_size()} "
-            )
+            logger.info(f"CONFIG: default_num_micro_batches={self.default_num_micro_batches} "
+                        f"num_layers(this stage)={self.num_layers} "
+                        f"pp_size={self.num_stages} "
+                        f"dp_size={self.grid.get_data_parallel_world_size()} "
+                        f"mp_size={self.grid.get_model_parallel_world_size()} ")
         if self.dp_id == 0:
-            logger.info(
-                f"rank={self.global_rank} "
-                f"stage={self.stage_id} "
-                f"layers={self.module.num_layers} "
-                f"[{self.module.layer_idx_start}, {self.module.layer_idx_end}) "
-                f"stage_params={num_params} ({num_params/1e6:0.3f}M) "
-                f"total_params={total_params} ({total_params/1e6:0.3f}M) "
-                f"unique_params={unique_params} ({unique_params/1e6:0.3f}M)"
-            )
+            logger.info(f"rank={self.global_rank} "
+                        f"stage={self.stage_id} "
+                        f"layers={self.module.num_layers} "
+                        f"[{self.module.layer_idx_start}, {self.module.layer_idx_end}) "
+                        f"stage_params={num_params} ({num_params/1e6:0.3f}M) "
+                        f"total_params={total_params} ({total_params/1e6:0.3f}M) "
+                        f"unique_params={unique_params} ({unique_params/1e6:0.3f}M)")
 
     def is_first_stage(self):
         """True if this process is in the first stage in the pipeline."""
@@ -190,8 +186,7 @@ class InferencePipelineEngine:
                 NamedArray(
                     packed_input_ids=x["packed_input_ids"],
                     cu_seqlens=torch.nn.functional.pad(x["pair_input_lens"].cumsum(0), (1, 0)),
-                )
-                for x in splitted
+                ) for x in splitted
             ]
         if self._compute_loss:
             for mbid, x in enumerate(splitted):
@@ -206,13 +201,12 @@ class InferencePipelineEngine:
             packed_input_ids = input.packed_input_ids
 
             # sequence parallel input padding
-            x = PipeTransferData(
-                cu_seqlens=cu_seqlens.int(), max_seqlen=int(max_seqlen), store_kv_cache=store_kv_cache
-            )
+            x = PipeTransferData(cu_seqlens=cu_seqlens.int(),
+                                 max_seqlen=int(max_seqlen),
+                                 store_kv_cache=store_kv_cache)
             if self.is_first_stage():
-                ys = [PipeCacheData(input_ids=packed_input_ids)] + [
-                    PipeCacheData() for _ in range(self.num_layers - 1)
-                ]
+                ys = [PipeCacheData(input_ids=packed_input_ids)
+                      ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
             else:
                 ys = [PipeCacheData() for _ in range(self.num_layers)]
             total_len = packed_input_ids.shape[0]
@@ -253,9 +247,8 @@ class InferencePipelineEngine:
             self.tensor_buffer.put("terminate", mbid, torch.tensor(0, dtype=torch.bool, device=self.device))
             self.tensor_buffer.put("generated_idx", mbid, 0)
             batch_length = self.tensor_buffer.get("batch_lengths", mbid)
-            self.tensor_buffer.put(
-                "unfinished_sequences", mbid, torch.ones(batch_length, dtype=torch.long, device=self.device)
-            )
+            self.tensor_buffer.put("unfinished_sequences", mbid,
+                                   torch.ones(batch_length, dtype=torch.long, device=self.device))
             self.tensor_buffer.put("gen_token_ph", mbid, [])
             self.tensor_buffer.put("gen_logprob_ph", mbid, [])
             self.tensor_buffer.put("gen_logits_mask_ph", mbid, [])
@@ -353,9 +346,9 @@ class InferencePipelineEngine:
         # forward one step and return packed logits
         self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
         self._pre_forward()
-        sched = schedule.InferenceSchedule(
-            micro_batches=self.num_micro_batches, stages=self.num_stages, stage_id=self.stage_id
-        )
+        sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
+                                           stages=self.num_stages,
+                                           stage_id=self.stage_id)
         with self.module.sequence_parallel_disable():
             self._exec_schedule(sched)
 
@@ -430,9 +423,7 @@ class InferencePipelineEngine:
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
         num_micro_batches: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
-        self.num_micro_batches = (
-            num_micro_batches if num_micro_batches else self.default_num_micro_batches
-        )
+        self.num_micro_batches = (num_micro_batches if num_micro_batches else self.default_num_micro_batches)
         self._set_generate_states()
         self._prepare_input(packed_input_ids, cu_seqlens)
         # for elegant generation termination
@@ -449,9 +440,7 @@ class InferencePipelineEngine:
         )
 
         def terminate_condition():
-            return all(
-                [self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)]
-            )
+            return all([self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)])
 
         with self.module.gradient_checkpointing_disable(), self.module.sequence_parallel_disable():
             self._exec_schedule(sched, terminate_condition)
@@ -497,9 +486,8 @@ class InferencePipelineEngine:
             assert all_gen_tokens[i].shape == all_log_probs[i].shape
             if all_gen_tokens[i].shape[-1] < max_gen_tokens_length:
                 # if t.shape[-1] < max_gen_tokens_length, pad it with zeros
-                pad_shape = all_gen_tokens[i].shape[:-1] + (
-                    max_gen_tokens_length - all_gen_tokens[i].shape[-1],
-                )
+                pad_shape = all_gen_tokens[i].shape[:-1] + (max_gen_tokens_length -
+                                                            all_gen_tokens[i].shape[-1],)
                 all_gen_tokens[i] = torch.cat(
                     [
                         all_gen_tokens[i],
@@ -509,12 +497,11 @@ class InferencePipelineEngine:
                 )
                 # hack for log_probs and logits_mask, check if correct
                 all_log_probs[i] = torch.cat(
-                    [all_log_probs[i], torch.zeros(pad_shape, device=self.device)], dim=1
-                )
+                    [all_log_probs[i], torch.zeros(pad_shape, device=self.device)], dim=1)
                 if all_logits_mask[i] is not None:
                     all_logits_mask[i] = torch.cat(
-                        [all_logits_mask[i], torch.ones((*pad_shape, vocab_size), device=self.device)], dim=1
-                    )
+                        [all_logits_mask[i],
+                         torch.ones((*pad_shape, vocab_size), device=self.device)], dim=1)
 
         gen_tokens = torch.cat(all_gen_tokens, dim=0)
         log_probs = torch.cat(all_log_probs, dim=0)
@@ -531,15 +518,16 @@ class InferencePipelineEngine:
         prompt_logits = torch.cat(prompt_logits, dim=0)
         return gen_tokens, log_probs, logits_mask, None, prompt_logits
 
-
     def _exec_forward_pass(self, stage_id: int, micro_batch_id: int, step_id: int):
         if self._generate_mode and self.is_first_stage():
-            buf = self.tensor_buffer.get(
-                "recv_next_tokens_buf", micro_batch_id, remove=True, raise_error=False
-            )
-            handle = self.tensor_buffer.get(
-                "recv_next_tokens_handle", micro_batch_id, remove=True, raise_error=False
-            )
+            buf = self.tensor_buffer.get("recv_next_tokens_buf",
+                                         micro_batch_id,
+                                         remove=True,
+                                         raise_error=False)
+            handle = self.tensor_buffer.get("recv_next_tokens_handle",
+                                            micro_batch_id,
+                                            remove=True,
+                                            raise_error=False)
         else:
             buf = self.tensor_buffer.get("recv_act_buf", micro_batch_id, remove=True, raise_error=False)
             handle = self.tensor_buffer.get("recv_act_handle", micro_batch_id, remove=True, raise_error=False)
@@ -634,11 +622,8 @@ class InferencePipelineEngine:
                 base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
                 self.hidden_dim // self.head_dim + 10,
             )
-            if (
-                self._gd_graph is not None
-                and self._gd_graph_bs >= bs
-                and self._gd_graph_seqlen >= kvcache_seqlen
-            ):
+            if (self._gd_graph is not None and self._gd_graph_bs >= bs
+                    and self._gd_graph_seqlen >= kvcache_seqlen):
                 if self._gd_graph_bs < bs or self._gd_graph_seqlen < kvcache_seqlen:
                     raise RuntimeError(
                         f"CUDAGraph batch size {self._gd_graph_bs} or seqlen {self._gd_graph_seqlen} "
@@ -660,10 +645,8 @@ class InferencePipelineEngine:
                     name=f"kv_cache_{layer_idx}_v",
                     force_zero=True,
                 )
-            indices = (
-                torch.arange(kvcache_seqlen, device=self.device, dtype=torch.long)[None, :]
-                < input_lens[:, None]
-            )
+            indices = (torch.arange(kvcache_seqlen, device=self.device, dtype=torch.long)[None, :]
+                       < input_lens[:, None])
             k_cache[indices] = y.k_cache
             v_cache[indices] = y.v_cache
             y.k_cache = k_cache
@@ -673,9 +656,8 @@ class InferencePipelineEngine:
         self.tensor_buffer.put("kv_cache_reserved", mbid, True)
         return True  # if generating first token, return logits to pass to genstep
 
-    def __maybe_increase_cache_seqlens(
-        self, x: PipeTransferData, ys: List[PipeCacheData], mbid: int, is_first_step: bool
-    ):
+    def __maybe_increase_cache_seqlens(self, x: PipeTransferData, ys: List[PipeCacheData], mbid: int,
+                                       is_first_step: bool):
         if not self._generate_mode:
             return
         if is_first_step:  # Do not increase cache seqlens for the first token step
@@ -699,8 +681,7 @@ class InferencePipelineEngine:
         generated_idx = self.tensor_buffer.get("generated_idx", mbid)
 
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, self.tokenizer, unfinished_sequences, generated_idx, self.current_gconfig
-        )
+            logits, self.tokenizer, unfinished_sequences, generated_idx, self.current_gconfig)
 
         if isinstance(terminate, bool):
             terminate = torch.tensor(terminate, device=self.device, dtype=torch.bool)
@@ -749,9 +730,9 @@ class InferencePipelineEngine:
 
     def _exec_send_activations(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert not self.is_last_stage()
-        x: PipeTransferData = self.tensor_buffer.get(
-            "batch_output_x", micro_batch_id, remove=not self._train_mode
-        )
+        x: PipeTransferData = self.tensor_buffer.get("batch_output_x",
+                                                     micro_batch_id,
+                                                     remove=not self._train_mode)
         # NOTE: enable the following optimization will sometimes report CUDA error: operation not permitted when stream is capturing
         # The performance improvement is about 5%~10%, so we disable it for now.
 
@@ -1017,15 +998,11 @@ class InferencePipelineEngine:
                 # logger.info(f"rank {self.global_rank} exec cmd: {cmd}")
                 if type(cmd) not in self._INSTRUCTION_MAP:
                     raise RuntimeError(
-                        f"{self.__class__.__name__} does not understand instruction {repr(cmd)}"
-                    )
+                        f"{self.__class__.__name__} does not understand instruction {repr(cmd)}")
 
                 if will_break:
-                    if (
-                        self.is_last_stage()
-                        and burn_out_steps < self.num_stages - 1
-                        and type(cmd) != schedule.RecvActivation
-                    ):
+                    if (self.is_last_stage() and burn_out_steps < self.num_stages - 1
+                            and type(cmd) != schedule.RecvActivation):
                         # logger.info(f"rank {self.global_rank} skip cmd: {cmd}")
                         continue
                     elif not self.is_last_stage() and type(cmd) != schedule.SendActivation:
@@ -1042,9 +1019,9 @@ class InferencePipelineEngine:
                     )
                     self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
                     self._exec_instr(*cmd.args)
-                    time_mark(
-                        name=f"{cmd_type_string}_end", identifier=str(self.global_rank), step=self.sched_count
-                    )
+                    time_mark(name=f"{cmd_type_string}_end",
+                              identifier=str(self.global_rank),
+                              step=self.sched_count)
                 except Exception as e:
                     logger.error(f"Rank {self.global_rank} step {self.step_count}, Exception in cmd {cmd}")
                     raise e
