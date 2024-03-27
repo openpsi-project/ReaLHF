@@ -13,7 +13,7 @@ import base.namedarray
 from base.topology import ParallelGrid, PipeModelDataParallelTopology
 import torch.distributed as dist
 import base.constants
-import api.model
+
 
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
@@ -58,7 +58,7 @@ def clear_name_resolve():
 
 
 def make_finetune_spec(bs_per_device, total_train_epochs=1, total_train_steps=10, steps_per_epoch=10):
-
+    import api.model  # NOTE: importing this will initialize CUDA
     finetune_spec = api.model.FinetuneSpec(
         total_train_epochs=total_train_epochs,
         total_train_steps=total_train_steps,
@@ -133,7 +133,7 @@ def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
 
 
 def pytorch_memory_burnin(rank):
-    torch.cuda.set_device(rank)
+    torch.cuda.set_device(0)
     torch.cuda.init()
     x = torch.randn(1, device="cuda", dtype=torch.float64, requires_grad=True)
     y = x * torch.randn(1000, device="cuda", dtype=torch.float64)
@@ -162,7 +162,7 @@ def get_llama7b_flash_config():
     from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 
     return FlashMQATConfig(
-        n_layers=4,
+        n_layers=20,
         n_kv_heads=32,
         head_dim=128,
         hidden_dim=4096,

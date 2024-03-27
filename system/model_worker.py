@@ -18,6 +18,7 @@ import torch.utils.data
 from api.config.config_base import ModelName
 from base.monitor import gpu_utilization_monitor, time_mark
 from base.topology import ParallelGrid
+import base.topology
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 import api.config.config_system as config_system
 import api.config.dfg
@@ -32,7 +33,6 @@ import base.namedarray as namedarray
 import base.numpy_utils
 import base.seeding as seeding
 import base.timeutil
-import base.topology
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
@@ -412,9 +412,12 @@ class ModelWorker(worker_base.Worker):
     def __handle_one_rpc_hook(self, hook: str, hook_data: Any):
         if hook == "data_transfer":
             # torch.cuda.synchronize()
+            tik = time.perf_counter()
             self.__data_transfer_among_workers(hook_data)
+            blogger.debug(f"data transfer CPU time: {time.perf_counter() - tik:.4f}s")
             # torch.cuda.synchronize()
         elif hook == "param_sync":
+            tik = time.perf_counter()
             # torch.cuda.synchronize()
             from_model_name: ModelName = hook_data["from_model_name"]
             to_model_name: ModelName = hook_data["to_model_name"]
@@ -440,10 +443,13 @@ class ModelWorker(worker_base.Worker):
                 self.__unwrapped_models[to_model_name].layers = new_layers
                 self.__unwrapped_models[to_model_name].contiguous_param = new_contiguous_param_mem
                 self.__model_is_handle[to_model_name] = False
+            blogger.debug(f"param_sync CPU time: {time.perf_counter() - tik:.4f}s")
         elif hook == "offload":
+            tik = time.perf_counter()
             m = self.__unwrapped_models[hook_data["model_name"]]
             assert isinstance(m, FlashMQATModel), type(m)
             m.async_offload()
+            blogger.debug(f"async_offload enqueue CUDA request time: {time.perf_counter() - tik:.4f}s")
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
 

@@ -870,17 +870,15 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 k_cache = self._gd_input_buffers["k_caches"][bk_idx][:bs, :kvcache_seqlen]
                 v_cache = self._gd_input_buffers["v_caches"][bk_idx][:bs, :kvcache_seqlen]
             else:
-                k_cache = base.constants.get_global_memory_buffer().get_tensor(
-                    tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+                k_cache = torch.zeros(
+                    (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
                     dtype=y.k_cache.dtype,
-                    name=f"kv_cache_{layer_idx}_k",
-                    force_zero=True,
+                    device=y.k_cache.device,
                 )
-                v_cache = base.constants.get_global_memory_buffer().get_tensor(
-                    tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+                v_cache = torch.zeros(
+                    (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
                     dtype=y.v_cache.dtype,
-                    name=f"kv_cache_{layer_idx}_v",
-                    force_zero=True,
+                    device=y.v_cache.device,
                 )
             indices = (torch.arange(kvcache_seqlen, device=self.device, dtype=torch.long)[None, :]
                        < input_lens[:, None])
