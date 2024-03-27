@@ -367,7 +367,8 @@ class FlashMQATModel(nn.Module):
                                       self.layer_idx_start)
         for layer_idx, y, l in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers):
             with torch.cuda.stream(self._offload_stream):
-                # TODO: we can do more fine-grained overlapping
+                # NOTE: although we can do more fine-grained overlapping, the overhead that can be
+                # reduced is very small (~50ms), which is unnecessary for now.
                 for k, v in l.named_parameters():
                     spec = self._param_spec[f"{layer_idx}.{k}"]
                     v.data.copy_(
@@ -391,7 +392,11 @@ class FlashMQATModel(nn.Module):
         assert len(ys) == len(layers)
         raw_pp_input = x.pp_input
         for i, (layer, y) in enumerate(zip(layers, ys)):
-            x = layer(x, y)  # This will set pp_output.
+            if self._offload_disable_sequence_parallel:
+                with _disable_sequence_parallel_of_module(layer):
+                    x = layer(x, y)  # This will set pp_output.
+            else:
+                x = layer(x, y)
             x.pp_input = x.pp_output
         # Finally, pp_input is the input of this pipeline stage (maybe across several layers),
         # pp_output is the output of this pipeline stage.
@@ -993,7 +998,7 @@ class FlashMQATModel(nn.Module):
         src_mp_size = from_topo.get_dim("model")
         dst_mp_size = to_topo.get_dim("model")
 
-        # TODO: remote synchronization deletes the local model, but sometimes it is uncessary.
+        # FIXME: remote synchronization deletes the local model, but sometimes it is uncessary.
 
         if (from_model_name, to_model_name) in self._reparallelize_targets:
             rtgt = self._reparallelize_targets[(from_model_name, to_model_name)]

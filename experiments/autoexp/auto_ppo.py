@@ -206,6 +206,6 @@ def register_auto_ppo_experiment(
 
 
 for size in [7, 13, 34, 70]:
-    for gen_bs in [16, 32, 48, 64, 80, 100, 128, 160, 200, 240, 256, 288, 320]:
+    for gen_bs in [16, 32, 48, 64, 80, 100, 128, 160, 200, 240, 256, 288, 320, 360]:
         train_bs = gen_bs
         register_auto_ppo_experiment(size, gen_bs, train_bs)

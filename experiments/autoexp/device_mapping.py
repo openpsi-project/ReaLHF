@@ -169,9 +169,9 @@ def scheduling_config_from_allocations(
     return sched
 
 
-def _make_train_backend_config(cfg: ModelTrainEvalConfig, use_stream_pipe_engine: bool):
+def _make_train_backend_config(cfg: ModelTrainEvalConfig):
     if cfg.parallel.pipeline_parallel_size > 1:
-        engine_type = "stream_pipe" if use_stream_pipe_engine else "pipe"
+        engine_type = "pipe"
     else:
         engine_type = "deepspeed"
     return ModelBackend(
@@ -245,8 +245,7 @@ def mw_config_from_allocations(
                     shard_idx = shard_counter[m.rpc.model_name]
                     if m.train_eval_config.optimizer.type != "empty":
                         backend = _make_train_backend_config(
-                            m.train_eval_config,
-                            use_stream_pipe_engine=False,
+                            m.train_eval_config
                         )
                     else:
                         backend = _make_inf_backend_config(m.train_eval_config)
@@ -289,17 +288,17 @@ def optimal_device_mapping(
     ref_inf.post_hooks.append(OffloadHook())
 
     rew_mapping = np.array([[1, 1, 0, 0, 0, 0, 0, 0]])
-    # FIXME: pp stage > 1 will block async h2d loading
     rew_parallel = ParallelismConfig(
         model_parallel_size=1,
         pipeline_parallel_size=2,
         data_parallel_size=1,
     )
-    ref_mapping = np.array([[0, 0, 1, 1, 0, 0, 0, 0]])
+    ref_mapping = np.array([[0, 0, 1, 1, 1, 1, 0, 0]])
     ref_parallel = ParallelismConfig(
-        model_parallel_size=1,
+        model_parallel_size=2,
         pipeline_parallel_size=2,
         data_parallel_size=1,
+        use_sequence_parallel=False,
     )
     return {
         rollout.name: RPCAllocation(
@@ -340,7 +339,7 @@ def optimal_device_mapping(
         ),
         critic_inf.name: RPCAllocation(
             rpc=critic_inf,
-            mapping=np.array([[0, 0, 0, 0, 1, 1, 1, 1]]),
+            mapping=np.array([[0, 0, 0, 0, 0, 0, 1, 1]]),
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -349,7 +348,7 @@ def optimal_device_mapping(
                 parallel=ParallelismConfig(
                     model_parallel_size=1,
                     pipeline_parallel_size=2,
-                    data_parallel_size=2,
+                    data_parallel_size=1,
                     use_sequence_parallel=True,
                 ),
             ),
@@ -368,7 +367,7 @@ def optimal_device_mapping(
                     data_parallel_size=1,
                     use_sequence_parallel=True,
                 ),
-                optimizer=OptimizerConfig(type="adam", offload=True),
+                optimizer=OptimizerConfig(type="adam", offload=False),
             ),
         ),
         actor_train.name: RPCAllocation(
@@ -385,7 +384,7 @@ def optimal_device_mapping(
                     data_parallel_size=1,
                     use_sequence_parallel=True,
                 ),
-                optimizer=OptimizerConfig(type="adam", offload=True),
+                optimizer=OptimizerConfig(type="adam", offload=False),
             ),
         ),
     }

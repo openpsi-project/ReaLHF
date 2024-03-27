@@ -62,28 +62,6 @@ def split_tensor_into_1d_equal_chunks(tensor, new_buffer=False):
     return data
 
 
-def gather_split_1d_tensor(tensor):
-    """ Opposite of split_tensor_into_1d_equal_chunks. Gather values from tensor
-        model parallel ranks.
-
-        Returns a new Tensor with the gathered data.
-
-        Arguments:
-            tensor: A Tensor or view of this rank's portion of the data.
-    """
-    numel_gathered = torch.numel(tensor) * base.constants.model_parallel_world_size()
-    gathered = torch.empty(numel_gathered,
-                           dtype=tensor.dtype,
-                           device=torch.cuda.current_device(),
-                           requires_grad=False)
-    # TODO: This API is experimental in pytorch (as of Feb 2022) and
-    # this might break in future pytorch releases. We chose this API
-    # as opposed to torch.distributed.all_gather for efficiency reasons.
-    # This API calls directly NCCL all-gather versus the former does
-    # internal copies and can potentially cause slow down.
-    torch.distributed._all_gather_base(gathered, tensor, group=base.constants.model_parallel_group())
-    return gathered
-
 
 def pad_sequence_parallel_input(packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int):
     """ Sequence parallel requires packed_input_ids has a shape of 1 dimension [total_seq_len], and 

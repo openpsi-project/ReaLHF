@@ -8,7 +8,7 @@ import deepspeed
 import torch
 import torch.distributed
 
-from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
+from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
 import base.constants
 import base.logging as logging
 
@@ -163,10 +163,10 @@ def deepspeed_initialize(
         zero.partition_parameters.restore_init_context()
         logger.info(f"Deepspeed Engine initialze finished.")
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
-    elif engine_type == "pipe" or engine_type == "stream_pipe":
+    elif engine_type == "pipe":
         # mpu = model.mpu()
         config_class = DeepSpeedConfig(config, mpu)
-        engine_cls = DeepSpeedPipelineEngine if engine_type == "pipe" else StreamPipeEngine
+        engine_cls = DeepSpeedPipelineEngine
         engine = engine_cls(
             sequence_parallel=sequence_parallel,
             enable_async_p2p_communication=enable_async_p2p_communication,

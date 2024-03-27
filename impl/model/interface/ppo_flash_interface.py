@@ -11,7 +11,6 @@ from base.constants import data_parallel_group
 from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-from impl.model.backend.pipe_engine.stream_pipe_engine import StreamPipeEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
@@ -398,7 +397,7 @@ class PackedActorInterface(api.model.ModelInterface):
             cu_seqlens = data["cu_seqlens"]
             input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
             logits_mask = data["packed_logits_mask"] if "packed_logits_mask" in data else None
-            if isinstance(module, DeepSpeedPipelineEngine) or isinstance(module, StreamPipeEngine):
+            if isinstance(module, DeepSpeedPipelineEngine):
                 module.set_version_steps(model.version.global_step)
                 loss_fn_kwargs = dict(
                     input_lens=input_lens,  # used for partition

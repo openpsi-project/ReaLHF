@@ -108,7 +108,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # storages
         self.tensor_buffer = TensorBuffer()
 
-        # TODO: add activation checkpoints
         # schedule execution states
         self.tokenizer = None
         self.current_gconfig = None
@@ -820,7 +819,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.__maybe_calculate_loss(x, micro_batch_id)
         self.__maybe_store_logits(x, micro_batch_id)
         self.tensor_buffer.put("batch_output_x", micro_batch_id, x)  # send activation
-        # TODO: proper end condition for generate
         # if end:
         #     logger.info(f"rank {self.global_rank} stage_id {stage_id} mbid {micro_batch_id} step {step_id} forward pass end")
         return end, None
