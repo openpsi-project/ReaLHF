@@ -11,8 +11,8 @@ import tqdm
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
-import base.constants
 import api.model
+import base.constants
 import base.logging as logging
 
 logger = logging.getLogger("Packed Reward Modeling Interface", "benchmark")
@@ -42,16 +42,14 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
 
     output_scaling: float = 1.0
     output_bias: float = 0.0
-    
+
     pipe_inf_n_mbs: Optional[int] = None
-    
 
     def __post_init__(self):
         super().__post_init__()
         self.train_total_predictions = self.train_total_correct_predictions = 0
         if self.pipe_inf_n_mbs is None:
             self.pipe_inf_n_mbs = base.constants.pipe_parallel_world_size()
-
 
     @torch.no_grad()
     def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
@@ -69,7 +67,8 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
                                                cu_seqlens=cu_seqlens,
                                                max_seqlen=max_seqlen).float()
         else:
-            r = module.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
+            r = module.forward(packed_input_ids=packed_input_ids,
+                               cu_seqlens=cu_seqlens,
                                num_micro_batches=self.pipe_inf_n_mbs)
             if r is None:
                 return

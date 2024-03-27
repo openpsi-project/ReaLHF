@@ -62,7 +62,6 @@ def split_tensor_into_1d_equal_chunks(tensor, new_buffer=False):
     return data
 
 
-
 def pad_sequence_parallel_input(packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int):
     """ Sequence parallel requires packed_input_ids has a shape of 1 dimension [total_seq_len], and 
     total_seq_len should be divisible by model_parallel_world_size. This function is used to pad packed_input_ids

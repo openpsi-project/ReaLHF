@@ -244,9 +244,7 @@ def mw_config_from_allocations(
                 if m.mapping[i, j] and not any(m.rpc.model_name == s.id.model_name for s in mw.shards):
                     shard_idx = shard_counter[m.rpc.model_name]
                     if m.train_eval_config.optimizer.type != "empty":
-                        backend = _make_train_backend_config(
-                            m.train_eval_config
-                        )
+                        backend = _make_train_backend_config(m.train_eval_config)
                     else:
                         backend = _make_inf_backend_config(m.train_eval_config)
                     mw.shards.append(

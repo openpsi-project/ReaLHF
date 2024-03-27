@@ -1,11 +1,12 @@
 from typing import Dict, Optional, Tuple
 import functools
+
 from torch.cuda.amp import custom_bwd, custom_fwd
-from impl.model.utils.functional import build_leave_one_indices
 import torch
 import torch.distributed
-from impl.model.parallelism.model_parallel.utils import VocabUtility
 
+from impl.model.parallelism.model_parallel.utils import VocabUtility
+from impl.model.utils.functional import build_leave_one_indices
 import base.constants
 
 
@@ -121,9 +122,9 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         target = labels = torch.nn.functional.pad(packed_input_ids[1:], (0, 1), value=0.0)
         # Maximum value along vocab dimension across all GPUs.
         logits_max = torch.max(vocab_parallel_logits, dim=-1)[0]
-        torch.distributed.all_reduce(
-            logits_max, op=torch.distributed.ReduceOp.MAX, group=base.constants.model_parallel_group()
-        )
+        torch.distributed.all_reduce(logits_max,
+                                     op=torch.distributed.ReduceOp.MAX,
+                                     group=base.constants.model_parallel_group())
         # Subtract the maximum value.
         vocab_parallel_logits = vocab_parallel_logits - logits_max.unsqueeze(dim=-1)
 
@@ -418,7 +419,7 @@ def compute_rewards(
         # Set KL rewards *at EOS* and after EOS to 0.
         # The final *state* is the sequence without EOS, so the final KL reward is assigned to this state.
         # The next "environment step" indicates a "done" by outputting an EOS token, therefore no rewards afterwards.
-        kl_rewards[i, eos_indices[i] :] = 0.0
+        kl_rewards[i, eos_indices[i]:] = 0.0
 
     reward_clip = torch.clamp(reward_score, -clip_reward_value, clip_reward_value)
     score_rewards = torch.zeros_like(kl_rewards)
@@ -533,8 +534,7 @@ def get_packed_advantages_and_returns(
     try:
         import cugae
 
-        return cugae.cugae1d_nolp_misalign_func(
-            rewards, values, short1cu_seqlens.int(), seq_no_eos_mask.bool(), gamma, lam
-        )
+        return cugae.cugae1d_nolp_misalign_func(rewards, values, short1cu_seqlens.int(),
+                                                seq_no_eos_mask.bool(), gamma, lam)
     except ModuleNotFoundError:
         return _pygae1d_nolp_misalign(rewards, values, short1cu_seqlens, seq_no_eos_mask, gamma, lam)

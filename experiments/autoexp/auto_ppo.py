@@ -1,10 +1,9 @@
 from typing import List
+import copy
+import dataclasses
 import functools
 
-
 from .device_mapping import auto_device_mapping as auto
-import dataclasses
-import copy
 from .device_mapping import ClusterDeviceMesh
 from api.config.config_dataset import DatasetType, PromptOnlyDatasetConfig
 from api.config.config_system import _LLM_ENVVARS, ExperimentSaveEvalControl, register_experiment
@@ -42,19 +41,15 @@ def register_auto_ppo_experiment(
     @dataclasses.dataclass
     class AutoPPOExperiment:
         seed: int = 1
-        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(
-            default_factory=functools.partial(
-                ExperimentSaveEvalControl,
-                benchmark_steps=20,
-            ),
-        )
-        ppo: PPOHyperparmeters = dataclasses.field(
-            default_factory=functools.partial(
-                PPOHyperparmeters,
-                max_new_tokens=seqlen,
-                min_new_tokens=seqlen,
-            )
-        )
+        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=functools.partial(
+            ExperimentSaveEvalControl,
+            benchmark_steps=20,
+        ),)
+        ppo: PPOHyperparmeters = dataclasses.field(default_factory=functools.partial(
+            PPOHyperparmeters,
+            max_new_tokens=seqlen,
+            min_new_tokens=seqlen,
+        ))
 
         @property
         def dataset(self) -> DatasetType:

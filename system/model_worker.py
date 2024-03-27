@@ -18,7 +18,6 @@ import torch.utils.data
 from api.config.config_base import ModelName
 from base.monitor import gpu_utilization_monitor, time_mark
 from base.topology import ParallelGrid
-import base.topology
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 import api.config.config_system as config_system
 import api.config.dfg
@@ -33,6 +32,7 @@ import base.namedarray as namedarray
 import base.numpy_utils
 import base.seeding as seeding
 import base.timeutil
+import base.topology
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
