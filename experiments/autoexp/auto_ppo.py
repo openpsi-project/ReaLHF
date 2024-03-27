@@ -1,11 +1,13 @@
+from typing import List
 import functools
 
-from omegaconf import MISSING
 
 from .device_mapping import auto_device_mapping as auto
+import dataclasses
+import copy
 from .device_mapping import ClusterDeviceMesh
 from api.config.config_dataset import DatasetType, PromptOnlyDatasetConfig
-from api.config.config_system import *
+from api.config.config_system import _LLM_ENVVARS, ExperimentSaveEvalControl, register_experiment
 from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
 from base.topology import PipeModelDataParallelTopology
 from experiments.common.ppo_exp import PPOHyperparmeters
@@ -18,6 +20,7 @@ def register_auto_ppo_experiment(
     size: int,
     gen_bs: int,
     train_bs: int,
+    seqlen: int,
 ):
     assert size in [7, 13, 34, 70]
     if size == 7:
@@ -39,11 +42,19 @@ def register_auto_ppo_experiment(
     @dataclasses.dataclass
     class AutoPPOExperiment:
         seed: int = 1
-        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=functools.partial(
-            ExperimentSaveEvalControl,
-            benchmark_steps=20,
-        ),)
-        ppo: PPOHyperparmeters = dataclasses.field(default_factory=PPOHyperparmeters)
+        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(
+            default_factory=functools.partial(
+                ExperimentSaveEvalControl,
+                benchmark_steps=20,
+            ),
+        )
+        ppo: PPOHyperparmeters = dataclasses.field(
+            default_factory=functools.partial(
+                PPOHyperparmeters,
+                max_new_tokens=seqlen,
+                min_new_tokens=seqlen,
+            )
+        )
 
         @property
         def dataset(self) -> DatasetType:
@@ -202,10 +213,11 @@ def register_auto_ppo_experiment(
                 ),
             ]
 
-    register_experiment(f"sosp-a{size}g{gen_bs}t{train_bs}", AutoPPOExperiment)
+    register_experiment(f"sosp-a{size}s{seqlen}g{gen_bs}t{train_bs}", AutoPPOExperiment)
 
 
 for size in [7, 13, 34, 70]:
     for gen_bs in [16, 32, 48, 64, 80, 100, 128, 160, 200, 240, 256, 288, 320, 360]:
-        train_bs = gen_bs
-        register_auto_ppo_experiment(size, gen_bs, train_bs)
+        for seqlen in [256, 512, 1024]:
+            train_bs = gen_bs
+            register_auto_ppo_experiment(size, gen_bs, train_bs, seqlen)

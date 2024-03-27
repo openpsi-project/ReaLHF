@@ -30,7 +30,8 @@ def gpu_memory_mb(name):
 
     logger.debug(
         f"{name} GPU rank {dist.get_rank()}: memory usage: {round(get_accelerator().memory_allocated() / 1024**2, 2)}MB, "
-        f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB")
+        f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB"
+    )
 
 
 def mock_time_mark(name, identifier, t, step):
@@ -104,17 +105,17 @@ MATPLOTLIB_COLORS = [
 
 
 def summary_time_points(
-        start_keys,
-        end_keys,
-        identifiers,
-        dir_name=None,
-        file_name=None,
-        start_time=None,
-        figsize=(12, 4),
-        end_time=None,
-        step_range=None,
-        save_fig_path="time_points.png",
-        draw_boundary=False,
+    start_keys,
+    end_keys,
+    identifiers,
+    dir_name=None,
+    file_name=None,
+    start_time=None,
+    figsize=(12, 4),
+    end_time=None,
+    step_range=None,
+    save_fig_path="time_points.png",
+    draw_boundary=False,
 ):
     """Plot and summary time marks in logs"""
     import matplotlib.pyplot as plt
@@ -227,9 +228,11 @@ def summary_time_points(
             min_val = round(min(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
 
             bubble_time -= time_perc
-            print(f"{k} -- {time_perc} %, "
-                  f"avg, min, max = {avg_val}, {min_val}, {max_val} ms, "
-                  f"sum, n = {round(time_sum[k]/10e6, 2)} ms, {len(time_list[k])}")
+            print(
+                f"{k} -- {time_perc} %, "
+                f"avg, min, max = {avg_val}, {min_val}, {max_val} ms, "
+                f"sum, n = {round(time_sum[k]/10e6, 2)} ms, {len(time_list[k])}"
+            )
         print(f"bubble time -- {round(bubble_time, 2)}%")
 
     plt.legend(loc=(1.01, 0.0))
@@ -313,22 +316,64 @@ def gpu_utilization_monitor(gpu_idx: int, ttl: float):
 
 
 # Helper function to calculate FLOPs using the Megatron-LM paper's formula
-def calculate_train_flops(
+def calculate_llama_train_flops(
     checkpoint_activations_factor: int,
     batch_size: int,
-    seq_length: int,
+    seqlens: List[int],
     num_layers: int,
     hidden_size: int,
+    intermediate_size: int,
     vocab_size: int,
 ):
-    flops_per_iteration = (24 * checkpoint_activations_factor * batch_size * seq_length * num_layers *
-                           (hidden_size**2)) * (1.0 + (seq_length / (6.0 * hidden_size)) +
-                                                (vocab_size / (16.0 * num_layers * hidden_size)))
-    return flops_per_iteration
+    return checkpoint_activations_factor * caculuate_llama_forward_flops(
+        batch_size, seqlens, num_layers, hidden_size, intermediate_size, vocab_size
+    )
 
 
-def caculuate_inference_gen_flops(batch_size: int, seq_length: int, num_layers: int, hidden_size: int,
-                                  vocab_size: int):
-    return (24 * batch_size * seq_length * num_layers *
-            (hidden_size**2)) * (1.0 + (seq_length / (6.0 * hidden_size)) +
-                                 (vocab_size / (16.0 * num_layers * hidden_size)))
+def caculuate_llama_forward_flops(
+    batch_size: int,
+    seqlens: List[int],
+    num_layers: int,
+    hidden_size: int,
+    intermediate_size: int,
+    vocab_size: int,
+):
+    assert len(seqlens) == batch_size
+    attn_flops = sum(x**2 for x in seqlens) * hidden_size
+    return (
+        2
+        * num_layers
+        * (
+            4 * sum(seqlens) * hidden_size**2
+            + 2 * attn_flops
+            + 3 * sum(seqlens) * hidden_size * intermediate_size
+        )
+        + 4 * sum(seqlens) * vocab_size * hidden_size
+    )
+
+
+def calculate_llama_gen_flops(
+    batch_size,
+    prompt_lens,
+    gen_len,
+    num_layers,
+    hidden_size,
+    intermediate_size,
+    vocab_size,
+):
+    flops = caculuate_llama_forward_flops(
+        batch_size, prompt_lens, num_layers, hidden_size, intermediate_size, vocab_size
+    )
+    for i in range(gen_len):
+        prefix_lens = [x + i for x in prompt_lens]
+        flops += (
+            2
+            * num_layers
+            * (
+                4 * batch_size * hidden_size**2
+                + 2 * (sum(prefix_lens) + batch_size) * hidden_size
+                + 3 * batch_size * hidden_size * intermediate_size
+            )
+            + 4 * batch_size * vocab_size * hidden_size
+        )
+    return flops
