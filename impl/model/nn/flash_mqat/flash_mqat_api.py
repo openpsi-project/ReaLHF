@@ -1064,7 +1064,12 @@ class FlashMQATModel(nn.Module):
                 else:
                     buf = torch.zeros(step.param_shape, dtype=step.param_dtype, device="cuda")
                     comm_volume += buf.numel()
-                    torch.distributed.broadcast(buf, src=step.src, group=step.group)
+                    print("==========", buf.shape, step.src, step.rank, torch.distributed.get_rank(), torch.distributed.get_process_group_ranks(step.group), flush=True)
+                    try:
+                        torch.distributed.broadcast(buf, src=step.src, group=step.group)
+                    except torch.distributed.DistBackendError:
+                        print(">>>>>>>>>>", buf.shape, step.src, step.rank, torch.distributed.get_rank(), torch.distributed.get_process_group_ranks(step.group), flush=True)
+                        raise
 
                 tmp_portion_storage[(step.param_key, step.receiver_mp_portion_id)] = buf
                 if all((step.param_key, i) in tmp_portion_storage for i in range(n_receiver_portions)):

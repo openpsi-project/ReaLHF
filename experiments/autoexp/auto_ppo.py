@@ -27,7 +27,7 @@ def register_auto_ppo_experiment(
         nodelist = "QH-com13"
     elif size == 13:
         n_nodes = 2
-        nodelist = "QH-com[13-14]"
+        nodelist = "QH-com[42-43]"
     elif size == 34:
         n_nodes = 4
         nodelist = "QH-com[13-16]"

@@ -24,11 +24,12 @@ _LLM_ENVVARS = {
     "TRITON_CACHE_DIR": TRITON_CACHE_PATH,
     "TOKENIZERS_PARALLELISM": "true",
     "TORCH_EXTENSIONS_DIR": TORCH_EXTENSIONS_DIR,
-    # "NCCL_DEBUG": "INFO",
+    "NCCL_DEBUG": "INFO",
     # "TORCH_DISTRIBUTED_DEBUG": "DETAIL",
     # "NCCL_SOCKET_IFNAME": "ibp71s0",
     # "GLOO_SOCKET_IFNAME": "ibp71s0",
     # "TORCH_USE_CUDA_DSA": "1",
+    # "NCCL_IGNORE_DISABLED_P2P": "1",
     # "CUDA_LAUNCH_BLOCKING": "1",  # NOTE: CUDAGraph Capturing will not work if CUDA_LAUNCH_BLOCKING is set to 1.
     # "NCCL_COMM_BLOCKING": "1",  # NOTE: CUDAGraph Capturing will not work if NCCL_COMM_BLOCKING is set to 1.
     # "NCCL_BLOCKING_WAIT": "1",  # NOTE: CUDAGraph Capturing will not work if NCCL_BLOCKING_WAIT is set to 1.
