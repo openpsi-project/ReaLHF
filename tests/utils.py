@@ -95,21 +95,25 @@ def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
     return make_input(tokenizer, device, dp_batch)
 
 
-def init_global_constants(num_dp, num_mp, num_pp, model_name=None):
+def init_global_constants(num_dp=None, num_mp=None, num_pp=None, topo=None, model_name=None, msid2mwid=None):
     if model_name is None:
         model_name = MODEL_NAME
 
-    topo = PipeModelDataParallelTopology(num_dp=num_dp, num_mp=num_mp, num_pp=num_pp)
-    ws = num_dp * num_mp * num_pp
+    if topo is None:
+        topo = PipeModelDataParallelTopology(num_dp=num_dp, num_mp=num_mp, num_pp=num_pp)
+        ws = num_dp * num_mp * num_pp
+    else:
+        ws = topo.world_size()
 
-    wg = dist.new_group(ranks=range(ws))
+    with base.constants.model_scope(model_name):
+        base.constants.set_rank_mapping(model_name, topo, msid2mwid=msid2mwid)
+        wg = dist.new_group(ranks=[base.constants.to_global_pg_rank(i) for i in range(ws)])
 
-    base.constants.set_parallelism_group(model_name=MODEL_NAME, pgroup=wg)
-    grid = ParallelGrid(process_group=wg, topology=topo)
-    base.constants.set_grid(model_name=MODEL_NAME, grid=grid)
-    base.constants.set_experiment_trial_names(EXPR_NAME, TRIAL_NAME)
-    base.constants.set_rank_mapping(model_name, topo)
-    base.constants.set_max_seqlen(1024)
+        base.constants.set_parallelism_group(model_name=model_name, pgroup=wg)
+        grid = ParallelGrid(process_group=wg, topology=topo)
+        base.constants.set_grid(model_name=model_name, grid=grid)
+        base.constants.set_experiment_trial_names(EXPR_NAME, TRIAL_NAME)
+        base.constants.set_max_seqlen(1024)
 
 
 def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
