@@ -1,3 +1,4 @@
+from typing import Dict, List, Optional
 import pickle
 
 from profiler.device_mesh import DeviceMesh, make_device_mesh_from_name, ModelParallelStrategy
@@ -7,6 +8,20 @@ from profiler.estimate import (comm_stats, estimate_function_call_memory, estima
 from profiler.experiments import ProfileExperiment
 from profiler.rpc import RPC, RPCExecution
 import profiler.cppsearch.mdm_search as mdm_search
+
+from api.config.dfg import ModelRPC
+from experiments.autoexp.auto_ppo import ClusterDeviceMesh
+from experiments.autoexp.device_mapping import RPCAllocation
+from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+
+
+def optimal_device_mapping(
+    device_mesh: ClusterDeviceMesh,
+    model_rpcs: List[ModelRPC],
+    model_configs: Dict[str, FlashMQATConfig],
+    nodelist: Optional[str] = None,
+) -> Dict[str, RPCAllocation]:
+    pass
 
 
 def handpick_model_device_mapping(exp: ProfileExperiment):
@@ -37,7 +52,7 @@ def handpick_model_device_mapping(exp: ProfileExperiment):
     print(f"dynamic_model_cost: {dynamic_model_cost/(1024*1024*1024):02f} GB")
 
 
-def make_rpc_exe_list(exp: ProfileExperiment, if_print: bool = False):
+def make_rpc_exe_list(rpcs, device_mesh, if_print: bool = False):
     device_mesh = make_device_mesh_from_name(exp.device_mesh_name)
     rpc_exe_list = []
     for rpc in exp.model_rpcs:

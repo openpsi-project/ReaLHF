@@ -5,6 +5,7 @@ import numpy as np
 
 from api.config.config_flash_model import ParallelismConfig
 from api.config.dfg import ModelRPC
+from experiments.autoexp.device_mapping import ClusterDeviceMesh
 
 
 @dataclasses.dataclass
@@ -38,6 +39,20 @@ class DeviceMesh:
 
     def __repr__(self):
         return self.device_mesh_name
+
+    @classmethod
+    def from_config(
+            cls,
+            c_device_mesh: ClusterDeviceMesh,
+            mapping: np.ndarray,  # 2d  array of shape (n_nodes, n_gpus_per_node)
+            nodelist: str):
+        node_names = slurm_nodelist_from_nodes(nodelist)
+        indices = np.nonzero(np.sum(mapping, axis=0))
+        assert np.diff(indices, axis=0) == 1
+        node_names = [node_names[i] for i in indices]
+
+    def to_config(self):
+        pass
 
 
 @dataclasses.dataclass

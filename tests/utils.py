@@ -48,13 +48,18 @@ def clear_name_resolve():
     name_resolve.clear_subtree(names.trial_root(experiment_name=EXPR_NAME, trial_name=TRIAL_NAME))
 
 
-def make_finetune_spec(bs_per_device, total_train_epochs=1, total_train_steps=10, steps_per_epoch=10):
+def make_finetune_spec(bs_per_device,
+                       total_train_epochs=1,
+                       total_train_steps=10,
+                       steps_per_epoch=10,
+                       max_seq_len=1024):
     import api.model
     finetune_spec = api.model.FinetuneSpec(
         total_train_epochs=total_train_epochs,
         total_train_steps=total_train_steps,
         steps_per_epoch=steps_per_epoch,
         batch_size_per_device=bs_per_device,
+        max_seqlen=max_seq_len,
     )
     return finetune_spec
 

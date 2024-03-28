@@ -119,12 +119,11 @@ class ProfileInterface(api.model.ModelInterface):
         gconfig = GenerationConfig(min_new_tokens=gen_tokens, max_new_tokens=gen_tokens)
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            res = module.generate(
-                tokenizer=model.tokenizer,
-                packed_input_ids=data['packed_input_ids'],
-                cu_seqlens=data['cu_seqlens'],
-                gconfig=gconfig,
-            )
+            res = module.generate(tokenizer=model.tokenizer,
+                                  packed_input_ids=data['packed_input_ids'],
+                                  cu_seqlens=data['cu_seqlens'],
+                                  gconfig=gconfig,
+                                  num_micro_batches=base.constants.pipe_parallel_world_size())
             if res is None:
                 return dict()
             gen_tokens, logprobs, logits_mask, *_ = res

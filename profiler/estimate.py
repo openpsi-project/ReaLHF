@@ -7,12 +7,15 @@ import argparse
 import dataclasses
 import enum
 import getpass
+import itertools
 import json
 import os
+import pprint
 
 from profiler.device_mesh import *
 from profiler.experiments import ProfileExperiment
 from profiler.rpc import CommStats
+from profiler.utils import make_stats_key
 
 from api.config.config_base import MODEL_TYPE_TO_PATH
 from api.config.dfg import ModelInterfaceType
@@ -102,11 +105,12 @@ def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen):
     head_cost = op_cost["head"][real_op_key]
     cost = (embedding_layer_cost + num_layers * flash_mqat_block_0_cost\
             + head_cost) / num_pp
+    # print(f"{cost} = ({embedding_layer_cost} + {num_layers} * {flash_mqat_block_0_cost} + {head_cost})/{num_pp}")
+    # print(f"op key {op_key} real op key {real_op_key}")
 
-    if op_name == "fwd_gen_1":
-        cost = cost * bs / real_op_key[1]
-    elif op_name != "opt":
+    if op_name != "opt" and op_name != "fwd_gen_1":
         cost = cost * bs * seqlen / (real_op_key[1] * real_op_key[2])
+
     return cost
 
 
@@ -118,7 +122,7 @@ def comm_inst_cost(comm_stats, size, comm_type):
 def estimate_instruction_cost(
     layer_stats_path: str,  # path to layer stats file
     comm_stats_path: str,
-    num_layers: str,  # model configuration, num transformers layer
+    num_layers: int,  # model configuration, num transformers layer
     parallel_strategy: ModelParallelStrategy,
     hidden_dim: int,
     batch_size: int,
@@ -149,13 +153,22 @@ def estimate_instruction_cost(
     # print(f"batch size {batch_size} num_pp {num_pp} num_dp {num_dp} num_mp {num_mp}"
     #       f"train mbs {train_mbs} gen_mbs {gen_mbs}")
 
+    # pprint.pprint(op_cost, indent=4)
     inst_cost = {}
-    inst_cost["gen_fwd_0"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_0", gen_mbs, seq_len)
-    inst_cost["gen_fwd_1"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_1", gen_mbs, seq_len)
-    inst_cost["inf_fwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd", gen_mbs, seq_len)
-    inst_cost["train_fwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd", train_mbs, seq_len)
-    inst_cost["train_bwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "bwd", train_mbs, seq_len)
-    inst_cost["train_opt"] = compute_inst_cost(op_cost, num_layers, num_pp, "opt", train_mbs, seq_len)
+    inst_keys = ["gen_fwd_0", "gen_fwd_1", "inf_fwd", "train_fwd", "train_bwd", "train_opt"]
+    op_names = ["fwd_gen_0", "fwd_gen_1", "fwd", "fwd", "bwd", "opt"]
+
+    for inst_key, op_name in zip(inst_keys, op_names):
+        mbs = train_mbs if "train" in inst_key else gen_mbs
+        # print(f"inst key {inst_key}")
+        inst_cost[inst_key] = compute_inst_cost(op_cost, num_layers, num_pp, op_name, mbs, seq_len)
+
+    # inst_cost["gen_fwd_0"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_0", gen_mbs, seq_len)
+    # inst_cost["gen_fwd_1"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_1", gen_mbs, seq_len)
+    # inst_cost["inf_fwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd", gen_mbs, seq_len)
+    # inst_cost["train_fwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd", train_mbs, seq_len)
+    # inst_cost["train_bwd"] = compute_inst_cost(op_cost, num_layers, num_pp, "bwd", train_mbs, seq_len)
+    # inst_cost["train_opt"] = compute_inst_cost(op_cost, num_layers, num_pp, "opt", train_mbs, seq_len)
 
     comm_type = "remote_send" if num_gpus // num_pp >= 8 else "local_send"
     # print(type(hidden_dim), type(bs), type(seq_len))
@@ -193,26 +206,31 @@ def _estimate_rpc_cost(
         comm_cost = inst_cost["act_p2p"] * (num_pp + num_micro_batches - 2) * 2 +\
                     inst_cost["gen_act_p2p"] * (num_gen_tokens - 1) * num_micro_batches * 2
     # print(f"{model_interface_type} compute cost {compute_cost} comm cost {comm_cost}")
+    # pprint.pprint(inst_cost, indent=4)
     return compute_cost + comm_cost
 
 
-def load_model_config(model_path, model_type="llama"):
-    return getattr(FlashMQATModel, f"config_from_{model_type}")(model_path=model_path)
+def load_model_config(rpc: ModelRPC) -> FlashMQATConfig:
+    return getattr(FlashMQATModel,
+                   f"config_from_{rpc.model_type._class}")(model_path=MODEL_TYPE_TO_PATH[rpc.model_type])
 
 
 def estimate_rpc_cost(rpc: ModelRPC,
                       rpc_alloc: RPCAllocation,
                       num_gen_tokens=256,
-                      use_gradient_checkpointing=False):
+                      use_gradient_checkpointing=False,
+                      bs=None,
+                      seq_len=None):
     # print(f"estimating rpc cost for {rpc.name}")
     model_type = rpc.model_type
     layer_stats_path = os.path.join(PROFILE_RESULT_PATH, str(model_type))
     # comm_stats_path = os.path.join(PROFILE_RESULT_PATH, exp.device_mesh_name)
     comm_stats_path = os.path.join(PROFILE_RESULT_PATH, "default_comm")
-    model_config = load_model_config(MODEL_TYPE_TO_PATH[model_type], model_type._class)
+    model_config = load_model_config(rpc)
 
-    bs = rpc.min_n_seqs
-    seq_len = rpc.max_n_tokens // bs
+    if bs == None or seq_len == None:
+        bs = rpc.min_n_seqs
+        seq_len = rpc.max_n_tokens // bs
     ps = ModelParallelStrategy.from_config(rpc_alloc.train_eval_config.parallel)
     inst_cost = estimate_instruction_cost(layer_stats_path, comm_stats_path, model_config.n_layers, ps,
                                           model_config.hidden_dim, bs, seq_len)
@@ -243,13 +261,16 @@ def estimate_model_size(model_config: FlashMQATConfig):
     return 2 * n_params
 
 
-def estimate_function_call_memory(interface_type: ModelInterfaceType,
+def estimate_function_call_memory(rpc: ModelRPC,
+                                  rpc_alloc: RPCAllocation,
                                   batch_size: int,
                                   seq_len: int,
-                                  model_config: FlashMQATConfig,
-                                  parallel_strategy: ModelParallelStrategy,
                                   gradient_checkpointing: bool = False,
                                   offload_optimizer: bool = False):
+    interface_type = rpc.interface_type
+    model_config = load_model_config(rpc)
+    parallel_strategy = ModelParallelStrategy.from_config(rpc_alloc.train_eval_config.parallel)
+
     h = model_config.hidden_dim
     i = model_config.intermediate_dim
     v = model_config.vocab_size
@@ -297,10 +318,27 @@ def main(args):
     rpcs = exp.rpcs
     rpc_allocations = exp.rpc_allocations
     # device_mesh = exp.device_mesh_name
+
+    bs_list = [256, 512]
+    seq_len_list = [128, 256, 512]
+    # bs_list = [32, 64]
+    # seq_len_list = [128, 256]
+    bs_seqlen_list = list(itertools.product(bs_list, seq_len_list))
+    r = {}
     for rpc, rpc_alloc in zip(rpcs, rpc_allocations):
         rpc_name = rpc.name
-        rpc_cost = estimate_rpc_cost(rpc, rpc_alloc)
-        print(f"RPC {rpc_name} cost: {rpc_cost}")
+        for bs, seq_len in bs_seqlen_list:
+            rpc_cost = estimate_rpc_cost(rpc,
+                                         rpc_alloc,
+                                         use_gradient_checkpointing=False,
+                                         bs=bs,
+                                         seq_len=seq_len)
+            stats_key = make_stats_key(rpc_name, bs, seq_len)
+            r[stats_key] = rpc_cost
+            # print(f"RPC {stats_key} cost: {rpc_cost}")
+
+    # pprint.pprint(r, indent=4)
+    return r
 
 
 if __name__ == "__main__":
@@ -319,4 +357,4 @@ if __name__ == "__main__":
     # )
     args = parser.parse_args()
 
-    main(args)
+    r = main(args)

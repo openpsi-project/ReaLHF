@@ -18,7 +18,7 @@ logger = logging.getLogger("main", "system")
 
 CONTROLLER_TIME_LIMIT = None
 TRACE_TIMEOUT = (
-    300  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
+    500  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
 )
 
 
@@ -34,7 +34,7 @@ def main(args, if_raise=True):
         "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
         "WANDB_MODE": "disabled",
         "DLLM_MODE": "SLURM",
-        "DLLM_TRACE": "0",
+        "DLLM_TRACE": "0" if not args.trace else "1",
     }
 
     logger.info(f"Resetting name resolving repo...")
@@ -91,9 +91,9 @@ def main(args, if_raise=True):
             use_ray_cluster=False,
         )
 
-    # timeout = None if not args.trace else TRACE_TIMEOUT  # run 5 mins to collect trace
+    timeout = None if not args.trace else TRACE_TIMEOUT  # run 5 mins to collect trace
     try:
-        sched.wait(timeout=None)
+        sched.wait(timeout=timeout)
     except (KeyboardInterrupt, scheduler.client.JobException, TimeoutError) as e:
         sched.stop_all()
         if if_raise:
@@ -118,5 +118,10 @@ if __name__ == "__main__":
         type=str,
         default=None,
     )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+    )
+
     args = parser.parse_args()
     main(args)

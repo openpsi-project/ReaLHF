@@ -20,7 +20,7 @@ import torch.utils.data
 
 from profiler.comm import ProfileCommunication
 from profiler.engine import ProfileEngine
-from profiler.utils import random_sample
+from profiler.utils import make_stats_key, random_sample
 
 from api.config.config_flash_model import FlashMQATConfig
 from base.constants import LOG_ROOT
@@ -103,9 +103,13 @@ class ProfileWorker(worker_base.Worker):
         # self.gen_tokens_list = cfg.gen_tokens_list
 
         if self.bs_list is None:
-            self.bs_list = [32, 64, 128, 256]
+            self.bs_list = [256, 512]  # total bss
+            if len(self.rpcs) == 1:
+                self.bs_list = [256]
         if self.seq_len_list is None:
             self.seq_len_list = [128, 256, 512]
+            if len(self.rpcs) == 1:
+                self.seq_len_list = [128]
         # if self.gen_tokens_list is None:
         #     self.gen_tokens_list = [128]
 
@@ -193,19 +197,28 @@ class ProfileWorker(worker_base.Worker):
         with base.constants.model_scope(self.model_name):
             # initialize
             func_name = rpc.interface_type.value
-            data = random_sample(bs, seq_len, self.__vocab_size)
-            stats_key = f"{rpc.name}|{bs}|{seq_len}"
+            num_pp = base.constants.pipe_parallel_world_size()
+            num_dp = base.constants.data_parallel_world_size()
+            if bs < 2 * num_pp * num_dp:
+                return worker_base.PollResult(sample_count=0, batch_count=0)
+            data = random_sample(bs // num_dp, seq_len, self.__vocab_size)
+            # stats_key = f"{rpc.name}|{bs}|{seq_len}"
+            stats_key = make_stats_key(rpc.name, bs, seq_len)
             logger.info(f"Running model function call: {func_name} "
                         f"for rpc {stats_key}.")
             func = getattr(self.__interface, func_name)
             for i in range(self.warmup_rounds):
                 func(self.__model, data)
+                dist.barrier()
+                torch.cuda.synchronize()
                 logger.info(f"{stats_key} warm up round {i} done")
 
             st = time.monotonic()
             for _ in range(self.profile_rounds):
                 rt = time.monotonic()
                 func(self.__model, data)
+                dist.barrier()
+                torch.cuda.synchronize()
                 self.stats[stats_key].append(time.monotonic() - rt)
             logger.info(f"Running {self.profile_rounds} model function call: {func_name} "
                         f"for rpc {stats_key} done, time cost = {time.monotonic() - st}, "
@@ -229,14 +242,15 @@ class ProfileWorker(worker_base.Worker):
             if self.profile_rpc:
                 bs_seq_len = itertools.product(self.bs_list, self.seq_len_list)
                 bs_seq_len = sorted(bs_seq_len, key=lambda x: x[0] * x[1])
+                self.__reinit_backend(max(self.bs_list), max(self.seq_len_list))
                 for bs, seq_len in bs_seq_len:
-                    self.__reinit_backend(bs, seq_len)
                     for rpc in self.rpcs:
                         # data = random_sample(bs, seq_len, self.__vocab_size)
                         r = self.__run_model_function_call(rpc, bs, seq_len)
 
                     # dump stats
-                    with open(os.path.join(self.dump_root, "rpc_profile_stats.json"), "w") as f:
+                    with open(os.path.join(self.dump_root, f"rpc_profile_stats_{self.__worker_index}.json"),
+                              "w") as f:
                         json.dump(self.stats, f)
 
                 if r.batch_count > 0:
@@ -257,6 +271,9 @@ class ProfileWorker(worker_base.Worker):
                 self.__profile_comm.print_stats()
                 self.__profile_comm.dump_stats()
 
+            if os.environ["DLLM_TRACE"] == "1":
+                return r
+
             raise ProfileCompelte(f"Profile rounds {self.warmup_rounds + self.profile_rounds} complete !!! "
                                   f"total time cost {time.monotonic() - self.profile_start} s.")
         except Exception as e:
@@ -269,5 +286,3 @@ class ProfileWorker(worker_base.Worker):
         #     # if self.config.profile_communication:
         #     #     self.__profile_comm.reset_stats()
         #     logger.info("Warmup round {} done.".format(self.current_profile_round))
-
-        return r

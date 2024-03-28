@@ -110,6 +110,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 loss, _ = module.eval_batch(packed_input_ids,
                                             cu_seqlens,
                                             loss_fn=compute_packed_sft_loss,
+                                            num_micro_batches=base.constants.pipe_parallel_world_size(),
                                             **loss_fn_kwargs)
             else:
                 logits = module(packed_input_ids=packed_input_ids,
@@ -143,7 +144,9 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            logits = module.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
+            logits = module.forward(packed_input_ids=packed_input_ids,
+                                    cu_seqlens=cu_seqlens,
+                                    num_micro_batches=base.constants.pipe_parallel_world_size())
         else:
             logits = model.module(packed_input_ids=packed_input_ids,
                                   cu_seqlens=cu_seqlens,

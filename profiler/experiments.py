@@ -37,17 +37,20 @@ class ProfileExperiment(Experiment):
     gen_tokens_list: Optional[List[int]] = None
 
     # use_sequence_parallel: bool = False
-    use_gradient_checkpointing: bool = False
+    use_gradient_checkpointing: bool = True
 
     profile_communication: bool = False
     profile_rpc: bool = True
+
+    single_rpc_profile: Optional[str] = None
+    instruction_sync: bool = False
 
     def __post_init__(self):
         self.n_workers = self.n_nodes * NUM_GPUS_PER_NODE
         self.device_mesh_name = self.nodelist
 
     @property
-    def rpcs(self) -> List[ModelRPC]:
+    def all_rpcs(self):
         rollout = ModelRPC(model_name="actor",
                            model_type=self.model_type,
                            interface_type=ModelInterfaceType.GENERATE,
@@ -71,46 +74,62 @@ class ProfileExperiment(Experiment):
                          min_n_seqs=32,
                          max_n_seqs=32,
                          max_n_tokens=32 * 128)
-
         return [rollout, inf, train]
 
     @property
+    def rpcs(self) -> List[ModelRPC]:
+        if self.single_rpc_profile == "gen":
+            return [self.all_rpcs[0]]
+        elif self.single_rpc_profile == "inf":
+            return [self.all_rpcs[1]]
+        elif self.single_rpc_profile == "train":
+            return [self.all_rpcs[2]]
+        else:
+            return self.all_rpcs
+
+    @property
     def rpc_allocations(self):
-        rollout, inf, train = self.rpcs
-        return [
-            RPCAllocation(
-                rpc=rollout,
-                mapping=np.ones((self.n_nodes, NUM_GPUS_PER_NODE), dtype=np.int32),
-                train_eval_config=ModelTrainEvalConfig(
-                    type="llama",
-                    path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                    base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                    parallel=self.parallelism_config,
-                ),
+        rollout, inf, train = self.all_rpcs
+        rollout_alloc = RPCAllocation(
+            rpc=rollout,
+            mapping=np.ones((self.n_nodes, NUM_GPUS_PER_NODE), dtype=np.int32),
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                parallel=self.parallelism_config,
             ),
-            RPCAllocation(
-                rpc=inf,
-                mapping=np.ones((self.n_nodes, NUM_GPUS_PER_NODE), dtype=np.int32),
-                train_eval_config=ModelTrainEvalConfig(
-                    type="llama",
-                    path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                    base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                    parallel=self.parallelism_config,
-                ),
+        )
+        inf_alloc = RPCAllocation(
+            rpc=inf,
+            mapping=np.ones((self.n_nodes, NUM_GPUS_PER_NODE), dtype=np.int32),
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                parallel=self.parallelism_config,
             ),
-            RPCAllocation(
-                rpc=train,
-                mapping=np.ones((self.n_nodes, NUM_GPUS_PER_NODE), dtype=np.int32),
-                train_eval_config=ModelTrainEvalConfig(
-                    type="llama",
-                    path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                    base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                    gradient_checkpointing=self.use_gradient_checkpointing,
-                    parallel=self.parallelism_config,
-                    optimizer=OptimizerConfig(type="adam"),
-                ),
+        )
+        train_alloc = RPCAllocation(
+            rpc=train,
+            mapping=np.ones((self.n_nodes, NUM_GPUS_PER_NODE), dtype=np.int32),
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                gradient_checkpointing=self.use_gradient_checkpointing,
+                parallel=self.parallelism_config,
+                optimizer=OptimizerConfig(type="adam"),
             ),
-        ]
+        )
+        if self.single_rpc_profile == "gen":
+            return [rollout_alloc]
+        elif self.single_rpc_profile == "inf":
+            return [inf_alloc]
+        elif self.single_rpc_profile == "train":
+            return [train_alloc]
+        else:
+            return [rollout_alloc, inf_alloc, train_alloc]
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(profile_worker=TasksGroup(count=self.n_workers,
@@ -144,10 +163,9 @@ class ProfileExperiment(Experiment):
             ),
         )
         interface = rpc.interface_impl
-        backend = _make_train_backend_config(
-            m.train_eval_config,
-            use_stream_pipe_engine=False,
-        )
+        backend = _make_train_backend_config(m.train_eval_config,
+                                             use_stream_pipe_engine=False,
+                                             instruction_sync=self.instruction_sync)
 
         profile_workers = [
             ProfileWorker(seed=self.seed,
@@ -186,8 +204,8 @@ def register_profile_experiment(
     actor_model_type = ModelType(model_class, size, False)
     n_nodes = (num_pp * num_mp * num_dp) // NUM_GPUS_PER_NODE
 
-    node_start = 40
-    node_end = 40 + n_nodes - 1
+    node_start = 31
+    node_end = node_start + n_nodes - 1
     nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
 
     exp_func = functools.partial(
@@ -202,9 +220,28 @@ def register_profile_experiment(
             pipeline_parallel_size=num_pp,
             use_sequence_parallel=(num_mp > 1),
         ),
+        instruction_sync=False,
     )
     # print(f"registering profile-s{size}p{num_pp}m{num_mp}d{num_dp}")
     register_experiment(f"profile-s{size}p{num_pp}m{num_mp}d{num_dp}", exp_func)
+
+    for func_name in ["gen", "train", "inf"]:
+        exp_func = functools.partial(
+            ProfileExperiment,
+            model_type=actor_model_type,
+            interface=ModelInterface(type_="profile"),
+            n_nodes=n_nodes,
+            nodelist=nodelist,
+            parallelism_config=ParallelismConfig(
+                data_parallel_size=num_dp,
+                model_parallel_size=num_mp,
+                pipeline_parallel_size=num_pp,
+                use_sequence_parallel=(num_mp > 1),
+            ),
+            single_rpc_profile=func_name,
+            instruction_sync=True,
+        )
+        register_experiment(f"profile-s{size}p{num_pp}m{num_mp}d{num_dp}-{func_name}", exp_func)
 
 
 # register_profile_experiment(7, 2, 1, 4)

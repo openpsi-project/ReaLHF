@@ -19,7 +19,7 @@ import scheduler.client
 
 
 def profile(args):
-    trial_name = args.trial_name
+    # trial_name = args.trial_name
     expr_name = args.expr_name
     exp: ProfileExperiment = config_package.make_experiment(expr_name)
     exp.profile_communication = True
@@ -47,8 +47,8 @@ def profile(args):
     model_type = exp.model_type
     model_path = MODEL_TYPE_TO_PATH[model_type]
 
-    bs_list = [2**i for i in range(7)] * 2
-    sl_list = [128] * 7 + [256] * 7
+    bs_list = [16, 32, 64, 128] * 3
+    sl_list = [128] * 4 + [256] * 4 + [512] * 4
 
     print(f"Profiling {model_type} layers, model path {model_path}, "
           f"cmd {profile_layers_cmd(model_path, model_type, bs_list, sl_list)}")
@@ -82,12 +82,12 @@ if __name__ == "__main__":
         type=str,
         default=None,
     )
-    parser.add_argument(
-        "-f",
-        "--trial_name",
-        type=str,
-        default=None,
-    )
+    # parser.add_argument(
+    #     "-f",
+    #     "--trial_name",
+    #     type=str,
+    #     default=None,
+    # )
     args = parser.parse_args()
 
     profile(args)

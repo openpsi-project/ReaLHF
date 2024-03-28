@@ -169,7 +169,9 @@ def scheduling_config_from_allocations(
     return sched
 
 
-def _make_train_backend_config(cfg: ModelTrainEvalConfig, use_stream_pipe_engine: bool):
+def _make_train_backend_config(cfg: ModelTrainEvalConfig,
+                               use_stream_pipe_engine: bool,
+                               instruction_sync: bool = False):
     if cfg.parallel.pipeline_parallel_size > 1:
         engine_type = "stream_pipe" if use_stream_pipe_engine else "pipe"
     else:
@@ -197,6 +199,7 @@ def _make_train_backend_config(cfg: ModelTrainEvalConfig, use_stream_pipe_engine
             enable_fp16=cfg.enable_fp16,
             sequence_parallel=cfg.parallel.use_sequence_parallel,
             enable_async_p2p_communication=cfg.enable_async_p2p,
+            instruction_sync=instruction_sync,
         ),
     )
 

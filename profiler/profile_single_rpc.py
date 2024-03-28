@@ -2,14 +2,14 @@ import argparse
 import datetime
 import time
 
-from multi_host_main import main
-
+from profiler.multi_host_main import main
 from profiler.utils import find_factors
 
 if __name__ == "__main__":
     date = datetime.datetime.now().strftime("%Y%m%d")
     expr_names = []
-    for size in [7, 13, 34, 70]:
+    sizes = [7, 13, 70]  # [7, 13, 34, 70]
+    for size in sizes:
         if size == 7:
             n_nodes = 1
         elif size == 13:
@@ -32,6 +32,7 @@ if __name__ == "__main__":
         args = argparse.Namespace()
         setattr(args, "expr_name", expr_name)
         setattr(args, "trial_name", date)
+        setattr(args, "trace", False)
         error = main(args, if_raise=False)
         print(f"expr_name: {expr_name} at {date} done, error: {error}, "
               f"timecost {time.monotonic() - st:.2f}")

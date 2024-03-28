@@ -272,7 +272,9 @@ def get_tracer(
     min_duration: int = 0,
     output_file: str = "result.json",
 ) -> viztracer.VizTracer:
+    print("trace: ", os.environ.get("DLLM_TRACE"))
     if os.environ.get("DLLM_TRACE") == "1":
+        print("initialized viztracer")
         return viztracer.VizTracer(
             tracer_entries=tracer_entries,
             verbose=verbose,
