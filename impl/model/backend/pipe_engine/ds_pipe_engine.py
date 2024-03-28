@@ -747,6 +747,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def _exec_reduce_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert self._train_mode, "_exec_reduce_grads() should only be executed in train mode"
         self._force_grad_boundary = True
+        self.set_gradient_accumulation_boundary(True)
         if self.bfloat16_enabled():
             if self.zero_optimization_stage() < ZeroStageEnum.gradients:
                 self._bf16_reduce_grads()
@@ -973,6 +974,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # The last stage just runs backward on the loss using DeepSpeed's typical
         # mechanisms.
         output_x = self.tensor_buffer.get("batch_output_x", micro_batch_id, remove=True)
+        self.enable_backward_allreduce = False
+        self.set_gradient_accumulation_boundary(False)
 
         if self.is_last_stage():
             loss = self.tensor_buffer.get("losses", micro_batch_id, remove=True)
