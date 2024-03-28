@@ -22,17 +22,12 @@ except ImportError:
 USE_TE_BACKEND = TE_ENABLED and os.getenv("FLASH_MQAT_USE_TE") == "1"
 
 import impl.model.backend.deepspeed
-import impl.model.interface.chat
-import impl.model.interface.dpo_interface
-import impl.model.interface.flash.dpo_flash_interface
+import impl.model.backend.pipe_inf
+import impl.model.interface.dpo_flash_interface
 # import impl.model.interface.flash.gen_scoring_flash_interface
-import impl.model.interface.flash.ppo_flash_interface
-import impl.model.interface.flash.rw_flash_interface
-import impl.model.interface.flash.sft_flash_interface
-import impl.model.interface.pipe.stream_pipe_ppo_interface
-import impl.model.interface.pipe.stream_pipe_test_interface
-import impl.model.interface.simple_interface
-import impl.model.interface.wps_ac_interface
+import impl.model.interface.ppo_flash_interface
+import impl.model.interface.rw_flash_interface
+import impl.model.interface.sft_flash_interface
 import impl.model.nn.basic_nn
 import impl.model.nn.flash_mqat.flash_from_hf_impl
 import impl.model.nn.flash_mqat.flash_generate

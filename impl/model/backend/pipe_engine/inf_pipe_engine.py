@@ -10,11 +10,11 @@ import dataclasses
 import gc
 
 from deepspeed import comm as dist
-from deepspeed.runtime.bf16_optimizer import BF16_Optimizer
 from deepspeed.runtime.engine import DeepSpeedEngine, MEMORY_OPT_ALLREDUCE_SIZE
 from deepspeed.runtime.zero.config import ZeroStageEnum
 import numpy as np
 import torch
+import torch.nn as nn
 import transformers
 
 from base.dataparallel import PackedParallelDataBroker
@@ -25,44 +25,29 @@ from impl.model.nn.flash_mqat.flash_generate import GenerationConfig, genstep
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
 from impl.model.utils.data import PipeCacheData, PipeTransferData
-from impl.model.utils.tensor import pad_sequence_parallel_input
 import base.constants
 import base.logging as logging
 import impl.model.backend.pipe_engine.static_schedule as schedule
 import impl.model.parallelism.pipeline_parallel.p2p as p2p
 
-logger = logging.getLogger("DeepSpeedPipelineEngine", "benchmark")
+logger = logging.getLogger("InferencePipelineEngine", "benchmark")
 
 
 class PipelineError(Exception):
     pass
 
 
-class DeepSpeedPipelineEngine(DeepSpeedEngine):
+class InferencePipelineEngine:
     """A training engine hybrid pipeline, data, and model parallel training."""
 
     def __init__(
         self,
-        sequence_parallel=False,
+        module: FlashMQATModel,
         enable_async_p2p_communication=False,
         enable_async_instruction=False,
-        instruction_sync=False,
-        *super_args,
-        **super_kwargs,
     ):
-        super().__init__(*super_args, **super_kwargs)
-        assert (self.zero_optimization_stage()
-                < 2), "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
 
-        self.module: FlashMQATModel
-        # print(f"module cls name {type(self.module)}")
-
-        # deepspeed enigne attributes
-        self.pipeline_parallelism = True
-        # We schedule the all-reduces, so disable it in super().backward()
-        self.enable_backward_allreduce = False
-        # see method is_gradient_accumulation_boundary()
-        self._force_grad_boundary = False
+        self.module: FlashMQATModel = module
 
         # configs for data shape
         self.config = self.module.config
@@ -70,8 +55,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.hidden_dim = self.config.hidden_dim
         self.head_dim = self.config.head_dim
         self.n_kv = self.config.n_kv_heads
-        self.dtype = torch.half if not self.bfloat16_enabled() else torch.bfloat16
-        self.sequence_parallel = sequence_parallel
+
+        self.dtype = self.module.dtype
+        self.device = self.module.device
         # tensor model parallel option, whether to enable sequence parallel
 
         # logging
@@ -79,10 +65,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         # parallelism constants
         self.grid: ParallelGrid = base.constants.grid()
-        assert self.dp_world_size == self.grid.data_parallel_size
 
         self.global_rank = self.grid.get_global_rank()
         self.num_stages = self.grid.get_pipe_parallel_world_size()
+        assert self.num_stages > 1
         self.stage_id = self.grid.get_stage_id()
         self.dp_id = self.grid.get_data_parallel_id()
 
@@ -92,10 +78,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         # PipelineEngine needs to handle data loading specially due to only the first
         # and last stages loading inputs/labels. We construct a sampler that uses
-
-        self.is_pipe_parallel = self.grid.pipe_parallel_size > 1
-        self.is_data_parallel = self.grid.data_parallel_size > 1
-        self.is_model_parallel = self.grid.model_parallel_size > 1
 
         self.prev_stage = (self.stage_id - 1) % self.num_stages
         self.next_stage = (self.stage_id + 1) % self.num_stages
@@ -121,32 +103,16 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         # engine mode
         self._generate_mode = False  # for generate()
-        self._train_mode = False  # for train_batch()
         self._inference_mode = True  # for evaluate() and forward()
 
         self._first_token = False
 
         self._gd_graph = None
 
-        self._sa_prompt_graph_size = self._sa_decoding_graph_size = -1
-        self._ra_prompt_graph_size = self._ra_decoding_graph_size = -1
-
         self._async_p2p = enable_async_p2p_communication
         self._async_instruction = enable_async_instruction and self._async_p2p
-        self._instruction_sync = instruction_sync
 
         self._post_init_logging()
-
-    def __post_init__(self):
-        # assertions
-        # assert isinstance(self.module, PipelineModule), "model must base PipelineModule"
-        assert self.zero_optimization_stage(
-        ) < 2, "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
-        if self.bfloat16_enabled():
-            assert isinstance(self.optimizer, BF16_Optimizer)
-        assert self.dp_world_size == self.grid.data_parallel_size
-        assert self.num_stages > 1
-        assert self.is_pipe_parallel, "Must use pipeline parallelism with PipelineModule"
 
     def _post_init_logging(self):
         model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
@@ -171,8 +137,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                         f"num_layers(this stage)={self.num_layers} "
                         f"pp_size={self.num_stages} "
                         f"dp_size={self.grid.get_data_parallel_world_size()} "
-                        f"mp_size={self.grid.get_model_parallel_world_size()} "
-                        f"bf16={self.bfloat16_enabled()} ")
+                        f"mp_size={self.grid.get_model_parallel_world_size()} ")
         if self.dp_id == 0:
             logger.info(f"rank={self.global_rank} "
                         f"stage={self.stage_id} "
@@ -189,20 +154,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def is_last_stage(self):
         """True if this process is in the last stage in the pipeline."""
         return self.stage_id == self.num_stages - 1
-
-    def is_gradient_accumulation_boundary(self):
-        """True if the engine is executing a gradient reduction or optimizer step instruction.
-
-        This is overridden from :class:`DeepSpeedEngine` to force reductions
-        and steps when the pipeline engine is instructed to do so.
-
-        Returns:
-            bool: whether reductions and optimizer steps should occur.
-        """
-        return self._force_grad_boundary
-
-    def gradient_checkpointing_enable(self, attn: Optional[bool] = False, mlp: Optional[bool] = False):
-        self.module.gradient_checkpointing_enable(attn, mlp)
 
     def _prepare_input(
         self,
@@ -227,7 +178,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             n_seqs = input_lens_for_partition.shape[0]
         else:
             data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
-            # print(f"in _prepare_input cu_seqlens type {type(cu_seqlens)}")
             n_seqs = cu_seqlens.shape[0] - 1
         n_mbs = self.num_micro_batches
         splitted = PackedParallelDataBroker.scatter_to(data, n_mbs, min_size=n_seqs // n_mbs)
@@ -251,11 +201,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             packed_input_ids = input.packed_input_ids
 
             # sequence parallel input padding
-            if self.sequence_parallel:
-                assert not self._generate_mode
-                packed_input_ids, cu_seqlens, max_seqlen, pad_size = pad_sequence_parallel_input(
-                    packed_input_ids, cu_seqlens, max_seqlen)
-                self.tensor_buffer.put("pad_size", mbid, pad_size)
             x = PipeTransferData(cu_seqlens=cu_seqlens.int(),
                                  max_seqlen=int(max_seqlen),
                                  store_kv_cache=store_kv_cache)
@@ -264,8 +209,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                       ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
             else:
                 ys = [PipeCacheData() for _ in range(self.num_layers)]
-            total_len = (packed_input_ids.shape[0] if not self.sequence_parallel else
-                         packed_input_ids.shape[0] // base.constants.model_parallel_world_size())
+            total_len = packed_input_ids.shape[0]
             mb_seq_lens.append(total_len)
             return (x, ys)
 
@@ -285,14 +229,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 store_kv_cache=batch[0].store_kv_cache,
             )
             self.tensor_buffer.put("pipe_transfer_infos", mbid, others_cache)
-
-    def _prepare_loss_input(self, n_seqs: int, **loss_kwargs):
-        data = NamedArray(**loss_kwargs)
-        splitted = PackedParallelDataBroker.scatter_to(data,
-                                                       self.num_micro_batches,
-                                                       min_size=n_seqs // self.num_micro_batches)
-        for mbid, x in enumerate(splitted):
-            self.tensor_buffer.put("loss_inputs", mbid, x)
 
     def _set_generate_states(self):
         self._generate_mode = True
@@ -337,25 +273,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.tensor_buffer.remove("first_token")
         self._clear_p2p_caches()
 
-    def _set_eval_batch_states(self):
-        self._compute_loss = True
-        self._generate_mode = False
-        self._train_mode = False
-        self._inference_mode = True
-
-    def _pre_eval_batch(self):
-        pass
-
-    def _post_eval_batch(self):
-        self.tensor_buffer.remove("batch_input_x")
-        self.tensor_buffer.remove("batch_input_ys")
-        self.tensor_buffer.remove("batch_lengths")
-        self.tensor_buffer.remove("loss_inputs")
-        self.tensor_buffer.remove("input_cache")
-        self.tensor_buffer.remove("losses")
-        self.tensor_buffer.remove("stats")
-        self._clear_p2p_caches()
-
     def _clear_p2p_caches(self):
         self.tensor_buffer.remove("recv_next_tokens_buf")
         self.tensor_buffer.remove("recv_act_buf")
@@ -376,21 +293,15 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         pass
 
     def _post_forward(self):
-        self._post_eval_batch()
+        self.tensor_buffer.remove("batch_input_x")
+        self.tensor_buffer.remove("batch_input_ys")
+        self.tensor_buffer.remove("batch_lengths")
+        self.tensor_buffer.remove("loss_inputs")
+        self.tensor_buffer.remove("input_cache")
+        self.tensor_buffer.remove("losses")
+        self.tensor_buffer.remove("stats")
         self.tensor_buffer.remove("logits")
         self._clear_p2p_caches()
-
-    def _set_train_batch_states(self):
-        self._compute_loss = True
-        self._generate_mode = False
-        self._train_mode = True
-        self._inference_mode = False
-
-    def _pre_train_batch(self):
-        pass
-
-    def _post_train_batch(self):
-        self._post_eval_batch()
 
     def set_version_steps(self, version_steps):
         self.version_steps = version_steps
@@ -433,13 +344,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
         self._set_forward_states()
         # forward one step and return packed logits
-        # print(f"in forward cu_seqlens type {type(cu_seqlens)}")
         self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
         self._pre_forward()
         sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
                                            stages=self.num_stages,
                                            stage_id=self.stage_id)
-        self._exec_schedule(sched)
+        with self.module.sequence_parallel_disable():
+            self._exec_schedule(sched)
 
         logits = None
         if self.is_last_stage():
@@ -447,119 +358,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             for i in range(self.num_micro_batches):
                 logits = self.tensor_buffer.get("logits", i, remove=True)
                 # logger.info(f"mbid {i} before remove pad logits shape {logits.shape}")
-                if self.sequence_parallel:
-                    pad_size = self.tensor_buffer.get("pad_size", i, remove=True)
-                    logits = logits[:-pad_size] if pad_size > 0 else logits
-                    # logger.info(f"mbid {i} after remove pad {pad_size} logits shape {logits.shape}")
                 logits_list.append(logits)
             logits = torch.cat(logits_list, dim=0)
 
         self._post_forward()
         return logits
-
-    def eval_batch(
-        self,
-        packed_input_ids: torch.Tensor,
-        cu_seqlens: torch.Tensor,
-        loss_fn: Callable,
-        input_lens_for_partition: Optional[torch.Tensor] = None,
-        num_micro_batches: Optional[int] = None,
-        **loss_fn_kwargs,
-    ):
-        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
-        self._set_eval_batch_states()
-        self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
-        if input_lens_for_partition is not None:
-            n_seqs = input_lens_for_partition.shape[0]
-        else:
-            n_seqs = cu_seqlens.shape[0] - 1
-        self._loss_fn = loss_fn
-        self._prepare_loss_input(n_seqs=n_seqs, **loss_fn_kwargs)
-        self._pre_eval_batch()
-
-        # Do the work
-        sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
-                                           stages=self.num_stages,
-                                           stage_id=self.stage_id)
-
-        # prevent dead-lock with multiple evals sequence
-        # dist.barrier()
-
-        self._exec_schedule(sched)
-
-        avg_loss, avg_stats = None, None
-        if self.is_last_stage():
-            losses = []
-            stats = []
-
-            for mbid in range(self.num_micro_batches):
-                loss = self.tensor_buffer.get("losses", mbid).detach()
-                losses.append(loss)
-                stats.append(self.tensor_buffer.get("stats", mbid))
-
-            assert len(losses) > 0
-            avg_loss = torch.stack(losses).mean()
-            avg_stats = dict()
-            for key in stats[0].keys():
-                avg_stats[key] = torch.stack([stat[key] for stat in stats]).mean()
-
-        self._post_eval_batch()
-        return avg_loss, avg_stats
-
-    def train_batch(
-        self,
-        packed_input_ids: torch.Tensor,
-        cu_seqlens: torch.Tensor,
-        loss_fn: Callable,
-        input_lens_for_partition: Optional[torch.Tensor] = None,
-        num_micro_batches: Optional[int] = None,
-        **loss_fn_kwargs,
-    ):
-        if not torch._C.is_grad_enabled():
-            raise RuntimeError(f"train_batch() requires gradients enabled. Use eval_batch() instead.")
-
-        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
-        self._set_train_batch_states()
-        self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
-        self._loss_fn = loss_fn
-        if input_lens_for_partition is not None:
-            n_seqs = input_lens_for_partition.shape[0]
-        else:
-            n_seqs = cu_seqlens.shape[0] - 1
-        self._prepare_loss_input(n_seqs=n_seqs, **loss_fn_kwargs)
-        self._pre_train_batch()
-
-        # Do the work
-        sched = schedule.TrainSchedule(micro_batches=self.num_micro_batches,
-                                       stages=self.num_stages,
-                                       stage_id=self.stage_id)
-        self._exec_schedule(sched)
-
-        avg_loss, avg_stats = None, None
-        if self.is_last_stage():
-            losses = []
-            stats = []
-
-            for mbid in range(self.num_micro_batches):
-                loss = self.tensor_buffer.get("losses", mbid)  # .detach()
-                losses.append(loss)
-                stats.append(self.tensor_buffer.get("stats", mbid))
-
-            assert len(losses) > 0
-            avg_loss = torch.stack(losses).mean()
-            avg_stats = dict()
-            for key in stats[0].keys():
-                avg_stats[key] = torch.stack([stat[key] for stat in stats]).mean()
-
-        self._post_eval_batch()
-        return avg_loss, avg_stats
-
-    @contextlib.contextmanager
-    def sequence_parallel_disable(self):
-        a = self.sequence_parallel
-        self.sequence_parallel = False
-        yield
-        self.sequence_parallel = a
 
     def capture_generate_decoding_steps(self, ys: List[PipeCacheData]):
         torch.cuda.synchronize()
@@ -581,11 +384,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             position_ids=cache_seqlens.clone().long()[:, None],
             k_caches=[y.k_cache for y in ys],
             v_caches=[y.v_cache for y in ys],
-            hidden_states=torch.randn(max_batch_size,
-                                      1,
-                                      self.module.config.hidden_dim,
-                                      device=self.device,
-                                      dtype=self.module.dtype),
+            hidden_states=torch.randn(
+                max_batch_size,
+                1,
+                self.module.config.hidden_dim,
+                device=self.module.device,
+                dtype=self.module.dtype,
+            ),
             # NOTE: here cache_seqlens should be the real cache_seqlens,
             # otherwise k/v cache will be changed in-place during capturing
             cache_seqlens=cache_seqlens.clone(),
@@ -618,32 +423,29 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
         num_micro_batches: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
-        with self.sequence_parallel_disable():
-            self.num_micro_batches = (num_micro_batches
-                                      if num_micro_batches else self.default_num_micro_batches)
-            self._set_generate_states()
-            self._prepare_input(packed_input_ids, cu_seqlens)
-            # for elegant generation termination
-            gconfig.max_new_tokens += self.num_stages - 1
-            self.current_gconfig = gconfig
-            self.tokenizer = tokenizer
-            self._pre_generate()
+        self.num_micro_batches = (num_micro_batches if num_micro_batches else self.default_num_micro_batches)
+        self._set_generate_states()
+        self._prepare_input(packed_input_ids, cu_seqlens)
+        # for elegant generation termination
+        gconfig.max_new_tokens += self.num_stages - 1
+        self.current_gconfig = gconfig
+        self.tokenizer = tokenizer
+        self._pre_generate()
 
-            sched = schedule.GenerateSchedule(
-                micro_batches=self.num_micro_batches,
-                stages=self.num_stages,
-                stage_id=self.stage_id,
-                max_new_tokens=gconfig.max_new_tokens,
-            )
+        sched = schedule.GenerateSchedule(
+            micro_batches=self.num_micro_batches,
+            stages=self.num_stages,
+            stage_id=self.stage_id,
+            max_new_tokens=gconfig.max_new_tokens,
+        )
 
-            def terminate_condition():
-                return all(
-                    [self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)])
+        def terminate_condition():
+            return all([self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)])
 
-            with self.module.gradient_checkpointing_disable(), self.module.sequence_parallel_disable():
-                self._exec_schedule(sched, terminate_condition)
-            r = self._maybe_gather_generate_outputs()
-            self._post_generate()
+        with self.module.gradient_checkpointing_disable(), self.module.sequence_parallel_disable():
+            self._exec_schedule(sched, terminate_condition)
+        r = self._maybe_gather_generate_outputs()
+        self._post_generate()
         return r
 
     def _maybe_gather_generate_outputs(self):
@@ -667,15 +469,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 mm = next(m for m in gen_logits_mask_ph if m is not None)
                 gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
                 logits_mask = torch.stack(gen_logits_mask_ph, -2)
-
-            # logger.info(f"gen_tokens shape {gen_tokens.shape} "
-            #             f"log_probs shape {log_probs.shape} ")
-            if self.sequence_parallel:
-                pad_seq_size = self.tensor_buffer.get("pad_seq_size", mbid, remove=True)
-                gen_tokens = gen_tokens[:-pad_seq_size] if pad_seq_size > 0 else gen_tokens
-                log_probs = log_probs[:-pad_seq_size] if pad_seq_size > 0 else log_probs
-                if torch.is_tensor(logits_mask):
-                    logits_mask = logits_mask[:-pad_seq_size] if pad_seq_size > 0 else logits_mask
 
             all_gen_tokens.append(gen_tokens)
             all_log_probs.append(log_probs)
@@ -725,43 +518,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         prompt_logits = torch.cat(prompt_logits, dim=0)
         return gen_tokens, log_probs, logits_mask, None, prompt_logits
 
-    # def _exec_reduce_tied_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
-    #     # We need to run this first to write to self.averaged_gradients;
-    #     # since this class turns `enable_backward_allreduce` off,
-    #     # `self.overlapping_partition_gradients_reduce_epilogue()` defined in the DeepSpeedEngine
-    #     # never actually runs. I suspect this is because of efficiency problems; get_flat_partition in
-    #     # stage2.py might do something expensive; someone will have to look into that later. But
-    #     # in the meantime, this fixes ZeRO2 + Pipelining enough to run a demo. Further profiling
-    #     # needed to decide if it actually breaks everything.
-    #     # (see https://github.com/EleutherAI/gpt-neox/issues/62#issuecomment-761471944)
-    #     if self.zero_optimization_partition_gradients():
-    #         self.optimizer.overlapping_partition_gradients_reduce_epilogue()
-
-    #     weight_group_list = self.module.get_tied_weights_and_groups()
-    #     for weight, group in weight_group_list:
-    #         grad = weight._hp_grad if self.bfloat16_enabled() else weight.grad
-    #         dist.all_reduce(grad, group=group)
-
-    def _exec_reduce_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
-        assert self._train_mode, "_exec_reduce_grads() should only be executed in train mode"
-        self._force_grad_boundary = True
-        self.set_gradient_accumulation_boundary(True)
-        if self.bfloat16_enabled():
-            if self.zero_optimization_stage() < ZeroStageEnum.gradients:
-                self._bf16_reduce_grads()
-            else:
-                raise NotImplementedError("PP+BF16 only work for ZeRO Stage 1")
-        else:
-            self.allreduce_gradients(bucket_size=MEMORY_OPT_ALLREDUCE_SIZE)
-        self._force_grad_boundary = False
-
-        return False, None
-
-    def _bf16_reduce_grads(self):
-        # Make our own list of gradients from the optimizer's FP32 grads
-        self.buffered_allreduce_fallback(grads=self.optimizer.get_grads_for_reduction(),
-                                         elements_per_buffer=MEMORY_OPT_ALLREDUCE_SIZE)
-
     def _exec_forward_pass(self, stage_id: int, micro_batch_id: int, step_id: int):
         if self._generate_mode and self.is_first_stage():
             buf = self.tensor_buffer.get("recv_next_tokens_buf",
@@ -796,9 +552,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         else:
             x = self.tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
 
-        self._zero_grads(x)
-        self._zero_grads(ys)
-
         # TODO: since pytorch all-reduce has bug during capturing and vllm all-reduce does not support >8 GPUs,
         # we defer the implementation of CUDAGraph generation in the future
         # if self._generate_mode and self.tensor_buffer.get("kv_cache_reserved", micro_batch_id):
@@ -823,14 +576,12 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         #         self._gd_graph.replay()
         #     x.pp_output = self._gd_output_buffers["output"][:bs]
         # else:
-        x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
-        # print(f"module cls name {type(self.module)}, stage {self.stage_id} output: {x.pp_output}")
+        x, ys = self.module.forward(x, ys)  # ys will be modified inplace in tensor buffer
 
         # logger.info(f"rank {self.global_rank} mbid {micro_batch_id} step {step_id} x.pp_output shape {x.pp_output.shape}")
         is_first_step = self.__maybe_init_kv_cache(x, ys, micro_batch_id)
         self.__maybe_increase_cache_seqlens(x, ys, micro_batch_id, is_first_step)
         end = self.__maybe_genstep(x, ys, micro_batch_id, is_first_step)
-        self.__maybe_calculate_loss(x, micro_batch_id)
         self.__maybe_store_logits(x, micro_batch_id)
         self.tensor_buffer.put("batch_output_x", micro_batch_id, x)  # send activation
         # if end:
@@ -941,82 +692,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.tensor_buffer.get("gen_logits_mask_ph", mbid).append(logits_mask)
         self.tensor_buffer.put("next_tokens_to_send", mbid, next_tokens)
 
-    def __maybe_calculate_loss(self, x: PipeTransferData, mbid: int):
-        if self.is_last_stage() and self._compute_loss:
-            model_output = x.pp_output
-            if self.sequence_parallel:
-                pad_size = self.tensor_buffer.get("pad_size", mbid, remove=True)
-                model_output = model_output[:-pad_size] if pad_size > 0 else model_output
-            loss_kwargs = self.tensor_buffer.get("loss_inputs", mbid, remove=True)
-            input_cache = self.tensor_buffer.get("input_cache", mbid, remove=True)
-            packed_input_ids = input_cache.packed_input_ids
-            cu_seqlens = input_cache.cu_seqlens
-            assert self._loss_fn is not None, "loss function is not set, please use engine.set_loss_fn(fn)"
-            loss, stats = self._loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_kwargs)
-            loss = loss / self.num_micro_batches
-            self.tensor_buffer.put("losses", mbid, loss)
-            self.tensor_buffer.put("stats", mbid, stats)
-
     def __maybe_store_logits(self, x: PipeTransferData, mbid: int):
         if self.is_last_stage() and not self._compute_loss:
             logits = x.pp_output
             self.tensor_buffer.put("logits", mbid, logits)
-
-    def _exec_backward_pass(self, stage_id: int, micro_batch_id: int, step_id: int):
-        assert self.optimizer is not None, "must provide optimizer during " "init in order to use backward"
-        # The last stage just runs backward on the loss using DeepSpeed's typical
-        # mechanisms.
-        output_x = self.tensor_buffer.get("batch_output_x", micro_batch_id, remove=True)
-        self.enable_backward_allreduce = False
-        self.set_gradient_accumulation_boundary(False)
-
-        if self.is_last_stage():
-            loss = self.tensor_buffer.get("losses", micro_batch_id, remove=True)
-            super().backward(loss)
-            self.tensor_buffer.put("losses", micro_batch_id, loss.detach().clone())
-            return False, None
-
-        if self.bfloat16_enabled() and not self.is_last_stage():
-            # manually call because we don't call optimizer.backward()
-            self.optimizer.clear_lp_grads()
-
-        if not self.is_last_stage() and self.zero_optimization():
-            # manually call because we don't call optimizer.backward()
-            self.optimizer.micro_step_id += 1
-
-            if self.optimizer.contiguous_gradients:
-                self.optimizer.ipg_buffer = []
-                buf_0 = torch.empty(int(self.optimizer.reduce_bucket_size),
-                                    dtype=self.dtype,
-                                    device=self.device)
-                self.optimizer.ipg_buffer.append(buf_0)
-
-                # Use double buffers to avoid data access conflict when overlap_comm is enabled.
-                if self.optimizer.overlap_comm:
-                    buf_1 = torch.empty(int(self.optimizer.reduce_bucket_size),
-                                        dtype=self.dtype,
-                                        device=self.device)
-                    self.optimizer.ipg_buffer.append(buf_1)
-                self.optimizer.ipg_index = 0
-
-        handle = self.tensor_buffer.get("recv_grad_handle", micro_batch_id, remove=True, raise_error=False)
-        if handle is not None:
-            handle.wait()
-        grad = self.tensor_buffer.get("grad", micro_batch_id, remove=True)
-
-        output_tensor = output_x.pp_output
-        torch.autograd.backward(tensors=output_tensor, grad_tensors=grad)
-
-        if not self.is_last_stage() and self.zero_optimization():
-            # manually call because we don't call optimizer.backward()
-            # Only for Stage 1, Mode 2
-            if self.optimizer.use_grad_accum_attribute:
-                self.optimizer.fill_grad_accum_attribute()
-
-        if self.bfloat16_enabled() and not self.is_last_stage():
-            # manually call because we don't call optimizer.backward()
-            self.optimizer.update_hp_grads(clear_lp_grads=False)
-        return False, None
 
     def _capture_send_activation(self, shape, dtype, is_decoding_phase: bool):
         sa_graph_size = int(np.prod(shape))
@@ -1079,7 +758,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if self._generate_mode:
             self.tensor_buffer.put("first_token", micro_batch_id, False)
 
-        if type(self) == DeepSpeedPipelineEngine and self._generate_mode:
+        if self._generate_mode:
             if self._async_p2p:
                 handle.wait()
             terminate = self.tensor_buffer.get("terminate", micro_batch_id)
@@ -1126,8 +805,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         #     ft = self.tensor_buffer.get("first_token", micro_batch_id, remove=False)
         #     if not ft:
         #         batch_length = self.tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
-        #         batch_length = batch_length // base.constants.model_parallel_world_size() \
-        #                        if self.sequence_parallel else batch_length
+        #         batch_length = batch_length
         #         act_shape = (batch_length, 1, self.hidden_dim)
         #     length = int(np.prod(act_shape))
         #     if (ft and length > self._ra_prompt_graph_size) or (not ft
@@ -1143,14 +821,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         #     self.tensor_buffer.put("terminate", micro_batch_id, terminate)
         #     return False, None
 
-        if self._train_mode:
-            buf = self.tensor_buffer.alloc("activation",
-                                           micro_batch_id,
-                                           act_shape,
-                                           self.dtype,
-                                           self.device,
-                                           require_grads=True)
-        elif self._inference_mode:
+        if self._inference_mode:
             buf = torch.empty(act_shape, dtype=self.dtype, device=self.device, requires_grad=False)
         elif self._generate_mode:
             ft = self.tensor_buffer.get("first_token", micro_batch_id, remove=False)
@@ -1158,8 +829,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 buf = torch.empty(act_shape, dtype=self.dtype, device=self.device, requires_grad=False)
             else:
                 batch_length = self.tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
-                batch_length = (batch_length // base.constants.model_parallel_world_size()
-                                if self.sequence_parallel else batch_length)
                 act_shape = (batch_length, 1, self.hidden_dim)
                 buf = torch.empty(act_shape, dtype=self.dtype, device=self.device, requires_grad=False)
 
@@ -1168,7 +837,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             self.tensor_buffer.put("recv_act_handle", micro_batch_id, recv_handle)
         self.tensor_buffer.put("recv_act_buf", micro_batch_id, buf)
 
-        if type(self) == DeepSpeedPipelineEngine and self._generate_mode:
+        if self._generate_mode:
             if self._async_p2p:
                 recv_handle.wait()
             terminate = torch.empty((), dtype=torch.bool, device=self.device)
@@ -1179,27 +848,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # x = PipeTransferData(pp_input=buf, **others)
         # self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
         return False, recv_handle
-
-    def _exec_send_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
-        assert self._train_mode, "_exec_send_grads() should be only executed in train mode."
-        assert not self.is_first_stage()
-        activation = self.tensor_buffer.get("activation", micro_batch_id, remove=True)
-        assert activation.grad is not None
-        handle = p2p.send(activation.grad, self.prev_stage, async_op=self._async_p2p)
-        if self._async_p2p:
-            self.tensor_buffer.put("send_grad_handle", micro_batch_id, handle)
-        return False, handle
-
-    def _exec_recv_grads(self, stage_id: int, micro_batch_id: int, step_id: int):
-        assert self._train_mode, "_exec_recv_grads() should be only executed in train mode."
-        assert not self.is_last_stage()
-        mb_seq_len = self.tensor_buffer.get("mb_seq_lens", micro_batch_id, remove=False)
-        grad_shape = (mb_seq_len, self.hidden_dim)
-        buf = self.tensor_buffer.alloc("grad", micro_batch_id, grad_shape, self.dtype, self.device)
-        handle = p2p.recv(buf, self.next_stage, async_op=self._async_p2p)
-        if self._async_p2p:
-            self.tensor_buffer.put("recv_grad_handle", micro_batch_id, handle)
-        return False, handle
 
     def _capture_send_next_token(self, batch_length):
         self._sn_graph_size = batch_length
@@ -1241,10 +889,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if self._async_p2p:
             self.tensor_buffer.put("send_next_tokens_handle", micro_batch_id, handle)
 
-        if type(self) == DeepSpeedPipelineEngine:
-            if self._async_p2p:
-                handle.wait()
-            p2p.send(self.tensor_buffer.get("terminate", micro_batch_id), self.next_stage)
+        if self._async_p2p:
+            handle.wait()
+        p2p.send(self.tensor_buffer.get("terminate", micro_batch_id), self.next_stage)
         self.tensor_buffer.put("first_token", micro_batch_id, False)
         return False, handle
 
@@ -1297,62 +944,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         x = PipeTransferData(store_kv_cache=True)
         self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
 
-        if type(self) == DeepSpeedPipelineEngine:
-            if self._async_p2p:
-                handle.wait()
-            terminate = torch.empty((), dtype=torch.bool, device=self.device)
-            p2p.recv(terminate, self.prev_stage)
-            self.tensor_buffer.put("terminate", micro_batch_id, terminate)
+        if self._async_p2p:
+            handle.wait()
+        terminate = torch.empty((), dtype=torch.bool, device=self.device)
+        p2p.recv(terminate, self.prev_stage)
+        self.tensor_buffer.put("terminate", micro_batch_id, terminate)
 
         return False, handle
-
-    def _exec_optimizer_step(self, stage_id: int, micro_batch_id: int, step_id: int):
-        assert self._train_mode, "_exec_optimizer_step() should be only executed in train mode."
-        self._force_grad_boundary = True
-        lr_kwargs = None
-        if self.version_steps is not None:
-            lr_kwargs = {"epoch": self.version_steps}
-        # self.rank_print("before take model step")
-        self._take_model_step(lr_kwargs=lr_kwargs)
-        # self.rank_print("after take model step")
-
-        # sync loss scale across pipeline stages
-        if not self.bfloat16_enabled():
-            loss_scale = self.optimizer.loss_scale
-            total_scale_cuda = torch.FloatTensor([float(loss_scale)]).to(self.device)
-            dist.all_reduce(total_scale_cuda,
-                            op=dist.ReduceOp.MIN,
-                            group=self.grid.get_model_parallel_group())
-            # all_loss_scale = total_scale_cuda[0].item()
-            logger.info(
-                f"loss scale: {total_scale_cuda}, group: { torch.distributed.get_process_group_ranks(self.mpu.get_model_parallel_group())}"
-            )
-            self.optimizer.loss_scaler.cur_scale = min(total_scale_cuda[0].item(), 8192)
-
-        # self.rank_print("after sync loss scale")
-
-        self._force_grad_boundary = False
-        return False, None
-
-    def _exec_end_schedule(self, stage_id: int, micro_batch_id: int, step_id: int):
-        """Used in StreamPipeEngine to force end the schedule. Do nothing."""
-        # logger.info(f"rank {self.global_rank} stage {stage_id} execute EndSchedule")
-        return True, None
-
-    def _zero_grads(self, inputs):
-        if isinstance(inputs, torch.Tensor):
-            if inputs.grad is not None:
-                inputs.grad.data.zero_()
-        elif isinstance(inputs, tuple):
-            for t in inputs:
-                if t.grad is not None:
-                    t.grad.data.zero_()
-        elif dataclasses.is_dataclass(inputs):
-            for f in dataclasses.fields(inputs):
-                self._zero_grads(getattr(inputs, f.name))
-        else:
-            # do nothing for non tensor
-            pass
 
     def backward(self, *args, **kwargs):
         """Disabled for pipeline parallel training. See ``train_batch()``."""
@@ -1365,17 +963,11 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     # A map of PipeInstruction types to methods. Each method will be executed with the
     # kwargs provided to the PipeInstruction from the scheduler.
     _INSTRUCTION_MAP = {
-        schedule.OptimizerStep: _exec_optimizer_step,
-        schedule.ReduceGrads: _exec_reduce_grads,
         schedule.ForwardPass: _exec_forward_pass,
-        schedule.BackwardPass: _exec_backward_pass,
         schedule.SendActivation: _exec_send_activations,
         schedule.RecvActivation: _exec_recv_activations,
-        schedule.SendGrad: _exec_send_grads,
-        schedule.RecvGrad: _exec_recv_grads,
         schedule.SendNextTokens: _exec_send_next_tokens,
         schedule.RecvNextTokens: _exec_recv_next_tokens,
-        schedule.EndSchedule: _exec_end_schedule,
     }
 
     def _exec_schedule(self, pipe_schedule, terminate_condition=None):
@@ -1425,8 +1017,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     )
                     self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
                     self._exec_instr(*cmd.args)
-                    if self._instruction_sync:
-                        torch.cuda.synchronize()
                     time_mark(name=f"{cmd_type_string}_end",
                               identifier=str(self.global_rank),
                               step=self.sched_count)

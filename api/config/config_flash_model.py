@@ -257,10 +257,6 @@ class ModelTrainEvalConfig:
             raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
         if self.parallel.pipeline_parallel_size > 1 and self.lora is not None:
             raise ValueError("Use LoRA with pipeline parallel is not supported.")
-        if self.offload and self.zero_stage != 3:
-            raise ValueError("offload model is only supported when zero stage=3.")
-        if self.optimizer is not None and self.optimizer.offload and self.zero_stage != 3:
-            raise ValueError("offload optimizer is only supported when zero stage=3.")
         if self.parallel.pipeline_parallel_size > 1 and self.zero_stage > 1:
             logger.warning(f"ZeRO stage should be at most 1 when pipeline parallelism is used. "
                            f"Force to set it to 1. (original {self.zero_stage})")

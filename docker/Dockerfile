@@ -15,12 +15,21 @@ RUN apt install -y libpgm-dev net-tools \
 RUN pip3 install -U pip
 # RUN pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
+# Install the latest NCCL
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb
+RUN dpkg -i cuda-keyring_1.0-1_all.deb
+RUN apt-get update
+RUN apt install libnccl2=2.20.5-1+cuda12.2 libnccl-dev=2.20.5-1+cuda12.2
+
+# build pytorch with the latest NCCL version
+ENV NCCL_INCLUDE_DIR="/usr/include/" NCCL_LIB_DIR="/usr/lib/" USE_SYSTEM_NCCL=1
+
 # build pytorch from source, such that we can use MPI backend
 RUN apt-get update && apt-get -y install ninja-build
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 ENV _GLIBCXX_USE_CXX11_ABI=1
 ENV TORCH_CUDA_ARCH_LIST="8.0;9.0"
-ENV pip3 uninstall -y torch
+RUN pip3 uninstall -y torch
 WORKDIR /tmp
 RUN git clone --depth 1 --branch v2.1.0 https://github.com/pytorch/pytorch
 WORKDIR /tmp/pytorch

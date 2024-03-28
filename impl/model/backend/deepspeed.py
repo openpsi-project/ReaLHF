@@ -7,7 +7,7 @@ import deepspeed
 import torch
 
 from base.constants import data_parallel_world_size, model_parallel_world_size, pipe_parallel_world_size
-from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine, StreamPipeEngine
+from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
 import api.model
 import base.constants
 import base.deepspeed_utils as deepspeed_utils
@@ -58,7 +58,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             logger.warning("Sequence parallel only works with tensor model parallelism, but currently "
                            f"model_parallel_world_size = {base.constants.model_parallel_world_size()}. ")
             self.sequence_parallel = False
-        if self.engine_type == "pipe" or self.engine_type == "stream_pipe":
+        if self.engine_type == "pipe":
             assert self.zero_stage < 2
             assert self.enable_hybrid_engine is False
 
@@ -151,9 +151,9 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             instruction_sync=self.instruction_sync,
         )
 
-        if self.engine_type == "pipe" or self.engine_type == "stream_pipe":
+        if self.engine_type == "pipe":
             # log pipeline infos
-            assert isinstance(module, DeepSpeedPipelineEngine) or isinstance(module, StreamPipeEngine)
+            assert isinstance(module, DeepSpeedPipelineEngine)
             logger.info(f"PipelineEngine:: ddp rank = {torch.distributed.get_rank()}; "
                         f"pipe id = {module.stage_id}; dp id = {module.dp_id};")
 

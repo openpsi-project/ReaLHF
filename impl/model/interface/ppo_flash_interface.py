@@ -4,14 +4,15 @@ import dataclasses
 import itertools
 import time
 
+from deepspeed import DeepSpeedEngine
 import torch
 
 from base.constants import data_parallel_group
 from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-from impl.model.backend.pipe_engine.stream_pipe_engine import StreamPipeEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
 import api.huggingface
 import api.model
@@ -48,46 +49,50 @@ def _ppo_actor_loss_from_model_outputs(
     if logits_mask is not None:
         logits.masked_fill_(logits_mask.logical_not_(),
                             torch.finfo(logits.dtype).min)  # inplace operation for logits mask
-    new_logp = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids).float()
+    # new_logp = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids).float()
 
-    new_logp = new_logp * ppo_loss_mask
+    # new_logp = new_logp * ppo_loss_mask
 
-    loss, loss_stat = ppo_functional.actor_loss_fn(
-        logprobs=new_logp,
+    assert ppo_loss_mask is not None
+    loss = ppo_functional.memory_efficient_ppo_loss_fn(
+        logits=logits,
+        cu_seqlens=cu_seqlens,
+        packed_input_ids=packed_input_ids,
+        ppo_loss_mask=ppo_loss_mask,
         old_logprobs=old_logp,
         advantages=advantages,
         eps_clip=eps_clip,
-        loss_mask=ppo_loss_mask,
     )
+    loss = torch.where(ppo_loss_mask, loss, 0.0).sum() / ppo_loss_mask.count_nonzero()
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
     mean_ref_kl = api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
-    importance_weight = loss_stat["importance_weight"]
-    clip_ratio = loss_stat["clip_ratio"]
-    if early_stop_imp_ratio is not None and importance_weight > early_stop_imp_ratio:
-        logger.warning(f"Current importance ratio {importance_weight.item():.4f} is larger "
-                       f"than early stop threshold {early_stop_imp_ratio}. Abandon this minibatch.")
-        loss = loss * 0.0
+    # importance_weight = loss_stat["importance_weight"]
+    # clip_ratio = loss_stat["clip_ratio"]
+    # if early_stop_imp_ratio is not None and importance_weight > early_stop_imp_ratio:
+    #     logger.warning(f"Current importance ratio {importance_weight.item():.4f} is larger "
+    #                    f"than early stop threshold {early_stop_imp_ratio}. Abandon this minibatch.")
+    #     loss = loss * 0.0
 
-    approx_kl = ((old_logp - new_logp).detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
+    # approx_kl = ((old_logp - new_logp).detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
 
     stats = dict(
-        ppo_approx_kl=approx_kl,
-        cur_kl_ctl=torch.tensor(kl_adapter.value).to(approx_kl),
+        # ppo_approx_kl=approx_kl,
+        # cur_kl_ctl=torch.tensor(kl_adapter.value).to(approx_kl),
         actor_loss=loss.detach(),
-        actor_clip_ratio=clip_ratio,
-        importance_weight=importance_weight,
+        # actor_clip_ratio=clip_ratio,
+        # importance_weight=importance_weight,
     )
 
     if logits_mask is not None:
         stats["ignoring_logits_ratio"] = logits_mask.half().mean()  # inversed logits mask
 
-    if (early_stop_kl is not None and approx_kl > early_stop_kl):
-        logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
-                       f"than early stop threshold {early_stop_kl}. Abort actor update.")
-        loss = loss * 0.0
+    # if (early_stop_kl is not None and approx_kl > early_stop_kl):
+    #     logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
+    #                    f"than early stop threshold {early_stop_kl}. Abort actor update.")
+    #     loss = loss * 0.0
 
     return loss, stats
 
@@ -178,20 +183,7 @@ class PackedActorInterface(api.model.ModelInterface):
         # logger.info(f"packed_prompts shape {packed_prompts.shape}, bs {bs}")
 
         # st = time.monotonic()
-        if isinstance(module, DeepSpeedPipelineEngine):
-            res = module.generate(
-                tokenizer=model.tokenizer,
-                packed_input_ids=packed_prompts,
-                cu_seqlens=cu_seqlens,
-                gconfig=GenerationConfig(**self.generation_config),
-                num_micro_batches=self.pipe_gen_n_mbs,
-            )
-            if res is None:
-                return None
-
-            gen_tokens, logprobs, logits_mask, *_ = res
-            # logger.info(f"gen_tokens shape {gen_tokens.shape}")
-        else:
+        if isinstance(module, (DeepSpeedEngine, FlashMQATModel)):
             # unwrap deepspeed engine here
             module = module.module
             gen_res = module.generate(
@@ -204,6 +196,19 @@ class PackedActorInterface(api.model.ModelInterface):
             gen_tokens = gen_res.sequences
             logprobs = gen_res.scores
             logits_mask = gen_res.logits_mask
+        else:
+            res = module.generate(
+                tokenizer=model.tokenizer,
+                packed_input_ids=packed_prompts,
+                cu_seqlens=cu_seqlens,
+                gconfig=GenerationConfig(**self.generation_config),
+                num_micro_batches=self.pipe_gen_n_mbs,
+            )
+            if res is None:
+                return None
+
+            gen_tokens, logprobs, logits_mask, *_ = res
+            # logger.info(f"gen_tokens shape {gen_tokens.shape}")
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
@@ -278,15 +283,15 @@ class PackedActorInterface(api.model.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        if isinstance(module, DeepSpeedPipelineEngine):
+        if isinstance(module, (DeepSpeedEngine, FlashMQATModel)):
+            res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+            logits = res
+        else:
             res = module.forward(packed_input_ids=data["packed_seq"],
                                  cu_seqlens=cu_seqlens,
                                  num_micro_batches=self.pipe_inf_n_mbs)
             if res is None:
                 return None
-            logits = res
-        else:
-            res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
             logits = res
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
@@ -296,6 +301,7 @@ class PackedActorInterface(api.model.ModelInterface):
                     gather_from_tensor_model_parallel_region
                 logits = gather_from_tensor_model_parallel_region(logits)
             logits.masked_fill_(packed_logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
+        # FIXME: the following line will OOM
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         return from_dict(dict(logprobs=logprobs))
 
@@ -391,7 +397,7 @@ class PackedActorInterface(api.model.ModelInterface):
             cu_seqlens = data["cu_seqlens"]
             input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
             logits_mask = data["packed_logits_mask"] if "packed_logits_mask" in data else None
-            if isinstance(module, DeepSpeedPipelineEngine) or isinstance(module, StreamPipeEngine):
+            if isinstance(module, DeepSpeedPipelineEngine):
                 module.set_version_steps(model.version.global_step)
                 loss_fn_kwargs = dict(
                     input_lens=input_lens,  # used for partition
@@ -567,16 +573,16 @@ class PackedCriticInterface(api.model.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        if isinstance(module, DeepSpeedPipelineEngine):
+        if isinstance(module, (DeepSpeedEngine, FlashMQATModel)):
+            scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
+                                               cu_seqlens=cu_seqlens,
+                                               max_seqlen=max_seqlen)
+        else:
             scores = module.forward(packed_input_ids=data["packed_seq"],
                                     cu_seqlens=cu_seqlens,
                                     num_micro_batches=self.pipe_inf_n_mbs)
             if scores is None:
                 return None
-        else:
-            scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen)
         scores = scores.squeeze(-1)
         return from_dict(dict(scores=scores))
 

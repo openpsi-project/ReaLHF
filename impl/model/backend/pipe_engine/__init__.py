@@ -1,2 +1,1 @@
 from .ds_pipe_engine import DeepSpeedPipelineEngine
-from .stream_pipe_engine import StreamPipeEngine

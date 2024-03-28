@@ -5,8 +5,7 @@ from omegaconf import MISSING
 from api.config.config_dataset import PromptOnlyDatasetConfig
 from api.config.config_flash_model import get_flash_mqat_model_config, ModelTrainEvalConfig
 from api.config.config_system import *
-from api.config.dfg import (LoadToDeviceHook, ModelInterface, ModelInterfaceType, ModelRPC, ModelType,
-                            OffloadHook, SyncParamHook)
+from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType, OffloadHook, SyncParamHook
 from base.topology import PipeModelDataParallelTopology
 import base.logging as logging
 
@@ -44,7 +43,6 @@ class PPOHyperparmeters:
         value_norm_beta (float): Exponential decay factor in exponential moving average.
         value_norm_eps (float): Epsilon factor in the denominator of exponential moving average.
         actor_as_critic (bool): Whether to use actor as critic for critic and reward models.
-        use_stream_pipe_engine (bool): Whether to use stream pipe engine for actor model.
     """
 
     max_new_tokens: int = 256
@@ -70,7 +68,6 @@ class PPOHyperparmeters:
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
     actor_as_critic: bool = False
-    use_stream_pipe_engine: bool = False
 
 
 @dataclasses.dataclass
@@ -191,9 +188,9 @@ class PPOConfig(Experiment):
         critic_model = _make_model_config(self.critic, critic_type)
         rw_model = _make_model_config(self.rew, critic_type)
 
-        def _make_train_backend_config(cfg: ModelTrainEvalConfig, use_stream_pipe_engine: bool):
+        def _make_train_backend_config(cfg: ModelTrainEvalConfig):
             if cfg.parallel.pipeline_parallel_size > 1:
-                engine_type = "stream_pipe" if use_stream_pipe_engine else "pipe"
+                engine_type = "pipe"
             else:
                 engine_type = "deepspeed"
             return ModelBackend(
@@ -223,8 +220,8 @@ class PPOConfig(Experiment):
                 ),
             )
 
-        actor_backend = _make_train_backend_config(self.actor, self.ppo.use_stream_pipe_engine)
-        critic_backend = _make_train_backend_config(self.critic, False)
+        actor_backend = _make_train_backend_config(self.actor)
+        critic_backend = _make_train_backend_config(self.critic)
 
         def make_inf_backend(cfg: ModelTrainEvalConfig):
             return ModelBackend(
@@ -269,18 +266,6 @@ class PPOConfig(Experiment):
         )
         ref_interface = copy.deepcopy(actor_interface)
         ref_interface.args["enable_save"] = False
-
-        if self.ppo.use_stream_pipe_engine:
-            actor_interface = ModelInterface(
-                "stream_pipe_ppo_actor",
-                args={
-                    **copy.deepcopy(ppo_kwargs),
-                    "generation_config": generation_kwargs,
-                    "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
-                    "force_no_logits_mask": False,
-                    "adv_norm": self.ppo.adv_norm,
-                },
-            )
 
         critic_interface = ModelInterface(
             "flash_critic",
@@ -397,7 +382,7 @@ class PPOConfig(Experiment):
                 "prompt_mask",
             ],
             balanced_dp=True,
-            # pre_hooks=[LoadToDeviceHook(), SyncParamHook(target="ref", interval=1)],  # NOTE: just for testing
+            # pre_hooks=[SyncParamHook(target="ref", interval=1)],  # NOTE: just for testing
             # post_hooks=[OffloadHook()],  # NOTE: just for testing
         )
 

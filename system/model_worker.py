@@ -184,7 +184,6 @@ class ModelWorker(worker_base.Worker):
 
         # log info
         self.__total_time = 0.01
-        self.__engine_poll_time = 0
 
         return r
 
@@ -235,10 +234,6 @@ class ModelWorker(worker_base.Worker):
     @property
     def _backend(self) -> api.model.ModelBackend:
         return self.__backends[base.constants.model_name()]
-
-    @property
-    def _engine(self):
-        return self.__engines[base.constants.model_name()]
 
     def __lazy_setup(self):
         # Add an additional subscript pattern for source RPCs.
@@ -332,7 +327,6 @@ class ModelWorker(worker_base.Worker):
 
         self.__backends: Dict[ModelName, api.model.ModelBackend] = dict()
         self.__unwrapped_models: Dict[ModelName, torch.nn.Module | FlashMQATModel] = dict()
-        self.__engines: Dict[str, Any] = dict()
 
         self.__backend_initialized: Dict[ModelName, bool] = dict()
         self.__profiler_launched = False
@@ -402,9 +396,8 @@ class ModelWorker(worker_base.Worker):
         )
 
         # A monitoring process.
-        self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor,
-                                        args=(self.__pg_info.local_gpu_id, 7200))
-        # self.__gpu_util_mp.start()
+        self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor, args=(self.__worker_index, 20, 7200))
+        self.__gpu_util_mp.start()
 
     def __prefetch_from_dataset(self):
         if self.__dict_sample is None:
@@ -418,9 +411,12 @@ class ModelWorker(worker_base.Worker):
     def __handle_one_rpc_hook(self, hook: str, hook_data: Any):
         if hook == "data_transfer":
             # torch.cuda.synchronize()
+            tik = time.perf_counter()
             self.__data_transfer_among_workers(hook_data)
+            blogger.debug(f"data transfer CPU time: {time.perf_counter() - tik:.4f}s")
             # torch.cuda.synchronize()
         elif hook == "param_sync":
+            tik = time.perf_counter()
             # torch.cuda.synchronize()
             from_model_name: ModelName = hook_data["from_model_name"]
             to_model_name: ModelName = hook_data["to_model_name"]
@@ -432,7 +428,7 @@ class ModelWorker(worker_base.Worker):
             else:
                 m = self.__unwrapped_models[to_model_name]
             assert isinstance(m, FlashMQATModel), type(m)
-            m = m.to_reparallelized_model(
+            new_layers, new_contiguous_param_mem = m.build_reparallelized_layers(
                 from_model_name=from_model_name,
                 to_model_name=to_model_name,
                 from_topo=from_topo,
@@ -443,13 +439,16 @@ class ModelWorker(worker_base.Worker):
             if from_model_name in self.__models:
                 self.__model_is_handle[from_model_name] = True
             if to_model_name in self.__models:
-                self.__unwrapped_models[to_model_name].layers = m.layers
+                self.__unwrapped_models[to_model_name].layers = new_layers
+                self.__unwrapped_models[to_model_name].contiguous_param = new_contiguous_param_mem
                 self.__model_is_handle[to_model_name] = False
-            # torch.cuda.synchronize()
+            blogger.debug(f"param_sync CPU time: {time.perf_counter() - tik:.4f}s")
         elif hook == "offload":
-            print("offload hook is not implemented yet")
-        elif hook == "load_to_device":
-            print("load to device hook is not implemented yet")
+            tik = time.perf_counter()
+            m = self.__unwrapped_models[hook_data["model_name"]]
+            assert isinstance(m, FlashMQATModel), type(m)
+            m.async_offload()
+            blogger.debug(f"async_offload enqueue CUDA request time: {time.perf_counter() - tik:.4f}s")
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
 
@@ -499,7 +498,6 @@ class ModelWorker(worker_base.Worker):
                 assert not self.__model_is_handle[request.handler.model_name]
                 base.constants.set_max_seqlen(data.max_seqlen)  # used by cuda graph buffer for generation
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
-                self.__engines[request.handler.model_name] = self._model.module
                 self.__backend_initialized[request.handler.model_name] = True
             elif request.handle_name == "model_config":
                 assert isinstance(self.__unwrapped_models[request.handler.model_name], FlashMQATModel)

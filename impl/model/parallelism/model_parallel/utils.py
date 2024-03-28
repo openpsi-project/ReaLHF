@@ -176,7 +176,7 @@ def gather_split_1d_tensor(tensor):
                            dtype=tensor.dtype,
                            device=torch.cuda.current_device(),
                            requires_grad=False)
-    # TODO: This API is experimental in pytorch (as of Feb 2022) and
+    # NOTE: This API is experimental in pytorch (as of Feb 2022) and
     # this might break in future pytorch releases. We chose this API
     # as opposed to torch.distributed.all_gather for efficiency reasons.
     # This API calls directly NCCL all-gather versus the former does

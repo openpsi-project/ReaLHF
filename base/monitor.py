@@ -297,8 +297,9 @@ def get_tracer(
         return NoopTracer()
 
 
-def gpu_utilization_monitor(gpu_idx: int, ttl: float):
+def gpu_utilization_monitor(worker_idx: int, interval: float, ttl: float):
     pynvml.nvmlInit()
+    gpu_idx = worker_idx % 8
     tik = time.time()
     while time.time() - tik < ttl:
         handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
@@ -307,30 +308,59 @@ def gpu_utilization_monitor(gpu_idx: int, ttl: float):
         total_memory = memory_info.total / (1024**2)  # Convert bytes to megabytes
         used_memory = memory_info.used / (1024**2)
         memory_usage_percentage = (used_memory / total_memory) * 100
-        logger.debug(
-            f"GPU {gpu_idx}: Compute Utilization - {utilization.gpu}%, Total Memory - {total_memory:.2f}MB, Used Memory - {used_memory:.2f}MB, Memory Usage - {memory_usage_percentage:.2f}%"
-        )
-        time.sleep(10)
+        logger.debug(f"Worker Index {worker_idx}, GPU {gpu_idx}: "
+                     f"Compute Utilization - {utilization.gpu}%, "
+                     f"Total Memory - {total_memory:.2f}MB, Used Memory - {used_memory:.2f}MB, "
+                     f"Memory Usage - {memory_usage_percentage:.2f}%")
+        time.sleep(interval)
     pynvml.nvmlShutdown()
 
 
 # Helper function to calculate FLOPs using the Megatron-LM paper's formula
-def calculate_train_flops(
+def calculate_llama_train_flops(
     checkpoint_activations_factor: int,
     batch_size: int,
-    seq_length: int,
+    seqlens: List[int],
     num_layers: int,
     hidden_size: int,
+    intermediate_size: int,
     vocab_size: int,
 ):
-    flops_per_iteration = (24 * checkpoint_activations_factor * batch_size * seq_length * num_layers *
-                           (hidden_size**2)) * (1.0 + (seq_length / (6.0 * hidden_size)) +
-                                                (vocab_size / (16.0 * num_layers * hidden_size)))
-    return flops_per_iteration
+    return checkpoint_activations_factor * caculuate_llama_forward_flops(
+        batch_size, seqlens, num_layers, hidden_size, intermediate_size, vocab_size)
 
 
-def caculuate_inference_gen_flops(batch_size: int, seq_length: int, num_layers: int, hidden_size: int,
-                                  vocab_size: int):
-    return (24 * batch_size * seq_length * num_layers *
-            (hidden_size**2)) * (1.0 + (seq_length / (6.0 * hidden_size)) +
-                                 (vocab_size / (16.0 * num_layers * hidden_size)))
+def caculuate_llama_forward_flops(
+    batch_size: int,
+    seqlens: List[int],
+    num_layers: int,
+    hidden_size: int,
+    intermediate_size: int,
+    vocab_size: int,
+):
+    assert len(seqlens) == batch_size
+    attn_flops = sum(x**2 for x in seqlens) * hidden_size
+    return (2 * num_layers * (4 * sum(seqlens) * hidden_size**2 + 2 * attn_flops +
+                              3 * sum(seqlens) * hidden_size * intermediate_size) +
+            4 * sum(seqlens) * vocab_size * hidden_size)
+
+
+def calculate_llama_gen_flops(
+    batch_size,
+    prompt_lens,
+    gen_len,
+    num_layers,
+    hidden_size,
+    intermediate_size,
+    vocab_size,
+):
+    flops = caculuate_llama_forward_flops(batch_size, prompt_lens, num_layers, hidden_size, intermediate_size,
+                                          vocab_size)
+    for i in range(gen_len):
+        prefix_lens = [x + i for x in prompt_lens]
+        flops += (
+            2 * num_layers *
+            (4 * batch_size * hidden_size**2 + 2 *
+             (sum(prefix_lens) + batch_size) * hidden_size + 3 * batch_size * hidden_size * intermediate_size)
+            + 4 * batch_size * vocab_size * hidden_size)
+    return flops

@@ -19,18 +19,13 @@ class OffloadHook:
 
 
 @dataclasses.dataclass
-class LoadToDeviceHook:
-    pass
-
-
-@dataclasses.dataclass
 class SyncParamHook:
     source: Optional[ModelName] = None
     target: Optional[ModelName] = None
     interval: int = 1
 
 
-RPCHook = Union[OffloadHook, LoadToDeviceHook, SyncParamHook]
+RPCHook = Union[OffloadHook, SyncParamHook]
 
 
 @dataclasses.dataclass
@@ -221,4 +216,7 @@ def build_graph(rpcs: List[ModelRPC], verbose: bool = False) -> Tuple[List[Model
             assert isinstance(h, RPCHook), type(h)
             if isinstance(h, SyncParamHook):
                 assert any(h.target == r.model_name for r in rpcs) or (h.source == r.model_name for r in rpcs)
+        for h in rpc.pre_hooks:
+            if isinstance(h, OffloadHook):
+                raise ValueError("Offload can only be post hooks!")
     return rpcs, edges

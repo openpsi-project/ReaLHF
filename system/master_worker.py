@@ -187,6 +187,10 @@ def _request_parameter_sync(
 
     model_name = from_model_name
     target = to_model_name
+    # Prioritize handlers of `from_model`, then handlers of `to_model`.
+    # As a result, if both `from_model` and `to_model` reside in a model worker,
+    # the handler in the received request will be `from_model`. Layers will also built in `from_model`.
+    # After that, we assign layers of the `from_model` to `to_model`.
     handlers = [
         config_pkg.ModelShardID.from_parallelism_rank(model_name, from_topo, j)
         for j in range(from_topo.world_size())
@@ -224,6 +228,37 @@ def _request_parameter_sync(
 
 
 @dataclasses.dataclass
+class InterfaceDataAmount:
+    train_configs: List[FlashMQATConfig] = dataclasses.field(default_factory=list)
+    train_bs: List[int] = dataclasses.field(default_factory=list)
+    train_seqlens: List[List[int]] = dataclasses.field(default_factory=list)
+
+    inf_configs: List[FlashMQATConfig] = dataclasses.field(default_factory=list)
+    inf_bs: List[int] = dataclasses.field(default_factory=list)
+    inf_seqlens: List[List[int]] = dataclasses.field(default_factory=list)
+
+    gen_configs: List[FlashMQATConfig] = dataclasses.field(default_factory=list)
+    gen_bs: List[int] = dataclasses.field(default_factory=list)
+    prompt_lens: List[List[int]] = dataclasses.field(default_factory=list)
+    gen_len: List[int] = dataclasses.field(default_factory=list)
+
+    def clear(self):
+        self.train_bs.clear()
+        self.train_seqlens.clear()
+
+        self.inf_bs.clear()
+        self.inf_seqlens.clear()
+
+        self.gen_bs.clear()
+        self.prompt_lens.clear()
+        self.gen_len.clear()
+
+        self.train_configs.clear()
+        self.inf_configs.clear()
+        self.gen_configs.clear()
+
+
+@dataclasses.dataclass
 class RPCCorountineControl:
     ## Shared resources ##
     stop: asyncio.Event
@@ -241,6 +276,8 @@ class RPCCorountineControl:
     model_traversal: Dict[str, int]
     # for synchronizing req ids between req and reply coroutines
     request_queues: Dict[str, List[asyncio.Queue]]
+
+    data_amount: InterfaceDataAmount = dataclasses.field(default_factory=InterfaceDataAmount)
 
 
 def _attach_payloads_with_hooks(
@@ -301,11 +338,10 @@ def _attach_payloads_with_hooks(
                     getattr(payloads[h], f"{hook_type}_hooks").append("param_sync")
                     getattr(payloads[h], f"{hook_type}_hook_data").append(ps_data)
 
-        elif isinstance(hook, (api.config.dfg.OffloadHook, api.config.dfg.LoadToDeviceHook)):
+        elif isinstance(hook, api.config.dfg.OffloadHook):
             for h in main_handlers:
-                getattr(payloads[h], f"{hook_type}_hooks").append(
-                    "offload" if isinstance(hook, api.config.dfg.OffloadHook) else "load_to_device")
-                getattr(payloads[h], f"{hook_type}_hook_data").append(None)
+                getattr(payloads[h], f"{hook_type}_hooks").append("offload")
+                getattr(payloads[h], f"{hook_type}_hook_data").append(dict(model_name=h.model_name))
         else:
             raise NotImplementedError(f"Unknown hook type: {hook}")
     return payloads, mwids
@@ -446,6 +482,20 @@ async def model_rpc_request_func(
             await asyncio.sleep(0.1)
 
         sample = await buffer.get_batch_for_rpc(rpc)
+
+        if rpc.interface_type == api.config.dfg.ModelInterfaceType.GENERATE:
+            ctrl.data_amount.gen_configs.append(model_configs[rpc.model_name])
+            ctrl.data_amount.gen_bs.append(len(sample.seqlens))
+            ctrl.data_amount.gen_len.append(rpc.interface_impl.args["generation_config"]["min_new_tokens"])
+            ctrl.data_amount.prompt_lens.append(sample.seqlens)
+        elif rpc.interface_type == api.config.dfg.ModelInterfaceType.TRAIN_STEP:
+            ctrl.data_amount.train_configs.append(model_configs[rpc.model_name])
+            ctrl.data_amount.train_bs.append(len(sample.seqlens))
+            ctrl.data_amount.train_seqlens.append(sample.seqlens)
+        elif rpc.interface_type == api.config.dfg.ModelInterfaceType.INFERENCE:
+            ctrl.data_amount.inf_configs.append(model_configs[rpc.model_name])
+            ctrl.data_amount.inf_bs.append(len(sample.seqlens))
+            ctrl.data_amount.inf_seqlens.append(sample.seqlens)
 
         data_amount_seqs += len(sample.seqlens)
         data_amount_tokens += sum(sample.seqlens)
@@ -1006,31 +1056,55 @@ class MasterWorker(worker_base.Worker):
 
         # calculate flops
         #########################################
-        from base.monitor import caculuate_inference_gen_flops, calculate_train_flops
+        from base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
+                                  calculate_llama_train_flops)
 
         flops = 0
-        for rpc in self.__model_rpcs:
-            flash_config = self.__model_configs[rpc.model_name]
-            if rpc.interface_type == api.config.dfg.ModelInterfaceType.TRAIN_STEP:
-                # TODO: count seqlen
-                flops += calculate_train_flops(
-                    checkpoint_activations_factor=4,
-                    batch_size=rpc.min_n_seqs,
-                    seq_length=280,
-                    num_layers=flash_config.n_layers,
-                    hidden_size=flash_config.hidden_dim,
-                    vocab_size=flash_config.vocab_size,
-                )
-            else:
-                # TODO: count minibatch
-                flops += caculuate_inference_gen_flops(
-                    batch_size=rpc.min_n_seqs,
-                    seq_length=280,
-                    num_layers=flash_config.n_layers,
-                    hidden_size=flash_config.hidden_dim,
-                    vocab_size=flash_config.vocab_size,
-                )
-        tflops = flops / (e2e_time * 8 * (10**12))
+        for train_bs, train_seqlens, flash_config in zip(
+                self.__rpc_ctrl.data_amount.train_bs,
+                self.__rpc_ctrl.data_amount.train_seqlens,
+                self.__rpc_ctrl.data_amount.train_configs,
+        ):
+            flops += calculate_llama_train_flops(
+                checkpoint_activations_factor=4,
+                batch_size=train_bs,
+                seqlens=train_seqlens,
+                num_layers=flash_config.n_layers,
+                hidden_size=flash_config.hidden_dim,
+                intermediate_size=flash_config.intermediate_dim,
+                vocab_size=flash_config.vocab_size,
+            )
+        for inf_bs, inf_seqlens, flash_config in zip(
+                self.__rpc_ctrl.data_amount.inf_bs,
+                self.__rpc_ctrl.data_amount.inf_seqlens,
+                self.__rpc_ctrl.data_amount.inf_configs,
+        ):
+            flops += caculuate_llama_forward_flops(
+                batch_size=inf_bs,
+                seqlens=inf_seqlens,
+                num_layers=flash_config.n_layers,
+                hidden_size=flash_config.hidden_dim,
+                intermediate_size=flash_config.intermediate_dim,
+                vocab_size=flash_config.vocab_size,
+            )
+        for gen_bs, prompt_lens, gen_len, flash_config in zip(
+                self.__rpc_ctrl.data_amount.gen_bs,
+                self.__rpc_ctrl.data_amount.prompt_lens,
+                self.__rpc_ctrl.data_amount.gen_len,
+                self.__rpc_ctrl.data_amount.gen_configs,
+        ):
+            flops += calculate_llama_gen_flops(
+                batch_size=gen_bs,
+                prompt_lens=prompt_lens,
+                gen_len=gen_len,
+                num_layers=flash_config.n_layers,
+                hidden_size=flash_config.hidden_dim,
+                intermediate_size=flash_config.intermediate_dim,
+                vocab_size=flash_config.vocab_size,
+            )
+        self.__rpc_ctrl.data_amount.clear()
+        tflops_per_gpu = flops / (e2e_time * (10**12))
+        tflops = flops / (e2e_time * self.config.n_model_workers * (10**12))
         #########################################
 
         logger.info(
@@ -1038,7 +1112,7 @@ class MasterWorker(worker_base.Worker):
             f"step {self._epoch_step + 1} "
             f"(global step {self._global_step + 1}) finishes. "
             f"#End to end# execution time: *{e2e_time:.3f}*s. "
-            f"Total time consumption: {total_time_consumption:.3f}s. TFLOPs: {tflops:.2f}."
+            f"Total time consumption: {total_time_consumption:.3f}s. TFLOP/s per GPU: {tflops_per_gpu:.2f}, total TFLOP/s: {tflops:.2f}."
             # f"Estimated remaining time of this epoch: {self._buffer_size_tokens / buffer_size_decre_per_step * time_per_step:.3f}s."
         )
 
