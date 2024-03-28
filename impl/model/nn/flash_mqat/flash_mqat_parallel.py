@@ -219,6 +219,11 @@ def pipeline_repartition_strategy(
     layer_mapping2: Dict[int, List[int]],
 ):
     assert set(sum(layer_mapping1.values(), [])) == set(sum(layer_mapping2.values(), []))
+    assert all(isinstance(i, int) for i in layer_mapping1)
+    assert all(isinstance(i, int) for i in layer_mapping2)
+
+    layer_mapping1 = dict(sorted(layer_mapping1.items()))
+    layer_mapping2 = dict(sorted(layer_mapping2.items()))
 
     layer_map: Dict[Tuple[int, int], List[int]] = {}
     for pp_rank2, layer_indices2 in layer_mapping2.items():
