@@ -394,6 +394,7 @@ class PackedActorInterface(api.model.ModelInterface):
                 logits_mask=data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None,
             ))
 
+        data_.register_metadata(seqlens=batch_seqlens)
         datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=self.pipe_train_n_mbs)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
@@ -673,6 +674,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                 cu_seqlens=data_["cu_seqlens"],
             ))
 
+        data_.register_metadata(seqlens=batch_seqlens)
         datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=self.pipe_train_n_mbs)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)

@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import contextlib
 import copy
 import dataclasses
@@ -160,7 +160,13 @@ def map_param_to_contigous_memory(
         layer_idx = local_layer_idx + layer_idx_offset
         for k, v in l.named_parameters():
             spec = param_spec[f"{layer_idx}.{k}"]
+            old_param_data = v.data
             recursive_getattr(l, k).data = contiguous_param[spec.start_idx:spec.end_idx].view(spec.shape)
+            # This is for reward model. We should initialize the reward head instead of letting it be all-zero.
+            if old_param_data.shape == spec.shape:
+                v.data.copy_(old_param_data)
+            else:
+                assert old_param_data.shape == torch.Size([0]), (old_param_data.shape, spec.shape)
 
 
 class FlashMQATModel(nn.Module):
@@ -207,8 +213,6 @@ class FlashMQATModel(nn.Module):
         self._offload_stream = torch.cuda.Stream()
         self._offload_event = torch.cuda.Event()
         self._offloaded = False
-
-        self._offload_disable_sequence_parallel = False
 
     def instantiate(self):
         assert not self._instantiated
@@ -337,25 +341,9 @@ class FlashMQATModel(nn.Module):
 
     @contextlib.contextmanager
     def sequence_parallel_disable(self):
-        _offloaded = self._offloaded
-        if not _offloaded:
-            _states = []
-            for _, m in self.named_modules():
-                if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
-                    _states.append(m.sequence_parallel)
-                    m.sequence_parallel_enable(False)
-        else:
-            self._offload_disable_sequence_parallel = True
         x = self.sequence_parallel
         self.sequence_parallel = False
         yield
-        if not _offloaded:
-            for _, m in self.named_modules():
-                if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
-                    m.sequence_parallel_enable(_states.pop(0))
-            assert len(_states) == 0
-        else:
-            self._offload_disable_sequence_parallel = False
         self.sequence_parallel = x
 
     def __overlapped_load_forward(self, x: PipeTransferData,
@@ -365,6 +353,7 @@ class FlashMQATModel(nn.Module):
         self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
         map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
                                       self.layer_idx_start)
+        self.wait_for_offload()
         for layer_idx, y, l in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers):
             with torch.cuda.stream(self._offload_stream):
                 # NOTE: although we can do more fine-grained overlapping, the overhead that can be
@@ -376,7 +365,7 @@ class FlashMQATModel(nn.Module):
                         non_blocking=True,
                     )
             torch.cuda.default_stream().wait_stream(self._offload_stream)
-            if self._offload_disable_sequence_parallel:
+            if not self.sequence_parallel:
                 with _disable_sequence_parallel_of_module(l):
                     x = l(x, y)
             else:
@@ -392,7 +381,7 @@ class FlashMQATModel(nn.Module):
         assert len(ys) == len(layers)
         raw_pp_input = x.pp_input
         for i, (layer, y) in enumerate(zip(layers, ys)):
-            if self._offload_disable_sequence_parallel:
+            if not self.sequence_parallel:
                 with _disable_sequence_parallel_of_module(layer):
                     x = layer(x, y)  # This will set pp_output.
             else:
@@ -986,7 +975,47 @@ class FlashMQATModel(nn.Module):
 
         return comm_plan
 
-    def build_reparallelized_layers(
+    def build_reparallelization_plan(
+        self,
+        from_model_name: ModelName,
+        to_model_name: ModelName,
+        from_topo: base.topology.PipeModelDataParallelTopology,
+        to_topo: base.topology.PipeModelDataParallelTopology,
+        to_model_config: FlashMQATConfig,
+        pg_info: gpu_utils.NCCLProcessGroupInfo,
+    ):
+        comm_plan = self._derive_reparallelize_comm_plan(from_model_name, to_model_name, from_topo, to_topo,
+                                                         to_model_config, pg_info)
+        to_layers_handle_dict = {}
+        for step in comm_plan:
+            layer_idx = int(step.param_key.split(".")[0])
+            if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
+                if layer_idx not in to_layers_handle_dict:
+                    with base.constants.model_scope(to_model_name):
+                        l = self._build_layer(layer_idx, to_model_config)
+                    for k, v in l.named_parameters():
+                        v.data = torch.tensor((), dtype=self.dtype, device=self.device)
+                    to_layers_handle_dict[layer_idx] = l
+        to_layer_indices = sorted(to_layers_handle_dict.keys())
+        to_param_spec, to_param_size = _build_param_spec(to_layer_indices, to_model_config,
+                                                         to_topo.get_dim("model"))
+        if len(to_layer_indices) > 0:
+            to_layer_idx_start = min(to_layer_indices)
+            to_layer_idx_end = max(to_layer_indices) + 1
+        else:
+            to_layer_idx_start = to_layer_idx_end = -1
+        to_layers_handle = nn.ModuleList([to_layers_handle_dict[i] for i in to_layer_indices])
+        rtgt = ReparallelizeTraget(
+            comm_plan=comm_plan,
+            to_param_spec=to_param_spec,
+            to_param_size=to_param_size,
+            to_layers_handle=to_layers_handle,
+            to_layer_start_idx=to_layer_idx_start,
+            to_layer_end_idx=to_layer_idx_end,
+        )
+        self._reparallelize_targets[(from_model_name, to_model_name)] = rtgt
+
+    def build_reparallelized_layers_async(
         self,
         from_model_name: ModelName,
         to_model_name: ModelName,
@@ -995,44 +1024,12 @@ class FlashMQATModel(nn.Module):
         to_model_config: FlashMQATConfig,
         pg_info: gpu_utils.NCCLProcessGroupInfo,
     ) -> Tuple[nn.ModuleList, torch.Tensor]:
-        src_mp_size = from_topo.get_dim("model")
-        dst_mp_size = to_topo.get_dim("model")
-
         # FIXME: remote synchronization deletes the local model, but sometimes it is uncessary.
 
-        if (from_model_name, to_model_name) in self._reparallelize_targets:
-            rtgt = self._reparallelize_targets[(from_model_name, to_model_name)]
-        else:
-            comm_plan = self._derive_reparallelize_comm_plan(from_model_name, to_model_name, from_topo,
-                                                             to_topo, to_model_config, pg_info)
-            to_layers_handle_dict = {}
-            for step in comm_plan:
-                layer_idx = int(step.param_key.split(".")[0])
-                if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
-                    if layer_idx not in to_layers_handle_dict:
-                        with base.constants.model_scope(to_model_name):
-                            l = self._build_layer(layer_idx, to_model_config)
-                        for k, v in l.named_parameters():
-                            v.data = torch.tensor((), dtype=self.dtype, device=self.device)
-                        to_layers_handle_dict[layer_idx] = l
-            to_layer_indices = sorted(to_layers_handle_dict.keys())
-            to_param_spec, to_param_size = _build_param_spec(to_layer_indices, to_model_config,
-                                                             to_topo.get_dim("model"))
-            if len(to_layer_indices) > 0:
-                to_layer_idx_start = min(to_layer_indices)
-                to_layer_idx_end = max(to_layer_indices) + 1
-            else:
-                to_layer_idx_start = to_layer_idx_end = -1
-            to_layers_handle = nn.ModuleList([to_layers_handle_dict[i] for i in to_layer_indices])
-            rtgt = ReparallelizeTraget(
-                comm_plan=comm_plan,
-                to_param_spec=to_param_spec,
-                to_param_size=to_param_size,
-                to_layers_handle=to_layers_handle,
-                to_layer_start_idx=to_layer_idx_start,
-                to_layer_end_idx=to_layer_idx_end,
-            )
-            self._reparallelize_targets[(from_model_name, to_model_name)] = rtgt
+        if (from_model_name, to_model_name) not in self._reparallelize_targets:
+            self.build_reparallelization_plan(from_model_name, to_model_name, from_topo, to_topo,
+                                              to_model_config, pg_info)
+        rtgt = self._reparallelize_targets[(from_model_name, to_model_name)]
 
         # The following tensor holds the contiguous memory of incoming parameters
         to_contiguous_param = torch.empty(rtgt.to_param_size, dtype=self.dtype, device="cuda")
@@ -1045,6 +1042,8 @@ class FlashMQATModel(nn.Module):
 
         comm_volume = 0
 
+        src_mp_size = from_topo.get_dim("model")
+        dst_mp_size = to_topo.get_dim("model")
         n_receiver_portions = max(src_mp_size // dst_mp_size, 1)
         tmp_portion_storage = {}
         for step in rtgt.comm_plan:
@@ -1083,7 +1082,7 @@ class FlashMQATModel(nn.Module):
 
             if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
                 if step.group is not None:
-                    buf = buf = mp_partition_flash_mqat_state_dict(
+                    buf = mp_partition_flash_mqat_state_dict(
                         {
                             step.param_key: recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
                                                               step.param_key.split(".", 1)[1])
@@ -1103,7 +1102,11 @@ class FlashMQATModel(nn.Module):
 
         # release the local GPU memory
         self.contiguous_param = None
+        self.layers = None
         return rtgt.to_layers_handle, to_contiguous_param
+
+    def patch_reparallelization(self, x):
+        self.layers, self.contiguous_param = x
 
 
 # a helper function to make flash_mqat look like huggingface model

@@ -95,6 +95,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
                                    f"Current keys: {list(src.keys())}.")
         else:
             raw_input_lens = src["input_lens"]
+        assert src.metadata.get("seqlens", None) is not None
         if "seqlens" in src.metadata:
             seqlens_cpu = src.metadata["seqlens"]
             assert isinstance(seqlens_cpu, list)

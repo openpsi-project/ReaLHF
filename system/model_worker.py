@@ -46,6 +46,16 @@ blogger = logging.getLogger("benchmark")
 TIME_RECORD_RPCS = ["generate", "inference", "train_step", "save", "evaluate", "initialize"]
 
 
+def get_pytorch_profiler():
+    return torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+        with_flops=True,
+    )
+
+
 class NoRequestToHandle(Exception):
     pass
 
@@ -81,6 +91,7 @@ def split_packed_batch_into_seqs(
 
     partitions = [(i, i + 1) for i in range(input_lens.shape[0])]
     sample["input_lens"] = input_lens
+    sample.register_metadata(seqlens=input_lens.cpu().numpy().tolist())
     res = dataparallel.PackedParallelDataBroker.scatter_to(sample,
                                                            n_dp=len(input_lens),
                                                            partitions=partitions)
@@ -396,8 +407,7 @@ class ModelWorker(worker_base.Worker):
         )
 
         # A monitoring process.
-        self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor,
-                                        args=(self.__worker_index, 20, 7200))
+        self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor, args=(self.__worker_index, 20, 7200))
         self.__gpu_util_mp.start()
 
     def __prefetch_from_dataset(self):
@@ -424,12 +434,14 @@ class ModelWorker(worker_base.Worker):
             from_topo: base.topology.PipeModelDataParallelTopology = hook_data["from_topo"]
             to_topo: base.topology.PipeModelDataParallelTopology = hook_data["to_topo"]
             to_model_config = hook_data["to_model_config"]
+            # profiler = get_pytorch_profiler()
+            # profiler.start()
             if from_model_name in self.__unwrapped_models:
                 m = self.__unwrapped_models[from_model_name]
             else:
                 m = self.__unwrapped_models[to_model_name]
             assert isinstance(m, FlashMQATModel), type(m)
-            new_layers, new_contiguous_param_mem = m.build_reparallelized_layers(
+            ipara = m.build_reparallelized_layers_async(
                 from_model_name=from_model_name,
                 to_model_name=to_model_name,
                 from_topo=from_topo,
@@ -440,10 +452,13 @@ class ModelWorker(worker_base.Worker):
             if from_model_name in self.__models:
                 self.__model_is_handle[from_model_name] = True
             if to_model_name in self.__models:
-                self.__unwrapped_models[to_model_name].layers = new_layers
-                self.__unwrapped_models[to_model_name].contiguous_param = new_contiguous_param_mem
+                self.__unwrapped_models[to_model_name].patch_reparallelization(ipara)
                 self.__model_is_handle[to_model_name] = False
             blogger.debug(f"param_sync CPU time: {time.perf_counter() - tik:.4f}s")
+            # profiler.__exit__(None, None, None)
+            # profiler.export_chrome_trace(
+            #     f"/lustre/aigc/llm/logs/fw/sosp-profile/paramsync_{from_model_name}-{to_model_name}@{self.__worker_index}.json"
+            # )
         elif hook == "offload":
             tik = time.perf_counter()
             m = self.__unwrapped_models[hook_data["model_name"]]
@@ -542,6 +557,8 @@ class ModelWorker(worker_base.Worker):
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 data, buffer_indices, seqlens, output_key_remap = self.__compute_input_queues[
                     request.handle_name].get_nowait()
+                data: namedarray.NamedArray
+                data.register_metadata(seqlens=seqlens)
                 res = self._interface.inference(self._model, data)  # -> NamedArray
                 if res is not None:
                     new_res = {}
@@ -554,12 +571,14 @@ class ModelWorker(worker_base.Worker):
                     res = new_res, buffer_indices, seqlens
             elif request.handle_name == "train_step":
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
-                data, *_ = self.__compute_input_queues[request.handle_name].get_nowait()
+                data, _, seqlens, *_ = self.__compute_input_queues[request.handle_name].get_nowait()
+                data.register_metadata(seqlens=seqlens)
                 res = self._interface.train_step(self._model, data)  # -> Dict
             elif request.handle_name == "generate":
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 data, buffer_indices, seqlens, output_key_remap = self.__compute_input_queues[
                     request.handle_name].get_nowait()
+                data.register_metadata(seqlens=seqlens)
                 res = self._interface.generate(self._model, data)  # -> NamedArray
                 if res is not None:
                     new_res = {}

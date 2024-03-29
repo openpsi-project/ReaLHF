@@ -28,9 +28,11 @@ def test_impl(world_size):
     mconfig = get_llama7b_flash_config()
     with base.constants.model_scope(MODEL_NAME):
         m = FlashMQATModel(mconfig, device=torch.device("cuda:0"), dtype=torch.float16)
-        torch.cuda.synchronize()
         # add_helper_functions(m)
         m.instantiate()
+        m.load_from_hf("/lustre/public/pretrained_model_weights/Llama-2-7b-hf")
+        torch.cuda.synchronize()
+        original_state_dict = m.state_dict()
         engine = InferencePipelineEngine(m)
         print("After model creation", get_memory(0))
 
@@ -39,12 +41,17 @@ def test_impl(world_size):
 
         packed_input_ids = torch.randint(0, mconfig.vocab_size, (32 * 256,), dtype=torch.long, device="cuda")
         cu_seqlens = torch.linspace(0, 256 * 32, 33, dtype=torch.int32, device="cuda")
+        seqlens_cpu = [256 for _ in range(32)]
         assert cu_seqlens[-1] == packed_input_ids.shape[0]
         with torch.no_grad():
-            y = engine.forward(packed_input_ids, cu_seqlens, num_micro_batches=world_size)
+            y = engine.forward(seqlens_cpu, packed_input_ids, cu_seqlens, num_micro_batches=world_size)
             for _ in range(5):
-                engine.forward(packed_input_ids, cu_seqlens, num_micro_batches=world_size)
+                engine.forward(seqlens_cpu, packed_input_ids, cu_seqlens, num_micro_batches=world_size)
                 # assert torch.allclose(m(input_ids=x), y)
+                new_state_dict = m.state_dict()
+                for k in original_state_dict:
+                    # print(k, original_state_dict[k])
+                    assert torch.allclose(original_state_dict[k], new_state_dict[k]), (k, original_state_dict[k], new_state_dict[k])
                 m.async_offload()
             m.wait_for_offload()
         clear_gpu_cache()
