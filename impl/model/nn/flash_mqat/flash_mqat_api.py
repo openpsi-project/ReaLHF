@@ -89,6 +89,8 @@ class ReparallelizeReceiverStep:
     src: int
     group: torch.distributed.ProcessGroup
 
+def _is_integer_list_contiguous(l: List[int]) -> bool:
+    return all(x == l[0] + i for i, x in enumerate(l))
 
 def recursive_getattr(obj, attr_string):
     attrs = attr_string.split(".")
@@ -206,7 +208,11 @@ class FlashMQATModel(nn.Module):
         self._reparallelize_targets: Dict[Tuple[ModelName, ModelName], ReparallelizeTraget] = {}
 
         # Flatten all parameters to a contiguous GPU buffer to reduce the time of CUDAFree and CUDAMalloc
-        self._param_size = self._param_spec = None
+        self._param_spec, self._param_size = _build_param_spec(
+            list(range(self.layer_idx_start, self.layer_idx_end)),
+            self.config,
+            base.constants.model_parallel_world_size(),
+        )
         self.contiguous_param = None
 
         self._offload_buffer = None
@@ -222,11 +228,6 @@ class FlashMQATModel(nn.Module):
 
         self.layers = nn.ModuleList(layers)
 
-        self._param_spec, self._param_size = _build_param_spec(
-            list(range(self.layer_idx_start, self.layer_idx_end)),
-            self.config,
-            base.constants.model_parallel_world_size(),
-        )
         self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
         map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
                                       self.layer_idx_start)
@@ -845,6 +846,24 @@ class FlashMQATModel(nn.Module):
             with_hf_format=True,
         )
 
+    def _param_indices_from_layer_indices(self, layer_indices: List[int], src2dst_tp_size: int, src2dst_tp_rank: int) -> List[int]:
+        assert _is_integer_list_contiguous(layer_indices)
+        sd_keys = []
+        for layer_idx in layer_indices:
+            if layer_idx == 0:
+                sd_keys += flash_model_embedding_param_keys(self.config)
+            elif layer_idx == self.config.n_layers + 1:
+                sd_keys += flash_model_head_param_keys(self.config)
+            else:
+                sd_keys += flash_model_tblock_param_keys(self.config, layer_idx - 1)
+        param_indices = []
+        for k in sd_keys:
+            param_indices += list(range(self._param_spec[k].start_idx, self._param_spec[k].end_idx))
+        assert _is_integer_list_contiguous(param_indices)
+        if src2dst_tp_size == 1:
+            return param_indices
+        
+        # TODO:
     def _derive_reparallelize_comm_plan(
         self,
         from_model_name: ModelName,
@@ -895,6 +914,7 @@ class FlashMQATModel(nn.Module):
 
         # derive a global NCCL communication plan
         for (pp_i, pp_j), layer_indices in repart_strat.items():
+            assert _is_integer_list_contiguous(layer_indices)
             sd_keys = []
             for layer_idx in layer_indices:
                 if layer_idx == 0:
