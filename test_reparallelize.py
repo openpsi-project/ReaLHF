@@ -19,7 +19,10 @@ from api.config.config_base import ModelName, ModelShardID
 import base.gpu_utils
 
 
-def test_impl(rank, world_size, from_model_name, to_model_name, from_topo, to_topo, pg_info, profile=False):
+def test_impl(
+    rank, world_size, from_model_name, to_model_name, from_topo, to_topo, pg_info, profile=False, check=True,
+    n_iterations=1,
+):
     from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel, add_helper_functions
     from impl.model.backend.pipe_inf import InferencePipelineEngine
 
@@ -33,7 +36,8 @@ def test_impl(rank, world_size, from_model_name, to_model_name, from_topo, to_to
         with base.constants.model_scope(from_model_name):
             m1 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
             m1.instantiate()
-            m1.load_from_saved_flash_model("/tmp/reparallelize_test/")
+            if check:
+                m1.load_from_saved_flash_model("/tmp/reparallelize_test/")
             if base.constants.pipe_parallel_world_size() > 1:
                 engine1 = InferencePipelineEngine(m1)
             else:
@@ -57,11 +61,15 @@ def test_impl(rank, world_size, from_model_name, to_model_name, from_topo, to_to
     else:
         m2 = None
 
-    if profile:
-        profiler = get_pytorch_profiler(f"repara{rank}.json")
-        profiler.start()
+    for it in range(n_iterations):
+        torch.cuda.synchronize()
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
 
-    for it in range(3):
+        if it == n_iterations -1 and profile:
+            print("//////////// profiling start //////////")
+            profiler = get_pytorch_profiler(f"repara{rank}.json")
+            profiler.start()
         # from m1 to m2
         if m1 is not None:
             tik = time.perf_counter()
@@ -88,23 +96,27 @@ def test_impl(rank, world_size, from_model_name, to_model_name, from_topo, to_to
 
             with base.constants.model_scope(to_model_name):
 
-                torch.cuda.synchronize()
-                m3 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
-                m3.instantiate()
-                m3.load_from_saved_flash_model("/tmp/reparallelize_test/")
-                assert len(m2.state_dict()) == len(m3.state_dict()) > 0
-                for k in m2.state_dict().keys():
-                    v1 = m2.state_dict()[k]
-                    v2 = m3.state_dict()[k]
-                    assert torch.allclose(v1, v2), (k, v1, v2)
+                if check:
+                    torch.cuda.synchronize()
+                    m3 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
+                    m3.instantiate()
+                    m3.load_from_saved_flash_model("/tmp/reparallelize_test/")
+                    assert len(m2.state_dict()) == len(m3.state_dict()) > 0
+                    for k in m2.state_dict().keys():
+                        v1 = m2.state_dict()[k]
+                        v2 = m3.state_dict()[k]
+                        assert torch.allclose(v1, v2), (k, v1, v2)
 
-                if isinstance(engine2, InferencePipelineEngine):
-                    engine2.forward(
-                        seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
-                    )
-                else:
-                    engine2(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+                    if isinstance(engine2, InferencePipelineEngine):
+                        engine2.forward(
+                            seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
+                        )
+                    else:
+                        engine2(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
 
+        torch.cuda.synchronize()
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
         # convert m2 back to m1
         if m2 is not None:
             tik = time.perf_counter()
@@ -129,24 +141,25 @@ def test_impl(rank, world_size, from_model_name, to_model_name, from_topo, to_to
         if m1 is not None:
             m1.patch_reparallelization(res)
             with base.constants.model_scope(from_model_name):
-                torch.cuda.synchronize()
-                m4 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
-                m4.instantiate()
-                m4.load_from_saved_flash_model("/tmp/reparallelize_test/")
-                assert len(m1.state_dict()) == len(m4.state_dict()) > 0
-                for k in m1.state_dict().keys():
-                    v1 = m1.state_dict()[k]
-                    v2 = m4.state_dict()[k]
-                    assert torch.allclose(v1, v2), (k, v1, v2)
+                if check:
+                    torch.cuda.synchronize()
+                    m4 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
+                    m4.instantiate()
+                    m4.load_from_saved_flash_model("/tmp/reparallelize_test/")
+                    assert len(m1.state_dict()) == len(m4.state_dict()) > 0
+                    for k in m1.state_dict().keys():
+                        v1 = m1.state_dict()[k]
+                        v2 = m4.state_dict()[k]
+                        assert torch.allclose(v1, v2), (k, v1, v2)
 
-                if isinstance(engine1, InferencePipelineEngine):
-                    engine1.forward(
-                        seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
-                    )
-                else:
-                    engine1(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-    if profile:
-        profiler.__exit__(None, None, None)
+                    if isinstance(engine1, InferencePipelineEngine):
+                        engine1.forward(
+                            seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
+                        )
+                    else:
+                        engine1(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+        if it == n_iterations -1 and profile:
+            profiler.__exit__(None, None, None)
 
 
 def setup_gpu(rank, world_size, barrier, model_topos, msid2mwid, param_sync_pairs):
@@ -198,20 +211,34 @@ def test(rank, world_size, barrier, from_topo, to_topo, err_queue):
 
     from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 
-    mconfig = get_llama7b_flash_config()
-    with base.constants.model_scope(from_model_name):
-        global_m = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
-        global_m.instantiate()
-        if os.path.exists("/tmp/reparallelize_test/"):
-            global_m.load_from_saved_flash_model("/tmp/reparallelize_test/")
-        else:
+    try:
+        mconfig = get_llama7b_flash_config()
+        with base.constants.model_scope(from_model_name):
+            global_m = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
+            global_m.instantiate()
+            # if os.path.exists("/tmp/reparallelize_test/"):
+            #     global_m.load_from_saved_flash_model("/tmp/reparallelize_test/")
+            # else:
+            os.system("rm -rf /tmp/reparallelize_test/")
+            torch.distributed.barrier()
             global_m.save("/tmp/reparallelize_test/")
 
-    try:
-        test_impl(rank, world_size, from_model_name, to_model_name, from_topo, to_topo, pg_info=pg_info)
-    except Exception:
+        torch.distributed.barrier()
+        test_impl(
+            rank,
+            world_size,
+            from_model_name,
+            to_model_name,
+            from_topo,
+            to_topo,
+            pg_info=pg_info,
+            profile=False,
+            check=True,
+            n_iterations=3,
+        )
+    except Exception as e:
         err_queue.put(1)
-        raise
+        raise e
 
     # print("====================")
     # test_impl(
@@ -290,10 +317,10 @@ def decompose_to_three_factors(n: int):
 
 
 if __name__ == "__main__":
-    err_queue = mp.Queue(8)
+    err_queue = mp.Queue(100)
     for a, b in [(8, 8)]:
-        for x1, x2 in itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)):
-            # for x1, x2 in itertools.product([(1, 4, 2)], [(2, 2, 2)]):
+        # for x1, x2 in itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)):
+        for x1, x2 in itertools.product([(1, 4, 2)], [(2, 2, 2)]):
             if not (x1[1] % x2[1] == 0 or x2[1] % x1[1] == 0):
                 continue
             barrier = mp.Barrier(8)

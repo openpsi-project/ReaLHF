@@ -41,7 +41,7 @@ if USE_TE_BACKEND:
 
 
 # model parallel partition util functions
-def _mp_partition(
+def tensor_slice_partition_fn(
     tensor: torch.Tensor,
     mp_rank: Optional[int],
     mp_world_size: int,
@@ -58,35 +58,78 @@ def _mp_partition(
         return splits[mp_rank].contiguous()
 
 
+def flat_indices_partition_fn(
+    shape: torch.Size,
+    mp_rank: Optional[int],
+    mp_world_size: int,
+    dim: Optional[int],
+) -> Union[List[torch.Tensor], torch.Tensor]:
+    param_size = int(np.prod(shape))
+    if dim is None:
+        splits = [np.arange(param_size, dtype=np.int64) for _ in range(mp_world_size)]
+    else:
+        assert shape[dim] % mp_world_size == 0
+        indices = np.arange(param_size, dtype=np.int64).reshape(shape)
+        split_boundaries = [i * shape[dim] // mp_world_size for i in range(1, mp_world_size)]
+        splits = np.split(indices, split_boundaries, axis=dim)
+        splits = [x.flatten() for x in splits]
+    if mp_rank is None:
+        return [s for s in splits]
+    else:
+        return splits[mp_rank]
+
+
+def shape_partition_fn(
+    shape: torch.Size,
+    mp_rank: Optional[int],
+    mp_world_size: int,
+    dim: Optional[int],
+):
+    if dim is None:
+        splits = [shape for _ in range(mp_world_size)]
+    else:
+        if dim < 0:
+            dim = len(shape) + dim
+        assert shape[dim] % mp_world_size == 0
+        splits = [(*shape[:dim], shape[dim] // mp_world_size, *shape[dim + 1:]) for _ in range(mp_world_size)]
+    if mp_rank is None:
+        return [s for s in splits]
+    else:
+        return splits[mp_rank]
+
+
 def mp_partition_key(
     key: str,
-    tensor: torch.Tensor,
+    tensor_or_shape: torch.Tensor | torch.Size,
     mp_rank: Optional[int],
     mp_size: Optional[int],
     config: FlashMQATConfig,
+    partition_fn: Callable[[torch.Tensor, Optional[int], int, Optional[int]],
+                           Union[List[torch.Tensor], torch.Tensor]] = tensor_slice_partition_fn,
 ) -> torch.Tensor:
     if any([ek in key for ek in EMBEDDING_KEYS]):
         assert "weight" in key
-        return _mp_partition(tensor, mp_rank, mp_size, dim=0)
+        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif key == f"{config.n_layers + 1}.weight":  # output head
         if config.is_critic:
-            assert tensor.shape[0] == 1
-            return _mp_partition(tensor, mp_rank, mp_size, dim=None)
+            if isinstance(tensor_or_shape, torch.Tensor):
+                assert tensor_or_shape.shape[0] == 1
+            else:
+                assert tensor_or_shape[0] == 1
+            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
         else:
-            return _mp_partition(tensor, mp_rank, mp_size, dim=0)
+            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif any([ck in key for ck in COLUMN_LINEAR_KEYS]):
         if ("k_attn" or "v_attn" in key) and config.n_kv_heads % mp_size != 0:
-            logger.warning(
-                f"Cannot split {config.n_kv_heads} kv heads evenly among "
-                f"{mp_size} model parallel ranks, "
-                f"use unsplitted linear for kv heads instead"
-            )
-            return _mp_partition(tensor, mp_rank, mp_size, dim=None)
-        return _mp_partition(tensor, mp_rank, mp_size, dim=0)
+            logger.warning(f"Cannot split {config.n_kv_heads} kv heads evenly among "
+                           f"{mp_size} model parallel ranks, "
+                           f"use unsplitted linear for kv heads instead")
+            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
+        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif any([rk in key for rk in ROW_LINEAR_KEYS]):
-        return _mp_partition(tensor, mp_rank, mp_size, dim=-1)
+        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=-1)
     else:
-        return _mp_partition(tensor, mp_rank, mp_size, dim=None)
+        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
 
 
 def mp_partition_flash_mqat_state_dict(
@@ -112,7 +155,7 @@ def mp_partition_flash_mqat_state_dict(
         return new_state_dict
 
 
-def get_flash_model_param_shape(k: str, config: FlashMQATConfig, mp_size: int):
+def get_flash_model_param_shape(k: str, config: FlashMQATConfig, mp_size: int) -> Tuple:
 
     if "wte.weight" in k:
         assert config.vocab_size % mp_size == 0
@@ -204,11 +247,9 @@ def partition_pipeline_layers(
     from base.datapack import partition_balanced as true_partition_balanced
 
     # Each stage gets a simple uniform number of layers.
-    param_counts = (
-        [embed_param_counter(config)]
-        + [transformer_block_param_counter(config, i) for i in range(config.n_layers)]
-        + [head_param_counter(config)]
-    )
+    param_counts = ([embed_param_counter(config)] +
+                    [transformer_block_param_counter(config, i)
+                     for i in range(config.n_layers)] + [head_param_counter(config)])
     parts = None
     if method == "uniform":
         parts = ds_utils.partition_uniform(num_items=config.n_layers + 2, num_parts=num_stages)
@@ -242,8 +283,7 @@ def pipeline_repartition_strategy(
     layer_map: Dict[Tuple[int, int], List[int]] = {}
     for pp_rank2, layer_indices2 in layer_mapping2.items():
         for pp_rank1, layer_indices1 in layer_mapping1.items():
-            layer_map[(pp_rank1, pp_rank2)] = sorted(
-                list(set(layer_indices1).intersection(set(layer_indices2)))
-            )
+            layer_map[(pp_rank1,
+                       pp_rank2)] = sorted(list(set(layer_indices1).intersection(set(layer_indices2))))
 
     return layer_map

@@ -53,6 +53,9 @@ import base.logging as logging
 
 logger = logging.getLogger("FlashMQAT Interface")
 
+MAX_PYTORCH_N_INTERVALS = 1024
+CUDA_INTERVAL_OP_CHUNK_SIZE = 2048
+
 
 @dataclasses.dataclass
 class FlashMQATParallelismHelper:
@@ -74,7 +77,9 @@ class ReparallelizeSenderStep:
     sender_mp_portion_id: int
     receiver_mp_portion_id: int
     param_keys: List[str]
-    param_intervals: List[Tuple[int, int]]
+    param_intervals: torch.Tensor
+    param_intervals_cpu: List[Tuple[int, int]]
+    max_interval_size: int
     param_size: int
     group: torch.distributed.ProcessGroup
     dst_ranks: List[int]
@@ -86,7 +91,12 @@ class ReparallelizeReceiverStep:
     rank: int
     sender_mp_portion_id: int
     receiver_mp_portion_id: int
-    sender_param_intervals: List[Tuple[int, int]]
+    sender_param_intervals: torch.Tensor
+    sender_param_intervals_cpu: List[Tuple[int, int]]
+    sender_max_interval_size: int
+    receiver_param_intervals: torch.Tensor
+    receiver_param_intervals_cpu: List[Tuple[int, int]]
+    receiver_max_interval_size: int
     param_size: int
     param_keys: List[str]
     param_dtype: torch.dtype
@@ -106,14 +116,70 @@ def _are_intervals_contiguous(l: List[Tuple[int, int]]) -> bool:
     return res
 
 
-def slice_intervals(tensor: torch.Tensor, intervals: List[Tuple[int, int]],
-                    concat: bool) -> List[torch.Tensor]:
+def slice_intervals(
+    tensor: torch.Tensor,
+    intervals: torch.IntTensor,
+    intervals_cpu: List[Tuple[int, int]],
+    max_interval_size: int,
+    output_size: int,
+) -> torch.Tensor:
     assert len(tensor.shape) == 1
-    x = [tensor[start:end] for start, end in intervals]
-    if concat:
-        return torch.cat(x)
-    else:
-        return x
+    if len(intervals_cpu) == 1:
+        return tensor[intervals_cpu[0][0]:intervals_cpu[0][1]]
+    elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
+        return torch.cat([tensor[start:end] for start, end in intervals_cpu])
+    try:
+        import interval_op_cuda
+
+        interval_sizes = intervals[:, 1] - intervals[:, 0]
+        offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+        return interval_op_cuda.slice_intervals_cuda_half(
+            tensor,
+            intervals,
+            interval_sizes,
+            offsets,
+            max_interval_size,
+            output_size,
+        )
+    except ModuleNotFoundError:
+        logger.warning("interval_op_cuda not found, falling back to PyTorch implementation.")
+        return torch.cat([tensor[start:end] for start, end in intervals])
+
+
+def set_intervals(
+    src: torch.Tensor,
+    dst: torch.Tensor,
+    intervals: torch.IntTensor,
+    intervals_cpu: List[Tuple[int, int]],
+    max_interval_size: int,
+):
+    assert len(dst.shape) == len(src.shape) == 1
+    if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
+        offset = 0
+        for i, j in intervals_cpu:
+            dst[i:j] = src[offset:offset + j - i]
+            offset += j - i
+        assert offset == src.shape[0]
+    try:
+        import interval_op_cuda
+
+        interval_sizes = intervals[:, 1] - intervals[:, 0]
+        offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+        interval_op_cuda.set_intervals_cuda_half(
+            src,
+            dst,
+            intervals,
+            interval_sizes,
+            offsets,
+            max_interval_size,
+        )
+    except ModuleNotFoundError:
+        logger.warning("interval_op_cuda not found, falling back to PyTorch implementation.")
+        offset = 0
+        for i, j in intervals_cpu:
+            dst[i:j] = src[offset:offset + j - i]
+            offset += j - i
+        assert offset == src.shape[0]
 
 
 def extract_intervals(arr: np.ndarray) -> List[Tuple[int, int]]:
@@ -156,30 +222,30 @@ class ContiguousParamSpec:
     shape: torch.Size
 
 
-def _param_indices_from_layer_indices(
+def _param_intervals_from_layer_indices(
     config: FlashMQATConfig,
     param_spec: Dict[str, ContiguousParamSpec],
-    src_mp_size: int,
+    mp_size: int,
     layer_indices: List[int],
-    src2dst_tp_size: int,
-    src2dst_tp_rank: int,
-) -> Tuple[List[int], int]:
+    portion_size: int,
+    portion_rank: int,
+) -> List[int]:
     sd_keys = _keys_from_layer_indices(config, layer_indices)
     intervals = []
     for k in sd_keys:
         intervals.append((param_spec[k].start_idx, param_spec[k].end_idx))
     assert _are_intervals_contiguous(intervals)
     intervals = sorted(intervals, key=lambda x: x[0])
-    if src2dst_tp_size == 1:
+    if portion_size == 1:
         return [(intervals[0][0], intervals[-1][-1])]
 
     intervals = []
     for k in sd_keys:
         param_indices = (mp_partition_key(
             k,
-            get_flash_model_param_shape(k, config, src_mp_size),
-            src2dst_tp_rank,
-            src2dst_tp_size,
+            get_flash_model_param_shape(k, config, mp_size),
+            portion_rank,
+            portion_size,
             config,
             partition_fn=flat_indices_partition_fn,
         ) + param_spec[k].start_idx)
@@ -276,6 +342,26 @@ def map_param_to_contigous_memory(
                 assert old_param_data.shape == torch.Size([0]), (old_param_data.shape, spec.shape)
 
 
+def _split_intervals(intervals, K):
+    result = []
+    for start, end in intervals:
+        if end - start <= K:
+            result.append((start, end))
+        else:
+            # Calculate how many chunks are needed
+            num_chunks = (end - start) // K
+            remainder = (end - start) % K
+
+            # Generate the chunks
+            for i in range(num_chunks):
+                result.append((start, start + K))
+                start += K
+            if remainder:
+                result.append((start, start + remainder))
+
+    return result
+
+
 def _derive_reparallelize_comm_plan(
     from_model_name: ModelName,
     to_model_name: ModelName,
@@ -326,6 +412,11 @@ def _derive_reparallelize_comm_plan(
             from_layer_indices = from_layer_mapping[base.constants.pipe_parallel_rank()]
             from_model_param_specs, _ = _build_param_spec(from_layer_indices, from_model_config,
                                                           from_topo.get_dim("model"))
+    if base.constants.has_model_name(to_model_name):
+        with base.constants.model_scope(to_model_name):
+            to_layer_indices = to_layer_mapping[base.constants.pipe_parallel_rank()]
+            to_model_param_specs, _ = _build_param_spec(to_layer_indices, to_model_config,
+                                                        to_topo.get_dim("model"))
 
     comm_plan = []
 
@@ -359,18 +450,49 @@ def _derive_reparallelize_comm_plan(
                     group = pg_info.param_sync_groups[key]
                     dst_ranks = pg_info.param_sync_dst_ranks[key]
 
-                    param_intervals = param_keys = param_shapes = None
+                    param_intervals = param_keys = receiver_param_intervals = None
+                    max_param_interval_size = max_receiver_param_interval_size = -1
+                    param_intervals_cpu = receiver_param_intervals_cpu = None
                     param_size = -1
                     if torch.distributed.get_rank() in dst_ranks or torch.distributed.get_rank() == src:
                         if torch.distributed.get_rank() == src:
-                            param_intervals = _param_indices_from_layer_indices(
+
+                            param_intervals_cpu = _param_intervals_from_layer_indices(
                                 config=from_model_config,
-                                src_mp_size=src_mp_size,
+                                mp_size=src_mp_size,
                                 param_spec=from_model_param_specs,
                                 layer_indices=layer_indices,
-                                src2dst_tp_size=max(dst_mp_size // src_mp_size, 1),
-                                src2dst_tp_rank=sender_mp_portion_id,
+                                portion_size=max(dst_mp_size // src_mp_size, 1),
+                                portion_rank=sender_mp_portion_id,
                             )
+                            if len(param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
+                                param_intervals_cpu = _split_intervals(param_intervals_cpu,
+                                                                       CUDA_INTERVAL_OP_CHUNK_SIZE)
+                                max_param_interval_size = CUDA_INTERVAL_OP_CHUNK_SIZE
+                            else:
+                                max_param_interval_size = max(j - i for i, j in param_intervals_cpu)
+                            param_intervals = torch.tensor(param_intervals_cpu,
+                                                           dtype=torch.long,
+                                                           device="cuda")
+                        if torch.distributed.get_rank() in dst_ranks:
+                            receiver_param_intervals_cpu = _param_intervals_from_layer_indices(
+                                config=to_model_config,
+                                mp_size=dst_mp_size,
+                                param_spec=to_model_param_specs,
+                                layer_indices=layer_indices,
+                                portion_size=max(src_mp_size // dst_mp_size, 1),
+                                portion_rank=receiver_mp_portion_id,
+                            )
+                            if len(receiver_param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
+                                receiver_param_intervals_cpu = _split_intervals(
+                                    receiver_param_intervals_cpu, CUDA_INTERVAL_OP_CHUNK_SIZE)
+                                max_receiver_param_interval_size = CUDA_INTERVAL_OP_CHUNK_SIZE
+                            else:
+                                max_receiver_param_interval_size = max(
+                                    j - i for i, j in receiver_param_intervals_cpu)
+                            receiver_param_intervals = torch.tensor(receiver_param_intervals_cpu,
+                                                                    dtype=torch.long,
+                                                                    device="cuda")
                         param_size = _param_size_from_layer_indices(
                             config=from_model_config,
                             src_mp_size=src_mp_size,
@@ -388,7 +510,12 @@ def _derive_reparallelize_comm_plan(
                                 sender_mp_portion_id=sender_mp_portion_id,
                                 receiver_mp_portion_id=receiver_mp_portion_id,
                                 param_keys=param_keys,
+                                sender_param_intervals_cpu=param_intervals_cpu,
                                 sender_param_intervals=param_intervals,
+                                sender_max_interval_size=max_param_interval_size,
+                                receiver_param_intervals_cpu=receiver_param_intervals_cpu,
+                                receiver_param_intervals=receiver_param_intervals,
+                                receiver_max_interval_size=max_receiver_param_interval_size,
                                 param_size=param_size,
                                 param_dtype=dtype,
                                 src=src,
@@ -401,6 +528,8 @@ def _derive_reparallelize_comm_plan(
                             receiver_mp_portion_id=receiver_mp_portion_id,
                             param_keys=param_keys,
                             param_intervals=param_intervals,
+                            param_intervals_cpu=param_intervals_cpu,
+                            max_interval_size=max_param_interval_size,
                             param_size=param_size,
                             group=group,
                             dst_ranks=dst_ranks,
@@ -1191,43 +1320,39 @@ class FlashMQATModel(nn.Module):
         src_mp_size = from_topo.get_dim("model")
         dst_mp_size = to_topo.get_dim("model")
         n_receiver_portions = max(src_mp_size // dst_mp_size, 1)
-        import time
-        rbt = sbt = ct = 0
         for step in rtgt.comm_plan:
             if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
 
-                rtik = time.perf_counter()
                 if step.rank == step.src:
-                    buf = slice_intervals(self.contiguous_param, step.sender_param_intervals, concat=True)
+                    buf = slice_intervals(
+                        self.contiguous_param,
+                        step.sender_param_intervals,
+                        step.sender_param_intervals_cpu,
+                        max_interval_size=step.sender_max_interval_size,
+                        output_size=step.param_size,
+                    )
                 else:
                     buf = torch.zeros(step.param_size, dtype=step.param_dtype, device="cuda")
                     comm_volume += buf.numel()
                     torch.distributed.broadcast(buf, src=step.src, group=step.group)
-                rbt += time.perf_counter() - rtik
 
-                ctik = time.perf_counter()
-                buf_offset = 0
-                for pk in step.param_keys:
-                    pslice = to_contiguous_param[rtgt.to_param_spec[pk].start_idx:rtgt.to_param_spec[pk].
-                                                 end_idx]
-                    pshape = rtgt.to_param_spec[pk].shape
-                    flat_indices = mp_partition_key(
-                        pk,
-                        pshape,
-                        step.receiver_mp_portion_id,
-                        n_receiver_portions,
-                        self.config,
-                        partition_fn=flat_indices_partition_fn,
-                    )
-                    pslice[flat_indices] = buf[buf_offset:buf_offset + len(flat_indices)]
-                    buf_offset += len(flat_indices)
-                assert buf_offset == buf.numel(), (buf_offset, buf.numel(), step.param_keys)
-                ct += time.perf_counter() - ctik
+                set_intervals(
+                    src=buf,
+                    dst=to_contiguous_param,
+                    intervals=step.receiver_param_intervals,
+                    intervals_cpu=step.receiver_param_intervals_cpu,
+                    max_interval_size=step.receiver_max_interval_size,
+                )
 
             if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
-                stik = time.perf_counter()
                 if step.group is not None:
-                    buf = slice_intervals(self.contiguous_param, step.param_intervals, concat=True)
+                    buf = slice_intervals(
+                        self.contiguous_param,
+                        step.param_intervals,
+                        step.param_intervals_cpu,
+                        step.max_interval_size,
+                        step.param_size,
+                    )
                     torch.distributed.broadcast(buf, src=step.rank, group=step.group)
                 if step.remove:
                     for param_key in step.param_keys:
@@ -1236,8 +1361,6 @@ class FlashMQATModel(nn.Module):
                         dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
                         recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
                                           k).data = (dummy_tensor)
-                sbt += time.perf_counter() - stik
-        print(rbt, sbt, ct)
 
         # assert len(state_dict) == 0
 

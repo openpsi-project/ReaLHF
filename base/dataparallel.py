@@ -6,8 +6,8 @@ import numpy as np
 import torch
 
 import base.datapack as datapack
-import base.namedarray as namedarray
 import base.logging as logging
+import base.namedarray as namedarray
 
 logger = logging.getLogger("dataparallel")
 

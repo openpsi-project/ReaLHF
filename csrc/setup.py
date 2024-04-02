@@ -186,8 +186,20 @@ cr_extension = CUDAExtension(
     },
     libraries=["cuda"] if _is_cuda() else [],
 )
-ext_modules.append(cr_extension)
+# ext_modules.append(cr_extension)
 
+interval_extension = CUDAExtension(
+    name="interval_op_cuda",
+    sources=[
+        "csrc/interval_op/interval_ops.cu",
+    ],
+    extra_compile_args={
+        "cxx": CXX_FLAGS,
+        "nvcc": NVCC_FLAGS,
+    },
+    libraries=["cuda"] if _is_cuda() else [],
+)
+ext_modules.append(interval_extension)
 
 setuptools.setup(
     name="dllm_cuda",

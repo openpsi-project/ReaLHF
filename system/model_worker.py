@@ -345,9 +345,13 @@ class ModelWorker(worker_base.Worker):
         for s in self.config.shards:
             with base.constants.model_scope(s.id.model_name):
                 self.__backend_initialized[s.id.model_name] = False
+                tik = time.perf_counter()
                 self.__models[s.id.model_name] = model = api.model.make_model(s.model,
                                                                               name=s.id.model_name,
                                                                               device=self.__device)
+                if self._dp_rank == 0:
+                    self.logger.info(
+                        f"Model {s.id.model_name} initialized in {time.perf_counter() - tik:.4f}s.")
                 self.__unwrapped_models[s.id.model_name] = model.module
                 if s.id.model_name.replica_id == 0:
                     assert isinstance(model.module, FlashMQATModel)
@@ -408,7 +412,7 @@ class ModelWorker(worker_base.Worker):
 
         # A monitoring process.
         self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor, args=(self.__worker_index, 20, 7200))
-        self.__gpu_util_mp.start()
+        # self.__gpu_util_mp.start()
 
     def __prefetch_from_dataset(self):
         if self.__dict_sample is None:
