@@ -167,11 +167,11 @@ def get_llama7b_flash_config():
 
     # codellama 34b config
     return FlashMQATConfig(
-        n_layers=48,
-        n_kv_heads=64,
+        n_layers=80,
+        n_kv_heads=8,
         head_dim=128,
         hidden_dim=8192,
-        intermediate_dim=22016,
+        intermediate_dim=28672,
         vocab_size=32000,
         n_positions=4096,
         activation_function="silu",

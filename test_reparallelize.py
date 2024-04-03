@@ -384,7 +384,7 @@ if __name__ == "__main__":
         random.shuffle(all_configs)
         print(f">>>>>>>>> running {len(all_configs)} configurations >>>>>>>")
         # for x1, x2 in all_configs:
-        for x1, x2 in itertools.product([(8, 1, 4)], [(1, 4, 4)]):
+        for x1, x2 in itertools.product([(8, 2, 4)], [(1, 8, 4)]):
             barrier = mp.Barrier(8)
             if args.node_idx == args.num_nodes - 1:
                 clear_name_resolve()
