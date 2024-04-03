@@ -3,13 +3,15 @@ import pickle
 
 from profiler.device_mesh import DeviceMesh, make_device_mesh_from_name, ModelParallelStrategy
 from profiler.enumerate import build_graph, enumerate_rpc_executions
-from profiler.estimate import (comm_stats, estimate_function_call_memory, estimate_model_size,
-                               estimate_rpc_cost, load_model_config)
+from profiler.estimate import (comm_stats, estimate_model_size, estimate_rpc_memory, estimate_rpc_time,
+                               load_model_config)
 from profiler.experiments import ppo_rpcs_example, ProfileExperiment
 from profiler.rpc import RPC, RPCExecution
 import profiler.cppsearch.mdm_search as mdm_search
 
-from api.config.dfg import ModelRPC
+from api.config.config_base import MODEL_TYPE_TO_PATH
+from api.config.config_flash_model import ModelTrainEvalConfig, OptimizerConfig
+from api.config.dfg import ModelName, ModelRPC, OffloadHook, SyncParamHook
 from experiments.autoexp.auto_ppo import ClusterDeviceMesh
 from experiments.autoexp.device_mapping import RPCAllocation
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
@@ -21,6 +23,17 @@ def optimal_device_mapping(
     model_configs: Dict[str, FlashMQATConfig],
     nodelist: Optional[str] = None,
 ) -> Dict[str, RPCAllocation]:
+    # hack, only suitable for configs in experiments/autoexp/auto_ppo.py
+    rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
+    actor_train.pre_hooks.append(SyncParamHook(source=ModelName("actor", 0)))
+    actor_train.model_name = ModelName("actor", 1)
+    actor_train.post_hooks.append(SyncParamHook(target=ModelName("actor", 0)))
+    critic_train.pre_hooks.append(SyncParamHook(source=ModelName("critic", 0)))
+    critic_train.model_name = ModelName("critic", 1)
+    critic_train.post_hooks.append(SyncParamHook(target=ModelName("critic", 0)))
+    rew_inf.post_hooks.append(OffloadHook())
+    ref_inf.post_hooks.append(OffloadHook())
+
     device_mesh = make_device_mesh_from_name(nodelist)
 
     rpc_exe_list = make_rpc_exe_list(model_rpcs, device_mesh, if_print=True)
@@ -29,40 +42,59 @@ def optimal_device_mapping(
     comm_stats_ = comm_stats(None, if_print=True)
     model_size_dict = make_model_size_dict(model_rpcs, if_print=True)
 
-    r = mdm_search.multi_mcmc_search(rpc_list, rpc_exe_list, graph, comm_stats_, model_size_dict, 0.01, 0.03,
-                                     0.01, 10)
-    print(r)
+    rpc_dict = {rpc.name: rpc for rpc in model_rpcs}
+
+    r: Dict[str, List] = mdm_search.multi_mcmc_search(
+        rpc_list,
+        rpc_exe_list,
+        graph,
+        comm_stats_,
+        model_size_dict,
+        0.01,  # beta min
+        0.03,  # beta max
+        0.01,  # beta step
+        10  # time limit for each search
+    )
+    # print(r)
+
+    rpc_alloc_dict = {}
+    for rpc_name, alloc_info in r.items():
+        rpc = rpc_dict[rpc_name]
+        ps = ModelParallelStrategy(
+            num_pp=alloc_info["num_pp"],
+            num_dp=alloc_info["num_dp"],
+            num_mp=alloc_info["num_mp"],
+        )
+        use_sequence_parallel = False\
+            if rpc.model_name.role in ["reward", "ref"] else (ps.num_mp > 1)
+        parallel_config = ps.to_config(use_sequence_parallel=use_sequence_parallel,)
+        gradient_checkpointing = rpc.interface_type == "train_step"
+        optim_config = OptimizerConfig(type="adam", offload=False)\
+            if rpc.interface_type == "train_step" else OptimizerConfig()
+        sub_device_mesh = make_device_mesh_from_name(alloc_info["device_mesh"])
+        train_eval_config = ModelTrainEvalConfig(
+            type=rpc.model_type._class,
+            path=MODEL_TYPE_TO_PATH[rpc.model_type],
+            base_model_path=MODEL_TYPE_TO_PATH[rpc.model_type],
+            gradient_checkpointing=gradient_checkpointing,
+            parallel=parallel_config,
+            optimizer=optim_config,
+        )
+        rpc_alloc = sub_device_mesh.to_config(
+            device_mesh=device_mesh,
+            train_eval_config=train_eval_config,
+            rpc=rpc_dict[rpc_name],
+        )
+        # print(f"{rpc_name}: mapping: {rpc_alloc.mapping}, "
+        #       f" parallel: {parallel_config}")
+        rpc_alloc_dict = {rpc_name: rpc_alloc}
+
+    return rpc_alloc_dict
 
 
-# def handpick_model_device_mapping(rpcs: List[ModelRPC], device_mesh_name: str):
-#     device_mesh = make_device_mesh_from_name(device_mesh_name)
-#     total_time_cost = 0
-#     total_model_cost = 0
-#     dynamic_model_cost = 0
-#     models = []
-#     for rpc in exp.model_rpcs:
-#         model_type = exp.model_names_to_types[rpc.model_name]
-#         flash_mqat_config = load_model_config(exp.model_paths[exp.model_types.index(model_type)])
-#         parallel_strategy = ModelParallelStrategy(num_pp=exp.n_nodes, num_dp=8, num_mp=1)
-#         mem_cost, static_mem = estimate_function_call_memory(rpc.interface_type, rpc.min_n_seqs,
-#                                                              rpc.max_n_tokens // rpc.min_n_seqs,
-#                                                              flash_mqat_config, parallel_strategy)
-#         mem_cost = int(mem_cost)
-#         static_mem = int(static_mem)
-#         time_cost = estimate_rpc_cost(exp, rpc, flash_mqat_config, parallel_strategy)
-#         total_time_cost += time_cost
-#         if mem_cost - static_mem > dynamic_model_cost:
-#             dynamic_model_cost = mem_cost - static_mem
-#         if rpc.model_name not in models:
-#             models.append(rpc.model_name)
-#             total_model_cost += static_mem
-
-#     print(f"total_time_cost: {5*total_time_cost/(1e3)} ms")
-#     print(f"total_model_cost: {total_model_cost/(1024*1024*1024):02f} GB")
-#     print(f"dynamic_model_cost: {dynamic_model_cost/(1024*1024*1024):02f} GB")
-
-
-def make_rpc_exe_list(rpcs: List[ModelRPC], device_mesh: DeviceMesh, if_print: bool = False):
+def make_rpc_exe_list(rpcs: List[ModelRPC],
+                      device_mesh: DeviceMesh,
+                      if_print: bool = False) -> List[RPCExecution]:
     rpc_exe_list = []
     for rpc in rpcs:
         # flash_mqat_config = load_model_config(rpc)
@@ -83,7 +115,7 @@ def make_rpc_exe_list(rpcs: List[ModelRPC], device_mesh: DeviceMesh, if_print: b
     return rpc_exe_list
 
 
-def make_model_size_dict(rpcs: List[ModelRPC], if_print: bool = False):
+def make_model_size_dict(rpcs: List[ModelRPC], if_print: bool = False) -> Dict[str, int]:
     model_size_dict = {}
 
     for rpc in rpcs:
@@ -98,12 +130,13 @@ def make_model_size_dict(rpcs: List[ModelRPC], if_print: bool = False):
     return model_size_dict
 
 
-def make_rpc_list(rpcs: List[ModelRPC], if_print: bool = False):
+def make_rpc_list(rpcs: List[ModelRPC], if_print: bool = False) -> List[RPC]:
     rpc_list = []
     for rpc in rpcs:
-        rpc_list.append(RPC(rpc))
+        rpc_list.append(RPC.from_config(rpc))
         if if_print:
-            print(f"rpc_name: {rpc.name}, model_name: {rpc.model_name}, interface_type: {rpc.interface_type}")
+            print(f"rpc_name: {rpc.name}, model_name: {rpc.model_name}, "
+                  f"interface_type: {rpc.interface_type}")
     return rpc_list
 
 

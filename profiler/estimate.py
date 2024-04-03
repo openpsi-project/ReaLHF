@@ -220,7 +220,7 @@ def load_model_config(rpc: ModelRPC) -> FlashMQATConfig:
                    f"config_from_{rpc.model_type._class}")(model_path=MODEL_TYPE_TO_PATH[rpc.model_type])
 
 
-def estimate_rpc_cost(rpc: ModelRPC,
+def estimate_rpc_time(rpc: ModelRPC,
                       parallel_strategy: ModelParallelStrategy,
                       num_gen_tokens=256,
                       use_gradient_checkpointing=False,
@@ -274,13 +274,13 @@ def estimate_model_size(model_config: FlashMQATConfig):
     return 2 * n_params
 
 
-def estimate_function_call_memory(rpc: ModelRPC,
-                                  parallel_strategy: ModelParallelStrategy,
-                                  batch_size: int,
-                                  seq_len: int,
-                                  gradient_checkpointing: bool = False,
-                                  offload_optimizer: bool = False,
-                                  n_ppo_minibatches: int = 1):
+def estimate_rpc_memory(rpc: ModelRPC,
+                        parallel_strategy: ModelParallelStrategy,
+                        batch_size: int,
+                        seq_len: int,
+                        gradient_checkpointing: bool = False,
+                        offload_optimizer: bool = False,
+                        n_ppo_minibatches: int = 1):
     interface_type = rpc.interface_type
     model_config = load_model_config(rpc)
 
@@ -343,7 +343,7 @@ def main(args):
         rpc_name = rpc.name
         p = ModelParallelStrategy.from_config(rpc_alloc.train_eval_config.parallel)
         for bs, seq_len in bs_seqlen_list:
-            rpc_cost = estimate_rpc_cost(rpc, p, use_gradient_checkpointing=False, bs=bs, seq_len=seq_len)
+            rpc_cost = estimate_rpc_time(rpc, p, use_gradient_checkpointing=False, bs=bs, seq_len=seq_len)
             stats_key = make_stats_key(rpc_name, bs, seq_len)
             r[stats_key] = rpc_cost
             # print(f"RPC {stats_key} cost: {rpc_cost}")

@@ -19,13 +19,13 @@ def enumerate_rpc_executions(rpc: ModelRPC, device_mesh: DeviceMesh) -> List[RPC
         for p in ps:
             bs = rpc.min_n_seqs
             seq_len = rpc.max_n_tokens // bs
-            mem_cost, static_mem = estimate_function_call_memory(rpc, p, bs, seq_len)
+            mem_cost, static_mem = estimate_rpc_memory(rpc, p, bs, seq_len)
             mem_cost = int(mem_cost)
             static_mem = int(static_mem)
-            time_cost = estimate_rpc_cost(rpc, p, bs=bs, seq_len=seq_len)
+            time_cost = estimate_rpc_time(rpc, p, bs=bs, seq_len=seq_len)
             time_cost = int(time_cost)
             if mem_cost * 1.2 < GPU_MEM_CAP:
-                rep_rpc = RPC(rpc)
+                rep_rpc = RPC.from_config(rpc)
                 feasible.append(RPCExecution(rep_rpc, sub_device_mesh, p, time_cost, mem_cost, static_mem))
     return feasible
 
@@ -53,18 +53,20 @@ def build_graph(rpcs: List[ModelRPC], num_epoch: int = 5, epoch_dependency_inter
             if rpc.is_src and epoch_id >= epoch_dependency_interval:
                 for other in rpcs:
                     if other.is_dst:
-                        parents.append(RPCInstance(RPC(other), epoch_id - epoch_dependency_interval, [], []))
+                        parents.append(
+                            RPCInstance(RPC.from_config(other), epoch_id - epoch_dependency_interval, [], []))
             if rpc.is_dst:
                 for other in rpcs:
                     if other.is_src and epoch_id + epoch_dependency_interval < num_epoch:
-                        children.append(RPCInstance(RPC(other), epoch_id + epoch_dependency_interval, [], []))
+                        children.append(
+                            RPCInstance(RPC.from_config(other), epoch_id + epoch_dependency_interval, [], []))
             for parent in rpc.parents:
-                p = RPC(rpc_names_mapping[parent])
+                p = RPC.from_config(rpc_names_mapping[parent])
                 parents.append(RPCInstance(p, epoch_id, [], []))
             for child in rpc.children:
-                c = RPC(rpc_names_mapping[child])
+                c = RPC.from_config(rpc_names_mapping[child])
                 children.append(RPCInstance(c, epoch_id, [], []))
-            rpc_instance = RPCInstance(RPC(rpc), epoch_id, parents, children)
+            rpc_instance = RPCInstance(RPC.from_config(rpc), epoch_id, parents, children)
             print(rpc_instance)
             rpc_instances.append(rpc_instance)
     if if_print:

@@ -23,11 +23,11 @@ class ModelParallelStrategy:
                    num_mp=parallel.model_parallel_size,
                    num_dp=parallel.data_parallel_size)
 
-    def to_config(self):
+    def to_config(self, use_sequence_parallel: bool):
         return ParallelismConfig(pipeline_parallel_size=self.num_pp,
                                  model_parallel_size=self.num_mp,
                                  data_parallel_size=self.num_dp,
-                                 use_sequence_parallel=self.num_mp > 1)
+                                 use_sequence_parallel=use_sequence_parallel)
 
 
 @dataclasses.dataclass
@@ -62,8 +62,8 @@ class DeviceMesh:
     def __repr__(self):
         return self.device_mesh_name
 
-    def to_config(self, device_mesh: 'DeviceMesh', parallel_strategy: ModelParallelStrategy, rpc: ModelRPC,
-                  **kwargs) -> RPCAllocation:
+    def to_config(self, device_mesh: 'DeviceMesh', train_eval_config: ModelTrainEvalConfig,
+                  rpc: ModelRPC) -> RPCAllocation:
         """ 
         args:
             device_mesh: DeviceMesh, the entire device mesh of the experiment,
@@ -72,7 +72,7 @@ class DeviceMesh:
             rpc: ModelRPC
             kwargs: additional arguments for ModelTrainEvalConfig
         """
-        ps = parallel_strategy.to_config()
+        # ps = parallel_strategy.to_config()
         assert device_mesh.n_gpus_per_node == 8
         mapping = np.zeros((device_mesh.n_nodes, device_mesh.n_gpus_per_node), dtype=np.int32)
 
@@ -89,9 +89,7 @@ class DeviceMesh:
                 for gpu_index in gpu_indices:
                     mapping[node_index, gpu_index] = 1
 
-        return RPCAllocation(rpc=rpc,
-                             mapping=mapping,
-                             train_eval_config=ModelTrainEvalConfig(parallel=ps, **kwargs))
+        return RPCAllocation(rpc=rpc, mapping=mapping, train_eval_config=train_eval_config)
 
 
 def is_overlap(device_mesh: DeviceMesh, other: DeviceMesh):
