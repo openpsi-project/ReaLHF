@@ -27,8 +27,7 @@ from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_co
                                                       flash_model_tblock_param_keys, FlashMQATBlock,
                                                       OutputHead, SequenceParallelActorHead,
                                                       SequenceParallelCriticHead, VocabPositionEmbedding)
-from impl.model.nn.flash_mqat.flash_mqat_parallel import (intervals_partition_fn,
-                                                          get_flash_model_param_shape,
+from impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape, intervals_partition_fn,
                                                           mp_merge_flash_mqat_state_dict,
                                                           mp_partition_flash_mqat_state_dict,
                                                           mp_partition_key, partition_pipeline_layers,

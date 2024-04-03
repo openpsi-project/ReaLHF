@@ -82,7 +82,9 @@ def intervals_partition_fn(
             assert dim == 1
             col_start = mp_rank * shape[1] // mp_world_size
             col_end = (mp_rank + 1) * shape[1] // mp_world_size
-            return np.arange(shape[0], dtype=np.int64)[:, None] * shape[1] + np.array([(col_start, col_end)], dtype=np.int64)
+            return np.arange(shape[0], dtype=np.int64)[:, None] * shape[1] + np.array([(col_start, col_end)],
+                                                                                      dtype=np.int64)
+
 
 def shape_partition_fn(
     shape: torch.Size,
