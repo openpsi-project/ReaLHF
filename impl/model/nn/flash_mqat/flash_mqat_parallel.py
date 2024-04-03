@@ -58,26 +58,31 @@ def tensor_slice_partition_fn(
         return splits[mp_rank].contiguous()
 
 
-def flat_indices_partition_fn(
+def intervals_partition_fn(
     shape: torch.Size,
     mp_rank: Optional[int],
     mp_world_size: int,
     dim: Optional[int],
 ) -> Union[List[torch.Tensor], torch.Tensor]:
+    # HACK: some add-hoc implementations to make this function efficient.
+    assert mp_rank is not None
     param_size = int(np.prod(shape))
     if dim is None:
-        splits = [np.arange(param_size, dtype=np.int64) for _ in range(mp_world_size)]
+        return np.array([(0, param_size)], dtype=np.int64)
     else:
         assert shape[dim] % mp_world_size == 0
-        indices = np.arange(param_size, dtype=np.int64).reshape(shape)
-        split_boundaries = [i * shape[dim] // mp_world_size for i in range(1, mp_world_size)]
-        splits = np.split(indices, split_boundaries, axis=dim)
-        splits = [x.flatten() for x in splits]
-    if mp_rank is None:
-        return [s for s in splits]
-    else:
-        return splits[mp_rank]
-
+        assert len(shape) == 2, shape
+        if dim < 0:
+            dim = len(shape) + dim
+        if dim == 0:
+            row_start = mp_rank * shape[0] // mp_world_size
+            row_end = (mp_rank + 1) * shape[0] // mp_world_size
+            return np.array([(row_start * shape[1], row_end * shape[1])], dtype=np.int64)
+        else:
+            assert dim == 1
+            col_start = mp_rank * shape[1] // mp_world_size
+            col_end = (mp_rank + 1) * shape[1] // mp_world_size
+            return np.arange(shape[0], dtype=np.int64)[:, None] * shape[1] + np.array([(col_start, col_end)], dtype=np.int64)
 
 def shape_partition_fn(
     shape: torch.Size,

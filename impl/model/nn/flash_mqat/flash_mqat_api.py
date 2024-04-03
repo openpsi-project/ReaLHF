@@ -27,7 +27,7 @@ from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_co
                                                       flash_model_tblock_param_keys, FlashMQATBlock,
                                                       OutputHead, SequenceParallelActorHead,
                                                       SequenceParallelCriticHead, VocabPositionEmbedding)
-from impl.model.nn.flash_mqat.flash_mqat_parallel import (flat_indices_partition_fn,
+from impl.model.nn.flash_mqat.flash_mqat_parallel import (intervals_partition_fn,
                                                           get_flash_model_param_shape,
                                                           mp_merge_flash_mqat_state_dict,
                                                           mp_partition_flash_mqat_state_dict,
@@ -182,19 +182,6 @@ def set_intervals(
         assert offset == src.shape[0]
 
 
-def extract_intervals(arr: np.ndarray) -> List[Tuple[int, int]]:
-    # Find the indices where the values change
-    indices = np.where(np.diff(arr) != 1)[0]
-
-    # Add the last index to capture the end of the last interval
-    indices = np.append(indices, len(arr) - 1)
-
-    # Create intervals using the indices
-    intervals = [(arr[start], arr[end] + 1) for start, end in zip(np.insert(indices, 0, -1) + 1, indices)]
-
-    return np.array(intervals)
-
-
 def recursive_getattr(obj, attr_string):
     attrs = attr_string.split(".")
     for attr in attrs:
@@ -247,30 +234,20 @@ def _param_intervals_from_keys(
     for k in sd_keys:
         if (model_name, k.split('.',
                                 1)[1], mp_size, portion_rank, portion_size) not in _FLAT_PARAM_INDICES_CACHE:
-            zero_start_flat_indices = mp_partition_key(
+            zero_start_intervals = mp_partition_key(
                 k,
                 get_flash_model_param_shape(k, config, mp_size),
                 portion_rank,
                 portion_size,
                 config,
-                partition_fn=flat_indices_partition_fn,
+                partition_fn=intervals_partition_fn,
             )
-            zero_start_intervals = extract_intervals(zero_start_flat_indices)
             _FLAT_PARAM_INDICES_CACHE[(model_name, k.split('.', 1)[1], mp_size, portion_rank,
                                        portion_size)] = zero_start_intervals
         else:
             zero_start_intervals = _FLAT_PARAM_INDICES_CACHE[(model_name, k.split('.', 1)[1], mp_size,
                                                               portion_rank, portion_size)]
         intervals += (zero_start_intervals + param_spec[k].start_idx).tolist()
-        # param_indices = (mp_partition_key(
-        #     k,
-        #     get_flash_model_param_shape(k, config, mp_size),
-        #     portion_rank,
-        #     portion_size,
-        #     config,
-        #     partition_fn=flat_indices_partition_fn,
-        # ) + param_spec[k].start_idx)
-        # intervals += extract_intervals(param_indices)
     # assert len(set([x[0] for x in intervals])) == len(intervals)
     intervals = sorted(intervals, key=lambda x: x[0])
     return intervals
@@ -285,15 +262,15 @@ def _param_size_from_keys(
 ) -> Tuple[List[int], int]:
     param_size = 0
     for k in sd_keys:
-        param_indices = mp_partition_key(
+        new_shape = mp_partition_key(
             k,
             get_flash_model_param_shape(k, config, src_mp_size),
             src2dst_tp_rank,
             src2dst_tp_size,
             config,
-            partition_fn=flat_indices_partition_fn,
+            partition_fn=shape_partition_fn,
         )
-        param_size += len(param_indices)
+        param_size += int(np.prod(new_shape))
     return param_size
 
 
