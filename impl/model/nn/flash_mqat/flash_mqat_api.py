@@ -133,6 +133,7 @@ def slice_intervals(
 
         interval_sizes = intervals[:, 1] - intervals[:, 0]
         offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+        assert tensor.dtype == torch.half
         return interval_op_cuda.slice_intervals_cuda_half(
             tensor,
             intervals,
@@ -143,7 +144,7 @@ def slice_intervals(
         )
     except ModuleNotFoundError:
         logger.warning("interval_op_cuda not found, falling back to PyTorch implementation.")
-        return torch.cat([tensor[start:end] for start, end in intervals])
+        return torch.cat([tensor[start:end] for start, end in intervals_cpu])
 
 
 def set_intervals(
@@ -160,6 +161,7 @@ def set_intervals(
             dst[i:j] = src[offset:offset + j - i]
             offset += j - i
         assert offset == src.shape[0]
+        return
     try:
         import interval_op_cuda
 
@@ -173,6 +175,7 @@ def set_intervals(
             offsets,
             max_interval_size,
         )
+        return
     except ModuleNotFoundError:
         logger.warning("interval_op_cuda not found, falling back to PyTorch implementation.")
         offset = 0
@@ -180,6 +183,7 @@ def set_intervals(
             dst[i:j] = src[offset:offset + j - i]
             offset += j - i
         assert offset == src.shape[0]
+        return
 
 
 def recursive_getattr(obj, attr_string):
@@ -477,7 +481,6 @@ def _derive_reparallelize_comm_plan(
                                                            dtype=torch.long,
                                                            device="cuda")
                         if torch.distributed.get_rank() in dst_ranks:
-                            print(layer_indices)
                             receiver_param_intervals_cpu = _param_intervals_from_keys(
                                 model_name=to_model_name,
                                 config=to_model_config,
