@@ -192,7 +192,7 @@ def extract_intervals(arr: np.ndarray) -> List[Tuple[int, int]]:
     # Create intervals using the indices
     intervals = [(arr[start], arr[end] + 1) for start, end in zip(np.insert(indices, 0, -1) + 1, indices)]
 
-    return intervals
+    return np.array(intervals)
 
 
 def recursive_getattr(obj, attr_string):
@@ -203,7 +203,7 @@ def recursive_getattr(obj, attr_string):
 
 
 def _keys_from_layer_indices(config: FlashMQATConfig, layer_indices: List[int]) -> List[str]:
-    assert _is_integer_list_contiguous(layer_indices)
+    # assert _is_integer_list_contiguous(layer_indices)
     sd_keys = []
     for layer_idx in layer_indices:
         if layer_idx == 0:
@@ -222,47 +222,67 @@ class ContiguousParamSpec:
     shape: torch.Size
 
 
-def _param_intervals_from_layer_indices(
+_FLAT_PARAM_INDICES_CACHE = {}
+
+
+def _param_intervals_from_keys(
+    model_name: ModelName,
     config: FlashMQATConfig,
     param_spec: Dict[str, ContiguousParamSpec],
     mp_size: int,
-    layer_indices: List[int],
+    sd_keys: List[str],
     portion_size: int,
     portion_rank: int,
 ) -> List[int]:
-    sd_keys = _keys_from_layer_indices(config, layer_indices)
-    intervals = []
-    for k in sd_keys:
-        intervals.append((param_spec[k].start_idx, param_spec[k].end_idx))
-    assert _are_intervals_contiguous(intervals)
-    intervals = sorted(intervals, key=lambda x: x[0])
     if portion_size == 1:
-        return [(intervals[0][0], intervals[-1][-1])]
+        start, end = None, None
+        for k in sd_keys:
+            if start is None or param_spec[k].start_idx < start:
+                start = param_spec[k].start_idx
+            if end is None or param_spec[k].end_idx > end:
+                end = param_spec[k].end_idx
+        return [(start, end)]
 
     intervals = []
     for k in sd_keys:
-        param_indices = (mp_partition_key(
-            k,
-            get_flash_model_param_shape(k, config, mp_size),
-            portion_rank,
-            portion_size,
-            config,
-            partition_fn=flat_indices_partition_fn,
-        ) + param_spec[k].start_idx)
-        intervals += extract_intervals(param_indices)
-    assert len(set([x[0] for x in intervals])) == len(intervals)
+        if (model_name, k.split('.',
+                                1)[1], mp_size, portion_rank, portion_size) not in _FLAT_PARAM_INDICES_CACHE:
+            zero_start_flat_indices = mp_partition_key(
+                k,
+                get_flash_model_param_shape(k, config, mp_size),
+                portion_rank,
+                portion_size,
+                config,
+                partition_fn=flat_indices_partition_fn,
+            )
+            zero_start_intervals = extract_intervals(zero_start_flat_indices)
+            _FLAT_PARAM_INDICES_CACHE[(model_name, k.split('.', 1)[1], mp_size, portion_rank,
+                                       portion_size)] = zero_start_intervals
+        else:
+            zero_start_intervals = _FLAT_PARAM_INDICES_CACHE[(model_name, k.split('.', 1)[1], mp_size,
+                                                              portion_rank, portion_size)]
+        intervals += (zero_start_intervals + param_spec[k].start_idx).tolist()
+        # param_indices = (mp_partition_key(
+        #     k,
+        #     get_flash_model_param_shape(k, config, mp_size),
+        #     portion_rank,
+        #     portion_size,
+        #     config,
+        #     partition_fn=flat_indices_partition_fn,
+        # ) + param_spec[k].start_idx)
+        # intervals += extract_intervals(param_indices)
+    # assert len(set([x[0] for x in intervals])) == len(intervals)
     intervals = sorted(intervals, key=lambda x: x[0])
     return intervals
 
 
-def _param_size_from_layer_indices(
+def _param_size_from_keys(
     config: FlashMQATConfig,
     src_mp_size: int,
-    layer_indices: List[int],
+    sd_keys: List[str],
     src2dst_tp_size: int,
     src2dst_tp_rank: int,
 ) -> Tuple[List[int], int]:
-    sd_keys = _keys_from_layer_indices(config, layer_indices)
     param_size = 0
     for k in sd_keys:
         param_indices = mp_partition_key(
@@ -424,6 +444,8 @@ def _derive_reparallelize_comm_plan(
 
     # derive a global NCCL communication plan
     for (pp_i, pp_j), layer_indices in repart_strat.items():
+        if len(layer_indices) == 0:
+            continue
 
         for mp_i in range(src_mp_size):
             if dst_mp_size > src_mp_size:
@@ -455,13 +477,16 @@ def _derive_reparallelize_comm_plan(
                     param_intervals_cpu = receiver_param_intervals_cpu = None
                     param_size = -1
                     if torch.distributed.get_rank() in dst_ranks or torch.distributed.get_rank() == src:
+                        param_keys = _keys_from_layer_indices(from_model_config, layer_indices)
+
                         if torch.distributed.get_rank() == src:
 
-                            param_intervals_cpu = _param_intervals_from_layer_indices(
+                            param_intervals_cpu = _param_intervals_from_keys(
+                                model_name=from_model_name,
                                 config=from_model_config,
                                 mp_size=src_mp_size,
                                 param_spec=from_model_param_specs,
-                                layer_indices=layer_indices,
+                                sd_keys=param_keys,
                                 portion_size=max(dst_mp_size // src_mp_size, 1),
                                 portion_rank=sender_mp_portion_id,
                             )
@@ -475,11 +500,13 @@ def _derive_reparallelize_comm_plan(
                                                            dtype=torch.long,
                                                            device="cuda")
                         if torch.distributed.get_rank() in dst_ranks:
-                            receiver_param_intervals_cpu = _param_intervals_from_layer_indices(
+                            print(layer_indices)
+                            receiver_param_intervals_cpu = _param_intervals_from_keys(
+                                model_name=to_model_name,
                                 config=to_model_config,
                                 mp_size=dst_mp_size,
                                 param_spec=to_model_param_specs,
-                                layer_indices=layer_indices,
+                                sd_keys=param_keys,
                                 portion_size=max(src_mp_size // dst_mp_size, 1),
                                 portion_rank=receiver_mp_portion_id,
                             )
@@ -493,15 +520,13 @@ def _derive_reparallelize_comm_plan(
                             receiver_param_intervals = torch.tensor(receiver_param_intervals_cpu,
                                                                     dtype=torch.long,
                                                                     device="cuda")
-                        param_size = _param_size_from_layer_indices(
+                        param_size = _param_size_from_keys(
                             config=from_model_config,
                             src_mp_size=src_mp_size,
-                            layer_indices=layer_indices,
+                            sd_keys=param_keys,
                             src2dst_tp_size=max(dst_mp_size // src_mp_size, 1),
                             src2dst_tp_rank=sender_mp_portion_id,
                         )
-
-                        param_keys = _keys_from_layer_indices(from_model_config, layer_indices)
 
                     for dst_rank in dst_ranks:
                         comm_plan.append(
