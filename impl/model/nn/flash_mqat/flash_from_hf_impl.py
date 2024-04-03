@@ -294,7 +294,7 @@ def llama_transformer_block_param_name(config: FlashMQATConfig, idx: int) -> Lis
         f"model.layers.{idx}.self_attn.k_proj.weight",
         f"model.layers.{idx}.self_attn.o_proj.weight",
         f"model.layers.{idx}.self_attn.q_proj.weight",
-        f"model.layers.{idx}.self_attn.rotary_emb.inv_freq",
+        # f"model.layers.{idx}.self_attn.rotary_emb.inv_freq",
         f"model.layers.{idx}.self_attn.v_proj.weight",
     ]
     if idx == config.n_layers - 1:

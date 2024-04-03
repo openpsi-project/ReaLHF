@@ -11,6 +11,7 @@ from base.constants import data_parallel_group
 from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.backend.pipe_inf import InferencePipelineEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
@@ -183,7 +184,21 @@ class PackedActorInterface(api.model.ModelInterface):
         # logger.info(f"packed_prompts shape {packed_prompts.shape}, bs {bs}")
 
         # st = time.monotonic()
-        if isinstance(module, (DeepSpeedEngine, FlashMQATModel)):
+        if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
+            res = module.generate(
+                seqlens_cpu=data.metadata['seqlens'],
+                tokenizer=model.tokenizer,
+                packed_input_ids=packed_prompts,
+                cu_seqlens=cu_seqlens,
+                gconfig=GenerationConfig(**self.generation_config),
+                num_micro_batches=self.pipe_gen_n_mbs,
+            )
+            if res is None:
+                return None
+
+            gen_tokens, logprobs, logits_mask, *_ = res
+            # logger.info(f"gen_tokens shape {gen_tokens.shape}")
+        else:
             # unwrap deepspeed engine here
             module = module.module
             gen_res = module.generate(
@@ -196,19 +211,6 @@ class PackedActorInterface(api.model.ModelInterface):
             gen_tokens = gen_res.sequences
             logprobs = gen_res.scores
             logits_mask = gen_res.logits_mask
-        else:
-            res = module.generate(
-                tokenizer=model.tokenizer,
-                packed_input_ids=packed_prompts,
-                cu_seqlens=cu_seqlens,
-                gconfig=GenerationConfig(**self.generation_config),
-                num_micro_batches=self.pipe_gen_n_mbs,
-            )
-            if res is None:
-                return None
-
-            gen_tokens, logprobs, logits_mask, *_ = res
-            # logger.info(f"gen_tokens shape {gen_tokens.shape}")
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
@@ -283,15 +285,16 @@ class PackedActorInterface(api.model.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        if isinstance(module, (DeepSpeedEngine, FlashMQATModel)):
-            res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            logits = res
-        else:
-            res = module.forward(packed_input_ids=data["packed_seq"],
+        if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
+            res = module.forward(seqlens_cpu=data.metadata['seqlens'],
+                                 packed_input_ids=data["packed_seq"],
                                  cu_seqlens=cu_seqlens,
                                  num_micro_batches=self.pipe_inf_n_mbs)
             if res is None:
                 return None
+            logits = res
+        else:
+            res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
             logits = res
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
@@ -379,6 +382,7 @@ class PackedActorInterface(api.model.ModelInterface):
         if self.adv_norm:
             advantages = masked_normalization(advantages, loss_mask)
 
+        batch_seqlens = data_.metadata['seqlens']
         data_ = from_dict(
             dict(
                 advantages=advantages,
@@ -390,15 +394,19 @@ class PackedActorInterface(api.model.ModelInterface):
                 logits_mask=data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None,
             ))
 
+        data_.register_metadata(seqlens=batch_seqlens)
         datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=self.pipe_train_n_mbs)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
+        offset = 0
         for data in datas:
             cu_seqlens = data["cu_seqlens"]
             input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
             logits_mask = data["packed_logits_mask"] if "packed_logits_mask" in data else None
             if isinstance(module, DeepSpeedPipelineEngine):
                 module.set_version_steps(model.version.global_step)
+                seqlens = batch_seqlens[offset:offset + input_lens.shape[0]]
+                offset += input_lens.shape[0]
                 loss_fn_kwargs = dict(
                     input_lens=input_lens,  # used for partition
                     old_logp=data["old_logp"],
@@ -413,6 +421,7 @@ class PackedActorInterface(api.model.ModelInterface):
                 )
 
                 loss, stats = module.train_batch(
+                    seqlens_cpu=seqlens,
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=data["cu_seqlens"],
                     loss_fn=_ppo_actor_loss_from_model_outputs,
@@ -573,16 +582,17 @@ class PackedCriticInterface(api.model.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        if isinstance(module, (DeepSpeedEngine, FlashMQATModel)):
-            scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen)
-        else:
-            scores = module.forward(packed_input_ids=data["packed_seq"],
+        if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
+            scores = module.forward(seqlens_cpu=data.metadata['seqlens'],
+                                    packed_input_ids=data["packed_seq"],
                                     cu_seqlens=cu_seqlens,
                                     num_micro_batches=self.pipe_inf_n_mbs)
             if scores is None:
                 return None
+        else:
+            scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
+                                               cu_seqlens=cu_seqlens,
+                                               max_seqlen=max_seqlen)
         scores = scores.squeeze(-1)
         return from_dict(dict(scores=scores))
 
@@ -653,6 +663,7 @@ class PackedCriticInterface(api.model.ModelInterface):
 
         global_stats = dict(returns=returns.mean().detach())
 
+        batch_seqlens = data_.metadata['seqlens']
         data_ = from_dict(
             dict(
                 returns=normalized_returns,
@@ -663,12 +674,16 @@ class PackedCriticInterface(api.model.ModelInterface):
                 cu_seqlens=data_["cu_seqlens"],
             ))
 
+        data_.register_metadata(seqlens=batch_seqlens)
         datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=self.pipe_train_n_mbs)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
+        offset = 0
         for data in datas:
             input_lens = data["cu_seqlens"][1:] - data["cu_seqlens"][:-1]
             if isinstance(module, DeepSpeedPipelineEngine):
+                seqlens_cpu = batch_seqlens[offset:offset + input_lens.shape[0]]
+                offset += input_lens.shape[0]
                 module.set_version_steps(model.version.global_step)
                 module.set_tokenizer(tokenizer)
 
@@ -684,6 +699,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                 )
 
                 loss, stats = module.train_batch(
+                    seqlens_cpu=seqlens_cpu,
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=data["cu_seqlens"],
                     loss_fn=_ppo_critic_loss_from_model_outputs,

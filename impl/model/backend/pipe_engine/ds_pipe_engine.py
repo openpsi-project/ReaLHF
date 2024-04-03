@@ -206,6 +206,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def _prepare_input(
         self,
+        seqlens_cpu: List[int],
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         input_lens_for_partition: Optional[torch.Tensor] = None,
@@ -229,8 +230,13 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
             # print(f"in _prepare_input cu_seqlens type {type(cu_seqlens)}")
             n_seqs = cu_seqlens.shape[0] - 1
+        data.register_metadata(seqlens=seqlens_cpu)
         n_mbs = self.num_micro_batches
-        splitted = PackedParallelDataBroker.scatter_to(data, n_mbs, min_size=n_seqs // n_mbs)
+        splitted, partitions = PackedParallelDataBroker.scatter_to(data,
+                                                                   n_mbs,
+                                                                   min_size=n_seqs // n_mbs,
+                                                                   return_partitions=True)
+        batch_seqlens = [seqlens_cpu[start:end] for start, end in partitions]
         if input_lens_for_partition is not None:
             splitted = [
                 NamedArray(
@@ -244,7 +250,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         mb_seq_lens = []
 
         def input_to_pipe_model_input(input: NamedArray, mbid: int):
-            max_seqlen = int(max(input.cu_seqlens[1:] - input.cu_seqlens[:-1]))
+            max_seqlen = int(max(batch_seqlens[mbid]))
             store_kv_cache = self._generate_mode
 
             cu_seqlens = input.cu_seqlens
@@ -286,8 +292,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             )
             self.tensor_buffer.put("pipe_transfer_infos", mbid, others_cache)
 
-    def _prepare_loss_input(self, n_seqs: int, **loss_kwargs):
+    def _prepare_loss_input(self, seqlens_cpu, n_seqs: int, **loss_kwargs):
         data = NamedArray(**loss_kwargs)
+        data.register_metadata(seqlens=seqlens_cpu)
         splitted = PackedParallelDataBroker.scatter_to(data,
                                                        self.num_micro_batches,
                                                        min_size=n_seqs // self.num_micro_batches)
@@ -425,6 +432,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def forward(
         self,
+        seqlens_cpu: List[int],
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         input_lens_for_partition: Optional[torch.Tensor] = None,
@@ -433,8 +441,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
         self._set_forward_states()
         # forward one step and return packed logits
-        # print(f"in forward cu_seqlens type {type(cu_seqlens)}")
-        self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
+        self._prepare_input(seqlens_cpu,
+                            packed_input_ids,
+                            cu_seqlens,
+                            input_lens_for_partition=input_lens_for_partition)
         self._pre_forward()
         sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
                                            stages=self.num_stages,
@@ -459,6 +469,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def eval_batch(
         self,
+        seqlens_cpu: List[int],
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         loss_fn: Callable,
@@ -468,13 +479,16 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     ):
         self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
         self._set_eval_batch_states()
-        self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
+        self._prepare_input(seqlens_cpu,
+                            packed_input_ids,
+                            cu_seqlens,
+                            input_lens_for_partition=input_lens_for_partition)
         if input_lens_for_partition is not None:
             n_seqs = input_lens_for_partition.shape[0]
         else:
             n_seqs = cu_seqlens.shape[0] - 1
         self._loss_fn = loss_fn
-        self._prepare_loss_input(n_seqs=n_seqs, **loss_fn_kwargs)
+        self._prepare_loss_input(seqlens_cpu=seqlens_cpu, n_seqs=n_seqs, **loss_fn_kwargs)
         self._pre_eval_batch()
 
         # Do the work
@@ -508,6 +522,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def train_batch(
         self,
+        seqlens_cpu: List[int],
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         loss_fn: Callable,
@@ -520,13 +535,16 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
         self._set_train_batch_states()
-        self._prepare_input(packed_input_ids, cu_seqlens, input_lens_for_partition=input_lens_for_partition)
+        self._prepare_input(seqlens_cpu,
+                            packed_input_ids,
+                            cu_seqlens,
+                            input_lens_for_partition=input_lens_for_partition)
         self._loss_fn = loss_fn
         if input_lens_for_partition is not None:
             n_seqs = input_lens_for_partition.shape[0]
         else:
             n_seqs = cu_seqlens.shape[0] - 1
-        self._prepare_loss_input(n_seqs=n_seqs, **loss_fn_kwargs)
+        self._prepare_loss_input(seqlens_cpu=seqlens_cpu, n_seqs=n_seqs, **loss_fn_kwargs)
         self._pre_train_batch()
 
         # Do the work
@@ -612,6 +630,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     @torch.no_grad()
     def generate(
         self,
+        seqlens_cpu: List[int],
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
@@ -622,7 +641,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             self.num_micro_batches = (num_micro_batches
                                       if num_micro_batches else self.default_num_micro_batches)
             self._set_generate_states()
-            self._prepare_input(packed_input_ids, cu_seqlens)
+            self._prepare_input(seqlens_cpu, packed_input_ids, cu_seqlens)
             # for elegant generation termination
             gconfig.max_new_tokens += self.num_stages - 1
             self.current_gconfig = gconfig

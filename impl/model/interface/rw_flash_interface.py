@@ -10,6 +10,7 @@ import tqdm
 
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.backend.pipe_inf import InferencePipelineEngine
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 import api.model
 import base.constants
@@ -62,17 +63,18 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
 
         module.eval()
 
-        if isinstance(module, (DeepSpeedEngine, FlashMQATModel)):
-            scores: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).float()
-        else:
-            r = module.forward(packed_input_ids=packed_input_ids,
+        if isinstance(module, (InferencePipelineEngine, DeepSpeedPipelineEngine)):
+            r = module.forward(seqlens_cpu=data.metadata['seqlens'],
+                               packed_input_ids=packed_input_ids,
                                cu_seqlens=cu_seqlens,
                                num_micro_batches=self.pipe_inf_n_mbs)
             if r is None:
                 return
             scores = r.float()
+        else:
+            scores: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
+                                               cu_seqlens=cu_seqlens,
+                                               max_seqlen=max_seqlen).float()
 
         scores = (scores.squeeze(-1) - self.output_bias) * self.output_scaling
         chosen_end_scores = scores[cu_seqlens[1:] - 1]  # [bs]

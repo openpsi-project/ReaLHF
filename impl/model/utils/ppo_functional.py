@@ -168,7 +168,7 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         )
 
         # Loss = log(sum(exp(logits))) - predicted-logit.
-        new_logprobs = torch.log(sum_exp_logits) - predicted_logits
+        new_logprobs = predicted_logits - torch.log(sum_exp_logits)
 
         # Normalize and optionally smooth logits
         exp_logits.div_(sum_exp_logits.unsqueeze(dim=-1))

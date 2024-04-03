@@ -227,24 +227,28 @@ def _create_param_sync_groups(
 
 
 def setup_ddp(
-    expr_name: str,
-    trial_name: str,
-    worker_index: int,
-    model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
-    msid2mwid: Optional[Dict[api.config.config_system.ModelShardID, int]] = None,
-    param_sync_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
-    data_transfer_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
+        expr_name: str,
+        trial_name: str,
+        worker_index: int,
+        model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
+        msid2mwid: Optional[Dict[api.config.config_system.ModelShardID, int]] = None,
+        param_sync_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
+        data_transfer_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
+        world_size: Optional[int] = None,  # for testing only
+        global_rank: Optional[int] = None,  # for testing only
 ) -> NCCLProcessGroupInfo:
-    peers: List[int] = list(
-        sorted(
-            map(
-                int,
-                name_resolve.get_subtree(
-                    names.trainer_ddp_peer(expr_name, trial_name, GLOBAL_PROCESS_GROUP_NAME)),
-            )))
-    assert len(peers) == len(set(peers)), f"Duplicated trainer worker index. {peers}"
-    world_size = len(peers)
-    global_rank = peers.index(worker_index)
+    assert (world_size is None) == (global_rank is None)
+    if world_size is None:
+        peers: List[int] = list(
+            sorted(
+                map(
+                    int,
+                    name_resolve.get_subtree(
+                        names.trainer_ddp_peer(expr_name, trial_name, GLOBAL_PROCESS_GROUP_NAME)),
+                )))
+        assert len(peers) == len(set(peers)), f"Duplicated trainer worker index. {peers}"
+        world_size = len(peers)
+        global_rank = peers.index(worker_index)
 
     mw_ranks = {}
     mw_dp_ranks: Dict[Tuple[ModelName, int], List[int]] = {}

@@ -139,6 +139,10 @@ def dataset_max_seqlen() -> int:
     return _max_seqlen
 
 
+def has_model_name(name: str) -> bool:
+    return name in _grids
+
+
 def model_name():
     if _model_name == None:
         raise RuntimeError("Global constant `model_name` should be accessed in the `model_scope` context.")

@@ -166,6 +166,7 @@ def split_packed_batch_into_seqs(
 
     partitions = [(i, i + 1) for i in range(input_lens.shape[0])]
     sample["input_lens"] = input_lens
+    sample.register_metadata(seqlens=input_lens.cpu().numpy().tolist())
     res = dataparallel.PackedParallelDataBroker.scatter_to(sample,
                                                            n_dp=len(input_lens),
                                                            partitions=partitions)

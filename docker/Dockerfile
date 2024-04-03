@@ -78,6 +78,9 @@ RUN rm -rf /tmp/TransformerEngine /tmp/flash_attn-2.3.6-cp310-cp310-linux_x86_64
 
 COPY dist/dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl /dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl
 RUN pip3 install /dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl && rm /dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl
+
+COPY dist/dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl /tmp/dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl
+RUN pip3 install /tmp/dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl && rm /tmp/dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl
 # install zmq with pgm
 # COPY ./zeromq-4.3.4.tar.gz /
 # WORKDIR /

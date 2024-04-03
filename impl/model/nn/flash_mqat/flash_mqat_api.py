@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import contextlib
 import copy
 import dataclasses
@@ -27,11 +27,11 @@ from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_co
                                                       flash_model_tblock_param_keys, FlashMQATBlock,
                                                       OutputHead, SequenceParallelActorHead,
                                                       SequenceParallelCriticHead, VocabPositionEmbedding)
-from impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape,
+from impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape, intervals_partition_fn,
                                                           mp_merge_flash_mqat_state_dict,
                                                           mp_partition_flash_mqat_state_dict,
-                                                          partition_pipeline_layers,
-                                                          pipeline_repartition_strategy)
+                                                          mp_partition_key, partition_pipeline_layers,
+                                                          pipeline_repartition_strategy, shape_partition_fn)
 from impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
                                                            RowParallelLinear)
 from impl.model.utils.data import DuckGenerationOutput, DuckModelOutput, PipeCacheData, PipeTransferData
@@ -51,6 +51,9 @@ except ModuleNotFoundError:
 import base.logging as logging
 
 logger = logging.getLogger("FlashMQAT Interface")
+
+MAX_PYTORCH_N_INTERVALS = 1024
+CUDA_INTERVAL_OP_CHUNK_SIZE = 2048
 
 
 @dataclasses.dataclass
@@ -72,7 +75,11 @@ class ReparallelizeSenderStep:
     rank: int
     sender_mp_portion_id: int
     receiver_mp_portion_id: int
-    param_key: str | int
+    param_keys: List[str]
+    param_intervals: torch.Tensor
+    param_intervals_cpu: List[Tuple[int, int]]
+    max_interval_size: int
+    param_size: int
     group: torch.distributed.ProcessGroup
     dst_ranks: List[int]
     remove: bool = False
@@ -83,11 +90,95 @@ class ReparallelizeReceiverStep:
     rank: int
     sender_mp_portion_id: int
     receiver_mp_portion_id: int
-    param_key: str | int
-    param_shape: torch.Size
+    sender_param_intervals: torch.Tensor
+    sender_param_intervals_cpu: List[Tuple[int, int]]
+    sender_max_interval_size: int
+    receiver_param_intervals: torch.Tensor
+    receiver_param_intervals_cpu: List[Tuple[int, int]]
+    receiver_max_interval_size: int
+    param_size: int
+    param_keys: List[str]
     param_dtype: torch.dtype
     src: int
     group: torch.distributed.ProcessGroup
+
+
+def _is_integer_list_contiguous(l: List[int]) -> bool:
+    return np.all(np.array(l) == np.arange(len(l)) + l[0])
+
+
+def _are_intervals_contiguous(l: List[Tuple[int, int]]) -> bool:
+    l = sorted(l, key=lambda x: x[0])
+    res = True
+    for i in range(len(l) - 1):
+        res &= l[i][1] == l[i + 1][0]
+    return res
+
+
+def slice_intervals(
+    tensor: torch.Tensor,
+    intervals: torch.IntTensor,
+    intervals_cpu: List[Tuple[int, int]],
+    max_interval_size: int,
+    output_size: int,
+) -> torch.Tensor:
+    assert len(tensor.shape) == 1
+    if len(intervals_cpu) == 1:
+        return tensor[intervals_cpu[0][0]:intervals_cpu[0][1]]
+    elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
+        return torch.cat([tensor[start:end] for start, end in intervals_cpu])
+    try:
+        import interval_op_cuda
+
+        interval_sizes = intervals[:, 1] - intervals[:, 0]
+        offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+        return interval_op_cuda.slice_intervals_cuda_half(
+            tensor,
+            intervals,
+            interval_sizes,
+            offsets,
+            max_interval_size,
+            output_size,
+        )
+    except ModuleNotFoundError:
+        logger.warning("interval_op_cuda not found, falling back to PyTorch implementation.")
+        return torch.cat([tensor[start:end] for start, end in intervals])
+
+
+def set_intervals(
+    src: torch.Tensor,
+    dst: torch.Tensor,
+    intervals: torch.IntTensor,
+    intervals_cpu: List[Tuple[int, int]],
+    max_interval_size: int,
+):
+    assert len(dst.shape) == len(src.shape) == 1
+    if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
+        offset = 0
+        for i, j in intervals_cpu:
+            dst[i:j] = src[offset:offset + j - i]
+            offset += j - i
+        assert offset == src.shape[0]
+    try:
+        import interval_op_cuda
+
+        interval_sizes = intervals[:, 1] - intervals[:, 0]
+        offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+        interval_op_cuda.set_intervals_cuda_half(
+            src,
+            dst,
+            intervals,
+            interval_sizes,
+            offsets,
+            max_interval_size,
+        )
+    except ModuleNotFoundError:
+        logger.warning("interval_op_cuda not found, falling back to PyTorch implementation.")
+        offset = 0
+        for i, j in intervals_cpu:
+            dst[i:j] = src[offset:offset + j - i]
+            offset += j - i
+        assert offset == src.shape[0]
 
 
 def recursive_getattr(obj, attr_string):
@@ -97,11 +188,89 @@ def recursive_getattr(obj, attr_string):
     return obj
 
 
+def _keys_from_layer_indices(config: FlashMQATConfig, layer_indices: List[int]) -> List[str]:
+    # assert _is_integer_list_contiguous(layer_indices)
+    sd_keys = []
+    for layer_idx in layer_indices:
+        if layer_idx == 0:
+            sd_keys += flash_model_embedding_param_keys(config)
+        elif layer_idx == config.n_layers + 1:
+            sd_keys += flash_model_head_param_keys(config)
+        else:
+            sd_keys += flash_model_tblock_param_keys(config, layer_idx - 1)
+    return sd_keys
+
+
 @dataclasses.dataclass
 class ContiguousParamSpec:
     start_idx: int
     end_idx: int
     shape: torch.Size
+
+
+_FLAT_PARAM_INDICES_CACHE = {}
+
+
+def _param_intervals_from_keys(
+    model_name: ModelName,
+    config: FlashMQATConfig,
+    param_spec: Dict[str, ContiguousParamSpec],
+    mp_size: int,
+    sd_keys: List[str],
+    portion_size: int,
+    portion_rank: int,
+) -> List[int]:
+    if portion_size == 1:
+        start, end = None, None
+        for k in sd_keys:
+            if start is None or param_spec[k].start_idx < start:
+                start = param_spec[k].start_idx
+            if end is None or param_spec[k].end_idx > end:
+                end = param_spec[k].end_idx
+        return [(start, end)]
+
+    intervals = []
+    for k in sd_keys:
+        if (model_name, k.split('.',
+                                1)[1], mp_size, portion_rank, portion_size) not in _FLAT_PARAM_INDICES_CACHE:
+            zero_start_intervals = mp_partition_key(
+                k,
+                get_flash_model_param_shape(k, config, mp_size),
+                portion_rank,
+                portion_size,
+                config,
+                partition_fn=intervals_partition_fn,
+            )
+            _FLAT_PARAM_INDICES_CACHE[(model_name, k.split('.', 1)[1], mp_size, portion_rank,
+                                       portion_size)] = zero_start_intervals
+        else:
+            zero_start_intervals = _FLAT_PARAM_INDICES_CACHE[(model_name, k.split('.', 1)[1], mp_size,
+                                                              portion_rank, portion_size)]
+        intervals += (zero_start_intervals + param_spec[k].start_idx).tolist()
+    # assert len(set([x[0] for x in intervals])) == len(intervals)
+    intervals = sorted(intervals, key=lambda x: x[0])
+    return intervals
+
+
+def _param_size_from_keys(
+    config: FlashMQATConfig,
+    src_mp_size: int,
+    sd_keys: List[str],
+    src2dst_tp_size: int,
+    src2dst_tp_rank: int,
+) -> Tuple[List[int], int]:
+    param_size = 0
+    for k in sd_keys:
+        new_shape = mp_partition_key(
+            k,
+            get_flash_model_param_shape(k, config, src_mp_size),
+            src2dst_tp_rank,
+            src2dst_tp_size,
+            config,
+            partition_fn=shape_partition_fn,
+        )
+        param_size += int(np.prod(new_shape))
+    return param_size
 
 
 @dataclasses.dataclass
@@ -160,7 +329,225 @@ def map_param_to_contigous_memory(
         layer_idx = local_layer_idx + layer_idx_offset
         for k, v in l.named_parameters():
             spec = param_spec[f"{layer_idx}.{k}"]
+            old_param_data = v.data
             recursive_getattr(l, k).data = contiguous_param[spec.start_idx:spec.end_idx].view(spec.shape)
+            # This is for reward model. We should initialize the reward head instead of letting it be all-zero.
+            if old_param_data.shape == spec.shape:
+                v.data.copy_(old_param_data)
+            else:
+                assert old_param_data.shape == torch.Size([0]), (old_param_data.shape, spec.shape)
+
+
+def _split_intervals(intervals, K):
+    result = []
+    for start, end in intervals:
+        if end - start <= K:
+            result.append((start, end))
+        else:
+            # Calculate how many chunks are needed
+            num_chunks = (end - start) // K
+            remainder = (end - start) % K
+
+            # Generate the chunks
+            for i in range(num_chunks):
+                result.append((start, start + K))
+                start += K
+            if remainder:
+                result.append((start, start + remainder))
+
+    return result
+
+
+def _derive_reparallelize_comm_plan(
+    from_model_name: ModelName,
+    to_model_name: ModelName,
+    from_topo: base.topology.PipeModelDataParallelTopology,
+    to_topo: base.topology.PipeModelDataParallelTopology,
+    from_model_config: FlashMQATConfig,
+    to_model_config: FlashMQATConfig,
+    pg_info: gpu_utils.NCCLProcessGroupInfo,
+    dtype: Optional[torch.dtype] = torch.float16,
+) -> List[ReparallelizeReceiverStep | ReparallelizeSenderStep]:
+    src_mp_size = from_topo.get_dim("model")
+    dst_mp_size = to_topo.get_dim("model")
+    assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
+    for k, v in dataclasses.asdict(to_model_config).items():
+        if k not in [
+                "is_critic",
+                "sequence_parallel",
+                "gradient_accumulation_fusion",
+                "ckpt_attn",
+                "ckpt_mlp",
+        ] and v != getattr(from_model_config, k):
+            raise ValueError(
+                f"Can't load a checkpoint with different config (key `{k}`, "
+                f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`).")
+    if (from_model_config.n_kv_heads % src_mp_size == 0) != (from_model_config.n_kv_heads % dst_mp_size == 0):
+        raise ValueError("Whether to partition kv heads should remain the same.")
+
+    from_layer_mapping = partition_pipeline_layers(
+        from_model_config,
+        from_topo.get_dim("pipe"),
+        flash_model_embed_param_count,
+        flash_model_tblock_param_count,
+        flash_model_head_param_count,
+    )
+    from_layer_mapping = {k: list(range(v[0], v[1])) for k, v in from_layer_mapping.items()}
+    to_layer_mapping = partition_pipeline_layers(
+        to_model_config,
+        to_topo.get_dim("pipe"),
+        flash_model_embed_param_count,
+        flash_model_tblock_param_count,
+        flash_model_head_param_count,
+    )
+    to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in to_layer_mapping.items()}
+    repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
+
+    if base.constants.has_model_name(from_model_name):
+        with base.constants.model_scope(from_model_name):
+            from_layer_indices = from_layer_mapping[base.constants.pipe_parallel_rank()]
+            from_model_param_specs, _ = _build_param_spec(from_layer_indices, from_model_config,
+                                                          from_topo.get_dim("model"))
+    if base.constants.has_model_name(to_model_name):
+        with base.constants.model_scope(to_model_name):
+            to_layer_indices = to_layer_mapping[base.constants.pipe_parallel_rank()]
+            to_model_param_specs, _ = _build_param_spec(to_layer_indices, to_model_config,
+                                                        to_topo.get_dim("model"))
+
+    comm_plan = []
+
+    src_dp_size = from_topo.get_dim("data")
+
+    # derive a global NCCL communication plan
+    for (pp_i, pp_j), layer_indices in repart_strat.items():
+        if len(layer_indices) == 0:
+            continue
+
+        for mp_i in range(src_mp_size):
+            if dst_mp_size > src_mp_size:
+                factor = dst_mp_size // src_mp_size
+                mp_js = [i + factor * mp_i for i in range(factor)]
+                receiver_mp_portion_id = 0
+            else:
+                factor = src_mp_size // dst_mp_size
+                mp_js = [mp_i // factor]
+                receiver_mp_portion_id = mp_i % factor
+            for sender_mp_portion_id, mp_j in enumerate(mp_js):
+
+                for dp_i in range(src_dp_size):
+                    key = gpu_utils.ParamSyncPair(
+                        src=from_model_name,
+                        src_dp_rank=dp_i,
+                        src_mp_rank=mp_i,
+                        src_pp_rank=pp_i,
+                        dst=to_model_name,
+                        dst_mp_rank=mp_j,
+                        dst_pp_rank=pp_j,
+                    )
+                    src = pg_info.param_sync_src_ranks[key]
+                    group = pg_info.param_sync_groups[key]
+                    dst_ranks = pg_info.param_sync_dst_ranks[key]
+
+                    param_intervals = param_keys = receiver_param_intervals = None
+                    max_param_interval_size = max_receiver_param_interval_size = -1
+                    param_intervals_cpu = receiver_param_intervals_cpu = None
+                    param_size = -1
+                    if torch.distributed.get_rank() in dst_ranks or torch.distributed.get_rank() == src:
+                        param_keys = _keys_from_layer_indices(from_model_config, layer_indices)
+
+                        if torch.distributed.get_rank() == src:
+
+                            param_intervals_cpu = _param_intervals_from_keys(
+                                model_name=from_model_name,
+                                config=from_model_config,
+                                mp_size=src_mp_size,
+                                param_spec=from_model_param_specs,
+                                sd_keys=param_keys,
+                                portion_size=max(dst_mp_size // src_mp_size, 1),
+                                portion_rank=sender_mp_portion_id,
+                            )
+                            if len(param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
+                                param_intervals_cpu = _split_intervals(param_intervals_cpu,
+                                                                       CUDA_INTERVAL_OP_CHUNK_SIZE)
+                                max_param_interval_size = CUDA_INTERVAL_OP_CHUNK_SIZE
+                            else:
+                                max_param_interval_size = max(j - i for i, j in param_intervals_cpu)
+                            param_intervals = torch.tensor(param_intervals_cpu,
+                                                           dtype=torch.long,
+                                                           device="cuda")
+                        if torch.distributed.get_rank() in dst_ranks:
+                            print(layer_indices)
+                            receiver_param_intervals_cpu = _param_intervals_from_keys(
+                                model_name=to_model_name,
+                                config=to_model_config,
+                                mp_size=dst_mp_size,
+                                param_spec=to_model_param_specs,
+                                sd_keys=param_keys,
+                                portion_size=max(src_mp_size // dst_mp_size, 1),
+                                portion_rank=receiver_mp_portion_id,
+                            )
+                            if len(receiver_param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
+                                receiver_param_intervals_cpu = _split_intervals(
+                                    receiver_param_intervals_cpu, CUDA_INTERVAL_OP_CHUNK_SIZE)
+                                max_receiver_param_interval_size = CUDA_INTERVAL_OP_CHUNK_SIZE
+                            else:
+                                max_receiver_param_interval_size = max(
+                                    j - i for i, j in receiver_param_intervals_cpu)
+                            receiver_param_intervals = torch.tensor(receiver_param_intervals_cpu,
+                                                                    dtype=torch.long,
+                                                                    device="cuda")
+                        param_size = _param_size_from_keys(
+                            config=from_model_config,
+                            src_mp_size=src_mp_size,
+                            sd_keys=param_keys,
+                            src2dst_tp_size=max(dst_mp_size // src_mp_size, 1),
+                            src2dst_tp_rank=sender_mp_portion_id,
+                        )
+
+                    for dst_rank in dst_ranks:
+                        comm_plan.append(
+                            ReparallelizeReceiverStep(
+                                rank=dst_rank,
+                                sender_mp_portion_id=sender_mp_portion_id,
+                                receiver_mp_portion_id=receiver_mp_portion_id,
+                                param_keys=param_keys,
+                                sender_param_intervals_cpu=param_intervals_cpu,
+                                sender_param_intervals=param_intervals,
+                                sender_max_interval_size=max_param_interval_size,
+                                receiver_param_intervals_cpu=receiver_param_intervals_cpu,
+                                receiver_param_intervals=receiver_param_intervals,
+                                receiver_max_interval_size=max_receiver_param_interval_size,
+                                param_size=param_size,
+                                param_dtype=dtype,
+                                src=src,
+                                group=group,
+                            ))
+                    comm_plan.append(
+                        ReparallelizeSenderStep(
+                            rank=src,
+                            sender_mp_portion_id=sender_mp_portion_id,
+                            receiver_mp_portion_id=receiver_mp_portion_id,
+                            param_keys=param_keys,
+                            param_intervals=param_intervals,
+                            param_intervals_cpu=param_intervals_cpu,
+                            max_interval_size=max_param_interval_size,
+                            param_size=param_size,
+                            group=group,
+                            dst_ranks=dst_ranks,
+                        ))
+    for i, step in enumerate(comm_plan):
+        if isinstance(step, ReparallelizeReceiverStep):
+            continue
+        step: ReparallelizeSenderStep
+        required_by_nex_steps = False
+        for nex_step in comm_plan[i + 1:]:
+            if (isinstance(nex_step, ReparallelizeSenderStep) and nex_step.rank == step.rank
+                    and nex_step.param_keys == step.param_keys):
+                required_by_nex_steps = True
+                break
+        step.remove = not required_by_nex_steps
+
+    return comm_plan
 
 
 class FlashMQATModel(nn.Module):
@@ -200,15 +587,17 @@ class FlashMQATModel(nn.Module):
         self._reparallelize_targets: Dict[Tuple[ModelName, ModelName], ReparallelizeTraget] = {}
 
         # Flatten all parameters to a contiguous GPU buffer to reduce the time of CUDAFree and CUDAMalloc
-        self._param_size = self._param_spec = None
+        self._param_spec, self._param_size = _build_param_spec(
+            list(range(self.layer_idx_start, self.layer_idx_end)),
+            self.config,
+            base.constants.model_parallel_world_size(),
+        )
         self.contiguous_param = None
 
         self._offload_buffer = None
         self._offload_stream = torch.cuda.Stream()
         self._offload_event = torch.cuda.Event()
         self._offloaded = False
-
-        self._offload_disable_sequence_parallel = False
 
     def instantiate(self):
         assert not self._instantiated
@@ -218,11 +607,6 @@ class FlashMQATModel(nn.Module):
 
         self.layers = nn.ModuleList(layers)
 
-        self._param_spec, self._param_size = _build_param_spec(
-            list(range(self.layer_idx_start, self.layer_idx_end)),
-            self.config,
-            base.constants.model_parallel_world_size(),
-        )
         self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
         map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
                                       self.layer_idx_start)
@@ -337,25 +721,9 @@ class FlashMQATModel(nn.Module):
 
     @contextlib.contextmanager
     def sequence_parallel_disable(self):
-        _offloaded = self._offloaded
-        if not _offloaded:
-            _states = []
-            for _, m in self.named_modules():
-                if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
-                    _states.append(m.sequence_parallel)
-                    m.sequence_parallel_enable(False)
-        else:
-            self._offload_disable_sequence_parallel = True
         x = self.sequence_parallel
         self.sequence_parallel = False
         yield
-        if not _offloaded:
-            for _, m in self.named_modules():
-                if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
-                    m.sequence_parallel_enable(_states.pop(0))
-            assert len(_states) == 0
-        else:
-            self._offload_disable_sequence_parallel = False
         self.sequence_parallel = x
 
     def __overlapped_load_forward(self, x: PipeTransferData,
@@ -365,6 +733,7 @@ class FlashMQATModel(nn.Module):
         self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
         map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
                                       self.layer_idx_start)
+        self.wait_for_offload()
         for layer_idx, y, l in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers):
             with torch.cuda.stream(self._offload_stream):
                 # NOTE: although we can do more fine-grained overlapping, the overhead that can be
@@ -376,7 +745,7 @@ class FlashMQATModel(nn.Module):
                         non_blocking=True,
                     )
             torch.cuda.default_stream().wait_stream(self._offload_stream)
-            if self._offload_disable_sequence_parallel:
+            if not self.sequence_parallel:
                 with _disable_sequence_parallel_of_module(l):
                     x = l(x, y)
             else:
@@ -392,7 +761,7 @@ class FlashMQATModel(nn.Module):
         assert len(ys) == len(layers)
         raw_pp_input = x.pp_input
         for i, (layer, y) in enumerate(zip(layers, ys)):
-            if self._offload_disable_sequence_parallel:
+            if not self.sequence_parallel:
                 with _disable_sequence_parallel_of_module(layer):
                     x = layer(x, y)  # This will set pp_output.
             else:
@@ -856,7 +1225,7 @@ class FlashMQATModel(nn.Module):
             with_hf_format=True,
         )
 
-    def _derive_reparallelize_comm_plan(
+    def build_reparallelization_plan(
         self,
         from_model_name: ModelName,
         to_model_name: ModelName,
@@ -864,32 +1233,10 @@ class FlashMQATModel(nn.Module):
         to_topo: base.topology.PipeModelDataParallelTopology,
         to_model_config: FlashMQATConfig,
         pg_info: gpu_utils.NCCLProcessGroupInfo,
+        from_model_config: None | FlashMQATConfig = None,
     ):
-        src_mp_size = from_topo.get_dim("model")
-        dst_mp_size = to_topo.get_dim("model")
-        assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
-        for k, v in dataclasses.asdict(to_model_config).items():
-            if k not in [
-                    "is_critic",
-                    "sequence_parallel",
-                    "gradient_accumulation_fusion",
-                    "ckpt_attn",
-                    "ckpt_mlp",
-            ] and v != getattr(self.config, k):
-                raise ValueError(
-                    f"Can't load a checkpoint with different config (key `{k}`, "
-                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`).")
-        if (self.config.n_kv_heads % src_mp_size == 0) != (self.config.n_kv_heads % dst_mp_size == 0):
-            raise ValueError("Whether to partition kv heads should remain the same.")
-
-        from_layer_mapping = partition_pipeline_layers(
-            self.config,
-            from_topo.get_dim("pipe"),
-            flash_model_embed_param_count,
-            flash_model_tblock_param_count,
-            flash_model_head_param_count,
-        )
-        from_layer_mapping = {k: list(range(v[0], v[1])) for k, v in from_layer_mapping.items()}
+        if from_model_config is None:
+            from_model_config = self.config
         to_layer_mapping = partition_pipeline_layers(
             to_model_config,
             to_topo.get_dim("pipe"),
@@ -897,96 +1244,48 @@ class FlashMQATModel(nn.Module):
             flash_model_tblock_param_count,
             flash_model_head_param_count,
         )
-        to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in to_layer_mapping.items()}
-        repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
+        to_layers_handle_dict = {}
+        to_layer_indices = []
+        if base.constants.has_model_name(to_model_name):
+            with base.constants.model_scope(to_model_name):
+                to_pp_rank = base.constants.pipe_parallel_rank()
+                to_layer_indices = list(
+                    range(to_layer_mapping[to_pp_rank][0], to_layer_mapping[to_pp_rank][1]))
+                for _to_layer_idx in to_layer_indices:
+                    l = self._build_layer(_to_layer_idx, to_model_config)
+                    for v in l.parameters():
+                        v.data = torch.tensor((), dtype=self.dtype, device=self.device)
+                    to_layers_handle_dict[_to_layer_idx] = l
+        to_param_spec, to_param_size = _build_param_spec(to_layer_indices, to_model_config,
+                                                         to_topo.get_dim("model"))
+        if len(to_layer_indices) > 0:
+            to_layer_idx_start = min(to_layer_indices)
+            to_layer_idx_end = max(to_layer_indices) + 1
+        else:
+            to_layer_idx_start = to_layer_idx_end = -1
+        to_layers_handle = nn.ModuleList([to_layers_handle_dict[i] for i in to_layer_indices])
 
-        comm_plan = []
+        comm_plan = _derive_reparallelize_comm_plan(
+            from_model_name=from_model_name,
+            to_model_name=to_model_name,
+            from_topo=from_topo,
+            to_topo=to_topo,
+            from_model_config=from_model_config,
+            to_model_config=to_model_config,
+            pg_info=pg_info,
+            dtype=self.dtype,
+        )
+        rtgt = ReparallelizeTraget(
+            comm_plan=comm_plan,
+            to_param_spec=to_param_spec,
+            to_param_size=to_param_size,
+            to_layers_handle=to_layers_handle,
+            to_layer_start_idx=to_layer_idx_start,
+            to_layer_end_idx=to_layer_idx_end,
+        )
+        self._reparallelize_targets[(from_model_name, to_model_name)] = rtgt
 
-        src_dp_size = from_topo.get_dim("data")
-
-        # derive a global NCCL communication plan
-        for (pp_i, pp_j), layer_indices in repart_strat.items():
-            sd_keys = []
-            for layer_idx in layer_indices:
-                if layer_idx == 0:
-                    sd_keys += flash_model_embedding_param_keys(self.config)
-                elif layer_idx == self.config.n_layers + 1:
-                    sd_keys += flash_model_head_param_keys(self.config)
-                else:
-                    sd_keys += flash_model_tblock_param_keys(self.config, layer_idx - 1)
-
-            sub_sd = {
-                k: (get_flash_model_param_shape(k, self.config, from_topo.get_dim("model")), self.dtype)
-                for k in sd_keys
-            }
-            for k, (shape, dtype) in sub_sd.items():
-                for mp_i in range(src_mp_size):
-                    if dst_mp_size > src_mp_size:
-                        factor = dst_mp_size // src_mp_size
-                        mp_js = [i + factor * mp_i for i in range(factor)]
-                        dtypes = [dtype for _ in range(factor)]
-                        shapes = [
-                            get_flash_model_param_shape(k, to_model_config, to_topo.get_dim("model"))
-                            for _ in range(factor)
-                        ]
-                        receiver_mp_portion_id = 0
-                    else:
-                        factor = src_mp_size // dst_mp_size
-                        mp_js = [mp_i // factor]
-                        dtypes = [dtype]
-                        shapes = [shape]
-                        receiver_mp_portion_id = mp_i % factor
-                    for sender_mp_portion_id, (mp_j, _dtype, _shape) in enumerate(zip(mp_js, dtypes, shapes)):
-                        for dp_i in range(src_dp_size):
-                            key = gpu_utils.ParamSyncPair(
-                                src=from_model_name,
-                                src_dp_rank=dp_i,
-                                src_mp_rank=mp_i,
-                                src_pp_rank=pp_i,
-                                dst=to_model_name,
-                                dst_mp_rank=mp_j,
-                                dst_pp_rank=pp_j,
-                            )
-                            src = pg_info.param_sync_src_ranks[key]
-                            group = pg_info.param_sync_groups[key]
-                            dst_ranks = pg_info.param_sync_dst_ranks[key]
-
-                            for dst_rank in dst_ranks:
-                                comm_plan.append(
-                                    ReparallelizeReceiverStep(
-                                        rank=dst_rank,
-                                        sender_mp_portion_id=sender_mp_portion_id,
-                                        receiver_mp_portion_id=receiver_mp_portion_id,
-                                        param_key=k,
-                                        param_shape=_shape,
-                                        param_dtype=_dtype,
-                                        src=src,
-                                        group=group,
-                                    ))
-                            comm_plan.append(
-                                ReparallelizeSenderStep(
-                                    rank=src,
-                                    sender_mp_portion_id=sender_mp_portion_id,
-                                    receiver_mp_portion_id=receiver_mp_portion_id,
-                                    param_key=k,
-                                    group=group,
-                                    dst_ranks=dst_ranks,
-                                ))
-        for i, step in enumerate(comm_plan):
-            if isinstance(step, ReparallelizeReceiverStep):
-                continue
-            step: ReparallelizeSenderStep
-            required_by_nex_steps = False
-            for nex_step in comm_plan[i + 1:]:
-                if (isinstance(nex_step, ReparallelizeSenderStep) and nex_step.rank == step.rank
-                        and nex_step.param_key == step.param_key):
-                    required_by_nex_steps = True
-                    break
-            step.remove = not required_by_nex_steps
-
-        return comm_plan
-
-    def build_reparallelized_layers(
+    def build_reparallelized_layers_async(
         self,
         from_model_name: ModelName,
         to_model_name: ModelName,
@@ -995,44 +1294,18 @@ class FlashMQATModel(nn.Module):
         to_model_config: FlashMQATConfig,
         pg_info: gpu_utils.NCCLProcessGroupInfo,
     ) -> Tuple[nn.ModuleList, torch.Tensor]:
-        src_mp_size = from_topo.get_dim("model")
-        dst_mp_size = to_topo.get_dim("model")
-
         # FIXME: remote synchronization deletes the local model, but sometimes it is uncessary.
 
-        if (from_model_name, to_model_name) in self._reparallelize_targets:
-            rtgt = self._reparallelize_targets[(from_model_name, to_model_name)]
-        else:
-            comm_plan = self._derive_reparallelize_comm_plan(from_model_name, to_model_name, from_topo,
-                                                             to_topo, to_model_config, pg_info)
-            to_layers_handle_dict = {}
-            for step in comm_plan:
-                layer_idx = int(step.param_key.split(".")[0])
-                if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
-                    if layer_idx not in to_layers_handle_dict:
-                        with base.constants.model_scope(to_model_name):
-                            l = self._build_layer(layer_idx, to_model_config)
-                        for k, v in l.named_parameters():
-                            v.data = torch.tensor((), dtype=self.dtype, device=self.device)
-                        to_layers_handle_dict[layer_idx] = l
-            to_layer_indices = sorted(to_layers_handle_dict.keys())
-            to_param_spec, to_param_size = _build_param_spec(to_layer_indices, to_model_config,
-                                                             to_topo.get_dim("model"))
-            if len(to_layer_indices) > 0:
-                to_layer_idx_start = min(to_layer_indices)
-                to_layer_idx_end = max(to_layer_indices) + 1
-            else:
-                to_layer_idx_start = to_layer_idx_end = -1
-            to_layers_handle = nn.ModuleList([to_layers_handle_dict[i] for i in to_layer_indices])
-            rtgt = ReparallelizeTraget(
-                comm_plan=comm_plan,
-                to_param_spec=to_param_spec,
-                to_param_size=to_param_size,
-                to_layers_handle=to_layers_handle,
-                to_layer_start_idx=to_layer_idx_start,
-                to_layer_end_idx=to_layer_idx_end,
+        if (from_model_name, to_model_name) not in self._reparallelize_targets:
+            self.build_reparallelization_plan(
+                from_model_name,
+                to_model_name,
+                from_topo,
+                to_topo,
+                to_model_config,
+                pg_info,
             )
-            self._reparallelize_targets[(from_model_name, to_model_name)] = rtgt
+        rtgt = self._reparallelize_targets[(from_model_name, to_model_name)]
 
         # The following tensor holds the contiguous memory of incoming parameters
         to_contiguous_param = torch.empty(rtgt.to_param_size, dtype=self.dtype, device="cuda")
@@ -1045,65 +1318,60 @@ class FlashMQATModel(nn.Module):
 
         comm_volume = 0
 
+        src_mp_size = from_topo.get_dim("model")
+        dst_mp_size = to_topo.get_dim("model")
         n_receiver_portions = max(src_mp_size // dst_mp_size, 1)
-        tmp_portion_storage = {}
         for step in rtgt.comm_plan:
-            layer_idx = int(step.param_key.split(".")[0])
             if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
 
                 if step.rank == step.src:
-                    buf = mp_partition_flash_mqat_state_dict(
-                        {
-                            step.param_key: recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
-                                                              step.param_key.split(".", 1)[1]).clone()
-                        },
-                        to_model_config,
-                        mp_size=max(dst_mp_size // src_mp_size, 1),
-                        mp_rank=step.sender_mp_portion_id,
-                    )[step.param_key]
+                    buf = slice_intervals(
+                        self.contiguous_param,
+                        step.sender_param_intervals,
+                        step.sender_param_intervals_cpu,
+                        max_interval_size=step.sender_max_interval_size,
+                        output_size=step.param_size,
+                    )
                 else:
-                    buf = torch.zeros(step.param_shape, dtype=step.param_dtype, device="cuda")
+                    buf = torch.zeros(step.param_size, dtype=step.param_dtype, device="cuda")
                     comm_volume += buf.numel()
                     torch.distributed.broadcast(buf, src=step.src, group=step.group)
 
-                tmp_portion_storage[(step.param_key, step.receiver_mp_portion_id)] = buf
-                if all((step.param_key, i) in tmp_portion_storage for i in range(n_receiver_portions)):
-                    buf = mp_merge_flash_mqat_state_dict(
-                        [{
-                            step.param_key: tmp_portion_storage[(step.param_key, i)]
-                        } for i in range(n_receiver_portions)],
-                        self.config,
-                    )[step.param_key]
-                    layer_param_key = step.param_key.split(".", 1)[1]
-                    to_local_layer_idx = layer_idx - rtgt.to_layer_start_idx
-                    recursive_getattr(rtgt.to_layers_handle[to_local_layer_idx],
-                                      layer_param_key).data.copy_(buf)
-                    for i in range(n_receiver_portions):
-                        del tmp_portion_storage[(step.param_key, i)]
+                set_intervals(
+                    src=buf,
+                    dst=to_contiguous_param,
+                    intervals=step.receiver_param_intervals,
+                    intervals_cpu=step.receiver_param_intervals_cpu,
+                    max_interval_size=step.receiver_max_interval_size,
+                )
 
             if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
                 if step.group is not None:
-                    buf = buf = mp_partition_flash_mqat_state_dict(
-                        {
-                            step.param_key: recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
-                                                              step.param_key.split(".", 1)[1])
-                        },
-                        self.config,
-                        mp_size=max(dst_mp_size // src_mp_size, 1),
-                        mp_rank=step.sender_mp_portion_id,
-                    )[step.param_key]
+                    buf = slice_intervals(
+                        self.contiguous_param,
+                        step.param_intervals,
+                        step.param_intervals_cpu,
+                        step.max_interval_size,
+                        step.param_size,
+                    )
                     torch.distributed.broadcast(buf, src=step.rank, group=step.group)
                 if step.remove:
-                    layer_idx, k = step.param_key.split(".", 1)
-                    layer_idx = int(layer_idx)
-                    dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
-                    recursive_getattr(self.layers[layer_idx - self.layer_idx_start], k).data = dummy_tensor
+                    for param_key in step.param_keys:
+                        layer_idx, k = param_key.split(".", 1)
+                        layer_idx = int(layer_idx)
+                        dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
+                        recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
+                                          k).data = (dummy_tensor)
 
         # assert len(state_dict) == 0
 
         # release the local GPU memory
         self.contiguous_param = None
+        self.layers = None
         return rtgt.to_layers_handle, to_contiguous_param
+
+    def patch_reparallelization(self, x):
+        self.layers, self.contiguous_param = x
 
 
 # a helper function to make flash_mqat look like huggingface model
