@@ -13,6 +13,7 @@ from base.topology import PipeModelDataParallelTopology
 import itertools
 import queue
 from tests.utils import *
+import argparse
 
 import base.constants
 from api.config.config_base import ModelName, ModelShardID
@@ -20,9 +21,19 @@ import base.gpu_utils
 
 
 def test_impl(
-    rank, world_size, from_model_name, to_model_name, from_topo, to_topo, pg_info, profile=False, check=True,
+    rank,
+    world_size,
+    from_model_name,
+    to_model_name,
+    from_topo,
+    to_topo,
+    pg_info,
+    profile=False,
+    check=True,
     n_iterations=1,
+    profile_compile=False,
 ):
+    assert not (profile and profile_compile)
     from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel, add_helper_functions
     from impl.model.backend.pipe_inf import InferencePipelineEngine
 
@@ -37,18 +48,31 @@ def test_impl(
             m1 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
             m1.instantiate()
             if check:
-                m1.load_from_saved_flash_model("/tmp/reparallelize_test/")
+                m1.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
             if base.constants.pipe_parallel_world_size() > 1:
                 engine1 = InferencePipelineEngine(m1)
             else:
                 add_helper_functions(m1)
                 engine1 = m1
+        
+        if profile_compile:
+            profiler = get_pytorch_profiler(f"repara{rank}_m1_compile.json")
+            profiler.start()
+        print("building m1 reparallelization plan... 1...")
+        tik = time.perf_counter()
         m1.build_reparallelization_plan(to_model_name, from_model_name, to_topo, from_topo, mconfig, pg_info)
+        print(f"building m1 reparallelization plan... 1... time {time.perf_counter() - tik:.4f}")
+        
+        print("building m1 reparallelization plan... 2...")
+        tik = time.perf_counter()
         m1.build_reparallelization_plan(from_model_name, to_model_name, from_topo, to_topo, mconfig, pg_info)
+        print(f"building m1 reparallelization plan... 2... time {time.perf_counter() - tik:.4f}")
+        if profile_compile:
+            profiler.__exit__(None, None, None)
     else:
         m1 = None
 
-    if rank >= 8 - to_topo.world_size():
+    if rank >= world_size - to_topo.world_size():
         with base.constants.model_scope(to_model_name):
             m2 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
             if base.constants.pipe_parallel_world_size() > 1:
@@ -56,8 +80,15 @@ def test_impl(
             else:
                 add_helper_functions(m2)
                 engine2 = m2
+        print("building m2 reparallelization plan... 1...")
+        tik = time.perf_counter()
         m2.build_reparallelization_plan(from_model_name, to_model_name, from_topo, to_topo, mconfig, pg_info)
+        print(f"building m2 reparallelization plan... 1... time {time.perf_counter() - tik:.4f}")
+
+        tik = time.perf_counter()
+        print("building m2 reparallelization plan... 2...")
         m2.build_reparallelization_plan(to_model_name, from_model_name, to_topo, from_topo, mconfig, pg_info)
+        print(f"building m2 reparallelization plan... 2... time {time.perf_counter() - tik:.4f}")
     else:
         m2 = None
 
@@ -65,9 +96,10 @@ def test_impl(
         torch.cuda.synchronize()
         torch.distributed.barrier()
         torch.cuda.synchronize()
+        if it > 1:
+            print("//////////// warmup finish, real runs start //////////")
 
-        if it == n_iterations -1 and profile:
-            print("//////////// profiling start //////////")
+        if it == n_iterations - 1 and profile:
             profiler = get_pytorch_profiler(f"repara{rank}.json")
             profiler.start()
         # from m1 to m2
@@ -76,13 +108,17 @@ def test_impl(
             res = m1.build_reparallelized_layers_async(
                 from_model_name, to_model_name, from_topo, to_topo, mconfig, pg_info
             )
-            print(f"param sync request cpu time: {time.perf_counter() - tik:.2f}s")
+            cpu_time = time.perf_counter() - tik
+            torch.cuda.synchronize()
+            print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
         else:
             tik = time.perf_counter()
             res = m2.build_reparallelized_layers_async(
                 from_model_name, to_model_name, from_topo, to_topo, mconfig, pg_info
             )
-            print(f"param sync request cpu time: {time.perf_counter() - tik:.2f}s")
+            cpu_time = time.perf_counter() - tik
+            torch.cuda.synchronize()
+            print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
 
         if m1 is not None:
             for k, p in m1.named_parameters():
@@ -100,7 +136,7 @@ def test_impl(
                     torch.cuda.synchronize()
                     m3 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
                     m3.instantiate()
-                    m3.load_from_saved_flash_model("/tmp/reparallelize_test/")
+                    m3.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
                     assert len(m2.state_dict()) == len(m3.state_dict()) > 0
                     for k in m2.state_dict().keys():
                         v1 = m2.state_dict()[k]
@@ -112,7 +148,9 @@ def test_impl(
                             seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
                         )
                     else:
-                        engine2(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+                        engine2(
+                            packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
+                        )
 
         torch.cuda.synchronize()
         torch.distributed.barrier()
@@ -123,13 +161,17 @@ def test_impl(
             res = m2.build_reparallelized_layers_async(
                 to_model_name, from_model_name, to_topo, from_topo, mconfig, pg_info
             )
-            print(f"param sync request cpu time: {time.perf_counter() - tik:.2f}s")
+            cpu_time = time.perf_counter() - tik
+            torch.cuda.synchronize()
+            print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
         else:
             tik = time.perf_counter()
             res = m1.build_reparallelized_layers_async(
                 to_model_name, from_model_name, to_topo, from_topo, mconfig, pg_info
             )
-            print(f"param sync request cpu time: {time.perf_counter() - tik:.2f}s")
+            cpu_time = time.perf_counter() - tik
+            torch.cuda.synchronize()
+            print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
 
         if m1 is not None:
             for k, p in m1.named_parameters():
@@ -145,7 +187,7 @@ def test_impl(
                     torch.cuda.synchronize()
                     m4 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
                     m4.instantiate()
-                    m4.load_from_saved_flash_model("/tmp/reparallelize_test/")
+                    m4.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
                     assert len(m1.state_dict()) == len(m4.state_dict()) > 0
                     for k in m1.state_dict().keys():
                         v1 = m1.state_dict()[k]
@@ -157,8 +199,10 @@ def test_impl(
                             seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
                         )
                     else:
-                        engine1(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        if it == n_iterations -1 and profile:
+                        engine1(
+                            packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
+                        )
+        if it == n_iterations - 1 and profile:
             profiler.__exit__(None, None, None)
 
 
@@ -167,13 +211,8 @@ def setup_gpu(rank, world_size, barrier, model_topos, msid2mwid, param_sync_pair
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
-    barrier.wait()
-    base.gpu_utils.isolate_cuda_device(WORKER_TYPE, rank, world_size, EXPR_NAME, TRIAL_NAME)
-    barrier.wait()
-    # print(f"rank {rank} isolated cuda device")
-    base.gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME, rank)
-    # print(f"rank {rank} revealed ddp identity")
-    barrier.wait()
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(rank % 8)
+    os.environ["GPU_DEVICES_ISOLATED"] = str(1)
     info = base.gpu_utils.setup_ddp(
         EXPR_NAME,
         TRIAL_NAME,
@@ -181,6 +220,8 @@ def setup_gpu(rank, world_size, barrier, model_topos, msid2mwid, param_sync_pair
         model_topos=model_topos,
         msid2mwid=msid2mwid,
         param_sync_pairs=param_sync_pairs,
+        world_size=world_size,
+        global_rank=rank,
     )
     world_size = info.world_size
     # print(f"rank {rank} setup ddp")
@@ -203,25 +244,30 @@ def test(rank, world_size, barrier, from_topo, to_topo, err_queue):
         msid2mwid[ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)] = i
     for i in range(to_topo.world_size()):
         msid2mwid[ModelShardID.from_parallelism_rank(to_model_name, to_topo, i)] = (
-            i + 8 - to_topo.world_size()
+            i + world_size - to_topo.world_size()
         )
     pg_info = setup_gpu(rank, world_size, barrier, model_topos, msid2mwid, param_sync_pairs)
-    init_global_constants(topo=from_topo, model_name=from_model_name, msid2mwid=msid2mwid)
-    init_global_constants(topo=to_topo, model_name=to_model_name, msid2mwid=msid2mwid)
+    if rank < from_topo.world_size():
+        init_global_constants(topo=from_topo, model_name=from_model_name, msid2mwid=msid2mwid)
+    if rank >= world_size - to_topo.world_size():
+        init_global_constants(topo=to_topo, model_name=to_model_name, msid2mwid=msid2mwid)
 
     from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 
     try:
         mconfig = get_llama7b_flash_config()
-        with base.constants.model_scope(from_model_name):
-            global_m = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
-            global_m.instantiate()
-            # if os.path.exists("/tmp/reparallelize_test/"):
-            #     global_m.load_from_saved_flash_model("/tmp/reparallelize_test/")
-            # else:
-            os.system("rm -rf /tmp/reparallelize_test/")
-            torch.distributed.barrier()
-            global_m.save("/tmp/reparallelize_test/")
+        torch.distributed.barrier()
+        if base.constants.has_model_name(from_model_name):
+            with base.constants.model_scope(from_model_name):
+                global_m = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
+                global_m.instantiate()
+                # if os.path.exists("/lustre/aigc/llm/checkpoints/reparallelize_test/"):
+                #     global_m.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
+                # else:
+                # torch.distributed.barrier(group=base.constants.parallelism_group())
+                # os.system("rm -rf /lustre/aigc/llm/checkpoints/reparallelize_test/")
+                torch.distributed.barrier(group=base.constants.parallelism_group())
+                # global_m.save("/lustre/aigc/llm/checkpoints/reparallelize_test/")
 
         torch.distributed.barrier()
         test_impl(
@@ -233,8 +279,9 @@ def test(rank, world_size, barrier, from_topo, to_topo, err_queue):
             to_topo,
             pg_info=pg_info,
             profile=False,
-            check=True,
+            check=False,
             n_iterations=3,
+            profile_compile=False,
         )
     except Exception as e:
         err_queue.put(1)
@@ -301,7 +348,7 @@ def test(rank, world_size, barrier, from_topo, to_topo, err_queue):
     # torch.distributed.all_reduce(comm_volume)
     # assert comm_volume == est_comm_volume, (comm_volume, est_comm_volume, from_topo, to_topo)
     torch.distributed.barrier()
-    if rank == 0:
+    if rank % 8 == 0:
         print("success!")
 
 
@@ -317,20 +364,39 @@ def decompose_to_three_factors(n: int):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--node_idx", "-i", type=int, default=0)
+    parser.add_argument("--num_nodes", "-n", type=int, default=1)
+    args = parser.parse_args()
+
     err_queue = mp.Queue(100)
+
     for a, b in [(8, 8)]:
         # for x1, x2 in itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)):
-        for x1, x2 in itertools.product([(1, 4, 2)], [(2, 2, 2)]):
+        for x1, x2 in itertools.product([(4, 2, 4)], [(8, 1, 4)]):
             if not (x1[1] % x2[1] == 0 or x2[1] % x1[1] == 0):
                 continue
+
             barrier = mp.Barrier(8)
-            clear_name_resolve()
+            if args.node_idx == args.num_nodes - 1:
+                clear_name_resolve()
             print(f"testing from {x1} to {x2}")
+
             from_topo = PipeModelDataParallelTopology(num_pp=x1[0], num_mp=x1[1], num_dp=x1[2])
             to_topo = PipeModelDataParallelTopology(num_pp=x2[0], num_mp=x2[1], num_dp=x2[2])
             procs = []
             for i in range(8):
-                proc = mp.Process(target=test, args=(i, 8, barrier, from_topo, to_topo, err_queue))
+                proc = mp.Process(
+                    target=test,
+                    args=(
+                        i + args.node_idx * 8,
+                        args.num_nodes * 8,
+                        barrier,
+                        from_topo,
+                        to_topo,
+                        err_queue,
+                    ),
+                )
                 procs.append(proc)
                 proc.start()
             for proc in procs:
