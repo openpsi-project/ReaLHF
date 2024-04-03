@@ -95,7 +95,7 @@ def test_impl(
         torch.cuda.synchronize()
         torch.distributed.barrier()
         torch.cuda.synchronize()
-        if it > 1:
+        if it > 0:
             print("//////////// warmup finish, real runs start //////////")
 
         if it == n_iterations - 1 and profile:
@@ -229,7 +229,16 @@ def setup_gpu(rank, world_size, barrier, model_topos, msid2mwid, param_sync_pair
     return info
 
 
-def test(rank, world_size, barrier, from_topo, to_topo, err_queue):
+def test(rank,
+         world_size,
+         barrier,
+         from_topo,
+         to_topo,
+         err_queue,
+         profile=False,
+         check=False,
+         n_iterations=2,
+         profile_compile=False):
     from_model_name = ModelName("actor", 0)
     to_model_name = ModelName("actor", 1)
     param_sync_pairs = [(from_model_name, to_model_name), (to_model_name, from_model_name)]
@@ -251,17 +260,17 @@ def test(rank, world_size, barrier, from_topo, to_topo, err_queue):
     try:
         mconfig = get_llama7b_flash_config()
         torch.distributed.barrier()
-        if base.constants.has_model_name(from_model_name):
-            with base.constants.model_scope(from_model_name):
-                global_m = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
-                global_m.instantiate()
-                # if os.path.exists("/lustre/aigc/llm/checkpoints/reparallelize_test/"):
-                #     global_m.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
-                # else:
-                # torch.distributed.barrier(group=base.constants.parallelism_group())
-                # os.system("rm -rf /lustre/aigc/llm/checkpoints/reparallelize_test/")
-                torch.distributed.barrier(group=base.constants.parallelism_group())
-                # global_m.save("/lustre/aigc/llm/checkpoints/reparallelize_test/")
+        # if check and base.constants.has_model_name(from_model_name):
+        #     with base.constants.model_scope(from_model_name):
+        #         global_m = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
+        #         global_m.instantiate()
+        #         # if os.path.exists("/lustre/aigc/llm/checkpoints/reparallelize_test/"):
+        #         #     global_m.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
+        #         # else:
+        #         # torch.distributed.barrier(group=base.constants.parallelism_group())
+        #         # os.system("rm -rf /lustre/aigc/llm/checkpoints/reparallelize_test/")
+        #         torch.distributed.barrier(group=base.constants.parallelism_group())
+        #         global_m.save("/lustre/aigc/llm/checkpoints/reparallelize_test/")
 
         torch.distributed.barrier()
         test_impl(
@@ -272,10 +281,10 @@ def test(rank, world_size, barrier, from_topo, to_topo, err_queue):
             from_topo,
             to_topo,
             pg_info=pg_info,
-            profile=False,
-            check=False,
-            n_iterations=3,
-            profile_compile=False,
+            profile=profile,
+            check=check,
+            n_iterations=n_iterations,
+            profile_compile=profile_compile,
         )
     except Exception as e:
         err_queue.put(1)
@@ -366,11 +375,20 @@ if __name__ == "__main__":
     err_queue = mp.Queue(100)
 
     for a, b in [(8, 8)]:
-        # for x1, x2 in itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)):
-        for x1, x2 in itertools.product([(4, 2, 4)], [(8, 1, 4)]):
-            if not (x1[1] % x2[1] == 0 or x2[1] % x1[1] == 0):
-                continue
-
+        if a == b:
+            three_factors = decompose_to_three_factors(a)
+            all_configs = []
+            for i in range(len(three_factors)):
+                for j in range(i):
+                    all_configs.append((three_factors[i], three_factors[j]))
+        else:
+            all_configs = list(itertools.product(decompose_to_three_factors(a),
+                                                 decompose_to_three_factors(b)))
+        all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
+        random.shuffle(all_configs)
+        print(f">>>>>>>>> running {len(all_configs)} configurations >>>>>>>")
+        # for x1, x2 in all_configs:
+        for x1, x2 in itertools.product([(8, 2, 4)], [(1, 8, 4)]):
             barrier = mp.Barrier(8)
             if args.node_idx == args.num_nodes - 1:
                 clear_name_resolve()
@@ -380,17 +398,21 @@ if __name__ == "__main__":
             to_topo = PipeModelDataParallelTopology(num_pp=x2[0], num_mp=x2[1], num_dp=x2[2])
             procs = []
             for i in range(8):
-                proc = mp.Process(
-                    target=test,
-                    args=(
-                        i + args.node_idx * 8,
-                        args.num_nodes * 8,
-                        barrier,
-                        from_topo,
-                        to_topo,
-                        err_queue,
-                    ),
-                )
+                proc = mp.Process(target=test,
+                                  args=(
+                                      i + args.node_idx * 8,
+                                      args.num_nodes * 8,
+                                      barrier,
+                                      from_topo,
+                                      to_topo,
+                                      err_queue,
+                                  ),
+                                  kwargs=dict(
+                                      profile=False,
+                                      check=False,
+                                      n_iterations=2,
+                                      profile_compile=False,
+                                  ))
                 procs.append(proc)
                 proc.start()
             for proc in procs:

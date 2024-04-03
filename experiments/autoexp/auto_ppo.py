@@ -27,10 +27,10 @@ def register_auto_ppo_experiment(
         nodelist = "QH-com13"
     elif size == 13:
         n_nodes = 2
-        nodelist = "QH-com[42-43]"
+        nodelist = "QH-com[17-18]"
     elif size == 34:
         n_nodes = 4
-        nodelist = "QH-com[13-16]"
+        nodelist = "QH-com[27-29,40]"
     elif size == 70:
         n_nodes = 8
         nodelist = "QH-com[13-20]"
@@ -212,7 +212,7 @@ def register_auto_ppo_experiment(
 
 
 for size in [7, 13, 34, 70]:
-    for gen_bs in [16, 32, 48, 64, 80, 100, 128, 160, 200, 240, 256, 288, 320, 360]:
+    for gen_bs in [16, 32, 48, 64, 80, 100, 128, 160, 200, 240, 256, 288, 320, 360, 400]:
         for seqlen in [256, 512, 1024]:
             train_bs = gen_bs
             register_auto_ppo_experiment(size, gen_bs, train_bs, seqlen)

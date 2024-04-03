@@ -12,20 +12,19 @@ import torch
 
 def test_set():
     # Usage example
-    n_intervals = 100000
+    n_intervals = 10000000
     input_tensor = torch.randn(int(1e8), device="cuda")
     offset = 0
     intervals = []
-    max_interval_size = 0
+    max_interval_size = 2048
     for i in range(n_intervals):
-        start = random.randint(offset, offset + 10000)
-        end = random.randint(start, start + 10000)
+        start = random.randint(offset, offset + max_interval_size)
+        end = random.randint(start, start + max_interval_size)
         offset = end
         if offset >= input_tensor.size(0):
             break
         intervals.append((start, end))
         max_interval_size = max(end - start, max_interval_size)
-    # print(intervals)
     intervals_cuda = torch.tensor(intervals, device="cuda", dtype=torch.long)
     output_size = sum(j - i for i, j in intervals)
     interval_sizes = torch.tensor([j - i for i, j in intervals], device="cuda", dtype=torch.long)
