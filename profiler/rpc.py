@@ -10,7 +10,7 @@ class RPC:
     """ simple RPC class for cpp search module input """
 
     def __init__(self, model_rpc: ModelRPC):
-        self.model_name = model_rpc.model_name
+        self.model_name = model_rpc.model_name.role
         self.interface_type = str(model_rpc.interface_type)
         self.rpc_name = model_rpc.name
 

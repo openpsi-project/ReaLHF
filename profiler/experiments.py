@@ -18,6 +18,132 @@ from experiments.autoexp.device_mapping import (_make_inf_backend_config, _make_
 NUM_GPUS_PER_NODE = 8
 
 
+def ppo_rpcs_example(size):
+    gen_bs = train_bs = 256
+    seq_len = 256
+    gen_len = 256
+    actor_interface = ModelInterface(
+        "flash_actor",
+        args={},
+    )
+    ref_interface = copy.deepcopy(actor_interface)
+    ref_interface.args["enable_save"] = False
+
+    critic_interface = ModelInterface(
+        "flash_critic",
+        args={},
+    )
+    rw_interface = ModelInterface(
+        "flash_paired_rw",
+        args=dict(enable_save=False,),
+    )
+    model_class = "llama" if size != 34 else "codellama"
+    return [
+        ModelRPC(
+            model_name="actor",
+            model_type=ModelType(model_class, size, is_critic=False),
+            interface_type=ModelInterfaceType.GENERATE,
+            interface_impl=actor_interface,
+            input_data=["packed_prompts", "prompt_cu_seqlens"],
+            output_data=[
+                "seq_no_eos_mask",
+                "packed_seq",
+                "cu_seqlens",
+                "packed_logprobs",
+                "prompt_mask",
+            ],
+            balanced_dp=True,
+            min_n_seqs=gen_bs,
+            max_n_seqs=gen_bs,
+            max_n_tokens=gen_bs * seq_len,
+        ),
+        ModelRPC(
+            model_name="reward",
+            model_type=ModelType("llama", 7, is_critic=True),
+            interface_type=ModelInterfaceType.INFERENCE,
+            interface_impl=rw_interface,
+            input_data=["packed_seq", "cu_seqlens"],
+            input_key_remap={"packed_seq": "packed_input_ids"},
+            output_data=["scores"],
+            output_key_remap={"scores": "rewards"},
+            min_n_seqs=gen_bs,
+            max_n_seqs=gen_bs,
+            max_n_tokens=gen_bs * (seq_len + gen_len),
+        ),
+        ModelRPC(
+            model_name="ref",
+            model_type=ModelType(model_class, size, is_critic=False),
+            interface_type=ModelInterfaceType.INFERENCE,
+            interface_impl=ref_interface,
+            input_data=[
+                "packed_seq",
+                "cu_seqlens",
+            ],
+            output_data=["logprobs"],
+            output_key_remap={"logprobs": "packed_ref_logprobs"},
+            min_n_seqs=gen_bs,
+            max_n_seqs=gen_bs,
+            max_n_tokens=gen_bs * (seq_len + gen_len),
+        ),
+        ModelRPC(
+            model_name="critic",
+            model_type=ModelType("llama", 7, is_critic=True),
+            interface_type=ModelInterfaceType.INFERENCE,
+            interface_impl=critic_interface,
+            input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
+            output_data=["scores"],
+            output_key_remap={"scores": "values"},
+            min_n_seqs=gen_bs,
+            max_n_seqs=gen_bs,
+            max_n_tokens=gen_bs * (seq_len + gen_len),
+        ),
+        ModelRPC(
+            model_name="actor",
+            model_type=ModelType(model_class, size, is_critic=False),
+            interface_type=ModelInterfaceType.TRAIN_STEP,
+            interface_impl=actor_interface,
+            input_data=[
+                "packed_seq",
+                "cu_seqlens",
+                "packed_logprobs",
+                "packed_ref_logprobs",
+                "rewards",
+                "values",
+                "prompt_mask",
+                "seq_no_eos_mask",
+            ],
+            log_return_value=True,
+            # min_n_seqs_per_dp=self.ppo.ppo_n_minibatches,
+            min_n_seqs=train_bs,
+            max_n_seqs=train_bs,
+            balanced_dp=True,
+            max_n_tokens=train_bs * (seq_len + gen_len),
+        ),
+        ModelRPC(
+            model_name="critic",
+            interface_type=ModelInterfaceType.TRAIN_STEP,
+            model_type=ModelType("llama", 7, is_critic=True),
+            interface_impl=critic_interface,
+            input_data=[
+                "packed_seq",
+                "cu_seqlens",
+                "packed_logprobs",
+                "packed_ref_logprobs",
+                "rewards",
+                "values",
+                "prompt_mask",
+                "seq_no_eos_mask",
+            ],
+            log_return_value=True,
+            # min_n_seqs_per_dp=self.ppo.ppo_n_minibatches,
+            min_n_seqs=train_bs,
+            max_n_seqs=train_bs,
+            balanced_dp=True,
+            max_n_tokens=train_bs * (seq_len + gen_len),
+        ),
+    ]
+
+
 # experiment config to run profiler (single instruction and model rpc)
 @dataclasses.dataclass
 class ProfileExperiment(Experiment):
@@ -55,25 +181,25 @@ class ProfileExperiment(Experiment):
                            model_type=self.model_type,
                            interface_type=ModelInterfaceType.GENERATE,
                            interface_impl=self.interface,
-                           min_n_seqs=32,
-                           max_n_seqs=32,
-                           max_n_tokens=32 * 128)
+                           min_n_seqs=256,
+                           max_n_seqs=256,
+                           max_n_tokens=256 * 256)
 
         inf = ModelRPC(model_name="actor",
                        model_type=self.model_type,
                        interface_type=ModelInterfaceType.INFERENCE,
                        interface_impl=self.interface,
-                       min_n_seqs=32,
-                       max_n_seqs=32,
-                       max_n_tokens=32 * 128)
+                       min_n_seqs=256,
+                       max_n_seqs=256,
+                       max_n_tokens=256 * 256)
 
         train = ModelRPC(model_name="actor",
                          model_type=self.model_type,
                          interface_type=ModelInterfaceType.TRAIN_STEP,
                          interface_impl=self.interface,
-                         min_n_seqs=32,
-                         max_n_seqs=32,
-                         max_n_tokens=32 * 128)
+                         min_n_seqs=256,
+                         max_n_seqs=256,
+                         max_n_tokens=256 * 256)
         return [rollout, inf, train]
 
     @property
@@ -163,9 +289,7 @@ class ProfileExperiment(Experiment):
             ),
         )
         interface = rpc.interface_impl
-        backend = _make_train_backend_config(m.train_eval_config,
-                                             use_stream_pipe_engine=False,
-                                             instruction_sync=self.instruction_sync)
+        backend = _make_train_backend_config(m.train_eval_config, instruction_sync=self.instruction_sync)
 
         profile_workers = [
             ProfileWorker(seed=self.seed,
@@ -204,7 +328,7 @@ def register_profile_experiment(
     actor_model_type = ModelType(model_class, size, False)
     n_nodes = (num_pp * num_mp * num_dp) // NUM_GPUS_PER_NODE
 
-    node_start = 31
+    node_start = 40
     node_end = node_start + n_nodes - 1
     nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
 

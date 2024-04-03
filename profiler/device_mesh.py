@@ -3,9 +3,31 @@ import dataclasses
 
 import numpy as np
 
-from api.config.config_flash_model import ParallelismConfig
+from api.config.config_flash_model import ModelTrainEvalConfig, ParallelismConfig
 from api.config.dfg import ModelRPC
-from experiments.autoexp.device_mapping import ClusterDeviceMesh
+from experiments.autoexp.device_mapping import ClusterDeviceMesh, RPCAllocation
+
+
+@dataclasses.dataclass
+class ModelParallelStrategy:
+    num_pp: int
+    num_mp: int
+    num_dp: int
+
+    def __repr__(self):
+        return f"pp{self.num_pp}_mp{self.num_mp}_dp{self.num_dp}"
+
+    @classmethod
+    def from_config(cls, parallel: ParallelismConfig):
+        return cls(num_pp=parallel.pipeline_parallel_size,
+                   num_mp=parallel.model_parallel_size,
+                   num_dp=parallel.data_parallel_size)
+
+    def to_config(self):
+        return ParallelismConfig(pipeline_parallel_size=self.num_pp,
+                                 model_parallel_size=self.num_mp,
+                                 data_parallel_size=self.num_dp,
+                                 use_sequence_parallel=self.num_mp > 1)
 
 
 @dataclasses.dataclass
@@ -40,53 +62,36 @@ class DeviceMesh:
     def __repr__(self):
         return self.device_mesh_name
 
-    @classmethod
-    def from_config(
-            cls,
-            c_device_mesh: ClusterDeviceMesh,
-            mapping: np.ndarray,  # 2d  array of shape (n_nodes, n_gpus_per_node)
-            nodelist: str):
-        node_names = slurm_nodelist_from_nodes(nodelist)
-        indices = np.nonzero(np.sum(mapping, axis=0))
-        assert np.diff(indices, axis=0) == 1
-        node_names = [node_names[i] for i in indices]
+    def to_config(self, device_mesh: 'DeviceMesh', parallel_strategy: ModelParallelStrategy, rpc: ModelRPC,
+                  **kwargs) -> RPCAllocation:
+        """ 
+        args:
+            device_mesh: DeviceMesh, the entire device mesh of the experiment,
+                         must contain this device mesh and contain whole nodes.
+            parallel_strategy: model parallel strategy
+            rpc: ModelRPC
+            kwargs: additional arguments for ModelTrainEvalConfig
+        """
+        ps = parallel_strategy.to_config()
+        assert device_mesh.n_gpus_per_node == 8
+        mapping = np.zeros((device_mesh.n_nodes, device_mesh.n_gpus_per_node), dtype=np.int32)
 
-    def to_config(self):
-        pass
+        node_indices = [device_mesh.node_names.index(node_name) for node_name in self.node_names]
+        gpu_indices = self.gpu_ids
 
+        if self.n_gpus_per_node == 8:
+            for node_index in node_indices:
+                mapping[node_index] = 1
+        else:
+            assert len(gpu_indices) in [1, 2, 4]
+            assert len(node_indices) == 1
+            for node_index in node_indices:
+                for gpu_index in gpu_indices:
+                    mapping[node_index, gpu_index] = 1
 
-@dataclasses.dataclass
-class ModelParallelStrategy:
-    num_pp: int
-    num_mp: int
-    num_dp: int
-
-    def __repr__(self):
-        return f"pp{self.num_pp}_mp{self.num_mp}_dp{self.num_dp}"
-
-    @classmethod
-    def from_config(cls, parallel: ParallelismConfig):
-        return cls(num_pp=parallel.pipeline_parallel_size,
-                   num_mp=parallel.model_parallel_size,
-                   num_dp=parallel.data_parallel_size)
-
-    def to_config(self):
-        return ParallelismConfig(pipeline_parallel_size=self.num_pp,
-                                 model_parallel_size=self.num_mp,
-                                 data_parallel_size=self.num_dp,
-                                 use_sequence_parallel=self.num_mp > 1)
-
-
-@dataclasses.dataclass
-class ModelDeviceMapping:
-    model_names: List[str]
-    model_rpc_names: List[str]
-    # model_rpc_name -> ModelRPC
-    model_rpc_mapping: Optional[Dict[str, ModelRPC]] = None
-    # model_rpc_name -> DeviceMesh
-    model_device_mapping: Optional[Dict[str, DeviceMesh]] = None
-    # model_rpc_name -> ModelParallelStrategy
-    model_parallel_strategy: Optional[Dict[str, ModelParallelStrategy]] = None
+        return RPCAllocation(rpc=rpc,
+                             mapping=mapping,
+                             train_eval_config=ModelTrainEvalConfig(parallel=ps, **kwargs))
 
 
 def is_overlap(device_mesh: DeviceMesh, other: DeviceMesh):
@@ -269,7 +274,13 @@ def find_parallel_strategies(device_mesh: DeviceMesh) -> List[ModelParallelStrat
             num_dp_pp = n_gpus // num_mp
             num_pp = 1
             while num_pp <= num_dp_pp:
-                if num_dp_pp % num_pp == 0:
+                num_dp_mp = n_gpus // num_pp
+                valid = True
+                if num_dp_mp >= 8:
+                    valid = num_dp_mp % 8 == 0
+                else:
+                    valid = 8 % num_dp_mp == 0
+                if num_dp_pp % num_pp == 0 and valid:
                     res.append(ModelParallelStrategy(num_pp, num_mp, num_dp_pp // num_pp))
                 num_pp += 1
 

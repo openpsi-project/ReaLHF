@@ -49,7 +49,7 @@ class ModelType:
     is_critic: bool
 
     def __repr__(self):
-        return f"{self._class}-{self.size}{'-critic' if self.is_critic else ''}"
+        return f"{self._class}-{self.size}"
 
 
 @dataclasses.dataclass

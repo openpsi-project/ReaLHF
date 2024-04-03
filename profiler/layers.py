@@ -232,7 +232,7 @@ class ProfileLayers:
             self.stats[make_stats_key(layer_name, "fwd", bs, seq_len)].append(time.monotonic_ns() - st)
             # bwd
             r = torch.rand(*x.pp_output.shape, device=x.pp_output.device, dtype=x.pp_output.dtype)
-            loss = torch.sum(x.pp_output * r)
+            loss = torch.max(x.pp_output * r)
             st = time.monotonic_ns()
             layer.module.backward(loss)
             torch.cuda.synchronize()
