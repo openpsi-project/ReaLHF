@@ -4,8 +4,8 @@ import dataclasses
 import functools
 
 from .device_mapping import auto_device_mapping as auto
-from .device_mapping import ClusterDeviceMesh
 from api.config.config_dataset import DatasetType, PromptOnlyDatasetConfig
+from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from api.config.config_system import _LLM_ENVVARS, ExperimentSaveEvalControl, register_experiment
 from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
 from base.topology import PipeModelDataParallelTopology

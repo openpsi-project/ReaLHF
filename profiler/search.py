@@ -10,10 +10,10 @@ from profiler.rpc import RPC, RPCExecution
 import profiler.cppsearch.mdm_search as mdm_search
 
 from api.config.config_base import MODEL_TYPE_TO_PATH
+# from experiments.autoexp.device_mapping import RPCAllocation
+from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from api.config.config_flash_model import ModelTrainEvalConfig, OptimizerConfig
 from api.config.dfg import ModelName, ModelRPC, OffloadHook, SyncParamHook
-from experiments.autoexp.auto_ppo import ClusterDeviceMesh
-from experiments.autoexp.device_mapping import RPCAllocation
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 
 
