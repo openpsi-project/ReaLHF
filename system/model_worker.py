@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 import collections
 import gc
 import itertools
@@ -395,8 +395,10 @@ class ModelWorker(worker_base.Worker):
         self.__data_owner_storage: Dict[int, Dict[str, torch.Tensor]] = collections.defaultdict(dict)
         self.__data_receive_cache: Dict[int, Dict[str, torch.Tensor]] = collections.defaultdict(dict)
 
-        self.__data_sent_worker_indices: Dict[int, Dict[str, Set]] = collections.defaultdict(collections.defaultdict(set))
-        self.__data_received_worker_indices: Dict[int, Dict[str, Set]] =  collections.defaultdict(collections.defaultdict(set))
+        self.__data_sent_worker_indices: Dict[int, Dict[str, Set]] = collections.defaultdict(
+            collections.defaultdict(set))
+        self.__data_received_worker_indices: Dict[int, Dict[str, Set]] = collections.defaultdict(
+            collections.defaultdict(set))
 
         self.__compute_input_queues = dict(
             train_step=queue.Queue(4),
@@ -423,9 +425,11 @@ class ModelWorker(worker_base.Worker):
             # torch.cuda.synchronize()
             tik = time.perf_counter()
             self.__data_transfer_among_workers(hook_data)
-            blogger.debug(f"data transfer CPU time: {time.perf_counter() - tik:.4f}s, "
-                          f"# remaining data in local storage: {sum([len(x for x in xs if isinstance(x, torch.Tensor) and x.device == self.__device) for xs in self.__data_owner_storage.values()])}, "
-                          f"# remaining data in receiver cache: {sum([len(xs) for xs in self.__data_receive_cache.values()])}.")
+            blogger.debug(
+                f"data transfer CPU time: {time.perf_counter() - tik:.4f}s, "
+                f"# remaining data in local storage: {sum([len(x for x in xs if isinstance(x, torch.Tensor) and x.device == self.__device) for xs in self.__data_owner_storage.values()])}, "
+                f"# remaining data in receiver cache: {sum([len(xs) for xs in self.__data_receive_cache.values()])}."
+            )
             # torch.cuda.synchronize()
         elif hook == "param_sync":
             tik = time.perf_counter()
@@ -676,12 +680,19 @@ class ModelWorker(worker_base.Worker):
                     seqlens = [global_seqlens[_i] for _i in comm_slots]
                     if bcast_src == dist.get_rank():
                         for buf_idx in buf_indices:
-                            self.__data_owner_storage[buf_idx][k] = self.__data_owner_storage[buf_idx][k].to(self.__device)
-                        vs = torch.cat([self.__data_owner_storage[buf_idx][k] for buf_idx in buf_indices], dim=0)
+                            self.__data_owner_storage[buf_idx][k] = self.__data_owner_storage[buf_idx][k].to(
+                                self.__device)
+                        vs = torch.cat([self.__data_owner_storage[buf_idx][k] for buf_idx in buf_indices],
+                                       dim=0)
                     else:
-                        all_sent_dst_ranks = [self.__data_received_worker_indices[buf_idx][k] for buf_idx in buf_indices]
-                        if all(set(dst_ranks).issubset(set(sent_dst_ranks)) for sent_dst_ranks in all_sent_dst_ranks):
-                            vs = torch.cat([self.__data_receive_cache[buf_idx][k] for buf_idx in buf_indices], dim=0)
+                        all_sent_dst_ranks = [
+                            self.__data_received_worker_indices[buf_idx][k] for buf_idx in buf_indices
+                        ]
+                        if all(
+                                set(dst_ranks).issubset(set(sent_dst_ranks))
+                                for sent_dst_ranks in all_sent_dst_ranks):
+                            vs = torch.cat([self.__data_receive_cache[buf_idx][k] for buf_idx in buf_indices],
+                                           dim=0)
                         else:
                             total_len = 0
                             for seqlen in seqlens:
@@ -689,7 +700,9 @@ class ModelWorker(worker_base.Worker):
                                 assert len(shape) == 1, shape
                                 total_len += shape[0]
                             dtype = _get_dtype_from_key(k)
-                            buf = base.constants.get_global_memory_buffer().get_tensor((total_len, ), dtype, name="data_transfer")
+                            buf = base.constants.get_global_memory_buffer().get_tensor((total_len,),
+                                                                                       dtype,
+                                                                                       name="data_transfer")
                             dist.broadcast(buf, src=bcast_src, group=group)
                             vs = buf.clone()
                             for buf_idx in buf_indices:
@@ -698,10 +711,11 @@ class ModelWorker(worker_base.Worker):
                     for seqlen, buf_idx in zip(seqlens, buf_indices):
                         shape = _get_shape_from_key_and_seqlen(k, seqlen)
                         assert len(shape) == 1, shape
-                        v = vs[offset: offset+shape[0]]
+                        v = vs[offset:offset + shape[0]]
                         offset += shape[0]
                         data[k].append(v)
-                        if k not in self.__data_owner_storage[buf_idx] and k not in self.__data_receive_cache[buf_idx]:
+                        if k not in self.__data_owner_storage[buf_idx] and k not in self.__data_receive_cache[
+                                buf_idx]:
                             self.__data_receive_cache[buf_idx][k] = v
                         local_buffer_indices.append(buf_idx)
                         local_seqlens.append(seqlen)
@@ -719,13 +733,19 @@ class ModelWorker(worker_base.Worker):
                     dst_ranks = self.__pg_info.data_transfer_dst_ranks[group_key]
 
                     buf_indices = [global_buffer_indices[_i] for _i in comm_slots]
-                    all_sent_dst_ranks = [self.__data_sent_worker_indices[buf_idx][k] for buf_idx in buf_indices]
-                    if all(set(dst_ranks).issubset(set(sent_dst_ranks)) for sent_dst_ranks in all_sent_dst_ranks):
+                    all_sent_dst_ranks = [
+                        self.__data_sent_worker_indices[buf_idx][k] for buf_idx in buf_indices
+                    ]
+                    if all(
+                            set(dst_ranks).issubset(set(sent_dst_ranks))
+                            for sent_dst_ranks in all_sent_dst_ranks):
                         pass
                     else:
                         for buf_idx in buf_indices:
-                            self.__data_owner_storage[buf_idx][k] = self.__data_owner_storage[buf_idx][k].to(self.__device)
-                        vs = torch.cat([self.__data_owner_storage[buf_idx][k] for buf_idx in buf_indices], dim=0)
+                            self.__data_owner_storage[buf_idx][k] = self.__data_owner_storage[buf_idx][k].to(
+                                self.__device)
+                        vs = torch.cat([self.__data_owner_storage[buf_idx][k] for buf_idx in buf_indices],
+                                       dim=0)
                         dist.broadcast(vs, src=bcast_src, group=group)
                         for buf_idx in buf_indices:
                             self.__data_sent_worker_indices[buf_idx][k].union(dst_ranks)

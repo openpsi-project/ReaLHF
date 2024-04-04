@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple, Union, Set
+from typing import Dict, List, Optional, Set, Tuple, Union
 import asyncio
 import copy
 import dataclasses
@@ -1003,7 +1003,7 @@ class MasterWorker(worker_base.Worker):
 
         self.__initialized = True
         self._train_start_time = time.perf_counter()
-        
+
         self.__clear_data_cache_reqids = None
 
     def _poll(self):
@@ -1058,8 +1058,13 @@ class MasterWorker(worker_base.Worker):
         logger.info("Execution finished!")
 
         if self.__clear_data_cache_reqids is not None:
-            [self.__stream.poll(block=True, pattern=create_exact_match_pattern([reqid])) for reqid in self.__clear_data_cache_reqids]
-        self.__clear_data_cache_reqids = request_all(self.__stream, [vs[0] for vs in self.__mwid2msids.values()], "clear_data_cache", [self.__rpc_ctrl.training_buffer_indices for _ in self.__all_model_handlers])
+            [
+                self.__stream.poll(block=True, pattern=create_exact_match_pattern([reqid]))
+                for reqid in self.__clear_data_cache_reqids
+            ]
+        self.__clear_data_cache_reqids = request_all(
+            self.__stream, [vs[0] for vs in self.__mwid2msids.values()], "clear_data_cache",
+            [self.__rpc_ctrl.training_buffer_indices for _ in self.__all_model_handlers])
         self.__rpc_ctrl.training_buffer_indices.clear()
 
         self._epoch_step += 1

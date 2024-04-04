@@ -30,7 +30,7 @@ def register_auto_ppo_experiment(
         nodelist = "QH-com[17-18]"
     elif size == 34:
         n_nodes = 4
-        nodelist = "QH-com[27-29,40]"
+        nodelist = "QH-com[24-27]"
     elif size == 70:
         n_nodes = 8
         nodelist = "QH-com[13-20]"
