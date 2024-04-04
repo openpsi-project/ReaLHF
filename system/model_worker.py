@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 import collections
 import gc
 import itertools
@@ -392,16 +392,11 @@ class ModelWorker(worker_base.Worker):
 
         # Storing model function call outputs. Model worker will serve as
         # the data producer when other model workers require this data.
-        self.__data_owner_storage = dict()
-        # Record which RPCs have received the data.
-        # After all RPCs have received the data, remove it from storage.
-        self.__data_sent_rpc_names = collections.defaultdict(list)
-        self.__data_received_rpc_names = collections.defaultdict(list)
+        self.__data_owner_storage: Dict[int, Dict[str, torch.Tensor]] = collections.defaultdict(dict)
+        self.__data_receive_cache: Dict[int, Dict[str, torch.Tensor]] = collections.defaultdict(dict)
 
-        self.__data_receive_cache = {}
-
-        self.__data_sent_worker_indices = collections.defaultdict(set)
-        self.__data_received_worker_indices = collections.defaultdict(set)
+        self.__data_sent_worker_indices: Dict[int, Dict[str, Set]] = collections.defaultdict(collections.defaultdict(set))
+        self.__data_received_worker_indices: Dict[int, Dict[str, Set]] =  collections.defaultdict(collections.defaultdict(set))
 
         self.__compute_input_queues = dict(
             train_step=queue.Queue(4),
@@ -429,8 +424,8 @@ class ModelWorker(worker_base.Worker):
             tik = time.perf_counter()
             self.__data_transfer_among_workers(hook_data)
             blogger.debug(f"data transfer CPU time: {time.perf_counter() - tik:.4f}s, "
-                          f"# remaining data in local storage: {len(self.__data_owner_storage)}, "
-                          f"# remaining data in receiver cache: {len(self.__data_receive_cache)}.")
+                          f"# remaining data in local storage: {sum([len(x for x in xs if isinstance(x, torch.Tensor) and x.device == self.__device) for xs in self.__data_owner_storage.values()])}, "
+                          f"# remaining data in receiver cache: {sum([len(xs) for xs in self.__data_receive_cache.values()])}.")
             # torch.cuda.synchronize()
         elif hook == "param_sync":
             tik = time.perf_counter()
@@ -541,7 +536,8 @@ class ModelWorker(worker_base.Worker):
                 assert len(buffer_indices) == len(self.__fetched_data)
                 for buf_idx, x in zip(buffer_indices, self.__fetched_data):
                     for k, v in x.items():
-                        self.__data_owner_storage[(buf_idx, k)] = v.to(self.__device)
+                        assert v.device == torch.device("cpu")
+                        self.__data_owner_storage[buf_idx][k] = v
                 self.__fetched_data = None
                 res = None
             elif request.handle_name == "spec":
@@ -558,6 +554,23 @@ class ModelWorker(worker_base.Worker):
                     batch_size_per_device=batch_size,
                     max_seqlen=self.__max_seqlen,
                 )
+            elif request.handle_name == "clear_data_cache":
+                buf_indices = request.data
+                for buf_idx in buf_indices:
+                    if buf_idx in self.__data_owner_storage:
+                        del self.__data_owner_storage[buf_idx]
+                    if buf_idx in self.__data_receive_cache:
+                        del self.__data_receive_cache[buf_idx]
+                    if buf_idx in self.__data_sent_worker_indices:
+                        del self.__data_sent_worker_indices[buf_idx]
+                    if buf_idx in self.__data_received_worker_indices:
+                        del self.__data_received_worker_indices[buf_idx]
+                st = time.monotonic()
+                gc.collect()
+                torch.cuda.empty_cache()
+                gc.collect()
+                et = time.monotonic()
+                blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
             ############## computation function calls ##############
             elif request.handle_name == "inference":
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
@@ -662,11 +675,13 @@ class ModelWorker(worker_base.Worker):
                     buf_indices = [global_buffer_indices[_i] for _i in comm_slots]
                     seqlens = [global_seqlens[_i] for _i in comm_slots]
                     if bcast_src == dist.get_rank():
-                        vs = torch.cat([self.__data_owner_storage[(buf_idx, k)] for buf_idx in buf_indices], dim=0)
+                        for buf_idx in buf_indices:
+                            self.__data_owner_storage[buf_idx][k] = self.__data_owner_storage[buf_idx][k].to(self.__device)
+                        vs = torch.cat([self.__data_owner_storage[buf_idx][k] for buf_idx in buf_indices], dim=0)
                     else:
-                        all_sent_dst_ranks = [self.__data_received_worker_indices[(buf_idx, k)] for buf_idx in buf_indices]
+                        all_sent_dst_ranks = [self.__data_received_worker_indices[buf_idx][k] for buf_idx in buf_indices]
                         if all(set(dst_ranks).issubset(set(sent_dst_ranks)) for sent_dst_ranks in all_sent_dst_ranks):
-                            vs = torch.cat([self.__data_receive_cache[(buf_idx, k)] for buf_idx in buf_indices], dim=0)
+                            vs = torch.cat([self.__data_receive_cache[buf_idx][k] for buf_idx in buf_indices], dim=0)
                         else:
                             total_len = 0
                             for seqlen in seqlens:
@@ -686,21 +701,10 @@ class ModelWorker(worker_base.Worker):
                         v = vs[offset: offset+shape[0]]
                         offset += shape[0]
                         data[k].append(v)
-                        if (buf_idx,k) not in self.__data_owner_storage and (buf_idx, k) not in self.__data_receive_cache:
-                            self.__data_receive_cache[(buf_idx, k)] = v
+                        if k not in self.__data_owner_storage[buf_idx] and k not in self.__data_receive_cache[buf_idx]:
+                            self.__data_receive_cache[buf_idx][k] = v
                         local_buffer_indices.append(buf_idx)
                         local_seqlens.append(seqlen)
-                        
-                        rpc_name = hook_data["rpc_name"]
-                        if rpc_name not in self.__data_received_rpc_names[(buf_idx, k)]:
-                            self.__data_received_rpc_names[(buf_idx, k)].append(rpc_name)
-                        if not set(self.data2required_rpc_names[k]).difference(
-                                self.__data_received_rpc_names[(buf_idx, k)]):
-                            if (buf_idx, k) in self.__data_receive_cache:
-                                self.__data_receive_cache.pop((buf_idx, k))
-                            if (buf_idx, k) in self.__data_received_worker_indices:
-                                self.__data_received_worker_indices.pop((buf_idx, k))
-                            self.__data_received_rpc_names.pop((buf_idx, k))
 
                 if producer_dp_rank == dp_i and producer_is_dp_head:
                     # sender
@@ -715,25 +719,16 @@ class ModelWorker(worker_base.Worker):
                     dst_ranks = self.__pg_info.data_transfer_dst_ranks[group_key]
 
                     buf_indices = [global_buffer_indices[_i] for _i in comm_slots]
-                    all_sent_dst_ranks = [self.__data_sent_worker_indices[(buf_idx, k)] for buf_idx in buf_indices]
+                    all_sent_dst_ranks = [self.__data_sent_worker_indices[buf_idx][k] for buf_idx in buf_indices]
                     if all(set(dst_ranks).issubset(set(sent_dst_ranks)) for sent_dst_ranks in all_sent_dst_ranks):
                         pass
                     else:
-                        vs = torch.cat([self.__data_owner_storage[(buf_idx, k)] for buf_idx in buf_indices], dim=0)
+                        for buf_idx in buf_indices:
+                            self.__data_owner_storage[buf_idx][k] = self.__data_owner_storage[buf_idx][k].to(self.__device)
+                        vs = torch.cat([self.__data_owner_storage[buf_idx][k] for buf_idx in buf_indices], dim=0)
                         dist.broadcast(vs, src=bcast_src, group=group)
                         for buf_idx in buf_indices:
-                            self.__data_sent_worker_indices[(buf_idx, k)].union(dst_ranks)
-
-                    for buf_idx in buf_indices:
-                        # Mark data as sent and remove it from storage if all targets have received it.
-                        rpc_name = hook_data["rpc_name"]
-                        if rpc_name not in self.__data_sent_rpc_names[(buf_idx, k)]:
-                            self.__data_sent_rpc_names[(buf_idx, k)].append(rpc_name)
-                        if not set(self.data2required_rpc_names[k]).difference(
-                                self.__data_sent_rpc_names[(buf_idx, k)]):
-                            self.__data_owner_storage.pop((buf_idx, k))
-                            self.__data_sent_rpc_names.pop((buf_idx, k))
-                            self.__data_sent_worker_indices.pop((buf_idx, k))
+                            self.__data_sent_worker_indices[buf_idx][k].union(dst_ranks)
 
         # if target in self.__models:
         #     with base.constants.model_scope(target):
@@ -795,7 +790,7 @@ class ModelWorker(worker_base.Worker):
                         xs = split_packed_batch_into_seqs(res, new_seqlens)
                     for buffer_idx, x in zip(buffer_indices, xs):
                         for k, v in x.items():
-                            self.__data_owner_storage[(buffer_idx, k)] = v
+                            self.__data_owner_storage[buffer_idx][k] = v
 
     def __maybe_post_responses(self):
         ready_to_post = []
