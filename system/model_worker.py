@@ -396,9 +396,9 @@ class ModelWorker(worker_base.Worker):
         self.__data_receive_cache: Dict[int, Dict[str, torch.Tensor]] = collections.defaultdict(dict)
 
         self.__data_sent_worker_indices: Dict[int, Dict[str, Set]] = collections.defaultdict(
-            collections.defaultdict(set))
+            lambda: collections.defaultdict(set))
         self.__data_received_worker_indices: Dict[int, Dict[str, Set]] = collections.defaultdict(
-            collections.defaultdict(set))
+            lambda: collections.defaultdict(set))
 
         self.__compute_input_queues = dict(
             train_step=queue.Queue(4),
@@ -427,7 +427,7 @@ class ModelWorker(worker_base.Worker):
             self.__data_transfer_among_workers(hook_data)
             blogger.debug(
                 f"data transfer CPU time: {time.perf_counter() - tik:.4f}s, "
-                f"# remaining data in local storage: {sum([len(x for x in xs if isinstance(x, torch.Tensor) and x.device == self.__device) for xs in self.__data_owner_storage.values()])}, "
+                f"# remaining data in local storage: {sum([len([x for x in xs if isinstance(x, torch.Tensor) and x.device == self.__device]) for xs in self.__data_owner_storage.values()])}, "
                 f"# remaining data in receiver cache: {sum([len(xs) for xs in self.__data_receive_cache.values()])}."
             )
             # torch.cuda.synchronize()
@@ -706,7 +706,7 @@ class ModelWorker(worker_base.Worker):
                             dist.broadcast(buf, src=bcast_src, group=group)
                             vs = buf.clone()
                             for buf_idx in buf_indices:
-                                self.__data_received_worker_indices[(buf_idx, k)].union(dst_ranks)
+                                self.__data_received_worker_indices[buf_idx][k].union(dst_ranks)
                     offset = 0
                     for seqlen, buf_idx in zip(seqlens, buf_indices):
                         shape = _get_shape_from_key_and_seqlen(k, seqlen)
