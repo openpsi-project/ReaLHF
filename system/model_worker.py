@@ -395,7 +395,13 @@ class ModelWorker(worker_base.Worker):
         self.__data_owner_storage = dict()
         # Record which RPCs have received the data.
         # After all RPCs have received the data, remove it from storage.
-        self.__data_send_record = collections.defaultdict(list)
+        self.__data_sent_rpc_names = collections.defaultdict(list)
+        self.__data_received_rpc_names = collections.defaultdict(list)
+
+        self.__data_receive_cache = {}
+
+        self.__data_sent_worker_indices = collections.defaultdict(set)
+        self.__data_received_worker_indices = collections.defaultdict(set)
 
         self.__compute_input_queues = dict(
             train_step=queue.Queue(4),
@@ -422,7 +428,9 @@ class ModelWorker(worker_base.Worker):
             # torch.cuda.synchronize()
             tik = time.perf_counter()
             self.__data_transfer_among_workers(hook_data)
-            blogger.debug(f"data transfer CPU time: {time.perf_counter() - tik:.4f}s")
+            blogger.debug(f"data transfer CPU time: {time.perf_counter() - tik:.4f}s, "
+                          f"# remaining data in local storage: {len(self.__data_owner_storage)}, "
+                          f"# remaining data in receiver cache: {len(self.__data_receive_cache)}.")
             # torch.cuda.synchronize()
         elif hook == "param_sync":
             tik = time.perf_counter()
@@ -462,7 +470,7 @@ class ModelWorker(worker_base.Worker):
             m = self.__unwrapped_models[hook_data["model_name"]]
             assert isinstance(m, FlashMQATModel), type(m)
             m.async_offload()
-            blogger.debug(f"async_offload enqueue CUDA request time: {time.perf_counter() - tik:.4f}s")
+            # blogger.debug(f"async_offload enqueue CUDA request time: {time.perf_counter() - tik:.4f}s")
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
 
@@ -649,20 +657,28 @@ class ModelWorker(worker_base.Worker):
                     )
                     bcast_src = self.__pg_info.data_transfer_src_ranks[group_key]
                     group = self.__pg_info.data_transfer_groups[group_key]
+                    dst_ranks = self.__pg_info.data_transfer_dst_ranks[group_key]
+
                     buf_indices = [global_buffer_indices[_i] for _i in comm_slots]
                     seqlens = [global_seqlens[_i] for _i in comm_slots]
                     if bcast_src == dist.get_rank():
                         vs = torch.cat([self.__data_owner_storage[(buf_idx, k)] for buf_idx in buf_indices], dim=0)
                     else:
-                        total_len = 0
-                        for seqlen in seqlens:
-                            shape = _get_shape_from_key_and_seqlen(k, seqlen)
-                            assert len(shape) == 1, shape
-                            total_len += shape[0]
-                        dtype = _get_dtype_from_key(k)
-                        buf = base.constants.get_global_memory_buffer().get_tensor((total_len, ), dtype, name="data_transfer")
-                        dist.broadcast(buf, src=bcast_src, group=group)
-                        vs = buf.clone()
+                        all_sent_dst_ranks = [self.__data_received_worker_indices[(buf_idx, k)] for buf_idx in buf_indices]
+                        if all(set(dst_ranks).issubset(set(sent_dst_ranks)) for sent_dst_ranks in all_sent_dst_ranks):
+                            vs = torch.cat([self.__data_receive_cache[(buf_idx, k)] for buf_idx in buf_indices], dim=0)
+                        else:
+                            total_len = 0
+                            for seqlen in seqlens:
+                                shape = _get_shape_from_key_and_seqlen(k, seqlen)
+                                assert len(shape) == 1, shape
+                                total_len += shape[0]
+                            dtype = _get_dtype_from_key(k)
+                            buf = base.constants.get_global_memory_buffer().get_tensor((total_len, ), dtype, name="data_transfer")
+                            dist.broadcast(buf, src=bcast_src, group=group)
+                            vs = buf.clone()
+                            for buf_idx in buf_indices:
+                                self.__data_received_worker_indices[(buf_idx, k)].union(dst_ranks)
                     offset = 0
                     for seqlen, buf_idx in zip(seqlens, buf_indices):
                         shape = _get_shape_from_key_and_seqlen(k, seqlen)
@@ -670,8 +686,22 @@ class ModelWorker(worker_base.Worker):
                         v = vs[offset: offset+shape[0]]
                         offset += shape[0]
                         data[k].append(v)
+                        if (buf_idx,k) not in self.__data_owner_storage and (buf_idx, k) not in self.__data_receive_cache:
+                            self.__data_receive_cache[(buf_idx, k)] = v
                         local_buffer_indices.append(buf_idx)
                         local_seqlens.append(seqlen)
+                        
+                        rpc_name = hook_data["rpc_name"]
+                        if rpc_name not in self.__data_received_rpc_names[(buf_idx, k)]:
+                            self.__data_received_rpc_names[(buf_idx, k)].append(rpc_name)
+                        if not set(self.data2required_rpc_names[k]).difference(
+                                self.__data_received_rpc_names[(buf_idx, k)]):
+                            if (buf_idx, k) in self.__data_receive_cache:
+                                self.__data_receive_cache.pop((buf_idx, k))
+                            if (buf_idx, k) in self.__data_received_worker_indices:
+                                self.__data_received_worker_indices.pop((buf_idx, k))
+                            self.__data_received_rpc_names.pop((buf_idx, k))
+
                 if producer_dp_rank == dp_i and producer_is_dp_head:
                     # sender
                     group_key = gpu_utils.DataTransferPair(
@@ -682,18 +712,28 @@ class ModelWorker(worker_base.Worker):
                     )
                     bcast_src = self.__pg_info.data_transfer_src_ranks[group_key]
                     group = self.__pg_info.data_transfer_groups[group_key]
+                    dst_ranks = self.__pg_info.data_transfer_dst_ranks[group_key]
+
                     buf_indices = [global_buffer_indices[_i] for _i in comm_slots]
-                    vs = torch.cat([self.__data_owner_storage[(buf_idx, k)] for buf_idx in buf_indices], dim=0)
-                    dist.broadcast(vs, src=bcast_src, group=group)
+                    all_sent_dst_ranks = [self.__data_sent_worker_indices[(buf_idx, k)] for buf_idx in buf_indices]
+                    if all(set(dst_ranks).issubset(set(sent_dst_ranks)) for sent_dst_ranks in all_sent_dst_ranks):
+                        pass
+                    else:
+                        vs = torch.cat([self.__data_owner_storage[(buf_idx, k)] for buf_idx in buf_indices], dim=0)
+                        dist.broadcast(vs, src=bcast_src, group=group)
+                        for buf_idx in buf_indices:
+                            self.__data_sent_worker_indices[(buf_idx, k)].union(dst_ranks)
+
                     for buf_idx in buf_indices:
                         # Mark data as sent and remove it from storage if all targets have received it.
                         rpc_name = hook_data["rpc_name"]
-                        if rpc_name not in self.__data_send_record[(buf_idx, k)]:
-                            self.__data_send_record[(buf_idx, k)].append(rpc_name)
+                        if rpc_name not in self.__data_sent_rpc_names[(buf_idx, k)]:
+                            self.__data_sent_rpc_names[(buf_idx, k)].append(rpc_name)
                         if not set(self.data2required_rpc_names[k]).difference(
-                                self.__data_send_record[(buf_idx, k)]):
+                                self.__data_sent_rpc_names[(buf_idx, k)]):
                             self.__data_owner_storage.pop((buf_idx, k))
-                            self.__data_send_record.pop((buf_idx, k))
+                            self.__data_sent_rpc_names.pop((buf_idx, k))
+                            self.__data_sent_worker_indices.pop((buf_idx, k))
 
         # if target in self.__models:
         #     with base.constants.model_scope(target):
