@@ -153,12 +153,6 @@ def _get_dtype_from_key(k: str):
     return dtype
 
 
-def _get_tensor_buffer_from_key_and_seqlen(k: str, seqlen: int):
-    shape = _get_shape_from_key_and_seqlen(k, seqlen)
-    dtype = _get_dtype_from_key(k)
-    return base.constants.get_global_memory_buffer().get_tensor(shape, dtype, name="data_transfer")
-
-
 class ModelWorker(worker_base.Worker):
 
     def _configure(self, cfg: config_system.ModelWorker):
@@ -655,15 +649,26 @@ class ModelWorker(worker_base.Worker):
                     )
                     bcast_src = self.__pg_info.data_transfer_src_ranks[group_key]
                     group = self.__pg_info.data_transfer_groups[group_key]
-                    for _i in comm_slots:
-                        buf_idx = global_buffer_indices[_i]
-                        seqlen = global_seqlens[_i]
-                        if bcast_src == dist.get_rank():
-                            v = self.__data_owner_storage[(buf_idx, k)]
-                        else:
-                            buf = _get_tensor_buffer_from_key_and_seqlen(k, seqlen)
-                            dist.broadcast(buf, src=bcast_src, group=group)
-                            v = buf.clone()
+                    buf_indices = [global_buffer_indices[_i] for _i in comm_slots]
+                    seqlens = [global_seqlens[_i] for _i in comm_slots]
+                    if bcast_src == dist.get_rank():
+                        vs = torch.cat([self.__data_owner_storage[(buf_idx, k)] for buf_idx in buf_indices], dim=0)
+                    else:
+                        total_len = 0
+                        for seqlen in seqlens:
+                            shape = _get_shape_from_key_and_seqlen(k, seqlen)
+                            assert len(shape) == 1, shape
+                            total_len += shape[0]
+                        dtype = _get_dtype_from_key(k)
+                        buf = base.constants.get_global_memory_buffer().get_tensor((total_len, ), dtype, name="data_transfer")
+                        dist.broadcast(buf, src=bcast_src, group=group)
+                        vs = buf.clone()
+                    offset = 0
+                    for seqlen, buf_idx in zip(seqlens, buf_indices):
+                        shape = _get_shape_from_key_and_seqlen(k, seqlen)
+                        assert len(shape) == 1, shape
+                        v = vs[offset: offset+shape[0]]
+                        offset += shape[0]
                         data[k].append(v)
                         local_buffer_indices.append(buf_idx)
                         local_seqlens.append(seqlen)
@@ -677,16 +682,10 @@ class ModelWorker(worker_base.Worker):
                     )
                     bcast_src = self.__pg_info.data_transfer_src_ranks[group_key]
                     group = self.__pg_info.data_transfer_groups[group_key]
-                    for _i in comm_slots:
-                        buf_idx = global_buffer_indices[_i]
-                        v = self.__data_owner_storage[(buf_idx, k)]
-                        assert v.dtype == _get_dtype_from_key(k), (k, v.dtype, _get_dtype_from_key(k))
-                        assert v.shape == _get_shape_from_key_and_seqlen(k, global_seqlens[_i]), (
-                            k,
-                            v.shape,
-                            global_seqlens[_i],
-                        )
-                        dist.broadcast(v, src=bcast_src, group=group)
+                    buf_indices = [global_buffer_indices[_i] for _i in comm_slots]
+                    vs = torch.cat([self.__data_owner_storage[(buf_idx, k)] for buf_idx in buf_indices], dim=0)
+                    dist.broadcast(vs, src=bcast_src, group=group)
+                    for buf_idx in buf_indices:
                         # Mark data as sent and remove it from storage if all targets have received it.
                         rpc_name = hook_data["rpc_name"]
                         if rpc_name not in self.__data_send_record[(buf_idx, k)]:
