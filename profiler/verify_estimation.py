@@ -8,10 +8,11 @@ import time
 from profiler.utils import find_factors
 import profiler.estimate
 
-if __name__ == "__main__":
-    date = "20240328"
+
+def verify_compute(date="20240403"):
+    # date = "20240328"
     expr_names = []
-    sizes = [7, 13]  # [7, 13, 34, 70]
+    sizes = [7, 13, 34, 70]
     for size in sizes:
         if size == 7:
             n_nodes = 1
@@ -48,7 +49,17 @@ if __name__ == "__main__":
         r = profiler.estimate.main(args)
         if pr is not None:
             for k, v in pr.items():
-                vv = int(mean(v) * 1e6)
-                if k in r:
-                    rr = int(r[k])
-                    print(f"key {k} pr {vv} r {rr} error {(vv - rr) / vv:.2f}")
+                # vv = int(mean(v) * 1e6)
+                vv = mean(v)
+                print(f"key {k} pr {vv:.2f}")
+                # if k in r:
+                #     rr = int(r[k])
+                #     print(f"key {k} pr {vv} r {rr} error {(vv - rr) / vv:.2f}")
+
+
+def verify_param_sync():
+    pass
+
+
+if __name__ == "__main__":
+    verify_compute()

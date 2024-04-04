@@ -191,26 +191,12 @@ def get_llama7b_flash_config():
     from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 
     # codellama 34b config
-    return FlashMQATConfig(
-        n_layers=80,
-        n_kv_heads=8,
-        head_dim=128,
-        hidden_dim=8192,
-        intermediate_dim=28672,
-        vocab_size=32000,
-        n_positions=4096,
-        activation_function="silu",
-        use_attention_bias=False,
-        layer_norm_type="rms",
-        mlp_type="llama",
-        apply_rotary=True,
-    )
     # return FlashMQATConfig(
-    #     n_layers=20,
-    #     n_kv_heads=32,
+    #     n_layers=80,
+    #     n_kv_heads=8,
     #     head_dim=128,
-    #     hidden_dim=4096,
-    #     intermediate_dim=11008,
+    #     hidden_dim=8192,
+    #     intermediate_dim=28672,
     #     vocab_size=32000,
     #     n_positions=4096,
     #     activation_function="silu",
@@ -219,6 +205,20 @@ def get_llama7b_flash_config():
     #     mlp_type="llama",
     #     apply_rotary=True,
     # )
+    return FlashMQATConfig(
+        n_layers=40,
+        n_kv_heads=32,
+        head_dim=128,
+        hidden_dim=4096,
+        intermediate_dim=11008,
+        vocab_size=32000,
+        n_positions=4096,
+        activation_function="silu",
+        use_attention_bias=False,
+        layer_norm_type="rms",
+        mlp_type="llama",
+        apply_rotary=True,
+    )
 
 
 def get_pytorch_profiler(save_fn: str):

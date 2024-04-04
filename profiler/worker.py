@@ -103,11 +103,11 @@ class ProfileWorker(worker_base.Worker):
         # self.gen_tokens_list = cfg.gen_tokens_list
 
         if self.bs_list is None:
-            self.bs_list = [256, 512]  # total bss
+            self.bs_list = [256, 360, 512, 720, 1024]  # total bss
             if len(self.rpcs) == 1:
                 self.bs_list = [256]
         if self.seq_len_list is None:
-            self.seq_len_list = [128, 256, 512]
+            self.seq_len_list = [128, 256, 512, 768, 1024]
             if len(self.rpcs) == 1:
                 self.seq_len_list = [128]
         # if self.gen_tokens_list is None:
@@ -159,7 +159,7 @@ class ProfileWorker(worker_base.Worker):
         self.__device = torch.device("cuda:0")
 
         self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor,
-                                        args=(self.__pg_info.local_gpu_id, 7200))
+                                        args=(self.__pg_info.local_gpu_id, 20, 7200))
         self.__gpu_util_mp.start()
 
         if self.profile_communication:

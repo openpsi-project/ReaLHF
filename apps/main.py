@@ -93,17 +93,22 @@ def main_start(args):
 
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
-    experiment = config_package.make_experiment(args.experiment_name)
-    sched = scheduler.client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
-
-    setup = experiment.scheduling_setup()
+    import base.constants
+    base.constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
     base_environs = {
         "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
         "WANDB_MODE": args.wandb_mode,
         "DLLM_MODE": args.mode.upper(),
         "DLLM_TRACE": "1" if args.trace else "0",
+        "IS_REMOTE": "1"
     }
+    os.environ["IS_REMOTE"] = "0"
+
+    experiment = config_package.make_experiment(args.experiment_name)
+    sched = scheduler.client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
+
+    setup = experiment.scheduling_setup()
 
     logger.info(f"Resetting name resolving repo...")
 

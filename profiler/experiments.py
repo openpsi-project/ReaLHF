@@ -7,13 +7,11 @@ import numpy as np
 from profiler.utils import find_factors
 
 from api.config.config_base import MODEL_TYPE_TO_PATH
-from api.config.config_flash_model import (get_flash_mqat_model_config, ModelTrainEvalConfig, OptimizerConfig,
-                                           ParallelismConfig)
+from api.config.config_device_mesh import make_train_backend_config, RPCAllocation
+from api.config.config_flash_model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
 from api.config.config_system import *
 from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
 from base.topology import PipeModelDataParallelTopology
-from experiments.autoexp.device_mapping import (_make_inf_backend_config, _make_train_backend_config,
-                                                RPCAllocation)
 
 NUM_GPUS_PER_NODE = 8
 
@@ -165,8 +163,8 @@ class ProfileExperiment(Experiment):
     # use_sequence_parallel: bool = False
     use_gradient_checkpointing: bool = True
 
-    profile_communication: bool = False
-    profile_rpc: bool = True
+    # profile_communication: bool = False
+    # profile_rpc: bool = True
 
     single_rpc_profile: Optional[str] = None
     instruction_sync: bool = False
@@ -220,7 +218,7 @@ class ProfileExperiment(Experiment):
             rpc=rollout,
             mapping=np.ones((self.n_nodes, NUM_GPUS_PER_NODE), dtype=np.int32),
             train_eval_config=ModelTrainEvalConfig(
-                type="llama",
+                type=rollout.model_type._class,
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
                 parallel=self.parallelism_config,
@@ -230,7 +228,7 @@ class ProfileExperiment(Experiment):
             rpc=inf,
             mapping=np.ones((self.n_nodes, NUM_GPUS_PER_NODE), dtype=np.int32),
             train_eval_config=ModelTrainEvalConfig(
-                type="llama",
+                type=inf.model_type._class,
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
                 parallel=self.parallelism_config,
@@ -240,7 +238,7 @@ class ProfileExperiment(Experiment):
             rpc=train,
             mapping=np.ones((self.n_nodes, NUM_GPUS_PER_NODE), dtype=np.int32),
             train_eval_config=ModelTrainEvalConfig(
-                type="llama",
+                type=train.model_type._class,
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
                 gradient_checkpointing=self.use_gradient_checkpointing,
@@ -289,7 +287,7 @@ class ProfileExperiment(Experiment):
             ),
         )
         interface = rpc.interface_impl
-        backend = _make_train_backend_config(m.train_eval_config, instruction_sync=self.instruction_sync)
+        backend = make_train_backend_config(m.train_eval_config, instruction_sync=self.instruction_sync)
 
         profile_workers = [
             ProfileWorker(seed=self.seed,
@@ -328,9 +326,17 @@ def register_profile_experiment(
     actor_model_type = ModelType(model_class, size, False)
     n_nodes = (num_pp * num_mp * num_dp) // NUM_GPUS_PER_NODE
 
-    node_start = 40
-    node_end = node_start + n_nodes - 1
-    nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
+    # node_start = 42
+    # node_end = node_start + n_nodes - 1
+    # nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
+    if size == 7:
+        nodelist = "QH-com42"
+    elif size == 13:
+        nodelist = "QH-com[42-43]"
+    elif size == 34:
+        nodelist = "QH-com[42-45]"
+    elif size == 70:
+        nodelist = "QH-com[29-30,42-47]"
 
     exp_func = functools.partial(
         ProfileExperiment,

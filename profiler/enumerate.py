@@ -1,11 +1,10 @@
 import time
 
 from profiler.device_mesh import *
-from profiler.estimate import *
+from profiler.estimate import estimate_rpc_memory, estimate_rpc_time
 from profiler.experiments import *
 from profiler.rpc import *
 
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 import api.config.dfg
 
 GPU_MEM_CAP = 80 * (1024**3)

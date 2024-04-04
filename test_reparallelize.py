@@ -375,20 +375,21 @@ if __name__ == "__main__":
     err_queue = mp.Queue(100)
 
     for a, b in [(8, 8)]:
-        if a == b:
-            three_factors = decompose_to_three_factors(a)
-            all_configs = []
-            for i in range(len(three_factors)):
-                for j in range(i):
-                    all_configs.append((three_factors[i], three_factors[j]))
-        else:
-            all_configs = list(itertools.product(decompose_to_three_factors(a),
-                                                 decompose_to_three_factors(b)))
-        all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
-        random.shuffle(all_configs)
-        print(f">>>>>>>>> running {len(all_configs)} configurations >>>>>>>")
+        # if a == b:
+        #     three_factors = decompose_to_three_factors(a)
+        #     all_configs = []
+        #     for i in range(len(three_factors)):
+        #         for j in range(i):
+        #             all_configs.append((three_factors[i], three_factors[j]))
+        # else:
+        #     all_configs = list(itertools.product(decompose_to_three_factors(a),
+        #                                          decompose_to_three_factors(b)))
+        # all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
+        # random.shuffle(all_configs)
+        # print(f">>>>>>>>> running {len(all_configs)} configurations >>>>>>>")
+
         # for x1, x2 in all_configs:
-        for x1, x2 in itertools.product([(8, 2, 4)], [(1, 8, 4)]):
+        for x1, x2 in itertools.product([(2, 2, 4)], [(1, 4, 2)]):
             barrier = mp.Barrier(8)
             if args.node_idx == args.num_nodes - 1:
                 clear_name_resolve()

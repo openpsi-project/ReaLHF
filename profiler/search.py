@@ -1,20 +1,22 @@
 from typing import Dict, List, Optional
+import os
 import pickle
 
 from profiler.device_mesh import DeviceMesh, make_device_mesh_from_name, ModelParallelStrategy
 from profiler.enumerate import build_graph, enumerate_rpc_executions
 from profiler.estimate import (comm_stats, estimate_model_size, estimate_rpc_memory, estimate_rpc_time,
                                load_model_config)
-from profiler.experiments import ppo_rpcs_example, ProfileExperiment
+from profiler.experiments import ppo_rpcs_example
+from profiler.profile_layers import profile_rpcs
 from profiler.rpc import RPC, RPCExecution
 import profiler.cppsearch.mdm_search as mdm_search
 
 from api.config.config_base import MODEL_TYPE_TO_PATH
-# from experiments.autoexp.device_mapping import RPCAllocation
 from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from api.config.config_flash_model import ModelTrainEvalConfig, OptimizerConfig
 from api.config.dfg import ModelName, ModelRPC, OffloadHook, SyncParamHook
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+import base.constants
 
 
 def optimal_device_mapping(
@@ -22,7 +24,20 @@ def optimal_device_mapping(
     model_rpcs: List[ModelRPC],
     model_configs: Dict[str, FlashMQATConfig],
     nodelist: Optional[str] = None,
+    profile_layers: bool = False,
 ) -> Dict[str, RPCAllocation]:
+    from_file = os.environ["IS_REMOTE"] == "1"
+    dump_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
+                            base.constants.trial_name(), "device_mapping.pkl")
+
+    if from_file:
+        with open(dump_dir, "rb") as f:
+            return pickle.load(f)
+
+    # profile layers for each model type
+    if profile_layers:
+        profile_rpcs(model_rpcs)
+
     # hack, only suitable for configs in experiments/autoexp/auto_ppo.py
     rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
     actor_train.pre_hooks.append(SyncParamHook(source=ModelName("actor", 0)))
@@ -34,12 +49,12 @@ def optimal_device_mapping(
     rew_inf.post_hooks.append(OffloadHook())
     ref_inf.post_hooks.append(OffloadHook())
 
-    device_mesh = make_device_mesh_from_name(nodelist)
+    search_device_mesh = make_device_mesh_from_name(nodelist)
 
-    rpc_exe_list = make_rpc_exe_list(model_rpcs, device_mesh, if_print=True)
+    rpc_exe_list = make_rpc_exe_list(model_rpcs, search_device_mesh, if_print=True)
     rpc_list = make_rpc_list(model_rpcs, if_print=True)
     graph = build_graph(model_rpcs, 5, 2, if_print=True)
-    comm_stats_ = comm_stats(None, if_print=True)
+    comm_stats_ = comm_stats(if_print=True)
     model_size_dict = make_model_size_dict(model_rpcs, if_print=True)
 
     rpc_dict = {rpc.name: rpc for rpc in model_rpcs}
@@ -53,7 +68,7 @@ def optimal_device_mapping(
         0.01,  # beta min
         0.03,  # beta max
         0.01,  # beta step
-        10  # time limit for each search
+        30  # time limit for each search
     )
     # print(r)
 
@@ -71,6 +86,7 @@ def optimal_device_mapping(
         gradient_checkpointing = rpc.interface_type == "train_step"
         optim_config = OptimizerConfig(type="adam", offload=False)\
             if rpc.interface_type == "train_step" else OptimizerConfig()
+        # print(alloc_info["device_mesh"])
         sub_device_mesh = make_device_mesh_from_name(alloc_info["device_mesh"])
         train_eval_config = ModelTrainEvalConfig(
             type=rpc.model_type._class,
@@ -81,13 +97,18 @@ def optimal_device_mapping(
             optimizer=optim_config,
         )
         rpc_alloc = sub_device_mesh.to_config(
-            device_mesh=device_mesh,
+            device_mesh=search_device_mesh,
             train_eval_config=train_eval_config,
             rpc=rpc_dict[rpc_name],
         )
         # print(f"{rpc_name}: mapping: {rpc_alloc.mapping}, "
         #       f" parallel: {parallel_config}")
-        rpc_alloc_dict = {rpc_name: rpc_alloc}
+        rpc_alloc_dict[rpc_name] = rpc_alloc
+
+    if not from_file:
+        os.makedirs(os.path.dirname(dump_dir), exist_ok=True)
+        with open(dump_dir, "wb") as f:
+            pickle.dump(rpc_alloc_dict, f)
 
     return rpc_alloc_dict
 
@@ -144,7 +165,7 @@ def search_model_device_mappings(rpcs: List[ModelRPC], device_mesh: DeviceMesh, 
     rpc_exe_list = make_rpc_exe_list(rpcs, device_mesh)
     rpc_list = make_rpc_list(rpcs)
     graph = build_graph(rpcs, 5, 2)
-    comm_stats_ = comm_stats(None)
+    comm_stats_ = comm_stats()
     model_size_dict = make_model_size_dict(rpcs)
 
     if method == "mcmc":
@@ -159,7 +180,7 @@ def dump_search_settings(rpcs: List[ModelRPC], device_mesh: DeviceMesh):
     rpc_exe_list = make_rpc_exe_list(rpcs, device_mesh, if_print=True)
     rpc_list = make_rpc_list(rpcs, if_print=True)
     graph = build_graph(rpcs, 5, 2, if_print=True)
-    comm_stats_ = comm_stats(None, if_print=True)
+    comm_stats_ = comm_stats(if_print=True)
     model_size_dict = make_model_size_dict(rpcs, if_print=True)
 
     dump_dir = "/home/meizy/model_device_mapping_search/test_case/"
@@ -198,16 +219,13 @@ def print_model_device_mapping_by_index(rpcs: List[ModelRPC], device_mesh: Devic
 
 
 if __name__ == "__main__":
-    # exp = ProfileExperiment()
-    size = 34
-    n_nodes = 4
-    node_start = 40
+    size = 13
+    n_nodes = 2
+    node_start = 42
     node_end = node_start + n_nodes - 1
     nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
     rpcs = ppo_rpcs_example(size)
     device_mesh = make_device_mesh_from_name(nodelist)
-    # handpick_model_device_mapping(exp)
-    # search_model_device_mappings(exp)ModelInterfaceType
     # dump_search_settings(rpcs, device_mesh)
     optimal_device_mapping(None, rpcs, None, nodelist)
 

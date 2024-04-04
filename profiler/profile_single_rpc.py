@@ -8,7 +8,7 @@ from profiler.utils import find_factors
 if __name__ == "__main__":
     date = datetime.datetime.now().strftime("%Y%m%d")
     expr_names = []
-    sizes = [7, 13, 70]  # [7, 13, 34, 70]
+    sizes = [7, 13, 34, 70]
     for size in sizes:
         if size == 7:
             n_nodes = 1

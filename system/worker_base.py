@@ -589,7 +589,7 @@ class Worker:
                 if not self.__is_configured:
                     raise RuntimeError("Worker is not configured")
                 if not self.__tracer_launched:
-                    self.logger.info("Launching tracer ... ")
+                    # self.logger.info("Launching tracer ... ")
                     self.__tracer.start()
                     self.__tracer_launched = True
                     self.__tracer.save()
@@ -614,7 +614,7 @@ class Worker:
                     else:
                         self.__last_update_ns = now
                 if self.__tracer_save_freqctrl.check():
-                    self.logger.info("Tracer Save ... ")
+                    # self.logger.info("Tracer Save ... ")
                     self.__tracer.save()
         except KeyboardInterrupt:
             self.exit()

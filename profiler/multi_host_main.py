@@ -6,7 +6,6 @@ import re
 
 import profiler.experiments
 
-from apps.main import _submit_workers
 import api.config.config_system as config_package
 import base.logging as logging
 import base.name_resolve
@@ -20,6 +19,64 @@ CONTROLLER_TIME_LIMIT = None
 TRACE_TIMEOUT = (
     500  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
 )
+
+
+def _submit_workers(
+    sched: scheduler.client.SchedulerClient,
+    expr_name: str,
+    trial_name: str,
+    debug: bool,
+    worker_type: str,
+    scheduling_configs: List[config_package.TasksGroup],
+    environs: Dict[str, str],
+    image_name: Optional[str] = None,
+    use_ray_cluster: bool = False,
+) -> List[str]:
+    if len(scheduling_configs) == 0:
+        return []
+
+    scheduled_jobs = []
+    for sch_cfg in scheduling_configs:
+        job_environs = {**environs, **sch_cfg.scheduling.env_vars}
+        if use_ray_cluster:
+            cmd = scheduler.client.ray_cluster_cmd(
+                expr_name,
+                trial_name,
+                worker_type=worker_type,
+            )
+        else:
+            cmd = scheduler.client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
+
+        logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
+
+        nodelist = sch_cfg.scheduling.nodelist
+        exclude = sch_cfg.scheduling.exclude
+        node_type = sch_cfg.scheduling.node_type
+        container_image = image_name or sch_cfg.scheduling.container_image
+        if use_ray_cluster:
+            worker_type = f"rc_{worker_type}"
+
+        scheduled_jobs.append(
+            sched.submit_array(
+                worker_type=worker_type,
+                cmd=cmd,
+                count=sch_cfg.count,
+                cpu=sch_cfg.scheduling.cpu,
+                gpu=sch_cfg.scheduling.gpu,
+                gpu_type=sch_cfg.scheduling.gpu_type,
+                mem=sch_cfg.scheduling.mem,
+                container_image=container_image,
+                node_type=node_type,
+                nodelist=nodelist,
+                exclude=exclude,
+                env_vars=job_environs,
+                hostfile=True,
+                multiprog=True,
+                begin=sch_cfg.scheduling.begin,
+                deadline=sch_cfg.scheduling.deadline,
+                time_limit=sch_cfg.scheduling.time_limit,
+            ),)
+    return scheduled_jobs
 
 
 def main(args, if_raise=True):

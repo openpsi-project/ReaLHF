@@ -13,10 +13,12 @@ def random_sample(bs, seq_len, vocab_size):
     data = base.namedarray.NamedArray(
         packed_input_ids=packed_input_ids,
         cu_seqlens=cu_seqlens,
-        prompts=input_ids,
+        # prompts=input_ids,
         prompt_mask=prompt_mask.bool(),
-        prompt_att_mask=attention_mask,
+        # prompt_att_mask=attention_mask,
     )
+    seqlens_cpu = [seq_len for _ in range(bs)]
+    data.register_metadata(seqlens=seqlens_cpu)
     return data
 
 

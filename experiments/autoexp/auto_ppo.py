@@ -24,16 +24,16 @@ def register_auto_ppo_experiment(
     assert size in [7, 13, 34, 70]
     if size == 7:
         n_nodes = 1
-        nodelist = "QH-com13"
+        nodelist = "QH-com20"
     elif size == 13:
         n_nodes = 2
-        nodelist = "QH-com[17-18]"
+        nodelist = "QH-com[25-26]"
     elif size == 34:
         n_nodes = 4
-        nodelist = "QH-com[27-29,40]"
+        nodelist = "QH-com[20-23]"
     elif size == 70:
         n_nodes = 8
-        nodelist = "QH-com[13-20]"
+        nodelist = "QH-com[20-27]"
 
     model_class = "llama" if size != 34 else "codellama"
 
@@ -126,6 +126,7 @@ def register_auto_ppo_experiment(
                     balanced_dp=True,
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
+                    max_n_tokens=gen_bs * seqlen,
                 ),
                 ModelRPC(
                     model_name="reward",
@@ -138,6 +139,7 @@ def register_auto_ppo_experiment(
                     output_key_remap={"scores": "rewards"},
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
+                    max_n_tokens=gen_bs * seqlen * 2,
                 ),
                 ModelRPC(
                     model_name="ref",
@@ -152,6 +154,7 @@ def register_auto_ppo_experiment(
                     output_key_remap={"logprobs": "packed_ref_logprobs"},
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
+                    max_n_tokens=gen_bs * 2 * seqlen,
                 ),
                 ModelRPC(
                     model_name="critic",
@@ -163,6 +166,7 @@ def register_auto_ppo_experiment(
                     output_key_remap={"scores": "values"},
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
+                    max_n_tokens=gen_bs * 2 * seqlen,
                 ),
                 ModelRPC(
                     model_name="actor",
@@ -184,6 +188,7 @@ def register_auto_ppo_experiment(
                     min_n_seqs=train_bs,
                     max_n_seqs=train_bs,
                     balanced_dp=True,
+                    max_n_tokens=train_bs * 2 * seqlen,
                 ),
                 ModelRPC(
                     model_name="critic",
@@ -205,6 +210,7 @@ def register_auto_ppo_experiment(
                     min_n_seqs=train_bs,
                     max_n_seqs=train_bs,
                     balanced_dp=True,
+                    max_n_tokens=train_bs * 2 * seqlen,
                 ),
             ]
 

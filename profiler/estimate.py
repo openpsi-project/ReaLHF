@@ -18,8 +18,8 @@ from profiler.rpc import CommStats
 from profiler.utils import make_stats_key
 
 from api.config.config_base import MODEL_TYPE_TO_PATH
+from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from api.config.dfg import ModelInterfaceType
-from experiments.autoexp.device_mapping import RPCAllocation
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 import api.config.config_system as config_package
@@ -255,10 +255,27 @@ def estimate_rpc_time(rpc: ModelRPC,
                               n_ppo_minibatches=n_ppo_minibatches)
 
 
-def comm_stats(exp: ProfileExperiment, if_print=False):
-    comm_stats_path = os.path.join(PROFILE_RESULT_PATH, "default_comm")
-    comm_stats = parse_comm_stats_files(comm_stats_path)
-    r = CommStats(**comm_stats)
+# def comm_stats(exp: ProfileExperiment, if_print=False):
+#     comm_stats_path = os.path.join(PROFILE_RESULT_PATH, "default_comm")
+#     comm_stats = parse_comm_stats_files(comm_stats_path)
+#     r = CommStats(**comm_stats)
+#     if if_print:
+#         print(r)
+#     return r
+
+
+def comm_stats(if_print=False):
+    # use default comm stats of cluster
+    r = CommStats(
+        # between GPUs on the same node
+        local_send=170000,  # unit: bytes per micro seconds, 170 GB/s
+        local_recv=170000,
+        # IB between GPUs on different nodes
+        remote_send=20000,  # unit: bytes per micro seconds 20 GB/s
+        remote_recv=20000,
+        offload_store=0,  # not used
+        offload_load=0,  # not used
+    )
     if if_print:
         print(r)
     return r

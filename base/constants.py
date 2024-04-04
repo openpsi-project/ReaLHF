@@ -140,7 +140,7 @@ def dataset_max_seqlen() -> int:
 
 
 def has_model_name(name: str) -> bool:
-    return name in _grids
+    return name in _grids and _grids[name].global_rank != -1
 
 
 def model_name():

@@ -10,6 +10,7 @@ import tqdm
 
 from profiler.engine import ProfileEngine
 
+from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
@@ -46,35 +47,49 @@ def compute_packed_sft_loss(
 
 
 class ProfileInterface(api.model.ModelInterface):
+    n_minibatches: int = 4
 
     def train_step(self, model: api.model.Model, data: NamedArray) -> Dict:
-        data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_input_ids: torch.Tensor = data['packed_input_ids']  # shape [tot_seqlen]
-        cu_seqlens: torch.Tensor = data['cu_seqlens']
-        prompt_mask: torch.BoolTensor = data['prompt_mask']  # shape [tot_seqlen]
         module: deepspeed.DeepSpeedEngine = model.module
-        max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+        data = recursive_apply(data, lambda x: x.to(model.device))
+        datas = PackedParallelDataBroker.scatter_to(data,
+                                                    self.n_minibatches,
+                                                    min_size=2 * base.constants.pipe_parallel_world_size())
+        offset = 0
+        batch_seqlens = data.metadata['seqlens']
 
-        module.train()
+        for d in datas:
+            packed_input_ids: torch.Tensor = d['packed_input_ids']  # shape [tot_seqlen]
+            cu_seqlens: torch.Tensor = d['cu_seqlens']
+            prompt_mask: torch.BoolTensor = d['prompt_mask']  # shape [tot_seqlen]
+            input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+            seqlens = batch_seqlens[offset:offset + input_lens.shape[0]]
+            offset += input_lens.shape[0]
 
-        loss_fn_kwargs = dict(
-            prompt_mask=prompt_mask,
-            input_lens=cu_seqlens[1:] -
-            cu_seqlens[:-1],  # this is used to partition other loss_fn_kwargs into microbatches
-        )
-        if isinstance(module, DeepSpeedPipelineEngine):
-            loss, _ = module.train_batch(
-                packed_input_ids=packed_input_ids,
-                cu_seqlens=cu_seqlens,
-                loss_fn=compute_packed_sft_loss,
-                num_micro_batches=2 * base.constants.pipe_parallel_world_size(),
-                **loss_fn_kwargs,
+            module.train()
+
+            loss_fn_kwargs = dict(
+                prompt_mask=prompt_mask,
+                input_lens=cu_seqlens[1:] -
+                cu_seqlens[:-1],  # this is used to partition other loss_fn_kwargs into microbatches
             )
-        else:
-            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
-            module.backward(loss)
-            module.step()
+            if isinstance(module, DeepSpeedPipelineEngine):
+                loss, _ = module.train_batch(
+                    seqlens_cpu=seqlens,
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    loss_fn=compute_packed_sft_loss,
+                    num_micro_batches=2 * base.constants.pipe_parallel_world_size(),
+                    **loss_fn_kwargs,
+                )
+            else:
+                logits = module(packed_input_ids=packed_input_ids,
+                                cu_seqlens=cu_seqlens,
+                                max_seqlen=max_seqlen)
+                loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
+                module.backward(loss)
+                module.step()
 
         cur_epoch = model.version.epoch
         model.inc_version()
@@ -99,7 +114,8 @@ class ProfileInterface(api.model.ModelInterface):
         max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            logits = module.forward(packed_input_ids=packed_input_ids,
+            logits = module.forward(seqlens_cpu=data.metadata['seqlens'],
+                                    packed_input_ids=packed_input_ids,
                                     cu_seqlens=cu_seqlens,
                                     num_micro_batches=base.constants.pipe_parallel_world_size())
         else:
@@ -119,7 +135,8 @@ class ProfileInterface(api.model.ModelInterface):
         gconfig = GenerationConfig(min_new_tokens=gen_tokens, max_new_tokens=gen_tokens)
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            res = module.generate(tokenizer=model.tokenizer,
+            res = module.generate(seqlens_cpu=data.metadata['seqlens'],
+                                  tokenizer=model.tokenizer,
                                   packed_input_ids=data['packed_input_ids'],
                                   cu_seqlens=data['cu_seqlens'],
                                   gconfig=gconfig,

@@ -3,9 +3,9 @@ import dataclasses
 
 import numpy as np
 
+from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from api.config.config_flash_model import ModelTrainEvalConfig, ParallelismConfig
 from api.config.dfg import ModelRPC
-from experiments.autoexp.device_mapping import ClusterDeviceMesh, RPCAllocation
 
 
 @dataclasses.dataclass
@@ -76,6 +76,7 @@ class DeviceMesh:
         assert device_mesh.n_gpus_per_node == 8
         mapping = np.zeros((device_mesh.n_nodes, device_mesh.n_gpus_per_node), dtype=np.int32)
 
+        # print(device_mesh.node_names, self.node_names)
         node_indices = [device_mesh.node_names.index(node_name) for node_name in self.node_names]
         gpu_indices = self.gpu_ids
 
@@ -129,7 +130,7 @@ def parse_node_id(node_name: str) -> int:
 def parse_slurm_nodelist(nodelist: str) -> List[str]:
     nodelist = nodelist.replace("QH-com", "")
     if "[" not in nodelist:
-        return [nodelist]
+        return ["QH-com" + nodelist]
     else:
         nodelist = nodelist.strip("[]")
         node_ids = []
