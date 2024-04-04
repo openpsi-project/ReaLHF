@@ -10,12 +10,10 @@ from tests.utils import clear_name_resolve, init_global_constants, MODEL_NAME, s
 
 def main(rank, world_size, args):
     import base.constants
+    device = setup_gpu(rank, world_size)
+    init_global_constants(1, world_size, 1)
+
     with base.constants.model_scope(MODEL_NAME):
-        device = setup_gpu(rank, world_size)
-        init_global_constants(1, world_size, 1)
-
-        # device = "cpu"
-
         from profiler.layers import make_profile_layers
         profile_layers = make_profile_layers(device, args.model_path, args.model_name,
                                              args.use_sequence_parallel and world_size > 1,

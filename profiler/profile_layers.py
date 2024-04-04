@@ -14,6 +14,9 @@ import scheduler.client
 
 
 def profile_model_type(model_type: ModelType):
+    if model_type.is_critic:
+        return
+
     model_path = MODEL_TYPE_TO_PATH[model_type]
 
     base_environs = {
@@ -32,7 +35,7 @@ def profile_model_type(model_type: ModelType):
                f"--model_path {model_path} --model_name {model_type} "\
                f"--batch_size_list {batch_size_list} --seq_len_list {seq_len_list}"
 
-    bs_list = [16, 32, 64, 128] * 3
+    bs_list = [8, 16, 32, 64, 128] * 3
     sl_list = [128] * 4 + [256] * 4 + [512] * 4
 
     print(f"Profiling {model_type} layers, model path {model_path}, "
@@ -76,6 +79,14 @@ def profile(args):
     profile_model_type(model_type)
 
 
+def profile_all_model_types():
+    sizes = [70, 34, 13, 7]
+    for size in sizes:
+        _class = "llama" if size != 34 else "codellama"
+        model_type = ModelType(_class=_class, size=size, is_critic=False)
+        profile_model_type(model_type)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a profiling experiment.")
     parser.add_argument(
@@ -92,4 +103,7 @@ if __name__ == "__main__":
     # )
     args = parser.parse_args()
 
-    profile(args)
+    if args.expr_name is None:
+        profile_all_model_types()
+    else:
+        profile(args)

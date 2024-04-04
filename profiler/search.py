@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional
+import argparse
 import os
 import pickle
 
@@ -14,8 +15,9 @@ import profiler.cppsearch.mdm_search as mdm_search
 from api.config.config_base import MODEL_TYPE_TO_PATH
 from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from api.config.config_flash_model import ModelTrainEvalConfig, OptimizerConfig
-from api.config.dfg import ModelName, ModelRPC, OffloadHook, SyncParamHook
+from api.config.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+import api.config.config_system as config_package
 import base.constants
 
 
@@ -25,6 +27,7 @@ def optimal_device_mapping(
     model_configs: Dict[str, FlashMQATConfig],
     nodelist: Optional[str] = None,
     profile_layers: bool = False,
+    top_k: int = 10,
 ) -> Dict[str, RPCAllocation]:
     from_file = os.environ["IS_REMOTE"] == "1"
     dump_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
@@ -39,15 +42,15 @@ def optimal_device_mapping(
         profile_rpcs(model_rpcs)
 
     # hack, only suitable for configs in experiments/autoexp/auto_ppo.py
-    rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
-    actor_train.pre_hooks.append(SyncParamHook(source=ModelName("actor", 0)))
-    actor_train.model_name = ModelName("actor", 1)
-    actor_train.post_hooks.append(SyncParamHook(target=ModelName("actor", 0)))
-    critic_train.pre_hooks.append(SyncParamHook(source=ModelName("critic", 0)))
-    critic_train.model_name = ModelName("critic", 1)
-    critic_train.post_hooks.append(SyncParamHook(target=ModelName("critic", 0)))
-    rew_inf.post_hooks.append(OffloadHook())
-    ref_inf.post_hooks.append(OffloadHook())
+    # rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
+    # actor_train.pre_hooks.append(SyncParamHook(source=ModelName("actor", 0)))
+    # actor_train.model_name = ModelName("actor", 1)
+    # actor_train.post_hooks.append(SyncParamHook(target=ModelName("actor", 0)))
+    # critic_train.pre_hooks.append(SyncParamHook(source=ModelName("critic", 0)))
+    # critic_train.model_name = ModelName("critic", 1)
+    # critic_train.post_hooks.append(SyncParamHook(target=ModelName("critic", 0)))
+    # rew_inf.post_hooks.append(OffloadHook())
+    # ref_inf.post_hooks.append(OffloadHook())
 
     search_device_mesh = make_device_mesh_from_name(nodelist)
 
@@ -57,7 +60,7 @@ def optimal_device_mapping(
     comm_stats_ = comm_stats(if_print=True)
     model_size_dict = make_model_size_dict(model_rpcs, if_print=True)
 
-    rpc_dict = {rpc.name: rpc for rpc in model_rpcs}
+    # rpc_dict = {rpc.name: rpc for rpc in model_rpcs}
 
     r: Dict[str, List] = mdm_search.multi_mcmc_search(
         rpc_list,
@@ -72,6 +75,34 @@ def optimal_device_mapping(
     )
     # print(r)
 
+    # hack, only suitable for configs in experiments/autoexp/auto_ppo.py
+    rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
+    rollout_topo = tuple(r[rollout.name].values())
+    actor_train_topo = tuple(r[actor_train.name].values())
+    old_name = actor_train.name
+    optim_model_name = []
+    if rollout_topo != actor_train_topo:
+        actor_train.pre_hooks.append(SyncParamHook(source=ModelName("actor", 0)))
+        actor_train.model_name = ModelName("actor", 1)
+        actor_train.post_hooks.append(SyncParamHook(target=ModelName("actor", 0)))
+        r[actor_train.name] = r.pop(old_name)
+
+    critic_inf_topo = tuple(r[critic_inf.name].values())
+    critic_train_topo = tuple(r[critic_train.name].values())
+    old_name = critic_train.name
+    if critic_inf_topo != critic_train_topo:
+        critic_train.pre_hooks.append(SyncParamHook(source=ModelName("critic", 0)))
+        critic_train.model_name = ModelName("critic", 1)
+        critic_train.post_hooks.append(SyncParamHook(target=ModelName("critic", 0)))
+        r[critic_train.name] = r.pop(old_name)
+
+    rew_inf.post_hooks.append(OffloadHook())
+    ref_inf.post_hooks.append(OffloadHook())
+
+    rpc_dict = {rpc.name: rpc for rpc in model_rpcs}
+    # import pprint
+    # pprint.pprint(rpc_dict)
+
     rpc_alloc_dict = {}
     for rpc_name, alloc_info in r.items():
         rpc = rpc_dict[rpc_name]
@@ -83,9 +114,13 @@ def optimal_device_mapping(
         use_sequence_parallel = False\
             if rpc.model_name.role in ["reward", "ref"] else (ps.num_mp > 1)
         parallel_config = ps.to_config(use_sequence_parallel=use_sequence_parallel,)
-        gradient_checkpointing = rpc.interface_type == "train_step"
-        optim_config = OptimizerConfig(type="adam", offload=False)\
-            if rpc.interface_type == "train_step" else OptimizerConfig()
+        gradient_checkpointing = True
+        if rpc.model_name in [actor_train.model_name, critic_train.model_name]:
+            optim_config = OptimizerConfig(type="adam", offload=False)
+        else:
+            optim_config = OptimizerConfig()
+        # optim_config = OptimizerConfig(type="adam", offload=False)\
+        #     if rpc.interface_type == ModelInterfaceType.TRAIN_STEP else OptimizerConfig()
         # print(alloc_info["device_mesh"])
         sub_device_mesh = make_device_mesh_from_name(alloc_info["device_mesh"])
         train_eval_config = ModelTrainEvalConfig(
@@ -219,15 +254,21 @@ def print_model_device_mapping_by_index(rpcs: List[ModelRPC], device_mesh: Devic
 
 
 if __name__ == "__main__":
-    size = 13
-    n_nodes = 2
-    node_start = 42
-    node_end = node_start + n_nodes - 1
-    nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
-    rpcs = ppo_rpcs_example(size)
-    device_mesh = make_device_mesh_from_name(nodelist)
-    # dump_search_settings(rpcs, device_mesh)
-    optimal_device_mapping(None, rpcs, None, nodelist)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--expr_name", type=str)
+    args = parser.parse_args()
+
+    experiment = config_package.make_experiment(args.expr_name)
+
+    # size = 13
+    # n_nodes = 2
+    # node_start = 42
+    # node_end = node_start + n_nodes - 1
+    # nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
+    # rpcs = ppo_rpcs_example(size)
+    # device_mesh = make_device_mesh_from_name(nodelist)
+    # # dump_search_settings(rpcs, device_mesh)
+    # optimal_device_mapping(None, rpcs, None, nodelist)
 
     # 7b 13b 2x8:
     # [0, 2, 2, 1, 11, 3, ]

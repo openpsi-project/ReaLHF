@@ -152,7 +152,8 @@ def make_device_mesh_from_name(name: str):
                           n_nodes=1,
                           n_gpus=len(gpu_ids),
                           node_names=[node_name],
-                          gpu_ids=gpu_ids)
+                          gpu_ids=gpu_ids,
+                          n_gpus_per_node=len(gpu_ids))
     else:
         node_names = parse_slurm_nodelist(name)
         n_nodes = len(node_names)
@@ -160,7 +161,8 @@ def make_device_mesh_from_name(name: str):
                           n_nodes=n_nodes,
                           n_gpus=n_nodes * 8,
                           node_names=node_names,
-                          gpu_ids=list(range(8)))
+                          gpu_ids=list(range(8)),
+                          n_gpus_per_node=8)
 
 
 def slurm_nodelist_from_nodes(nodes: List[str]) -> str:
@@ -190,52 +192,62 @@ def find_sub_device_meshes(device_mesh: DeviceMesh) -> List[DeviceMesh]:
     # In full device mesh NXM (M=8), sub-device mesh for models can only be 1x1, 1x2, 1x4, 1x8
     # or nx8 where n <= N, and in the same mesh, nodes should be consecutive
     # sub device meshes of single node device_mesh
+    # this function only supports finding sub device meshes of integer number of nodes
+    assert device_mesh.n_gpus_per_node == 8
     if device_mesh.n_nodes == 1:
-        if device_mesh.n_gpus == 1:
-            return [device_mesh]
-        elif device_mesh.n_gpus == 2:
-            return [
-                DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:{gpu_id}",
-                           n_nodes=1,
-                           n_gpus=1,
-                           node_names=device_mesh.node_names,
-                           gpu_ids=[gpu_id]) for gpu_id in device_mesh.gpu_ids
-            ] + [device_mesh]
-        elif device_mesh.n_gpus == 4:
-            return [
-                DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:{gpu_id},{gpu_id+1}",
-                           n_nodes=1,
-                           n_gpus=2,
-                           node_names=device_mesh.node_names,
-                           gpu_ids=[gpu_id, gpu_id + 1]) for gpu_id in device_mesh.gpu_ids[:-1]
-            ] + [
-                DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:{gpu_id}",
-                           n_nodes=1,
-                           n_gpus=1,
-                           node_names=device_mesh.node_names,
-                           gpu_ids=[gpu_id]) for gpu_id in device_mesh.gpu_ids
-            ] + [device_mesh]
-        elif device_mesh.n_gpus == 8:
-            return [
-                DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:"
-                           f"{gpu_id},{gpu_id+1},{gpu_id+2},{gpu_id+3}",
-                           n_nodes=1,
-                           n_gpus=4,
-                           node_names=device_mesh.node_names,
-                           gpu_ids=[gpu_id + i for i in range(4)]) for gpu_id in list(range(8))[:-3]
-            ] + [
-                DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:{gpu_id},{gpu_id+1}",
-                           n_nodes=1,
-                           n_gpus=2,
-                           node_names=device_mesh.node_names,
-                           gpu_ids=[gpu_id, gpu_id + 1]) for gpu_id in device_mesh.gpu_ids[:-1]
-            ] + [
-                DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:{gpu_id}",
-                           n_nodes=1,
-                           n_gpus=1,
-                           node_names=device_mesh.node_names,
-                           gpu_ids=[gpu_id]) for gpu_id in device_mesh.gpu_ids
-            ] + [device_mesh]
+        return [
+            DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:"
+                       f"{gpu_id},{gpu_id+1},{gpu_id+2},{gpu_id+3}",
+                       n_nodes=1,
+                       n_gpus=4,
+                       node_names=device_mesh.node_names,
+                       gpu_ids=[gpu_id + i for i in range(4)]) for gpu_id in [0, 4]
+        ] + [device_mesh]
+    # if device_mesh.n_gpus == 1:
+    #     return [device_mesh]
+    # elif device_mesh.n_gpus == 2:
+    #     return [
+    #         DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:{gpu_id}",
+    #                    n_nodes=1,
+    #                    n_gpus=1,
+    #                    node_names=device_mesh.node_names,
+    #                    gpu_ids=[gpu_id]) for gpu_id in device_mesh.gpu_ids
+    #     ] + [device_mesh]
+    # elif device_mesh.n_gpus == 4:
+    #     return [
+    #         DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:{gpu_id},{gpu_id+1}",
+    #                    n_nodes=1,
+    #                    n_gpus=2,
+    #                    node_names=device_mesh.node_names,
+    #                    gpu_ids=[gpu_id, gpu_id + 1]) for gpu_id in device_mesh.gpu_ids[:-1]
+    #     ] + [
+    #         DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:{gpu_id}",
+    #                    n_nodes=1,
+    #                    n_gpus=1,
+    #                    node_names=device_mesh.node_names,
+    #                    gpu_ids=[gpu_id]) for gpu_id in device_mesh.gpu_ids
+    #     ] + [device_mesh]
+    # elif device_mesh.n_gpus == 8:
+    #     return [
+    #         DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:"
+    #                     f"{gpu_id},{gpu_id+1},{gpu_id+2},{gpu_id+3}",
+    #                     n_nodes=1,
+    #                     n_gpus=4,
+    #                     node_names=device_mesh.node_names,
+    #                     gpu_ids=[gpu_id + i for i in range(4)]) for gpu_id in [0, 4]
+    #     ] + [
+    #         DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:{gpu_id},{gpu_id+1}",
+    #                     n_nodes=1,
+    #                     n_gpus=2,
+    #                     node_names=device_mesh.node_names,
+    #                     gpu_ids=[gpu_id, gpu_id + 1]) for gpu_id in [0, 2, 4, 6]
+    #     ] + [
+    #         DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:{gpu_id}",
+    #                     n_nodes=1,
+    #                     n_gpus=1,
+    #                     node_names=device_mesh.node_names,
+    #                     gpu_ids=[gpu_id]) for gpu_id in device_mesh.gpu_ids
+    #     ] + [device_mesh]
 
     # single node meshes
     res = []
@@ -276,7 +288,7 @@ def find_parallel_strategies(device_mesh: DeviceMesh) -> List[ModelParallelStrat
                 num_dp_mp = n_gpus // num_pp
                 valid = True
                 if num_dp_mp >= 8:
-                    valid = num_dp_mp % 8 == 0
+                    valid = False
                 else:
                     valid = 8 % num_dp_mp == 0
                 if num_dp_pp % num_pp == 0 and valid:

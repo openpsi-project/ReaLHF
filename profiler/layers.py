@@ -37,7 +37,7 @@ def make_layers(config: FlashMQATConfig, dtype, device):
             output_layernorm=(i == 1),
             dtype=dtype,
             device=device,
-        ) for i in range(2)
+        ) for i in range(1)
     ]
 
     # if config.is_critic and config.sequence_parallel:
@@ -68,7 +68,8 @@ def make_layers(config: FlashMQATConfig, dtype, device):
         dtype=dtype,
     )
 
-    layer_names = ["embedding_layer", "flash_mqat_block_0", "flash_mqat_block_1", "head"]
+    # layer_names = ["embedding_layer", "flash_mqat_block_0", "flash_mqat_block_1", "head"]
+    layer_names = ["embedding_layer", "flash_mqat_block_0", "head"]
     return [embedding_layer] + flash_mqat_blocks + [head], layer_names
 
 
