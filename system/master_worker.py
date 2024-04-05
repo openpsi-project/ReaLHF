@@ -337,8 +337,9 @@ def _attach_payloads_with_hooks(
                     setattr(payloads[h], f"{hook_type}_hook_data", [ps_data])
                     mwids.append(msid2mwid[h])
                 elif msid2mwid[h] not in main_mwids:
-                    getattr(payloads[h], f"{hook_type}_hooks").append("param_sync")
-                    getattr(payloads[h], f"{hook_type}_hook_data").append(ps_data)
+                    hh = next(hh for hh in payloads if msid2mwid[hh] == msid2mwid[h])
+                    getattr(payloads[hh], f"{hook_type}_hooks").append("param_sync")
+                    getattr(payloads[hh], f"{hook_type}_hook_data").append(ps_data)
 
         elif isinstance(hook, api.config.dfg.OffloadHook):
             for h in main_handlers:

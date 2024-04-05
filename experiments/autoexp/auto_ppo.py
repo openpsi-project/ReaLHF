@@ -9,7 +9,7 @@ from api.config.config_dataset import DatasetType, PromptOnlyDatasetConfig
 from api.config.config_system import _LLM_ENVVARS, ExperimentSaveEvalControl, register_experiment
 from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
 from base.topology import PipeModelDataParallelTopology
-from experiments.common.ppo_exp import PPOHyperparmeters
+from experiments.common.ppo_exp import PPOHyperparameters
 import base.logging as logging
 
 logger = logging.getLogger("Auto PPO exp", "colored")
@@ -45,8 +45,8 @@ def register_auto_ppo_experiment(
             ExperimentSaveEvalControl,
             benchmark_steps=20,
         ),)
-        ppo: PPOHyperparmeters = dataclasses.field(default_factory=functools.partial(
-            PPOHyperparmeters,
+        ppo: PPOHyperparameters = dataclasses.field(default_factory=functools.partial(
+            PPOHyperparameters,
             max_new_tokens=seqlen,
             min_new_tokens=seqlen,
         ))

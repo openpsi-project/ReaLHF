@@ -13,7 +13,7 @@ logger = logging.getLogger("PPO exp", "colored")
 
 
 @dataclasses.dataclass
-class PPOHyperparmeters:
+class PPOHyperparameters:
     """Configuration of PPO hyperparameters.
 
     Args:
@@ -90,7 +90,7 @@ class PPOConfig(Experiment):
     ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
     rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
-    ppo: PPOHyperparmeters = dataclasses.field(default_factory=PPOHyperparmeters)
+    ppo: PPOHyperparameters = dataclasses.field(default_factory=PPOHyperparameters)
 
     actor_per_device_generate_batch_size: int = 1
     actor_per_device_train_batch_size: int = 1

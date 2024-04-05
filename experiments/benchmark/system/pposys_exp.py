@@ -7,7 +7,7 @@ from api.config.dfg import ModelInterfaceType, ModelRPC
 from base.topology import PipeModelDataParallelTopology
 from experiments.common.config_dataset import PromptOnlyDatasetConfig
 from experiments.common.config_model import get_flash_mqat_model_config, ModelConfig
-from experiments.common.ppo_exp import PPOConfig, PPOHyperparmeters
+from experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
 import base.logging as logging
 
 rollout = ModelRPC(
@@ -83,7 +83,7 @@ train_critic = ModelRPC(
     log_return_value=True,
 )
 
-ppo_benchmark_hyperparam = PPOHyperparmeters(
+ppo_benchmark_hyperparam = PPOHyperparameters(
     max_new_tokens=-1,  # will be overwritten
     min_new_tokens=-1,  # will be overwritten
     greedy=True,
