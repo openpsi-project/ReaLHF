@@ -33,6 +33,14 @@ PROFILE_RESULT_PATH = os.path.join(
     "profile",
     "profile_result",
 )
+PROFILE_NSYNC_RESULT_PATH = os.path.join(
+    base.cluster.spec.fileroot,
+    "logs",
+    getpass.getuser(),
+    "profile",
+    "profile_nsync",
+    "profile_result",
+)
 
 
 def parse_layer_stats_file_name(fn):
@@ -93,7 +101,7 @@ def find_nearest_key(k, d):
     return op_keys[-1]
 
 
-def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen):
+def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen, p=False):
     op_key = (op_name, bs, seqlen)
     if op_key not in op_cost["embedding_layer"]:
         real_op_key = find_nearest_key(op_key, op_cost["embedding_layer"])
@@ -105,12 +113,15 @@ def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen):
     head_cost = op_cost["head"][real_op_key]
     cost = (embedding_layer_cost + num_layers * flash_mqat_block_0_cost\
             + head_cost) / num_pp
-    # print(f"{cost} = ({embedding_layer_cost} + {num_layers} * {flash_mqat_block_0_cost} + {head_cost})/{num_pp}")
-    # print(f"op key {op_key} real op key {real_op_key}")
 
-    if op_name == "fwd_gen_1":
-        cost = cost * bs / real_op_key[1]
-    elif op_name != "opt":
+    # if op_name == "fwd_gen_1":
+    #     print(f"op key {op_key} real op key {real_op_key}")
+    #     print(f"{cost} = ({embedding_layer_cost} + {num_layers} * {flash_mqat_block_0_cost} + {head_cost})/{num_pp}")
+
+    # if op_name == "fwd_gen_1":
+    #     if bs > 32:
+    #         cost = cost * bs / real_op_key[1]
+    if op_name != "opt" and op_name != "fwd_gen_1":
         cost = cost * bs * seqlen / (real_op_key[1] * real_op_key[2])
 
     return cost
@@ -129,7 +140,8 @@ def estimate_instruction_cost(
         hidden_dim: int,
         batch_size: int,
         seq_len: int,
-        n_ppo_minibatches: int = 1):
+        n_ppo_minibatches: int = 1,
+        p=False):
     comm_stats = parse_comm_stats_files(comm_stats_path)
     layer_stats = parse_layer_stats_files(layer_stats_path)
     num_mp = parallel_strategy.num_mp
@@ -163,7 +175,7 @@ def estimate_instruction_cost(
     for inst_key, op_name in zip(inst_keys, op_names):
         mbs = train_mbs if "train" in inst_key else gen_mbs
         # print(f"inst key {inst_key}")
-        inst_cost[inst_key] = compute_inst_cost(op_cost, num_layers, num_pp, op_name, mbs, seq_len)
+        inst_cost[inst_key] = compute_inst_cost(op_cost, num_layers, num_pp, op_name, mbs, seq_len, p=p)
 
     # inst_cost["gen_fwd_0"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_0", gen_mbs, seq_len)
     # inst_cost["gen_fwd_1"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_1", gen_mbs, seq_len)
@@ -189,13 +201,16 @@ def _estimate_rpc_cost(
         use_gradient_checkpointing: bool,
         n_ppo_minibatches: int = 1):
     num_pp = parallel_strategy.num_pp
+    num_dp = parallel_strategy.num_dp
+    num_mp = parallel_strategy.num_mp
     if model_interface_type == ModelInterfaceType.INFERENCE:
         num_micro_batches = num_pp
         compute_cost = inst_cost["inf_fwd"] * (num_pp + num_micro_batches - 1)
         comm_cost = inst_cost["act_p2p"] * (num_pp + num_micro_batches - 2) * 2
+        compute_cost = compute_cost * (1 - num_mp * 0.05)
     elif model_interface_type == ModelInterfaceType.TRAIN_STEP:
         # TODO: add reduce grads, add ppo micro batches
-        num_micro_batches = num_pp * 2
+        num_micro_batches = num_pp * 2 if num_pp * num_dp > 1 else 1
         compute_cost = (inst_cost["train_fwd"] + inst_cost["train_bwd"]) * (num_pp + num_micro_batches - 1) +\
                         inst_cost["train_opt"]
         if use_gradient_checkpointing:
@@ -203,13 +218,26 @@ def _estimate_rpc_cost(
         comm_cost = (inst_cost["grad_p2p"] + inst_cost["act_p2p"]) * (num_pp + num_micro_batches - 2) * 2
         compute_cost = compute_cost * n_ppo_minibatches
         comm_cost = comm_cost * n_ppo_minibatches
+        if num_mp > 1 and num_pp * num_dp > 1:
+            compute_cost = compute_cost * (1 - num_mp * 0.06)
     elif model_interface_type == ModelInterfaceType.GENERATE:
         num_micro_batches = num_pp
         num_gen_tokens = num_gen_tokens
         compute_cost = inst_cost["gen_fwd_0"] * (num_pp + num_micro_batches - 1) +\
                        inst_cost["gen_fwd_1"] * (num_gen_tokens - 1) * num_micro_batches
-        comm_cost = inst_cost["act_p2p"] * (num_pp + num_micro_batches - 2) * 2 +\
-                    inst_cost["gen_act_p2p"] * (num_gen_tokens - 1) * num_micro_batches * 2
+        # dirty heuristic
+        compute_cost = compute_cost * (1 - max(num_dp, num_mp) * 0.04)
+        # comm_cost = inst_cost["act_p2p"] * (num_pp + num_micro_batches - 2) * 2 +\
+        #             inst_cost["gen_act_p2p"] * (num_gen_tokens - 1) * num_micro_batches * 2
+        comm_cost = 0
+
+    if num_pp >= 8:
+        compute_cost = compute_cost * (1 + num_pp * 0.01)
+
+    # print(parallel_strategy)
+    # print(f"gen_fwd_0 {inst_cost['gen_fwd_0']}*{num_pp+num_micro_batches-1}={inst_cost['gen_fwd_0'] * (num_pp + num_micro_batches - 1)}"
+    #       f"gen_fwd_1 {inst_cost['gen_fwd_1']}*{(num_gen_tokens - 1) * num_micro_batches}={inst_cost['gen_fwd_1'] * (num_gen_tokens - 1) * num_micro_batches}"
+    #       f"final {compute_cost}")
     # print(f"{model_interface_type} compute cost {compute_cost} comm cost {comm_cost}")
     # pprint.pprint(inst_cost, indent=4)
     return compute_cost + comm_cost
@@ -238,6 +266,7 @@ def estimate_rpc_time(rpc: ModelRPC,
         bs = rpc.min_n_seqs
         seq_len = rpc.max_n_tokens // bs
     # ps = ModelParallelStrategy.from_config(rpc_alloc.train_eval_config.parallel)
+    p = (rpc.interface_type == ModelInterfaceType.GENERATE)
     inst_cost = estimate_instruction_cost(layer_stats_path,
                                           comm_stats_path,
                                           model_config.n_layers,
@@ -245,7 +274,8 @@ def estimate_rpc_time(rpc: ModelRPC,
                                           model_config.hidden_dim,
                                           bs,
                                           seq_len,
-                                          n_ppo_minibatches=n_ppo_minibatches)
+                                          n_ppo_minibatches=n_ppo_minibatches,
+                                          p=p)
     # print(inst_cost)
     return _estimate_rpc_cost(inst_cost,
                               parallel_strategy,
@@ -350,8 +380,8 @@ def main(args):
     rpc_allocations = exp.rpc_allocations
     # device_mesh = exp.device_mesh_name
 
-    bs_list = [256, 512]
-    seq_len_list = [128, 256, 512]
+    bs_list = [256, 360, 512, 720, 1024]
+    seq_len_list = [128, 256, 512, 1024]
     # bs_list = [32, 64]
     # seq_len_list = [128, 256]
     bs_seqlen_list = list(itertools.product(bs_list, seq_len_list))
@@ -360,13 +390,31 @@ def main(args):
         rpc_name = rpc.name
         p = ModelParallelStrategy.from_config(rpc_alloc.train_eval_config.parallel)
         for bs, seq_len in bs_seqlen_list:
-            rpc_cost = estimate_rpc_time(rpc, p, use_gradient_checkpointing=False, bs=bs, seq_len=seq_len)
+            rpc_cost = estimate_rpc_time(rpc, p, use_gradient_checkpointing=True, bs=bs, seq_len=seq_len)
             stats_key = make_stats_key(rpc_name, bs, seq_len)
             r[stats_key] = rpc_cost
             # print(f"RPC {stats_key} cost: {rpc_cost}")
 
     # pprint.pprint(r, indent=4)
     return r
+
+
+def example(args):
+    exp: ProfileExperiment = config_package.make_experiment(args.expr_name)
+    rpcs = exp.rpcs
+    rollout, inf, train = rpcs
+
+    bs = 256
+    seq_len = 128
+
+    p1 = ModelParallelStrategy(num_pp=1, num_mp=8, num_dp=1)
+    rpc_cost = estimate_rpc_time(rollout, p1, use_gradient_checkpointing=True, bs=bs, seq_len=seq_len)
+    print(f"rollout {p1} rpc cost {rpc_cost}")
+
+    p2 = ModelParallelStrategy(num_pp=1, num_mp=1, num_dp=8)
+    # rpc_cost = estimate_rpc_time(rollout, p2, use_gradient_checkpointing=True,
+    #                              bs=bs, seq_len=seq_len)
+    # print(f"rollout {p2} rpc cost {rpc_cost}")
 
 
 if __name__ == "__main__":
@@ -385,4 +433,5 @@ if __name__ == "__main__":
     # )
     args = parser.parse_args()
 
-    r = main(args)
+    # r = main(args)
+    example(args)

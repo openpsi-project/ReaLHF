@@ -27,11 +27,15 @@ def optimal_device_mapping(
     model_configs: Dict[str, FlashMQATConfig],
     nodelist: Optional[str] = None,
     profile_layers: bool = False,
+    num_gen_tokens: int = 256,
+    n_ppo_minibatches: int = 1,
     top_k: int = 10,
 ) -> Dict[str, RPCAllocation]:
     from_file = os.environ["IS_REMOTE"] == "1"
     dump_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
                             base.constants.trial_name(), "device_mapping.pkl")
+    log_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
+                           base.constants.trial_name(), "device_mapping")
 
     if from_file:
         with open(dump_dir, "rb") as f:
@@ -54,7 +58,11 @@ def optimal_device_mapping(
 
     search_device_mesh = make_device_mesh_from_name(nodelist)
 
-    rpc_exe_list = make_rpc_exe_list(model_rpcs, search_device_mesh, if_print=True)
+    rpc_exe_list = make_rpc_exe_list(model_rpcs,
+                                     search_device_mesh,
+                                     num_gen_tokens=num_gen_tokens,
+                                     n_ppo_minibatches=n_ppo_minibatches,
+                                     if_print=True)
     rpc_list = make_rpc_list(model_rpcs, if_print=True)
     graph = build_graph(model_rpcs, 5, 2, if_print=True)
     comm_stats_ = comm_stats(if_print=True)
@@ -62,17 +70,22 @@ def optimal_device_mapping(
 
     # rpc_dict = {rpc.name: rpc for rpc in model_rpcs}
 
-    r: Dict[str, List] = mdm_search.multi_mcmc_search(
+    n_nodes = device_mesh.n_nodes
+    search_time = 30 * n_nodes
+
+    rs: List[Dict[str, List]] = mdm_search.multi_mcmc_search(
         rpc_list,
         rpc_exe_list,
         graph,
         comm_stats_,
         model_size_dict,
         0.01,  # beta min
-        0.03,  # beta max
+        0.05,  # beta max
         0.01,  # beta step
-        30  # time limit for each search
+        search_time,  # time limit for each search
+        1,  # repeat
     )
+    r = rs[-1]
     # print(r)
 
     # hack, only suitable for configs in experiments/autoexp/auto_ppo.py
@@ -144,23 +157,31 @@ def optimal_device_mapping(
         os.makedirs(os.path.dirname(dump_dir), exist_ok=True)
         with open(dump_dir, "wb") as f:
             pickle.dump(rpc_alloc_dict, f)
+        with open(log_dir, "w") as f:
+            import pprint
+            pprint.pprint(rpc_alloc_dict, stream=f)
 
     return rpc_alloc_dict
 
 
 def make_rpc_exe_list(rpcs: List[ModelRPC],
                       device_mesh: DeviceMesh,
+                      num_gen_tokens: int = 256,
+                      n_ppo_minibatches: int = 1,
                       if_print: bool = False) -> List[RPCExecution]:
     rpc_exe_list = []
     for rpc in rpcs:
         # flash_mqat_config = load_model_config(rpc)
-        feasible = enumerate_rpc_executions(rpc, device_mesh)
+        feasible = enumerate_rpc_executions(rpc,
+                                            device_mesh,
+                                            num_gen_tokens=num_gen_tokens,
+                                            n_ppo_minibatches=n_ppo_minibatches)
         rpc_exe_list.extend(feasible)
 
         if if_print:
             print(f"{rpc.name} feasible: {len(feasible)}")
             feasible.sort(key=lambda x: x.time_cost)
-            feasible = feasible[:30]
+            # feasible = feasible[:30]
             for rpc_exe in feasible:
                 print(f"time_cost: {rpc_exe.time_cost/(1e3)} ms, {rpc_exe.time_cost} "
                       f"sub_device_mesh: {rpc_exe.device_mesh}, "
@@ -254,21 +275,23 @@ def print_model_device_mapping_by_index(rpcs: List[ModelRPC], device_mesh: Devic
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--expr_name", type=str)
-    args = parser.parse_args()
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("--expr_name", type=str)
+    # args = parser.parse_args()
 
-    experiment = config_package.make_experiment(args.expr_name)
+    # experiment = config_package.make_experiment(args.expr_name)
 
-    # size = 13
-    # n_nodes = 2
-    # node_start = 42
-    # node_end = node_start + n_nodes - 1
-    # nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
-    # rpcs = ppo_rpcs_example(size)
-    # device_mesh = make_device_mesh_from_name(nodelist)
-    # # dump_search_settings(rpcs, device_mesh)
-    # optimal_device_mapping(None, rpcs, None, nodelist)
+    os.environ.setdefault("IS_REMOTE", "0")
+    size = 13
+    n_nodes = 2
+    node_start = 42
+    node_end = node_start + n_nodes - 1
+    nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
+    cluster_device_mesh = ClusterDeviceMesh(n_nodes=n_nodes, n_gpus_per_node=8, mem=80)
+    rpcs = ppo_rpcs_example(size)
+    device_mesh = make_device_mesh_from_name(nodelist)
+    dump_search_settings(rpcs, device_mesh)
+    # optimal_device_mapping(cluster_device_mesh, rpcs, None, nodelist)
 
     # 7b 13b 2x8:
     # [0, 2, 2, 1, 11, 3, ]

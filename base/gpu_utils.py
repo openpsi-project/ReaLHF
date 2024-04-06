@@ -90,6 +90,7 @@ class NCCLProcessGroupInfo:
     # Groups for data transfer among model workers.
     data_transfer_groups: Dict[DataTransferPair, torch.distributed.ProcessGroup]
     data_transfer_src_ranks: Dict[DataTransferPair, int]
+    data_transfer_dst_ranks: Dict[DataTransferPair, List[int]]
     # Groups for parameter synchronization.
     param_sync_groups: Dict[ParamSyncPair, torch.distributed.ProcessGroup]
     param_sync_src_ranks: Dict[ParamSyncPair, int]
@@ -320,6 +321,7 @@ def setup_ddp(
     # logger.info("Created master-DP head group for model %s with ranks %s", model_name, ranks)
 
     data_transfer_groups, data_transfer_src_ranks = {}, {}
+    data_transfer_dst_ranks = {}
     if data_transfer_pairs is not None:
         for src, dst in data_transfer_pairs:
             src_topo = model_topos[src]
@@ -329,6 +331,7 @@ def setup_ddp(
                 key = DataTransferPair(src=src, src_dp_rank=src_dp, dst=dst, dst_dp_rank=dst_dp)
                 src_mw_rank = mw_dp_head_ranks[src][src_dp]
                 dst_mw_ranks = mw_dp_ranks[dst, dst_dp]
+                data_transfer_dst_ranks[key] = dst_mw_ranks
                 if src_mw_rank not in dst_mw_ranks:
                     _ranks = [src_mw_rank] + dst_mw_ranks
                 else:
@@ -361,6 +364,7 @@ def setup_ddp(
         model_groups=model_groups,
         data_transfer_groups=data_transfer_groups,
         data_transfer_src_ranks=data_transfer_src_ranks,
+        data_transfer_dst_ranks=data_transfer_dst_ranks,
         param_sync_groups=param_sync_groups,
         param_sync_src_ranks=param_sync_src_ranks,
         param_sync_dst_ranks=param_sync_dst_ranks,

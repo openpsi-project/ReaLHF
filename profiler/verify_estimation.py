@@ -12,7 +12,7 @@ import profiler.estimate
 def verify_compute(date="20240403"):
     # date = "20240328"
     expr_names = []
-    sizes = [7, 13, 34, 70]
+    sizes = [7, 13, 34]
     for size in sizes:
         if size == 7:
             n_nodes = 1
@@ -27,6 +27,8 @@ def verify_compute(date="20240403"):
         for num_mp in [1, 2, 4, 8]:
             remain = num_gpus // num_mp
             for num_dp in find_factors(remain):
+                if num_dp * num_mp > 8:
+                    continue
                 num_pp = remain // num_dp
                 expr_names.append(f"profile-s{size}p{num_pp}m{num_mp}d{num_dp}")
 
@@ -51,10 +53,10 @@ def verify_compute(date="20240403"):
             for k, v in pr.items():
                 # vv = int(mean(v) * 1e6)
                 vv = mean(v)
-                print(f"key {k} pr {vv:.2f}")
-                # if k in r:
-                #     rr = int(r[k])
-                #     print(f"key {k} pr {vv} r {rr} error {(vv - rr) / vv:.2f}")
+                # print(f"key {k} pr {vv:.2f}")
+                if k in r:
+                    rr = r[k] / 1e6
+                    print(f"key {k} pr {vv:.2f} r {rr:.2f} error {(rr - vv) / rr:.2f}")
 
 
 def verify_param_sync():

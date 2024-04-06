@@ -10,20 +10,33 @@ import api.config.dfg
 GPU_MEM_CAP = 80 * (1024**3)
 
 
-def enumerate_rpc_executions(rpc: ModelRPC, device_mesh: DeviceMesh) -> List[RPCExecution]:
+def enumerate_rpc_executions(rpc: ModelRPC,
+                             device_mesh: DeviceMesh,
+                             num_gen_tokens=256,
+                             n_ppo_minibatches=1) -> List[RPCExecution]:
     sub_device_meshes = find_sub_device_meshes(device_mesh)
     feasible = []
+    mem_index = 1.2
     for sub_device_mesh in sub_device_meshes:
         ps = find_parallel_strategies(sub_device_mesh)
         for p in ps:
             bs = rpc.min_n_seqs
             seq_len = rpc.max_n_tokens // bs
+            if 2 * p.num_dp * p.num_pp * n_ppo_minibatches > bs:
+                # batch size too small
+                continue
             mem_cost, static_mem = estimate_rpc_memory(rpc, p, bs, seq_len)
-            mem_cost = int(mem_cost)
-            static_mem = int(static_mem)
-            time_cost = estimate_rpc_time(rpc, p, bs=bs, seq_len=seq_len)
+            mem_cost = int(mem_cost * mem_index)
+            static_mem = int(static_mem * mem_index)
+            time_cost = estimate_rpc_time(rpc,
+                                          p,
+                                          bs=bs,
+                                          seq_len=seq_len,
+                                          num_gen_tokens=num_gen_tokens,
+                                          use_gradient_checkpointing=True,
+                                          n_ppo_minibatches=n_ppo_minibatches)
             time_cost = int(time_cost)
-            if mem_cost * 1.2 < GPU_MEM_CAP:
+            if mem_cost < GPU_MEM_CAP:
                 rep_rpc = RPC.from_config(rpc)
                 feasible.append(RPCExecution(rep_rpc, sub_device_mesh, p, time_cost, mem_cost, static_mem))
     return feasible

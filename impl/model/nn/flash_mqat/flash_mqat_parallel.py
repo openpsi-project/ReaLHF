@@ -118,11 +118,10 @@ def mp_partition_key(
         assert "weight" in key
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif key == f"{config.n_layers + 1}.weight":  # output head
-        if config.is_critic:
-            if isinstance(tensor_or_shape, torch.Tensor):
-                assert tensor_or_shape.shape[0] == 1
-            else:
-                assert tensor_or_shape[0] == 1
+        if (isinstance(tensor_or_shape, torch.Tensor)
+                and tensor_or_shape.shape[0] == 1) or (not isinstance(tensor_or_shape, torch.Tensor)
+                                                       and tensor_or_shape[0] == 1):
+            assert config.is_critic
             return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
         else:
             return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)

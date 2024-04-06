@@ -35,8 +35,8 @@ def profile_model_type(model_type: ModelType):
                f"--model_path {model_path} --model_name {model_type} "\
                f"--batch_size_list {batch_size_list} --seq_len_list {seq_len_list}"
 
-    bs_list = [8, 16, 32, 64, 128] * 3
-    sl_list = [128] * 4 + [256] * 4 + [512] * 4
+    bs_list = [1, 2, 4, 8, 16, 32, 64, 128] * 3
+    sl_list = [128] * 8 + [256] * 8 + [512] * 8
 
     print(f"Profiling {model_type} layers, model path {model_path}, "
           f"cmd {profile_layers_cmd(model_path, model_type, bs_list, sl_list)}")
@@ -47,6 +47,7 @@ def profile_model_type(model_type: ModelType):
         cpu=64,
         gpu=8,
         gpu_type="tesla",
+        nodelist="QH-com29",
         mem=500000,
         env_vars=base_environs,
         container_image="llm/llm-gpu",
@@ -80,7 +81,7 @@ def profile(args):
 
 
 def profile_all_model_types():
-    sizes = [70, 34, 13, 7]
+    sizes = [7, 13, 34, 70]
     for size in sizes:
         _class = "llama" if size != 34 else "codellama"
         model_type = ModelType(_class=_class, size=size, is_critic=False)

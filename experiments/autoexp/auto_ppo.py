@@ -24,16 +24,16 @@ def register_auto_ppo_experiment(
     assert size in [7, 13, 34, 70]
     if size == 7:
         n_nodes = 1
-        nodelist = "QH-com20"
+        nodelist = "QH-com25"
     elif size == 13:
         n_nodes = 2
-        nodelist = "QH-com[46-47]"
+        nodelist = "QH-com[25-26]"
     elif size == 34:
         n_nodes = 4
-        nodelist = "QH-com[20-23]"
+        nodelist = "QH-com[25-28]"
     elif size == 70:
         n_nodes = 8
-        nodelist = "QH-com[20-27]"
+        nodelist = "QH-com[23-30]"
 
     model_class = "llama" if size != 34 else "codellama"
 
@@ -43,7 +43,7 @@ def register_auto_ppo_experiment(
         seed: int = 1
         exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=functools.partial(
             ExperimentSaveEvalControl,
-            benchmark_steps=20,
+            benchmark_steps=10,
         ),)
         ppo: PPOHyperparmeters = dataclasses.field(default_factory=functools.partial(
             PPOHyperparmeters,
@@ -54,7 +54,7 @@ def register_auto_ppo_experiment(
         @property
         def dataset(self) -> DatasetType:
             return PromptOnlyDatasetConfig(
-                max_prompt_len=256,
+                max_prompt_len=128,
                 n_tokens_per_batch=1048576,
                 path="/lustre/fw/datasets/antropic-hh/ppo_prompt_only.jsonl",
                 # path="/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl",
@@ -126,7 +126,7 @@ def register_auto_ppo_experiment(
                     balanced_dp=True,
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
-                    max_n_tokens=gen_bs * seqlen,
+                    max_n_tokens=gen_bs * 128,
                 ),
                 ModelRPC(
                     model_name="reward",
@@ -139,7 +139,7 @@ def register_auto_ppo_experiment(
                     output_key_remap={"scores": "rewards"},
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
-                    max_n_tokens=gen_bs * seqlen * 2,
+                    max_n_tokens=gen_bs * (128 + seqlen),
                 ),
                 ModelRPC(
                     model_name="ref",
@@ -154,7 +154,7 @@ def register_auto_ppo_experiment(
                     output_key_remap={"logprobs": "packed_ref_logprobs"},
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
-                    max_n_tokens=gen_bs * 2 * seqlen,
+                    max_n_tokens=gen_bs * (128 + seqlen),
                 ),
                 ModelRPC(
                     model_name="critic",
@@ -166,7 +166,7 @@ def register_auto_ppo_experiment(
                     output_key_remap={"scores": "values"},
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
-                    max_n_tokens=gen_bs * 2 * seqlen,
+                    max_n_tokens=gen_bs * (128 + seqlen),
                 ),
                 ModelRPC(
                     model_name="actor",
@@ -188,7 +188,7 @@ def register_auto_ppo_experiment(
                     min_n_seqs=train_bs,
                     max_n_seqs=train_bs,
                     balanced_dp=True,
-                    max_n_tokens=train_bs * 2 * seqlen,
+                    max_n_tokens=train_bs * (128 + seqlen),
                 ),
                 ModelRPC(
                     model_name="critic",
@@ -210,7 +210,7 @@ def register_auto_ppo_experiment(
                     min_n_seqs=train_bs,
                     max_n_seqs=train_bs,
                     balanced_dp=True,
-                    max_n_tokens=train_bs * 2 * seqlen,
+                    max_n_tokens=train_bs * (128 + seqlen),
                 ),
             ]
 
@@ -218,7 +218,8 @@ def register_auto_ppo_experiment(
 
 
 for size in [7, 13, 34, 70]:
-    for gen_bs in [16, 32, 48, 64, 80, 100, 128, 160, 200, 240, 256, 288, 320, 360, 400]:
-        for seqlen in [256, 512, 1024]:
+    for gen_bs in [16, 32, 48, 64, 80, 100, 128, 160, 200, 240, 256, 288, 320, 360, 400, 512, 640, 1024]:
+        # for seqlen in [256, 512, 1024]:
+        for seqlen in [128, 384, 896]:
             train_bs = gen_bs
             register_auto_ppo_experiment(size, gen_bs, train_bs, seqlen)

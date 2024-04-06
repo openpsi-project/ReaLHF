@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 import asyncio
 import copy
 import dataclasses
@@ -278,6 +278,7 @@ class RPCCorountineControl:
     # for synchronizing req ids between req and reply coroutines
     request_queues: Dict[str, List[asyncio.Queue]]
 
+    training_buffer_indices: Set[int] = dataclasses.field(default_factory=set)
     data_amount: InterfaceDataAmount = dataclasses.field(default_factory=InterfaceDataAmount)
 
 
@@ -336,8 +337,9 @@ def _attach_payloads_with_hooks(
                     setattr(payloads[h], f"{hook_type}_hook_data", [ps_data])
                     mwids.append(msid2mwid[h])
                 elif msid2mwid[h] not in main_mwids:
-                    getattr(payloads[h], f"{hook_type}_hooks").append("param_sync")
-                    getattr(payloads[h], f"{hook_type}_hook_data").append(ps_data)
+                    hh = next(hh for hh in payloads if msid2mwid[hh] == msid2mwid[h])
+                    getattr(payloads[hh], f"{hook_type}_hooks").append("param_sync")
+                    getattr(payloads[hh], f"{hook_type}_hook_data").append(ps_data)
 
         elif isinstance(hook, api.config.dfg.OffloadHook):
             for h in main_handlers:
@@ -483,6 +485,9 @@ async def model_rpc_request_func(
             await asyncio.sleep(0.1)
 
         sample = await buffer.get_batch_for_rpc(rpc)
+
+        if rpc.is_src:
+            ctrl.training_buffer_indices = ctrl.training_buffer_indices.union(sample.indices)
 
         if rpc.interface_type == api.config.dfg.ModelInterfaceType.GENERATE:
             ctrl.data_amount.gen_configs.append(model_configs[rpc.model_name])
@@ -730,6 +735,10 @@ class MasterWorker(worker_base.Worker):
                                f"to {_dp_size * _pp_size} (dp_size * pp_size). (original: {rpc.min_n_seqs})")
                 rpc.min_n_seqs_per_dp = 1
                 rpc.min_n_seqs = _dp_size * _pp_size
+
+        self.__mwid2msids = defaultdict(list)
+        for msid, mwid in self.config.msid2mwid.items():
+            self.__mwid2msids[mwid].append(msid)
 
         self.__rpc_srcs = list(filter(lambda rpc: rpc.is_src, self.__model_rpcs))
         self.__rpc_dsts = list(filter(lambda rpc: rpc.is_dst, self.__model_rpcs))
@@ -996,6 +1005,8 @@ class MasterWorker(worker_base.Worker):
         self.__initialized = True
         self._train_start_time = time.perf_counter()
 
+        self.__clear_data_cache_reqids = None
+
     def _poll(self):
         if not self.__initialized:
             self.__lazy_init()
@@ -1046,6 +1057,16 @@ class MasterWorker(worker_base.Worker):
             except:
                 raise_asyncio_exception(self.__asyncio_ctx)
         logger.info("Execution finished!")
+
+        if self.__clear_data_cache_reqids is not None:
+            [
+                self.__stream.poll(block=True, pattern=create_exact_match_pattern([reqid]))
+                for reqid in self.__clear_data_cache_reqids
+            ]
+        self.__clear_data_cache_reqids = request_all(
+            self.__stream, [vs[0] for vs in self.__mwid2msids.values()], "clear_data_cache",
+            [self.__rpc_ctrl.training_buffer_indices for _ in self.__all_model_handlers])
+        self.__rpc_ctrl.training_buffer_indices.clear()
 
         self._epoch_step += 1
         self._global_step += 1

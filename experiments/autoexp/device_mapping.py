@@ -490,6 +490,8 @@ def auto_device_mapping(
                     model_rpcs=self._internal_exp.rpcs,
                     model_configs=model_configs,
                     nodelist=nodelist,
+                    num_gen_tokens=self._internal_exp.ppo.max_new_tokens,
+                    n_ppo_minibatches=self._internal_exp.ppo.ppo_n_minibatches,
                 )
                 # import pprint
                 # pprint.pprint(self._allocations)

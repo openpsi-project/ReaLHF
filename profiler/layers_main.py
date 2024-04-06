@@ -1,4 +1,5 @@
 import argparse
+import gc
 import time
 
 import torch
@@ -24,6 +25,11 @@ def main(rank, world_size, args):
             for bs, seq_len in zip(args.batch_size_list, args.seq_len_list):
                 profile_layers.fwd_gen(bs, seq_len)
                 profile_layers.fwd_bwd_opt(bs, seq_len)
+                # torch.cuda.synchronize()
+                # gc.collect()
+                # torch.cuda.empty_cache()
+                # gc.collect()
+                # torch.cuda.synchronize()
 
             if i < args.warm_up_rounds:
                 profile_layers.reset_stats()

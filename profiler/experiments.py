@@ -268,7 +268,7 @@ class ProfileExperiment(Experiment):
     def initial_setup(self) -> ExperimentConfig:
         exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=functools.partial(
             ExperimentSaveEvalControl,
-            benchmark_steps=20,
+            benchmark_steps=10,
         ),)
 
         # rpc allocation for each rpc
@@ -330,7 +330,7 @@ def register_profile_experiment(
     # node_end = node_start + n_nodes - 1
     # nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
     if size == 7:
-        nodelist = "QH-com42"
+        nodelist = "QH-com30"
     elif size == 13:
         nodelist = "QH-com[42-43]"
     elif size == 34:
