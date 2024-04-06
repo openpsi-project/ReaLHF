@@ -322,6 +322,12 @@ def memory_efficient_ppo_loss_fn(
             eps_clip,
         )
 
+def _huber_loss(x: torch.Tensor, y: torch.Tensor, delta:float):
+    diff = torch.abs(x - y)
+    return torch.where(diff < delta, 0.5 * diff ** 2, delta * (diff - 0.5 * delta))
+
+def _mse_loss(x: torch.Tensor, y: torch.Tensor):
+    return 0.5 * (x - y) ** 2
 
 def critic_loss_fn(
     value: torch.FloatTensor,
@@ -329,7 +335,7 @@ def critic_loss_fn(
     target_value: torch.FloatTensor,
     value_eps_clip: float,
     loss_mask: Optional[torch.FloatTensor] = None,
-    loss_fn_type: str = "huber",
+    loss_fn_type: str = "mse",
 ) -> Tuple[torch.Tensor, Dict]:
     """Compute PPO critic loss function given padded batch inputs.
 
@@ -350,34 +356,32 @@ def critic_loss_fn(
         Tuple[torch.Tensor, Dict]: Scalar loss and statistics.
     """
     if loss_fn_type == "huber":
-        loss_fn = functools.partial(torch.nn.functional.huber_loss, reduction="none", delta=10.0)
+        loss_fn = functools.partial(_huber_loss, delta=10.0)
     elif loss_fn_type == "mse":
-        loss_fn = functools.partial(torch.nn.functional.mse_loss, reduction="none")
+        loss_fn = _mse_loss
     else:
         raise NotImplementedError(f"Unknown loss fn type: {loss_fn_type}")
 
     if target_value.is_inference():
         target_value = target_value.clone()  # clone a inference tensor
 
-    # TODO: bf16 support for autocast
-    with torch.autocast("cuda"):
-        value_loss_original = loss_fn(value, target_value)
+    value_loss_original = loss_fn(value, target_value)
 
     value_clipped = old_value + (value - old_value).clamp(-value_eps_clip, value_eps_clip)
 
-    with torch.autocast("cuda"):
-        value_loss_clipped = loss_fn(value_clipped, target_value)
+    value_loss_clipped = loss_fn(value_clipped, target_value)
 
     value_loss = torch.max(value_loss_original, value_loss_clipped)
 
-    clip_mask = value_loss_clipped.detach() > value_loss_original.detach()
-    if loss_mask is not None:
-        mask_count = loss_mask.count_nonzero()
-        proportion_clipped = clip_mask.logical_and_(loss_mask).count_nonzero() / mask_count
-    else:
-        proportion_clipped = clip_mask.count_nonzero()
+    with torch.no_grad():
+        clip_mask = value_loss_clipped.detach() > value_loss_original.detach()
+        if loss_mask is not None:
+            mask_count = loss_mask.count_nonzero()
+            proportion_clipped = clip_mask.logical_and_(loss_mask).count_nonzero() / mask_count
+        else:
+            proportion_clipped = clip_mask.count_nonzero()
 
-    stat = dict(clip_ratio=proportion_clipped)
+        stat = dict(clip_ratio=proportion_clipped)
 
     if loss_mask is not None:
         value_loss = torch.where(loss_mask, value_loss, 0).sum() / mask_count
