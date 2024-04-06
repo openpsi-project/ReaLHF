@@ -5,7 +5,7 @@ import os
 from .pposys_exp import PPOSysExperiment
 from api.config.config_system import *
 from experiments.common import ModelBackend, ModelConfig, OptimizerConfig, ParallelismConfig
-from experiments.common.ppo_exp import PPOConfig, PPOHyperparmeters
+from experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
 
 
 def build_llama2_model(

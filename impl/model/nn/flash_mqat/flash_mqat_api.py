@@ -598,8 +598,6 @@ class FlashMQATModel(nn.Module):
         self.contiguous_param = None
 
         self._offload_buffer = None
-        self._offload_stream = torch.cuda.Stream()
-        self._offload_event = torch.cuda.Event()
         self._offloaded = False
 
     def instantiate(self):
@@ -632,6 +630,8 @@ class FlashMQATModel(nn.Module):
         else:
             assert self._offload_buffer.shape == self.contiguous_param.shape
         dummy_tensor = torch.tensor((), device=self.device, dtype=self.dtype)
+        self._offload_stream = torch.cuda.Stream()
+        self._offload_event = torch.cuda.Event()
         self.contiguous_param = None
         for i, l in enumerate(self.layers):
             layer_idx = self.layer_idx_start + i
@@ -646,7 +646,7 @@ class FlashMQATModel(nn.Module):
 
     def wait_for_offload(self):
         assert self._offloaded
-        self._offload_event.synchronize()
+        torch.cuda.current_stream().wait_event(self._offload_event)
 
     @property
     def num_layers(self):
@@ -737,8 +737,11 @@ class FlashMQATModel(nn.Module):
         map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
                                       self.layer_idx_start)
         self.wait_for_offload()
-        for layer_idx, y, l in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers):
-            with torch.cuda.stream(self._offload_stream):
+
+        stream = torch.cuda.Stream()
+        events: List[torch.cuda.Event] = [torch.cuda.Event() for _ in range(self.num_layers)]
+        with torch.cuda.stream(stream):
+            for layer_idx, y, l, e in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers, events):
                 # NOTE: although we can do more fine-grained overlapping, the overhead that can be
                 # reduced is very small (~50ms), which is unnecessary for now.
                 for k, v in l.named_parameters():
@@ -747,7 +750,11 @@ class FlashMQATModel(nn.Module):
                         self._offload_buffer[spec.start_idx:spec.end_idx].view(spec.shape),
                         non_blocking=True,
                     )
-            torch.cuda.default_stream().wait_stream(self._offload_stream)
+                e: torch.cuda.Event
+                e.record(stream)
+                
+        for layer_idx, y, l, e in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers, events):
+            torch.cuda.default_stream().wait_event(e)
             if not self.sequence_parallel:
                 with _disable_sequence_parallel_of_module(l):
                     x = l(x, y)
