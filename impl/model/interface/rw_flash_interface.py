@@ -72,12 +72,15 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
                 return
             scores = r.float()
         else:
-            scores: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).float()
+            if hasattr(module, "module"):
+                module = module.module
+            with module.sequence_parallel_disable():
+                scores: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
+                                                   cu_seqlens=cu_seqlens,
+                                                   max_seqlen=max_seqlen)
 
-        scores = (scores.squeeze(-1) - self.output_bias) * self.output_scaling
-        chosen_end_scores = scores[cu_seqlens[1:] - 1]  # [bs]
+        chosen_end_scores = scores.squeeze(-1)[cu_seqlens[1:] - 1].float()  # [bs]
+        scores = (scores - self.output_bias) * self.output_scaling
 
         ###################### logging ######################
         # input_ids = [packed_input_ids[start:end] for start, end in zip(cu_seqlens[:-1], cu_seqlens[1:])]

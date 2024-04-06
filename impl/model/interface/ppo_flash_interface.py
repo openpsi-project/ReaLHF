@@ -295,7 +295,12 @@ class PackedActorInterface(api.model.ModelInterface):
                 return None
             logits = res
         else:
-            res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+            if hasattr(module, "module"):
+                module = module.module
+            with module.sequence_parallel_disable():
+                res = module(packed_input_ids=data["packed_seq"],
+                             cu_seqlens=cu_seqlens,
+                             max_seqlen=max_seqlen)
             logits = res
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
@@ -591,9 +596,12 @@ class PackedCriticInterface(api.model.ModelInterface):
             if scores is None:
                 return None
         else:
-            scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen)
+            if hasattr(module, "module"):
+                module = module.module
+            with module.sequence_parallel_disable():
+                scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
+                                                   cu_seqlens=cu_seqlens,
+                                                   max_seqlen=max_seqlen)
         scores = scores.squeeze(-1)
         return from_dict(dict(scores=scores))
 
