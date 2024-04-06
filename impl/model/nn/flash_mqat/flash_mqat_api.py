@@ -741,7 +741,8 @@ class FlashMQATModel(nn.Module):
         stream = torch.cuda.Stream()
         events: List[torch.cuda.Event] = [torch.cuda.Event() for _ in range(self.num_layers)]
         with torch.cuda.stream(stream):
-            for layer_idx, y, l, e in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers, events):
+            for layer_idx, y, l, e in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers,
+                                          events):
                 # NOTE: although we can do more fine-grained overlapping, the overhead that can be
                 # reduced is very small (~50ms), which is unnecessary for now.
                 for k, v in l.named_parameters():
@@ -752,8 +753,9 @@ class FlashMQATModel(nn.Module):
                     )
                 e: torch.cuda.Event
                 e.record(stream)
-                
-        for layer_idx, y, l, e in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers, events):
+
+        for layer_idx, y, l, e in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers,
+                                      events):
             torch.cuda.default_stream().wait_event(e)
             if not self.sequence_parallel:
                 with _disable_sequence_parallel_of_module(l):
