@@ -8,7 +8,7 @@ import subprocess
 import numpy as np
 import transformers
 
-from profiler.search import optimal_device_mapping
+from profiler.search import data_pipe_device_mapping, model_pipe_device_mapping, optimal_device_mapping
 
 from api.config.config_base import MODEL_TYPE_TO_PATH
 from api.config.config_dataset import PromptOnlyDatasetConfig
@@ -195,271 +195,12 @@ def mw_config_from_allocations(
     return mw_configs
 
 
-# def optimal_device_mapping(
-#     device_mesh: ClusterDeviceMesh,
-#     model_rpcs: List[ModelRPC],
-#     model_configs: Dict[str, FlashMQATConfig],
-#     nodelist: Optional[str] = None,
-# ) -> Dict[str, RPCAllocation]:
-#     # NOTE: here we return model RPCs because different RPCs of the same model
-#     # may be assigned to different devices, thus have diferent model names.
-
-#     # device_mesh=QH-com[40-43], parallel_strategy=pp2_mp1_dp16, rpc_name="ModelName(role='actor', replica_id=0)@generate")
-#     # device_mesh=QH-com[40-43], parallel_strategy=pp1_mp4_dp8, rpc_name="ModelName(role='actor', replica_id=0)@train_step")
-#     # device_mesh=QH-com[40-43], parallel_strategy=pp16_mp1_dp2, rpc_name="ModelName(role='ref', replica_id=0)@inference")
-#     # device_mesh=QH-com[40-43], parallel_strategy=pp1_mp4_dp8, rpc_name="ModelName(role='critic', replica_id=0)@train_step")
-#     # device_mesh=QH-com[40-43], parallel_strategy=pp1_mp2_dp16, rpc_name="ModelName(role='critic', replica_id=0)@inference")
-#     # device_mesh=QH-com[40-43], parallel_strategy=pp1_mp4_dp8, rpc_name="ModelName(role='reward', replica_id=0)@inference")
-
-#     # # HACK
-#     rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
-#     actor_train.pre_hooks.append(SyncParamHook(source=ModelName("actor", 0)))
-#     actor_train.model_name = ModelName("actor", 1)
-#     actor_train.post_hooks.append(SyncParamHook(target=ModelName("actor", 0)))
-#     critic_train.pre_hooks.append(SyncParamHook(source=ModelName("critic", 0)))
-#     critic_train.model_name = ModelName("critic", 1)
-#     critic_train.post_hooks.append(SyncParamHook(target=ModelName("critic", 0)))
-
-#     rew_inf.post_hooks.append(OffloadHook())
-#     ref_inf.post_hooks.append(OffloadHook())
-
-#     mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]] * 4)
-
-#     # rew_mapping = np.array([[0, 0, 0, 0, 0, 0, 0, 0], [1, 1, 1, 1, 0, 0, 0, 0]])
-#     rew_parallel = ParallelismConfig(
-#         model_parallel_size=4,
-#         pipeline_parallel_size=1,
-#         data_parallel_size=8,
-#         use_sequence_parallel=False,
-#     )
-#     # ref_mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1], [0, 0, 0, 0, 0, 0, 0, 0]])
-#     ref_parallel = ParallelismConfig(
-#         model_parallel_size=1,
-#         pipeline_parallel_size=16,
-#         data_parallel_size=2,
-#         use_sequence_parallel=False,
-#     )
-#     return {
-#         rollout.name: RPCAllocation(
-#             rpc=rollout,
-#             mapping=mapping,
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 gradient_checkpointing=True,
-#                 parallel=ParallelismConfig(
-#                     model_parallel_size=1,
-#                     pipeline_parallel_size=2,
-#                     data_parallel_size=16,
-#                     use_sequence_parallel=True,
-#                 ),
-#             ),
-#         ),
-#         rew_inf.name: RPCAllocation(
-#             rpc=rew_inf,
-#             mapping=mapping,
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 parallel=rew_parallel,
-#             ),
-#         ),
-#         ref_inf.name: RPCAllocation(
-#             rpc=ref_inf,
-#             mapping=mapping,
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 parallel=ref_parallel,
-#             ),
-#         ),
-#         critic_inf.name: RPCAllocation(
-#             rpc=critic_inf,
-#             mapping=mapping,
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 gradient_checkpointing=True,
-#                 parallel=ParallelismConfig(
-#                     model_parallel_size=2,
-#                     pipeline_parallel_size=1,
-#                     data_parallel_size=16,
-#                     use_sequence_parallel=True,
-#                 ),
-#             ),
-#         ),
-#         critic_train.name: RPCAllocation(
-#             rpc=critic_train,
-#             mapping=mapping,
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 gradient_checkpointing=True,
-#                 parallel=ParallelismConfig(
-#                     model_parallel_size=4,
-#                     pipeline_parallel_size=1,
-#                     data_parallel_size=8,
-#                     use_sequence_parallel=True,
-#                 ),
-#                 optimizer=OptimizerConfig(type="adam", offload=False),
-#             ),
-#         ),
-#         actor_train.name: RPCAllocation(
-#             rpc=actor_train,
-#             mapping=mapping,
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 gradient_checkpointing=True,
-#                 parallel=ParallelismConfig(
-#                     model_parallel_size=4,
-#                     pipeline_parallel_size=1,
-#                     data_parallel_size=8,
-#                     use_sequence_parallel=True,
-#                 ),
-#                 optimizer=OptimizerConfig(type="adam", offload=False),
-#             ),
-#         ),
-#     }
-
-# This is a setting similar to DSchat
-# def optimal_device_mapping(
-#     device_mesh: ClusterDeviceMesh,
-#     model_rpcs: List[ModelRPC],
-#     model_configs: Dict[str, FlashMQATConfig],
-#     nodelist: Optional[str] = None,
-# ) -> Dict[str, RPCAllocation]:
-#     # NOTE: here we return model RPCs because different RPCs of the same model
-#     # may be assigned to different devices, thus have diferent model names.
-
-#     # HACK
-#     rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
-#     # actor_train.pre_hooks.append(SyncParamHook(source=ModelName("actor", 0)))
-#     # actor_train.model_name = ModelName("actor", 1)
-#     # actor_train.post_hooks.append(SyncParamHook(target=ModelName("actor", 0)))
-#     # critic_train.pre_hooks.append(SyncParamHook(source=ModelName("critic", 0)))
-#     # critic_train.model_name = ModelName("critic", 1)
-#     # critic_train.post_hooks.append(SyncParamHook(target=ModelName("critic", 0)))
-
-#     rew_mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]])
-#     rew_parallel = ParallelismConfig(
-#         model_parallel_size=1,
-#         pipeline_parallel_size=1,
-#         data_parallel_size=8,
-#     )
-#     ref_mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]])
-#     ref_parallel = ParallelismConfig(
-#         model_parallel_size=1,
-#         pipeline_parallel_size=1,
-#         data_parallel_size=8,
-#     )
-#     return {
-#         rollout.name: RPCAllocation(
-#             rpc=rollout,
-#             mapping=np.array([[1, 1, 1, 1, 1, 1, 1, 1]]),
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 gradient_checkpointing=True,
-#                 parallel=ParallelismConfig(
-#                     model_parallel_size=8,
-#                     pipeline_parallel_size=1,
-#                     data_parallel_size=1,
-#                     use_sequence_parallel=True,
-#                 ),
-#                 optimizer=OptimizerConfig(type="adam", offload=True),
-#             ),
-#         ),
-#         rew_inf.name: RPCAllocation(
-#             rpc=rew_inf,
-#             mapping=rew_mapping,
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 parallel=rew_parallel,
-#                 offload=True,
-#                 zero_stage=3,
-#             ),
-#         ),
-#         ref_inf.name: RPCAllocation(
-#             rpc=ref_inf,
-#             mapping=ref_mapping,
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 parallel=ref_parallel,
-#                 offload=True,
-#                 zero_stage=3,
-#             ),
-#         ),
-#         critic_inf.name: RPCAllocation(
-#             rpc=critic_inf,
-#             mapping=np.array([[1, 1, 1, 1, 1, 1, 1, 1]]),
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 gradient_checkpointing=True,
-#                 parallel=ParallelismConfig(
-#                     model_parallel_size=8,
-#                     pipeline_parallel_size=1,
-#                     data_parallel_size=1,
-#                     use_sequence_parallel=True,
-#                 ),
-#                 optimizer=OptimizerConfig(type="adam", offload=True),
-#             ),
-#         ),
-#         critic_train.name: RPCAllocation(
-#             rpc=critic_train,
-#             mapping=np.array([[1, 1, 1, 1, 1, 1, 1, 1]]),
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 gradient_checkpointing=True,
-#                 parallel=ParallelismConfig(
-#                     model_parallel_size=8,
-#                     pipeline_parallel_size=1,
-#                     data_parallel_size=1,
-#                     use_sequence_parallel=True,
-#                 ),
-#                 optimizer=OptimizerConfig(type="adam", offload=True),
-#             ),
-#         ),
-#         actor_train.name: RPCAllocation(
-#             rpc=actor_train,
-#             mapping=np.array([[1, 1, 1, 1, 1, 1, 1, 1]]),
-#             train_eval_config=ModelTrainEvalConfig(
-#                 type="llama",
-#                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-#                 gradient_checkpointing=True,
-#                 parallel=ParallelismConfig(
-#                     model_parallel_size=8,
-#                     pipeline_parallel_size=1,
-#                     data_parallel_size=1,
-#                     use_sequence_parallel=True,
-#                 ),
-#                 optimizer=OptimizerConfig(type="adam", offload=True),
-#             ),
-#         ),
-#     }
-
-
 def auto_device_mapping(
     n_nodes: int,
     n_gpus_per_node: int = 8,
     mem: int = 80,
     nodelist: Optional[str] = None,
+    mode: Literal["search", "model_pipe", "data_pipe"] = "search",
 ):
     device_mesh = ClusterDeviceMesh(n_nodes, n_gpus_per_node, mem)
 
@@ -485,7 +226,16 @@ def auto_device_mapping(
                                 raise RuntimeError(
                                     f"Model config mismatch: {k} {v} {getattr(model_configs[rpc.model_name], k)}"
                                 )
-                self._allocations = optimal_device_mapping(
+                if mode == "search":
+                    device_mapping_func = optimal_device_mapping
+                elif mode == "model_pipe":
+                    device_mapping_func = model_pipe_device_mapping
+                elif mode == "data_pipe":
+                    device_mapping_func = data_pipe_device_mapping
+                else:
+                    raise ValueError(f"Invalid mode {mode}")
+
+                self._allocations = device_mapping_func(
                     device_mesh,
                     model_rpcs=self._internal_exp.rpcs,
                     model_configs=model_configs,

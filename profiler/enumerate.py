@@ -8,6 +8,7 @@ from profiler.rpc import *
 import api.config.dfg
 
 GPU_MEM_CAP = 80 * (1024**3)
+MEM_INDEX = 1.25
 
 
 def enumerate_rpc_executions(rpc: ModelRPC,
@@ -16,7 +17,7 @@ def enumerate_rpc_executions(rpc: ModelRPC,
                              n_ppo_minibatches=1) -> List[RPCExecution]:
     sub_device_meshes = find_sub_device_meshes(device_mesh)
     feasible = []
-    mem_index = 1.2
+    # mem_index = 1.2
     for sub_device_mesh in sub_device_meshes:
         ps = find_parallel_strategies(sub_device_mesh)
         for p in ps:
@@ -26,8 +27,8 @@ def enumerate_rpc_executions(rpc: ModelRPC,
                 # batch size too small
                 continue
             mem_cost, static_mem = estimate_rpc_memory(rpc, p, bs, seq_len)
-            mem_cost = int(mem_cost * mem_index)
-            static_mem = int(static_mem * mem_index)
+            mem_cost = int(mem_cost * MEM_INDEX)
+            static_mem = int(static_mem * MEM_INDEX)
             time_cost = estimate_rpc_time(rpc,
                                           p,
                                           bs=bs,
@@ -42,7 +43,7 @@ def enumerate_rpc_executions(rpc: ModelRPC,
     return feasible
 
 
-def build_graph(rpcs: List[ModelRPC], num_epoch: int = 5, epoch_dependency_interval: int = 2, if_print=False):
+def build_graph(rpcs: List[ModelRPC], num_epoch: int = 5, epoch_dependency_interval: int = 1, if_print=False):
     """ Build model function call graph of multiple training epochs,
     
     args:

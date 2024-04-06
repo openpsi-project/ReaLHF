@@ -200,7 +200,8 @@ class PackedActorInterface(api.model.ModelInterface):
             # logger.info(f"gen_tokens shape {gen_tokens.shape}")
         else:
             # unwrap deepspeed engine here
-            module = module.module
+            if hasattr(module, "module"):
+                module = module.module
             gen_res = module.generate(
                 tokenizer=model.tokenizer,
                 packed_input_ids=packed_prompts,

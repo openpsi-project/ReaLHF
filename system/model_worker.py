@@ -510,6 +510,11 @@ class ModelWorker(worker_base.Worker):
         assert not handled and res is None
 
         with base.constants.model_scope(handler_model_name):
+            # if not isinstance(request.handler, str):
+            #     if request.handler.model_name in self.__models:
+            #         print(f"model {request.handler.model_name} handle_name {request.handle_name} module type {type(self._model.module)}")
+            #     else:
+            #         print(f"model {request.handler.model_name} handle name {request.handle_name} not in __models")
             res = None
             if request.handle_name == "empty":
                 # Empty request is used for executing hooks, e.g., data transfer, parameter syncrhonization.
@@ -520,6 +525,7 @@ class ModelWorker(worker_base.Worker):
                 base.constants.set_max_seqlen(data.max_seqlen)  # used by cuda graph buffer for generation
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
                 self.__backend_initialized[request.handler.model_name] = True
+                # print(f"after initialize model {request.handler.model_name} module type {type(self._model.module)}")
             elif request.handle_name == "model_config":
                 assert isinstance(self.__unwrapped_models[request.handler.model_name], FlashMQATModel)
                 res = self.__unwrapped_models[request.handler.model_name].config

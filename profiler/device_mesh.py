@@ -287,7 +287,7 @@ def find_parallel_strategies(device_mesh: DeviceMesh) -> List[ModelParallelStrat
             while num_pp <= num_dp_pp:
                 num_dp_mp = n_gpus // num_pp
                 valid = num_dp_mp <= 8 and num_dp_pp % num_pp == 0
-                if num_dp_pp % num_pp == 0 and valid:
+                if valid:
                     res.append(ModelParallelStrategy(num_pp, num_mp, num_dp_pp // num_pp))
                 num_pp += 1
 

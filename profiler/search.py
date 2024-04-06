@@ -3,6 +3,8 @@ import argparse
 import os
 import pickle
 
+import numpy as np
+
 from profiler.device_mesh import DeviceMesh, make_device_mesh_from_name, ModelParallelStrategy
 from profiler.enumerate import build_graph, enumerate_rpc_executions
 from profiler.estimate import (comm_stats, estimate_model_size, estimate_rpc_memory, estimate_rpc_time,
@@ -14,7 +16,7 @@ import profiler.cppsearch.mdm_search as mdm_search
 
 from api.config.config_base import MODEL_TYPE_TO_PATH
 from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
-from api.config.config_flash_model import ModelTrainEvalConfig, OptimizerConfig
+from api.config.config_flash_model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
 from api.config.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
 from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 import api.config.config_system as config_package
@@ -36,6 +38,8 @@ def optimal_device_mapping(
                             base.constants.trial_name(), "device_mapping.pkl")
     log_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
                            base.constants.trial_name(), "device_mapping")
+    rs_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
+                          base.constants.trial_name(), "raw_search_result")
 
     if from_file:
         with open(dump_dir, "rb") as f:
@@ -64,7 +68,7 @@ def optimal_device_mapping(
                                      n_ppo_minibatches=n_ppo_minibatches,
                                      if_print=True)
     rpc_list = make_rpc_list(model_rpcs, if_print=True)
-    graph = build_graph(model_rpcs, 5, 2, if_print=True)
+    graph = build_graph(model_rpcs, 5, 1, if_print=True)
     comm_stats_ = comm_stats(if_print=True)
     model_size_dict = make_model_size_dict(model_rpcs, if_print=True)
 
@@ -80,7 +84,7 @@ def optimal_device_mapping(
         comm_stats_,
         model_size_dict,
         0.01,  # beta min
-        0.05,  # beta max
+        0.04,  # beta max
         0.01,  # beta step
         search_time,  # time limit for each search
         1,  # repeat
@@ -118,14 +122,17 @@ def optimal_device_mapping(
 
     rpc_alloc_dict = {}
     for rpc_name, alloc_info in r.items():
+        if rpc_name == "end_time":
+            continue
         rpc = rpc_dict[rpc_name]
         ps = ModelParallelStrategy(
             num_pp=alloc_info["num_pp"],
             num_dp=alloc_info["num_dp"],
             num_mp=alloc_info["num_mp"],
         )
-        use_sequence_parallel = False\
-            if rpc.model_name.role in ["reward", "ref"] else (ps.num_mp > 1)
+        # use_sequence_parallel = False\
+        #     if rpc.model_name.role in ["reward", "ref"] else (ps.num_mp > 1)
+        use_sequence_parallel = ps.num_mp > 1
         parallel_config = ps.to_config(use_sequence_parallel=use_sequence_parallel,)
         gradient_checkpointing = True
         if rpc.model_name in [actor_train.model_name, critic_train.model_name]:
@@ -160,6 +167,9 @@ def optimal_device_mapping(
         with open(log_dir, "w") as f:
             import pprint
             pprint.pprint(rpc_alloc_dict, stream=f)
+        with open(rs_dir, "w") as f:
+            import pprint
+            pprint.pprint(rs, stream=f)
 
     return rpc_alloc_dict
 
@@ -220,7 +230,7 @@ def make_rpc_list(rpcs: List[ModelRPC], if_print: bool = False) -> List[RPC]:
 def search_model_device_mappings(rpcs: List[ModelRPC], device_mesh: DeviceMesh, method="mcmc", beta=0.75):
     rpc_exe_list = make_rpc_exe_list(rpcs, device_mesh)
     rpc_list = make_rpc_list(rpcs)
-    graph = build_graph(rpcs, 5, 2)
+    graph = build_graph(rpcs, 1, 1)
     comm_stats_ = comm_stats()
     model_size_dict = make_model_size_dict(rpcs)
 
@@ -235,7 +245,7 @@ def search_model_device_mappings(rpcs: List[ModelRPC], device_mesh: DeviceMesh, 
 def dump_search_settings(rpcs: List[ModelRPC], device_mesh: DeviceMesh):
     rpc_exe_list = make_rpc_exe_list(rpcs, device_mesh, if_print=True)
     rpc_list = make_rpc_list(rpcs, if_print=True)
-    graph = build_graph(rpcs, 5, 2, if_print=True)
+    graph = build_graph(rpcs, 5, 1, if_print=True)
     comm_stats_ = comm_stats(if_print=True)
     model_size_dict = make_model_size_dict(rpcs, if_print=True)
 
@@ -274,6 +284,154 @@ def print_model_device_mapping_by_index(rpcs: List[ModelRPC], device_mesh: Devic
         print(feasible[pindex])
 
 
+def model_pipe_device_mapping(
+    device_mesh: ClusterDeviceMesh,
+    model_rpcs: List[ModelRPC],
+    model_configs: Dict[str, FlashMQATConfig],
+    nodelist: Optional[str] = None,
+    profile_layers: bool = False,
+    num_gen_tokens: int = 256,
+    n_ppo_minibatches: int = 1,
+) -> Dict[str, RPCAllocation]:
+    n_nodes = device_mesh.n_nodes
+
+    rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
+    rew_inf.post_hooks.append(OffloadHook())
+    ref_inf.post_hooks.append(OffloadHook())
+
+    mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]] * n_nodes)
+
+    parallel_config = ParallelismConfig(model_parallel_size=8,
+                                        pipeline_parallel_size=n_nodes,
+                                        data_parallel_size=1,
+                                        use_sequence_parallel=True)
+    actor_alloc = RPCAllocation(
+        rpc=actor_train,
+        mapping=mapping,
+        train_eval_config=ModelTrainEvalConfig(
+            type="llama",
+            path=MODEL_TYPE_TO_PATH[rollout.model_type],
+            base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+            gradient_checkpointing=True,
+            parallel=parallel_config,
+            optimizer=OptimizerConfig(type="adam", offload=False),
+        ),
+    )
+    critic_alloc = RPCAllocation(
+        rpc=critic_train,
+        mapping=mapping,
+        train_eval_config=ModelTrainEvalConfig(
+            type="llama",
+            path=MODEL_TYPE_TO_PATH[rollout.model_type],
+            base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+            gradient_checkpointing=True,
+            parallel=parallel_config,
+            optimizer=OptimizerConfig(type="adam", offload=False),
+        ),
+    )
+
+    return {
+        rollout.name: actor_alloc,
+        rew_inf.name: RPCAllocation(
+            rpc=rew_inf,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                parallel=parallel_config,
+            ),
+        ),
+        ref_inf.name: RPCAllocation(
+            rpc=ref_inf,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                parallel=parallel_config,
+            ),
+        ),
+        critic_inf.name: critic_alloc,
+        critic_train.name: critic_alloc,
+        actor_train.name: actor_alloc,
+    }
+
+
+def data_pipe_device_mapping(
+    device_mesh: ClusterDeviceMesh,
+    model_rpcs: List[ModelRPC],
+    model_configs: Dict[str, FlashMQATConfig],
+    nodelist: Optional[str] = None,
+    profile_layers: bool = False,
+    num_gen_tokens: int = 256,
+    n_ppo_minibatches: int = 1,
+) -> Dict[str, RPCAllocation]:
+    n_nodes = device_mesh.n_nodes
+
+    rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
+    rew_inf.post_hooks.append(OffloadHook())
+    ref_inf.post_hooks.append(OffloadHook())
+
+    mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]] * n_nodes)
+
+    parallel_config = ParallelismConfig(model_parallel_size=1,
+                                        pipeline_parallel_size=n_nodes,
+                                        data_parallel_size=8,
+                                        use_sequence_parallel=True)
+    actor_alloc = RPCAllocation(
+        rpc=actor_train,
+        mapping=mapping,
+        train_eval_config=ModelTrainEvalConfig(
+            type="llama",
+            path=MODEL_TYPE_TO_PATH[rollout.model_type],
+            base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+            gradient_checkpointing=True,
+            parallel=parallel_config,
+            optimizer=OptimizerConfig(type="adam", offload=False),
+        ),
+    )
+    critic_alloc = RPCAllocation(
+        rpc=critic_train,
+        mapping=mapping,
+        train_eval_config=ModelTrainEvalConfig(
+            type="llama",
+            path=MODEL_TYPE_TO_PATH[rollout.model_type],
+            base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+            gradient_checkpointing=True,
+            parallel=parallel_config,
+            optimizer=OptimizerConfig(type="adam", offload=False),
+        ),
+    )
+
+    return {
+        rollout.name: actor_alloc,
+        rew_inf.name: RPCAllocation(
+            rpc=rew_inf,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                parallel=parallel_config,
+            ),
+        ),
+        ref_inf.name: RPCAllocation(
+            rpc=ref_inf,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                parallel=parallel_config,
+            ),
+        ),
+        critic_inf.name: critic_alloc,
+        critic_train.name: critic_alloc,
+        actor_train.name: actor_alloc,
+    }
+
+
 if __name__ == "__main__":
     # parser = argparse.ArgumentParser()
     # parser.add_argument("--expr_name", type=str)
@@ -281,7 +439,7 @@ if __name__ == "__main__":
 
     # experiment = config_package.make_experiment(args.expr_name)
 
-    os.environ.setdefault("IS_REMOTE", "0")
+    # os.environ.setdefault("IS_REMOTE", "0")
     size = 13
     n_nodes = 2
     node_start = 42
