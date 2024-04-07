@@ -322,6 +322,8 @@ def setup_ddp(
 
     data_transfer_groups, data_transfer_src_ranks = {}, {}
     data_transfer_dst_ranks = {}
+    import pprint
+    pprint.pprint(data_transfer_pairs)
     if data_transfer_pairs is not None:
         for src, dst in data_transfer_pairs:
             src_topo = model_topos[src]

@@ -1,5 +1,6 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 import argparse
+import functools
 import os
 import pickle
 
@@ -40,10 +41,14 @@ def optimal_device_mapping(
                            base.constants.trial_name(), "device_mapping")
     rs_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
                           base.constants.trial_name(), "raw_search_result")
+    rpc_exe_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
+                               base.constants.trial_name(), "rpc_exe_info")
 
     if from_file:
         with open(dump_dir, "rb") as f:
             return pickle.load(f)
+    else:
+        os.makedirs(os.path.dirname(dump_dir), exist_ok=True)
 
     # profile layers for each model type
     if profile_layers:
@@ -66,16 +71,16 @@ def optimal_device_mapping(
                                      search_device_mesh,
                                      num_gen_tokens=num_gen_tokens,
                                      n_ppo_minibatches=n_ppo_minibatches,
-                                     if_print=True)
-    rpc_list = make_rpc_list(model_rpcs, if_print=True)
-    graph = build_graph(model_rpcs, 5, 1, if_print=True)
-    comm_stats_ = comm_stats(if_print=True)
-    model_size_dict = make_model_size_dict(model_rpcs, if_print=True)
+                                     log_dir=rpc_exe_dir)
+    rpc_list = make_rpc_list(model_rpcs, if_print=False)
+    graph = build_graph(model_rpcs, 5, 1, if_print=False)
+    comm_stats_ = comm_stats(if_print=False)
+    model_size_dict = make_model_size_dict(model_rpcs, if_print=False)
 
     # rpc_dict = {rpc.name: rpc for rpc in model_rpcs}
 
     n_nodes = device_mesh.n_nodes
-    search_time = 30 * n_nodes
+    search_time = 60 * n_nodes
 
     rs: List[Dict[str, List]] = mdm_search.multi_mcmc_search(
         rpc_list,
@@ -83,9 +88,9 @@ def optimal_device_mapping(
         graph,
         comm_stats_,
         model_size_dict,
-        0.01,  # beta min
-        0.04,  # beta max
-        0.01,  # beta step
+        0.001,  # beta min
+        0.004,  # beta max
+        0.001,  # beta step
         search_time,  # time limit for each search
         1,  # repeat
     )
@@ -122,7 +127,7 @@ def optimal_device_mapping(
 
     rpc_alloc_dict = {}
     for rpc_name, alloc_info in r.items():
-        if rpc_name == "end_time":
+        if rpc_name in ["end_time", "mem_cost"]:
             continue
         rpc = rpc_dict[rpc_name]
         ps = ModelParallelStrategy(
@@ -161,7 +166,6 @@ def optimal_device_mapping(
         rpc_alloc_dict[rpc_name] = rpc_alloc
 
     if not from_file:
-        os.makedirs(os.path.dirname(dump_dir), exist_ok=True)
         with open(dump_dir, "wb") as f:
             pickle.dump(rpc_alloc_dict, f)
         with open(log_dir, "w") as f:
@@ -178,8 +182,10 @@ def make_rpc_exe_list(rpcs: List[ModelRPC],
                       device_mesh: DeviceMesh,
                       num_gen_tokens: int = 256,
                       n_ppo_minibatches: int = 1,
-                      if_print: bool = False) -> List[RPCExecution]:
+                      if_print: bool = False,
+                      log_dir: Optional[str] = None) -> List[RPCExecution]:
     rpc_exe_list = []
+    log_flag = False
     for rpc in rpcs:
         # flash_mqat_config = load_model_config(rpc)
         feasible = enumerate_rpc_executions(rpc,
@@ -188,10 +194,25 @@ def make_rpc_exe_list(rpcs: List[ModelRPC],
                                             n_ppo_minibatches=n_ppo_minibatches)
         rpc_exe_list.extend(feasible)
 
+        if log_dir is not None:
+            mode = "w" if not log_flag else "a"
+            with open(log_dir, mode) as f:
+                f.write(f"{rpc.name} feasible: {len(feasible)}\n")
+                feasible.sort(key=lambda x: x.time_cost)
+                # feasible = feasible[:30]
+                for rpc_exe in feasible:
+                    f.write(f"time_cost: {rpc_exe.time_cost/(1e3)} ms, {rpc_exe.time_cost} "
+                            f"sub_device_mesh: {rpc_exe.device_mesh}, "
+                            f"parallel_strategy: {rpc_exe.parallel_strategy}, "
+                            f"mem_cost: {rpc_exe.mem/(1024*1024*1024):02f} GB, "
+                            f"static_mem_cost: {rpc_exe.static_mem/(1024*1024*1024):02f} GB\n")
+                f.write("\n")
+                log_flag = True
+
         if if_print:
             print(f"{rpc.name} feasible: {len(feasible)}")
             feasible.sort(key=lambda x: x.time_cost)
-            # feasible = feasible[:30]
+            # feasible = feasible[:10]
             for rpc_exe in feasible:
                 print(f"time_cost: {rpc_exe.time_cost/(1e3)} ms, {rpc_exe.time_cost} "
                       f"sub_device_mesh: {rpc_exe.device_mesh}, "
@@ -227,28 +248,17 @@ def make_rpc_list(rpcs: List[ModelRPC], if_print: bool = False) -> List[RPC]:
     return rpc_list
 
 
-def search_model_device_mappings(rpcs: List[ModelRPC], device_mesh: DeviceMesh, method="mcmc", beta=0.75):
-    rpc_exe_list = make_rpc_exe_list(rpcs, device_mesh)
-    rpc_list = make_rpc_list(rpcs)
-    graph = build_graph(rpcs, 1, 1)
-    comm_stats_ = comm_stats()
-    model_size_dict = make_model_size_dict(rpcs)
-
-    if method == "mcmc":
-        mdm_search.mcmc_search(rpc_list, rpc_exe_list, graph, comm_stats_, model_size_dict, beta)
-    elif method == "brute_force":
-        mdm_search.brute_force_search(rpc_list, rpc_exe_list, graph, comm_stats_, model_size_dict)
-    else:
-        raise NotImplementedError(f"method {method} not supported")
-
-
-def dump_search_settings(rpcs: List[ModelRPC], device_mesh: DeviceMesh):
-    rpc_exe_list = make_rpc_exe_list(rpcs, device_mesh, if_print=True)
+def dump_search_settings(rpcs: List[ModelRPC], device_mesh: DeviceMesh, num_gen_tokens: int,
+                         n_ppo_minibatches: int):
+    rpc_exe_list = make_rpc_exe_list(rpcs,
+                                     device_mesh,
+                                     num_gen_tokens=num_gen_tokens,
+                                     n_ppo_minibatches=n_ppo_minibatches,
+                                     if_print=True)
     rpc_list = make_rpc_list(rpcs, if_print=True)
     graph = build_graph(rpcs, 5, 1, if_print=True)
     comm_stats_ = comm_stats(if_print=True)
     model_size_dict = make_model_size_dict(rpcs, if_print=True)
-
     dump_dir = "/home/meizy/model_device_mapping_search/test_case/"
     with open(dump_dir + "rpc_list.pkl", "wb") as f:
         pickle.dump(rpc_list, f)
@@ -284,7 +294,7 @@ def print_model_device_mapping_by_index(rpcs: List[ModelRPC], device_mesh: Devic
         print(feasible[pindex])
 
 
-def model_pipe_device_mapping(
+def handpicked_model_device_mapping(
     device_mesh: ClusterDeviceMesh,
     model_rpcs: List[ModelRPC],
     model_configs: Dict[str, FlashMQATConfig],
@@ -292,6 +302,7 @@ def model_pipe_device_mapping(
     profile_layers: bool = False,
     num_gen_tokens: int = 256,
     n_ppo_minibatches: int = 1,
+    mode: Literal["data_pipe", "model_pipe"] = "model_pipe",
 ) -> Dict[str, RPCAllocation]:
     n_nodes = device_mesh.n_nodes
 
@@ -301,37 +312,30 @@ def model_pipe_device_mapping(
 
     mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]] * n_nodes)
 
-    parallel_config = ParallelismConfig(model_parallel_size=8,
-                                        pipeline_parallel_size=n_nodes,
-                                        data_parallel_size=1,
-                                        use_sequence_parallel=True)
-    actor_alloc = RPCAllocation(
-        rpc=actor_train,
-        mapping=mapping,
-        train_eval_config=ModelTrainEvalConfig(
-            type="llama",
-            path=MODEL_TYPE_TO_PATH[rollout.model_type],
-            base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-            gradient_checkpointing=True,
-            parallel=parallel_config,
-            optimizer=OptimizerConfig(type="adam", offload=False),
-        ),
-    )
-    critic_alloc = RPCAllocation(
-        rpc=critic_train,
-        mapping=mapping,
-        train_eval_config=ModelTrainEvalConfig(
-            type="llama",
-            path=MODEL_TYPE_TO_PATH[rollout.model_type],
-            base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-            gradient_checkpointing=True,
-            parallel=parallel_config,
-            optimizer=OptimizerConfig(type="adam", offload=False),
-        ),
-    )
+    if mode == "model_pipe":
+        parallel_config = ParallelismConfig(model_parallel_size=8,
+                                            pipeline_parallel_size=n_nodes,
+                                            data_parallel_size=1,
+                                            use_sequence_parallel=True)
+    elif mode == "data_pipe":
+        parallel_config = ParallelismConfig(model_parallel_size=1,
+                                            pipeline_parallel_size=n_nodes,
+                                            data_parallel_size=8,
+                                            use_sequence_parallel=True)
 
     return {
-        rollout.name: actor_alloc,
+        rollout.name: RPCAllocation(
+            rpc=rollout,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                gradient_checkpointing=True,
+                parallel=parallel_config,
+                optimizer=OptimizerConfig(type="adam", offload=False),
+            ),
+        ),
         rew_inf.name: RPCAllocation(
             rpc=rew_inf,
             mapping=mapping,
@@ -352,85 +356,47 @@ def model_pipe_device_mapping(
                 parallel=parallel_config,
             ),
         ),
-        critic_inf.name: critic_alloc,
-        critic_train.name: critic_alloc,
-        actor_train.name: actor_alloc,
-    }
-
-
-def data_pipe_device_mapping(
-    device_mesh: ClusterDeviceMesh,
-    model_rpcs: List[ModelRPC],
-    model_configs: Dict[str, FlashMQATConfig],
-    nodelist: Optional[str] = None,
-    profile_layers: bool = False,
-    num_gen_tokens: int = 256,
-    n_ppo_minibatches: int = 1,
-) -> Dict[str, RPCAllocation]:
-    n_nodes = device_mesh.n_nodes
-
-    rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
-    rew_inf.post_hooks.append(OffloadHook())
-    ref_inf.post_hooks.append(OffloadHook())
-
-    mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]] * n_nodes)
-
-    parallel_config = ParallelismConfig(model_parallel_size=1,
-                                        pipeline_parallel_size=n_nodes,
-                                        data_parallel_size=8,
-                                        use_sequence_parallel=True)
-    actor_alloc = RPCAllocation(
-        rpc=actor_train,
-        mapping=mapping,
-        train_eval_config=ModelTrainEvalConfig(
-            type="llama",
-            path=MODEL_TYPE_TO_PATH[rollout.model_type],
-            base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-            gradient_checkpointing=True,
-            parallel=parallel_config,
-            optimizer=OptimizerConfig(type="adam", offload=False),
-        ),
-    )
-    critic_alloc = RPCAllocation(
-        rpc=critic_train,
-        mapping=mapping,
-        train_eval_config=ModelTrainEvalConfig(
-            type="llama",
-            path=MODEL_TYPE_TO_PATH[rollout.model_type],
-            base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
-            gradient_checkpointing=True,
-            parallel=parallel_config,
-            optimizer=OptimizerConfig(type="adam", offload=False),
-        ),
-    )
-
-    return {
-        rollout.name: actor_alloc,
-        rew_inf.name: RPCAllocation(
-            rpc=rew_inf,
+        critic_inf.name: RPCAllocation(
+            rpc=critic_inf,
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                gradient_checkpointing=True,
                 parallel=parallel_config,
+                optimizer=OptimizerConfig(type="adam", offload=False),
             ),
         ),
-        ref_inf.name: RPCAllocation(
-            rpc=ref_inf,
+        critic_train.name: RPCAllocation(
+            rpc=critic_train,
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
                 base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                gradient_checkpointing=True,
                 parallel=parallel_config,
+                optimizer=OptimizerConfig(type="adam", offload=False),
             ),
         ),
-        critic_inf.name: critic_alloc,
-        critic_train.name: critic_alloc,
-        actor_train.name: actor_alloc,
+        actor_train.name: RPCAllocation(
+            rpc=actor_train,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                gradient_checkpointing=True,
+                parallel=parallel_config,
+                optimizer=OptimizerConfig(type="adam", offload=False),
+            ),
+        ),
     }
 
+
+model_pipe_device_mapping = functools.partial(handpicked_model_device_mapping, mode="model_pipe")
+data_pipe_device_mapping = functools.partial(handpicked_model_device_mapping, mode="data_pipe")
 
 if __name__ == "__main__":
     # parser = argparse.ArgumentParser()
@@ -440,15 +406,17 @@ if __name__ == "__main__":
     # experiment = config_package.make_experiment(args.expr_name)
 
     # os.environ.setdefault("IS_REMOTE", "0")
-    size = 13
-    n_nodes = 2
+    bs = 128
+    seqlen = 896
+    size = 70
+    n_nodes = 8
     node_start = 42
     node_end = node_start + n_nodes - 1
     nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
     cluster_device_mesh = ClusterDeviceMesh(n_nodes=n_nodes, n_gpus_per_node=8, mem=80)
-    rpcs = ppo_rpcs_example(size)
+    rpcs = ppo_rpcs_example(size, bs, seqlen)
     device_mesh = make_device_mesh_from_name(nodelist)
-    dump_search_settings(rpcs, device_mesh)
+    dump_search_settings(rpcs, device_mesh, num_gen_tokens=seqlen, n_ppo_minibatches=4)
     # optimal_device_mapping(cluster_device_mesh, rpcs, None, nodelist)
 
     # 7b 13b 2x8:

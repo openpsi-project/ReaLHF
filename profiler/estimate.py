@@ -101,6 +101,61 @@ def find_nearest_key(k, d):
     return op_keys[-1]
 
 
+# def fitting_key(k, d):
+#     op_name, bs, seqlen = k
+#     keys = list(d.keys())
+#     op_keys = []
+#     for ik in keys:
+#         if k[0] == ik[0]:
+#             op_keys.append(ik)
+#     key_map = {}
+#     for k in op_keys:
+#         if op_name == "fwd_gen_1":
+#             if bs not in key_map.values():
+#                 key_map[k] = bs
+#         else:
+#             if bs * seqlen not in key_map.values():
+#                 key_map[k] = bs * seqlen
+#     kv_tuples = sorted(key_map.items(), key=lambda x: x[1])
+#     v_tuple = (k, bs) if op_name == "fwd_gen_1" else (k, bs * seqlen)
+#     v = v_tuple[1]
+#     kv_tuples.append(v_tuple)
+#     kv_tuples.sort(key=lambda x: x[1])
+#     left = kv_tuples.index(v_tuple) - 1
+#     right = kv_tuples.index(v_tuple) + 1
+#     if left < 0:
+#         right_key = kv_tuples[right][0]
+#         right_value = kv_tuples[right][1]
+#         return d[right_key] * v / right_value
+#     if right >= len(kv_tuples):
+#         left_key = kv_tuples[left][0]
+#         left_value = kv_tuples[left][1]
+#         return d[left_key] * v / left_value
+#     left_key = kv_tuples[left][0]
+#     left_value = kv_tuples[left][1]
+#     right_key = kv_tuples[right][0]
+#     right_value = kv_tuples[right][1]
+#     return d[left_key] + (d[right_key] - d[left_key]) * (v - left_value) / (right_value - left_value)
+
+# def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen, p=False):
+#     op_key = (op_name, bs, seqlen)
+#     if op_key not in op_cost["embedding_layer"]:
+#         real_op_key = find_nearest_key(op_key, op_cost["embedding_layer"])
+#     else:
+#         real_op_key = op_key
+#     if op_key in op_cost["embedding_layer"]:
+#         embedding_layer_cost = op_cost["embedding_layer"][real_op_key]
+#         flash_mqat_block_0_cost = op_cost["flash_mqat_block_0"][real_op_key]
+#         head_cost = op_cost["head"][real_op_key]
+#     else:
+#         embedding_layer_cost = fitting_key(op_key, op_cost["embedding_layer"])
+#         flash_mqat_block_0_cost = fitting_key(op_key, op_cost["flash_mqat_block_0"])
+#         head_cost = fitting_key(op_key, op_cost["head"])
+#     cost = (embedding_layer_cost + num_layers * flash_mqat_block_0_cost\
+#             + head_cost) / num_pp
+#     return cost
+
+
 def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen, p=False):
     op_key = (op_name, bs, seqlen)
     if op_key not in op_cost["embedding_layer"]:
@@ -325,6 +380,7 @@ def estimate_rpc_memory(rpc: ModelRPC,
                         parallel_strategy: ModelParallelStrategy,
                         batch_size: int,
                         seq_len: int,
+                        offload: bool = False,
                         gradient_checkpointing: bool = False,
                         offload_optimizer: bool = False,
                         n_ppo_minibatches: int = 1):
@@ -361,17 +417,20 @@ def estimate_rpc_memory(rpc: ModelRPC,
         #       f"total: {(static_mem + active_mem)/(1024*1024*1024):02f} GB")
         return static_mem + active_mem, static_mem
     elif interface_type == ModelInterfaceType.INFERENCE:
-        static_mem = param_mem // (num_pp * num_mp)
+        static_mem = 2 * param_mem // (num_pp * num_mp)
         active_mem = 0  # no tensor need to be stored in inference
         # print(f"inference static_mem: {static_mem/(1024*1024*1024):02f} GB")
-        return static_mem, 0  # assume offload
+        if offload:
+            return static_mem, 0  # assume offload
+        else:
+            return static_mem, static_mem
     elif interface_type == ModelInterfaceType.GENERATE:
-        static_mem = param_mem // (num_pp * num_mp)
+        static_mem = 2 * param_mem // (num_pp * num_mp)
         active_mem = 2 * (2 * b * s * h) * L // (num_pp * num_mp * num_dp)  # kv cache
         # print(f"generate static_mem: {static_mem/(1024*1024*1024):02f} GB, "
         #       f"kv_cache_mem: {kv_cache_mem/(1024*1024*1024):02f} GB, "
         #       f"total: {(static_mem + kv_cache_mem)/(1024*1024*1024):02f} GB")
-        return static_mem + active_mem, 0  # assume offload
+        return static_mem + active_mem, static_mem
 
 
 def main(args):

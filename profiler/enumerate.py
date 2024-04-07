@@ -8,7 +8,7 @@ from profiler.rpc import *
 import api.config.dfg
 
 GPU_MEM_CAP = 80 * (1024**3)
-MEM_INDEX = 1.25
+MEM_INDEX = 1.0
 
 
 def enumerate_rpc_executions(rpc: ModelRPC,
@@ -26,7 +26,11 @@ def enumerate_rpc_executions(rpc: ModelRPC,
             if 2 * p.num_dp * p.num_pp * n_ppo_minibatches > bs:
                 # batch size too small
                 continue
-            mem_cost, static_mem = estimate_rpc_memory(rpc, p, bs, seq_len)
+            mem_cost, static_mem = estimate_rpc_memory(rpc,
+                                                       p,
+                                                       bs,
+                                                       seq_len,
+                                                       offload=rpc.model_name.role in ["ref", "reward"])
             mem_cost = int(mem_cost * MEM_INDEX)
             static_mem = int(static_mem * MEM_INDEX)
             time_cost = estimate_rpc_time(rpc,

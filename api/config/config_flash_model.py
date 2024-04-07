@@ -188,8 +188,8 @@ class OptimizerConfig:
     eps: float = 1e-5
     min_lr_ratio: float = 0.0
     lr_scheduler_type: str = dataclasses.field(
-        metadata={"choices": ["linear", "cosine"]},
-        default="cosine",
+        metadata={"choices": ["linear", "cosine", "constant"]},
+        default="constant",
     )
     warmup_steps_proportion: float = 0.02
     offload: bool = False

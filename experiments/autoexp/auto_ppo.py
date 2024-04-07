@@ -25,16 +25,16 @@ def register_auto_ppo_experiment(
     assert size in [7, 13, 34, 70]
     if size == 7:
         n_nodes = 1
-        nodelist = "QH-com42"
+        nodelist = "QH-com41"
     elif size == 13:
         n_nodes = 2
-        nodelist = "QH-com[42-43]"
+        nodelist = "QH-com[41-42]"
     elif size == 34:
         n_nodes = 4
-        nodelist = "QH-com[42-45]"
+        nodelist = "QH-com[41-44]"
     elif size == 70:
         n_nodes = 8
-        nodelist = "QH-com[30, 42-48]"
+        nodelist = "QH-com[41-48]"
 
     model_class = "llama" if size != 34 else "codellama"
 

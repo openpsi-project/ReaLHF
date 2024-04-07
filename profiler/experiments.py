@@ -16,10 +16,9 @@ from base.topology import PipeModelDataParallelTopology
 NUM_GPUS_PER_NODE = 8
 
 
-def ppo_rpcs_example(size):
-    gen_bs = train_bs = 256
-    seq_len = 256
-    gen_len = 256
+def ppo_rpcs_example(size, bs, seqlen):
+    prompt_seqlen = 128
+    train_seqlen = prompt_seqlen + seqlen
     actor_interface = ModelInterface(
         "flash_actor",
         args={},
@@ -51,9 +50,9 @@ def ppo_rpcs_example(size):
                 "prompt_mask",
             ],
             balanced_dp=True,
-            min_n_seqs=gen_bs,
-            max_n_seqs=gen_bs,
-            max_n_tokens=gen_bs * seq_len,
+            min_n_seqs=bs,
+            max_n_seqs=bs,
+            max_n_tokens=bs * prompt_seqlen,
         ),
         ModelRPC(
             model_name="reward",
@@ -64,9 +63,9 @@ def ppo_rpcs_example(size):
             input_key_remap={"packed_seq": "packed_input_ids"},
             output_data=["scores"],
             output_key_remap={"scores": "rewards"},
-            min_n_seqs=gen_bs,
-            max_n_seqs=gen_bs,
-            max_n_tokens=gen_bs * (seq_len + gen_len),
+            min_n_seqs=bs,
+            max_n_seqs=bs,
+            max_n_tokens=bs * train_seqlen,
         ),
         ModelRPC(
             model_name="ref",
@@ -79,9 +78,9 @@ def ppo_rpcs_example(size):
             ],
             output_data=["logprobs"],
             output_key_remap={"logprobs": "packed_ref_logprobs"},
-            min_n_seqs=gen_bs,
-            max_n_seqs=gen_bs,
-            max_n_tokens=gen_bs * (seq_len + gen_len),
+            min_n_seqs=bs,
+            max_n_seqs=bs,
+            max_n_tokens=bs * train_seqlen,
         ),
         ModelRPC(
             model_name="critic",
@@ -91,9 +90,9 @@ def ppo_rpcs_example(size):
             input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
             output_data=["scores"],
             output_key_remap={"scores": "values"},
-            min_n_seqs=gen_bs,
-            max_n_seqs=gen_bs,
-            max_n_tokens=gen_bs * (seq_len + gen_len),
+            min_n_seqs=bs,
+            max_n_seqs=bs,
+            max_n_tokens=bs * train_seqlen,
         ),
         ModelRPC(
             model_name="actor",
@@ -112,10 +111,9 @@ def ppo_rpcs_example(size):
             ],
             log_return_value=True,
             # min_n_seqs_per_dp=self.ppo.ppo_n_minibatches,
-            min_n_seqs=train_bs,
-            max_n_seqs=train_bs,
-            balanced_dp=True,
-            max_n_tokens=train_bs * (seq_len + gen_len),
+            min_n_seqs=bs,
+            max_n_seqs=bs,
+            max_n_tokens=bs * train_seqlen,
         ),
         ModelRPC(
             model_name="critic",
@@ -134,10 +132,9 @@ def ppo_rpcs_example(size):
             ],
             log_return_value=True,
             # min_n_seqs_per_dp=self.ppo.ppo_n_minibatches,
-            min_n_seqs=train_bs,
-            max_n_seqs=train_bs,
-            balanced_dp=True,
-            max_n_tokens=train_bs * (seq_len + gen_len),
+            min_n_seqs=bs,
+            max_n_seqs=bs,
+            max_n_tokens=bs * train_seqlen,
         ),
     ]
 
