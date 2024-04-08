@@ -1146,7 +1146,7 @@ class MasterWorker(worker_base.Worker):
             self.__stream, [vs[0] for vs in self.__mwid2msids.values()], "clear_data_cache",
             [self.__rpc_ctrl.training_buffer_indices for _ in self.__all_model_handlers])
         self.__rpc_ctrl.training_buffer_indices.clear()
-        
+
         return worker_base.PollResult(sample_count=1, batch_count=1)
 
     def experiment_complete_exit(self, msg: str):

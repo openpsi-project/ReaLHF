@@ -7,9 +7,9 @@ import time
 from deepspeed import DeepSpeedEngine
 import torch
 
-from base.monitor import cuda_tmarked, cuda_tmark, CUDATimeMarkType
 from base.constants import data_parallel_group
 from base.dataparallel import PackedParallelDataBroker
+from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.backend.pipe_inf import InferencePipelineEngine
@@ -300,7 +300,9 @@ class PackedActorInterface(api.model.ModelInterface):
             if hasattr(module, "module"):
                 module = module.module
             with module.sequence_parallel_disable():
-                res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+                res = module(packed_input_ids=data["packed_seq"],
+                             cu_seqlens=cu_seqlens,
+                             max_seqlen=max_seqlen)
             logits = res
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
@@ -458,7 +460,7 @@ class PackedActorInterface(api.model.ModelInterface):
 
                 with cuda_tmarked("bwd", CUDATimeMarkType.backward):
                     module.backward(loss)
-                
+
                 with cuda_tmarked("optim_step", CUDATimeMarkType.optim_step):
                     module.step(lr_kwargs={"epoch": model.version.global_step})
 
@@ -603,8 +605,8 @@ class PackedCriticInterface(api.model.ModelInterface):
                 module = module.module
             with module.sequence_parallel_disable():
                 scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
-                                                cu_seqlens=cu_seqlens,
-                                                max_seqlen=max_seqlen)
+                                                   cu_seqlens=cu_seqlens,
+                                                   max_seqlen=max_seqlen)
         scores = scores.squeeze(-1)
         return from_dict(dict(scores=scores))
 

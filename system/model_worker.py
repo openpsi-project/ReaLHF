@@ -16,7 +16,7 @@ import torch.distributed as dist
 import torch.utils.data
 
 from api.config.config_base import ModelName
-from base.monitor import gpu_utilization_monitor, cuda_tmark, cuda_tmarked, CUDATimeMarkType, dump_tmark_db
+from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, dump_tmark_db, gpu_utilization_monitor
 from base.topology import ParallelGrid
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 import api.config.config_system as config_system

@@ -322,12 +322,15 @@ def memory_efficient_ppo_loss_fn(
             eps_clip,
         )
 
-def _huber_loss(x: torch.Tensor, y: torch.Tensor, delta:float):
+
+def _huber_loss(x: torch.Tensor, y: torch.Tensor, delta: float):
     diff = torch.abs(x - y)
-    return torch.where(diff < delta, 0.5 * diff ** 2, delta * (diff - 0.5 * delta))
+    return torch.where(diff < delta, 0.5 * diff**2, delta * (diff - 0.5 * delta))
+
 
 def _mse_loss(x: torch.Tensor, y: torch.Tensor):
-    return 0.5 * (x - y) ** 2
+    return 0.5 * (x - y)**2
+
 
 def critic_loss_fn(
     value: torch.FloatTensor,

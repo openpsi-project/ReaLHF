@@ -17,9 +17,8 @@ import numpy as np
 import torch
 import transformers
 
-from base.monitor import cuda_tmarked, cuda_tmark, CUDATimeMarkType
 from base.dataparallel import PackedParallelDataBroker
-from base.monitor import time_mark
+from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, time_mark
 from base.namedarray import NamedArray
 from base.topology import ParallelGrid
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig, genstep

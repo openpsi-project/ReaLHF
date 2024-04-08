@@ -15,13 +15,7 @@ import base.logging as logging
 logger = logging.getLogger("Auto PPO exp", "colored")
 
 
-def register_auto_ppo_experiment(
-    size: int,
-    gen_bs: int,
-    train_bs: int,
-    seqlen: int,
-    mapping_type: str
-):
+def register_auto_ppo_experiment(size: int, gen_bs: int, train_bs: int, seqlen: int, mapping_type: str):
     assert size in [0, 7, 13, 34, 70]
     if size <= 7:
         n_nodes = 1
