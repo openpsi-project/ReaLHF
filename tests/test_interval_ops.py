@@ -1,13 +1,13 @@
-import torch
-from torch.utils.cpp_extension import load
-
 # slice_intervals_cuda = load(
 #     'slice_intervals',
 #     ['csrc/interval_op/interval_get.cu'],
 #     verbose=True)
 import random
-import interval_op_cuda
 import time
+
+from torch.utils.cpp_extension import load
+import interval_op_cuda
+import torch
 
 
 def test_set():
@@ -43,7 +43,7 @@ def test_set():
     )
     offset = 0
     for i, j in intervals:
-        input_tensor2[i:j] = output_tensor[offset : offset + j - i]
+        input_tensor2[i:j] = output_tensor[offset:offset + j - i]
         offset += j - i
     assert torch.allclose(input_tensor, input_tensor2)
 
@@ -67,7 +67,7 @@ def test_set():
     for _ in range(5):
         offset = 0
         for i, j in intervals:
-            input_tensor2[i:j] = output_tensor[offset : offset + j - i]
+            input_tensor2[i:j] = output_tensor[offset:offset + j - i]
             offset += j - i
     torch.cuda.synchronize()
     t2 = time.perf_counter() - tik
@@ -109,9 +109,8 @@ def test_get():
     torch.cuda.synchronize()
     tik = time.perf_counter()
     for _ in range(5):
-        output_tensor = interval_op_cuda.slice_intervals_cuda(
-            input_tensor, intervals_cuda, interval_sizes, offsets, max_interval_size, output_size
-        )
+        output_tensor = interval_op_cuda.slice_intervals_cuda(input_tensor, intervals_cuda, interval_sizes,
+                                                              offsets, max_interval_size, output_size)
     torch.cuda.synchronize()
     t1 = time.perf_counter() - tik
 

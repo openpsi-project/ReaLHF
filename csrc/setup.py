@@ -1,20 +1,19 @@
+from pathlib import Path
+from typing import List, Set
 import contextlib
 import io
 import os
 import re
 import subprocess
 import warnings
-from pathlib import Path
-from typing import List, Set
 
 from packaging.version import parse, Version
+from torch.utils.cpp_extension import BuildExtension, CUDA_HOME, CUDAExtension, ROCM_HOME
 import setuptools
 import torch
 import torch.utils.cpp_extension as torch_cpp_ext
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CUDA_HOME, ROCM_HOME
 
 ROOT_DIR = os.path.dirname(__file__)
-
 
 # Supported NVIDIA GPU architectures.
 NVIDIA_SUPPORTED_ARCHS = {"7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
@@ -74,11 +73,9 @@ def get_torch_arch_list() -> Set[str]:
     arch_list = torch_arch_list.intersection(valid_archs)
     # If none of the specified architectures are valid, raise an error.
     if not arch_list:
-        raise RuntimeError(
-            "None of the CUDA architectures in `TORCH_CUDA_ARCH_LIST` env "
-            f"variable ({env_arch_list}) is supported. "
-            f"Supported CUDA architectures are: {valid_archs}."
-        )
+        raise RuntimeError("None of the CUDA architectures in `TORCH_CUDA_ARCH_LIST` env "
+                           f"variable ({env_arch_list}) is supported. "
+                           f"Supported CUDA architectures are: {valid_archs}.")
     invalid_arch_list = torch_arch_list - valid_archs
     if invalid_arch_list:
         warnings.warn(
@@ -172,7 +169,6 @@ if _is_cuda():
     for flag in REMOVE_NVCC_FLAGS:
         with contextlib.suppress(ValueError):
             torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
-
 
 cr_extension = CUDAExtension(
     name="custom_all_reduce",

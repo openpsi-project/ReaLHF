@@ -110,6 +110,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 loss, _ = module.eval_batch(packed_input_ids,
                                             cu_seqlens,
                                             loss_fn=compute_packed_sft_loss,
+                                            num_micro_batches=base.constants.pipe_parallel_world_size(),
                                             **loss_fn_kwargs)
             else:
                 logits = module(packed_input_ids=packed_input_ids,
@@ -143,7 +144,9 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            logits = module.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
+            logits = module.forward(packed_input_ids=packed_input_ids,
+                                    cu_seqlens=cu_seqlens,
+                                    num_micro_batches=base.constants.pipe_parallel_world_size())
         else:
             logits = model.module(packed_input_ids=packed_input_ids,
                                   cu_seqlens=cu_seqlens,
@@ -162,32 +165,32 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         # prompt_att_mask: torch.BoolTensor = data["prompt_att_mask"]
         # bs, prompt_max_len = prompts.shape[:2]
 
-        assert isinstance(module, DeepSpeedPipelineEngine)
+        # assert isinstance(module, DeepSpeedPipelineEngine)
         # if isinstance(module, DeepSpeedPipelineEngine):
         # packed_input_ids, _, cu_seqlens, _ = unpad_input(prompts, prompt_att_mask)
 
-        res = module.generate(
-            tokenizer=model.tokenizer,
-            packed_input_ids=data['packed_input_ids'],
-            cu_seqlens=data['cu_seqlens'],
-            gconfig=gconfig,
-        )
-        if res is None:
-            return dict()
+        if isinstance(module, DeepSpeedPipelineEngine):
+            res = module.generate(
+                tokenizer=model.tokenizer,
+                packed_input_ids=data['packed_input_ids'],
+                cu_seqlens=data['cu_seqlens'],
+                gconfig=gconfig,
+                num_micro_batches=base.constants.pipe_parallel_world_size(),
+            )
+            if res is None:
+                return dict()
 
-        gen_tokens, logprobs, logits_mask, *_ = res
-        # else:
-        #     # unwrap deepspeed engine here
-        #     module = module.module
-        #     gen_res = module.generate(
-        #         tokenizer=model.tokenizer,
-        #         input_ids=prompts,
-        #         attention_mask=prompt_att_mask,
-        #         gconfig=gconfig,
-        #     )
-        #     gen_tokens = gen_res.sequences
-        #     logprobs = gen_res.scores
-        #     logits_mask = gen_res.logits_mask
+            gen_tokens, logprobs, logits_mask, *_ = res
+        else:
+            res = module.generate(
+                tokenizer=model.tokenizer,
+                packed_input_ids=data['packed_input_ids'],
+                cu_seqlens=data['cu_seqlens'],
+                gconfig=gconfig,
+            )
+            gen_tokens = res.sequences
+            logprobs = res.scores
+            logits_mask = res.logits_mask
 
         return dict(
             gen_tokens=gen_tokens,

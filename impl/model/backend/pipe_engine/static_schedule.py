@@ -59,6 +59,9 @@ class PipeSchedule(ABC):
     def terminate(self):
         return self.terminate_hooks
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(micro_batches={self.micro_batches}, stages={self.stages}, stage_id={self.stage_id})"
+
     @abstractmethod
     def steps(self):
         """Yield a list of :class:`PipeInstruction` for each step in the schedule.

@@ -46,6 +46,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         sequence_parallel=False,
         enable_async_p2p_communication=False,
         enable_async_instruction=False,
+        instruction_sync=False,
         *super_args,
         **super_kwargs,
     ):
@@ -54,6 +55,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 < 2), "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
 
         self.module: FlashMQATModel
+        # print(f"module cls name {type(self.module)}")
 
         # deepspeed enigne attributes
         self.pipeline_parallelism = True
@@ -68,8 +70,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.hidden_dim = self.config.hidden_dim
         self.head_dim = self.config.head_dim
         self.n_kv = self.config.n_kv_heads
-        if self.bfloat16_enabled():
-            assert isinstance(self.optimizer, BF16_Optimizer)
         self.dtype = torch.half if not self.bfloat16_enabled() else torch.bfloat16
         self.sequence_parallel = sequence_parallel
         # tensor model parallel option, whether to enable sequence parallel
@@ -83,7 +83,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         self.global_rank = self.grid.get_global_rank()
         self.num_stages = self.grid.get_pipe_parallel_world_size()
-        assert self.num_stages > 1
         self.stage_id = self.grid.get_stage_id()
         self.dp_id = self.grid.get_data_parallel_id()
 
@@ -95,7 +94,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # and last stages loading inputs/labels. We construct a sampler that uses
 
         self.is_pipe_parallel = self.grid.pipe_parallel_size > 1
-        assert self.is_pipe_parallel
         self.is_data_parallel = self.grid.data_parallel_size > 1
         self.is_model_parallel = self.grid.model_parallel_size > 1
 
@@ -135,8 +133,20 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
         self._async_p2p = enable_async_p2p_communication
         self._async_instruction = enable_async_instruction and self._async_p2p
+        self._instruction_sync = instruction_sync
 
         self._post_init_logging()
+
+    def __post_init__(self):
+        # assertions
+        # assert isinstance(self.module, PipelineModule), "model must base PipelineModule"
+        assert self.zero_optimization_stage(
+        ) < 2, "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
+        if self.bfloat16_enabled():
+            assert isinstance(self.optimizer, BF16_Optimizer)
+        assert self.dp_world_size == self.grid.data_parallel_size
+        assert self.num_stages > 1
+        assert self.is_pipe_parallel, "Must use pipeline parallelism with PipelineModule"
 
     def _post_init_logging(self):
         model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
@@ -218,6 +228,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             n_seqs = input_lens_for_partition.shape[0]
         else:
             data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
+            # print(f"in _prepare_input cu_seqlens type {type(cu_seqlens)}")
             n_seqs = cu_seqlens.shape[0] - 1
         data.register_metadata(seqlens=seqlens_cpu)
         n_mbs = self.num_micro_batches
@@ -832,6 +843,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         #     x.pp_output = self._gd_output_buffers["output"][:bs]
         # else:
         x, ys = super().forward(x, ys)  # ys will be modified inplace in tensor buffer
+        # print(f"module cls name {type(self.module)}, stage {self.stage_id} output: {x.pp_output}")
 
         # logger.info(f"rank {self.global_rank} mbid {micro_batch_id} step {step_id} x.pp_output shape {x.pp_output.shape}")
         is_first_step = self.__maybe_init_kv_cache(x, ys, micro_batch_id)
@@ -1433,6 +1445,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     )
                     self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
                     self._exec_instr(*cmd.args)
+                    if self._instruction_sync:
+                        torch.cuda.synchronize()
                     time_mark(name=f"{cmd_type_string}_end",
                               identifier=str(self.global_rank),
                               step=self.sched_count)

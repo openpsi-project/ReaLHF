@@ -1,11 +1,12 @@
 from typing import *
-import torch.distributed as dist
-import torch
-import random
-import multiprocessing as mp
 import dataclasses
+import multiprocessing as mp
 import os
+import random
 import time
+
+import torch
+import torch.distributed as dist
 
 
 def repartition_strategy(
@@ -17,9 +18,8 @@ def repartition_strategy(
     layer_map: Dict[Tuple[int, int], List[int]] = {}
     for pp_rank2, layer_indices2 in layer_mapping2.items():
         for pp_rank1, layer_indices1 in layer_mapping1.items():
-            layer_map[(pp_rank1, pp_rank2)] = sorted(
-                list(set(layer_indices1).intersection(set(layer_indices2)))
-            )
+            layer_map[(pp_rank1,
+                       pp_rank2)] = sorted(list(set(layer_indices1).intersection(set(layer_indices2))))
 
     return layer_map
 
@@ -59,8 +59,8 @@ def worker(idx: int):
 
     tensor_storage = torch.randn(tensor_size).cuda()
     recv_buf = torch.zeros_like(tensor_storage)
-    
-    sender_mapping= {}
+
+    sender_mapping = {}
     offset = 0
     for i, rank in enumerate(sender_ranks):
         sender_mapping[i] = list(range(offset, offset + sender_partition[i]))
@@ -73,7 +73,7 @@ def worker(idx: int):
     repart_strat = repartition_strategy(sender_mapping, receiver_mapping)
     if idx == 0:
         print(sender_partition, receiver_partition, repart_strat)
-    
+
     dist.barrier()
     for (dp_i, dp_j), comm_slots in repart_strat.items():
         if len(comm_slots) > 0:
@@ -88,9 +88,11 @@ def worker(idx: int):
                 if idx == source:
                     recv_buf[comm_slots] = tensor_storage[comm_slots]
                 else:
-                    dist.broadcast(recv_buf[comm_slots], src=group_sources[(dp_i, dp_j)], group=groups[(dp_i, dp_j)])
+                    dist.broadcast(recv_buf[comm_slots],
+                                   src=group_sources[(dp_i, dp_j)],
+                                   group=groups[(dp_i, dp_j)])
     dist.barrier()
-    
+
     dist.barrier()
     tik = time.time()
     for (dp_i, dp_j), comm_slots in repart_strat.items():
@@ -106,7 +108,9 @@ def worker(idx: int):
                 if idx == source:
                     recv_buf[comm_slots] = tensor_storage[comm_slots]
                 else:
-                    dist.broadcast(recv_buf[comm_slots], src=group_sources[(dp_i, dp_j)], group=groups[(dp_i, dp_j)])
+                    dist.broadcast(recv_buf[comm_slots],
+                                   src=group_sources[(dp_i, dp_j)],
+                                   group=groups[(dp_i, dp_j)])
 
     print(f"rank {idx} took {time.time() - tik} seconds")
     for dp_i, s_ranks in enumerate(sender_ranks):
@@ -117,6 +121,7 @@ def worker(idx: int):
             print(f"receiver partition {dp_j} has tensor {tensor_storage[receiver_mapping[dp_j]]}")
     time.sleep(2)
     print("success!")
+
 
 if __name__ == "__main__":
     procs = []

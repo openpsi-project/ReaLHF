@@ -133,6 +133,7 @@ def deepspeed_initialize(
     sequence_parallel: Optional[bool] = False,
     enable_async_p2p_communication: Optional[bool] = False,
     enable_async_instruction: Optional[bool] = False,
+    instruction_sync: Optional[bool] = False,
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
     if mpu is None:
@@ -179,8 +180,8 @@ def deepspeed_initialize(
             optimizer=optimizer,
             lr_scheduler=lr_scheduler,
             dist_init_required=False,
+            instruction_sync=instruction_sync,
         )
         logger.info(f"Deepspeed Pipeline Engine initialze finished.")
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
-
     return tuple(return_items)

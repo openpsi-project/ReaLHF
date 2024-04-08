@@ -26,6 +26,9 @@ def main_reset_name_resolve(args):
 
 
 def main_worker(args):
+    import base.constants
+    base.constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
+
     worker_index_start = args.jobstep_id * args.wprocs_per_jobstep + args.wproc_offset
     worker_index_end = min(worker_index_start + args.wprocs_per_jobstep,
                            args.wprocs_in_job + args.wproc_offset)
@@ -43,7 +46,12 @@ def main_worker(args):
         logger.info("CUDA_VISIBLE_DEVICES: %s", os.environ['CUDA_VISIBLE_DEVICES'])
 
     # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
+    import profiler.experiments
+    # import profiler.worker
+    import profiler.interface
+
     import experiments
+    # profiler.import_profiler_registers()
     import impl.dataset
     import impl.model
     import system
@@ -101,9 +109,14 @@ def main_controller(args):
             config_index: the index of experiment configuration (experiment may return multiple configurations)
             ignore_worker_error: bool, if False, stop the experiment when any worker(s) fail.
     """
+    import profiler.experiments
+
     import api.config.config_system
+    import base.constants
     import experiments
     import system
+    base.constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
+
     if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
         with open(QUICKSTART_EXPR_CACHE_PATH, 'rb') as f:
             api.config.config_system.register_experiment(*pickle.load(f))

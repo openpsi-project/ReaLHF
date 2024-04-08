@@ -90,6 +90,16 @@ class Scheduling:
             **kwargs,
         })
 
+    @staticmethod
+    def profile_worker_default(**kwargs):
+        return Scheduling(**{
+            "cpu": 2,
+            "gpu": 1,
+            "mem": 60 * 1024,
+            "container_image": _LLM_GPU_IMAGE,
+            **kwargs,
+        })
+
 
 @dataclasses.dataclass
 class WorkerInformation:
@@ -154,6 +164,25 @@ class ModelWorker:
                 f"ModelWorker cannot have multiple shards of the same model name: {model_names}.")
 
 
+# For profiling only
+@dataclasses.dataclass
+class ProfileWorker:
+    seed: int
+    model: Model
+    backend: ModelBackend
+    interface: api.config.dfg.ModelInterface
+    rpcs: List[api.config.dfg.ModelRPC]
+    bs_list: Optional[List[int]] = None
+    seq_len_list: Optional[List[int]] = None
+    gen_tokens_list: Optional[List[int]] = None
+    topo: Optional[base.topology.PipeModelDataParallelTopology] = None
+    profile_communication: bool = False
+    profile_rpc: bool = False
+    warmup_rounds: int = 2
+    profile_rounds: int = 5
+    worker_info: Optional[WorkerInformation] = None
+
+
 @dataclasses.dataclass
 class ExperimentSaveEvalControl:
     total_train_epochs: int = 1
@@ -192,6 +221,7 @@ class TasksGroup:
 class ExperimentScheduling:
     model_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
     master_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
+    profile_worker: Union[List[TasksGroup], TasksGroup] = dataclasses.field(default_factory=list)
     controller_image: str = _LLM_CPU_IMAGE
 
 
@@ -201,12 +231,19 @@ class ExperimentConfig:
     # dataflow
     model_rpcs: List[api.config.dfg.ModelRPC]
     model_worker: List[ModelWorker] = dataclasses.field(default_factory=list)
+    profile_worker: List[ProfileWorker] = dataclasses.field(default_factory=list)
     # master_worker will be set automatically
     master_worker: Optional[List[MasterWorker]] = None
     config: Optional[Any] = None
 
     def __post_init__(self):
         assert self.master_worker is None
+
+        if len(self.profile_worker) > 0:
+            self.master_worker = []
+            self.model_worker = []
+            self.model_rpcs = []
+            return
 
         model_names = set()
         for w in self.model_worker:
@@ -324,11 +361,18 @@ class ExperimentConfig:
         ]
 
     def set_worker_information(self, experiment_name, trial_name):
-        assert len(self.master_worker) == 1
+        if len(self.model_worker) > 0:
+            assert len(self.master_worker) == 1
+        elif len(self.profile_worker) > 0:
+            assert len(self.master_worker) == 0
+
         for worker_type, workers in [
             ("model_worker", self.model_worker),
             ("master_worker", self.master_worker),
+            ("profile_worker", self.profile_worker),
         ]:
+            if len(workers) == 0:
+                continue
             for i, worker in enumerate(workers):
                 system_worker_info = dict(
                     experiment_name=experiment_name,

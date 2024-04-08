@@ -7,95 +7,82 @@ import torch
 import torch.distributed
 import torch.multiprocessing as mp
 
+from api.config.config_base import MODEL_TYPE_TO_PATH, ModelType
 from base.monitor import get_tracer
 from tests.utils import *
 import api.config.config_system as config_package
+import base.constants
 
-NUM_MP = 1
-NUM_PP = 4
+# mp2pp4 8.4 0.57 mp4pp2 7.84 0.53
+NUM_MP = 4
+NUM_PP = 1
 NUM_DP = 2
 NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
-if MODEL_TYPE == "llama":
-    if NUM_PP == 1:
-        SUFFIX = f"_{NUM_MP}mp_{NUM_SHARDS}s"
-    elif NUM_MP == 1:
-        SUFFIX = f"_{NUM_PP}pp_{NUM_SHARDS}s"
-    elif NUM_PP > 1:
-        SUFFIX = f"_{NUM_PP}pp_{NUM_MP}mp_{NUM_SHARDS}s"
-    # BASELINE_MODEL_PATH = "/home/meizy/models/test/Llama-2-4l"
-    # MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-4l{SUFFIX}"
-    BASELINE_MODEL_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
-    MODEL_PARALLEL_PATH = f"/lustre/public/pretrained_model_weights/sharded/Llama-2-7b-hf{SUFFIX}"
-BATCH_SIZE = 200
-MIN_NEW_TOKENS = 32
-MAX_NEW_TOKENS = 32
+
+MODEL_PARALLEL_PATH = BASELINE_MODEL_PATH = MODEL_TYPE_TO_PATH[ModelType("llama", 7, False)]
+BATCH_SIZE = 512
+MIN_NEW_TOKENS = 256
+MAX_NEW_TOKENS = 256
+SEQ_LEN = 256
 
 USE_GRADIENT_CHECKPOINTING = True
 USE_BF16 = False
-USE_SEQ_PARALLEL = False
+USE_SEQ_PARALLEL = NUM_MP > 1
 GRADIENT_ACCUMULATION_FUSION = False
 ASYNC_P2P = False
+OFFLOAD_OPTIMIZER_STATE = False
+OFFLOAD_PARAM = False
 
 
 def make_backend():
     import api.model
 
-    if NUM_PP == 1:
-        return api.model.make_backend(
-            config_package.ModelBackend(
-                type_="ds_train",
-                args=dict(
-                    optimizer_name="adam",
-                    optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
-                    warmup_steps_proportion=0.0,
-                    min_lr_ratio=0.0,
-                    # TODO: test zero_stage = 2 or 3 later
-                    gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
-                    zero_stage=1,
-                    enable_fp16=not USE_BF16,
-                    enable_bf16=USE_BF16,
-                    sequence_parallel=USE_SEQ_PARALLEL,
-                    enable_async_p2p_communication=ASYNC_P2P,
-                ),
-            ))
-    elif NUM_PP > 1:
-        return api.model.make_backend(
-            config_package.ModelBackend(
-                type_="ds_train",
-                args=dict(
-                    optimizer_name="adam",
-                    optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
-                    warmup_steps_proportion=0.0,
-                    min_lr_ratio=0.0,
-                    zero_stage=1,
-                    engine_type="pipe",
-                    gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
-                    num_pipeline_stages=2 * NUM_PP,
-                    enable_fp16=not USE_BF16,
-                    enable_bf16=USE_BF16,
-                    sequence_parallel=USE_SEQ_PARALLEL,
-                    enable_async_p2p_communication=ASYNC_P2P,
-                ),
-            ))
+    engine_type = "pipe" if NUM_PP > 1 else "deepspeed"
+    args = dict(
+        optimizer_name="adam",
+        optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
+        warmup_steps_proportion=0.0,
+        min_lr_ratio=0.0,
+        zero_stage=1,
+        gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
+        engine_type=engine_type,
+        offload_optimizer_state=OFFLOAD_OPTIMIZER_STATE,
+        offload_param=OFFLOAD_PARAM,
+        enable_fp16=not USE_BF16,
+        enable_bf16=USE_BF16,
+        sequence_parallel=USE_SEQ_PARALLEL,
+        enable_async_p2p_communication=ASYNC_P2P,
+    )
+    return api.model.make_backend(config_package.ModelBackend(
+        type_="ds_train",
+        args=args,
+    ))
 
 
 def make_interface():
-    import api.model
+    import profiler.interface
 
-    return api.model.make_interface(config_package.ModelInterface(type_="flash_sft", args=dict()))
+    import api.config.dfg
+    import api.model
+    return api.model.make_interface(api.config.dfg.ModelInterface(type_="profile", args=dict()))
 
 
 def make_model(device):
     import api.model
     import impl.model.nn.flash_mqat.flash_mqat_api
 
+    # from_type = "self" if NUM_PP == 1 else "empty_actor"
+    # if NUM_MP == NUM_PP == 1:
+    #     from_type = "random_actor"
+    from_type = "hf_as_actor"
+
     model_config = config_package.Model(
         "flash_mqat",
         args=dict(
             model_path=MODEL_PARALLEL_PATH,
-            from_type="self" if NUM_PP == 1 else "empty_actor",
+            from_type=from_type,
             dtype="bf16" if USE_BF16 else "fp16",
             hf_model_type=MODEL_TYPE,
             tokenizer_path=MODEL_PARALLEL_PATH,
@@ -103,165 +90,184 @@ def make_model(device):
             gradient_accumulation_fusion=False,
         ),
     )
-    assert NUM_PP > 1 or NUM_MP > 1, "can not test model without mp or dp"
-    if NUM_PP > 1:
-        model_config.wrappers += [
-            config_package.ModelWrapper(
-                "pipe_flash_mqat",
-                args=dict(
-                    model_path=MODEL_PARALLEL_PATH,
-                    partition_method="parameters_balanced",
-                    init_critic_from_actor=False,
-                    init_from_scratch=False,
-                ),
-            )
-        ]
 
     model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
     return model
 
 
 def init_handles(rank):
-    device = setup_gpu(rank, WORLD_SIZE)
-    init_global_constants(NUM_DP, NUM_MP, NUM_PP)
-    torch_dist_rank = torch.distributed.get_rank()
-    cuda_visible = os.environ["CUDA_VISIBLE_DEVICES"]
-    print(f"PROCESS RANK: {rank}; \n"
-          f"TORCH DIST RANK: {torch_dist_rank}; \n"
-          f"CUDA VISIBLE: {cuda_visible}")
+    with base.constants.model_scope(MODEL_NAME):
+        device = setup_gpu(rank, WORLD_SIZE)
+        init_global_constants(NUM_DP, NUM_MP, NUM_PP)
+        torch_dist_rank = torch.distributed.get_rank()
+        cuda_visible = os.environ["CUDA_VISIBLE_DEVICES"]
+        print(f"PROCESS RANK: {rank}; \n"
+              f"TORCH DIST RANK: {torch_dist_rank}; \n"
+              f"CUDA VISIBLE: {cuda_visible}")
 
-    model = make_model(device)
-    backend = make_backend()
-    ft_spec = make_finetune_spec(BATCH_SIZE)
-    interface = make_interface()
-    # ft_spec = None
-    # backend = None
-    # interface = None
+        model = make_model(device)
+        backend = make_backend()
+        ft_spec = make_finetune_spec(BATCH_SIZE)
+        interface = make_interface()
+        # ft_spec = None
+        # backend = None
+        # interface = None
 
-    backend.initialize(model, ft_spec)
+        model.module.instantiate()
+        backend.initialize(model, ft_spec)
     return device, model, backend, interface
 
 
 def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
-    data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
+    # data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
 
     # packed_input_ids = data['packed_input_ids']
     # cu_seqlens = data['cu_seqlens']
     # max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
-
-    model.module.eval()
-
-    st = time.monotonic()
-    res = interface.inference(model, data)
-    logits = res["logits"]
-    print(f"rank {rank} mp FIRST inference "
-          f"time cost {time.monotonic() - st:.4f}")
-    if logits is not None:
-        print(f"rank {rank} mp FIRST inference logits shape {logits.shape}")
-
-    st = time.monotonic()
-    res = interface.inference(model, data)
-    logits = res["logits"]
-    if logits is not None:
-        from impl.model.parallelism.model_parallel.mappings import gather_from_tensor_model_parallel_region
-
-        logits = gather_from_tensor_model_parallel_region(logits)
-        print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
-
     import base.constants
+    with base.constants.model_scope(MODEL_NAME):
+        model.module.eval()
 
-    if base.constants.pipe_parallel_rank() == NUM_PP - 1:
-        res_queue.put(logits)
-    time.sleep(2)
+        st = time.monotonic()
+        data = random_sample(BATCH_SIZE // NUM_DP, SEQ_LEN, 32000)
+        res = interface.inference(model, data)
+        logits = res["logits"]
+        print(f"rank {rank} mp FIRST inference "
+              f"time cost {time.monotonic() - st:.4f}")
+        if logits is not None:
+            print(f"rank {rank} mp FIRST inference logits shape {logits.shape}")
+
+        for _ in range(3):
+            st = time.monotonic()
+            res = interface.inference(model, data)
+            logits = res["logits"]
+            if logits is not None:
+                from impl.model.parallelism.model_parallel.mappings import \
+                    gather_from_tensor_model_parallel_region
+
+                logits = gather_from_tensor_model_parallel_region(logits)
+                print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
+
+        import base.constants
+
+        if base.constants.pipe_parallel_rank() == NUM_PP - 1:
+            res_queue.put(logits)
+        time.sleep(2)
 
 
 def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
-    data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
+    # data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
+    import base.constants
 
     # os.environ["DLLM_TRACE"] = "1"
-    tracer = get_tracer(tracer_entries=int(2e6),
-                        max_stack_depth=10,
-                        ignore_c_function=False,
-                        ignore_frozen=True,
-                        log_async=True,
-                        min_duration=5,
-                        output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json")
-    tracer.start()
 
-    st = time.monotonic()
-    res = interface.train_step(model, data)
-    print(f"rank {rank} mp FIRST train time cost {time.monotonic() - st:.4f}, res {res}")
+    with base.constants.model_scope(MODEL_NAME):
+        tracer = get_tracer(tracer_entries=int(2e6),
+                            max_stack_depth=10,
+                            ignore_c_function=False,
+                            ignore_frozen=True,
+                            log_async=True,
+                            min_duration=5,
+                            output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json")
+        tracer.start()
 
-    for _ in range(10):
+        data = random_sample(BATCH_SIZE // NUM_DP, SEQ_LEN, 32000)
         st = time.monotonic()
         res = interface.train_step(model, data)
-        print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
+        torch.cuda.synchronize()
+        print(f"rank {rank} mp FIRST train time cost {time.monotonic() - st:.4f}, res {res}")
 
-    tracer.save()
+        for _ in range(10):
+            st = time.monotonic()
+            res = interface.train_step(model, data)
+            print(f"rank {rank} mp train time cost {time.monotonic() - st:.4f}, res {res}")
+            torch.cuda.synchronize()
+        tracer.save()
 
 
 def run_generate(rank: int, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
-    data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
+    # data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
 
     import os
 
-    # os.environ["DLLM_TRACE"] = "1"
-    tracer = get_tracer(
-        tracer_entries=int(2e6),
-        # max_stack_depth=10,
-        ignore_c_function=False,
-        ignore_frozen=True,
-        log_async=True,
-        min_duration=10,
-        output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json")
-    tracer.start()
+    import base.constants
 
-    st = time.monotonic()
-    outputs = interface.generate(model, data, gconfig=gconfig)
-    t = time.monotonic() - st
-    print(f"rank {rank} FIRST generate time cost {t:.4f}")
-    if len(outputs) > 0:
-        print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
-              f"log probs shape {outputs['log_probs'].shape}")
+    with base.constants.model_scope(MODEL_NAME):
+        # os.environ["DLLM_TRACE"] = "1"
+        tracer = get_tracer(
+            tracer_entries=int(2e6),
+            # max_stack_depth=10,
+            ignore_c_function=False,
+            ignore_frozen=True,
+            log_async=True,
+            # min_duration=10,
+            output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json")
+        tracer.start()
 
-    for i in range(1):
-        # data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed+i)
         st = time.monotonic()
-        outputs = interface.generate(model, data, gconfig=gconfig)
+
+        data = random_sample(32, 128, 32000)
+        outputs = interface.generate(model, data)
         t = time.monotonic() - st
-        print(f"rank {rank} generate time cost {t:.4f}")
+        print(f"rank {rank} FIRST generate time cost {t:.4f}")
         if len(outputs) > 0:
             print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
                   f"log probs shape {outputs['log_probs'].shape}")
+        torch.cuda.synchronize()
 
-    tracer.save()
+        for i in range(3):
+            # data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed+i)
+
+            data = random_sample(32, 128, 32000)
+            st = time.monotonic()
+            outputs = interface.generate(model, data)
+            t = time.monotonic() - st
+            print(f"rank {rank} generate time cost {t:.4f}")
+            if len(outputs) > 0:
+                print(f"generate result gen_tokens shape{outputs['gen_tokens'].shape}, "
+                      f"log probs shape {outputs['log_probs'].shape}")
+            torch.cuda.synchronize()
+        tracer.save()
 
 
 def run_mixed(rank: int, seed: int):
     device, model, backend, interface = init_handles(rank)
     engine = model.module
 
-    from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-    assert isinstance(engine, DeepSpeedPipelineEngine)
+    # from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+    # assert isinstance(engine, DeepSpeedPipelineEngine)
+
+    import os
+
+    os.environ["DLLM_TRACE"] = "1"
+    tracer = get_tracer(tracer_entries=int(2e6),
+                        max_stack_depth=10,
+                        ignore_c_function=False,
+                        ignore_frozen=True,
+                        log_async=True,
+                        min_duration=10,
+                        output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json")
 
     train_iters = 4
     gen_iters = 1
 
-    train_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(train_iters)]
-    gen_datas = [init_data(model.tokenizer, device, BATCH_SIZE * 4, seed=seed + i) for i in range(gen_iters)]
+    train_datas = [random_sample(32 * 8, 128, 32000) for _ in range(train_iters)]
+    # train_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(train_iters)]
+    gen_datas = [random_sample(32 * 4, 128, 32000) for _ in range(gen_iters)]
+    # gen_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(gen_iters)]
 
     from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
 
     def mixed_one_step():
-        for i in range(gen_iters):
-            gen_res = interface.generate(model, gen_datas[i], gconfig=gconfig)
+        for gen_data in gen_datas:
+            gen_res = interface.generate(model, gen_data, gconfig=gconfig)
             print(f"generate {time.monotonic() - st:.4f}")
 
         for train_data in train_datas:
@@ -269,15 +275,19 @@ def run_mixed(rank: int, seed: int):
             train_res = interface.train_step(model, train_data)
             print(f"train {time.monotonic() - st2} total {time.monotonic() - st:.4f}")
 
+    tracer.start()
+
     st = time.monotonic()
     mixed_one_step()
 
     print(f"rank {rank} FIRST mixed time cost {time.monotonic() - st:.4f}")
 
-    for _ in range(1):
-        st = time.monotonic()
-        mixed_one_step()
-        print(f"mixed time cost {time.monotonic() - st:.4f}")
+    # for _ in range(2):
+    #     st = time.monotonic()
+    #     mixed_one_step()
+    #     print(f"mixed time cost {time.monotonic() - st:.4f}")
+
+    tracer.save()
 
 
 def run_linear(rank: int, res_queue: mp.Queue, seed: int):
@@ -510,4 +520,4 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testMixed")
+    unittest.main(defaultTest="ModelParallelFlashMQATTest.testTrainStep")

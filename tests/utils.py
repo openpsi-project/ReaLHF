@@ -1,14 +1,17 @@
+import dataclasses
+import gc
 import os
 import random
 
+import pynvml
 import torch
+import torch.distributed as dist
 import torch.multiprocessing as mp
 
+from base.topology import ParallelGrid, PipeModelDataParallelTopology
+import base.constants
 import base.gpu_utils
 import base.name_resolve as name_resolve
-import base.names as names
-import gc
-import pynvml
 import base.namedarray
 from base.topology import ParallelGrid, PipeModelDataParallelTopology
 import torch.distributed as dist
@@ -58,13 +61,18 @@ def clear_name_resolve():
     name_resolve.clear_subtree(names.trial_root(experiment_name=EXPR_NAME, trial_name=TRIAL_NAME))
 
 
-def make_finetune_spec(bs_per_device, total_train_epochs=1, total_train_steps=10, steps_per_epoch=10):
-    import api.model  # NOTE: importing this will initialize CUDA
+def make_finetune_spec(bs_per_device,
+                       total_train_epochs=1,
+                       total_train_steps=10,
+                       steps_per_epoch=10,
+                       max_seq_len=1024):
+    import api.model
     finetune_spec = api.model.FinetuneSpec(
         total_train_epochs=total_train_epochs,
         total_train_steps=total_train_steps,
         steps_per_epoch=steps_per_epoch,
         batch_size_per_device=bs_per_device,
+        max_seqlen=max_seq_len,
     )
     return finetune_spec
 
@@ -84,7 +92,7 @@ def make_input(tokenizer, device, s):
     input_ids = input_ids.to(device)
     attention_mask = attention_mask.to(device)
 
-    print(f"make input input_ids.shape {input_ids.shape}")
+    # print(f"make input input_ids.shape {input_ids.shape}")
 
     return input_ids, attention_mask
 
@@ -92,7 +100,7 @@ def make_input(tokenizer, device, s):
 def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
     random.seed(seed)
     whole_batch = [random_sentence() for _ in range(batch_size)]
-    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank : batch_size // dp_worldsize * (dp_rank + 1)]
+    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank:batch_size // dp_worldsize * (dp_rank + 1)]
     return make_input(tokenizer, device, dp_batch)
 
 
@@ -125,6 +133,26 @@ def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
         dp_rank = base.constants.data_parallel_rank()
         num_dp = base.constants.data_parallel_world_size()
     input_ids, attention_mask = make_batch(tokenizer, device, batch_size, dp_rank % num_dp, num_dp, seed=seed)
+    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+    prompt_mask = torch.zeros_like(packed_input_ids)
+    data = base.namedarray.NamedArray(
+        packed_input_ids=packed_input_ids,
+        cu_seqlens=cu_seqlens,
+        prompts=input_ids,
+        prompt_mask=prompt_mask.bool(),
+        prompt_att_mask=attention_mask,
+    )
+    return data
+
+
+def random_sample(bs, seq_len, vocab_size):
+    from flash_attn.bert_padding import unpad_input
+    import torch
+
+    import base.constants
+    import base.namedarray
+    input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
+    attention_mask = torch.ones_like(input_ids)
     packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
     prompt_mask = torch.zeros_like(packed_input_ids)
     data = base.namedarray.NamedArray(
@@ -198,6 +226,7 @@ def get_llama7b_flash_config():
 
 
 def get_pytorch_profiler(save_fn: str):
+
     def trace_handler(p: torch.profiler._KinetoProfile):
         # print(
         #     p.key_averages().table(

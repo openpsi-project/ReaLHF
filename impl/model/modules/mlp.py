@@ -404,26 +404,31 @@ class _LlamaRMSNorm(nn.Module):
         return self.weight * hidden_states.to(input_dtype)
 
 
-try:
-    # HACK: we use transformer engine's rms norm as long as we can find the transformer engine package
-    import transformer_engine.pytorch as te
+if os.getenv("FLASH_MQAT_USE_TE") == "1":
+    try:
+        # HACK: we use transformer engine's rms norm as long as we can find the transformer engine package
+        import transformer_engine.pytorch as te
 
-    def _TELlamaRMSNorm(
-        hidden_size: int,
-        eps: float = 1e-6,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[str, torch.device]] = None,
-    ):
-        return te.module.rmsnorm.RMSNorm(
-            hidden_size=hidden_size,
-            eps=eps,
-            sequence_parallel=False,  # FIXME: does this have any nagative effect?
-            params_dtype=dtype,
-            device=device,
-        )
+        def _TELlamaRMSNorm(
+            hidden_size: int,
+            eps: float = 1e-6,
+            dtype: Optional[torch.dtype] = None,
+            device: Optional[Union[str, torch.device]] = None,
+        ):
+            return te.module.rmsnorm.RMSNorm(
+                hidden_size=hidden_size,
+                eps=eps,
+                sequence_parallel=False,  # FIXME: does this have any nagative effect?
+                params_dtype=dtype,
+                device=device,
+            )
 
-    LlamaRMSNorm = _TELlamaRMSNorm
-except ModuleNotFoundError:
+        LlamaRMSNorm = _TELlamaRMSNorm
+    except ModuleNotFoundError:
+        LlamaRMSNorm = _LlamaRMSNorm
+    except ImportError:
+        LlamaRMSNorm = _LlamaRMSNorm
+else:
     LlamaRMSNorm = _LlamaRMSNorm
 
 try:
@@ -432,6 +437,7 @@ try:
     TE_ENABLED = True
 except ImportError:
     TE_ENABLED = False
+
 USE_TE_BACKEND = TE_ENABLED and os.getenv("FLASH_MQAT_USE_TE") == "1"
 
 if USE_TE_BACKEND:

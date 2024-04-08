@@ -324,6 +324,8 @@ def setup_ddp(
 
     data_transfer_groups, data_transfer_src_ranks = {}, {}
     data_transfer_dst_ranks = {}
+    import pprint
+    pprint.pprint(data_transfer_pairs)
     if data_transfer_pairs is not None:
         for src, dst in data_transfer_pairs:
             src_topo = model_topos[src]
@@ -442,3 +444,64 @@ def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(local_gpu_id)
     os.environ["GPU_DEVICES_ISOLATED"] = "1"
+
+
+def reveal_ddp_identity_single_model(expr_name, trial_name, model_name, worker_index):
+    """ Legacy method. Reveal DDP identity for a single model, for testing scripts only """
+    master_group_name = names.trainer_ddp_peer(expr_name, trial_name, model_name)
+    name_resolve.add_subentry(master_group_name, str(worker_index), keepalive_ttl=30)
+    # local_peer_name = names.trainer_ddp_local_peer(expr_name, trial_name, socket.gethostname(), peer_name)
+    # name_resolve.add_subentry(local_peer_name, peer_index, keepalive_ttl=30)
+
+
+def setup_ddp_single_model(expr_name: str, trial_name: str, model_name: str, worker_index: int):
+    """ Legacy method. Setup DDP for a single model, for testing scripts only """
+    logger.info(f"Setup DDP {worker_index} for model {model_name}")
+
+    global_peers = list(
+        sorted(map(int, name_resolve.get_subtree(names.trainer_ddp_peer(expr_name, trial_name, model_name)))))
+    assert len(global_peers) == len(set(global_peers)), f"Duplicated trainer worker index. {global_peers}"
+    world_size = len(global_peers)
+    ddp_rank = global_peers.index(worker_index)
+
+    if 'GPU_DEVICES_ISOLATED' not in os.environ and 'RAY' not in os.environ['DLLM_MODE']:
+        raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
+
+    assert len(os.environ['CUDA_VISIBLE_DEVICES'].split(',')) == 1, os.environ['CUDA_VISIBLE_DEVICES']
+    local_gpu_id = int(os.environ['CUDA_VISIBLE_DEVICES'])
+
+    ddp_master_name = names.trainer_ddp_master(expr_name, trial_name, model_name)
+
+    if ddp_rank == 0:
+        host_ip = socket.gethostbyname(socket.gethostname())
+        port = network.find_free_port()
+        ddp_init_address = f"tcp://{host_ip}:{port}"
+        name_resolve.add(ddp_master_name, ddp_init_address, keepalive_ttl=60)
+    else:
+        try:
+            ddp_init_address = name_resolve.wait(ddp_master_name, timeout=60)
+        except TimeoutError:
+            raise TimeoutError(f"DDP trainer(index:{worker_index}), rank {ddp_rank} for model "
+                               f"{model_name} wait for ddp_init_method timeout.")
+
+    torch_dist_kwargs = dict(world_size=world_size,
+                             rank=ddp_rank,
+                             init_method=ddp_init_address,
+                             backend='nccl')
+    torch.cuda.set_device(0)  # initialize CUDA here with only a single visible device
+    # This environment variable is used by DeepSpeed.
+    os.environ['LOCAL_RANK'] = "0"
+
+    torch.distributed.init_process_group(**torch_dist_kwargs, group_name=model_name)
+
+    return NCCLProcessGroupInfo(
+        world_size=world_size,
+        global_rank=ddp_rank,
+        local_gpu_id=local_gpu_id,
+        model_groups=None,
+        data_transfer_groups=None,
+        data_transfer_src_ranks=None,
+        param_sync_groups=None,
+        param_sync_src_ranks=None,
+        param_sync_dst_ranks=None,
+    )

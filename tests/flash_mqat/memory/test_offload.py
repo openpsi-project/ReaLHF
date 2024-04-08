@@ -1,29 +1,22 @@
 from typing import *
 import collections
-import torch
+import dataclasses
 import functools
 import gc
-import pynvml
-import torch.profiler
-import dataclasses
-import base.constants
-from tests.utils import (
-    get_llama7b_flash_config,
-    MODEL_NAME,
-    get_memory,
-    clear_gpu_cache,
-    setup_gpu,
-    init_global_constants,
-    setup_barrier,
-    clear_name_resolve,
-    get_pytorch_profiler,
-)
 import time
+
+import pynvml
+import torch
+import torch.profiler
+
+from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_flash_config, get_memory,
+                         get_pytorch_profiler, init_global_constants, MODEL_NAME, setup_barrier, setup_gpu)
+import base.constants
 
 
 def test_impl(world_size):
-    from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel, add_helper_functions
     from impl.model.backend.pipe_inf import InferencePipelineEngine
+    from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
 
     mconfig = get_llama7b_flash_config()
     with base.constants.model_scope(MODEL_NAME):
@@ -52,7 +45,8 @@ def test_impl(world_size):
                 new_state_dict = m.state_dict()
                 for k in original_state_dict:
                     # print(k, original_state_dict[k])
-                    assert torch.allclose(original_state_dict[k], new_state_dict[k]), (k, original_state_dict[k], new_state_dict[k])
+                    assert torch.allclose(original_state_dict[k],
+                                          new_state_dict[k]), (k, original_state_dict[k], new_state_dict[k])
                 m.async_offload()
             m.wait_for_offload()
         clear_gpu_cache()

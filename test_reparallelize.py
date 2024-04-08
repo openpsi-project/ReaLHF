@@ -1,22 +1,21 @@
 from typing import *
-import torch.distributed as dist
-import torch
-import random
-import multiprocessing as mp
+import argparse
 import dataclasses
+import itertools
+import multiprocessing as mp
 import os
+import queue
+import random
 import time
 
+import torch
 import torch.distributed
-from api.config.config_system import ModelShardID, ModelName
-from base.topology import PipeModelDataParallelTopology
-import itertools
-import queue
-from tests.utils import *
-import argparse
 
-import base.constants
 from api.config.config_base import ModelName, ModelShardID
+from api.config.config_system import ModelName, ModelShardID
+from base.topology import PipeModelDataParallelTopology
+from tests.utils import *
+import base.constants
 import base.gpu_utils
 from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark
 
@@ -36,8 +35,8 @@ def test_impl(
     record_cost_to_file=False,
 ):
     assert not (profile and profile_compile)
-    from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel, add_helper_functions
     from impl.model.backend.pipe_inf import InferencePipelineEngine
+    from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
 
     mconfig = get_llama7b_flash_config()
     os.environ["DLLM_CUDA_TMARK"] = "1"
@@ -104,17 +103,15 @@ def test_impl(
         # from m1 to m2
         if m1 is not None:
             tik = time.perf_counter()
-            res = m1.build_reparallelized_layers_async(
-                from_model_name, to_model_name, from_topo, to_topo, mconfig, pg_info
-            )
+            res = m1.build_reparallelized_layers_async(from_model_name, to_model_name, from_topo, to_topo,
+                                                       mconfig, pg_info)
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
         else:
             tik = time.perf_counter()
-            res = m2.build_reparallelized_layers_async(
-                from_model_name, to_model_name, from_topo, to_topo, mconfig, pg_info
-            )
+            res = m2.build_reparallelized_layers_async(from_model_name, to_model_name, from_topo, to_topo,
+                                                       mconfig, pg_info)
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
@@ -170,9 +167,9 @@ def test_impl(
                     torch.cuda.synchronize()
                     tik = time.time_ns()
                     if isinstance(engine2, InferencePipelineEngine):
-                        engine2.forward(
-                            seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
-                        )
+                        engine2.forward(seqlens_cpu=seqlens_cpu,
+                                        packed_input_ids=packed_input_ids,
+                                        cu_seqlens=cu_seqlens)
                     else:
                         engine2(
                             packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
@@ -211,17 +208,15 @@ def test_impl(
         # convert m2 back to m1
         if m2 is not None:
             tik = time.perf_counter()
-            res = m2.build_reparallelized_layers_async(
-                to_model_name, from_model_name, to_topo, from_topo, mconfig, pg_info
-            )
+            res = m2.build_reparallelized_layers_async(to_model_name, from_model_name, to_topo, from_topo,
+                                                       mconfig, pg_info)
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
         else:
             tik = time.perf_counter()
-            res = m1.build_reparallelized_layers_async(
-                to_model_name, from_model_name, to_topo, from_topo, mconfig, pg_info
-            )
+            res = m1.build_reparallelized_layers_async(to_model_name, from_model_name, to_topo, from_topo,
+                                                       mconfig, pg_info)
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
@@ -276,9 +271,9 @@ def test_impl(
                     torch.cuda.synchronize()
                     tik = time.time_ns()
                     if isinstance(engine1, InferencePipelineEngine):
-                        engine1.forward(
-                            seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
-                        )
+                        engine1.forward(seqlens_cpu=seqlens_cpu,
+                                        packed_input_ids=packed_input_ids,
+                                        cu_seqlens=cu_seqlens)
                     else:
                         engine1(
                             packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
@@ -364,9 +359,8 @@ def test(
     for i in range(from_topo.world_size()):
         msid2mwid[ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)] = i
     for i in range(to_topo.world_size()):
-        msid2mwid[ModelShardID.from_parallelism_rank(to_model_name, to_topo, i)] = (
-            i + world_size - to_topo.world_size()
-        )
+        msid2mwid[ModelShardID.from_parallelism_rank(to_model_name, to_topo,
+                                                     i)] = (i + world_size - to_topo.world_size())
     pg_info = setup_gpu(rank, world_size, barrier, model_topos, msid2mwid, param_sync_pairs)
     if rank < from_topo.world_size():
         init_global_constants(topo=from_topo, model_name=from_model_name, msid2mwid=msid2mwid)
@@ -476,9 +470,9 @@ def test(
 
 def decompose_to_three_factors(n: int):
     factors = []
-    for i in range(1, int(n ** (1 / 2)) + 1):
+    for i in range(1, int(n**(1 / 2)) + 1):
         if n % i == 0:
-            for j in range(i, int((n // i) ** (1 / 2)) + 1):
+            for j in range(i, int((n // i)**(1 / 2)) + 1):
                 if (n // i) % j == 0:
                     k = (n // i) // j
                     factors += list(set(itertools.permutations([i, j, k])))

@@ -44,6 +44,7 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
     sequence_parallel: bool = False
     enable_async_p2p_communication: bool = False
     enable_async_instruction: bool = False
+    instruction_sync: bool = False
     # selective gradient ckpt, only effective when gradient_checkpointing is True
     ckpt_attn: bool = False  # checkpoint attn only
     ckpt_mlp: bool = False  # checkpoint mlp only
@@ -134,6 +135,10 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
                                       min_lr_ratio=self.min_lr_ratio)
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
+        if self.gradient_checkpointing:
+            if hasattr(module, "gradient_checkpointing_enable"):
+                module.gradient_checkpointing_enable(self.ckpt_attn, self.ckpt_mlp)
+
         module, *_ = deepspeed_utils.deepspeed_initialize(
             model=module,
             optimizer=optimizer,
@@ -142,16 +147,15 @@ class DeepspeedTrainBackend(api.model.ModelBackend):
             engine_type=self.engine_type,
             sequence_parallel=self.sequence_parallel,
             enable_async_p2p_communication=self.enable_async_p2p_communication,
-            enable_async_instruction=self.enable_async_instruction)
+            enable_async_instruction=self.enable_async_instruction,
+            instruction_sync=self.instruction_sync,
+        )
 
         if self.engine_type == "pipe":
             # log pipeline infos
             assert isinstance(module, DeepSpeedPipelineEngine)
             logger.info(f"PipelineEngine:: ddp rank = {torch.distributed.get_rank()}; "
                         f"pipe id = {module.stage_id}; dp id = {module.dp_id};")
-
-        if self.gradient_checkpointing:
-            module.gradient_checkpointing_enable(self.ckpt_attn, self.ckpt_mlp)
 
         model.module = module
         return model
@@ -188,7 +192,8 @@ class DeepspeedInferenceBackend(api.model.ModelBackend):
             config=ds_config,
             engine_type=self.engine_type,
             sequence_parallel=self.sequence_parallel,
-            enable_async_p2p_communication=self.enable_async_p2p_communication)
+            enable_async_p2p_communication=self.enable_async_p2p_communication,
+        )
         model.module = module
         return model
 

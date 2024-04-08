@@ -1,8 +1,9 @@
 import functools
+import itertools
 import os
 import time
 import unittest
-import itertools
+
 import torch
 import torch.distributed
 import torch.multiprocessing as mp
@@ -128,8 +129,7 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
             mp.Process(
                 target=build_hf_model,
                 args=(save_critic, i, save_world_size, save_mp_size, save_pp_size, save_dir),
-            )
-            for i in range(save_world_size)
+            ) for i in range(save_world_size)
         ]
         for p in procs:
             p.start()
@@ -143,8 +143,7 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
             mp.Process(
                 target=load_model,
                 args=(save_critic, load_critic, i, load_world_size, load_mp_size, load_pp_size, save_dir),
-            )
-            for i in range(load_world_size)
+            ) for i in range(load_world_size)
         ]
         for p in procs:
             p.start()
@@ -154,12 +153,12 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
     def testSaveThenLoad(self):
         with base.constants.model_scope(MODEL_NAME):
             for (
-                save_critic,
-                load_critic,
-                save_mp_size,
-                save_pp_size,
-                load_mp_size,
-                load_pp_size,
+                    save_critic,
+                    load_critic,
+                    save_mp_size,
+                    save_pp_size,
+                    load_mp_size,
+                    load_pp_size,
             ) in itertools.product([True, False], [False, True], [1, 2], [2, 4], [1, 2], [1, 3]):
                 print(
                     ">>>>>>>>>>>>>",
@@ -170,9 +169,8 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
                 )
                 if save_critic and not load_critic:
                     continue
-                self._testSaveThenLoad(
-                    save_critic, load_critic, save_mp_size, save_pp_size, load_mp_size, load_pp_size
-                )
+                self._testSaveThenLoad(save_critic, load_critic, save_mp_size, save_pp_size, load_mp_size,
+                                       load_pp_size)
 
 
 if __name__ == "__main__":
