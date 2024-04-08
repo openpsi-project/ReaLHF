@@ -112,6 +112,7 @@ class StandaloneModelShard:
 
 
 MODEL_TYPE_TO_PATH: Dict[ModelType, str] = {
+    ModelType("llama", 0, True): "/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/",
     ModelType("llama", 7, True): "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/",
     ModelType("llama", 13, True): "/lustre/public/pretrained_model_weights/Llama-2-13b-hf/",
     ModelType("llama", 70, True): "/lustre/public/pretrained_model_weights/Llama-2-70b-hf/",

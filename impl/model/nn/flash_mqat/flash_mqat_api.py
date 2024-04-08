@@ -16,6 +16,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
+from base.monitor import cuda_tmarked, CUDATimeMarkType
 from api.config.config_base import ModelName
 from api.config.config_flash_model import FlashMQATConfig
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
@@ -829,11 +830,13 @@ class FlashMQATModel(nn.Module):
                 pp_input_buf[:batch_length] = x.pp_input
                 x.pp_input = pp_input_buf
 
-        # Main forward calls.
-        if not self._offloaded:
-            x, ys = self.__forward(x, ys)
-        else:
-            x, ys = self.__overlapped_load_forward(x, ys)
+        tmark_type = CUDATimeMarkType.forward
+        with cuda_tmarked("fwd", tmark_type):
+            # Main forward calls.
+            if not self._offloaded:
+                x, ys = self.__forward(x, ys)
+            else:
+                x, ys = self.__overlapped_load_forward(x, ys)
 
         # Resume from padding.
         if self.sequence_parallel and pad_size > 0 and ys[0].input_ids is not None:

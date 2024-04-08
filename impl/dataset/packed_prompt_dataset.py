@@ -22,6 +22,7 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
         max_length: Optional[int] = None,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
+        pad_to_max_length: bool = False,
     ):
         """A dataset with prompts. Usually used for PPO.
 
@@ -65,11 +66,12 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
         data = [data[i] for i in shuffle_indices]
 
         all_prompt_str = [x["prompt"] for x in data]
+        util.tokenizer.padding_side = "left"
         all_prompt_encodings = util.tokenizer(
             all_prompt_str,
             truncation=True,
             max_length=max_length,
-            padding=False,
+            padding=pad_to_max_length,
             return_length=True,
             return_attention_mask=False,
         )
@@ -134,6 +136,7 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
     def __iter__(self):
         for indices in self.__batch_indices:
             seqlens = [self.prompt_lengths[idx] for idx in indices]
+            assert all(x == seqlens[0] for x in seqlens), seqlens
             prompts = [self.prompts[idx] for idx in indices]
             total_seqlen = sum(seqlens)
             assert total_seqlen <= self.n_tokens_per_batch, (total_seqlen, self.n_tokens_per_batch)
@@ -198,7 +201,7 @@ else:
     for _ in range(10):
         print("dataset iteration")
         for x in dataloader:
-            datas, sizes = PackedParallelDataBroker.scatter_to(from_dict(x), n_dp, return_sizes=True)
-            for data in datas:
-                PackedParallelDataBroker.scatter_to(data, n_pp)
+            # datas, sizes = PackedParallelDataBroker.scatter_to(from_dict(x), n_dp, return_sizes=True)
+            # for data in datas:
+            #     PackedParallelDataBroker.scatter_to(data, n_pp)
             continue

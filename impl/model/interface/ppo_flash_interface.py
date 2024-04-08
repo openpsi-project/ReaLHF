@@ -7,6 +7,7 @@ import time
 from deepspeed import DeepSpeedEngine
 import torch
 
+from base.monitor import cuda_tmarked, cuda_tmark, CUDATimeMarkType
 from base.constants import data_parallel_group
 from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import from_dict, NamedArray, recursive_apply
@@ -200,7 +201,8 @@ class PackedActorInterface(api.model.ModelInterface):
             # logger.info(f"gen_tokens shape {gen_tokens.shape}")
         else:
             # unwrap deepspeed engine here
-            module = module.module
+            if hasattr(module, "module"):
+                module = module.module
             with module.sequence_parallel_disable():
                 gen_res = module.generate(
                     tokenizer=model.tokenizer,
@@ -454,8 +456,11 @@ class PackedActorInterface(api.model.ModelInterface):
                     logits_mask=logits_mask,
                 )
 
-                module.backward(loss)
-                module.step(lr_kwargs={"epoch": model.version.global_step})
+                with cuda_tmarked("bwd", CUDATimeMarkType.backward):
+                    module.backward(loss)
+                
+                with cuda_tmarked("optim_step", CUDATimeMarkType.optim_step):
+                    module.step(lr_kwargs={"epoch": model.version.global_step})
 
             if stats:
                 for k, v in stats.items():
@@ -732,8 +737,10 @@ class PackedCriticInterface(api.model.ModelInterface):
                     rms=self.rms if self.value_norm else None,
                 )
 
-                module.backward(loss)
-                module.step(lr_kwargs={"epoch": model.version.global_step})
+                with cuda_tmarked("bwd", CUDATimeMarkType.backward):
+                    module.backward(loss)
+                with cuda_tmarked("optim_step", CUDATimeMarkType.optim_step):
+                    module.step(lr_kwargs={"epoch": model.version.global_step})
 
             if stats:
                 for k, v in stats.items():

@@ -16,7 +16,7 @@ import torch.distributed as dist
 import torch.utils.data
 
 from api.config.config_base import ModelName
-from base.monitor import gpu_utilization_monitor, time_mark
+from base.monitor import gpu_utilization_monitor, cuda_tmark, cuda_tmarked, CUDATimeMarkType, dump_tmark_db
 from base.topology import ParallelGrid
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 import api.config.config_system as config_system
@@ -434,42 +434,44 @@ class ModelWorker(worker_base.Worker):
         elif hook == "param_sync":
             tik = time.perf_counter()
             # torch.cuda.synchronize()
-            from_model_name: ModelName = hook_data["from_model_name"]
-            to_model_name: ModelName = hook_data["to_model_name"]
-            from_topo: base.topology.PipeModelDataParallelTopology = hook_data["from_topo"]
-            to_topo: base.topology.PipeModelDataParallelTopology = hook_data["to_topo"]
-            to_model_config = hook_data["to_model_config"]
-            # profiler = get_pytorch_profiler()
-            # profiler.start()
-            if from_model_name in self.__unwrapped_models:
-                m = self.__unwrapped_models[from_model_name]
-            else:
-                m = self.__unwrapped_models[to_model_name]
-            assert isinstance(m, FlashMQATModel), type(m)
-            ipara = m.build_reparallelized_layers_async(
-                from_model_name=from_model_name,
-                to_model_name=to_model_name,
-                from_topo=from_topo,
-                to_topo=to_topo,
-                to_model_config=to_model_config,
-                pg_info=self.__pg_info,
-            )
-            if from_model_name in self.__models:
-                self.__model_is_handle[from_model_name] = True
-            if to_model_name in self.__models:
-                self.__unwrapped_models[to_model_name].patch_reparallelization(ipara)
-                self.__model_is_handle[to_model_name] = False
-            blogger.debug(f"param_sync CPU time: {time.perf_counter() - tik:.4f}s")
-            # profiler.__exit__(None, None, None)
-            # profiler.export_chrome_trace(
-            #     f"/lustre/aigc/llm/logs/fw/sosp-profile/paramsync_{from_model_name}-{to_model_name}@{self.__worker_index}.json"
-            # )
+            with cuda_tmarked("param_sync", CUDATimeMarkType.mem_layout):
+                from_model_name: ModelName = hook_data["from_model_name"]
+                to_model_name: ModelName = hook_data["to_model_name"]
+                from_topo: base.topology.PipeModelDataParallelTopology = hook_data["from_topo"]
+                to_topo: base.topology.PipeModelDataParallelTopology = hook_data["to_topo"]
+                to_model_config = hook_data["to_model_config"]
+                # profiler = get_pytorch_profiler()
+                # profiler.start()
+                if from_model_name in self.__unwrapped_models:
+                    m = self.__unwrapped_models[from_model_name]
+                else:
+                    m = self.__unwrapped_models[to_model_name]
+                assert isinstance(m, FlashMQATModel), type(m)
+                ipara = m.build_reparallelized_layers_async(
+                    from_model_name=from_model_name,
+                    to_model_name=to_model_name,
+                    from_topo=from_topo,
+                    to_topo=to_topo,
+                    to_model_config=to_model_config,
+                    pg_info=self.__pg_info,
+                )
+                if from_model_name in self.__models:
+                    self.__model_is_handle[from_model_name] = True
+                if to_model_name in self.__models:
+                    self.__unwrapped_models[to_model_name].patch_reparallelization(ipara)
+                    self.__model_is_handle[to_model_name] = False
+                blogger.debug(f"param_sync CPU time: {time.perf_counter() - tik:.4f}s")
+                # profiler.__exit__(None, None, None)
+                # profiler.export_chrome_trace(
+                #     f"/lustre/aigc/llm/logs/fw/sosp-profile/paramsync_{from_model_name}-{to_model_name}@{self.__worker_index}.json"
+                # )
         elif hook == "offload":
-            tik = time.perf_counter()
-            m = self.__unwrapped_models[hook_data["model_name"]]
-            assert isinstance(m, FlashMQATModel), type(m)
-            m.async_offload()
-            # blogger.debug(f"async_offload enqueue CUDA request time: {time.perf_counter() - tik:.4f}s")
+            with cuda_tmarked("offload", CUDATimeMarkType.mem_layout):
+                tik = time.perf_counter()
+                m = self.__unwrapped_models[hook_data["model_name"]]
+                assert isinstance(m, FlashMQATModel), type(m)
+                m.async_offload()
+                # blogger.debug(f"async_offload enqueue CUDA request time: {time.perf_counter() - tik:.4f}s")
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
 
@@ -559,22 +561,24 @@ class ModelWorker(worker_base.Worker):
                     max_seqlen=self.__max_seqlen,
                 )
             elif request.handle_name == "clear_data_cache":
-                buf_indices = request.data
-                for buf_idx in buf_indices:
-                    if buf_idx in self.__data_owner_storage:
-                        del self.__data_owner_storage[buf_idx]
-                    if buf_idx in self.__data_receive_cache:
-                        del self.__data_receive_cache[buf_idx]
-                    if buf_idx in self.__data_sent_worker_indices:
-                        del self.__data_sent_worker_indices[buf_idx]
-                    if buf_idx in self.__data_received_worker_indices:
-                        del self.__data_received_worker_indices[buf_idx]
-                st = time.monotonic()
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
-                et = time.monotonic()
-                blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
+                with cuda_tmarked("clear_data_cache", CUDATimeMarkType.misc):
+                    buf_indices = request.data
+                    for buf_idx in buf_indices:
+                        if buf_idx in self.__data_owner_storage:
+                            del self.__data_owner_storage[buf_idx]
+                        if buf_idx in self.__data_receive_cache:
+                            del self.__data_receive_cache[buf_idx]
+                        if buf_idx in self.__data_sent_worker_indices:
+                            del self.__data_sent_worker_indices[buf_idx]
+                        if buf_idx in self.__data_received_worker_indices:
+                            del self.__data_received_worker_indices[buf_idx]
+                    st = time.monotonic()
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                    et = time.monotonic()
+                    blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
+                dump_tmark_db(self.__worker_index)
             ############## computation function calls ##############
             elif request.handle_name == "inference":
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
@@ -582,7 +586,15 @@ class ModelWorker(worker_base.Worker):
                     request.handle_name].get_nowait()
                 data: namedarray.NamedArray
                 data.register_metadata(seqlens=seqlens)
+                # if base.constants.model_name().role == "reward":
+                #     profiler = get_pytorch_profiler()
+                #     profiler.start()
                 res = self._interface.inference(self._model, data)  # -> NamedArray
+                # if base.constants.model_name().role == "reward":
+                #     profiler.__exit__(None, None, None)
+                #     profiler.export_chrome_trace(
+                #         os.path.join(base.constants.LOG_ROOT, self.__experiment_name, self.__trial_name, f"reward_inf{self.__worker_index}.json")
+                #     )
                 if res is not None:
                     new_res = {}
                     for k, v in res.items():
@@ -627,6 +639,7 @@ class ModelWorker(worker_base.Worker):
 
         self.__request_queue.put_nowait((request, data, True, res))
 
+    @cuda_tmark("data_transfer", CUDATimeMarkType.comm)
     def __data_transfer_among_workers(self, hook_data: Dict[str, Any]):
         from impl.model.nn.flash_mqat.flash_mqat_parallel import pipeline_repartition_strategy
 
@@ -812,6 +825,7 @@ class ModelWorker(worker_base.Worker):
                         for k, v in x.items():
                             self.__data_owner_storage[buffer_idx][k] = v
 
+    @cuda_tmark("post_response", CUDATimeMarkType.misc)
     def __maybe_post_responses(self):
         ready_to_post = []
         try:
@@ -844,6 +858,7 @@ class ModelWorker(worker_base.Worker):
         except request_reply_stream.NoMessage:
             return
 
+    @cuda_tmark("receive_request", CUDATimeMarkType.misc)
     def __maybe_receive_requests(self):
         for _ in range(8):
             self.__maybe_receive_one_request()

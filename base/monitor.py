@@ -1,15 +1,23 @@
 from collections import defaultdict
 from statistics import mean
-from typing import List, Optional, Union
+import dataclasses
+from typing import List, Optional, Union, Callable, TYPE_CHECKING
+import contextlib
 import os
 import time
+import pickle
+import enum
 
 import numpy as np
 import psutil
 import pynvml
 import viztracer
 
+import base.constants
 import base.logging as logging
+
+if TYPE_CHECKING:
+    from api.config.config_base import ModelName
 
 logger = logging.getLogger("benchmark")
 
@@ -30,7 +38,8 @@ def gpu_memory_mb(name):
 
     logger.debug(
         f"{name} GPU rank {dist.get_rank()}: memory usage: {round(get_accelerator().memory_allocated() / 1024**2, 2)}MB, "
-        f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB")
+        f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB"
+    )
 
 
 def mock_time_mark(name, identifier, t, step):
@@ -104,17 +113,17 @@ MATPLOTLIB_COLORS = [
 
 
 def summary_time_points(
-        start_keys,
-        end_keys,
-        identifiers,
-        dir_name=None,
-        file_name=None,
-        start_time=None,
-        figsize=(12, 4),
-        end_time=None,
-        step_range=None,
-        save_fig_path="time_points.png",
-        draw_boundary=False,
+    start_keys,
+    end_keys,
+    identifiers,
+    dir_name=None,
+    file_name=None,
+    start_time=None,
+    figsize=(12, 4),
+    end_time=None,
+    step_range=None,
+    save_fig_path="time_points.png",
+    draw_boundary=False,
 ):
     """Plot and summary time marks in logs"""
     import matplotlib.pyplot as plt
@@ -227,9 +236,11 @@ def summary_time_points(
             min_val = round(min(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
 
             bubble_time -= time_perc
-            print(f"{k} -- {time_perc} %, "
-                  f"avg, min, max = {avg_val}, {min_val}, {max_val} ms, "
-                  f"sum, n = {round(time_sum[k]/10e6, 2)} ms, {len(time_list[k])}")
+            print(
+                f"{k} -- {time_perc} %, "
+                f"avg, min, max = {avg_val}, {min_val}, {max_val} ms, "
+                f"sum, n = {round(time_sum[k]/10e6, 2)} ms, {len(time_list[k])}"
+            )
         print(f"bubble time -- {round(bubble_time, 2)}%")
 
     plt.legend(loc=(1.01, 0.0))
@@ -306,10 +317,12 @@ def gpu_utilization_monitor(worker_idx: int, interval: float, ttl: float):
         total_memory = memory_info.total / (1024**2)  # Convert bytes to megabytes
         used_memory = memory_info.used / (1024**2)
         memory_usage_percentage = (used_memory / total_memory) * 100
-        logger.debug(f"Worker Index {worker_idx}, GPU {gpu_idx}: "
-                     f"Compute Utilization - {utilization.gpu}%, "
-                     f"Total Memory - {total_memory:.2f}MB, Used Memory - {used_memory:.2f}MB, "
-                     f"Memory Usage - {memory_usage_percentage:.2f}%")
+        logger.debug(
+            f"Worker Index {worker_idx}, GPU {gpu_idx}: "
+            f"Compute Utilization - {utilization.gpu}%, "
+            f"Total Memory - {total_memory:.2f}MB, Used Memory - {used_memory:.2f}MB, "
+            f"Memory Usage - {memory_usage_percentage:.2f}%"
+        )
         time.sleep(interval)
     pynvml.nvmlShutdown()
 
@@ -325,7 +338,8 @@ def calculate_llama_train_flops(
     vocab_size: int,
 ):
     return checkpoint_activations_factor * caculuate_llama_forward_flops(
-        batch_size, seqlens, num_layers, hidden_size, intermediate_size, vocab_size)
+        batch_size, seqlens, num_layers, hidden_size, intermediate_size, vocab_size
+    )
 
 
 def caculuate_llama_forward_flops(
@@ -338,9 +352,16 @@ def caculuate_llama_forward_flops(
 ):
     assert len(seqlens) == batch_size
     attn_flops = sum(x**2 for x in seqlens) * hidden_size
-    return (2 * num_layers * (4 * sum(seqlens) * hidden_size**2 + 2 * attn_flops +
-                              3 * sum(seqlens) * hidden_size * intermediate_size) +
-            4 * sum(seqlens) * vocab_size * hidden_size)
+    return (
+        2
+        * num_layers
+        * (
+            4 * sum(seqlens) * hidden_size**2
+            + 2 * attn_flops
+            + 3 * sum(seqlens) * hidden_size * intermediate_size
+        )
+        + 4 * sum(seqlens) * vocab_size * hidden_size
+    )
 
 
 def calculate_llama_gen_flops(
@@ -352,13 +373,98 @@ def calculate_llama_gen_flops(
     intermediate_size,
     vocab_size,
 ):
-    flops = caculuate_llama_forward_flops(batch_size, prompt_lens, num_layers, hidden_size, intermediate_size,
-                                          vocab_size)
+    flops = caculuate_llama_forward_flops(
+        batch_size, prompt_lens, num_layers, hidden_size, intermediate_size, vocab_size
+    )
     for i in range(gen_len):
         prefix_lens = [x + i for x in prompt_lens]
         flops += (
-            2 * num_layers *
-            (4 * batch_size * hidden_size**2 + 2 *
-             (sum(prefix_lens) + batch_size) * hidden_size + 3 * batch_size * hidden_size * intermediate_size)
-            + 4 * batch_size * vocab_size * hidden_size)
+            2
+            * num_layers
+            * (
+                4 * batch_size * hidden_size**2
+                + 2 * (sum(prefix_lens) + batch_size) * hidden_size
+                + 3 * batch_size * hidden_size * intermediate_size
+            )
+            + 4 * batch_size * vocab_size * hidden_size
+        )
     return flops
+
+
+class CUDATimeMarkType(enum.Enum):
+    forward = "forward"
+    backward = "backward"
+    optim_step = "optim_step"
+    comm = "comm"
+    misc = "misc"
+    mem_layout = "memory_layout"
+
+
+@dataclasses.dataclass
+class TimeMarkEntry:
+    name: str
+    model_name: "ModelName"
+    type_: CUDATimeMarkType
+    start_time: int
+    end_time: int
+
+
+TIME_MARK_DB = []
+
+
+def cuda_tmark(name: str, type_: CUDATimeMarkType):
+    if os.getenv("DLLM_CUDA_TMARK", None) == "1":
+
+        def wrapper(f: Callable):
+            def _wrapped_f(*args, **kwargs):
+                import torch
+                from base.constants import _model_name
+
+                torch.cuda.synchronize()
+                tik = time.time_ns()
+                res = f(*args, **kwargs)
+                torch.cuda.synchronize()
+                tok = time.time_ns()
+                global TIME_MARK_DB
+                TIME_MARK_DB.append(TimeMarkEntry(name, _model_name, type_, tik, tok))
+                return res
+
+            return _wrapped_f
+
+    else:
+
+        def wrapper(f):
+            return f
+
+    return wrapper
+
+
+@contextlib.contextmanager
+def cuda_tmarked(name: str, type_: CUDATimeMarkType):
+    if os.getenv("DLLM_CUDA_TMARK", None) == "1":
+        import torch
+        from base.constants import _model_name
+
+        torch.cuda.synchronize()
+        tik = time.time_ns()
+    yield
+    if os.getenv("DLLM_CUDA_TMARK", None) == "1":
+        torch.cuda.synchronize()
+        tok = time.time_ns()
+        global TIME_MARK_DB
+        TIME_MARK_DB.append(TimeMarkEntry(name, _model_name, type_, tik, tok))
+
+
+def dump_tmark_db(worker_idx):
+    if os.getenv("DLLM_CUDA_TMARK", None) != "1":
+        return
+    fn = os.path.join(
+        base.constants.LOG_ROOT,
+        base.constants.experiment_name(),
+        base.constants.trial_name(),
+        f"time_marks{worker_idx}.pkl",
+    )
+    global TIME_MARK_DB
+    with open(fn, "wb") as f:
+        pickle.dump(TIME_MARK_DB, f)
+    TIME_MARK_DB.clear()

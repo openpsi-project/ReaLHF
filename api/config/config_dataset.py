@@ -96,6 +96,7 @@ class PromptOnlyDatasetConfig:
     n_tokens_per_batch: int = 65536
     batch_size: int = 256
     path: str = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl"
+    pad_to_max_length: bool = False
 
 
 DatasetType = Union[PromptOnlyDatasetConfig, PromptAnswerDatasetConfig, PairedComparisonDatasetConfig]
