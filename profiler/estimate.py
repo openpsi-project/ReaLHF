@@ -280,6 +280,9 @@ def _estimate_rpc_cost(
         compute_cost = inst_cost["inf_fwd"] * (num_pp + num_micro_batches - 1)
         comm_cost = inst_cost["act_p2p"] * (num_pp + num_micro_batches - 2) * 2
         log_debug(f"{inst_cost['inf_fwd']} * {num_pp + num_micro_batches - 1}")
+        if num_mp > 1:  # and num_pp * num_dp > 1:
+            compute_cost = compute_cost * (1 - num_mp * 0.03)
+            log_debug(f"num_dp num_mp coefficent {1- num_mp * 0.03}")
     elif model_interface_type == ModelInterfaceType.TRAIN_STEP:
         # TODO: add reduce grads, add ppo micro batches
         num_micro_batches = num_pp * 2 if num_pp > 1 else 1
@@ -292,8 +295,11 @@ def _estimate_rpc_cost(
         comm_cost = (inst_cost["grad_p2p"] + inst_cost["act_p2p"]) * (num_pp + num_micro_batches - 2) * 2
         compute_cost = compute_cost * n_ppo_minibatches
         comm_cost = comm_cost * n_ppo_minibatches
-        if num_pp * num_dp <= 2:
+        if num_pp * num_dp <= 1:
             compute_cost = compute_cost * (1 - num_mp * 0.04)
+        if num_mp > 1:  # and num_pp * num_dp > 1:
+            compute_cost = compute_cost * (1 - num_mp * 0.03)
+            log_debug(f"num_dp num_mp coefficent {1- num_mp * 0.03}")
     elif model_interface_type == ModelInterfaceType.GENERATE:
         num_micro_batches = num_pp
         num_gen_tokens = num_gen_tokens
@@ -302,19 +308,15 @@ def _estimate_rpc_cost(
         log_debug(f"{inst_cost['gen_fwd_0']} * {num_pp + num_micro_batches - 1} + "
                   f"{inst_cost['gen_fwd_1']} * {(num_gen_tokens - 1) * num_micro_batches}")
 
-        if num_dp > 1:
-            compute_cost = compute_cost * (1 - num_dp * 0.03)
-            log_debug(f"num_dp coefficent {1 - num_dp * 0.03}")
+        if num_dp * num_mp > 1:
+            compute_cost = compute_cost * (1 - min(num_dp * num_mp, 8) * 0.03)
+            log_debug(f"num_dp coefficent {1 - min(num_dp * num_mp, 8) * 0.03}")
 
         # comm_cost = inst_cost["act_p2p"] * (num_pp + num_micro_batches - 2) * 2 +\
         #             inst_cost["gen_act_p2p"] * (num_gen_tokens - 1) * num_micro_batches * 2
         comm_cost = 0
 
     # dirty heuristic
-    if num_mp > 1:  # and num_pp * num_dp > 1:
-        compute_cost = compute_cost * (1 - num_mp * 0.03)
-        log_debug(f"num_dp num_mp coefficent {1- num_mp * 0.03}")
-
     if num_pp > 8:
         compute_cost = compute_cost * (1 + num_pp * 0.01)
         log_debug(f"num_pp coefficent {1 + num_pp * 0.01}")
@@ -448,15 +450,15 @@ def estimate_rpc_memory(rpc: ModelRPC,
         #       f"total: {(static_mem + active_mem)/(1024*1024*1024):02f} GB")
         return static_mem + active_mem, static_mem
     elif interface_type == ModelInterfaceType.INFERENCE:
-        static_mem = 2 * param_mem // (num_pp * num_mp)
-        active_mem = 0  # no tensor need to be stored in inference
+        static_mem = int(1.5 * param_mem // (num_pp * num_mp))
+        # active_mem = 0  # no tensor need to be stored in inference
         # print(f"inference static_mem: {static_mem/(1024*1024*1024):02f} GB")
         if offload:
             return static_mem, 0  # assume offload
         else:
             return static_mem, static_mem
     elif interface_type == ModelInterfaceType.GENERATE:
-        static_mem = 2 * param_mem // (num_pp * num_mp)
+        static_mem = int(1.5 * param_mem // (num_pp * num_mp))
         active_mem = 2 * (2 * b * s * h) * L // (num_pp * num_mp * num_dp)  # kv cache
         # print(f"generate static_mem: {static_mem/(1024*1024*1024):02f} GB, "
         #       f"kv_cache_mem: {kv_cache_mem/(1024*1024*1024):02f} GB, "
@@ -510,7 +512,7 @@ def example(args):
     bs = 128
     seq_len = 128
 
-    p1 = ModelParallelStrategy(num_pp=2, num_mp=2, num_dp=8)
+    p1 = ModelParallelStrategy(num_pp=1, num_mp=4, num_dp=8)
     rpc_cost = estimate_rpc_time(rollout,
                                  p1,
                                  use_gradient_checkpointing=True,
@@ -518,11 +520,11 @@ def example(args):
                                  bs=bs,
                                  seq_len=seq_len,
                                  n_ppo_minibatches=4)
-    mem_cost, static_mem = estimate_rpc_memory(train, p1, bs, seq_len)
+    mem_cost, static_mem = estimate_rpc_memory(rollout, p1, bs, seq_len)
     print(f"rollout {p1} rpc cost {rpc_cost} mem cost {mem_cost/(1024**3):.2f} GB")
 
     print("*" * 100)
-    p2 = ModelParallelStrategy(num_pp=4, num_mp=8, num_dp=1)
+    p2 = ModelParallelStrategy(num_pp=1, num_mp=4, num_dp=6)
     rpc_cost = estimate_rpc_time(rollout,
                                  p2,
                                  use_gradient_checkpointing=True,

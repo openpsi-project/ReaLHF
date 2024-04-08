@@ -510,10 +510,10 @@ if __name__ == "__main__":
     # experiment = config_package.make_experiment(args.expr_name)
 
     # os.environ.setdefault("IS_REMOTE", "0")
-    bs = 256
-    seqlen = 384
-    size = 70
-    n_nodes = 8
+    bs = 128
+    seqlen = 896
+    size = 34
+    n_nodes = 4
     node_start = 42
     node_end = node_start + n_nodes - 1
     nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"

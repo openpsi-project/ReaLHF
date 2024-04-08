@@ -103,11 +103,11 @@ class ProfileWorker(worker_base.Worker):
         # self.gen_tokens_list = cfg.gen_tokens_list
 
         if self.bs_list is None:
-            self.bs_list = [256, 360, 512, 720, 1024]  # total bss
+            self.bs_list = [128, 256, 512]  # total bss
             if len(self.rpcs) == 1:
                 self.bs_list = [256]
         if self.seq_len_list is None:
-            self.seq_len_list = [128, 256, 512, 768, 1024]
+            self.seq_len_list = [1024, 512, 256]
             if len(self.rpcs) == 1:
                 self.seq_len_list = [128]
         # if self.gen_tokens_list is None:
@@ -201,14 +201,17 @@ class ProfileWorker(worker_base.Worker):
             num_dp = base.constants.data_parallel_world_size()
             if bs < 2 * num_pp * num_dp:
                 return worker_base.PollResult(sample_count=0, batch_count=0)
-            data = random_sample(bs // num_dp, seq_len, self.__vocab_size)
+            if rpc.interface_type == api.config.dfg.ModelInterfaceType.GENERATE:
+                data = random_sample(bs // num_dp, 128, self.__vocab_size)
+            else:
+                data = random_sample(bs // num_dp, seq_len, self.__vocab_size)
             # stats_key = f"{rpc.name}|{bs}|{seq_len}"
             stats_key = make_stats_key(rpc.name, bs, seq_len)
             logger.info(f"Running model function call: {func_name} "
                         f"for rpc {stats_key}.")
             func = getattr(self.__interface, func_name)
             for i in range(self.warmup_rounds):
-                func(self.__model, data)
+                func(self.__model, data, gen_tokens=seq_len - 128)
                 dist.barrier()
                 torch.cuda.synchronize()
                 logger.info(f"{stats_key} warm up round {i} done")
@@ -216,7 +219,7 @@ class ProfileWorker(worker_base.Worker):
             st = time.monotonic()
             for _ in range(self.profile_rounds):
                 rt = time.monotonic()
-                func(self.__model, data)
+                func(self.__model, data, gen_tokens=seq_len - 128)
                 dist.barrier()
                 torch.cuda.synchronize()
                 self.stats[stats_key].append(time.monotonic() - rt)

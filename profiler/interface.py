@@ -13,6 +13,7 @@ from profiler.engine import ProfileEngine
 from base.dataparallel import PackedParallelDataBroker
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+from impl.model.backend.pipe_inf import InferencePipelineEngine
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
 from impl.model.utils.data import PipeCacheData, PipeTransferData
@@ -49,7 +50,7 @@ def compute_packed_sft_loss(
 class ProfileInterface(api.model.ModelInterface):
     n_minibatches: int = 4
 
-    def train_step(self, model: api.model.Model, data: NamedArray) -> Dict:
+    def train_step(self, model: api.model.Model, data: NamedArray, gen_tokens: int = 128) -> Dict:
         module: deepspeed.DeepSpeedEngine = model.module
         data = recursive_apply(data, lambda x: x.to(model.device))
         datas = PackedParallelDataBroker.scatter_to(data,
@@ -102,7 +103,7 @@ class ProfileInterface(api.model.ModelInterface):
         return res
 
     @torch.no_grad()
-    def inference(self, model: api.model.Model, data: NamedArray) -> Dict:
+    def inference(self, model: api.model.Model, data: NamedArray, gen_tokens: int = 128) -> Dict:
         device = model.device
         module = model.module
         module.eval()
@@ -113,15 +114,22 @@ class ProfileInterface(api.model.ModelInterface):
         cu_seqlens: torch.Tensor = data["cu_seqlens"]
         max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
 
-        if isinstance(module, DeepSpeedPipelineEngine):
-            logits = module.forward(seqlens_cpu=data.metadata['seqlens'],
-                                    packed_input_ids=packed_input_ids,
-                                    cu_seqlens=cu_seqlens,
-                                    num_micro_batches=base.constants.pipe_parallel_world_size())
+        if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
+            res = module.forward(seqlens_cpu=data.metadata['seqlens'],
+                                 packed_input_ids=data["packed_seq"],
+                                 cu_seqlens=cu_seqlens,
+                                 num_micro_batches=base.constants.pipe_parallel_world_size())
+            if res is None:
+                return None
+            logits = res
         else:
-            logits = model.module(packed_input_ids=packed_input_ids,
-                                  cu_seqlens=cu_seqlens,
-                                  max_seqlen=max_seqlen)
+            if hasattr(module, "module"):
+                module = module.module
+            with module.sequence_parallel_disable():
+                res = module(packed_input_ids=data["packed_seq"],
+                             cu_seqlens=cu_seqlens,
+                             max_seqlen=max_seqlen)
+            logits = res
 
         return dict(logits=logits)
 
@@ -133,27 +141,41 @@ class ProfileInterface(api.model.ModelInterface):
 
         data = recursive_apply(data, lambda x: x.to(model.device))
         gconfig = GenerationConfig(min_new_tokens=gen_tokens, max_new_tokens=gen_tokens)
+        packed_prompts = data["packed_input_ids"]
+        cu_seqlens = data["cu_seqlens"]
+        self.pipe_gen_n_mbs = base.constants.pipe_parallel_world_size()
+        prompt_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
+        bs = prompt_lengths.shape[0]
 
-        if isinstance(module, DeepSpeedPipelineEngine):
-            res = module.generate(seqlens_cpu=data.metadata['seqlens'],
-                                  tokenizer=model.tokenizer,
-                                  packed_input_ids=data['packed_input_ids'],
-                                  cu_seqlens=data['cu_seqlens'],
-                                  gconfig=gconfig,
-                                  num_micro_batches=base.constants.pipe_parallel_world_size())
-            if res is None:
-                return dict()
-            gen_tokens, logprobs, logits_mask, *_ = res
-        else:
+        if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
             res = module.generate(
+                seqlens_cpu=data.metadata['seqlens'],
                 tokenizer=model.tokenizer,
-                packed_input_ids=data['packed_input_ids'],
-                cu_seqlens=data['cu_seqlens'],
+                packed_input_ids=packed_prompts,
+                cu_seqlens=cu_seqlens,
                 gconfig=gconfig,
+                num_micro_batches=self.pipe_gen_n_mbs,
             )
-            gen_tokens = res.sequences
-            logprobs = res.scores
-            logits_mask = res.logits_mask
+            if res is None:
+                return None
+
+            gen_tokens, logprobs, logits_mask, *_ = res
+            # logger.info(f"gen_tokens shape {gen_tokens.shape}")
+        else:
+            # unwrap deepspeed engine here
+            if hasattr(module, "module"):
+                module = module.module
+            with module.sequence_parallel_disable():
+                gen_res = module.generate(
+                    tokenizer=model.tokenizer,
+                    packed_input_ids=packed_prompts,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=int(max(prompt_lengths)),
+                    gconfig=gconfig,
+                )
+            gen_tokens = gen_res.sequences
+            logprobs = gen_res.scores
+            logits_mask = gen_res.logits_mask
 
         return dict(
             gen_tokens=gen_tokens,

@@ -327,13 +327,13 @@ def register_profile_experiment(
     # node_end = node_start + n_nodes - 1
     # nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
     if size == 7:
-        nodelist = "QH-com30"
+        nodelist = "QH-com41"
     elif size == 13:
-        nodelist = "QH-com[42-43]"
+        nodelist = "QH-com[41-42]"
     elif size == 34:
-        nodelist = "QH-com[42-45]"
+        nodelist = "QH-com[41-44]"
     elif size == 70:
-        nodelist = "QH-com[29-30,42-47]"
+        nodelist = "QH-com[41-48]"
 
     exp_func = functools.partial(
         ProfileExperiment,
@@ -388,4 +388,5 @@ for size in [7, 13, 34, 70]:
         remain = num_gpus // num_mp
         for num_dp in find_factors(remain):
             num_pp = remain // num_dp
-            register_profile_experiment(size, num_pp, num_mp, num_dp)
+            if num_pp <= 8:
+                register_profile_experiment(size, num_pp, num_mp, num_dp)
