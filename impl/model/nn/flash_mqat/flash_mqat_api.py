@@ -18,7 +18,7 @@ import transformers
 
 from api.config.config_base import ModelName
 from api.config.config_flash_model import FlashMQATConfig
-from base.monitor import cuda_tmarked, CUDATimeMarkType
+from base.monitor import cuda_tmarked, CUDATimeMarkType, cuda_tmark
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
                                                       flash_model_embedding_param_keys,
@@ -1300,6 +1300,7 @@ class FlashMQATModel(nn.Module):
         )
         self._reparallelize_targets[(from_model_name, to_model_name)] = rtgt
 
+    @cuda_tmark("param_sync", CUDATimeMarkType.mem_layout)
     def build_reparallelized_layers_async(
         self,
         from_model_name: ModelName,
@@ -1308,7 +1309,7 @@ class FlashMQATModel(nn.Module):
         to_topo: base.topology.PipeModelDataParallelTopology,
         to_model_config: FlashMQATConfig,
         pg_info: gpu_utils.NCCLProcessGroupInfo,
-    ) -> Tuple[nn.ModuleList, torch.Tensor]:
+    ) -> Tuple[nn.ModuleList, torch.Tensor, torch.Tensor]:
         # FIXME: remote synchronization deletes the local model, but sometimes it is uncessary.
 
         if (from_model_name, to_model_name) not in self._reparallelize_targets:
@@ -1331,14 +1332,12 @@ class FlashMQATModel(nn.Module):
             rtgt.to_layer_start_idx,
         )
 
-        comm_volume = 0
-
-        src_mp_size = from_topo.get_dim("model")
-        dst_mp_size = to_topo.get_dim("model")
-        n_receiver_portions = max(src_mp_size // dst_mp_size, 1)
+        # Allocate send and receive tensors in advance to reduce overhead.
+        recv_buf_specs  = []
+        send_buf_specs = []
+        comm_volume = torch.zeros((), dtype=torch.long, device='cuda')
         for step in rtgt.comm_plan:
             if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
-
                 if step.rank == step.src:
                     buf = slice_intervals(
                         self.contiguous_param,
@@ -1350,15 +1349,14 @@ class FlashMQATModel(nn.Module):
                 else:
                     buf = torch.zeros(step.param_size, dtype=step.param_dtype, device="cuda")
                     comm_volume += buf.numel()
-                    torch.distributed.broadcast(buf, src=step.src, group=step.group)
 
-                set_intervals(
+                recv_buf_specs.append(dict(
                     src=buf,
                     dst=to_contiguous_param,
                     intervals=step.receiver_param_intervals,
                     intervals_cpu=step.receiver_param_intervals_cpu,
                     max_interval_size=step.receiver_max_interval_size,
-                )
+                ))
 
             if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
                 if step.group is not None:
@@ -1369,21 +1367,48 @@ class FlashMQATModel(nn.Module):
                         step.max_interval_size,
                         step.param_size,
                     )
-                    torch.distributed.broadcast(buf, src=step.rank, group=step.group)
+                    send_buf_specs.append(buf)
                 if step.remove:
                     for param_key in step.param_keys:
                         layer_idx, k = param_key.split(".", 1)
                         layer_idx = int(layer_idx)
                         dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
                         recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
-                                          k).data = (dummy_tensor)
+                                        k).data = (dummy_tensor)
 
+        # Run boradcast!
+        streams = [torch.cuda.Stream() for step in rtgt.comm_plan]
+        recv_buf_cnt = 0
+        recv_events = []
+        for step, s in zip(rtgt.comm_plan, streams):
+            with torch.cuda.stream(s):
+                if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
+                    e = torch.cuda.Event()
+                    if step.rank != step.src:
+                        buf = recv_buf_specs[recv_buf_cnt]['src']
+                        torch.distributed.broadcast(buf, src=step.src, group=step.group)
+                    e.record(s)
+                    recv_events.append(e)
+                    recv_buf_cnt += 1
+
+                if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
+                    if step.group is not None:
+                        buf = send_buf_specs.pop(0)
+                        torch.distributed.broadcast(buf, src=step.rank, group=step.group)
+
+        # Post-processing.
+        assert len(send_buf_specs) == 0, len(send_buf_specs)
+        assert recv_buf_cnt == len(recv_buf_specs), (len(recv_buf_specs), recv_buf_cnt)
         # assert len(state_dict) == 0
+        assert len(recv_events) == len(recv_buf_specs)
+        for e, x in zip(recv_events, recv_buf_specs):
+            torch.cuda.current_stream().wait_event(e)
+            set_intervals(**x)
 
         # release the local GPU memory
         self.contiguous_param = None
         self.layers = None
-        return rtgt.to_layers_handle, to_contiguous_param
+        return rtgt.to_layers_handle, to_contiguous_param, comm_volume
 
     def patch_reparallelization(self, x):
         self.layers, self.contiguous_param = x

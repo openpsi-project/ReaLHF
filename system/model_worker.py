@@ -434,37 +434,36 @@ class ModelWorker(worker_base.Worker):
         elif hook == "param_sync":
             tik = time.perf_counter()
             # torch.cuda.synchronize()
-            with cuda_tmarked("param_sync", CUDATimeMarkType.mem_layout):
-                from_model_name: ModelName = hook_data["from_model_name"]
-                to_model_name: ModelName = hook_data["to_model_name"]
-                from_topo: base.topology.PipeModelDataParallelTopology = hook_data["from_topo"]
-                to_topo: base.topology.PipeModelDataParallelTopology = hook_data["to_topo"]
-                to_model_config = hook_data["to_model_config"]
-                # profiler = get_pytorch_profiler()
-                # profiler.start()
-                if from_model_name in self.__unwrapped_models:
-                    m = self.__unwrapped_models[from_model_name]
-                else:
-                    m = self.__unwrapped_models[to_model_name]
-                assert isinstance(m, FlashMQATModel), type(m)
-                ipara = m.build_reparallelized_layers_async(
-                    from_model_name=from_model_name,
-                    to_model_name=to_model_name,
-                    from_topo=from_topo,
-                    to_topo=to_topo,
-                    to_model_config=to_model_config,
-                    pg_info=self.__pg_info,
-                )
-                if from_model_name in self.__models:
-                    self.__model_is_handle[from_model_name] = True
-                if to_model_name in self.__models:
-                    self.__unwrapped_models[to_model_name].patch_reparallelization(ipara)
-                    self.__model_is_handle[to_model_name] = False
-                blogger.debug(f"param_sync CPU time: {time.perf_counter() - tik:.4f}s")
-                # profiler.__exit__(None, None, None)
-                # profiler.export_chrome_trace(
-                #     f"/lustre/aigc/llm/logs/fw/sosp-profile/paramsync_{from_model_name}-{to_model_name}@{self.__worker_index}.json"
-                # )
+            from_model_name: ModelName = hook_data["from_model_name"]
+            to_model_name: ModelName = hook_data["to_model_name"]
+            from_topo: base.topology.PipeModelDataParallelTopology = hook_data["from_topo"]
+            to_topo: base.topology.PipeModelDataParallelTopology = hook_data["to_topo"]
+            to_model_config = hook_data["to_model_config"]
+            # profiler = get_pytorch_profiler()
+            # profiler.start()
+            if from_model_name in self.__unwrapped_models:
+                m = self.__unwrapped_models[from_model_name]
+            else:
+                m = self.__unwrapped_models[to_model_name]
+            assert isinstance(m, FlashMQATModel), type(m)
+            new_layers, new_param, _ = m.build_reparallelized_layers_async(
+                from_model_name=from_model_name,
+                to_model_name=to_model_name,
+                from_topo=from_topo,
+                to_topo=to_topo,
+                to_model_config=to_model_config,
+                pg_info=self.__pg_info,
+            )
+            if from_model_name in self.__models:
+                self.__model_is_handle[from_model_name] = True
+            if to_model_name in self.__models:
+                self.__unwrapped_models[to_model_name].patch_reparallelization((new_layers, new_param))
+                self.__model_is_handle[to_model_name] = False
+            blogger.debug(f"param_sync CPU time: {time.perf_counter() - tik:.4f}s")
+            # profiler.__exit__(None, None, None)
+            # profiler.export_chrome_trace(
+            #     f"/lustre/aigc/llm/logs/fw/sosp-profile/paramsync_{from_model_name}-{to_model_name}@{self.__worker_index}.json"
+            # )
         elif hook == "offload":
             with cuda_tmarked("offload", CUDATimeMarkType.mem_layout):
                 tik = time.perf_counter()

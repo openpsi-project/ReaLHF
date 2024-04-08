@@ -438,6 +438,9 @@ def cuda_tmarked(name: str, type_: CUDATimeMarkType):
         global TIME_MARK_DB
         TIME_MARK_DB.append(TimeMarkEntry(name, _model_name, type_, tik, tok))
 
+def fetch_latest_tmark():
+    global TIME_MARK_DB
+    return TIME_MARK_DB[-1]
 
 def dump_tmark_db(worker_idx):
     if os.getenv("DLLM_CUDA_TMARK", None) != "1":
