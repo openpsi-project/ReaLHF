@@ -1,13 +1,23 @@
 # Modified from https://github.com/microsoft/DeepSpeed/blob/aed599b4422b1cdf7397abb05a58c3726523a333/deepspeed/runtime/pipe/topology.py#
 
 from itertools import product as cartesian_product
-from typing import Dict, NamedTuple, Optional
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import torch.distributed
 
 import base.logging as logging
 
 logger = logging.getLogger("Topology")
+
+GLOBAL_PROCESS_GROUP_REGISTRY: Dict[Tuple, torch.distributed.ProcessGroup] = {}
+
+
+def new_or_get_group(ranks: List[int], backend="nccl"):
+    ranks = tuple(sorted(ranks))
+    global GLOBAL_PROCESS_GROUP_REGISTRY
+    if ranks not in GLOBAL_PROCESS_GROUP_REGISTRY:
+        GLOBAL_PROCESS_GROUP_REGISTRY[ranks] = torch.distributed.new_group(ranks, backend=backend)
+    return GLOBAL_PROCESS_GROUP_REGISTRY[ranks]
 
 
 class PipeDataModelProcessCoord(NamedTuple):
@@ -343,7 +353,7 @@ class ParallelGrid:
         self.ds_model_rank = -1
         for dp in range(self.data_parallel_size):
             ranks = sorted(self._topo.get_axis_list(axis="data", idx=dp))
-            proc_group = dist.new_group(ranks=[rank_mapping[rank] for rank in ranks])
+            proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])
             if self.global_rank in ranks:
                 self.ds_model_proc_group = proc_group
                 self.ds_model_world_size = len(ranks)
@@ -362,7 +372,7 @@ class ParallelGrid:
         self.dp_group = []
         self.dp_groups = self._topo.get_axis_comm_lists("data")
         for g in self.dp_groups:
-            proc_group = dist.new_group(ranks=[rank_mapping[x] for x in g])
+            proc_group = new_or_get_group(ranks=[rank_mapping[x] for x in g])
             if self.global_rank in g:
                 self.dp_group = g
                 self.dp_proc_group = proc_group
@@ -380,7 +390,7 @@ class ParallelGrid:
             if self.global_rank == 0:
                 # print(f'RANK={self.global_rank} building pipeline group: {ranks}')
                 pass
-            proc_group = dist.new_group(ranks=[rank_mapping[rank] for rank in ranks])
+            proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])
             if self.global_rank in ranks:
                 self.pp_group = ranks
                 self.pp_proc_group = proc_group
@@ -395,7 +405,7 @@ class ParallelGrid:
         self.mp_group = []
         self.model_groups = self._topo.get_axis_comm_lists("model")
         for g in self.model_groups:
-            proc_group = dist.new_group(ranks=[rank_mapping[x] for x in g])
+            proc_group = new_or_get_group(ranks=[rank_mapping[x] for x in g])
             if self.global_rank in g:
                 self.slice_group = g
                 self.slice_proc_group = proc_group

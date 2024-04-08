@@ -13,7 +13,6 @@ from profiler.search import (data_pipe_device_mapping, model_pipe_device_mapping
 
 from api.config.config_base import MODEL_TYPE_TO_PATH
 from api.config.config_dataset import PromptOnlyDatasetConfig
-from api.config.config_device_mesh import *
 from api.config.config_flash_model import (FLASH_MODEL_CONFIG_CONVERTER, FlashMQATConfig,
                                            ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig)
 from api.config.config_system import *
@@ -22,6 +21,28 @@ from base.topology import PipeModelDataParallelTopology
 import base.logging as logging
 
 logger = logging.getLogger("DeviceMappingCompiler", "benchmark")
+
+
+@dataclasses.dataclass
+class RPCAllocation:
+    rpc: ModelRPC
+    mapping: np.ndarray  # a 2D binary array, shape (n_nodes, n_gpus_per_node)
+    train_eval_config: ModelTrainEvalConfig
+
+    @property
+    def topo(self) -> PipeModelDataParallelTopology:
+        return PipeModelDataParallelTopology(
+            num_pp=self.train_eval_config.parallel.pipeline_parallel_size,
+            num_mp=self.train_eval_config.parallel.model_parallel_size,
+            num_dp=self.train_eval_config.parallel.data_parallel_size,
+        )
+
+
+@dataclasses.dataclass
+class ClusterDeviceMesh:
+    n_nodes: int
+    n_gpus_per_node: int
+    mem: Union[int, float]
 
 
 def _are_ones_contiguous(binary_array: np.ndarray):
@@ -151,6 +172,56 @@ def scheduling_config_from_allocations(
     return sched
 
 
+def _make_train_backend_config(cfg: ModelTrainEvalConfig):
+    if cfg.parallel.pipeline_parallel_size > 1:
+        engine_type = "pipe"
+    else:
+        engine_type = "deepspeed"
+    return ModelBackend(
+        "ds_train",
+        args=dict(
+            optimizer_name="adam",
+            optimizer_config=dict(
+                lr=cfg.optimizer.lr,
+                weight_decay=cfg.optimizer.weight_decay,
+                eps=cfg.optimizer.eps,
+                betas=(cfg.optimizer.beta1, cfg.optimizer.beta2),
+            ),
+            lr_scheduler_type=cfg.optimizer.lr_scheduler_type,
+            warmup_steps_proportion=cfg.optimizer.warmup_steps_proportion,
+            min_lr_ratio=cfg.optimizer.min_lr_ratio,
+            zero_stage=(cfg.zero_stage if cfg.parallel.pipeline_parallel_size == 1 else min(
+                cfg.zero_stage, 1)),
+            gradient_checkpointing=cfg.gradient_checkpointing,
+            engine_type=engine_type,
+            offload_optimizer_state=cfg.optimizer.offload,
+            offload_param=cfg.offload,
+            enable_bf16=cfg.enable_bf16,
+            enable_fp16=cfg.enable_fp16,
+            sequence_parallel=cfg.parallel.use_sequence_parallel,
+            enable_async_p2p_communication=cfg.enable_async_p2p,
+        ),
+    )
+
+
+def _make_inf_backend_config(cfg: ModelTrainEvalConfig):
+    if cfg.parallel.pipeline_parallel_size > 1:
+        return ModelBackend("pipe_inference")
+    else:
+        return ModelBackend("null")
+    # return ModelBackend(
+    #     "ds_inference",
+    #     args=dict(
+    #         enable_fp16=(not cfg.enable_bf16),
+    #         zero_stage=3 if cfg.offload else 0,
+    #         offload=cfg.offload,
+    #         enable_bf16=cfg.enable_bf16,
+    #         engine_type="pipe" if cfg.parallel.pipeline_parallel_size > 1 else "deepspeed",
+    #         sequence_parallel=cfg.parallel.use_sequence_parallel,
+    #     ),
+    # )
+
+
 def mw_config_from_allocations(
     allocations: Dict[str, RPCAllocation],
     model_configs: Dict[str, Model],
@@ -176,9 +247,9 @@ def mw_config_from_allocations(
                 if m.mapping[i, j] and not any(m.rpc.model_name == s.id.model_name for s in mw.shards):
                     shard_idx = shard_counter[m.rpc.model_name]
                     if m.train_eval_config.optimizer.type != "empty":
-                        backend = make_train_backend_config(m.train_eval_config)
+                        backend = _make_train_backend_config(m.train_eval_config)
                     else:
-                        backend = make_inf_backend_config(m.train_eval_config)
+                        backend = _make_inf_backend_config(m.train_eval_config)
                     mw.shards.append(
                         StandaloneModelShard(
                             id=ModelShardID(
@@ -201,7 +272,8 @@ def auto_device_mapping(
     n_gpus_per_node: int = 8,
     mem: int = 80,
     nodelist: Optional[str] = None,
-    mode: Literal["search", "model_pipe", "data_pipe"] = "search",
+    mode: Literal["search", "model_pipe", "data_pipe", "test"] = "search",
+    mapping_type: Optional[str] = "ours",
 ):
     device_mesh = ClusterDeviceMesh(n_nodes, n_gpus_per_node, mem)
 
@@ -228,17 +300,17 @@ def auto_device_mapping(
                                     f"Model config mismatch: {k} {v} {getattr(model_configs[rpc.model_name], k)}"
                                 )
                 if mode == "search":
-                    device_mapping_func = optimal_device_mapping
+                    alloc_func = optimal_device_mapping
                 elif mode == "model_pipe":
-                    device_mapping_func = model_pipe_device_mapping
+                    alloc_func = model_pipe_device_mapping
                 elif mode == "data_pipe":
-                    device_mapping_func = data_pipe_device_mapping
+                    alloc_func = data_pipe_device_mapping
                 elif mode == "test":
-                    device_mapping_func = test_model_device_mapping
+                    alloc_func = test_model_device_mapping
                 else:
                     raise ValueError(f"Invalid mode {mode}")
 
-                self._allocations = device_mapping_func(
+                self._allocations = alloc_func(
                     device_mesh,
                     model_rpcs=self._internal_exp.rpcs,
                     model_configs=model_configs,
@@ -246,8 +318,6 @@ def auto_device_mapping(
                     num_gen_tokens=self._internal_exp.ppo.max_new_tokens,
                     n_ppo_minibatches=self._internal_exp.ppo.ppo_n_minibatches,
                 )
-                # import pprint
-                # pprint.pprint(self._allocations)
                 self._rpcs = [a.rpc for a in self._allocations.values()]
 
             def scheduling_setup(self):
@@ -286,6 +356,7 @@ def auto_device_mapping(
                             dataset_path=self._internal_exp.dataset.path,
                             n_tokens_per_batch=self._internal_exp.dataset.n_tokens_per_batch,
                             max_length=self._internal_exp.dataset.max_prompt_len,
+                            pad_to_max_length=self._internal_exp.dataset.pad_to_max_length,
                         ),
                     )
                     dataloader = DataLoader("iterable_dataset_loader")

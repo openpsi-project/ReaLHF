@@ -21,12 +21,13 @@ def test_impl(world_size):
     mconfig = get_llama7b_flash_config()
     with base.constants.model_scope(MODEL_NAME):
         m = FlashMQATModel(mconfig, device=torch.device("cuda:0"), dtype=torch.float16)
-        # add_helper_functions(m)
+        add_helper_functions(m)
         m.instantiate()
         m.load_from_hf("/lustre/public/pretrained_model_weights/Llama-2-7b-hf")
         torch.cuda.synchronize()
         original_state_dict = m.state_dict()
-        engine = InferencePipelineEngine(m)
+        # engine = InferencePipelineEngine(m)
+        engine = m
         print("After model creation", get_memory(0))
 
         m.async_offload()
@@ -37,9 +38,9 @@ def test_impl(world_size):
         seqlens_cpu = [256 for _ in range(32)]
         assert cu_seqlens[-1] == packed_input_ids.shape[0]
         with torch.no_grad():
-            y = engine.forward(seqlens_cpu, packed_input_ids, cu_seqlens, num_micro_batches=world_size)
+            y = engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
             for _ in range(5):
-                engine.forward(seqlens_cpu, packed_input_ids, cu_seqlens, num_micro_batches=world_size)
+                engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
                 # assert torch.allclose(m(input_ids=x), y)
                 new_state_dict = m.state_dict()
                 for k in original_state_dict:
@@ -55,7 +56,7 @@ def test_impl(world_size):
 def test(idx, world_size, profile: bool):
     # PyTorch CUDA setup
     setup_gpu(idx, world_size)
-    init_global_constants(num_dp=1, num_mp=1, num_pp=world_size)
+    init_global_constants(num_dp=1, num_mp=world_size, num_pp=1)
 
     print("After setup memory", get_memory(0))
 

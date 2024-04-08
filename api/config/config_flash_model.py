@@ -191,7 +191,7 @@ class OptimizerConfig:
         metadata={"choices": ["linear", "cosine", "constant"]},
         default="constant",
     )
-    warmup_steps_proportion: float = 0.02
+    warmup_steps_proportion: float = 0.0
     offload: bool = False
 
     def __post_init__(self):

@@ -4,8 +4,8 @@ import dataclasses
 import functools
 
 from .device_mapping import auto_device_mapping as auto
+from .device_mapping import ClusterDeviceMesh
 from api.config.config_dataset import DatasetType, PromptOnlyDatasetConfig
-from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from api.config.config_system import _LLM_ENVVARS, ExperimentSaveEvalControl, register_experiment
 from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
 from base.topology import PipeModelDataParallelTopology
@@ -15,36 +15,30 @@ import base.logging as logging
 logger = logging.getLogger("Auto PPO exp", "colored")
 
 
-def register_auto_ppo_experiment(
-    size: int,
-    gen_bs: int,
-    train_bs: int,
-    seqlen: int,
-    mode: str,
-):
-    assert size in [7, 13, 34, 70]
-    if size == 7:
+def register_auto_ppo_experiment(size: int, gen_bs: int, train_bs: int, seqlen: int, mapping_type: str):
+    assert size in [0, 7, 13, 34, 70]
+    if size <= 7:
         n_nodes = 1
-        nodelist = "QH-com41"
+        nodelist = "QH-com13"
     elif size == 13:
         n_nodes = 2
-        nodelist = "QH-com[41-42]"
+        nodelist = "QH-com[17-18]"
     elif size == 34:
         n_nodes = 4
-        nodelist = "QH-com[41-44]"
+        nodelist = "QH-com[24-27]"
     elif size == 70:
         n_nodes = 8
-        nodelist = "QH-com[41-48]"
+        nodelist = "QH-com[13-20]"
 
     model_class = "llama" if size != 34 else "codellama"
 
-    @auto(n_nodes=n_nodes, nodelist=nodelist, mode=mode)
+    @auto(n_nodes=n_nodes, nodelist=nodelist, mapping_type=mapping_type)
     @dataclasses.dataclass
     class AutoPPOExperiment:
         seed: int = 1
         exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=functools.partial(
             ExperimentSaveEvalControl,
-            benchmark_steps=10,
+            benchmark_steps=20,
         ),)
         ppo: PPOHyperparameters = dataclasses.field(default_factory=functools.partial(
             PPOHyperparameters,
@@ -59,6 +53,7 @@ def register_auto_ppo_experiment(
                 n_tokens_per_batch=1048576,
                 path="/lustre/fw/datasets/antropic-hh/ppo_prompt_only.jsonl",
                 # path="/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl",
+                pad_to_max_length=True,
             )
 
         @property
@@ -127,11 +122,10 @@ def register_auto_ppo_experiment(
                     balanced_dp=True,
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
-                    max_n_tokens=gen_bs * 128,
                 ),
                 ModelRPC(
                     model_name="reward",
-                    model_type=ModelType("llama", 7, is_critic=True),
+                    model_type=ModelType("llama", 0, is_critic=True),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=rw_interface,
                     input_data=["packed_seq", "cu_seqlens"],
@@ -140,7 +134,6 @@ def register_auto_ppo_experiment(
                     output_key_remap={"scores": "rewards"},
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
-                    max_n_tokens=gen_bs * (128 + seqlen),
                 ),
                 ModelRPC(
                     model_name="ref",
@@ -155,11 +148,10 @@ def register_auto_ppo_experiment(
                     output_key_remap={"logprobs": "packed_ref_logprobs"},
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
-                    max_n_tokens=gen_bs * (128 + seqlen),
                 ),
                 ModelRPC(
                     model_name="critic",
-                    model_type=ModelType("llama", 7, is_critic=True),
+                    model_type=ModelType("llama", 0, is_critic=True),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=critic_interface,
                     input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
@@ -167,7 +159,6 @@ def register_auto_ppo_experiment(
                     output_key_remap={"scores": "values"},
                     min_n_seqs=gen_bs,
                     max_n_seqs=gen_bs,
-                    max_n_tokens=gen_bs * (128 + seqlen),
                 ),
                 ModelRPC(
                     model_name="actor",
@@ -189,12 +180,11 @@ def register_auto_ppo_experiment(
                     min_n_seqs=train_bs,
                     max_n_seqs=train_bs,
                     balanced_dp=True,
-                    max_n_tokens=train_bs * (128 + seqlen),
                 ),
                 ModelRPC(
                     model_name="critic",
                     interface_type=ModelInterfaceType.TRAIN_STEP,
-                    model_type=ModelType("llama", 7, is_critic=True),
+                    model_type=ModelType("llama", 0, is_critic=True),
                     interface_impl=critic_interface,
                     input_data=[
                         "packed_seq",
@@ -211,18 +201,14 @@ def register_auto_ppo_experiment(
                     min_n_seqs=train_bs,
                     max_n_seqs=train_bs,
                     balanced_dp=True,
-                    max_n_tokens=train_bs * (128 + seqlen),
                 ),
             ]
 
-    short_mode = mode[0]
-    register_experiment(f"sosp-a{size}s{seqlen}g{gen_bs}t{train_bs}-{short_mode}", AutoPPOExperiment)
+    register_experiment(f"sosp-test-a{size}s{seqlen}g{gen_bs}t{train_bs}-{mapping_type}", AutoPPOExperiment)
 
 
-for size in [7, 13, 34, 70]:
-    for gen_bs in [16, 32, 48, 64, 80, 100, 128, 160, 200, 240, 256, 288, 320, 360, 400, 512, 640, 1024]:
-        # for seqlen in [256, 512, 1024]:
-        for seqlen in [128, 384, 896]:
-            for mode in ["search", "model_pipe", "data_pipe", "test"]:
-                train_bs = gen_bs
-                register_auto_ppo_experiment(size, gen_bs, train_bs, seqlen, mode)
+for mapping_type in ["ours", "dschat", "pipe"]:
+    for size in [0, 7, 13, 34, 70]:
+        for gen_bs, seqlen in [(64, 896), (128, 896), (256, 384), (512, 128)]:
+            train_bs = gen_bs
+            register_auto_ppo_experiment(size, gen_bs, train_bs, seqlen, mapping_type)

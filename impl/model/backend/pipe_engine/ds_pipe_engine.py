@@ -18,7 +18,7 @@ import torch
 import transformers
 
 from base.dataparallel import PackedParallelDataBroker
-from base.monitor import time_mark
+from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, time_mark
 from base.namedarray import NamedArray
 from base.topology import ParallelGrid
 from impl.model.nn.flash_mqat.flash_generate import GenerationConfig, genstep
@@ -981,6 +981,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             logits = x.pp_output
             self.tensor_buffer.put("logits", mbid, logits)
 
+    @cuda_tmark("bwd", CUDATimeMarkType.backward)
     def _exec_backward_pass(self, stage_id: int, micro_batch_id: int, step_id: int):
         assert self.optimizer is not None, "must provide optimizer during " "init in order to use backward"
         # The last stage just runs backward on the loss using DeepSpeed's typical

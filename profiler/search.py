@@ -399,6 +399,109 @@ def handpicked_model_device_mapping(
 model_pipe_device_mapping = functools.partial(handpicked_model_device_mapping, mode="model_pipe")
 data_pipe_device_mapping = functools.partial(handpicked_model_device_mapping, mode="data_pipe")
 
+
+def test_model_device_mapping(
+    device_mesh: ClusterDeviceMesh,
+    model_rpcs: List[ModelRPC],
+    model_configs: Dict[str, FlashMQATConfig],
+    nodelist: Optional[str] = None,
+    profile_layers: bool = False,
+    num_gen_tokens: int = 256,
+    n_ppo_minibatches: int = 1,
+    mode: Literal["data_pipe", "model_pipe"] = "model_pipe",
+) -> Dict[str, RPCAllocation]:
+    n_nodes = device_mesh.n_nodes
+
+    rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
+
+    actor_train.pre_hooks.append(SyncParamHook(source=ModelName("actor", 0)))
+    actor_train.model_name = ModelName("actor", 1)
+    actor_train.post_hooks.append(SyncParamHook(target=ModelName("actor", 0)))
+    rew_inf.post_hooks.append(OffloadHook())
+    ref_inf.post_hooks.append(OffloadHook())
+
+    mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]] * n_nodes)
+
+    parallel_config = ParallelismConfig(model_parallel_size=8,
+                                        pipeline_parallel_size=n_nodes,
+                                        data_parallel_size=1,
+                                        use_sequence_parallel=True)
+
+    rollout_config = ParallelismConfig(model_parallel_size=2,
+                                       data_parallel_size=8,
+                                       pipeline_parallel_size=n_nodes // 2)
+
+    return {
+        rollout.name: RPCAllocation(
+            rpc=rollout,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                gradient_checkpointing=True,
+                parallel=rollout_config,
+            ),
+        ),
+        rew_inf.name: RPCAllocation(
+            rpc=rew_inf,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                parallel=parallel_config,
+            ),
+        ),
+        ref_inf.name: RPCAllocation(
+            rpc=ref_inf,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                parallel=parallel_config,
+            ),
+        ),
+        critic_inf.name: RPCAllocation(
+            rpc=critic_inf,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                gradient_checkpointing=True,
+                parallel=parallel_config,
+                optimizer=OptimizerConfig(type="adam", offload=False),
+            ),
+        ),
+        critic_train.name: RPCAllocation(
+            rpc=critic_train,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                gradient_checkpointing=True,
+                parallel=parallel_config,
+                optimizer=OptimizerConfig(type="adam", offload=False),
+            ),
+        ),
+        actor_train.name: RPCAllocation(
+            rpc=actor_train,
+            mapping=mapping,
+            train_eval_config=ModelTrainEvalConfig(
+                type="llama",
+                path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                gradient_checkpointing=True,
+                parallel=parallel_config,
+                optimizer=OptimizerConfig(type="adam", offload=False),
+            ),
+        ),
+    }
+
+
 if __name__ == "__main__":
     # parser = argparse.ArgumentParser()
     # parser.add_argument("--expr_name", type=str)

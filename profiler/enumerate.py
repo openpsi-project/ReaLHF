@@ -28,6 +28,8 @@ def enumerate_rpc_executions(rpc: ModelRPC,
             if min_bs > bs:
                 # batch size too small
                 continue
+            if p.num_mp * p.num_dp > 8 and rpc.interface_type == ModelInterfaceType.TRAIN_STEP:
+                continue
             mem_cost, static_mem = estimate_rpc_memory(rpc,
                                                        p,
                                                        bs,

@@ -221,7 +221,7 @@ def _create_param_sync_groups(
                         _dst_ranks = [_src_rank] + _dst_ranks
                     assert len(set(_dst_ranks)) == len(_dst_ranks)
                     if len(_dst_ranks) > 1:
-                        param_sync_groups[key] = torch.distributed.new_group(_dst_ranks)
+                        param_sync_groups[key] = topology.new_or_get_group(_dst_ranks)
                     else:
                         param_sync_groups[key] = None
                     param_sync_src_ranks[key] = _src_rank
@@ -307,17 +307,17 @@ def setup_ddp(
     model_groups = {}
     # scatter_groups = defaultdict(list)
     for model_name, ranks in mw_ranks.items():
-        model_groups[model_name] = torch.distributed.new_group(ranks, backend="nccl")
+        model_groups[model_name] = topology.new_or_get_group(ranks, backend="nccl")
         # all_group_ranks = _partition_into_sub_bcast_groups(ranks, mw_bcast_groups)
         # for group_ranks in all_group_ranks:
-        #     scatter_groups[model_name].append(torch.distributed.new_group([0] + group_ranks, backend="nccl"))
+        #     scatter_groups[model_name].append(topology.new_or_get_group([0] + group_ranks, backend="nccl"))
         # logger.info("Created process group for model %s with ranks %s", model_name, ranks)
 
     # gather_groups = defaultdict(list)
     # for model_name, ranks in mw_head_ranks.items():
     #     all_group_ranks = _partition_into_sub_bcast_groups(ranks, mw_bcast_groups)
     #     for group_ranks in all_group_ranks:
-    #         gather_groups[model_name].append(torch.distributed.new_group([0] + group_ranks, backend="nccl"))
+    #         gather_groups[model_name].append(topology.new_or_get_group([0] + group_ranks, backend="nccl"))
     # logger.info("Created master-DP head group for model %s with ranks %s", model_name, ranks)
 
     data_transfer_groups, data_transfer_src_ranks = {}, {}
@@ -338,7 +338,7 @@ def setup_ddp(
                     _ranks = [src_mw_rank] + dst_mw_ranks
                 else:
                     _ranks = dst_mw_ranks
-                data_transfer_groups[key] = torch.distributed.new_group(_ranks, backend="nccl")
+                data_transfer_groups[key] = topology.new_or_get_group(_ranks, backend="nccl")
                 data_transfer_src_ranks[key] = src_mw_rank
 
     param_sync_groups = {}

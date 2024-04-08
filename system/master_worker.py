@@ -1058,16 +1058,6 @@ class MasterWorker(worker_base.Worker):
                 raise_asyncio_exception(self.__asyncio_ctx)
         logger.info("Execution finished!")
 
-        if self.__clear_data_cache_reqids is not None:
-            [
-                self.__stream.poll(block=True, pattern=create_exact_match_pattern([reqid]))
-                for reqid in self.__clear_data_cache_reqids
-            ]
-        self.__clear_data_cache_reqids = request_all(
-            self.__stream, [vs[0] for vs in self.__mwid2msids.values()], "clear_data_cache",
-            [self.__rpc_ctrl.training_buffer_indices for _ in self.__all_model_handlers])
-        self.__rpc_ctrl.training_buffer_indices.clear()
-
         self._epoch_step += 1
         self._global_step += 1
 
@@ -1146,6 +1136,16 @@ class MasterWorker(worker_base.Worker):
             for i, level_time_history in self.level_time_history.items():
                 logger.info(f"avg #level{i+1}# time *{np.mean(level_time_history):.3f}*")
             self.experiment_complete_exit(f"Benchmark completes! Yeah!!!")
+
+        if self.__clear_data_cache_reqids is not None:
+            [
+                self.__stream.poll(block=True, pattern=create_exact_match_pattern([reqid]))
+                for reqid in self.__clear_data_cache_reqids
+            ]
+        self.__clear_data_cache_reqids = request_all(
+            self.__stream, [vs[0] for vs in self.__mwid2msids.values()], "clear_data_cache",
+            [self.__rpc_ctrl.training_buffer_indices for _ in self.__all_model_handlers])
+        self.__rpc_ctrl.training_buffer_indices.clear()
 
         return worker_base.PollResult(sample_count=1, batch_count=1)
 

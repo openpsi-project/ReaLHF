@@ -13,7 +13,7 @@ import base.constants
 import base.gpu_utils
 import base.name_resolve as name_resolve
 import base.namedarray
-import base.names as names
+import base.topology
 
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
@@ -112,7 +112,7 @@ def init_global_constants(num_dp=None, num_mp=None, num_pp=None, topo=None, mode
 
     with base.constants.model_scope(model_name):
         base.constants.set_rank_mapping(model_name, topo, msid2mwid=msid2mwid)
-        wg = dist.new_group(ranks=[base.constants.to_global_pg_rank(i) for i in range(ws)])
+        wg = base.topology.new_or_get_group(ranks=[base.constants.to_global_pg_rank(i) for i in range(ws)])
 
         base.constants.set_parallelism_group(model_name=model_name, pgroup=wg)
         grid = ParallelGrid(process_group=wg, topology=topo)

@@ -13,6 +13,7 @@ import torch.distributed
 
 from api.config.config_base import ModelName, ModelShardID
 from api.config.config_system import ModelName, ModelShardID
+from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark
 from base.topology import PipeModelDataParallelTopology
 from tests.utils import *
 import base.constants
@@ -31,16 +32,14 @@ def test_impl(
     check=True,
     n_iterations=1,
     profile_compile=False,
+    record_cost_to_file=False,
 ):
     assert not (profile and profile_compile)
     from impl.model.backend.pipe_inf import InferencePipelineEngine
     from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
 
     mconfig = get_llama7b_flash_config()
-    packed_input_ids = torch.randint(0, mconfig.vocab_size, (32 * 256,), dtype=torch.long, device="cuda")
-    cu_seqlens = torch.linspace(0, 32 * 256, 33, dtype=torch.int32, device="cuda")
-    seqlens_cpu = [256 for _ in range(32)]
-    max_seqlen = 256
+    os.environ["DLLM_CUDA_TMARK"] = "1"
 
     if rank < from_topo.world_size():
         with base.constants.model_scope(from_model_name):
@@ -125,9 +124,17 @@ def test_impl(
                 assert p.data.shape == torch.Size([0]), (k, p, it)
 
         if m2 is not None:
-            m2.patch_reparallelization(res)
+            m2.patch_reparallelization(res[:2])
 
             with base.constants.model_scope(to_model_name):
+                comm_volume = res[-1]
+                dist.all_reduce(comm_volume, group=base.constants.parallelism_group())
+                entry = fetch_latest_tmark()
+                assert entry.type_ == CUDATimeMarkType.mem_layout
+                mem_shift_time_ns = (
+                    torch.tensor(entry.end_time - entry.start_time, dtype=torch.long, device="cuda") /
+                    to_topo.world_size())
+                dist.all_reduce(mem_shift_time_ns, group=base.constants.parallelism_group())
 
                 if check:
                     torch.cuda.synchronize()
@@ -140,6 +147,26 @@ def test_impl(
                         v2 = m3.state_dict()[k]
                         assert torch.allclose(v1, v2), (k, v1, v2)
 
+                with torch.no_grad():
+                    packed_input_ids = torch.randint(
+                        0,
+                        mconfig.vocab_size,
+                        (2**17 // to_topo.get_dim("data"),),
+                        dtype=torch.long,
+                        device="cuda",
+                    )
+                    bs = 2**17 // to_topo.get_dim("data") // 256 + 1
+                    cu_seqlens = torch.linspace(0,
+                                                256,
+                                                2**17 // to_topo.get_dim("data") // 256 + 1,
+                                                dtype=torch.int32,
+                                                device="cuda")
+                    seqlens_cpu = [256 for _ in range(bs)]
+                    max_seqlen = 256
+
+                    dist.barrier(group=base.constants.parallelism_group())
+                    torch.cuda.synchronize()
+                    tik = time.time_ns()
                     if isinstance(engine2, InferencePipelineEngine):
                         engine2.forward(seqlens_cpu=seqlens_cpu,
                                         packed_input_ids=packed_input_ids,
@@ -148,6 +175,29 @@ def test_impl(
                         engine2(packed_input_ids=packed_input_ids,
                                 cu_seqlens=cu_seqlens,
                                 max_seqlen=max_seqlen)
+                    dist.barrier(group=base.constants.parallelism_group())
+                    torch.cuda.synchronize()
+                fwd_time_ns = (torch.tensor(time.time_ns() - tik, dtype=torch.long, device="cuda") /
+                               to_topo.world_size())
+                dist.all_reduce(fwd_time_ns, group=base.constants.parallelism_group())
+                with open("memshift_cost.jsonl", "a") as f:
+                    import json
+
+                    d = dict(
+                        from_mp_size=from_topo.get_dim("model"),
+                        from_pp_size=from_topo.get_dim("pipe"),
+                        from_dp_size=from_topo.get_dim("data"),
+                        to_mp_size=to_topo.get_dim("model"),
+                        to_pp_size=to_topo.get_dim("pipe"),
+                        to_dp_size=to_topo.get_dim("data"),
+                        mem_shift_time_ns=mem_shift_time_ns.item(),
+                        fwd_time_ns=fwd_time_ns.item(),
+                        comm_volume=comm_volume.item(),
+                        world_size=world_size,
+                    )
+                    if (it == n_iterations - 1 and record_cost_to_file and dist.get_rank()
+                            == dist.get_process_group_ranks(base.constants.parallelism_group())[0]):
+                        f.write(json.dumps(d, ensure_ascii=False) + "\n")
 
         torch.cuda.synchronize()
         torch.distributed.barrier()
@@ -176,8 +226,17 @@ def test_impl(
                 assert p.data.shape == torch.Size([0]), (k, p, it)
 
         if m1 is not None:
-            m1.patch_reparallelization(res)
+            m1.patch_reparallelization(res[:2])
             with base.constants.model_scope(from_model_name):
+                comm_volume = res[-1]
+                dist.all_reduce(comm_volume, group=base.constants.parallelism_group())
+                entry = fetch_latest_tmark()
+                assert entry.type_ == CUDATimeMarkType.mem_layout
+                mem_shift_time_ns = (
+                    torch.tensor(entry.end_time - entry.start_time, dtype=torch.long, device="cuda") /
+                    from_topo.world_size())
+                dist.all_reduce(mem_shift_time_ns, group=base.constants.parallelism_group())
+
                 if check:
                     torch.cuda.synchronize()
                     m4 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
@@ -189,6 +248,26 @@ def test_impl(
                         v2 = m4.state_dict()[k]
                         assert torch.allclose(v1, v2), (k, v1, v2)
 
+                with torch.no_grad():
+                    packed_input_ids = torch.randint(
+                        0,
+                        mconfig.vocab_size,
+                        (2**17 // to_topo.get_dim("data"),),
+                        dtype=torch.long,
+                        device="cuda",
+                    )
+                    bs = 2**17 // to_topo.get_dim("data") // 256 + 1
+                    cu_seqlens = torch.linspace(0,
+                                                256,
+                                                2**17 // to_topo.get_dim("data") // 256 + 1,
+                                                dtype=torch.int32,
+                                                device="cuda")
+                    seqlens_cpu = [256 for _ in range(bs)]
+                    max_seqlen = 256
+
+                    dist.barrier(group=base.constants.parallelism_group())
+                    torch.cuda.synchronize()
+                    tik = time.time_ns()
                     if isinstance(engine1, InferencePipelineEngine):
                         engine1.forward(seqlens_cpu=seqlens_cpu,
                                         packed_input_ids=packed_input_ids,
@@ -197,6 +276,29 @@ def test_impl(
                         engine1(packed_input_ids=packed_input_ids,
                                 cu_seqlens=cu_seqlens,
                                 max_seqlen=max_seqlen)
+                    dist.barrier(group=base.constants.parallelism_group())
+                    torch.cuda.synchronize()
+                fwd_time_ns = (torch.tensor(time.time_ns() - tik, dtype=torch.long, device="cuda") /
+                               from_topo.world_size())
+                dist.all_reduce(fwd_time_ns, group=base.constants.parallelism_group())
+                with open("memshift_cost.jsonl", "a") as f:
+                    import json
+
+                    d = dict(
+                        from_mp_size=to_topo.get_dim("model"),
+                        from_pp_size=to_topo.get_dim("pipe"),
+                        from_dp_size=to_topo.get_dim("data"),
+                        to_mp_size=from_topo.get_dim("model"),
+                        to_pp_size=from_topo.get_dim("pipe"),
+                        to_dp_size=from_topo.get_dim("data"),
+                        mem_shift_time_ns=mem_shift_time_ns.item(),
+                        fwd_time_ns=fwd_time_ns.item(),
+                        comm_volume=comm_volume.item(),
+                        world_size=world_size,
+                    )
+                    if (it == n_iterations - 1 and record_cost_to_file and dist.get_rank()
+                            == dist.get_process_group_ranks(base.constants.parallelism_group())[0]):
+                        f.write(json.dumps(d, ensure_ascii=False) + "\n")
         if it == n_iterations - 1 and profile:
             profiler.__exit__(None, None, None)
 
@@ -229,16 +331,19 @@ def setup_gpu(rank, world_size, barrier, model_topos, msid2mwid, param_sync_pair
     return info
 
 
-def test(rank,
-         world_size,
-         barrier,
-         from_topo,
-         to_topo,
-         err_queue,
-         profile=False,
-         check=False,
-         n_iterations=2,
-         profile_compile=False):
+def test(
+    rank,
+    world_size,
+    barrier,
+    from_topo,
+    to_topo,
+    err_queue,
+    profile=False,
+    check=False,
+    n_iterations=2,
+    profile_compile=False,
+    record_cost_to_file=False,
+):
     from_model_name = ModelName("actor", 0)
     to_model_name = ModelName("actor", 1)
     param_sync_pairs = [(from_model_name, to_model_name), (to_model_name, from_model_name)]
@@ -285,6 +390,7 @@ def test(rank,
             check=check,
             n_iterations=n_iterations,
             profile_compile=profile_compile,
+            record_cost_to_file=record_cost_to_file,
         )
     except Exception as e:
         err_queue.put(1)
@@ -375,21 +481,20 @@ if __name__ == "__main__":
     err_queue = mp.Queue(100)
 
     for a, b in [(8, 8)]:
-        # if a == b:
-        #     three_factors = decompose_to_three_factors(a)
-        #     all_configs = []
-        #     for i in range(len(three_factors)):
-        #         for j in range(i):
-        #             all_configs.append((three_factors[i], three_factors[j]))
-        # else:
-        #     all_configs = list(itertools.product(decompose_to_three_factors(a),
-        #                                          decompose_to_three_factors(b)))
-        # all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
-        # random.shuffle(all_configs)
-        # print(f">>>>>>>>> running {len(all_configs)} configurations >>>>>>>")
-
+        if a == b:
+            three_factors = decompose_to_three_factors(a)
+            all_configs = []
+            for i in range(len(three_factors)):
+                for j in range(i):
+                    all_configs.append((three_factors[i], three_factors[j]))
+        else:
+            all_configs = list(itertools.product(decompose_to_three_factors(a),
+                                                 decompose_to_three_factors(b)))
+        all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
+        random.shuffle(all_configs)
+        print(f">>>>>>>>> running {len(all_configs)} configurations >>>>>>>")
         # for x1, x2 in all_configs:
-        for x1, x2 in itertools.product([(2, 2, 4)], [(1, 4, 2)]):
+        for x1, x2 in itertools.product([(4, 2, 1)], [(1, 1, 8)]):
             barrier = mp.Barrier(8)
             if args.node_idx == args.num_nodes - 1:
                 clear_name_resolve()
@@ -399,21 +504,22 @@ if __name__ == "__main__":
             to_topo = PipeModelDataParallelTopology(num_pp=x2[0], num_mp=x2[1], num_dp=x2[2])
             procs = []
             for i in range(8):
-                proc = mp.Process(target=test,
-                                  args=(
-                                      i + args.node_idx * 8,
-                                      args.num_nodes * 8,
-                                      barrier,
-                                      from_topo,
-                                      to_topo,
-                                      err_queue,
-                                  ),
-                                  kwargs=dict(
-                                      profile=False,
-                                      check=False,
-                                      n_iterations=2,
-                                      profile_compile=False,
-                                  ))
+                proc = mp.Process(
+                    target=test,
+                    args=(
+                        i + args.node_idx * 8,
+                        args.num_nodes * 8,
+                        barrier,
+                        from_topo,
+                        to_topo,
+                        err_queue,
+                    ),
+                    kwargs=dict(profile=True,
+                                check=False,
+                                n_iterations=3,
+                                profile_compile=False,
+                                record_cost_to_file=False),
+                )
                 procs.append(proc)
                 proc.start()
             for proc in procs:

@@ -1,7 +1,11 @@
 from collections import defaultdict
 from statistics import mean
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, TYPE_CHECKING, Union
+import contextlib
+import dataclasses
+import enum
 import os
+import pickle
 import time
 
 import numpy as np
@@ -9,7 +13,11 @@ import psutil
 import pynvml
 import viztracer
 
+import base.constants
 import base.logging as logging
+
+if TYPE_CHECKING:
+    from api.config.config_base import ModelName
 
 logger = logging.getLogger("benchmark")
 
@@ -364,3 +372,90 @@ def calculate_llama_gen_flops(
              (sum(prefix_lens) + batch_size) * hidden_size + 3 * batch_size * hidden_size * intermediate_size)
             + 4 * batch_size * vocab_size * hidden_size)
     return flops
+
+
+class CUDATimeMarkType(enum.Enum):
+    forward = "forward"
+    backward = "backward"
+    optim_step = "optim_step"
+    comm = "comm"
+    misc = "misc"
+    mem_layout = "memory_layout"
+
+
+@dataclasses.dataclass
+class TimeMarkEntry:
+    name: str
+    model_name: "ModelName"
+    type_: CUDATimeMarkType
+    start_time: int
+    end_time: int
+
+
+TIME_MARK_DB = []
+
+
+def cuda_tmark(name: str, type_: CUDATimeMarkType):
+    if os.getenv("DLLM_CUDA_TMARK", None) == "1":
+
+        def wrapper(f: Callable):
+
+            def _wrapped_f(*args, **kwargs):
+                import torch
+
+                from base.constants import _model_name
+
+                torch.cuda.synchronize()
+                tik = time.time_ns()
+                res = f(*args, **kwargs)
+                torch.cuda.synchronize()
+                tok = time.time_ns()
+                global TIME_MARK_DB
+                TIME_MARK_DB.append(TimeMarkEntry(name, _model_name, type_, tik, tok))
+                return res
+
+            return _wrapped_f
+
+    else:
+
+        def wrapper(f):
+            return f
+
+    return wrapper
+
+
+@contextlib.contextmanager
+def cuda_tmarked(name: str, type_: CUDATimeMarkType):
+    if os.getenv("DLLM_CUDA_TMARK", None) == "1":
+        import torch
+
+        from base.constants import _model_name
+
+        torch.cuda.synchronize()
+        tik = time.time_ns()
+    yield
+    if os.getenv("DLLM_CUDA_TMARK", None) == "1":
+        torch.cuda.synchronize()
+        tok = time.time_ns()
+        global TIME_MARK_DB
+        TIME_MARK_DB.append(TimeMarkEntry(name, _model_name, type_, tik, tok))
+
+
+def fetch_latest_tmark():
+    global TIME_MARK_DB
+    return TIME_MARK_DB[-1]
+
+
+def dump_tmark_db(worker_idx):
+    if os.getenv("DLLM_CUDA_TMARK", None) != "1":
+        return
+    fn = os.path.join(
+        base.constants.LOG_ROOT,
+        base.constants.experiment_name(),
+        base.constants.trial_name(),
+        f"time_marks{worker_idx}.pkl",
+    )
+    global TIME_MARK_DB
+    with open(fn, "wb") as f:
+        pickle.dump(TIME_MARK_DB, f)
+    TIME_MARK_DB.clear()

@@ -9,6 +9,7 @@ import torch
 
 from base.constants import data_parallel_group
 from base.dataparallel import PackedParallelDataBroker
+from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from base.namedarray import from_dict, NamedArray, recursive_apply
 from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from impl.model.backend.pipe_inf import InferencePipelineEngine
@@ -202,13 +203,14 @@ class PackedActorInterface(api.model.ModelInterface):
             # unwrap deepspeed engine here
             if hasattr(module, "module"):
                 module = module.module
-            gen_res = module.generate(
-                tokenizer=model.tokenizer,
-                packed_input_ids=packed_prompts,
-                cu_seqlens=cu_seqlens,
-                max_seqlen=int(max(prompt_lengths)),
-                gconfig=GenerationConfig(**self.generation_config),
-            )
+            with module.sequence_parallel_disable():
+                gen_res = module.generate(
+                    tokenizer=model.tokenizer,
+                    packed_input_ids=packed_prompts,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=int(max(prompt_lengths)),
+                    gconfig=GenerationConfig(**self.generation_config),
+                )
             gen_tokens = gen_res.sequences
             logprobs = gen_res.scores
             logits_mask = gen_res.logits_mask
@@ -456,8 +458,11 @@ class PackedActorInterface(api.model.ModelInterface):
                     logits_mask=logits_mask,
                 )
 
-                module.backward(loss)
-                module.step(lr_kwargs={"epoch": model.version.global_step})
+                with cuda_tmarked("bwd", CUDATimeMarkType.backward):
+                    module.backward(loss)
+
+                with cuda_tmarked("optim_step", CUDATimeMarkType.optim_step):
+                    module.step(lr_kwargs={"epoch": model.version.global_step})
 
             if stats:
                 for k, v in stats.items():
@@ -734,8 +739,10 @@ class PackedCriticInterface(api.model.ModelInterface):
                     rms=self.rms if self.value_norm else None,
                 )
 
-                module.backward(loss)
-                module.step(lr_kwargs={"epoch": model.version.global_step})
+                with cuda_tmarked("bwd", CUDATimeMarkType.backward):
+                    module.backward(loss)
+                with cuda_tmarked("optim_step", CUDATimeMarkType.optim_step):
+                    module.step(lr_kwargs={"epoch": model.version.global_step})
 
             if stats:
                 for k, v in stats.items():

@@ -12,7 +12,7 @@ import profiler.estimate
 def verify_compute(date="20240403"):
     # date = "20240328"
     expr_names = []
-    sizes = [13]  # , 13, 34]
+    sizes = [34]
     for size in sizes:
         if size == 7:
             n_nodes = 1
@@ -28,8 +28,8 @@ def verify_compute(date="20240403"):
             remain = num_gpus // num_mp
             for num_dp in find_factors(remain):
                 num_pp = remain // num_dp
-                if num_dp * num_mp > 8 or num_pp > 8:
-                    continue
+                # if num_dp * num_mp > 8 or num_pp > 8:
+                #     continue
                 expr_names.append(f"profile-s{size}p{num_pp}m{num_mp}d{num_dp}")
 
     rs = []
