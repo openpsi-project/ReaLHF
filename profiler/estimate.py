@@ -25,6 +25,16 @@ from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 import api.config.config_system as config_package
 import base.cluster
 
+# import base.logging as logging
+
+IF_PRINT = False
+
+
+def log_debug(*args, **kwargs):
+    if IF_PRINT:
+        print(*args, **kwargs)
+
+
 PROFILE_RESULT_PATH = os.path.join(
     base.cluster.spec.fileroot,
     "logs",
@@ -156,7 +166,7 @@ def find_nearest_key(k, d):
 #     return cost
 
 
-def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen, p=False):
+def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen):
     op_key = (op_name, bs, seqlen)
     if op_key not in op_cost["embedding_layer"]:
         real_op_key = find_nearest_key(op_key, op_cost["embedding_layer"])
@@ -173,11 +183,17 @@ def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen, p=False)
     #     print(f"op key {op_key} real op key {real_op_key}")
     #     print(f"{cost} = ({embedding_layer_cost} + {num_layers} * {flash_mqat_block_0_cost} + {head_cost})/{num_pp}")
 
+    log_debug(f"op key {op_key} real op key {real_op_key}")
+    log_debug(
+        f"{cost} = ({embedding_layer_cost} + {num_layers} * {flash_mqat_block_0_cost} + {head_cost}) / {num_pp}"
+    )
+
     # if op_name == "fwd_gen_1":
     #     if bs > 32:
     #         cost = cost * bs / real_op_key[1]
     if op_name != "opt" and op_name != "fwd_gen_1":
         cost = cost * bs * seqlen / (real_op_key[1] * real_op_key[2])
+        log_debug(f"cost {cost} = {cost} * {bs * seqlen} / {real_op_key[1] * real_op_key[2]}")
 
     return cost
 
@@ -195,8 +211,7 @@ def estimate_instruction_cost(
         hidden_dim: int,
         batch_size: int,
         seq_len: int,
-        n_ppo_minibatches: int = 1,
-        p=False):
+        n_ppo_minibatches: int = 1):
     comm_stats = parse_comm_stats_files(comm_stats_path)
     layer_stats = parse_layer_stats_files(layer_stats_path)
     num_mp = parallel_strategy.num_mp
@@ -216,11 +231,11 @@ def estimate_instruction_cost(
     for layer_name in layer_names:
         assert layer_name in op_cost
 
-    train_mbs = batch_size // (2 * num_pp * num_dp * n_ppo_minibatches)
-    gen_mbs = batch_size // (num_pp * num_dp)
-    # print(f"in estimate_instruction_cost, train_mbs {train_mbs} gen_mbs {gen_mbs}")
-    # print(f"batch size {batch_size} num_pp {num_pp} num_dp {num_dp} num_mp {num_mp}"
-    #       f"train mbs {train_mbs} gen_mbs {gen_mbs}")
+    train_mbs = batch_size / (2 * num_pp * num_dp * n_ppo_minibatches)
+    gen_mbs = batch_size / (num_pp * num_dp)
+    log_debug(f"in estimate_instruction_cost, train_mbs {train_mbs} gen_mbs {gen_mbs} ")
+    log_debug(f"batch size {batch_size} num_pp {num_pp} num_dp {num_dp} num_mp {num_mp} "
+              f"train mbs {train_mbs} gen_mbs {gen_mbs}")
 
     # pprint.pprint(op_cost, indent=4)
     inst_cost = {}
@@ -230,7 +245,7 @@ def estimate_instruction_cost(
     for inst_key, op_name in zip(inst_keys, op_names):
         mbs = train_mbs if "train" in inst_key else gen_mbs
         # print(f"inst key {inst_key}")
-        inst_cost[inst_key] = compute_inst_cost(op_cost, num_layers, num_pp, op_name, mbs, seq_len, p=p)
+        inst_cost[inst_key] = compute_inst_cost(op_cost, num_layers, num_pp, op_name, mbs, seq_len)
 
     # inst_cost["gen_fwd_0"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_0", gen_mbs, seq_len)
     # inst_cost["gen_fwd_1"] = compute_inst_cost(op_cost, num_layers, num_pp, "fwd_gen_1", gen_mbs, seq_len)
@@ -258,36 +273,52 @@ def _estimate_rpc_cost(
     num_pp = parallel_strategy.num_pp
     num_dp = parallel_strategy.num_dp
     num_mp = parallel_strategy.num_mp
+    log_debug(f"ModelInterfaceType {model_interface_type} num_pp {num_pp} num_dp {num_dp} num_mp {num_mp}")
     if model_interface_type == ModelInterfaceType.INFERENCE:
         num_micro_batches = num_pp
         compute_cost = inst_cost["inf_fwd"] * (num_pp + num_micro_batches - 1)
         comm_cost = inst_cost["act_p2p"] * (num_pp + num_micro_batches - 2) * 2
-        compute_cost = compute_cost * (1 - num_mp * 0.05)
+        log_debug(f"{inst_cost['inf_fwd']} * {num_pp + num_micro_batches - 1}")
+        compute_cost = compute_cost * (1 - num_mp * 0.03)
+        log_debug(f"num_mp coefficent {num_mp * 0.05}")
+        if num_pp > 8:
+            compute_cost = compute_cost * (1 + num_pp * 0.1)
     elif model_interface_type == ModelInterfaceType.TRAIN_STEP:
         # TODO: add reduce grads, add ppo micro batches
         num_micro_batches = num_pp * 2 if num_pp * num_dp > 1 else 1
-        compute_cost = (inst_cost["train_fwd"] + inst_cost["train_bwd"]) * (num_pp + num_micro_batches - 1) +\
-                        inst_cost["train_opt"]
+        compute_cost = (inst_cost["train_fwd"] + inst_cost["train_bwd"]) * (num_pp + num_micro_batches -
+                                                                            1) + inst_cost["train_opt"]
+        log_debug(f"({inst_cost['train_fwd']} + {inst_cost['train_bwd']}) * {num_pp + num_micro_batches - 1}")
         if use_gradient_checkpointing:
             compute_cost += inst_cost["train_fwd"] * (num_pp + num_micro_batches - 1)
+            log_debug(f"Gradient ckpt overhead {inst_cost['train_fwd']} * {num_pp + num_micro_batches - 1}")
         comm_cost = (inst_cost["grad_p2p"] + inst_cost["act_p2p"]) * (num_pp + num_micro_batches - 2) * 2
         compute_cost = compute_cost * n_ppo_minibatches
         comm_cost = comm_cost * n_ppo_minibatches
         if num_mp > 1 and num_pp * num_dp > 1:
-            compute_cost = compute_cost * (1 - num_mp * 0.06)
+            compute_cost = compute_cost * (1 - num_mp * 0.03)
+
+        log_debug(f"num_mp coefficent {1 - num_mp * 0.03}")
     elif model_interface_type == ModelInterfaceType.GENERATE:
         num_micro_batches = num_pp
         num_gen_tokens = num_gen_tokens
         compute_cost = inst_cost["gen_fwd_0"] * (num_pp + num_micro_batches - 1) +\
                        inst_cost["gen_fwd_1"] * (num_gen_tokens - 1) * num_micro_batches
         # dirty heuristic
-        compute_cost = compute_cost * (1 - max(num_dp, num_mp) * 0.04)
+        compute_cost = compute_cost * (1 - num_dp * num_mp * 0.04)
+        log_debug(f"{inst_cost['gen_fwd_0']} * {num_pp + num_micro_batches - 1} + "
+                  f"{inst_cost['gen_fwd_1']} * {(num_gen_tokens - 1) * num_micro_batches}")
+        log_debug(f"num_dp num_mp coefficent {num_dp * num_mp * 0.04}")
+
         # comm_cost = inst_cost["act_p2p"] * (num_pp + num_micro_batches - 2) * 2 +\
         #             inst_cost["gen_act_p2p"] * (num_gen_tokens - 1) * num_micro_batches * 2
         comm_cost = 0
 
-    if num_pp >= 8:
+    if num_pp > 8:
         compute_cost = compute_cost * (1 + num_pp * 0.01)
+        log_debug(f"num_pp coefficent {1 + num_pp * 0.01}")
+
+    log_debug(f"Final cost {compute_cost} + {comm_cost} = {compute_cost + comm_cost}")
 
     # print(parallel_strategy)
     # print(f"gen_fwd_0 {inst_cost['gen_fwd_0']}*{num_pp+num_micro_batches-1}={inst_cost['gen_fwd_0'] * (num_pp + num_micro_batches - 1)}"
@@ -329,8 +360,7 @@ def estimate_rpc_time(rpc: ModelRPC,
                                           model_config.hidden_dim,
                                           bs,
                                           seq_len,
-                                          n_ppo_minibatches=n_ppo_minibatches,
-                                          p=p)
+                                          n_ppo_minibatches=n_ppo_minibatches)
     # print(inst_cost)
     return _estimate_rpc_cost(inst_cost,
                               parallel_strategy,
@@ -459,30 +489,57 @@ def main(args):
 
 
 def example(args):
-    exp: ProfileExperiment = config_package.make_experiment(args.expr_name)
+    global IF_PRINT
+    IF_PRINT = True
+    if args.model_size == 7:
+        n_nodes = 1
+    elif args.model_size == 13:
+        n_nodes = 2
+    elif args.model_size == 34:
+        n_nodes = 4
+    elif args.model_size == 70:
+        n_nodes = 8
+
+    expr_name = f"profile-s{args.model_size}p{n_nodes}m1d8"
+
+    exp: ProfileExperiment = config_package.make_experiment(expr_name)
     rpcs = exp.rpcs
     rollout, inf, train = rpcs
 
     bs = 256
-    seq_len = 128
+    seq_len = 512
 
-    p1 = ModelParallelStrategy(num_pp=1, num_mp=8, num_dp=1)
-    rpc_cost = estimate_rpc_time(rollout, p1, use_gradient_checkpointing=True, bs=bs, seq_len=seq_len)
-    print(f"rollout {p1} rpc cost {rpc_cost}")
+    p1 = ModelParallelStrategy(num_pp=8, num_mp=2, num_dp=4)
+    rpc_cost = estimate_rpc_time(train,
+                                 p1,
+                                 use_gradient_checkpointing=True,
+                                 num_gen_tokens=896,
+                                 bs=bs,
+                                 seq_len=seq_len,
+                                 n_ppo_minibatches=4)
+    mem_cost, static_mem = estimate_rpc_memory(train, p1, bs, seq_len)
+    print(f"rollout {p1} rpc cost {rpc_cost} mem cost {mem_cost/(1024**3):.2f} GB")
 
-    p2 = ModelParallelStrategy(num_pp=1, num_mp=1, num_dp=8)
-    # rpc_cost = estimate_rpc_time(rollout, p2, use_gradient_checkpointing=True,
-    #                              bs=bs, seq_len=seq_len)
-    # print(f"rollout {p2} rpc cost {rpc_cost}")
+    print("*" * 100)
+    p2 = ModelParallelStrategy(num_pp=8, num_mp=8, num_dp=1)
+    rpc_cost = estimate_rpc_time(train,
+                                 p2,
+                                 use_gradient_checkpointing=True,
+                                 num_gen_tokens=896,
+                                 bs=bs,
+                                 seq_len=seq_len,
+                                 n_ppo_minibatches=4)
+    mem_cost, static_mem = estimate_rpc_memory(train, p2, bs, seq_len)
+    print(f"rollout {p2} rpc cost {rpc_cost} mem cost {mem_cost/(1024**3):.2f} GB")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a profiling experiment.")
     parser.add_argument(
-        "-e",
-        "--expr_name",
-        type=str,
-        default=None,
+        "-s",
+        "--model_size",
+        type=int,
+        default=7,
     )
     # parser.add_argument(
     #     "-f",

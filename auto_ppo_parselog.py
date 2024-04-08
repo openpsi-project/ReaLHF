@@ -61,7 +61,7 @@ def parse_log():
         for model_size in model_sizes:
             for bs, seqlen in bs_seqlen:
                 for mode in modes:
-                    trial_name = f"20240408-{r}"
+                    trial_name = f"20240407-{r}"
                     exp_name = f"sosp-a{model_size}s{seqlen}g{bs}t{bs}-{mode}"
                     root_dir = f"/lustre/aigc/llm/logs/meizy/{exp_name}/{trial_name}"
                     print(exp_name)

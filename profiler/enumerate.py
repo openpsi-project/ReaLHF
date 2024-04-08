@@ -23,7 +23,9 @@ def enumerate_rpc_executions(rpc: ModelRPC,
         for p in ps:
             bs = rpc.min_n_seqs
             seq_len = rpc.max_n_tokens // bs
-            if 2 * p.num_dp * p.num_pp * n_ppo_minibatches > bs:
+            min_bs = 2 * p.num_dp * p.num_pp * n_ppo_minibatches\
+                if rpc.interface_type == ModelInterfaceType.TRAIN_STEP else p.num_dp * p.num_pp
+            if min_bs > bs:
                 # batch size too small
                 continue
             mem_cost, static_mem = estimate_rpc_memory(rpc,
@@ -84,7 +86,6 @@ def build_graph(rpcs: List[ModelRPC], num_epoch: int = 5, epoch_dependency_inter
                 c = RPC.from_config(rpc_names_mapping[child])
                 children.append(RPCInstance(c, epoch_id, [], []))
             rpc_instance = RPCInstance(RPC.from_config(rpc), epoch_id, parents, children)
-            print(rpc_instance)
             rpc_instances.append(rpc_instance)
     if if_print:
         for ri in rpc_instances:

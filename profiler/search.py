@@ -200,8 +200,8 @@ def make_rpc_exe_list(rpcs: List[ModelRPC],
                 f.write(f"{rpc.name} feasible: {len(feasible)}\n")
                 feasible.sort(key=lambda x: x.time_cost)
                 # feasible = feasible[:30]
-                for rpc_exe in feasible:
-                    f.write(f"time_cost: {rpc_exe.time_cost/(1e3)} ms, {rpc_exe.time_cost} "
+                for i, rpc_exe in enumerate(feasible):
+                    f.write(f"{i}: time_cost: {rpc_exe.time_cost/(1e3)} ms, {rpc_exe.time_cost} "
                             f"sub_device_mesh: {rpc_exe.device_mesh}, "
                             f"parallel_strategy: {rpc_exe.parallel_strategy}, "
                             f"mem_cost: {rpc_exe.mem/(1024*1024*1024):02f} GB, "
@@ -213,8 +213,8 @@ def make_rpc_exe_list(rpcs: List[ModelRPC],
             print(f"{rpc.name} feasible: {len(feasible)}")
             feasible.sort(key=lambda x: x.time_cost)
             # feasible = feasible[:10]
-            for rpc_exe in feasible:
-                print(f"time_cost: {rpc_exe.time_cost/(1e3)} ms, {rpc_exe.time_cost} "
+            for i, rpc_exe in enumerate(feasible):
+                print(f"{i}: time_cost: {rpc_exe.time_cost/(1e3)} ms, {rpc_exe.time_cost} "
                       f"sub_device_mesh: {rpc_exe.device_mesh}, "
                       f"parallel_strategy: {rpc_exe.parallel_strategy}, "
                       f"mem_cost: {rpc_exe.mem/(1024*1024*1024):02f} GB, "
@@ -250,16 +250,17 @@ def make_rpc_list(rpcs: List[ModelRPC], if_print: bool = False) -> List[RPC]:
 
 def dump_search_settings(rpcs: List[ModelRPC], device_mesh: DeviceMesh, num_gen_tokens: int,
                          n_ppo_minibatches: int):
+    dump_dir = "/home/meizy/model_device_mapping_search/test_case/"
     rpc_exe_list = make_rpc_exe_list(rpcs,
                                      device_mesh,
                                      num_gen_tokens=num_gen_tokens,
                                      n_ppo_minibatches=n_ppo_minibatches,
+                                     log_dir=dump_dir + "rpc_exe_list.txt",
                                      if_print=True)
     rpc_list = make_rpc_list(rpcs, if_print=True)
     graph = build_graph(rpcs, 5, 1, if_print=True)
     comm_stats_ = comm_stats(if_print=True)
     model_size_dict = make_model_size_dict(rpcs, if_print=True)
-    dump_dir = "/home/meizy/model_device_mapping_search/test_case/"
     with open(dump_dir + "rpc_list.pkl", "wb") as f:
         pickle.dump(rpc_list, f)
     with open(dump_dir + "rpc_exe_list.pkl", "wb") as f:
@@ -406,8 +407,8 @@ if __name__ == "__main__":
     # experiment = config_package.make_experiment(args.expr_name)
 
     # os.environ.setdefault("IS_REMOTE", "0")
-    bs = 128
-    seqlen = 896
+    bs = 256
+    seqlen = 384
     size = 70
     n_nodes = 8
     node_start = 42
