@@ -507,8 +507,8 @@ if __name__ == "__main__":
         all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
         random.shuffle(all_configs)
         print(f">>>>>>>>> running {len(all_configs)} configurations >>>>>>>")
-        # for x1, x2 in all_configs:
-        for x1, x2 in itertools.product([(4, 2, 1)], [(1, 1, 8)]):
+        for x1, x2 in all_configs:
+        # for x1, x2 in itertools.product([(4, 2, 1)], [(1, 1, 8)]):
             barrier = mp.Barrier(8)
             if args.node_idx == args.num_nodes - 1:
                 clear_name_resolve()
@@ -529,11 +529,11 @@ if __name__ == "__main__":
                         err_queue,
                     ),
                     kwargs=dict(
-                        profile=True,
+                        profile=False,
                         check=False,
                         n_iterations=3,
                         profile_compile=False,
-                        record_cost_to_file=False
+                        record_cost_to_file=True,
                     ),
                 )
                 procs.append(proc)

@@ -1402,7 +1402,7 @@ class FlashMQATModel(nn.Module):
         # assert len(state_dict) == 0
         assert len(recv_events) == len(recv_buf_specs)
         for e, x in zip(recv_events, recv_buf_specs):
-            torch.cuda.current_stream().wait_event(e)
+            # torch.cuda.current_stream().wait_event(e)
             set_intervals(**x)
 
         # release the local GPU memory
