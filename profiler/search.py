@@ -99,8 +99,9 @@ def optimal_device_mapping(
 
     # hack, only suitable for configs in experiments/autoexp/auto_ppo.py
     rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
-    rollout_topo = tuple(r[rollout.name].values())
-    actor_train_topo = tuple(r[actor_train.name].values())
+    rollout_topo = (r[rollout.name]["num_pp"], r[rollout.name]["num_dp"], r[rollout.name]["num_mp"])
+    actor_train_topo = (r[actor_train.name]["num_pp"], r[actor_train.name]["num_dp"],
+                        r[actor_train.name]["num_mp"])
     old_name = actor_train.name
     optim_model_name = []
     if rollout_topo != actor_train_topo:
@@ -109,8 +110,10 @@ def optimal_device_mapping(
         actor_train.post_hooks.append(SyncParamHook(target=ModelName("actor", 0)))
         r[actor_train.name] = r.pop(old_name)
 
-    critic_inf_topo = tuple(r[critic_inf.name].values())
-    critic_train_topo = tuple(r[critic_train.name].values())
+    critic_inf_topo = (r[critic_inf.name]["num_pp"], r[critic_inf.name]["num_dp"],
+                       r[critic_inf.name]["num_mp"])
+    critic_train_topo = (r[critic_train.name]["num_pp"], r[critic_train.name]["num_dp"],
+                         r[critic_train.name]["num_mp"])
     old_name = critic_train.name
     if critic_inf_topo != critic_train_topo:
         critic_train.pre_hooks.append(SyncParamHook(source=ModelName("critic", 0)))

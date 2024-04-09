@@ -450,15 +450,19 @@ def estimate_rpc_memory(rpc: ModelRPC,
         #       f"total: {(static_mem + active_mem)/(1024*1024*1024):02f} GB")
         return static_mem + active_mem, static_mem
     elif interface_type == ModelInterfaceType.INFERENCE:
-        static_mem = int(1.5 * param_mem // (num_pp * num_mp))
+        static_mem = int(2 * param_mem // (num_pp * num_mp))
         # active_mem = 0  # no tensor need to be stored in inference
         # print(f"inference static_mem: {static_mem/(1024*1024*1024):02f} GB")
+        # if num_dp > 4:
+        #     static_mem = static_mem * 1.25
         if offload:
             return static_mem, 0  # assume offload
         else:
             return static_mem, static_mem
     elif interface_type == ModelInterfaceType.GENERATE:
-        static_mem = int(1.5 * param_mem // (num_pp * num_mp))
+        static_mem = int(2 * param_mem // (num_pp * num_mp))
+        if num_dp > 4:
+            static_mem = static_mem * 1.1
         active_mem = 2 * (2 * b * s * h) * L // (num_pp * num_mp * num_dp)  # kv cache
         # print(f"generate static_mem: {static_mem/(1024*1024*1024):02f} GB, "
         #       f"kv_cache_mem: {kv_cache_mem/(1024*1024*1024):02f} GB, "

@@ -49,7 +49,7 @@ class PPOHyperparameters:
     min_new_tokens: int = 256
     greedy: bool = False
     top_p: float = 0.9
-    top_k: int = 1024
+    top_k: int = 200
     temperature: float = 1.0
     ppo_n_minibatches: int = 4
     kl_ctl: float = 0.1
