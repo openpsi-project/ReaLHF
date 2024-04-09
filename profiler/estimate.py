@@ -461,7 +461,7 @@ def estimate_rpc_memory(rpc: ModelRPC,
             return static_mem, static_mem
     elif interface_type == ModelInterfaceType.GENERATE:
         static_mem = int(2 * param_mem // (num_pp * num_mp))
-        if num_dp > 4:
+        if num_dp > 4 and num_dp * num_mp * num_pp <= 16:
             static_mem = static_mem * 1.1
         active_mem = 2 * (2 * b * s * h) * L // (num_pp * num_mp * num_dp)  # kv cache
         # print(f"generate static_mem: {static_mem/(1024*1024*1024):02f} GB, "

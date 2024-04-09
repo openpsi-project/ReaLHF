@@ -16,27 +16,40 @@ logger = logging.getLogger("Auto PPO exp", "colored")
 
 
 def register_auto_ppo_experiment(
-    size: int,
+    actor_size: int,
+    critic_size: int,
     gen_bs: int,
     train_bs: int,
     seqlen: int,
     mode: str,
 ):
-    assert size in [7, 13, 34, 70]
-    if size == 7:
+    assert actor_size in [7, 13, 34, 70] and critic_size in [7, 13, 34, 70]
+    if (actor_size == 7 and critic_size == 7)\
+        or (critic_size == 7 and actor_size == 7):
         n_nodes = 1
         nodelist = "QH-com41"
-    elif size == 13:
+    elif (actor_size == 13 and critic_size == 7)\
+        or (critic_size == 13 and actor_size == 7):
         n_nodes = 2
         nodelist = "QH-com[41-42]"
-    elif size == 34:
+    elif (actor_size == 34 and critic_size == 7)\
+        or (critic_size == 34 and actor_size == 7)\
+        or (actor_size == 13 and critic_size == 13):
         n_nodes = 4
         nodelist = "QH-com[41-44]"
-    elif size == 70:
+    elif (actor_size == 70 and critic_size == 7)\
+        or (critic_size == 70 and actor_size == 7)\
+        or (actor_size == 34 and critic_size == 34):
         n_nodes = 8
-        nodelist = "QH-com[41-48]"
+        nodelist = "QH-com[41-46,27-28]"
+    elif (actor_size == 70 and critic_size == 70):
+        n_nodes = 16
+        nodelist = "QH-com[20-22,24-28,41-48]"
+    else:
+        raise ValueError(f"Invalid actor_size {actor_size} and critic_size {critic_size}")
 
-    model_class = "llama" if size != 34 else "codellama"
+    actor_model_class = "llama" if actor_size != 34 else "codellama"
+    critic_model_class = "llama" if critic_size != 34 else "codellama"
 
     @auto(n_nodes=n_nodes, nodelist=nodelist, mode=mode)
     @dataclasses.dataclass
@@ -113,7 +126,7 @@ def register_auto_ppo_experiment(
             return [
                 ModelRPC(
                     model_name="actor",
-                    model_type=ModelType(model_class, size, is_critic=False),
+                    model_type=ModelType(actor_model_class, actor_size, is_critic=False),
                     interface_type=ModelInterfaceType.GENERATE,
                     interface_impl=actor_interface,
                     input_data=["packed_prompts", "prompt_cu_seqlens"],
@@ -131,7 +144,7 @@ def register_auto_ppo_experiment(
                 ),
                 ModelRPC(
                     model_name="reward",
-                    model_type=ModelType("llama", 7, is_critic=True),
+                    model_type=ModelType(critic_model_class, critic_size, is_critic=True),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=rw_interface,
                     input_data=["packed_seq", "cu_seqlens"],
@@ -144,7 +157,7 @@ def register_auto_ppo_experiment(
                 ),
                 ModelRPC(
                     model_name="ref",
-                    model_type=ModelType(model_class, size, is_critic=False),
+                    model_type=ModelType(actor_model_class, actor_size, is_critic=False),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=ref_interface,
                     input_data=[
@@ -159,7 +172,7 @@ def register_auto_ppo_experiment(
                 ),
                 ModelRPC(
                     model_name="critic",
-                    model_type=ModelType("llama", 7, is_critic=True),
+                    model_type=ModelType(critic_model_class, critic_size, is_critic=True),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=critic_interface,
                     input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
@@ -171,7 +184,7 @@ def register_auto_ppo_experiment(
                 ),
                 ModelRPC(
                     model_name="actor",
-                    model_type=ModelType(model_class, size, is_critic=False),
+                    model_type=ModelType(actor_model_class, actor_size, is_critic=False),
                     interface_type=ModelInterfaceType.TRAIN_STEP,
                     interface_impl=actor_interface,
                     input_data=[
@@ -194,7 +207,7 @@ def register_auto_ppo_experiment(
                 ModelRPC(
                     model_name="critic",
                     interface_type=ModelInterfaceType.TRAIN_STEP,
-                    model_type=ModelType("llama", 7, is_critic=True),
+                    model_type=ModelType(critic_model_class, critic_size, is_critic=True),
                     interface_impl=critic_interface,
                     input_data=[
                         "packed_seq",
@@ -216,13 +229,18 @@ def register_auto_ppo_experiment(
             ]
 
     short_mode = mode[0]
-    register_experiment(f"sosp-a{size}s{seqlen}g{gen_bs}t{train_bs}-{short_mode}", AutoPPOExperiment)
+    if critic_size == 7:
+        register_experiment(f"sosp-a{actor_size}s{seqlen}g{gen_bs}t{train_bs}-{short_mode}",
+                            AutoPPOExperiment)
+    else:
+        register_experiment(f"sosp-a{actor_size}c{critic_size}s{seqlen}g{gen_bs}t{train_bs}-{short_mode}",
+                            AutoPPOExperiment)
 
 
-for size in [7, 13, 34, 70]:
-    for gen_bs in [16, 32, 48, 64, 80, 100, 128, 160, 200, 240, 256, 288, 320, 360, 400, 512, 640, 1024]:
+for sz in [7, 13, 34, 70]:
+    for gen_bs in [128, 256, 512, 1024]:
         # for seqlen in [256, 512, 1024]:
         for seqlen in [128, 384, 896]:
             for mode in ["search", "model_pipe", "data_pipe", "test"]:
                 train_bs = gen_bs
-                register_auto_ppo_experiment(size, gen_bs, train_bs, seqlen, mode)
+                register_auto_ppo_experiment(sz, gen_bs, train_bs, seqlen, mode)

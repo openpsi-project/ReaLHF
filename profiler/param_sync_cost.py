@@ -17,7 +17,7 @@ from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_co
 from impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape,
                                                           partition_pipeline_layers,
                                                           pipeline_repartition_strategy)
-from tests.utils import get_llama7b_flash_config
+from tests.utils import get_llama7b_flash_config, get_llama_config
 import api.config.config_system
 import base.gpu_utils as gpu_utils
 import base.topology
@@ -475,38 +475,61 @@ def decompose_to_three_factors(n: int):
 def get_table():
     from_model_name = ModelName("actor", 0)
     to_model_name = ModelName("actor", 1)
-    for a, b in [(32, 32), (64, 48)]:
-        all_configs = list(itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)))
-        all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
-        all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
-        all_configs = list(filter(lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8], all_configs))
-        all_configs = list(filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs))
-        all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
-        for config_id, (from_pp_mp_dp, to_pp_mp_dp) in enumerate(all_configs):
-            world_size = max(a, b)
 
-            from_topo = base.topology.PipeModelDataParallelTopology(*from_pp_mp_dp)
-            to_topo = base.topology.PipeModelDataParallelTopology(*to_pp_mp_dp)
-            assert world_size >= from_topo.world_size()
-            assert world_size >= to_topo.world_size()
+    def hash_tuple_into_str(t) -> bytes:
+        return ",".join([str(i) for i in t])
 
-            mconfig = get_llama7b_flash_config()
+    res = {}
 
-            tik = time.perf_counter()
-            cost = compute_cost(
-                world_size,
-                from_model_name,
-                to_model_name,
-                from_topo,
-                to_topo,
-                mconfig,
-                bw=200.0,
-                set_interval_cost=0.03,
-            )
-            print(
-                f"direction: {from_pp_mp_dp} -> {to_pp_mp_dp}, cost {cost:.4f}",
-                time.perf_counter() - tik,
-            )
+    for i, model_size in enumerate([7, 13, 34, 70]):
+        n_nodes = min(2**(i + 1), 8)
+        small_spaces = list(itertools.product([2, 4, 8, 16], [2, 4, 8, 16]))
+        large_spaces = list(
+            itertools.product([8 * i for i in range(1, n_nodes + 1)], [8 * i for i in range(1, n_nodes + 1)]))
+        for a, b in set(small_spaces + large_spaces):
+            # for a, b in [(32, 24)]:
+            mtik = time.perf_counter()
+            all_configs = list(itertools.product(decompose_to_three_factors(a),
+                                                 decompose_to_three_factors(b)))
+            all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
+            all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
+            all_configs = list(
+                filter(lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8], all_configs))
+            all_configs = list(filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs))
+            all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0,
+                                      all_configs))
+            for config_id, (from_pp_mp_dp, to_pp_mp_dp) in enumerate(all_configs):
+                world_size = max(a, b)
+
+                from_topo = base.topology.PipeModelDataParallelTopology(*from_pp_mp_dp)
+                to_topo = base.topology.PipeModelDataParallelTopology(*to_pp_mp_dp)
+                assert world_size >= from_topo.world_size()
+                assert world_size >= to_topo.world_size()
+
+                mconfig = get_llama_config(size=34)
+
+                tik = time.perf_counter()
+                cost = compute_cost(
+                    world_size,
+                    from_model_name,
+                    to_model_name,
+                    from_topo,
+                    to_topo,
+                    mconfig,
+                    bw=200.0,
+                    set_interval_cost=0.03,
+                )
+                print(
+                    f"direction: {from_pp_mp_dp} -> {to_pp_mp_dp}, cost {cost:.4f}",
+                    time.perf_counter() - tik,
+                )
+                res[hash_tuple_into_str((model_size, *from_pp_mp_dp, *to_pp_mp_dp))] = int(cost * 1000 * 1000)
+            print(f"Time for model size {model_size} {a} -> {b}: {time.perf_counter() - mtik:.4f}")
+
+    import pickle
+    with open("param_sync_cost_table.pkl", "wb") as f:
+        pickle.dump(res, f)
+    return res
 
 
 if __name__ == "__main__":

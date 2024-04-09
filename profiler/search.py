@@ -74,7 +74,8 @@ def optimal_device_mapping(
                                      log_dir=rpc_exe_dir)
     rpc_list = make_rpc_list(model_rpcs, if_print=False)
     graph = build_graph(model_rpcs, 5, 1, if_print=False)
-    comm_stats_ = comm_stats(if_print=False)
+    import pickle
+    cost_table = cost_table = pickle.load(open("param_sync_cost_table.pkl", "rb"))
     model_size_dict = make_model_size_dict(model_rpcs, if_print=False)
 
     # rpc_dict = {rpc.name: rpc for rpc in model_rpcs}
@@ -86,7 +87,7 @@ def optimal_device_mapping(
         rpc_list,
         rpc_exe_list,
         graph,
-        comm_stats_,
+        cost_table,
         model_size_dict,
         0.001,  # beta min
         0.004,  # beta max
@@ -233,11 +234,12 @@ def make_model_size_dict(rpcs: List[ModelRPC], if_print: bool = False) -> Dict[s
         if rpc.model_name.role in model_size_dict:
             continue
         flash_mqat_config = load_model_config(rpc)
-        model_size_dict[rpc.model_name.role] = estimate_model_size(flash_mqat_config)
+        # model_size_dict[rpc.model_name.role] = estimate_model_size(flash_mqat_config)
+        model_size_dict[rpc.model_name.role] = rpc.model_type.size
 
         if if_print:
             print(f"model_name: {rpc.model_name.role}, "
-                  f"model_size: {estimate_model_size(flash_mqat_config)} Bytes")
+                  f"model_size: {rpc.model_type.size}")
     return model_size_dict
 
 

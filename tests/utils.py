@@ -226,6 +226,58 @@ def get_llama7b_flash_config():
     )
 
 
+def get_llama_config(size):
+    from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+    if size == 7:
+        size_args = dict(
+            n_layers=40,
+            n_kv_heads=32,
+            head_dim=128,
+            hidden_dim=4096,
+            intermediate_dim=11008,
+            n_positions=4096,
+        )
+    elif size == 13:
+        size_args = dict(
+            n_layers=40,
+            n_kv_heads=40,
+            head_dim=128,
+            hidden_dim=5120,
+            intermediate_dim=13824,
+            n_positions=4096,
+        )
+    elif size == 34:
+        size_args = dict(
+            n_layers=48,
+            n_kv_heads=8,
+            head_dim=128,
+            hidden_dim=8192,
+            intermediate_dim=22016,
+            n_positions=16384,
+        )
+    elif size == 70:
+        size_args = dict(
+            n_layers=80,
+            n_kv_heads=8,
+            head_dim=128,
+            hidden_dim=8192,
+            intermediate_dim=28672,
+            n_positions=32768,
+        )
+    else:
+        raise ValueError(f"size {size} not supported")
+
+    return FlashMQATConfig(
+        vocab_size=32000,
+        activation_function="silu",
+        use_attention_bias=False,
+        layer_norm_type="rms",
+        mlp_type="llama",
+        apply_rotary=True,
+        **size_args,
+    )
+
+
 def get_pytorch_profiler(save_fn: str):
 
     def trace_handler(p: torch.profiler._KinetoProfile):

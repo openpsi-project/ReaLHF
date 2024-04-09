@@ -252,12 +252,21 @@ def find_sub_device_meshes(device_mesh: DeviceMesh) -> List[DeviceMesh]:
     # single node meshes
     res = []
     for node in device_mesh.node_names:
-        res += find_sub_device_meshes(
-            DeviceMesh(device_mesh_name=f"{node}",
-                       n_nodes=1,
-                       n_gpus=8,
-                       node_names=[node],
-                       gpu_ids=list(range(8))))
+        if device_mesh.n_nodes >= 4:
+            res += [
+                DeviceMesh(device_mesh_name=f"{node}",
+                           n_nodes=1,
+                           n_gpus=8,
+                           node_names=[node],
+                           gpu_ids=list(range(8)))
+            ]
+        else:
+            res += find_sub_device_meshes(
+                DeviceMesh(device_mesh_name=f"{node}",
+                           n_nodes=1,
+                           n_gpus=8,
+                           node_names=[node],
+                           gpu_ids=list(range(8))))
 
     # multi-node meshes
     node_ids = sorted([parse_node_id(node) for node in device_mesh.node_names])
@@ -287,7 +296,7 @@ def find_parallel_strategies(device_mesh: DeviceMesh) -> List[ModelParallelStrat
             while num_pp <= num_dp_pp:
                 num_dp_mp = n_gpus // num_pp
                 valid = (num_dp_mp in [1, 2, 4, 8] or num_dp_mp % 8 == 0)\
-                        and num_dp_pp % num_pp == 0
+                        and num_dp_pp % num_pp == 0 and num_pp <= 16
                 if valid:
                     res.append(ModelParallelStrategy(num_pp, num_mp, num_dp_pp // num_pp))
                 num_pp += 1
