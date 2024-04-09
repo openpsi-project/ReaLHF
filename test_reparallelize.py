@@ -7,6 +7,7 @@ import os
 import queue
 import random
 import time
+import json
 
 import torch
 import torch.distributed
@@ -103,15 +104,17 @@ def test_impl(
         # from m1 to m2
         if m1 is not None:
             tik = time.perf_counter()
-            res = m1.build_reparallelized_layers_async(from_model_name, to_model_name, from_topo, to_topo,
-                                                       mconfig, pg_info)
+            res = m1.build_reparallelized_layers_async(
+                from_model_name, to_model_name, from_topo, to_topo, mconfig, pg_info
+            )
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
         else:
             tik = time.perf_counter()
-            res = m2.build_reparallelized_layers_async(from_model_name, to_model_name, from_topo, to_topo,
-                                                       mconfig, pg_info)
+            res = m2.build_reparallelized_layers_async(
+                from_model_name, to_model_name, from_topo, to_topo, mconfig, pg_info
+            )
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
@@ -167,9 +170,9 @@ def test_impl(
                     torch.cuda.synchronize()
                     tik = time.time_ns()
                     if isinstance(engine2, InferencePipelineEngine):
-                        engine2.forward(seqlens_cpu=seqlens_cpu,
-                                        packed_input_ids=packed_input_ids,
-                                        cu_seqlens=cu_seqlens)
+                        engine2.forward(
+                            seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
+                        )
                     else:
                         engine2(
                             packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
@@ -196,7 +199,8 @@ def test_impl(
                         world_size=world_size,
                     )
                     if (
-                        it == n_iterations - 1 and record_cost_to_file
+                        it == n_iterations - 1
+                        and record_cost_to_file
                         and dist.get_rank()
                         == dist.get_process_group_ranks(base.constants.parallelism_group())[0]
                     ):
@@ -208,15 +212,17 @@ def test_impl(
         # convert m2 back to m1
         if m2 is not None:
             tik = time.perf_counter()
-            res = m2.build_reparallelized_layers_async(to_model_name, from_model_name, to_topo, from_topo,
-                                                       mconfig, pg_info)
+            res = m2.build_reparallelized_layers_async(
+                to_model_name, from_model_name, to_topo, from_topo, mconfig, pg_info
+            )
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
         else:
             tik = time.perf_counter()
-            res = m1.build_reparallelized_layers_async(to_model_name, from_model_name, to_topo, from_topo,
-                                                       mconfig, pg_info)
+            res = m1.build_reparallelized_layers_async(
+                to_model_name, from_model_name, to_topo, from_topo, mconfig, pg_info
+            )
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
@@ -271,9 +277,9 @@ def test_impl(
                     torch.cuda.synchronize()
                     tik = time.time_ns()
                     if isinstance(engine1, InferencePipelineEngine):
-                        engine1.forward(seqlens_cpu=seqlens_cpu,
-                                        packed_input_ids=packed_input_ids,
-                                        cu_seqlens=cu_seqlens)
+                        engine1.forward(
+                            seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
+                        )
                     else:
                         engine1(
                             packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
@@ -301,7 +307,8 @@ def test_impl(
                         world_size=world_size,
                     )
                     if (
-                        it == n_iterations - 1 and record_cost_to_file
+                        it == n_iterations - 1
+                        and record_cost_to_file
                         and dist.get_rank()
                         == dist.get_process_group_ranks(base.constants.parallelism_group())[0]
                     ):
@@ -359,8 +366,9 @@ def test(
     for i in range(from_topo.world_size()):
         msid2mwid[ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)] = i
     for i in range(to_topo.world_size()):
-        msid2mwid[ModelShardID.from_parallelism_rank(to_model_name, to_topo,
-                                                     i)] = (i + world_size - to_topo.world_size())
+        msid2mwid[ModelShardID.from_parallelism_rank(to_model_name, to_topo, i)] = (
+            i + world_size - to_topo.world_size()
+        )
     pg_info = setup_gpu(rank, world_size, barrier, model_topos, msid2mwid, param_sync_pairs)
     if rank < from_topo.world_size():
         init_global_constants(topo=from_topo, model_name=from_model_name, msid2mwid=msid2mwid)
@@ -466,13 +474,16 @@ def test(
     torch.distributed.barrier()
     if rank % 8 == 0:
         print("success!")
+    if rank == 0:
+        clear_name_resolve()
+    torch.distributed.barrier()
 
 
 def decompose_to_three_factors(n: int):
     factors = []
-    for i in range(1, int(n**(1 / 2)) + 1):
+    for i in range(1, int(n ** (1 / 2)) + 1):
         if n % i == 0:
-            for j in range(i, int((n // i)**(1 / 2)) + 1):
+            for j in range(i, int((n // i) ** (1 / 2)) + 1):
                 if (n // i) % j == 0:
                     k = (n // i) // j
                     factors += list(set(itertools.permutations([i, j, k])))
@@ -487,7 +498,7 @@ if __name__ == "__main__":
 
     err_queue = mp.Queue(100)
 
-    for a, b in [(8, 8)]:
+    for a, b in [(32, 32)]:
         if a == b:
             three_factors = decompose_to_three_factors(a)
             all_configs = []
@@ -498,18 +509,45 @@ if __name__ == "__main__":
             all_configs = list(
                 itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b))
             )
+        all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
+        all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
+        all_configs = list(filter(lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8], all_configs))
+        all_configs = list(filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs))
         all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
-        random.shuffle(all_configs)
         print(f">>>>>>>>> running {len(all_configs)} configurations >>>>>>>")
-        for x1, x2 in all_configs:
-        # for x1, x2 in itertools.product([(4, 2, 1)], [(1, 1, 8)]):
+        if os.path.exists("memshift_cost.jsonl"):
+            with open("memshift_cost.jsonl", "r") as f:
+                cost_data = [json.loads(ff) for ff in f.readlines()]
+        for config_id, (x1, x2) in enumerate(all_configs):
+            # for config_id, (x1, x2) in enumerate(itertools.product([(4, 2, 1)], [(1, 1, 8)])):
             barrier = mp.Barrier(8)
-            if args.node_idx == args.num_nodes - 1:
+            if args.node_idx == args.num_nodes - 1 and config_id == 0:
                 clear_name_resolve()
-            print(f"testing from {x1} to {x2}")
+            print(f"testing from {x1} to {x2}, config_id {config_id}/{len(all_configs)}...")
 
             from_topo = PipeModelDataParallelTopology(num_pp=x1[0], num_mp=x1[1], num_dp=x1[2])
             to_topo = PipeModelDataParallelTopology(num_pp=x2[0], num_mp=x2[1], num_dp=x2[2])
+            if os.path.exists("memshift_cost.jsonl"):
+                if any(
+                    from_topo.get_dim("pipe") == d["from_pp_size"]
+                    and from_topo.get_dim("model") == d["from_mp_size"]
+                    and from_topo.get_dim("data") == d["from_dp_size"]
+                    and to_topo.get_dim("pipe") == d["to_pp_size"]
+                    and to_topo.get_dim("model") == d["to_mp_size"]
+                    and to_topo.get_dim("data") == d["to_dp_size"]
+                    and max(from_topo.world_size(), to_topo.world_size()) == d["world_size"]
+                    for d in cost_data
+                ) and any(
+                    to_topo.get_dim("pipe") == d["from_pp_size"]
+                    and to_topo.get_dim("model") == d["from_mp_size"]
+                    and to_topo.get_dim("data") == d["from_dp_size"]
+                    and from_topo.get_dim("pipe") == d["to_pp_size"]
+                    and from_topo.get_dim("model") == d["to_mp_size"]
+                    and from_topo.get_dim("data") == d["to_dp_size"]
+                    and max(from_topo.world_size(), to_topo.world_size()) == d["world_size"]
+                    for d in cost_data
+                ):
+                    continue
             procs = []
             for i in range(8):
                 proc = mp.Process(

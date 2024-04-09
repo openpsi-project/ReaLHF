@@ -17,6 +17,7 @@ from base.topology import ParallelGrid, PipeModelDataParallelTopology
 import torch.distributed as dist
 import base.constants
 import base.topology
+import base.names as names
 
 
 EXPR_NAME = "test"
@@ -57,8 +58,12 @@ def setup_gpu(rank, world_size):
     return device
 
 
-def clear_name_resolve():
-    name_resolve.clear_subtree(names.trial_root(experiment_name=EXPR_NAME, trial_name=TRIAL_NAME))
+def clear_name_resolve(exp_name=None, trial_name=None):
+    if exp_name is None:
+        exp_name = EXPR_NAME
+    if trial_name is None:
+        trial_name = TRIAL_NAME
+    name_resolve.clear_subtree(names.trial_root(experiment_name=exp_name, trial_name=trial_name))
 
 
 def make_finetune_spec(bs_per_device,

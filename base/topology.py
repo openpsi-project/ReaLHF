@@ -1,7 +1,7 @@
 # Modified from https://github.com/microsoft/DeepSpeed/blob/aed599b4422b1cdf7397abb05a58c3726523a333/deepspeed/runtime/pipe/topology.py#
 
 from itertools import product as cartesian_product
-from typing import Dict, NamedTuple, Optional, Tuple, List
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import torch.distributed
 
@@ -11,12 +11,14 @@ logger = logging.getLogger("Topology")
 
 GLOBAL_PROCESS_GROUP_REGISTRY: Dict[Tuple, torch.distributed.ProcessGroup] = {}
 
+
 def new_or_get_group(ranks: List[int], backend="nccl"):
     ranks = tuple(sorted(ranks))
     global GLOBAL_PROCESS_GROUP_REGISTRY
     if ranks not in GLOBAL_PROCESS_GROUP_REGISTRY:
-        GLOBAL_PROCESS_GROUP_REGISTRY[ranks] = torch.distributed.new_group(ranks,backend=backend)
+        GLOBAL_PROCESS_GROUP_REGISTRY[ranks] = torch.distributed.new_group(ranks, backend=backend)
     return GLOBAL_PROCESS_GROUP_REGISTRY[ranks]
+
 
 class PipeDataModelProcessCoord(NamedTuple):
     pipe: int

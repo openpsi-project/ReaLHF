@@ -18,7 +18,7 @@ import transformers
 
 from api.config.config_base import ModelName
 from api.config.config_flash_model import FlashMQATConfig
-from base.monitor import cuda_tmarked, CUDATimeMarkType, cuda_tmark
+from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
                                                       flash_model_embedding_param_keys,
@@ -101,6 +101,7 @@ class ReparallelizeReceiverStep:
     param_keys: List[str]
     param_dtype: torch.dtype
     src: int
+    dst_ranks: List[int]
     group: torch.distributed.ProcessGroup
 
 
@@ -524,6 +525,7 @@ def _derive_reparallelize_comm_plan(
                                 param_size=param_size,
                                 param_dtype=dtype,
                                 src=src,
+                                dst_ranks=dst_ranks,
                                 group=group,
                             ))
                     comm_plan.append(
@@ -1333,7 +1335,7 @@ class FlashMQATModel(nn.Module):
         )
 
         # Allocate send and receive tensors in advance to reduce overhead.
-        recv_buf_specs  = []
+        recv_buf_specs = []
         send_buf_specs = []
         comm_volume = torch.zeros((), dtype=torch.long, device='cuda')
         for step in rtgt.comm_plan:
@@ -1350,13 +1352,14 @@ class FlashMQATModel(nn.Module):
                     buf = torch.zeros(step.param_size, dtype=step.param_dtype, device="cuda")
                     comm_volume += buf.numel()
 
-                recv_buf_specs.append(dict(
-                    src=buf,
-                    dst=to_contiguous_param,
-                    intervals=step.receiver_param_intervals,
-                    intervals_cpu=step.receiver_param_intervals_cpu,
-                    max_interval_size=step.receiver_max_interval_size,
-                ))
+                recv_buf_specs.append(
+                    dict(
+                        src=buf,
+                        dst=to_contiguous_param,
+                        intervals=step.receiver_param_intervals,
+                        intervals_cpu=step.receiver_param_intervals_cpu,
+                        max_interval_size=step.receiver_max_interval_size,
+                    ))
 
             if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
                 if step.group is not None:
@@ -1374,7 +1377,7 @@ class FlashMQATModel(nn.Module):
                         layer_idx = int(layer_idx)
                         dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
                         recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
-                                        k).data = (dummy_tensor)
+                                          k).data = (dummy_tensor)
 
         # Run boradcast!
         streams = [torch.cuda.Stream() for step in rtgt.comm_plan]
