@@ -101,6 +101,7 @@ class ReparallelizeReceiverStep:
     param_keys: List[str]
     param_dtype: torch.dtype
     src: int
+    dst_ranks: List[int]
     group: torch.distributed.ProcessGroup
 
 
@@ -524,6 +525,7 @@ def _derive_reparallelize_comm_plan(
                                 param_size=param_size,
                                 param_dtype=dtype,
                                 src=src,
+                                dst_ranks=dst_ranks,
                                 group=group,
                             ))
                     comm_plan.append(
@@ -1403,7 +1405,7 @@ class FlashMQATModel(nn.Module):
         # assert len(state_dict) == 0
         assert len(recv_events) == len(recv_buf_specs)
         for e, x in zip(recv_events, recv_buf_specs):
-            torch.cuda.current_stream().wait_event(e)
+            # torch.cuda.current_stream().wait_event(e)
             set_intervals(**x)
 
         # release the local GPU memory

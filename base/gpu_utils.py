@@ -143,6 +143,76 @@ def _max_match(_src_ranks: List[int], _grouped_dst_ranks: List[List[int]]):
     return row_ind, col_ind
 
 
+def _group_mwids_by_node(ranks: List[int]) -> Dict[int, List[int]]:
+    node2ranks = defaultdict(list)
+    for r in ranks:
+        node2ranks[r // 8].append(r)
+    return {k: node2ranks[k] for k in sorted(node2ranks.keys())}
+
+
+def _squeeze_mwids_by_node(ranks: List[int]) -> List[int]:
+    node2ranks = _group_mwids_by_node(ranks)
+    return [ranks[0] for ranks in node2ranks.values()]
+
+
+def _assign_src_to_dsts(node2srcs: Dict[int, List[int]], node2dsts: Dict[int,
+                                                                         List[int]]) -> Dict[int, List[int]]:
+    """Assign nodes with a greedy algorithm.
+
+    All ranks in the values of node2srcs have the data required by all dst ranks.
+    Source ranks can be assigned to zero or multiple destination ranks.
+    All destination ranks must be assigned to exactly one src rank.
+
+    Args:
+        node2srcs (Dict[int, List[int]]): Node index -> source ranks. 
+        node2dsts (Dict[int, List[int]]): Node index -> destination ranks. 
+
+    Returns:
+        Dict[int, List[int]]: src rank -> dst ranks.
+    """
+    # First, assign all destination ranks to source nodes.
+    # If a destination node is also a source node, assign it to itself.
+    # Otherwise, find the node with the minimum workload for load balancing.
+    dst_src_nodes = {}
+    for dst_node in node2dsts.keys():
+        if dst_node in node2srcs:
+            # dst node is also src node
+            dst_src_nodes[dst_node] = dst_node
+    src_node_workloads = {k: int(k in dst_src_nodes) for k in node2srcs}
+    assert sum(src_node_workloads.values()) == len(dst_src_nodes)
+    for dst_node in node2dsts.keys():
+        if dst_node not in node2srcs:
+            # find a source node with the minimum workload
+            src_node = min(src_node_workloads, key=src_node_workloads.get)
+            dst_src_nodes[dst_node] = src_node
+    assert all(dst_node in dst_src_nodes for dst_node in node2dsts)
+
+    # Revert the key-value of the dict.
+    src_dst_nodes = defaultdict(list)
+    for dst_node, src_node in dst_src_nodes.items():
+        src_dst_nodes[src_node].append(dst_node)
+
+    # Next, find an appropriate source rank on each source node.
+    # If the source rank is also the destination rank, assign it to the destination rank.
+    # Otherwise, assign the first one to the destination ranks.
+    assignment = {}
+    for src_node, dst_nodes in src_dst_nodes.items():
+        assigned = False
+        src_ranks = node2srcs[src_node]
+        dst_ranks = sum([node2dsts[dst_node] for dst_node in dst_nodes], start=[])
+        for s in src_ranks:
+            if s in dst_ranks:
+                assignment[s] = dst_ranks
+                assigned = True
+                break
+        if not assigned:
+            assignment[src_ranks[0]] = dst_ranks
+    assert len(set(assignment.keys())) == len(assignment.keys())
+    assert len(set(sum(assignment.values(), []))) == len(sum(assignment.values(), []))
+
+    return assignment
+
+
 def _create_param_sync_groups(
     from_topo: topology.PipeModelDataParallelTopology,
     to_topo: topology.PipeModelDataParallelTopology,
@@ -174,35 +244,34 @@ def _create_param_sync_groups(
                 _all_src_ranks = [
                     _filter_match_mwids(src, from_topo, msid2mwid, model=mp_j // factor, pipe=pp_i)
                 ]
+            # All GPUs in _src_ranks have the data required by (pp_j, mp_j)
             for _src_ranks in _all_src_ranks:
-                # All GPUs in _src_ranks have the data required by (pp_j, mp_j)
-                # We split _dst_ranks evenly among the GPUs in _src_ranks, such that they can broadcast in parallel.
-                subgroup_size = (len(_all_dst_ranks) + len(_src_ranks) - 1) // len(_src_ranks)
-                _grouped_dst_ranks = [[] for _ in range(len(_src_ranks))]
-                counter = 0
-                for _src_rank in _src_ranks:
-                    if _src_rank in _all_dst_ranks:
-                        _grouped_dst_ranks[counter].append(_src_rank)
-                        counter += 1
-                for _dst_rank in _all_dst_ranks:
-                    if _dst_rank in _src_ranks:
-                        continue
-                    for _this_group in _grouped_dst_ranks:
-                        if len(_this_group) >= subgroup_size:
-                            continue
-                        _this_group.append(_dst_rank)
-                        break
-                assert all(len(_x) <= subgroup_size for _x in _grouped_dst_ranks), (
-                    _grouped_dst_ranks,
-                    _all_dst_ranks,
-                    _src_ranks,
-                )
-                # prioritize the _src_rank that is also in _dst_ranks
-                src_rank_ids, group_dst_rank_ids = _max_match(_src_ranks, _grouped_dst_ranks)
-                for _src_rank_id, _dst_ranks_group_id in zip(src_rank_ids, group_dst_rank_ids):
-                    _src_rank = _src_ranks[_src_rank_id]
-                    _dst_ranks = _grouped_dst_ranks[_dst_ranks_group_id]
-
+                # NOTE: inter-node communication cost is significantly larger than intra-node communication cost.
+                # We only select one sender per host/node to prevent multiple senders occupying the same network bandwidth.
+                # This is not the optimal solution for intra-node communication
+                # because there may exist a source rank that is also dst rank,
+                # but we forcely select the first source rank on each node here.
+                assignment = _assign_src_to_dsts(_group_mwids_by_node(_src_ranks),
+                                                 _group_mwids_by_node(_all_dst_ranks))
+                _idle_src_ranks = [r for r in _src_ranks if r not in assignment]
+                for _src_rank in _idle_src_ranks:
+                    dp_i, mp_i = (
+                        from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).data,
+                        from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).model,
+                    )
+                    key = ParamSyncPair(
+                        src=src,
+                        src_dp_rank=dp_i,
+                        src_mp_rank=mp_i,
+                        src_pp_rank=pp_i,
+                        dst=dst,
+                        dst_mp_rank=mp_j,
+                        dst_pp_rank=pp_j,
+                    )
+                    param_sync_dst_ranks[key] = []
+                    param_sync_groups[key] = None
+                    param_sync_src_ranks[key] = _src_rank
+                for _src_rank, _dst_ranks in assignment.items():
                     dp_i, mp_i = (
                         from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).data,
                         from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).model,

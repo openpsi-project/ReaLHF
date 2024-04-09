@@ -2,6 +2,7 @@ from typing import *
 import argparse
 import dataclasses
 import itertools
+import json
 import multiprocessing as mp
 import os
 import queue
@@ -459,6 +460,9 @@ def test(
     torch.distributed.barrier()
     if rank % 8 == 0:
         print("success!")
+    if rank == 0:
+        clear_name_resolve()
+    torch.distributed.barrier()
 
 
 def decompose_to_three_factors(n: int):
@@ -480,7 +484,7 @@ if __name__ == "__main__":
 
     err_queue = mp.Queue(100)
 
-    for a, b in [(8, 8)]:
+    for a, b in [(32, 32)]:
         if a == b:
             three_factors = decompose_to_three_factors(a)
             all_configs = []
@@ -490,18 +494,39 @@ if __name__ == "__main__":
         else:
             all_configs = list(itertools.product(decompose_to_three_factors(a),
                                                  decompose_to_three_factors(b)))
+        all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
+        all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
+        all_configs = list(filter(lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8], all_configs))
+        all_configs = list(filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs))
         all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
-        random.shuffle(all_configs)
         print(f">>>>>>>>> running {len(all_configs)} configurations >>>>>>>")
-        # for x1, x2 in all_configs:
-        for x1, x2 in itertools.product([(4, 2, 1)], [(1, 1, 8)]):
+        if os.path.exists("memshift_cost.jsonl"):
+            with open("memshift_cost.jsonl", "r") as f:
+                cost_data = [json.loads(ff) for ff in f.readlines()]
+        for config_id, (x1, x2) in enumerate(all_configs):
+            # for config_id, (x1, x2) in enumerate(itertools.product([(4, 2, 1)], [(1, 1, 8)])):
             barrier = mp.Barrier(8)
-            if args.node_idx == args.num_nodes - 1:
+            if args.node_idx == args.num_nodes - 1 and config_id == 0:
                 clear_name_resolve()
-            print(f"testing from {x1} to {x2}")
+            print(f"testing from {x1} to {x2}, config_id {config_id}/{len(all_configs)}...")
 
             from_topo = PipeModelDataParallelTopology(num_pp=x1[0], num_mp=x1[1], num_dp=x1[2])
             to_topo = PipeModelDataParallelTopology(num_pp=x2[0], num_mp=x2[1], num_dp=x2[2])
+            if os.path.exists("memshift_cost.jsonl"):
+                if any(
+                        from_topo.get_dim("pipe") == d["from_pp_size"] and from_topo.get_dim(
+                            "model") == d["from_mp_size"] and from_topo.get_dim("data") == d["from_dp_size"]
+                        and to_topo.get_dim("pipe") == d["to_pp_size"] and to_topo.get_dim(
+                            "model") == d["to_mp_size"] and to_topo.get_dim("data") == d["to_dp_size"]
+                        and max(from_topo.world_size(), to_topo.world_size()) == d["world_size"]
+                        for d in cost_data) and any(
+                            to_topo.get_dim("pipe") == d["from_pp_size"] and to_topo.get_dim(
+                                "model") == d["from_mp_size"] and to_topo.get_dim("data") == d["from_dp_size"]
+                            and from_topo.get_dim("pipe") == d["to_pp_size"] and from_topo.get_dim(
+                                "model") == d["to_mp_size"] and from_topo.get_dim("data") == d["to_dp_size"]
+                            and max(from_topo.world_size(), to_topo.world_size()) == d["world_size"]
+                            for d in cost_data):
+                    continue
             procs = []
             for i in range(8):
                 proc = mp.Process(
@@ -514,11 +539,13 @@ if __name__ == "__main__":
                         to_topo,
                         err_queue,
                     ),
-                    kwargs=dict(profile=True,
-                                check=False,
-                                n_iterations=3,
-                                profile_compile=False,
-                                record_cost_to_file=False),
+                    kwargs=dict(
+                        profile=False,
+                        check=False,
+                        n_iterations=3,
+                        profile_compile=False,
+                        record_cost_to_file=True,
+                    ),
                 )
                 procs.append(proc)
                 proc.start()

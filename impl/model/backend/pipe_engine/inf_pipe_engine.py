@@ -112,40 +112,40 @@ class InferencePipelineEngine:
         self._async_p2p = enable_async_p2p_communication
         self._async_instruction = enable_async_instruction and self._async_p2p
 
-        self._post_init_logging()
+        # self._post_init_logging()
 
-    def _post_init_logging(self):
-        model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
-        num_params = sum([p.numel() for p in model_parameters])
-        unique_params = num_params
-        # Subtract tied parameters if we don't own them
-        # if self.module.tied_comms:
-        #     tied_params = 0
-        #     for key, d in self.module.tied_comms.items():
-        #         if self.global_rank != min(d['ranks']):
-        #             tied_params += sum(p.numel() for p in d['module'].parameters())
-        #     unique_params -= tied_params
+    # def _post_init_logging(self):
+    #     model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
+    #     num_params = sum([p.numel() for p in model_parameters])
+    #     unique_params = num_params
+    #     # Subtract tied parameters if we don't own them
+    #     # if self.module.tied_comms:
+    #     #     tied_params = 0
+    #     #     for key, d in self.module.tied_comms.items():
+    #     #         if self.global_rank != min(d['ranks']):
+    #     #             tied_params += sum(p.numel() for p in d['module'].parameters())
+    #     #     unique_params -= tied_params
 
-        params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(self.device)
-        dist.all_reduce(params_tensor, group=self.grid.get_model_parallel_group())
-        params_tensor = params_tensor.tolist()
-        total_params = params_tensor[0]
-        unique_params = params_tensor[1]
+    #     params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(self.device)
+    #     dist.all_reduce(params_tensor, group=self.grid.get_model_parallel_group())
+    #     params_tensor = params_tensor.tolist()
+    #     total_params = params_tensor[0]
+    #     unique_params = params_tensor[1]
 
-        if self.global_rank == 0:
-            logger.info(f"CONFIG: default_num_micro_batches={self.default_num_micro_batches} "
-                        f"num_layers(this stage)={self.num_layers} "
-                        f"pp_size={self.num_stages} "
-                        f"dp_size={self.grid.get_data_parallel_world_size()} "
-                        f"mp_size={self.grid.get_model_parallel_world_size()} ")
-        if self.dp_id == 0:
-            logger.info(f"rank={self.global_rank} "
-                        f"stage={self.stage_id} "
-                        f"layers={self.module.num_layers} "
-                        f"[{self.module.layer_idx_start}, {self.module.layer_idx_end}) "
-                        f"stage_params={num_params} ({num_params/1e6:0.3f}M) "
-                        f"total_params={total_params} ({total_params/1e6:0.3f}M) "
-                        f"unique_params={unique_params} ({unique_params/1e6:0.3f}M)")
+    #     if self.global_rank == 0:
+    #         logger.info(f"CONFIG: default_num_micro_batches={self.default_num_micro_batches} "
+    #                     f"num_layers(this stage)={self.num_layers} "
+    #                     f"pp_size={self.num_stages} "
+    #                     f"dp_size={self.grid.get_data_parallel_world_size()} "
+    #                     f"mp_size={self.grid.get_model_parallel_world_size()} ")
+    #     if self.dp_id == 0:
+    #         logger.info(f"rank={self.global_rank} "
+    #                     f"stage={self.stage_id} "
+    #                     f"layers={self.module.num_layers} "
+    #                     f"[{self.module.layer_idx_start}, {self.module.layer_idx_end}) "
+    #                     f"stage_params={num_params} ({num_params/1e6:0.3f}M) "
+    #                     f"total_params={total_params} ({total_params/1e6:0.3f}M) "
+    #                     f"unique_params={unique_params} ({unique_params/1e6:0.3f}M)")
 
     def is_first_stage(self):
         """True if this process is in the first stage in the pipeline."""
