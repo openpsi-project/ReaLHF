@@ -67,11 +67,11 @@ def compute_rlhf_pflops(
 
 
 def amend_baseline_data(all_data: List, baseline_name: str):
-    if baseline_name == "dschat":
+    if baseline_name == "DeepSpeedChat":
         os.system("python3 ../DeepSpeedExamples/sosp_parselog.py --max --dump_to_file /tmp/dschat.pkl")
         with open("/tmp/dschat.pkl", "rb") as f:
             data: pd.DataFrame = pickle.load(f)
-    elif baseline_name == "openrlhf":
+    elif baseline_name == "OpenRLHF":
         os.system("python3 ../OpenRLHF/sosp_parselog.py --max --dump_to_file /tmp/openrlhf.pkl")
         with open("/tmp/openrlhf.pkl", "rb") as f:
             data: pd.DataFrame = pickle.load(f)
@@ -178,8 +178,69 @@ def amend_baseline_data(all_data: List, baseline_name: str):
 
 def main():
     all_data = []
-    all_data = amend_baseline_data(all_data, "dschat")
-    all_data = amend_baseline_data(all_data, "openrlhf")
+    all_data = amend_baseline_data(all_data, "DeepSpeedChat")
+    all_data = amend_baseline_data(all_data, "OpenRLHF")
+
+    # amend our system's result
+    with open("/lustre/meizy/res.pkl", "rb") as f:
+        our_res = pickle.load(f)
+    ours_data = []
+    ours_m_data = []
+    for key, avg_time in our_res.items():
+        actor_size, bs, seqlen, mode = key
+        if actor_size == 7:
+            ngpus = 8
+        elif actor_size == 13:
+            ngpus = 16
+        elif actor_size == 34:
+            ngpus = 32
+        elif actor_size == 70:
+            ngpus = 64
+        ref_size = actor_size
+        critic_size = rew_size = 7
+        p = compute_rlhf_pflops(
+            actor_size,
+            critic_size,
+            ref_size,
+            rew_size,
+            batch_size=bs,
+            prompt_len=128,
+            gen_len=seqlen,
+            avg_time=avg_time,
+        )
+        if seqlen == 128:
+            case = 1
+        elif seqlen == 384:
+            case = 2
+        elif seqlen == 896:
+            case = 3
+        else:
+            raise NotImplementedError()
+        if mode == "s":
+            system = "ours"
+            ours_data.append(
+                dict(
+                    case=case,
+                    ngpus=ngpus,
+                    pflops=p,
+                    system=system,
+                )
+            )
+        elif mode == "m":
+            system = "ours-heuristic"
+            ours_m_data.append(
+                dict(
+                    case=case,
+                    ngpus=ngpus,
+                    pflops=p,
+                    system=system,
+                )
+            )
+        else:
+            raise NotImplementedError()
+
+    # all_data.extend(ours_m_data)
+    all_data.extend(ours_data)
 
     # Convert data to DataFrame
     df = pd.DataFrame(all_data)
@@ -188,12 +249,16 @@ def main():
     sns.set_style("whitegrid")
 
     # Create subplots
-    fig, axes = plt.subplots(1, 4, figsize=(12, 3), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(12, 3))
 
     # Plot for each seqlen setting
     for i, ((case, group), ax) in enumerate(zip(df.groupby("case"), axes.flatten())):
+        if case == 4:
+            continue
         width = 0.75
-        sns.barplot(x="ngpus", y="pflops", data=group, ax=ax, hue="system", width=width)
+        if i == 0:
+            print(group)
+        sns.barplot(x="ngpus", y="pflops", data=group, ax=ax, hue="system", width=width, palette=["blue", "orange", "red"])
 
         missing_points = group[group["pflops"].isnull()]
         n_gpus = group["ngpus"].unique().tolist()
@@ -211,14 +276,28 @@ def main():
                 mew=3,
             )
 
-        ax.set_title(f"Case {case}")
-        ax.set_xlabel("Number of GPUs")
-        ax.set_ylabel("Throughput PetaFLOP/s")
+        if case == 1:
+            ax.set_title("Generate Length=128", fontsize=16)
+        elif case == 2:
+            ax.set_title("Generate Length=384", fontsize=16)
+        elif case == 3:
+            ax.set_title("Generate Length=896", fontsize=16)
+        # ax.set_title(f"Case {case}")
+        ax.set_xlabel("Number of GPUs", fontsize=12)
+        ax.set_ylabel("Throughput PetaFLOP/s", fontsize=12)
+        if i == 0:
+            ax.set_ylim((0., 3.5))
+        elif i == 1:
+            ax.set_ylim((0., 2.2))
+        elif i == 2:
+            ax.set_ylim((0., 1.2))
+        elif i == 3:
+            ax.set_ylim((0., 1.0))
         # ax.set_xscale("log")
         # ax.set_xticks([8, 16, 32, 64])
         # ax.set_xlim(6, 80)
         # ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
-        if i != 3:
+        if i != 0:
             ax.get_legend().remove()
 
     # Adjust layout

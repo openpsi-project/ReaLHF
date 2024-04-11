@@ -26,11 +26,12 @@ def main():
         else:
             d["world_size"] = int(d["world_size"])
 
-        if d["from_mp_size"] * d["from_dp_size"] * d["from_pp_size"] != d["world_size"]:
-            continue
-        if d["to_mp_size"] * d["to_dp_size"] * d["to_pp_size"] != d["world_size"]:
+        if d["world_size"] not in [8, 32]:
             continue
 
+        from_size = d["from_dp_size"] * d["from_mp_size"] * d["from_pp_size"]
+        to_size = d["to_dp_size"] * d["to_mp_size"] * d["to_pp_size"]
+        d["overlapped"] = from_size == to_size == d["world_size"]
         d["dp_ratio"] = d["to_dp_size"] // d["from_dp_size"]
         d["mp_ratio"] = d["to_mp_size"] // d["from_mp_size"]
         d["pp_ratio"] = abs(math.log(d["to_pp_size"] / d["from_pp_size"], 2))
@@ -52,33 +53,37 @@ def main():
     df = pd.DataFrame(data)
     # Set style
     sns.set_style("whitegrid")
-
-    fig, axes = plt.subplots(1, 3, figsize=(12, 3))
+    fig, axes = plt.subplots(2, 2, figsize=(8, 6))
 
     # Group data by world_size
-    grouped = df.groupby("world_size")
+    grouped = df[df["overlapped"] == True].groupby("world_size")
+    for i, ((name, group), ax) in enumerate(zip(grouped, axes[0])):
+        sns.scatterplot(data=group, x="comm_volume", y="cost", ax=ax, hue="to_dp_size", palette="bright")
+        ax.set_xlabel("Total Communication Volume (Gb)", fontsize=12)
+        ax.set_ylabel("Reallocation Time (s)", fontsize=12)
+        if i > 0:
+            ax.get_legend().remove()
+        else:
+            ax.legend(title=r"$dp_2$", fontsize=10, loc=(0.6, 0.3))
+    axes[0][0].set_ylim(-0.0, 0.5)
+    axes[0][0].set_title("Single-Node Overlapped Reallocation", fontsize=14)
+    axes[0][1].set_ylim(-0.0, 1.0)
+    axes[0][1].set_title("Multi-Node Overlapped Reallocation", fontsize=14)
 
-    # Plot smooth lines for each group
-    # for name, group in grouped:
-    #     x = group['comm_volume']
-    #     y = group['cost']
-    #     print(group)
-
-    #     # Interpolate the data for smooth lines
-    #     x_new = np.linspace(x.min(), x.max(), 300)
-    #     spl = make_interp_spline(x, y)
-    #     y_smooth = spl(x_new)
-
-    #     # Plot the smooth line
-    #     plt.plot(x_new, y_smooth, label=f"World Size {name}", lw=2)
-
-    # # sns.scatterplot(data=df, x="comm_volume", y="cost", hue="world_size", lw=2, palette='coolwarm')
-    for (name, group), ax in zip(grouped, axes):
-        subgroups = group.groupby("to_dp_size")
-        for subgname, subgroup in subgroups:
-            # sns.regplot(data=subgroup, x="comm_volume", y="cost", ax=ax, label=f"dp_ratio={subgname}")
-            sns.scatterplot(data=subgroup, x="comm_volume", y="cost", ax=ax)
-
+    grouped = df[df["overlapped"] == False].groupby("world_size")
+    for i, ((name, group), ax) in enumerate(zip(grouped, axes[1])):
+        sns.scatterplot(data=group, x="comm_volume", y="cost", ax=ax, hue="to_dp_size", palette="bright")
+        ax.set_xlabel("Total Communication Volume (Gb)", fontsize=12)
+        ax.set_ylabel("Reallocation Time (s)", fontsize=12)
+        if i > 0:
+            ax.get_legend().remove()
+        else:
+            ax.legend(title=r"$dp_2$", fontsize=10, loc=(0.6, 0.3))
+    axes[1][0].set_ylim(-0.0, 0.5)
+    axes[1][0].set_title("Single-Node Disjoint Reallocation", fontsize=14)
+    axes[1][1].set_ylim(-0.0, 1.0)
+    axes[1][1].set_title("Multi-Node Disjoint Reallocation", fontsize=14)
+    
     plt.tight_layout()
     plt.savefig("vmsc.png")
 

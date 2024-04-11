@@ -498,7 +498,7 @@ if __name__ == "__main__":
 
     err_queue = mp.Queue(100)
 
-    for a, b in [(32, 32)]:
+    for a, b in [(16, 16), (32, 16), (8, 32)]:
         if a == b:
             three_factors = decompose_to_three_factors(a)
             all_configs = []

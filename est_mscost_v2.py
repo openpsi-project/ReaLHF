@@ -489,7 +489,7 @@ def decompose_to_three_factors(n: int):
 def get_table():
     from_model_name = ModelName("actor", 0)
     to_model_name = ModelName("actor", 1)
-    for a, b in [(32, 32), (64, 48)]:
+    for a, b in [(64, 56), (56, 64)]:
         all_configs = list(itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)))
         all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
         all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
@@ -519,6 +519,20 @@ def get_table():
             )
             print(
                 f"direction: {from_pp_mp_dp} -> {to_pp_mp_dp}, cost {cost:.4f}",
+                time.perf_counter() - tik,
+            )
+            cost = compute_cost(
+                world_size,
+                to_model_name,
+                from_model_name,
+                to_topo,
+                from_topo,
+                mconfig,
+                bw=200.0,
+                set_interval_cost=0.03,
+            )
+            print(
+                f"direction: {to_pp_mp_dp} -> {from_pp_mp_dp}, cost {cost:.4f}",
                 time.perf_counter() - tik,
             )
 

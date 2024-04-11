@@ -227,14 +227,8 @@ def test(
     print("After setup memory", get_memory(0))
 
     try:
-        if profile:
-            profiler = get_pytorch_profiler(f"offload{idx}.json")
-            profiler.start()
 
         test_impl(idx, world_size, topo, profile, check, n_iterations, record_cost_to_file)
-
-        if profile:
-            profiler.__exit__(None, None, None)
 
         torch.distributed.barrier()
         if idx == 0:
