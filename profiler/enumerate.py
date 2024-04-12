@@ -11,10 +11,8 @@ GPU_MEM_CAP = 80 * (1024**3)
 MEM_INDEX = 1.0
 
 
-def enumerate_rpc_executions(rpc: ModelRPC,
-                             device_mesh: DeviceMesh,
-                             num_gen_tokens=256,
-                             n_ppo_minibatches=1) -> List[RPCExecution]:
+def enumerate_rpc_executions(rpc: ModelRPC, device_mesh: DeviceMesh, num_gen_tokens,
+                             n_ppo_minibatches) -> List[RPCExecution]:
     sub_device_meshes = find_sub_device_meshes(device_mesh)
     feasible = []
     # mem_index = 1.2
@@ -36,6 +34,8 @@ def enumerate_rpc_executions(rpc: ModelRPC,
                                                        p,
                                                        bs,
                                                        seq_len,
+                                                       n_ppo_minibatches=n_ppo_minibatches,
+                                                       gen_len=num_gen_tokens,
                                                        offload=rpc.model_name.role in ["ref", "reward"])
             mem_cost = int(mem_cost * MEM_INDEX)
             static_mem = int(static_mem * MEM_INDEX)

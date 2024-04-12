@@ -66,6 +66,7 @@ def _ppo_actor_loss_from_model_outputs(
         eps_clip=eps_clip,
     )
     loss = torch.where(ppo_loss_mask, loss, 0.0).sum() / ppo_loss_mask.count_nonzero()
+    loss = loss * 0.0
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
     mean_ref_kl = api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
@@ -520,6 +521,8 @@ def _ppo_critic_loss_from_model_outputs(
         denormalized_values = rms.denormalize(new_values)
     else:
         denormalized_values = new_values
+
+    loss = loss * 0.0
 
     return loss, dict(
         value_loss=loss.detach(),

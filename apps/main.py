@@ -109,6 +109,7 @@ def main_start(args):
     sched = scheduler.client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
 
     setup = experiment.scheduling_setup()
+    # exit(0)
 
     logger.info(f"Resetting name resolving repo...")
 

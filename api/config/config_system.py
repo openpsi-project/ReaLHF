@@ -45,7 +45,7 @@ _LLM_ENVVARS = {
     # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
     "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
     # Whether to enable time mark to plot timelines.
-    "DLLM_CUDA_TMARK": "1",
+    "DLLM_CUDA_TMARK": "0",
 }
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
@@ -269,10 +269,11 @@ class ExperimentConfig:
             all_shards: List[StandaloneModelShard] = [
                 next(filter(lambda x: x.id.model_name == model_name, mw.shards)) for mw in _this_mws
             ]
-            for k, v in model_topos.items():
-                if k.role == model_name.role and v == all_shards[0].id.topo:
-                    raise ValueError(f"If different RPCs have the same topology, "
-                                     f"they don't need to use multiple model names ({k}, {model_name}).")
+            # TODO: same topo, diff nodelist?
+            # for k, v in model_topos.items():
+            # if k.role == model_name.role and v == all_shards[0].id.topo:
+            #     raise ValueError(f"If different RPCs have the same topology, "
+            #                      f"they don't need to use multiple model names ({k}, {model_name}).")
             model_topos[model_name] = all_shards[0].id.topo
             model_configs[model_name] = all_shards[0].model
 
@@ -292,6 +293,8 @@ class ExperimentConfig:
                 if len(edges[i][j]) > 0:
                     # NOTE: dependencies are reversed here
                     data_transfer_pairs.append((self.model_rpcs[j].model_name, self.model_rpcs[i].model_name))
+                    # print(f"model_rpc j name {self.model_rpcs[j].name} i name {self.model_rpcs[i].name} "
+                    #        "data transfer pair append {(self.model_rpcs[j].model_name, self.model_rpcs[i].model_name)} ")
         data_transfer_pairs += [(mn, mn) for mn in model_names]
 
         sync_param_pairs: List[Tuple[ModelName, ModelName]] = []

@@ -16,7 +16,7 @@ from base.topology import PipeModelDataParallelTopology
 NUM_GPUS_PER_NODE = 8
 
 
-def ppo_rpcs_example(size, bs, seqlen):
+def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
     prompt_seqlen = 128
     train_seqlen = prompt_seqlen + seqlen
     actor_interface = ModelInterface(
@@ -34,11 +34,13 @@ def ppo_rpcs_example(size, bs, seqlen):
         "flash_paired_rw",
         args=dict(enable_save=False,),
     )
-    model_class = "llama" if size != 34 else "codellama"
+    actor_model_class = "llama" if actor_size != 34 else "codellama"
+    critic_model_class = "llama" if critic_size != 34 else "codellama"
+
     return [
         ModelRPC(
             model_name="actor",
-            model_type=ModelType(model_class, size, is_critic=False),
+            model_type=ModelType(actor_model_class, actor_size, is_critic=False),
             interface_type=ModelInterfaceType.GENERATE,
             interface_impl=actor_interface,
             input_data=["packed_prompts", "prompt_cu_seqlens"],
@@ -56,7 +58,7 @@ def ppo_rpcs_example(size, bs, seqlen):
         ),
         ModelRPC(
             model_name="reward",
-            model_type=ModelType("llama", 7, is_critic=True),
+            model_type=ModelType(critic_model_class, critic_size, is_critic=True),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
             input_data=["packed_seq", "cu_seqlens"],
@@ -69,7 +71,7 @@ def ppo_rpcs_example(size, bs, seqlen):
         ),
         ModelRPC(
             model_name="ref",
-            model_type=ModelType(model_class, size, is_critic=False),
+            model_type=ModelType(actor_model_class, actor_size, is_critic=False),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=ref_interface,
             input_data=[
@@ -84,7 +86,7 @@ def ppo_rpcs_example(size, bs, seqlen):
         ),
         ModelRPC(
             model_name="critic",
-            model_type=ModelType("llama", 7, is_critic=True),
+            model_type=ModelType(critic_model_class, critic_size, is_critic=True),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=critic_interface,
             input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
@@ -96,7 +98,7 @@ def ppo_rpcs_example(size, bs, seqlen):
         ),
         ModelRPC(
             model_name="actor",
-            model_type=ModelType(model_class, size, is_critic=False),
+            model_type=ModelType(actor_model_class, actor_size, is_critic=False),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=actor_interface,
             input_data=[
@@ -118,7 +120,7 @@ def ppo_rpcs_example(size, bs, seqlen):
         ModelRPC(
             model_name="critic",
             interface_type=ModelInterfaceType.TRAIN_STEP,
-            model_type=ModelType("llama", 7, is_critic=True),
+            model_type=ModelType(critic_model_class, critic_size, is_critic=True),
             interface_impl=critic_interface,
             input_data=[
                 "packed_seq",

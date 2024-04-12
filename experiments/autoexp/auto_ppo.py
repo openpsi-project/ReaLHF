@@ -27,26 +27,26 @@ def register_auto_ppo_experiment(
     if (actor_size == 7 and critic_size == 7)\
         or (critic_size == 7 and actor_size == 7):
         n_nodes = 1
-        nodelist = "QH-com41"
+        nodelist = "QH-com46"
     elif (actor_size == 13 and critic_size == 7)\
         or (critic_size == 13 and actor_size == 7):
         n_nodes = 2
-        nodelist = "QH-com[41-42]"
+        nodelist = "QH-com[43-44]"
     elif (actor_size == 34 and critic_size == 7)\
         or (critic_size == 34 and actor_size == 7)\
         or (actor_size == 13 and critic_size == 13):
         n_nodes = 4
-        nodelist = "QH-com[41-44]"
+        nodelist = "QH-com[43-46]"
     elif (actor_size == 70 and critic_size == 7)\
         or (critic_size == 70 and actor_size == 7)\
         or (actor_size == 34 and critic_size == 34):
         n_nodes = 8
-        nodelist = "QH-com[41-46,27-28]"
+        nodelist = "QH-com[41-48]"
     elif (actor_size == 70 and critic_size == 70):
         n_nodes = 16
         nodelist = "QH-com[20-22,24-28,41-48]"
     else:
-        raise ValueError(f"Invalid actor_size {actor_size} and critic_size {critic_size}")
+        return
 
     actor_model_class = "llama" if actor_size != 34 else "codellama"
     critic_model_class = "llama" if critic_size != 34 else "codellama"
@@ -237,10 +237,12 @@ def register_auto_ppo_experiment(
                             AutoPPOExperiment)
 
 
-for sz in [7, 13, 34, 70]:
-    for gen_bs in [128, 256, 512, 1024]:
+import itertools
+
+for actor_sz, critic_sz in itertools.product([7, 13, 34, 70], [7, 13, 34, 70]):
+    for gen_bs in [128, 256, 512, 1024, 2048, 4096]:
         # for seqlen in [256, 512, 1024]:
         for seqlen in [128, 384, 896]:
             for mode in ["search", "model_pipe", "data_pipe", "test"]:
                 train_bs = gen_bs
-                register_auto_ppo_experiment(sz, gen_bs, train_bs, seqlen, mode)
+                register_auto_ppo_experiment(actor_sz, critic_sz, gen_bs, train_bs, seqlen, mode)

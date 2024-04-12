@@ -472,66 +472,141 @@ def decompose_to_three_factors(n: int):
     return factors
 
 
-def get_table():
+def dump_table(n_nodes, model_size, res_queue, rank=0, parallel=1):
     from_model_name = ModelName("actor", 0)
     to_model_name = ModelName("actor", 1)
 
-    def hash_tuple_into_str(t) -> bytes:
+    def hash_tuple_into_str(t) -> str:
         return ",".join([str(i) for i in t])
 
+        # time.sleep(10)
+
+    import tqdm
     res = {}
+    device_mesh_sizes = [4] + [8 * i for i in range(1, n_nodes + 1)]
+    space = list(itertools.product(device_mesh_sizes, device_mesh_sizes))
+    sub_space = space[rank::parallel]
+    # for a, b in set(small_spaces + large_spaces):
+    for a, b in sub_space:
+        mtik = time.perf_counter()
+        all_configs = list(itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)))
+        all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
+        all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
+        all_configs = list(filter(lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8], all_configs))
+        all_configs = list(filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs))
+        all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
+        for config_id, (from_pp_mp_dp, to_pp_mp_dp) in tqdm.tqdm(enumerate(all_configs)):
+            world_size = max(a, b)
 
+            from_topo = base.topology.PipeModelDataParallelTopology(*from_pp_mp_dp)
+            to_topo = base.topology.PipeModelDataParallelTopology(*to_pp_mp_dp)
+            assert world_size >= from_topo.world_size()
+            assert world_size >= to_topo.world_size()
+
+            mconfig = get_llama_config(size=model_size)
+
+            tik = time.perf_counter()
+            cost = compute_cost(
+                world_size,
+                from_model_name,
+                to_model_name,
+                from_topo,
+                to_topo,
+                mconfig,
+                bw=200.0,
+                set_interval_cost=0.03,
+            )
+            # print(
+            #     f"Model size {model_size}: {from_pp_mp_dp} -> {to_pp_mp_dp}, cost {cost:.4f}",
+            #     time.perf_counter() - tik,
+            # )
+            res[hash_tuple_into_str((model_size, *from_pp_mp_dp, *to_pp_mp_dp))] = int(cost * 1000 * 1000)
+        print(
+            f"Time for model size {model_size} {a} -> {b} {rank}/{parallel}: {time.perf_counter() - mtik:.4f}, num res entries {len(res)}"
+        )
+
+    print(f"Rank {rank} of model size  {model_size} finished, res size {len(res)}.")
+    if res_queue is not None:
+        # res_queue.put(res)
+        import pickle
+        with open(f"profile_result/param_sync_cost_table_parallel-{model_size}-{rank}-{parallel}.pkl",
+                  "wb") as f:
+            pickle.dump(res, f)
+        print(f"dumped table with {len(res)} entries to {model_size}-{rank}-{parallel}.")
+    else:
+        return res
+
+
+# def dump_table_test(n_nodes, model_size, res_queue, rank = 0, parallel = 1):
+#     r = {model_size: rank}
+#     res_queue.put(r)
+#     print(f"Rank {rank} of model size  {model_size} finished.")
+#     time.sleep(5)
+
+
+def get_table():
+    r = {}
     for i, model_size in enumerate([7, 13, 34, 70]):
-        n_nodes = min(2**(i + 1), 8)
-        small_spaces = list(itertools.product([2, 4, 8, 16], [2, 4, 8, 16]))
-        large_spaces = list(
-            itertools.product([8 * i for i in range(1, n_nodes + 1)], [8 * i for i in range(1, n_nodes + 1)]))
-        for a, b in set(small_spaces + large_spaces):
-            # for a, b in [(32, 24)]:
-            mtik = time.perf_counter()
-            all_configs = list(itertools.product(decompose_to_three_factors(a),
-                                                 decompose_to_three_factors(b)))
-            all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
-            all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
-            all_configs = list(
-                filter(lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8], all_configs))
-            all_configs = list(filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs))
-            all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0,
-                                      all_configs))
-            for config_id, (from_pp_mp_dp, to_pp_mp_dp) in enumerate(all_configs):
-                world_size = max(a, b)
+        n_nodes = 8
+        res = dump_table(n_nodes, model_size, None, 0, 1)
+        r.update(res)
 
-                from_topo = base.topology.PipeModelDataParallelTopology(*from_pp_mp_dp)
-                to_topo = base.topology.PipeModelDataParallelTopology(*to_pp_mp_dp)
-                assert world_size >= from_topo.world_size()
-                assert world_size >= to_topo.world_size()
-
-                mconfig = get_llama_config(size=34)
-
-                tik = time.perf_counter()
-                cost = compute_cost(
-                    world_size,
-                    from_model_name,
-                    to_model_name,
-                    from_topo,
-                    to_topo,
-                    mconfig,
-                    bw=200.0,
-                    set_interval_cost=0.03,
-                )
-                print(
-                    f"direction: {from_pp_mp_dp} -> {to_pp_mp_dp}, cost {cost:.4f}",
-                    time.perf_counter() - tik,
-                )
-                res[hash_tuple_into_str((model_size, *from_pp_mp_dp, *to_pp_mp_dp))] = int(cost * 1000 * 1000)
-            print(f"Time for model size {model_size} {a} -> {b}: {time.perf_counter() - mtik:.4f}")
-
+    print(f"dumping table with {len(r)} entries.")
     import pickle
-    with open("param_sync_cost_table.pkl", "wb") as f:
-        pickle.dump(res, f)
-    return res
+    with open("profile_result/param_sync_cost_table.pkl", "wb") as f:
+        pickle.dump(r, f)
+    return r
+
+
+def get_table_parallel(parallel=4):
+    import torch.multiprocessing as mp
+
+    mp.set_start_method("spawn", force=True)
+
+    rq = mp.Queue()
+    ps = []
+    for i, model_size in enumerate([7, 13, 34, 70]):
+        # n_nodes = 8 if model_size != 70 else 16
+        n_nodes = 8
+        for rank in range(parallel):
+            ps.append(mp.Process(target=dump_table, args=(n_nodes, model_size, rq, rank, parallel)))
+
+    for p in ps:
+        p.start()
+
+    for p in ps:
+        p.join()
+
+    # r = {}
+    # while not rq.empty():
+    #     print("res_queue size", rq.qsize())
+    #     res = rq.get()
+    #     # print(r)
+    #     r.update(res)
+
+    # print(f"dumping table with {len(r)} entries.")
+    # import pickle
+    # with open("profile_result/param_sync_cost_table_parallel.pkl", "wb") as f:
+    #     pickle.dump(r, f)
+    # return r
+
+
+def merge_parallel_table():
+    import os
+    import pickle
+    r = {}
+    for path in os.listdir("profile_result"):
+        if path.endswith(".pkl") and path.startswith("param_sync_cost_table_parallel"):
+            path = os.path.join("profile_result", path)
+            with open(path, "rb") as f:
+                r.update(pickle.load(f))
+    with open("profile_result/param_sync_cost_table_parallel.pkl", "wb") as f:
+        pickle.dump(r, f)
+    return r
 
 
 if __name__ == "__main__":
     # main()
-    get_table()
+    # get_table_parallel(16)
+    # get_table()
+    merge_parallel_table()

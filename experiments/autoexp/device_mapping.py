@@ -64,7 +64,9 @@ def _group_models_by_node(allocations: Dict[str, RPCAllocation]) -> Dict[Tuple[i
     """
     node2models: Dict[Tuple[int, int], List[str]] = defaultdict(list)
     for m in allocations.values():
+        # print(m.mapping)
         node_mapping = m.mapping.any(1)
+        # print(node_mapping)
         node_idx_start, node_idx_end = np.where(node_mapping)[0][[0, -1]]
 
         k, v = None, None
@@ -131,23 +133,36 @@ def scheduling_config_from_allocations(
         ),
         model_worker=[],
     )
-    for st, ed in node2models:
-        if nodelist is not None and hostnames is not None:
-            _this_nodelist = ",".join(hostnames[st:ed + 1])
-        else:
-            _this_nodelist = None
-        node_count = ed - st + 1
-        sched.model_worker.append(
-            TasksGroup(
-                count=node_count * device_mesh.n_gpus_per_node,
-                scheduling=Scheduling.model_worker_default(
-                    cpu=4,
-                    gpu=1,
-                    gpu_type="tesla",
-                    mem=100000,
-                    nodelist=_this_nodelist,
-                ),
-            ),)
+    # print(node2models)
+    # for st, ed in node2models:
+    #     if nodelist is not None and hostnames is not None:
+    #         _this_nodelist = ",".join(hostnames[st:ed + 1])
+    #     else:
+    #         _this_nodelist = None
+    #     node_count = ed - st + 1
+    #     sched.model_worker.append(
+    #         TasksGroup(
+    #             count=node_count * device_mesh.n_gpus_per_node,
+    #             scheduling=Scheduling.model_worker_default(
+    #                 cpu=4,
+    #                 gpu=1,
+    #                 gpu_type="tesla",
+    #                 mem=100000,
+    #                 nodelist=_this_nodelist,
+    #             ),
+    #         ),)
+    #     print(_this_nodelist)
+    sched.model_worker.append(
+        TasksGroup(
+            count=device_mesh.n_nodes * device_mesh.n_gpus_per_node,
+            scheduling=Scheduling.model_worker_default(
+                cpu=4,
+                gpu=1,
+                gpu_type="tesla",
+                mem=100000,
+                nodelist=nodelist,
+            ),
+        ),)
     return sched
 
 

@@ -416,7 +416,8 @@ def estimate_rpc_memory(rpc: ModelRPC,
                         offload: bool = False,
                         gradient_checkpointing: bool = False,
                         offload_optimizer: bool = False,
-                        n_ppo_minibatches: int = 1):
+                        n_ppo_minibatches: int = 1,
+                        gen_len: int = 128):
     interface_type = rpc.interface_type
     model_config = load_model_config(rpc)
 
@@ -424,6 +425,7 @@ def estimate_rpc_memory(rpc: ModelRPC,
     i = model_config.intermediate_dim
     v = model_config.vocab_size
     s = seq_len
+    gs = gen_len
     b = batch_size
     L = model_config.n_layers
     # for llama actor only
@@ -442,7 +444,7 @@ def estimate_rpc_memory(rpc: ModelRPC,
         # gradient checkpointing is always enabled for flash attn
         static_mem = (param_mem + grad_mem) // (num_pp * num_mp) +\
                      optimizer_mem // (num_pp * num_dp * num_mp)
-        micro_bs = b // (2 * num_pp * num_dp)
+        micro_bs = b // (2 * num_pp * num_dp) if num_pp > 0 else b // (num_dp)
         active_mem = (micro_bs * s * h * num_pp * 2) * 2 * L // (num_pp * num_mp)
         # enabled gradient ckpt
         # print(f"train static_mem: {static_mem/(1024*1024*1024):02f} GB, "
@@ -463,7 +465,7 @@ def estimate_rpc_memory(rpc: ModelRPC,
         static_mem = int(2 * param_mem // (num_pp * num_mp))
         if num_dp > 4 and num_dp * num_mp * num_pp <= 16:
             static_mem = static_mem * 1.1
-        active_mem = 2 * (2 * b * s * h) * L // (num_pp * num_mp * num_dp)  # kv cache
+        active_mem = 2 * (2 * b * (gs + s) * h) * L // (num_pp * num_mp * num_dp)  # kv cache
         # print(f"generate static_mem: {static_mem/(1024*1024*1024):02f} GB, "
         #       f"kv_cache_mem: {kv_cache_mem/(1024*1024*1024):02f} GB, "
         #       f"total: {(static_mem + kv_cache_mem)/(1024*1024*1024):02f} GB")

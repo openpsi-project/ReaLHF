@@ -1,5 +1,6 @@
 import datetime
 import enum
+import itertools
 import os
 import re
 import subprocess
@@ -64,15 +65,18 @@ def parse_log():
     modes = ["s", "m"]
     # modes = ["s", "m"]
     trial_names = [
-        "20240407-0", "20240408-0", "20240408-1", "20240408-2", "20240409-2", "20240409-3", "20240409-4"
+        "20240407-0", "20240408-0", "20240408-1", "20240408-2", "20240409-2", "20240409-3", "20240409-4",
+        "20240410-1", "20240410-2", "20240411-2"
     ]
     res = {}
+    log_path = {}
     for model_size in model_sizes:
         for bs, seqlen in bs_seqlen:
             for mode in modes:
                 rs = []
+                lps = []
                 for trial_name in trial_names:
-                    key = (model_size, bs, seqlen, mode)
+                    key = (model_size, 7, bs, seqlen, mode)
                     exp_name = f"sosp-a{model_size}s{seqlen}g{bs}t{bs}-{mode}"
                     root_dir = f"/lustre/aigc/llm/logs/meizy/{exp_name}/{trial_name}"
                     if not os.path.exists(root_dir):
@@ -82,26 +86,114 @@ def parse_log():
                         r = _parse_log(root_dir, model_size, seqlen, bs, mode)
                         if r > 0:
                             rs.append(r)
+                            lps.append(root_dir)
                     except FileNotFoundError:
                         pass
 
                 if len(rs) > 0:
                     res[key] = np.max(rs) if mode == "m" else np.min(rs)
+                    log_path[key] = lps[np.argmax(rs)] if mode == "m" else lps[np.argmin(rs)]
 
     # import pprint
     # pprint.pprint(res)
+
+    # import pickle
+    # pickle.dump(res, open("res.pkl", "wb"))
+    print("*" * 30)
+
+    for model_size in model_sizes:
+        for bs, seqlen in bs_seqlen:
+            if model_size == 7:
+                continue
+            for mode in modes:
+                rs = []
+                lps = []
+                for trial_name in trial_names:
+                    key = (7, model_size, bs, seqlen, mode)
+                    exp_name = f"sosp-a7c{model_size}s{seqlen}g{bs}t{bs}-{mode}"
+                    root_dir = f"/lustre/aigc/llm/logs/meizy/{exp_name}/{trial_name}"
+                    if not os.path.exists(root_dir):
+                        continue
+                    print(f"exp_name: {exp_name}, trial_name: {trial_name}")
+                    try:
+                        r = _parse_log(root_dir, f"critic {model_size}", seqlen, bs, mode)
+                        if r > 0:
+                            rs.append(r)
+                            lps.append(root_dir)
+                    except FileNotFoundError:
+                        pass
+
+                if len(rs) > 0:
+                    res[key] = np.max(rs) if mode == "m" else np.min(rs)
+                    log_path[key] = lps[np.argmax(rs)] if mode == "m" else lps[np.argmin(rs)]
+
+    print("*" * 30)
+    trial_names = ["20240410-1", "20240410-2", "20240411-2"]
+    for model_size in model_sizes:
+        if model_size == 70 or model_size == 7:
+            continue
+        for bs, seqlen in bs_seqlen:
+            for mode in modes:
+                rs = []
+                lps = []
+                for trial_name in trial_names:
+                    key = (model_size, model_size, bs, seqlen, mode)
+                    exp_name = f"sosp-a{model_size}c{model_size}s{seqlen}g{bs}t{bs}-{mode}"
+                    root_dir = f"/lustre/aigc/llm/logs/meizy/{exp_name}/{trial_name}"
+                    # print(exp_name)
+
+                    if not os.path.exists(root_dir):
+                        continue
+                    print(f"exp_name: {exp_name}, trial_name: {trial_name}")
+                    try:
+                        r = _parse_log(root_dir, f"both {model_size}", seqlen, bs, mode)
+                        if r > 0:
+                            rs.append(r)
+                            lps.append(root_dir)
+                    except FileNotFoundError:
+                        pass
+
+                if len(rs) > 0:
+                    res[key] = np.max(rs) if mode == "m" else np.min(rs)
+                    log_path[key] = lps[np.argmax(rs)] if mode == "m" else lps[np.argmin(rs)]
+
+    print("*" * 30)
+
     from collections import defaultdict
     print("*" * 30)
-    for model_size in model_sizes:
+    for ams, cms in itertools.product(model_sizes, model_sizes):
         for bs, seqlen in bs_seqlen:
             v = defaultdict(lambda: "/")
             for mode in modes:
-                key = (model_size, bs, seqlen, mode)
+                key = (ams, cms, bs, seqlen, mode)
                 v[mode] = res[key] if key in res else -1
-            print(f"{model_size}B seqlen={seqlen} bs={bs} search {v['s']:.2f} model+pipe {v['m']:.2f}")
+
+            if any([r > 0 for r in v.values()]):
+                print(
+                    f"actor {ams}B critic {cms} B seqlen={seqlen} bs={bs} search {v['s']:.2f} model+pipe {v['m']:.2f}"
+                )
 
     import pickle
-    pickle.dump(res, open("res.pkl", "wb"))
+    import pprint
+    pprint.pprint(log_path)
+
+    import collections
+
+    import pandas
+    df_dict = collections.defaultdict(list)
+    for k, v in res.items():
+        lp = log_path[k]
+        ams, cms, bs, seqlen, mode = k
+        df_dict["actor_model_size"].append(ams)
+        df_dict["critic_model_size"].append(cms)
+        df_dict["batch_size"].append(bs)
+        df_dict["seqlen"].append(seqlen)
+        df_dict["mode"].append(mode)
+        df_dict["time"].append(v)
+        df_dict["log_path"].append(lp)
+    df = pandas.DataFrame(df_dict)
+    print(df)
+    # pickle.dump(df, open("/home/meizy/logs/sosp/res_df.pkl", "wb"))
 
 
 if __name__ == "__main__":
