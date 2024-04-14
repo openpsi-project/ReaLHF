@@ -8,8 +8,8 @@ import subprocess
 import numpy as np
 import transformers
 
-from profiler.search import (data_pipe_device_mapping, model_pipe_device_mapping, optimal_device_mapping,
-                             test_model_device_mapping)
+from profiler.search import (data_pipe_device_mapping, full_model_device_mapping, model_pipe_device_mapping,
+                             optimal_device_mapping, test_model_device_mapping)
 
 from api.config.config_base import MODEL_TYPE_TO_PATH
 from api.config.config_dataset import PromptOnlyDatasetConfig
@@ -216,7 +216,7 @@ def auto_device_mapping(
     n_gpus_per_node: int = 8,
     mem: int = 80,
     nodelist: Optional[str] = None,
-    mode: Literal["search", "model_pipe", "data_pipe"] = "search",
+    mode: Literal["search", "model_pipe", "data_pipe", "full_model"] = "search",
 ):
     device_mesh = ClusterDeviceMesh(n_nodes, n_gpus_per_node, mem)
 
@@ -250,6 +250,8 @@ def auto_device_mapping(
                     device_mapping_func = data_pipe_device_mapping
                 elif mode == "test":
                     device_mapping_func = test_model_device_mapping
+                elif mode == "full_model":
+                    device_mapping_func = full_model_device_mapping
                 else:
                     raise ValueError(f"Invalid mode {mode}")
 

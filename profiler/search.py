@@ -80,7 +80,7 @@ def optimal_device_mapping(
     # rpc_dict = {rpc.name: rpc for rpc in model_rpcs}
 
     n_nodes = device_mesh.n_nodes
-    search_time = 60 * n_nodes
+    search_time = 120  # 60 * n_nodes
 
     rs: List[Dict[str, List]] = mdm_search.multi_mcmc_search(
         rpc_list,
@@ -94,6 +94,10 @@ def optimal_device_mapping(
         search_time,  # time limit for each search
         1,  # repeat
     )
+    if not from_file:
+        with open(rs_dir, "w") as f:
+            import pprint
+            pprint.pprint(rs, stream=f)
     r = rs[-1]
     # print(r)
 
@@ -112,7 +116,7 @@ def optimal_device_mapping(
         r[actor_train.name] = r.pop(old_name)
     else:
         actor_train.model_name = ModelName("actor", 0)
-        rollout.model_name = ModelName("rollout", 0)
+        rollout.model_name = ModelName("actor", 0)
 
     critic_inf_topo = (r[critic_inf.name]["device_mesh"], r[critic_inf.name]["num_pp"],
                        r[critic_inf.name]["num_dp"], r[critic_inf.name]["num_mp"])
@@ -181,9 +185,6 @@ def optimal_device_mapping(
         with open(log_dir, "w") as f:
             import pprint
             pprint.pprint(rpc_alloc_dict, stream=f)
-        with open(rs_dir, "w") as f:
-            import pprint
-            pprint.pprint(rs, stream=f)
 
     return rpc_alloc_dict
 
@@ -334,12 +335,16 @@ def handpicked_model_device_mapping(
                                             pipeline_parallel_size=n_nodes,
                                             data_parallel_size=8,
                                             use_sequence_parallel=True)
+    elif mode == "full_model":
+        parallel_config = ParallelismConfig(model_parallel_size=8 * n_nodes,
+                                            pipeline_parallel_size=1,
+                                            data_parallel_size=1,
+                                            use_sequence_parallel=True)
 
     return {
         rollout.name: RPCAllocation(
             rpc=rollout,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -352,7 +357,6 @@ def handpicked_model_device_mapping(
         rew_inf.name: RPCAllocation(
             rpc=rew_inf,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -363,7 +367,6 @@ def handpicked_model_device_mapping(
         ref_inf.name: RPCAllocation(
             rpc=ref_inf,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -374,7 +377,6 @@ def handpicked_model_device_mapping(
         critic_inf.name: RPCAllocation(
             rpc=critic_inf,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -387,7 +389,6 @@ def handpicked_model_device_mapping(
         critic_train.name: RPCAllocation(
             rpc=critic_train,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -400,7 +401,6 @@ def handpicked_model_device_mapping(
         actor_train.name: RPCAllocation(
             rpc=actor_train,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -415,6 +415,7 @@ def handpicked_model_device_mapping(
 
 model_pipe_device_mapping = functools.partial(handpicked_model_device_mapping, mode="model_pipe")
 data_pipe_device_mapping = functools.partial(handpicked_model_device_mapping, mode="data_pipe")
+full_model_device_mapping = functools.partial(handpicked_model_device_mapping, mode="full_model")
 
 
 def test_model_device_mapping(
@@ -452,7 +453,6 @@ def test_model_device_mapping(
         rollout.name: RPCAllocation(
             rpc=rollout,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -464,7 +464,6 @@ def test_model_device_mapping(
         rew_inf.name: RPCAllocation(
             rpc=rew_inf,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -475,7 +474,6 @@ def test_model_device_mapping(
         ref_inf.name: RPCAllocation(
             rpc=ref_inf,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -486,7 +484,6 @@ def test_model_device_mapping(
         critic_inf.name: RPCAllocation(
             rpc=critic_inf,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -499,7 +496,6 @@ def test_model_device_mapping(
         critic_train.name: RPCAllocation(
             rpc=critic_train,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -512,7 +508,6 @@ def test_model_device_mapping(
         actor_train.name: RPCAllocation(
             rpc=actor_train,
             mapping=mapping,
-            nodelist=nodelist,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
                 path=MODEL_TYPE_TO_PATH[rollout.model_type],
@@ -535,14 +530,20 @@ if __name__ == "__main__":
     # os.environ.setdefault("IS_REMOTE", "0")
     bs = 128
     seqlen = 896
-    size = 34
-    n_nodes = 8
-    node_start = 41
-    node_end = node_start + n_nodes - 1
-    nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
+    size = 70
+    n_nodes = 16
+    # node_start = 20
+    # node_end = node_start + n_nodes - 1
+    # nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
+    nodelist = "QH-com[20-22,24-28,41-48]"
     cluster_device_mesh = ClusterDeviceMesh(n_nodes=n_nodes, n_gpus_per_node=8, mem=80)
     rpcs = ppo_rpcs_example(size, size, bs, seqlen)
     device_mesh = make_device_mesh_from_name(nodelist)
+
+    # from profiler.device_mesh import find_sub_device_meshes
+    # import pprint
+    # pprint.pprint(find_sub_device_meshes(device_mesh))
+
     dump_search_settings(rpcs, device_mesh, num_gen_tokens=seqlen, n_ppo_minibatches=4)
     # optimal_device_mapping(cluster_device_mesh, rpcs, None, nodelist)
 

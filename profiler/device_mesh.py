@@ -90,10 +90,7 @@ class DeviceMesh:
                 for gpu_index in gpu_indices:
                     mapping[node_index, gpu_index] = 1
 
-        return RPCAllocation(rpc=rpc,
-                             mapping=mapping,
-                             train_eval_config=train_eval_config,
-                             node_list=self.device_mesh_name)
+        return RPCAllocation(rpc=rpc, mapping=mapping, train_eval_config=train_eval_config)
 
 
 def is_overlap(device_mesh: DeviceMesh, other: DeviceMesh):
@@ -159,6 +156,7 @@ def make_device_mesh_from_name(name: str):
                           n_gpus_per_node=len(gpu_ids))
     else:
         node_names = parse_slurm_nodelist(name)
+        print(node_names)
         n_nodes = len(node_names)
         return DeviceMesh(device_mesh_name=name,
                           n_nodes=n_nodes,
@@ -265,7 +263,7 @@ def find_sub_device_meshes(device_mesh: DeviceMesh) -> List[DeviceMesh]:
     # multi-node meshes
     node_ids = sorted([parse_node_id(node) for node in device_mesh.node_names])
     for i in range(2, device_mesh.n_nodes):
-        for j in range(device_mesh.n_nodes - i):
+        for j in range(device_mesh.n_nodes - i + 1):
             sub_mesh_node_ids = node_ids[j:j + i]
             node_names = [f"QH-com{node_id:02d}" for node_id in sub_mesh_node_ids]
             res.append(

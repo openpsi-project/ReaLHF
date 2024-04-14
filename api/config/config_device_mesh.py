@@ -14,7 +14,6 @@ class RPCAllocation:
     rpc: ModelRPC
     mapping: np.ndarray  # a 2D binary array, shape (n_nodes, n_gpus_per_node)
     train_eval_config: ModelTrainEvalConfig
-    nodelist: Optional[str] = None
 
     @property
     def topo(self) -> PipeModelDataParallelTopology:

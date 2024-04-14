@@ -28,7 +28,7 @@ def enumerate_rpc_executions(rpc: ModelRPC, device_mesh: DeviceMesh, num_gen_tok
                 continue
             if p.num_mp * p.num_dp > 8 and rpc.interface_type == ModelInterfaceType.TRAIN_STEP:
                 continue
-            if p.num_pp > max(device_mesh.n_nodes * 2, 8):
+            if p.num_pp > max(device_mesh.n_nodes, 8):
                 continue
             mem_cost, static_mem = estimate_rpc_memory(rpc,
                                                        p,
