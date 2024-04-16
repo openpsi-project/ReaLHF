@@ -520,31 +520,87 @@ def test_model_device_mapping(
     }
 
 
+def profile_search(rank):
+    # bs_list = [128, 256, 512]
+    # seqlen_list = [896, 384, 128]
+    model_sizes = [7, 13, 34, 70]
+    bs_list = [128, 256, 512]
+    seqlen_list = [896, 384, 128]
+    time_limits = [1800, 1800, 1800, 1800]
+    n_nodes_list = [1, 2, 4, 8]
+    modes = ["actor", "critic", "both"]
+    for mode in modes:
+        # for bs, seqlen in zip(bs_list, seqlen_list):
+        bs = bs_list[rank]
+        seqlen = seqlen_list[rank]
+        for model_size, n_nodes, time_limit in zip(model_sizes, n_nodes_list, time_limits):
+            # nodelist = "QH-com20"
+            cluster_device_mesh = ClusterDeviceMesh(n_nodes=n_nodes, n_gpus_per_node=8, mem=80)
+            if mode == "actor":
+                rpcs = ppo_rpcs_example(model_size, 7, bs, seqlen)
+                exp_name = f"ams-{model_size}_cms-7_bs-{bs}_seqlen-{seqlen}_n-{n_nodes}"
+            elif mode == "critic":
+                rpcs = ppo_rpcs_example(7, model_size, bs, seqlen)
+                exp_name = f"ams-7_cms-{model_size}_bs-{bs}_seqlen-{seqlen}_n-{n_nodes}"
+            elif mode == "both":
+                n_nodes *= 2
+                rpcs = ppo_rpcs_example(model_size, model_size, bs, seqlen)
+                exp_name = f"ams-{model_size}_cms-{model_size}_bs-{bs}_seqlen-{seqlen}_n-{n_nodes}"
+
+            node_start = 40
+            node_end = node_start + n_nodes - 1
+            nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
+
+            dump_dir = f"profile_result/search/{exp_name}.pkl"
+            print(exp_name, nodelist)
+            device_mesh = make_device_mesh_from_name(nodelist)
+
+            rpc_exe_list = make_rpc_exe_list(rpcs,
+                                             device_mesh,
+                                             num_gen_tokens=seqlen,
+                                             n_ppo_minibatches=4,
+                                             log_dir=None,
+                                             if_print=False)
+            rpc_list = make_rpc_list(rpcs, if_print=False)
+            graph = build_graph(rpcs, 5, 1, if_print=False)
+            cost_table = pickle.load(open("profile_result/param_sync_cost_table_parallel.pkl", "rb"))
+            model_size_dict = make_model_size_dict(rpcs, if_print=False)
+
+            rs = mdm_search.mcmc_search_time_profile(rpc_list, rpc_exe_list, graph, cost_table,
+                                                     model_size_dict, 0.0001, time_limit)
+            import pprint
+            pprint.pprint(rs)
+
+            with open(dump_dir, "wb") as f:
+                pickle.dump(rs, f)
+
+
 if __name__ == "__main__":
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument("--expr_name", type=str)
-    # args = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--rank", type=int)
+    args = parser.parse_args()
+    profile_search(rank=args.rank)
 
     # experiment = config_package.make_experiment(args.expr_name)
 
     # os.environ.setdefault("IS_REMOTE", "0")
-    bs = 128
-    seqlen = 896
-    size = 70
-    n_nodes = 16
-    # node_start = 20
-    # node_end = node_start + n_nodes - 1
-    # nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
-    nodelist = "QH-com[20-22,24-28,41-48]"
-    cluster_device_mesh = ClusterDeviceMesh(n_nodes=n_nodes, n_gpus_per_node=8, mem=80)
-    rpcs = ppo_rpcs_example(size, size, bs, seqlen)
-    device_mesh = make_device_mesh_from_name(nodelist)
+    # bs = 128
+    # seqlen = 896
+    # size = 7
+    # n_nodes = 1
+    # # node_start = 20
+    # # node_end = node_start + n_nodes - 1
+    # # nodelist = f"QH-com[{node_start:02d}-{node_end:02d}]"
+    # nodelist = "QH-com20"
+    # cluster_device_mesh = ClusterDeviceMesh(n_nodes=n_nodes, n_gpus_per_node=8, mem=80)
+    # rpcs = ppo_rpcs_example(size, size, bs, seqlen)
+    # device_mesh = make_device_mesh_from_name(nodelist)
 
-    # from profiler.device_mesh import find_sub_device_meshes
-    # import pprint
-    # pprint.pprint(find_sub_device_meshes(device_mesh))
+    # # from profiler.device_mesh import find_sub_device_meshes
+    # # import pprint
+    # # pprint.pprint(find_sub_device_meshes(device_mesh))
 
-    dump_search_settings(rpcs, device_mesh, num_gen_tokens=seqlen, n_ppo_minibatches=4)
+    # dump_search_settings(rpcs, device_mesh, num_gen_tokens=seqlen, n_ppo_minibatches=4)
     # optimal_device_mapping(cluster_device_mesh, rpcs, None, nodelist)
 
     # 7b 13b 2x8:
@@ -555,3 +611,4 @@ if __name__ == "__main__":
     # [0, 0, 9, 1, 4, 3, ] 87441235
     # [0, 0, 9, 1, 1, 3, ] 86986420
     # print_model_device_mapping_by_index(rpcs, device_mesh, [0, 0, 9, 1, 1, 3, ])
+    # profile_search()

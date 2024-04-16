@@ -11,8 +11,9 @@ import profiler.estimate
 
 
 def verify_compute():
-    trial_names = ["20240404", "20240403"]
+    # trial_names = ["20240404", "20240403"]
     # date = "20240328"
+    trial_names = ["20240415-0"]
     expr_names = []
     sizes = [7, 13, 34, 70]
     for size in sizes:
@@ -32,7 +33,8 @@ def verify_compute():
                 num_pp = remain // num_dp
                 # if num_dp * num_mp > 8 or num_pp > 8:
                 #     continue
-                expr_names.append(f"profile-s{size}p{num_pp}m{num_mp}d{num_dp}")
+                if num_pp <= 8:
+                    expr_names.append(f"profile-s{size}p{num_pp}m{num_mp}d{num_dp}")
 
     rs = []
     prs = []

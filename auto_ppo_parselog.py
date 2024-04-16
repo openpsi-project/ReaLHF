@@ -278,7 +278,18 @@ def parse_log():
         df_dict["log_path"].append(lp)
     df = pandas.DataFrame(df_dict)
     print(df)
-    pickle.dump(df, open("/home/meizy/logs/sosp/res_df.pkl", "wb"))
+
+    k1 = (34, 7, 256, 384, "s", 4)
+    k2 = (34, 7, 256, 384, "m", 4)
+    print(f"lp1 = {log_path[k1]}")
+    print(f"lp2 = {log_path[k2]}")
+
+    k1 = (7, 34, 128, 896, "s", 4)
+    k2 = (7, 34, 128, 896, "m", 4)
+    print(f"lp1 = {log_path[k1]}")
+    print(f"lp2 = {log_path[k2]}")
+
+    # pickle.dump(df, open("/home/meizy/logs/sosp/res_df.pkl", "wb"))
 
 
 if __name__ == "__main__":

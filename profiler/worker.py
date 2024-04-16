@@ -199,8 +199,11 @@ class ProfileWorker(worker_base.Worker):
             func_name = rpc.interface_type.value
             num_pp = base.constants.pipe_parallel_world_size()
             num_dp = base.constants.data_parallel_world_size()
-            if bs < 2 * num_pp * num_dp:
+            if bs < 2 * num_pp * num_dp and func_name == "train_step":
                 return worker_base.PollResult(sample_count=0, batch_count=0)
+            elif bs < num_pp * num_dp:
+                return worker_base.PollResult(sample_count=0, batch_count=0)
+
             if rpc.interface_type == api.config.dfg.ModelInterfaceType.GENERATE:
                 data = random_sample(bs // num_dp, 128, self.__vocab_size)
             else:
@@ -243,8 +246,8 @@ class ProfileWorker(worker_base.Worker):
 
             r = worker_base.PollResult(0, 0)
             if self.profile_rpc:
-                bs_seq_len = itertools.product(self.bs_list, self.seq_len_list)
-                bs_seq_len = sorted(bs_seq_len, key=lambda x: x[0] * x[1])
+                bs_seq_len = zip(self.bs_list, self.seq_len_list)
+                # bs_seq_len = sorted(bs_seq_len, key=lambda x: x[0] * x[1])
                 self.__reinit_backend(max(self.bs_list), max(self.seq_len_list))
                 for bs, seq_len in bs_seq_len:
                     for rpc in self.rpcs:

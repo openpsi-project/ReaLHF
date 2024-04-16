@@ -116,7 +116,7 @@ class ProfileInterface(api.model.ModelInterface):
 
         if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
             res = module.forward(seqlens_cpu=data.metadata['seqlens'],
-                                 packed_input_ids=data["packed_seq"],
+                                 packed_input_ids=data["packed_input_ids"],
                                  cu_seqlens=cu_seqlens,
                                  num_micro_batches=base.constants.pipe_parallel_world_size())
             if res is None:
@@ -126,7 +126,7 @@ class ProfileInterface(api.model.ModelInterface):
             if hasattr(module, "module"):
                 module = module.module
             with module.sequence_parallel_disable():
-                res = module(packed_input_ids=data["packed_seq"],
+                res = module(packed_input_ids=data["packed_input_ids"],
                              cu_seqlens=cu_seqlens,
                              max_seqlen=max_seqlen)
             logits = res

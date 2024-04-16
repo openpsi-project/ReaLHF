@@ -45,7 +45,7 @@ _LLM_ENVVARS = {
     # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
     "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
     # Whether to enable time mark to plot timelines.
-    "DLLM_CUDA_TMARK": "0",
+    "DLLM_CUDA_TMARK": "1",
 }
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v

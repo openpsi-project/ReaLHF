@@ -463,8 +463,8 @@ def estimate_rpc_memory(rpc: ModelRPC,
             return static_mem, static_mem
     elif interface_type == ModelInterfaceType.GENERATE:
         static_mem = int(2 * param_mem // (num_pp * num_mp))
-        if num_dp > 4 and num_dp * num_mp * num_pp <= 16:
-            static_mem = static_mem * 1.1
+        # if num_dp > 4 and num_dp * num_mp * num_pp <= 16:
+        #     static_mem = static_mem * 1.1
         active_mem = 2 * (2 * b * (gs + s) * h) * L // (num_pp * num_mp * num_dp)  # kv cache
         # print(f"generate static_mem: {static_mem/(1024*1024*1024):02f} GB, "
         #       f"kv_cache_mem: {kv_cache_mem/(1024*1024*1024):02f} GB, "
@@ -478,17 +478,22 @@ def main(args):
     rpc_allocations = exp.rpc_allocations
     # device_mesh = exp.device_mesh_name
 
-    bs_list = [256, 360, 512, 720, 1024]
-    seq_len_list = [128, 256, 512, 1024]
+    bs_list = [128, 256, 512]
+    seq_len_list = [1024, 512, 256]
     # bs_list = [32, 64]
     # seq_len_list = [128, 256]
-    bs_seqlen_list = list(itertools.product(bs_list, seq_len_list))
+    bs_seqlen_list = list(zip(bs_list, seq_len_list))
     r = {}
     for rpc, rpc_alloc in zip(rpcs, rpc_allocations):
         rpc_name = rpc.name
         p = ModelParallelStrategy.from_config(rpc_alloc.train_eval_config.parallel)
         for bs, seq_len in bs_seqlen_list:
-            rpc_cost = estimate_rpc_time(rpc, p, use_gradient_checkpointing=True, bs=bs, seq_len=seq_len)
+            rpc_cost = estimate_rpc_time(rpc,
+                                         p,
+                                         use_gradient_checkpointing=True,
+                                         bs=bs,
+                                         seq_len=seq_len,
+                                         num_gen_tokens=seq_len - 128)
             stats_key = make_stats_key(rpc_name, bs, seq_len)
             r[stats_key] = rpc_cost
             # print(f"RPC {stats_key} cost: {rpc_cost}")

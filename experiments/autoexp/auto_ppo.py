@@ -50,7 +50,7 @@ def register_auto_ppo_experiment(actor_size: int,
     elif n_nodes == 2:
         nodelist = "QH-com[27-28]"
     elif n_nodes == 4:
-        nodelist = "QH-com[26-29]"
+        nodelist = "QH-com[25-28]"
     elif n_nodes == 8:
         nodelist = "QH-com[20-22,24-28]"
     elif n_nodes == 16:
