@@ -6,9 +6,10 @@ from profiler.multi_host_main import main
 from profiler.utils import find_factors
 
 if __name__ == "__main__":
-    date = datetime.datetime.now().strftime("%Y%m%d")
+    date = datetime.datetime.now().strftime("%Y%m%d") + "-0"
     expr_names = []
-    sizes = [34, 70]
+    # sizes = [70, 34, 13, 7]
+    sizes = [70, 34, 13]
     for size in sizes:
         if size == 7:
             n_nodes = 1
@@ -24,7 +25,8 @@ if __name__ == "__main__":
             remain = num_gpus // num_mp
             for num_dp in find_factors(remain):
                 num_pp = remain // num_dp
-                expr_names.append(f"profile-s{size}p{num_pp}m{num_mp}d{num_dp}")
+                if num_pp <= 8:
+                    expr_names.append(f"profile-s{size}p{num_pp}m{num_mp}d{num_dp}")
 
     for expr_name in expr_names:
         st = time.monotonic()
