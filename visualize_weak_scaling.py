@@ -4,7 +4,11 @@ import seaborn as sns
 import pandas as pd
 import os
 import transformers
+import itertools
 import pickle
+import argparse
+import numpy as np
+import scipy.stats
 
 from base.monitor import calculate_llama_gen_flops, calculate_llama_train_flops, caculuate_llama_forward_flops
 from api.config.config_base import ModelType, MODEL_TYPE_TO_PATH
@@ -66,42 +70,56 @@ def compute_rlhf_pflops(
     return flops / 1e15 / avg_time
 
 
+def get_model_sizes(main_model_size: int, case: int):
+    if case == 0:
+        return (main_model_size, main_model_size, 7, 7)
+    elif case == 1:
+        return (7, 7, main_model_size, main_model_size)
+    elif case == 2:
+        return (main_model_size, main_model_size, main_model_size, main_model_size)
+    else:
+        raise NotImplementedError()
+
+
+def get_n_gpus(main_model_size: int, case):
+    default_ngpus = (
+        8 if main_model_size == 7 else 16 if main_model_size == 13 else 32 if main_model_size == 34 else 64
+    )
+    return default_ngpus if case <= 1 else 2 * default_ngpus
+
+
 def amend_baseline_data(all_data: List, baseline_name: str):
     if baseline_name == "DeepSpeedChat":
-        os.system("python3 ../DeepSpeedExamples/sosp_parselog.py --max --dump_to_file /tmp/dschat.pkl")
-        with open("/tmp/dschat.pkl", "rb") as f:
+        with open("/lustre/fw/sosp24/dschat_res.pkl", "rb") as f:
             data: pd.DataFrame = pickle.load(f)
     elif baseline_name == "OpenRLHF":
-        os.system("python3 ../OpenRLHF/sosp_parselog.py --max --dump_to_file /tmp/openrlhf.pkl")
-        with open("/tmp/openrlhf.pkl", "rb") as f:
+        with open("/lustre/fw/sosp24/openrlhf_res.pkl", "rb") as f:
             data: pd.DataFrame = pickle.load(f)
     else:
         raise NotImplementedError()
 
-    # case 1-3, increased actor/ref size, fixed rew/critic size, seqlen=128,384,896
-    for actor_size in [7, 13, 34, 70]:
-        ref_size = actor_size
-        critic_size = rew_size = 7
-        for seqlen in [128, 384, 896]:
+    for case in range(3):
+        for main_model_size, seqlen in itertools.product([7, 13, 34, 70], [128, 384, 896]):
+            subplot_y = 0 if seqlen == 128 else 1 if seqlen == 384 else 2
+            actor_size, ref_size, critic_size, rew_size = get_model_sizes(main_model_size, case)
+            n_gpus = get_n_gpus(main_model_size, case)
             bs = 2**17 // (seqlen + 128)
             df = data[
-                (data["actor_size"] == actor_size)
-                & (data["critic_size"] == critic_size)
-                & (data["seqlen"] == seqlen)
-                & (data["gpu_scale_factor"] == 1)
+                (data["a"] == actor_size)
+                & (data["c"] == critic_size)
+                & (data["s"] == seqlen)
+                & (data["n_gpus"] == n_gpus)
             ]
             if len(df) == 0:
-                assert actor_size == 70
                 all_data.append(
                     dict(
-                        case=1 if seqlen == 128 else 2 if seqlen == 384 else 3,
-                        ngpus=(
-                            8
-                            if actor_size == 7
-                            else 16 if actor_size == 13 else 32 if actor_size == 34 else 64
-                        ),
+                        subplot_x=case,
+                        subplot_y=subplot_y,
+                        ngpus=n_gpus,
                         pflops=None,
-                        system=baseline_name,
+                        cih=None,
+                        cil=None,
+                        System=baseline_name,
                     )
                 )
                 continue
@@ -115,64 +133,124 @@ def amend_baseline_data(all_data: List, baseline_name: str):
                 batch_size=bs,
                 prompt_len=128,
                 gen_len=seqlen,
-                avg_time=d["avg_time"],
+                avg_time=d["avg_t"],
+            )
+            cih = compute_rlhf_pflops(
+                actor_size,
+                critic_size,
+                ref_size,
+                rew_size,
+                batch_size=bs,
+                prompt_len=128,
+                gen_len=seqlen,
+                avg_time=d["cil"],
+            )
+            cil = compute_rlhf_pflops(
+                actor_size,
+                critic_size,
+                ref_size,
+                rew_size,
+                batch_size=bs,
+                prompt_len=128,
+                gen_len=seqlen,
+                avg_time=d["cih"],
             )
             all_data.append(
                 dict(
-                    case=1 if seqlen == 128 else 2 if seqlen == 384 else 3,
-                    ngpus=(
-                        8 if actor_size == 7 else 16 if actor_size == 13 else 32 if actor_size == 34 else 64
-                    ),
+                    subplot_x=case,
+                    subplot_y=subplot_y,
+                    ngpus=n_gpus,
                     pflops=p,
-                    system=baseline_name,
+                    cih=cih,
+                    cil=cil,
+                    System=baseline_name,
                 )
             )
+    return all_data
 
-    # case 4
-    for critic_size in [7, 13, 34, 70]:
-        rew_size = critic_size
-        actor_size = ref_size = 7
-        seqlen, bs = 384, 256
-        df = data[
-            (data["actor_size"] == actor_size)
-            & (data["critic_size"] == critic_size)
-            & (data["seqlen"] == seqlen)
-            & (data["gpu_scale_factor"] == 1)
-        ]
-        if len(df) == 0:
+
+def t_score_ci(m, std, size):
+    # Calculate mean and standard deviation
+    mean = m
+    std_dev = std
+
+    # Define confidence level (e.g., 95%)
+    confidence_level = 0.95
+
+    # Degrees of freedom (n-1 for a sample)
+    degrees_of_freedom = size - 1
+
+    # Calculate the critical value based on the confidence level and degrees of freedom
+    t_score = scipy.stats.t.ppf((1 + confidence_level) / 2, degrees_of_freedom)
+
+    # Calculate the margin of error
+    margin_of_error = t_score * (std_dev / np.sqrt(size))
+
+    # Calculate the confidence interval
+    lower_bound = mean - margin_of_error
+    upper_bound = mean + margin_of_error
+    return lower_bound, upper_bound
+
+
+def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
+    name = "ReaL (Ours)" if mode == "s" else "ReaL-Heuristic"
+    data = data[data["mode"] == mode]
+    for case in range(3):
+        for main_model_size, seqlen in itertools.product([7, 13, 34, 70], [128, 384, 896]):
+            subplot_y = 0 if seqlen == 128 else 1 if seqlen == 384 else 2
+            actor_size, ref_size, critic_size, rew_size = get_model_sizes(main_model_size, case)
+            n_gpus = get_n_gpus(main_model_size, case)
+            bs = 2**17 // (seqlen + 128)
+            df = data[
+                (data["actor_model_size"] == actor_size)
+                & (data["critic_model_size"] == critic_size)
+                & (data["seqlen"] == seqlen)
+                & (data["n_nodes"] == n_gpus // 8)
+            ]
+            assert len(df) == 1, df
+            d = df.to_dict(orient="records")[0]
+            p = compute_rlhf_pflops(
+                actor_size,
+                critic_size,
+                ref_size,
+                rew_size,
+                batch_size=bs,
+                prompt_len=128,
+                gen_len=seqlen,
+                avg_time=d["time"],
+            )
+            cil_t, cih_t = t_score_ci(d["time"], d["std"], d["n"])
+            cih = compute_rlhf_pflops(
+                actor_size,
+                critic_size,
+                ref_size,
+                rew_size,
+                batch_size=bs,
+                prompt_len=128,
+                gen_len=seqlen,
+                avg_time=cil_t,
+            )
+            cil = compute_rlhf_pflops(
+                actor_size,
+                critic_size,
+                ref_size,
+                rew_size,
+                batch_size=bs,
+                prompt_len=128,
+                gen_len=seqlen,
+                avg_time=cih_t,
+            )
             all_data.append(
                 dict(
-                    case=4,
-                    ngpus=(
-                        8
-                        if critic_size == 7
-                        else 16 if critic_size == 13 else 32 if critic_size == 34 else 64
-                    ),
-                    pflops=None,
-                    system=baseline_name,
+                    subplot_x=case,
+                    subplot_y=subplot_y,
+                    ngpus=n_gpus,
+                    pflops=p,
+                    cih=cih,
+                    cil=cil,
+                    System=name,
                 )
             )
-            continue
-        assert len(df) == 1, df
-        d = df.to_dict(orient="records")[0]
-        p = compute_rlhf_pflops(
-            actor_size,
-            critic_size,
-            ref_size,
-            rew_size,
-            batch_size=bs,
-            prompt_len=128,
-            gen_len=seqlen,
-            avg_time=d["avg_time"],
-        )
-        all_data.append(
-            dict(
-                case=4,
-                ngpus=8 if critic_size == 7 else 16 if critic_size == 13 else 32 if critic_size == 34 else 64,
-                pflops=p,
-                system=baseline_name,
-            )
-        )
     return all_data
 
 
@@ -180,130 +258,116 @@ def main():
     all_data = []
     all_data = amend_baseline_data(all_data, "DeepSpeedChat")
     all_data = amend_baseline_data(all_data, "OpenRLHF")
-
-    # amend our system's result
-    with open("/lustre/meizy/res.pkl", "rb") as f:
-        our_res = pickle.load(f)
-    ours_data = []
-    ours_m_data = []
-    for key, avg_time in our_res.items():
-        actor_size, bs, seqlen, mode = key
-        if actor_size == 7:
-            ngpus = 8
-        elif actor_size == 13:
-            ngpus = 16
-        elif actor_size == 34:
-            ngpus = 32
-        elif actor_size == 70:
-            ngpus = 64
-        ref_size = actor_size
-        critic_size = rew_size = 7
-        p = compute_rlhf_pflops(
-            actor_size,
-            critic_size,
-            ref_size,
-            rew_size,
-            batch_size=bs,
-            prompt_len=128,
-            gen_len=seqlen,
-            avg_time=avg_time,
-        )
-        if seqlen == 128:
-            case = 1
-        elif seqlen == 384:
-            case = 2
-        elif seqlen == 896:
-            case = 3
-        else:
-            raise NotImplementedError()
-        if mode == "s":
-            system = "ours"
-            ours_data.append(
-                dict(
-                    case=case,
-                    ngpus=ngpus,
-                    pflops=p,
-                    system=system,
-                )
-            )
-        elif mode == "m":
-            system = "ours-heuristic"
-            ours_m_data.append(
-                dict(
-                    case=case,
-                    ngpus=ngpus,
-                    pflops=p,
-                    system=system,
-                )
-            )
-        else:
-            raise NotImplementedError()
-
-    # all_data.extend(ours_m_data)
-    all_data.extend(ours_data)
+    # amend our System's result
+    with open("/lustre/meizy/res_df.pkl", "rb") as f:
+        data = pickle.load(f)
+    all_data = amend_ours_data(all_data, data, "m")
+    all_data = amend_ours_data(all_data, data, "s")
 
     # Convert data to DataFrame
     df = pd.DataFrame(all_data)
+    # print(df.to_string(index=False))
+    # input()
 
     # Set style
     sns.set_style("whitegrid")
 
     # Create subplots
-    fig, axes = plt.subplots(1, 3, figsize=(12, 3))
+    fig, axes = plt.subplots(3, 3, figsize=(12, 5))
+    width = 0.75
 
     # Plot for each seqlen setting
-    for i, ((case, group), ax) in enumerate(zip(df.groupby("case"), axes.flatten())):
-        if case == 4:
-            continue
-        width = 0.75
-        if i == 0:
-            print(group)
-        sns.barplot(x="ngpus", y="pflops", data=group, ax=ax, hue="system", width=width, palette=["blue", "orange", "red"])
+    for subplot_x, subplot_y in itertools.product(range(3), range(3)):
+        case = subplot_x
+        ax = axes[subplot_x, subplot_y]
+        group = df[(df["subplot_x"] == case) & (df["subplot_y"] == subplot_y)]
+
+        sns.barplot(
+            x="ngpus",
+            y="pflops",
+            data=group,
+            ax=ax,
+            hue="System",
+            width=width,
+            palette=sns.color_palette(n_colors=4),
+        )
+
+        n_gpus = group["ngpus"].unique().tolist()
+        systems = group["System"].unique().tolist()
+        width_per_bar = width / len(systems)
+
+        # plot error bars
+        # offsets = [width_per_bar * systems.index(s) + 0.5 * width_per_bar for s in group["System"]]
+        # errors = np.array([
+        #         [mean - lower, upper - mean]
+        #         for mean, lower, upper in zip(group['pflops'], group['cil'], group['cih'])
+        #     ]).swapaxes(0, 1)
+        # print(np.mean(errors[0] / group['pflops']))
+        # ax.errorbar(
+        #     [n_gpus.index(x) - width / 2 + offset for x, offset in zip(group["ngpus"], offsets)],
+        #     group['pflops'],
+        #     yerr=np.array([
+        #         [mean - lower, upper - mean]
+        #         for mean, lower, upper in zip(group['pflops'], group['cil'], group['cih'])
+        #     ]).swapaxes(0, 1),
+        #     fmt="none",
+        #     ecolor="black",
+        #     capsize=5,
+        # )
 
         missing_points = group[group["pflops"].isnull()]
-        n_gpus = group["ngpus"].unique().tolist()
-        systems = group["system"].unique().tolist()
-        width_per_bar = width / len(systems)
-        offsets = [width_per_bar * systems.index(s) + 0.5 * width_per_bar for s in missing_points["system"]]
-
+        offsets = [width_per_bar * systems.index(s) + 0.5 * width_per_bar for s in missing_points["System"]]
         # Plot missing data points with red cross
         if not missing_points.empty:
             ax.plot(
                 [n_gpus.index(x) - width / 2 + offset for x, offset in zip(missing_points["ngpus"], offsets)],
-                [0.05] * len(missing_points),
+                [0.1 * ax.get_ylim()[1]] * len(missing_points),
                 "rx",
                 markersize=10,
                 mew=3,
             )
 
-        if case == 1:
-            ax.set_title("Generate Length=128", fontsize=16)
-        elif case == 2:
-            ax.set_title("Generate Length=384", fontsize=16)
-        elif case == 3:
-            ax.set_title("Generate Length=896", fontsize=16)
-        # ax.set_title(f"Case {case}")
-        ax.set_xlabel("Number of GPUs", fontsize=12)
-        ax.set_ylabel("Throughput PetaFLOP/s", fontsize=12)
-        if i == 0:
-            ax.set_ylim((0., 3.5))
-        elif i == 1:
-            ax.set_ylim((0., 2.2))
-        elif i == 2:
-            ax.set_ylim((0., 1.2))
-        elif i == 3:
-            ax.set_ylim((0., 1.0))
-        # ax.set_xscale("log")
-        # ax.set_xticks([8, 16, 32, 64])
-        # ax.set_xlim(6, 80)
-        # ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
-        if i != 0:
+        # ax.set_yscale("log")
+        if subplot_x == 2:
+            ax.set_xlabel("Number of GPUs", fontsize=16)
+        else:
+            ax.set_xlabel(None)
+        if subplot_y == 0 and subplot_x == 1:
+            ax.set_ylabel("Throughput PetaFLOP/s", fontsize=16)
+        else:
+            ax.set_ylabel(None)
+        if subplot_y == 2:
+            ax2 = ax.twinx()
+            rightylabel = ["Scale Actor", "Scale Critic", "Scale Both"][subplot_x]
+            ax2.set_ylabel(rightylabel, fontsize=16)
+            ax2.set_yticks([])
+
+        if not (subplot_y == 0):
             ax.get_legend().remove()
+        else:
+            ax.legend(fontsize=8)
+
+    for j, title in enumerate(["Gen.Len.=128", "Gen.Len.=384", "Gen.Len.=896"]):
+        axes[0, j].set_title(title, fontsize=18)
+
+    axes[0, 0].set_ylim(0, 3.5)
+    axes[0, 0].set_yticks([0, 1, 2, 3])
+    axes[0, 1].set_ylim(0, 2.5)
+    axes[1, 1].set_ylim(0, 4)
+    axes[1, 1].set_yticks([0, 1, 2, 3, 4])
+    axes[1, 2].set_ylim(0, 3.5)
+    axes[1, 2].set_yticks([0, 1, 2, 3])
+    axes[2, 0].set_ylim(0, 7)
+    axes[2, 0].set_yticks([0, 2, 4, 6])
+    axes[2, 1].set_ylim(0, 4)
+    axes[2, 1].set_yticks([0, 1, 2, 3, 4])
+    # for i, title in enumerate(['Scale Actor', 'Scale Critic', 'Scale Both']):
+    #     axes[i, 0].text(13.5, 2, title, fontsize=16, rotation=270, ha='left', va='baseline')
 
     # Adjust layout
     plt.tight_layout()
 
-    plt.savefig("vws.png")
+    plt.savefig("vws.pdf", bbox_inches="tight")
 
 
 if __name__ == "__main__":
