@@ -6,11 +6,10 @@ import transformers
 
 from reallm.impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig, vanilla_cpu_generate,
                                                             vanilla_packed_generate)
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import ReaLModel, PipeCacheData, PipeTransferData
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import PipeCacheData, PipeTransferData, ReaLModel
 from reallm.impl.model.utils.functional import gather_shifted_log_probs
-import reallm.api.huggingface
-
 from tests.utils import *
+import reallm.api.huggingface
 
 torch.cuda.manual_seed_all(0)
 
@@ -184,9 +183,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
             sc_cfg).to(dtype=torch.float16, device=device)
         cls.starcoder.eval()
 
-        cls.model = ReaLModel.from_starcoder(from_model=cls.starcoder,
-                                                  dtype=torch.float16,
-                                                  device=device)
+        cls.model = ReaLModel.from_starcoder(from_model=cls.starcoder, dtype=torch.float16, device=device)
         cls.model.eval()
         cls.config = cls.model.config
 

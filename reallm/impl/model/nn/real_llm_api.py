@@ -1064,8 +1064,8 @@ class ReaLModel(nn.Module):
             head_param_names,
         )
         ReaLModel._convert_helpers[model_name] = FlashMQATConvertHelper(config_converter,
-                                                                             state_dict_converter,
-                                                                             state_dict_converter_to_hf)
+                                                                        state_dict_converter,
+                                                                        state_dict_converter_to_hf)
 
     def load_from_hf(self, load_dir: str, init_critic_from_actor: bool = False):
         # NOTE: moving this upwards will result in circular import

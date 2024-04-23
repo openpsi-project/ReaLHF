@@ -13,12 +13,11 @@ import traceback
 import ray
 import ray.util.queue as rq
 
+from reallm.base import logging, name_resolve, names
 from reallm.base.cluster import spec as cluster_spec
-import reallm.api.core.system as system_api
-from reallm.base import (name_resolve, logging, names)
-
-from reallm.system import worker_base, worker_control, load_worker, WORKER_TYPES
+from reallm.system import load_worker, worker_base, worker_control, WORKER_TYPES
 from reallm.system.worker_base import WorkerServerStatus as Wss
+import reallm.api.core.system as system_api
 
 CONNECTION_RETRY_AFTER_SECONDS = 360
 
@@ -97,14 +96,14 @@ class Controller:
             logger.info(f"Configuration has {len(config)} {name}.")
 
         name_resolve.add(names.trial_registry(self.experiment_name, self.trial_name),
-                                     value=datetime.now().strftime("%Y%m%d"),
-                                     delete_on_exit=False,
-                                     replace=True)
+                         value=datetime.now().strftime("%Y%m%d"),
+                         delete_on_exit=False,
+                         replace=True)
         name_resolve.add(names.worker_status(experiment_name=self.experiment_name,
-                                                         trial_name=self.trial_name,
-                                                         worker_name="ctl"),
-                                     value="READY",
-                                     delete_on_exit=True)
+                                             trial_name=self.trial_name,
+                                             worker_name="ctl"),
+                         value="READY",
+                         delete_on_exit=True)
 
         while True:
             try:
@@ -174,8 +173,7 @@ class Controller:
                     f"Timeout waiting for {self.experiment_name, self.trial_name}: {', '.join(sorted(left))}")
             for worker_name, worker_status in self.__control.pulse().items():
                 if worker_status in check_status:
-                    raise worker_base.WorkerException(worker_name, worker_status,
-                                                             "experiment is running.")
+                    raise worker_base.WorkerException(worker_name, worker_status, "experiment is running.")
                 if worker_status in remove_status:
                     if worker_name in current_status:
                         logger.debug(f"Worker {worker_name} is {worker_status}. Removed from waiting list.")
@@ -314,17 +312,17 @@ class RayController:
                     raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
                 for idx in range(count):
                     try:
-                        name_resolve.wait(names.ray_cluster(self.__experiment_name,
-                                                                        self.__trial_name, f"{name}/{idx}"),
-                                                      timeout=300)
+                        name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
+                                                            f"{name}/{idx}"),
+                                          timeout=300)
                     except TimeoutError:
                         raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
             logger.info("Ray cluster started.")
 
             try:
-                ray_head_addr = name_resolve.wait(names.ray_cluster(
-                    self.__experiment_name, self.__trial_name, "address"),
-                                                              timeout=300)
+                ray_head_addr = name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
+                                                                    "address"),
+                                                  timeout=300)
             except TimeoutError:
                 raise RuntimeError("Timeout waiting for ray cluster head address.")
             ray.init(address=ray_head_addr)

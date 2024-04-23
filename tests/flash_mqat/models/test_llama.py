@@ -12,10 +12,9 @@ from reallm.impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_p
                                                              flash_model_head_param_count,
                                                              flash_model_tblock_param_count, FlashMQATBlock,
                                                              OutputHead, VocabPositionEmbedding)
+from tests.utils import init_global_constants, MODEL_NAME
 import reallm.api.huggingface
 import reallm.base.constants
-
-from tests.utils import init_global_constants, MODEL_NAME
 
 torch.cuda.manual_seed_all(2)
 
@@ -58,9 +57,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         cls.llama.eval()
 
         with reallm.base.constants.model_scope(MODEL_NAME):
-            cls.hf_like_model = ReaLModel.from_llama(from_model=cls.llama,
-                                                          dtype=torch.float16,
-                                                          device=device)
+            cls.hf_like_model = ReaLModel.from_llama(from_model=cls.llama, dtype=torch.float16, device=device)
             cls.hf_like_model = add_helper_functions(cls.hf_like_model)
             cls.hf_like_model.eval()
         cls.config = cls.hf_like_model.config

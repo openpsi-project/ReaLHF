@@ -11,6 +11,7 @@ import random
 import subprocess
 import time
 
+from scheduler.client import make as make_scheduer
 import numpy as np
 import pandas as pd
 import pynvml
@@ -24,11 +25,9 @@ from reallm.api.core.system import ModelName, ModelShardID
 from reallm.api.quickstart.model import FLASH_MODEL_CONFIG_CONVERTER
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark
 from reallm.base.topology import PipeModelDataParallelTopology
+from tests.utils import clear_name_resolve, get_pytorch_profiler, init_global_constants, pytorch_memory_burnin
 import reallm.base.constants
 import reallm.base.gpu_utils
-
-from scheduler.client import make as make_scheduer
-from tests.utils import clear_name_resolve, get_pytorch_profiler, init_global_constants, pytorch_memory_burnin
 
 EXPR_NAME = "test_reparallelize"
 TRIAL_NAME = "test"

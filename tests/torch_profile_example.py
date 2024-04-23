@@ -23,10 +23,9 @@ import torch.distributed
 import torch.profiler
 
 from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelType
+from tests.utils import *
 import reallm.api.core.system as config_package
 import reallm.base.constants
-
-from tests.utils import *
 
 ## performance related config
 PROFILE_INTERFACE_TYPE = "inference"
@@ -88,9 +87,9 @@ def make_interface():
 
 
 def make_model(device):
-    import reallm.api.model
-
     import impl.model.nn.flash_mqat.flash_mqat_api
+
+    import reallm.api.model
 
     # from_type = "self" if NUM_PP == 1 else "empty_actor"
     # if NUM_MP == NUM_PP == 1:

@@ -9,10 +9,9 @@ except ModuleNotFoundError:
 import torch
 import transformers
 
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import ReaLModel, PipeCacheData, PipeTransferData
-import reallm.api.huggingface
-
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import PipeCacheData, PipeTransferData, ReaLModel
 from tests.utils import init_global_constants
+import reallm.api.huggingface
 
 
 class FlashMQATGPT2Test(unittest.TestCase):

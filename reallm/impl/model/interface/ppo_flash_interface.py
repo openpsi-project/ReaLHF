@@ -5,6 +5,7 @@ import itertools
 import time
 
 from deepspeed import DeepSpeedEngine
+import impl.model.utils.ppo_functional as ppo_functional
 import torch
 
 from reallm.base.constants import data_parallel_group
@@ -20,8 +21,6 @@ import reallm.api.huggingface
 import reallm.api.model
 import reallm.base.constants
 import reallm.base.logging as logging
-
-import impl.model.utils.ppo_functional as ppo_functional
 
 try:
     from flash_attn.bert_padding import unpad_input

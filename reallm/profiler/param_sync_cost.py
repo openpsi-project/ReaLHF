@@ -18,12 +18,11 @@ from reallm.impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_p
 from reallm.impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape,
                                                                  partition_pipeline_layers,
                                                                  pipeline_repartition_strategy)
+from tests.utils import get_llama7b_flash_config, get_llama_config
 import reallm.api.core.system
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.topology
 import reallm.base.topology as topology
-
-from tests.utils import get_llama7b_flash_config, get_llama_config
 
 
 def _filter_match_mwids(

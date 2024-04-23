@@ -1,6 +1,7 @@
 from typing import Dict
 import dataclasses
 
+import impl.model.utils.dpo_functional as dpo_functional
 import torch
 import torch.utils.data
 import tqdm
@@ -10,8 +11,6 @@ from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipeli
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs
 import reallm.api.model
 import reallm.base.logging as logging
-
-import impl.model.utils.dpo_functional as dpo_functional
 
 logger = logging.getLogger("Packed DPO Interface")
 

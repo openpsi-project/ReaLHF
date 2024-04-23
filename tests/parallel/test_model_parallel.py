@@ -9,10 +9,9 @@ import torch.multiprocessing as mp
 
 from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelType
 from reallm.base.monitor import get_tracer
+from tests.utils import *
 import reallm.api.core.system as config_package
 import reallm.base.constants
-
-from tests.utils import *
 
 # mp2pp4 8.4 0.57 mp4pp2 7.84 0.53
 NUM_MP = 4
@@ -71,9 +70,9 @@ def make_interface():
 
 
 def make_model(device):
-    import reallm.api.model
-
     import impl.model.nn.flash_mqat.flash_mqat_api
+
+    import reallm.api.model
 
     # from_type = "self" if NUM_PP == 1 else "empty_actor"
     # if NUM_MP == NUM_PP == 1:
@@ -356,10 +355,10 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
         self.tokenizer.padding_side = "left"
 
     def init_baseline_model(self):
+        import impl.model.nn.flash_mqat.flash_from_hf_impl
+
         from reallm.impl.model.nn.flash_mqat.flash_mqat_api import forward_helper, generate_helper
         from reallm.impl.model.nn.flash_mqat.flash_mqat_base import ReaLModel
-
-        import impl.model.nn.flash_mqat.flash_from_hf_impl
 
         self.device = device = "cuda"
         self.dtype = dtype = torch.float16
@@ -379,8 +378,8 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
         deepspeed.init_distributed()
         init_global_constants(1, 1, 1, model_name="baseline")
         self.baseline_model = getattr(ReaLModel, f"from_{MODEL_TYPE}")(model_path=BASELINE_MODEL_PATH,
-                                                                            dtype=dtype,
-                                                                            device=device)
+                                                                       dtype=dtype,
+                                                                       device=device)
         self.baseline_model.forward = functools.partial(forward_helper, self.baseline_model)
         self.baseline_model.generate = functools.partial(generate_helper, self.baseline_model)
 

@@ -9,10 +9,9 @@ import socket
 import threading
 import time
 
-import reallm.api.core.system as system_api
+from reallm.base import cluster, logging, monitor, name_resolve, names, network, timeutil
 from reallm.base.gpu_utils import set_cuda_device
-from reallm.base import (cluster, logging, monitor, name_resolve, names, network, timeutil)
-
+import reallm.api.core.system as system_api
 
 logger = logging.getLogger("worker")
 
@@ -280,9 +279,9 @@ class WorkerControlPanel:
                 if timeout is not None:
                     timeout = max(0, deadline - time.monotonic())
                 self.__logger.info(f"Connecting to worker {name}, timeout {timeout}")
-                server_address = name_resolve.wait(names.worker(
-                    self.__experiment_name, self.__trial_name, name),
-                                                               timeout=timeout)
+                server_address = name_resolve.wait(names.worker(self.__experiment_name, self.__trial_name,
+                                                                name),
+                                                   timeout=timeout)
                 self.__logger.info(f"Connecting to worker {name} done")
             except TimeoutError as e:
                 if raises_timeout_error:
@@ -499,15 +498,12 @@ class Worker:
         self.logger = logging.getLogger(r.worker_type + "-worker", 'colored')
         if r.host_key is not None:
             self.__host_key(
-                names.worker_key(experiment_name=r.experiment_name,
-                                             trial_name=r.trial_name,
-                                             key=r.host_key))
+                names.worker_key(experiment_name=r.experiment_name, trial_name=r.trial_name, key=r.host_key))
         if r.watch_keys is not None:
             keys = [r.watch_keys] if isinstance(r.watch_keys, str) else r.watch_keys
             self.__watch_keys([
-                names.worker_key(experiment_name=r.experiment_name,
-                                             trial_name=r.trial_name,
-                                             key=k) for k in keys
+                names.worker_key(experiment_name=r.experiment_name, trial_name=r.trial_name, key=k)
+                for k in keys
             ])
 
         self._tracer_output_file = os.path.join(

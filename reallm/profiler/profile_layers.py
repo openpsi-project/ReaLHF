@@ -5,13 +5,12 @@ import math
 from profiler.experiments import *
 from profiler.utils import find_factors
 import profiler.multi_host_main
+import scheduler.client
 
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelRPC
 from reallm.api.core.system import _LLM_ENVVARS
 import reallm.api.core.system as config_package
-
-import scheduler.client
 
 
 def profile_model_type(model_type: ModelType):

@@ -11,13 +11,12 @@ import shutil
 import socket
 import subprocess
 
+from scheduler.client import JobException, JobInfo, JobState
 import pandas as pd
 
 from reallm.base.constants import LOG_ROOT
 import reallm.base.cluster
 import reallm.base.logging as logging
-
-from scheduler.client import JobException, JobInfo, JobState
 
 logger = logging.getLogger("scheduler.slurm.utils")
 

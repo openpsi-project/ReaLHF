@@ -8,10 +8,9 @@ import torch
 import torch.distributed
 import torch.multiprocessing as mp
 
+from tests.utils import *
 import reallm.api.core.system as config_package
 import reallm.base.constants
-
-from tests.utils import *
 
 MODEL_TYPE = "llama"
 MODEL_SIZE = 7
@@ -19,9 +18,9 @@ BASE_MODEL_PATH = f"/lustre/public/pretrained_model_weights/Llama-2-{MODEL_SIZE}
 
 
 def make_model(device, from_type: str, load_dir=None):
-    import reallm.api.model
-
     import impl.model.nn.flash_mqat.flash_mqat_api
+
+    import reallm.api.model
 
     model_config = config_package.Model(
         "flash_mqat",

@@ -12,6 +12,8 @@ import gc
 from deepspeed import comm as dist
 from deepspeed.runtime.engine import DeepSpeedEngine, MEMORY_OPT_ALLREDUCE_SIZE
 from deepspeed.runtime.zero.config import ZeroStageEnum
+import impl.model.backend.pipe_engine.static_schedule as schedule
+import impl.model.parallelism.pipeline_parallel.p2p as p2p
 import numpy as np
 import torch
 import torch.nn as nn
@@ -27,9 +29,6 @@ from reallm.impl.model.parallelism.pipeline_parallel.tensor_storage import Tenso
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 import reallm.base.constants
 import reallm.base.logging as logging
-
-import impl.model.backend.pipe_engine.static_schedule as schedule
-import impl.model.parallelism.pipeline_parallel.p2p as p2p
 
 logger = logging.getLogger("InferencePipelineEngine", "benchmark")
 

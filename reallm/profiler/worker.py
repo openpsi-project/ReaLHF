@@ -17,6 +17,8 @@ from profiler.utils import make_stats_key, random_sample
 import colorama
 import deepspeed
 import numpy as np
+import system.request_reply_stream as request_reply_stream
+import system.worker_base as worker_base
 import torch
 import torch.distributed as dist
 import torch.utils.data
@@ -38,9 +40,6 @@ import reallm.base.namedarray as namedarray
 import reallm.base.numpy_utils
 import reallm.base.seeding as seeding
 import reallm.base.timeutil
-
-import system.request_reply_stream as request_reply_stream
-import system.worker_base as worker_base
 
 # Register all implemented datasets and models.
 import impl.model  # isort:skip

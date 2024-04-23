@@ -18,12 +18,11 @@ import torch.distributed
 import torch.profiler
 
 from reallm.base.topology import PipeModelDataParallelTopology
+from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_flash_config, get_memory,
+                         get_pytorch_profiler, MODEL_NAME, pytorch_memory_burnin)
 import reallm.base.constants
 import reallm.base.gpu_utils
 import reallm.base.topology
-
-from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_flash_config, get_memory,
-                         get_pytorch_profiler, MODEL_NAME, pytorch_memory_burnin)
 
 
 def get_model(mconfig):
