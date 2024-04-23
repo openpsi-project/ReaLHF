@@ -73,9 +73,11 @@ def get_torch_arch_list() -> Set[str]:
     arch_list = torch_arch_list.intersection(valid_archs)
     # If none of the specified architectures are valid, raise an error.
     if not arch_list:
-        raise RuntimeError("None of the CUDA architectures in `TORCH_CUDA_ARCH_LIST` env "
-                           f"variable ({env_arch_list}) is supported. "
-                           f"Supported CUDA architectures are: {valid_archs}.")
+        raise RuntimeError(
+            "None of the CUDA architectures in `TORCH_CUDA_ARCH_LIST` env "
+            f"variable ({env_arch_list}) is supported. "
+            f"Supported CUDA architectures are: {valid_archs}."
+        )
     invalid_arch_list = torch_arch_list - valid_archs
     if invalid_arch_list:
         warnings.warn(
@@ -171,7 +173,7 @@ if _is_cuda():
             torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
 
 cr_extension = CUDAExtension(
-    name="custom_all_reduce",
+    name="reallm._C.custom_all_reduce",
     sources=[
         "csrc/custom_all_reduce/custom_all_reduce.cu",
         "csrc/custom_all_reduce/pybind.cpp",
@@ -185,7 +187,7 @@ cr_extension = CUDAExtension(
 # ext_modules.append(cr_extension)
 
 interval_extension = CUDAExtension(
-    name="interval_op_cuda",
+    name="reallm._C.interval_op_cuda",
     sources=[
         "csrc/interval_op/interval_ops.cu",
     ],
@@ -197,8 +199,29 @@ interval_extension = CUDAExtension(
 )
 ext_modules.append(interval_extension)
 
+search_extension = setuptools.Extension(
+    name="reallm._C.mdm_search",
+    sources=[
+        "csrc/search/search.cpp",
+        "csrc/search/rpc.cpp",
+        "csrc/search/device_mesh.cpp",
+        "csrc/search/simulate.cpp",
+    ],
+    language="c++",
+    extra_compile_args=[
+        "-O3",
+        "-Wall",
+        "-shared",
+        "-std=c++11",
+        "-fPIC",
+        "-std=c++17",
+    ],
+    include_dirs=[os.path.join(os.path.dirname(__file__), "search")],
+)
+ext_modules.append(search_extension)
+
 setuptools.setup(
-    name="dllm_cuda",
+    name="reallm_cpp",
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
 )
