@@ -17,6 +17,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.utils.data
+from base.monitor import CUDAKernelTime
 
 from profiler.comm import ProfileCommunication
 from profiler.engine import ProfileEngine
@@ -102,14 +103,8 @@ class ProfileWorker(worker_base.Worker):
         self.seq_len_list = cfg.seq_len_list
         # self.gen_tokens_list = cfg.gen_tokens_list
 
-        if self.bs_list is None:
-            self.bs_list = [128, 256, 512]  # total bss
-            if len(self.rpcs) == 1:
-                self.bs_list = [256]
-        if self.seq_len_list is None:
-            self.seq_len_list = [1024, 512, 256]
-            if len(self.rpcs) == 1:
-                self.seq_len_list = [128]
+        self.bs_list = [128]
+        self.seq_len_list = [1024]
         # if self.gen_tokens_list is None:
         #     self.gen_tokens_list = [128]
 
@@ -219,10 +214,22 @@ class ProfileWorker(worker_base.Worker):
                 torch.cuda.synchronize()
                 logger.info(f"{stats_key} warm up round {i} done")
 
+            def trace_handler(p: torch.profiler._KinetoProfile):
+                import pickle
+                kernel_time = CUDAKernelTime.from_profiler(p)
+                with open(os.path.join(base.constants.LOG_ROOT,
+                                       self.__experiment_name,
+                                       self.__trial_name,
+                                       f"kernel_time{self.__worker_index}.pkl"), 'wb') as f:
+                    pickle.dump(kernel_time, f)
+
             st = time.monotonic()
             for _ in range(self.profile_rounds):
                 rt = time.monotonic()
-                func(self.__model, data, gen_tokens=seq_len - 128)
+                torch.cuda.synchronize()
+                with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA],
+                                            on_trace_ready=trace_handler) as p:
+                    func(self.__model, data, gen_tokens=seq_len - 128)
                 dist.barrier()
                 torch.cuda.synchronize()
                 self.stats[stats_key].append(time.monotonic() - rt)

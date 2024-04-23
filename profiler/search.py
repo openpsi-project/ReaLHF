@@ -13,7 +13,10 @@ from profiler.estimate import (comm_stats, estimate_model_size, estimate_rpc_mem
 from profiler.experiments import ppo_rpcs_example
 from profiler.profile_layers import profile_rpcs
 from profiler.rpc import RPC, RPCExecution
-import profiler.cppsearch.mdm_search as mdm_search
+try:
+    import profiler.cppsearch.mdm_search as mdm_search
+except ModuleNotFoundError:
+    mdm_search = None
 
 from api.config.config_base import MODEL_TYPE_TO_PATH
 from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
@@ -566,6 +569,7 @@ def profile_search(rank):
             cost_table = pickle.load(open("profile_result/param_sync_cost_table_parallel.pkl", "rb"))
             model_size_dict = make_model_size_dict(rpcs, if_print=False)
 
+            
             rs = mdm_search.mcmc_search_time_profile(rpc_list, rpc_exe_list, graph, cost_table,
                                                      model_size_dict, 0.0001, time_limit)
             import pprint
