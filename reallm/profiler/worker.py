@@ -20,6 +20,7 @@ import torch
 import torch.distributed as dist
 import torch.utils.data
 
+from reallm.api.core import data_api
 from reallm.api.quickstart.model import FlashMQATConfig
 from reallm.base.constants import LOG_ROOT
 from reallm.base.monitor import CUDAKernelTime, gpu_utilization_monitor, time_mark
@@ -29,10 +30,9 @@ from reallm.profiler.comm import ProfileCommunication
 from reallm.profiler.engine import ProfileEngine
 from reallm.profiler.utils import make_stats_key, random_sample
 import reallm.api.core.dfg
-import reallm.api.core.model as model_api
+import reallm.api.core.model_api as model_api
 # from reallm.impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
-import reallm.api.core.system as config_package
-import reallm.api.data
+import reallm.api.core.system_api as config_package
 import reallm.base.constants
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.logging as logging

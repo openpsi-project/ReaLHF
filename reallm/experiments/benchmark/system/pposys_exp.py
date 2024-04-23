@@ -3,7 +3,7 @@ import functools
 from omegaconf import MISSING
 
 from reallm.api.core.dfg import ModelInterfaceType, ModelRPC
-from reallm.api.core.system import *
+from reallm.api.core.system_api import *
 from reallm.base.topology import PipeModelDataParallelTopology
 from reallm.experiments.common.config_dataset import PromptOnlyDatasetConfig
 from reallm.experiments.common.config_model import get_flash_mqat_model_config, ModelConfig

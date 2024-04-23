@@ -4,7 +4,7 @@ import dataclasses
 import functools
 
 from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelName, ModelRPC, ModelType
-from reallm.api.core.system import _LLM_ENVVARS, ExperimentSaveEvalControl, register_experiment
+from reallm.api.core.system_api import _LLM_ENVVARS, ExperimentSaveEvalControl, register_experiment
 from reallm.api.quickstart.dataset import DatasetType, PromptOnlyDatasetConfig
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.base.topology import PipeModelDataParallelTopology

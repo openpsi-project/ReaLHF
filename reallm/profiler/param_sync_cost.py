@@ -17,7 +17,7 @@ from reallm.impl.model.nn.real_llm_api import (_keys_from_layer_indices, _param_
 from reallm.impl.model.nn.real_llm_base import (flash_model_embed_param_count, flash_model_head_param_count,
                                                 flash_model_tblock_param_count, FlashMQATConfig)
 from tests.utils import get_llama7b_flash_config, get_llama_config
-import reallm.api.core.system
+import reallm.api.core.system_api
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.topology
 import reallm.base.topology as topology
@@ -124,7 +124,7 @@ def _create_param_sync_groups(
     param_sync_src_ranks: Dict[gpu_utils.ParamSyncPair, int],
     param_sync_dst_ranks: Dict[gpu_utils.ParamSyncPair, List[int]],
 ):
-    mwid2msid: Dict[int, Dict[ModelName, reallm.api.core.system.ModelShardID]] = defaultdict(dict)
+    mwid2msid: Dict[int, Dict[ModelName, system_api.ModelShardID]] = defaultdict(dict)
     for k, v in msid2mwid.items():
         mwid2msid[v][k.model_name] = k
     for pp_i, pp_j in itertools.product(range(from_topo.get_dim("pipe")), range(to_topo.get_dim("pipe"))):

@@ -1,7 +1,7 @@
 import dataclasses
 
 from reallm.impl.model.backend.pipe_engine.inf_pipe_engine import InferencePipelineEngine
-import reallm.api.core.model as model_api
+import reallm.api.core.model_api as model_api
 
 
 @dataclasses.dataclass

@@ -9,7 +9,7 @@ import torch
 from reallm.base.constants import (data_parallel_world_size, model_parallel_world_size,
                                    pipe_parallel_world_size)
 from reallm.impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
-import reallm.api.core.model as model_api
+import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
 import reallm.base.deepspeed_utils as deepspeed_utils
 import reallm.base.logging as logging

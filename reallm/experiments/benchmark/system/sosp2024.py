@@ -2,7 +2,7 @@ from copy import deepcopy
 import functools
 import os
 
-from reallm.api.core.system import *
+from reallm.api.core.system_api import *
 from reallm.experiments.common import ModelBackend, ModelConfig, OptimizerConfig, ParallelismConfig
 from reallm.experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
 

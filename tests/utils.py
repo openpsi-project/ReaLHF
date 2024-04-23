@@ -9,7 +9,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 
 from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.base.gpu_utils
 import reallm.base.name_resolve as name_resolve
 import reallm.base.namedarray
@@ -67,7 +67,7 @@ def make_finetune_spec(bs_per_device,
                        total_train_steps=10,
                        steps_per_epoch=10,
                        max_seq_len=1024):
-    import reallm.api.core.model as model_api
+    import reallm.api.core.model_api as model_api
     finetune_spec = model_api.FinetuneSpec(
         total_train_epochs=total_train_epochs,
         total_train_steps=total_train_steps,
@@ -117,8 +117,7 @@ def init_global_constants(num_dp=None, num_mp=None, num_pp=None, topo=None, mode
 
     with reallm.base.constants.model_scope(model_name):
         reallm.base.constants.set_rank_mapping(model_name, topo, msid2mwid=msid2mwid)
-        wg = reallm.base.topology.new_or_get_group(
-            ranks=[base.constants.to_global_pg_rank(i) for i in range(ws)])
+        wg = reallm.base.topology.new_or_get_group(ranks=[constants.to_global_pg_rank(i) for i in range(ws)])
 
         reallm.base.constants.set_parallelism_group(model_name=model_name, pgroup=wg)
         grid = ParallelGrid(process_group=wg, topology=topo)

@@ -24,8 +24,8 @@ from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallel
 from reallm.impl.model.utils.data import (DuckGenerationOutput, DuckModelOutput, PipeCacheData,
                                           PipeTransferData)
 from reallm.impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
-import reallm.api.core.model as model_api
-import reallm.api.core.system as system_api
+import reallm.api.core.model_api as model_api
+import reallm.api.core.system_api as system_api
 import reallm.base.constants as constants
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.logging as logging

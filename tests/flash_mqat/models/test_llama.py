@@ -6,13 +6,13 @@ import torch
 import torch.distributed
 import transformers
 
-from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+from reallm.api.core import model_api
 from reallm.impl.model.nn.real_llm_api import add_helper_functions, ReaLModel
 from reallm.impl.model.nn.real_llm_base import (flash_model_embed_param_count, flash_model_head_param_count,
                                                 flash_model_tblock_param_count, FlashMQATBlock, OutputHead,
                                                 VocabPositionEmbedding)
+from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from tests.utils import init_global_constants, MODEL_NAME
-import reallm.api.huggingface
 import reallm.base.constants
 
 torch.cuda.manual_seed_all(2)
@@ -48,7 +48,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         hf_config.num_key_value_heads = 2
         hf_config.intermediate_size = 1024
 
-        cls.tokenizer = reallm.api.huggingface.load_hf_tokenizer(hf_path)
+        cls.tokenizer = model_api.load_hf_tokenizer(hf_path)
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.llama: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(hf_config).to(

@@ -4,7 +4,7 @@ import getpass
 import os
 import re
 
-import reallm.api.core.system as config_package
+import reallm.api.core.system_api as config_package
 import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.base.name_resolve as name_resolve

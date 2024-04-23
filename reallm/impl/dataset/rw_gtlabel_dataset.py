@@ -5,14 +5,14 @@ import json
 import torch
 import torch.utils.data
 
-import reallm.api.data
+from reallm.api.core import data_api
 
 
 class RewardModelingGTLabelDataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        util: reallm.api.data.DatasetUtility,
+        util: data_api.DatasetUtility,
         max_seq_len: int,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
@@ -51,7 +51,7 @@ class RewardModelingGTLabelDataset(torch.utils.data.Dataset):
             data = dataset_builder()
 
         datasize_per_rank = len(data) // world_size
-        shuffle_indices = reallm.api.data.get_shuffle_indices(seed, datasize_per_rank * world_size)
+        shuffle_indices = data_api.get_shuffle_indices(seed, datasize_per_rank * world_size)
         subset_indices = shuffle_indices[ddp_rank * datasize_per_rank:(ddp_rank + 1) * datasize_per_rank]
         data: List[Dict[str, str]] = [data[i] for i in subset_indices]
 
@@ -91,4 +91,4 @@ class RewardModelingGTLabelDataset(torch.utils.data.Dataset):
         }
 
 
-api.data.register_dataset("rw_gtlabel", RewardModelingGTLabelDataset)
+data_api.register_dataset("rw_gtlabel", RewardModelingGTLabelDataset)

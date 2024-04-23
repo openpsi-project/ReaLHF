@@ -19,7 +19,7 @@ from reallm.profiler.estimate import (comm_stats, estimate_model_size, estimate_
 from reallm.profiler.experiments import ppo_rpcs_example
 from reallm.profiler.profile_layers import profile_rpcs
 from reallm.profiler.rpc import RPC, RPCExecution
-import reallm.api.core.system as config_package
+import reallm.api.core.system_api as config_package
 # import reallm.experiments.autoexp.auto_ppo
 import reallm.base.constants
 import reallm.profiler.cppsearch.mdm_search as mdm_search

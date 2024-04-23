@@ -12,7 +12,7 @@ from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-import reallm.api.core.model as model_api
+import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
 import reallm.base.logging as logging
 

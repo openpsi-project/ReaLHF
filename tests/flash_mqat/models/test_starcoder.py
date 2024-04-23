@@ -4,12 +4,12 @@ import unittest
 import torch
 import transformers
 
-from reallm.impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig, vanilla_cpu_generate,
-                                                            vanilla_packed_generate)
+from reallm.api.core import model_api
 from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData, ReaLModel
+from reallm.impl.model.nn.real_llm_generate import (generate, GenerationConfig, vanilla_cpu_generate,
+                                                    vanilla_packed_generate)
 from reallm.impl.model.utils.functional import gather_shifted_log_probs
 from tests.utils import *
-import reallm.api.huggingface
 
 torch.cuda.manual_seed_all(0)
 
@@ -41,7 +41,7 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = reallm.api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
+        cls.tokenizer = model_api.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(
@@ -176,7 +176,7 @@ class FlashMQATStarCoderTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = reallm.api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
+        cls.tokenizer = model_api.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(

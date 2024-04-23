@@ -13,7 +13,7 @@ import uuid
 import zmq
 
 from reallm.base import logging, name_resolve, names
-import reallm.api.core.system as system_api
+import reallm.api.core.system_api as system_api
 
 logger = logging.getLogger("Request-Replay Stream")
 ZMQ_IO_THREADS = 8

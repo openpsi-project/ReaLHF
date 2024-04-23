@@ -11,7 +11,7 @@ import torch
 import torch.distributed
 
 from reallm.api.core.config import ModelName
-import reallm.api.core.system as system_api
+import reallm.api.core.system_api as system_api
 import reallm.base.logging as logging
 import reallm.base.name_resolve as name_resolve
 import reallm.base.names as names

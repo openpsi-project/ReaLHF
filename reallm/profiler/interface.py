@@ -8,21 +8,20 @@ import torch
 import torch.utils.data
 import tqdm
 
+from reallm.api.core import data_api, model_api
 from reallm.base.dataparallel import PackedParallelDataBroker
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
-from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from reallm.impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
                                                 gather_packed_shifted_log_probs)
 from reallm.impl.model.utils.save_load import save_hf_or_lora_model
 from reallm.profiler.engine import ProfileEngine
-import reallm.api.core.model as model_api
-import reallm.api.data
-import reallm.base.constants
-import reallm.base.dataparallel
+import reallm.base.constants as constants
+import reallm.base.dataparallel as dataparallel
 
 try:
     from flash_attn.bert_padding import unpad_input
@@ -46,7 +45,7 @@ def compute_packed_sft_loss(
     return loss, {"loss": loss.detach()}
 
 
-class ProfileInterface(api.model.ModelInterface):
+class ProfileInterface(model_api.ModelInterface):
     n_minibatches: int = 4
 
     def train_step(self, model: model_api.Model, data: NamedArray, gen_tokens: int = 128) -> Dict:
@@ -54,8 +53,7 @@ class ProfileInterface(api.model.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
         datas = PackedParallelDataBroker.scatter_to(data,
                                                     self.n_minibatches,
-                                                    min_size=2 *
-                                                    reallm.base.constants.pipe_parallel_world_size())
+                                                    min_size=2 * constants.pipe_parallel_world_size())
         offset = 0
         batch_seqlens = data.metadata['seqlens']
 
@@ -81,7 +79,7 @@ class ProfileInterface(api.model.ModelInterface):
                     packed_input_ids=packed_input_ids,
                     cu_seqlens=cu_seqlens,
                     loss_fn=compute_packed_sft_loss,
-                    num_micro_batches=2 * reallm.base.constants.pipe_parallel_world_size(),
+                    num_micro_batches=2 * constants.pipe_parallel_world_size(),
                     **loss_fn_kwargs,
                 )
             else:
@@ -118,7 +116,7 @@ class ProfileInterface(api.model.ModelInterface):
             res = module.forward(seqlens_cpu=data.metadata['seqlens'],
                                  packed_input_ids=data["packed_input_ids"],
                                  cu_seqlens=cu_seqlens,
-                                 num_micro_batches=base.constants.pipe_parallel_world_size())
+                                 num_micro_batches=constants.pipe_parallel_world_size())
             if res is None:
                 return None
             logits = res
@@ -143,7 +141,7 @@ class ProfileInterface(api.model.ModelInterface):
         gconfig = GenerationConfig(min_new_tokens=gen_tokens, max_new_tokens=gen_tokens)
         packed_prompts = data["packed_input_ids"]
         cu_seqlens = data["cu_seqlens"]
-        self.pipe_gen_n_mbs = reallm.base.constants.pipe_parallel_world_size()
+        self.pipe_gen_n_mbs = constants.pipe_parallel_world_size()
         prompt_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
         bs = prompt_lengths.shape[0]
 
@@ -184,4 +182,4 @@ class ProfileInterface(api.model.ModelInterface):
         )
 
 
-api.model.register_interface("profile", ProfileInterface)
+model_api.register_interface("profile", ProfileInterface)

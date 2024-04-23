@@ -11,7 +11,6 @@ import random
 import subprocess
 import time
 
-from scheduler.client import make as make_scheduer
 import numpy as np
 import pandas as pd
 import pynvml
@@ -21,13 +20,14 @@ import tqdm
 import transformers
 
 from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelName, ModelShardID, ModelType
-from reallm.api.core.system import ModelName, ModelShardID
+from reallm.api.core.system_api import ModelName, ModelShardID
 from reallm.api.quickstart.model import FLASH_MODEL_CONFIG_CONVERTER
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark
 from reallm.base.topology import PipeModelDataParallelTopology
+from reallm.scheduler.client import make as make_scheduer
 from tests.utils import clear_name_resolve, get_pytorch_profiler, init_global_constants, pytorch_memory_burnin
-import reallm.base.constants
-import reallm.base.gpu_utils
+import reallm.base.constants as constants
+import reallm.base.gpu_utils as gpu_utils
 
 EXPR_NAME = "test_reparallelize"
 TRIAL_NAME = "test"
@@ -159,12 +159,12 @@ def test_impl(
     os.environ["DLLM_CUDA_TMARK"] = "1"
 
     if rank < from_topo.world_size():
-        with reallm.base.constants.model_scope(from_model_name):
+        with constants.model_scope(from_model_name):
             m1 = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
             m1.instantiate()
             if check:
                 m1.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
-            if reallm.base.constants.pipe_parallel_world_size() > 1:
+            if constants.pipe_parallel_world_size() > 1:
                 engine1 = InferencePipelineEngine(m1)
             else:
                 add_helper_functions(m1)
@@ -188,9 +188,9 @@ def test_impl(
         m1 = None
 
     if rank >= world_size - to_topo.world_size():
-        with reallm.base.constants.model_scope(to_model_name):
+        with constants.model_scope(to_model_name):
             m2 = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
-            if reallm.base.constants.pipe_parallel_world_size() > 1:
+            if constants.pipe_parallel_world_size() > 1:
                 engine2 = InferencePipelineEngine(m2)
             else:
                 add_helper_functions(m2)
@@ -243,15 +243,15 @@ def test_impl(
         if m2 is not None:
             m2.patch_reparallelization(res[:2])
 
-            with reallm.base.constants.model_scope(to_model_name):
+            with constants.model_scope(to_model_name):
                 comm_volume = res[-1]
-                dist.all_reduce(comm_volume, group=base.constants.parallelism_group())
+                dist.all_reduce(comm_volume, group=constants.parallelism_group())
                 entry = fetch_latest_tmark()
                 assert entry.type_ == CUDATimeMarkType.mem_layout
                 mem_shift_time_ns = (
                     torch.tensor(entry.end_time - entry.start_time, dtype=torch.long, device="cuda") /
                     to_topo.world_size())
-                dist.all_reduce(mem_shift_time_ns, group=base.constants.parallelism_group())
+                dist.all_reduce(mem_shift_time_ns, group=constants.parallelism_group())
 
                 if check:
                     torch.cuda.synchronize()
@@ -281,7 +281,7 @@ def test_impl(
                     seqlens_cpu = [256 for _ in range(bs)]
                     max_seqlen = 256
 
-                    dist.barrier(group=base.constants.parallelism_group())
+                    dist.barrier(group=constants.parallelism_group())
                     torch.cuda.synchronize()
                     tik = time.time_ns()
                     if isinstance(engine2, InferencePipelineEngine):
@@ -292,11 +292,11 @@ def test_impl(
                         engine2(packed_input_ids=packed_input_ids,
                                 cu_seqlens=cu_seqlens,
                                 max_seqlen=max_seqlen)
-                    dist.barrier(group=base.constants.parallelism_group())
+                    dist.barrier(group=constants.parallelism_group())
                     torch.cuda.synchronize()
                 fwd_time_ns = (torch.tensor(time.time_ns() - tik, dtype=torch.long, device="cuda") /
                                to_topo.world_size())
-                dist.all_reduce(fwd_time_ns, group=base.constants.parallelism_group())
+                dist.all_reduce(fwd_time_ns, group=constants.parallelism_group())
 
                 d = dict(
                     mem_shift_time_ns=mem_shift_time_ns.item(),
@@ -304,7 +304,7 @@ def test_impl(
                     comm_volume=comm_volume.item(),
                 )
                 if (it == n_iterations - 1 and dump_to_file is not None and dist.get_rank()
-                        == dist.get_process_group_ranks(base.constants.parallelism_group())[0]):
+                        == dist.get_process_group_ranks(constants.parallelism_group())[0]):
                     assert dump_to_file.endswith("json"), dump_to_file
                     with open(dump_to_file, "r") as f:
                         _dump = json.load(f)
@@ -341,15 +341,15 @@ def test_impl(
 
         if m1 is not None:
             m1.patch_reparallelization(res[:2])
-            with reallm.base.constants.model_scope(from_model_name):
+            with constants.model_scope(from_model_name):
                 comm_volume = res[-1]
-                dist.all_reduce(comm_volume, group=base.constants.parallelism_group())
+                dist.all_reduce(comm_volume, group=constants.parallelism_group())
                 entry = fetch_latest_tmark()
                 assert entry.type_ == CUDATimeMarkType.mem_layout
                 mem_shift_time_ns = (
                     torch.tensor(entry.end_time - entry.start_time, dtype=torch.long, device="cuda") /
                     from_topo.world_size())
-                dist.all_reduce(mem_shift_time_ns, group=base.constants.parallelism_group())
+                dist.all_reduce(mem_shift_time_ns, group=constants.parallelism_group())
 
                 if check:
                     torch.cuda.synchronize()
@@ -379,7 +379,7 @@ def test_impl(
                     seqlens_cpu = [256 for _ in range(bs)]
                     max_seqlen = 256
 
-                    dist.barrier(group=base.constants.parallelism_group())
+                    dist.barrier(group=constants.parallelism_group())
                     torch.cuda.synchronize()
                     tik = time.time_ns()
                     if isinstance(engine1, InferencePipelineEngine):
@@ -390,18 +390,18 @@ def test_impl(
                         engine1(packed_input_ids=packed_input_ids,
                                 cu_seqlens=cu_seqlens,
                                 max_seqlen=max_seqlen)
-                    dist.barrier(group=base.constants.parallelism_group())
+                    dist.barrier(group=constants.parallelism_group())
                     torch.cuda.synchronize()
                 fwd_time_ns = (torch.tensor(time.time_ns() - tik, dtype=torch.long, device="cuda") /
                                from_topo.world_size())
-                dist.all_reduce(fwd_time_ns, group=base.constants.parallelism_group())
+                dist.all_reduce(fwd_time_ns, group=constants.parallelism_group())
                 d = dict(
                     mem_shift_time_ns=mem_shift_time_ns.item(),
                     fwd_time_ns=fwd_time_ns.item(),
                     comm_volume=comm_volume.item(),
                 )
                 if (it == n_iterations - 1 and dump_to_file is not None and dist.get_rank()
-                        == dist.get_process_group_ranks(base.constants.parallelism_group())[0]):
+                        == dist.get_process_group_ranks(constants.parallelism_group())[0]):
                     assert dump_to_file.endswith("json"), dump_to_file
                     with open(dump_to_file, "r") as f:
                         _dump = json.load(f)
@@ -468,16 +468,16 @@ def test(args):
         hf_model_type, args.model_size, False)])
     mconfig = FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
     torch.distributed.barrier()
-    # if check and reallm.base.constants.has_model_name(from_model_name):
-    #     with reallm.base.constants.model_scope(from_model_name):
+    # if check and constants.has_model_name(from_model_name):
+    #     with constants.model_scope(from_model_name):
     #         global_m = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
     #         global_m.instantiate()
     #         # if os.path.exists("/lustre/aigc/llm/checkpoints/reparallelize_test/"):
     #         #     global_m.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
     #         # else:
-    #         # torch.distributed.barrier(group=base.constants.parallelism_group())
+    #         # torch.distributed.barrier(group=constants.parallelism_group())
     #         # os.system("rm -rf /lustre/aigc/llm/checkpoints/reparallelize_test/")
-    #         torch.distributed.barrier(group=base.constants.parallelism_group())
+    #         torch.distributed.barrier(group=constants.parallelism_group())
     #         global_m.save("/lustre/aigc/llm/checkpoints/reparallelize_test/")
 
     torch.distributed.barrier()
@@ -563,8 +563,8 @@ def launch(args):
             dump_file,
         ]
         cmd = " ".join([str(x) for x in cmd])
-        os.makedirs(os.path.join(base.constants.LOG_ROOT, EXPR_NAME, TRIAL_NAME), exist_ok=True)
-        multiprog_path = os.path.join(base.constants.LOG_ROOT, EXPR_NAME, TRIAL_NAME, "test.multiprog")
+        os.makedirs(os.path.join(constants.LOG_ROOT, EXPR_NAME, TRIAL_NAME), exist_ok=True)
+        multiprog_path = os.path.join(constants.LOG_ROOT, EXPR_NAME, TRIAL_NAME, "test.multiprog")
         with open(multiprog_path, "w") as f:
             f.write(f"0-{world_size - 1} {cmd}\n")
         srun_flags = [

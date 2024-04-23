@@ -16,7 +16,7 @@ import hydra
 from reallm.base.cluster import spec as cluster_spec
 from reallm.base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
 from reallm.experiments.common import DPOConfig, PPOConfig, RWConfig, SFTConfig
-import reallm.api.core.system as system_api
+import reallm.api.core.system_api as system_api
 
 cs = ConfigStore.instance()
 

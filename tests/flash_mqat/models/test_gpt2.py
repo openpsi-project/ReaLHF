@@ -9,9 +9,9 @@ except ModuleNotFoundError:
 import torch
 import transformers
 
+from reallm.api.core import model_api
 from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData, ReaLModel
 from tests.utils import init_global_constants
-import reallm.api.huggingface
 
 
 class FlashMQATGPT2Test(unittest.TestCase):
@@ -37,7 +37,7 @@ class FlashMQATGPT2Test(unittest.TestCase):
 
         model_path = "/lustre/public/pretrained_model_weights/testOnly/gpt2-4l"
 
-        cls.tokenizer = reallm.api.huggingface.load_hf_tokenizer(model_path)
+        cls.tokenizer = model_api.load_hf_tokenizer(model_path)
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.gpt: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(

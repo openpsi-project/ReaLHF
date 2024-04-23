@@ -6,15 +6,15 @@ import numpy as np
 import torch
 import torch.utils.data
 
+from reallm.api.core import data_api
 from reallm.base.datapack import ffd_with_result_unsorted, min_abs_diff_partition
-import reallm.api.data
 
 
 class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
 
     def __init__(
         self,
-        util: reallm.api.data.DatasetUtility,
+        util: data_api.DatasetUtility,
         max_length: int,
         n_tokens_per_batch: int,
         min_seq_pairs_per_batch: int = 1,
@@ -57,7 +57,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
             assert dataset_builder is not None
             data = dataset_builder()
 
-        shuffle_indices = reallm.api.data.get_shuffle_indices(util.seed, len(data))
+        shuffle_indices = data_api.get_shuffle_indices(util.seed, len(data))
         data = [data[i] for i in shuffle_indices]
         for x in data:
             for pa, na in zip(x['pos_answers'], x['neg_answers']):
@@ -160,7 +160,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
         self.rng.shuffle(self.__batch_indices)
 
     def _shuffle(self):
-        shuffle_indices = reallm.api.data.get_shuffle_indices(
+        shuffle_indices = data_api.get_shuffle_indices(
             self.util.seed + self.shuffle_cnt * 7 + self.util.ddp_rank * 3, len(self.group_posneg_seqlens))
         self.pos_answer_tokens = [self.pos_answer_tokens[i] for i in shuffle_indices]
         self.neg_answer_tokens = [self.neg_answer_tokens[i] for i in shuffle_indices]
@@ -237,7 +237,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
 
 
 if __name__ != "__main__":
-    reallm.api.data.register_dataset("packed_rw_pair", RewardModelingPackedPairedDataset)
+    data_api.register_dataset("packed_rw_pair", RewardModelingPackedPairedDataset)
 else:
     import transformers
 
@@ -252,10 +252,7 @@ else:
     world_size = 1
     seed = 1
 
-    util = reallm.api.data.DatasetUtility(tokenizer=tokenizer,
-                                          ddp_rank=ddp_rank,
-                                          world_size=world_size,
-                                          seed=seed)
+    util = data_api.DatasetUtility(tokenizer=tokenizer, ddp_rank=ddp_rank, world_size=world_size, seed=seed)
 
     n_dp = 32
     dataset = RewardModelingPackedPairedDataset(

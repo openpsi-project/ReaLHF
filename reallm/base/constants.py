@@ -10,7 +10,7 @@ from reallm.api.core.config import ModelName
 from reallm.base.cluster import spec as cluster_spec
 
 if TYPE_CHECKING:
-    from reallm.api.core.system import ModelShardID
+    from reallm.api.core.system_api import ModelShardID
     from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
 
 

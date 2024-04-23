@@ -11,7 +11,7 @@ import time
 
 from reallm.base import cluster, logging, monitor, name_resolve, names, network, timeutil
 from reallm.base.gpu_utils import set_cuda_device
-import reallm.api.core.system as system_api
+import reallm.api.core.system_api as system_api
 
 logger = logging.getLogger("worker")
 

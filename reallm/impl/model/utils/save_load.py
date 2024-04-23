@@ -13,7 +13,7 @@ import transformers
 
 from reallm.base import constants, logging
 from reallm.base.monitor import process_memory_mb
-import reallm.api.core.model as model_api
+import reallm.api.core.model_api as model_api
 
 logger = logging.getLogger("Model Save")
 

@@ -6,7 +6,7 @@ import numpy as np
 
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
-from reallm.api.core.system import *
+from reallm.api.core.system_api import *
 from reallm.api.quickstart.device_mesh import make_train_backend_config, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
 from reallm.base.topology import PipeModelDataParallelTopology

@@ -1,5 +1,13 @@
 # A Distributed System for LLM RLHF
 
+## Installation
+
+Under the git repository, run:
+
+```bash
+python3 -m build -n
+```
+
 ## Quickstart
 
 The following command is used to run an SFT experiment:

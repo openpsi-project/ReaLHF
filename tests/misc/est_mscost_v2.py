@@ -8,16 +8,16 @@ import time
 import torch
 import torch.distributed
 
+from reallm.api.core import model_api, system_api
 from reallm.api.core.config import ModelName
-from reallm.impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape,
-                                                                 partition_pipeline_layers,
-                                                                 pipeline_repartition_strategy)
 from reallm.impl.model.nn.real_llm_api import (_keys_from_layer_indices, _param_size_from_keys,
                                                ReparallelizeReceiverStep, ReparallelizeSenderStep)
 from reallm.impl.model.nn.real_llm_base import (flash_model_embed_param_count, flash_model_head_param_count,
                                                 flash_model_tblock_param_count, FlashMQATConfig)
+from reallm.impl.model.nn.real_llm_parallel import (get_flash_model_param_shape, partition_pipeline_layers,
+                                                    pipeline_repartition_strategy)
 from tests.utils import get_llama7b_flash_config
-import reallm.api.core.system
+import reallm.api.core.system_api
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.topology
 import reallm.base.topology as topology
@@ -26,17 +26,17 @@ import reallm.base.topology as topology
 def _filter_match_mwids(
     model_name: ModelName,
     topo: topology.PipeModelDataParallelTopology,
-    msid2mwid: Dict[api.core.system.ModelShardID, int],
+    msid2mwid: Dict[system_api.ModelShardID, int],
     **conditions,
 ) -> List[int]:
     if len(conditions) == 0:
         mwids_this_model = [
-            msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(model_name, topo, j)]
+            msid2mwid[system_api.ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in range(topo.world_size())
         ]
     else:
         mwids_this_model = [
-            msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(model_name, topo, j)]
+            msid2mwid[system_api.ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in topo.filter_match(**conditions)
         ]
     mwids_this_model = sorted(mwids_this_model)
@@ -119,12 +119,12 @@ def _create_param_sync_groups(
     to_topo: reallm.base.topology.PipeModelDataParallelTopology,
     src: ModelName,
     dst: ModelName,
-    msid2mwid: Dict[api.core.system.ModelShardID, int],
+    msid2mwid: Dict[system_api.ModelShardID, int],
     param_sync_groups: Dict[gpu_utils.ParamSyncPair, torch.distributed.ProcessGroup],
     param_sync_src_ranks: Dict[gpu_utils.ParamSyncPair, int],
     param_sync_dst_ranks: Dict[gpu_utils.ParamSyncPair, List[int]],
 ):
-    mwid2msid: Dict[int, Dict[ModelName, reallm.api.core.system.ModelShardID]] = defaultdict(dict)
+    mwid2msid: Dict[int, Dict[ModelName, system_api.ModelShardID]] = defaultdict(dict)
     for k, v in msid2mwid.items():
         mwid2msid[v][k.model_name] = k
     for pp_i, pp_j in itertools.product(range(from_topo.get_dim("pipe")), range(to_topo.get_dim("pipe"))):
@@ -352,10 +352,10 @@ def compute_cost(
     param_sync_dst_ranks = {}
     msid2mwid = {}
     for i in range(from_topo.world_size()):
-        msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)] = i
+        msid2mwid[system_api.ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)] = i
     for i in range(to_topo.world_size()):
-        msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(
-            to_model_name, to_topo, i)] = (i + world_size - to_topo.world_size())
+        msid2mwid[system_api.ModelShardID.from_parallelism_rank(to_model_name, to_topo,
+                                                                i)] = (i + world_size - to_topo.world_size())
     _create_param_sync_groups(
         from_topo,
         to_topo,
@@ -428,7 +428,15 @@ def compute_cost(
         max_comm_volume = max(max_comm_volume, comm_volume)
         max_bcast_cnt = max(max_bcast_cnt, bcast_cnt)
 
-    return max_cost, total_local_comm_volume, total_remote_comm_volume, max_bcast_cnt, max_comm_volume, node_send_v, node_recv_v
+    return (
+        max_cost,
+        total_local_comm_volume,
+        total_remote_comm_volume,
+        max_bcast_cnt,
+        max_comm_volume,
+        node_send_v,
+        node_recv_v,
+    )
 
 
 def main():

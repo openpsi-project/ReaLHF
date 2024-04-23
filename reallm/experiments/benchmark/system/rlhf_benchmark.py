@@ -2,8 +2,8 @@ import dataclasses
 import functools
 import itertools
 
-from reallm.api.core.system import *
-from reallm.api.core.system import register_experiment
+from reallm.api.core.system_api import *
+from reallm.api.core.system_api import register_experiment
 from reallm.experiments.common.ppo_exp import PPOConfig
 
 EXPR_DEADLINE = None

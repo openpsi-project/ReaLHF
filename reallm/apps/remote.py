@@ -112,7 +112,7 @@ def main_controller(args):
             config_index: the index of experiment configuration (experiment may return multiple configurations)
             ignore_worker_error: bool, if False, stop the experiment when any worker(s) fail.
     """
-    import reallm.api.core.system as system_api
+    import reallm.api.core.system_api as system_api
     import reallm.base.constants
     import reallm.experiments
     import reallm.profiler.experiments

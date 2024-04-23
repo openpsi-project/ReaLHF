@@ -24,11 +24,11 @@ from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_parallel import pipeline_repartition_strategy
 from reallm.system import request_reply_stream, worker_base
 import reallm.api.core.dfg as dfg
-import reallm.api.core.system as system_api
+import reallm.api.core.system_api as system_api
 
 # NOTE: Register all implemented datasets and models.
-import reallm.api.core.data as data_api  # isort:skip
-import reallm.api.core.model as model_api  # isort:skip
+import reallm.api.core.data_api as data_api  # isort:skip
+import reallm.api.core.model_api as model_api  # isort:skip
 
 logger = logging.getLogger("Model Worker", "colored")
 blogger = logging.getLogger("benchmark")

@@ -130,10 +130,10 @@ def ray_cluster_cmd(expr_name, trial_name, worker_type):
 
 def make(mode, expr_name, trial_name, **kwargs) -> SchedulerClient:
     if mode == "slurm":
-        from scheduler.slurm.client import SlurmSchedulerClient
+        from reallm.scheduler.slurm.client import SlurmSchedulerClient
         return SlurmSchedulerClient(expr_name, trial_name)
     elif mode == 'local':
-        from scheduler.local.client import LocalSchedulerClient
+        from reallm.scheduler.local.client import LocalSchedulerClient
         return LocalSchedulerClient(expr_name, trial_name)
     else:
         raise NotImplementedError(f"Scheduler {mode} not found")

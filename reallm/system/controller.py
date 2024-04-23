@@ -17,7 +17,7 @@ from reallm.base import logging, name_resolve, names
 from reallm.base.cluster import spec as cluster_spec
 from reallm.system import load_worker, worker_base, worker_control, WORKER_TYPES
 from reallm.system.worker_base import WorkerServerStatus as Wss
-import reallm.api.core.system as system_api
+import reallm.api.core.system_api as system_api
 
 CONNECTION_RETRY_AFTER_SECONDS = 360
 

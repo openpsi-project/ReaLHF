@@ -8,8 +8,8 @@ import torch
 import torch.distributed
 import torch.multiprocessing as mp
 
+from reallm.api.core import model_api, system_api
 from tests.utils import *
-import reallm.api.core.system as config_package
 import reallm.base.constants
 
 MODEL_TYPE = "llama"
@@ -18,10 +18,10 @@ BASE_MODEL_PATH = f"/lustre/public/pretrained_model_weights/Llama-2-{MODEL_SIZE}
 
 
 def make_model(device, from_type: str, load_dir=None):
-    import reallm.api.core.model as model_api
+    import reallm.api.core.model_api as model_api
     import reallm.impl.model.nn.real_llm_api
 
-    model_config = config_package.Model(
+    model_config = system_api.Model(
         "flash_mqat",
         args=dict(
             model_path=load_dir if load_dir is not None else BASE_MODEL_PATH,
@@ -86,9 +86,8 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
         cls.baseline_model = None
 
     def init_tokenizer(self):
-        import reallm.api.huggingface
 
-        self.tokenizer = reallm.api.huggingface.load_hf_tokenizer(BASE_MODEL_PATH)
+        self.tokenizer = model_api.load_hf_tokenizer(BASE_MODEL_PATH)
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.tokenizer.padding_side = "left"
 

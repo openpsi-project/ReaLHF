@@ -12,7 +12,7 @@ from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import (FlashMQATConfig, ModelTrainEvalConfig, OptimizerConfig,
                                          ParallelismConfig)
 import reallm._C.mdm_search as mdm_search
-import reallm.api.core.system as config_package
+import reallm.api.core.system_api as config_package
 import reallm.base.constants as constants
 
 from .device_mesh import DeviceMesh, make_device_mesh_from_name, ModelParallelStrategy

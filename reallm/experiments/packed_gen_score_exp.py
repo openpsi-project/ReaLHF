@@ -3,7 +3,7 @@ import math
 import random
 
 from reallm.api.core.dfg import ModelInterfaceType, ModelRPC
-from reallm.api.core.system import *
+from reallm.api.core.system_api import *
 from reallm.base.topology import PipeModelDataParallelTopology
 
 gen_score = ModelRPC(
