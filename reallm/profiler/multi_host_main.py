@@ -9,8 +9,8 @@ import reallm.base.logging as logging
 import reallm.base.name_resolve
 import reallm.base.names
 import reallm.profiler.experiments
-import reallm.scheduler as scheduler
-import reallm.system
+import reallm.scheduler.client as schd_client
+import reallm.system as system
 
 logger = logging.getLogger("main", "system")
 
@@ -21,7 +21,7 @@ TRACE_TIMEOUT = (
 
 
 def _submit_workers(
-    sched: scheduler.client.SchedulerClient,
+    sched: schd_client.SchedulerClient,
     expr_name: str,
     trial_name: str,
     debug: bool,
@@ -38,13 +38,13 @@ def _submit_workers(
     for sch_cfg in scheduling_configs:
         job_environs = {**environs, **sch_cfg.scheduling.env_vars}
         if use_ray_cluster:
-            cmd = scheduler.client.ray_cluster_cmd(
+            cmd = schd_client.ray_cluster_cmd(
                 expr_name,
                 trial_name,
                 worker_type=worker_type,
             )
         else:
-            cmd = scheduler.client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
+            cmd = schd_client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
 
         logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
 
@@ -82,7 +82,7 @@ def main(args, if_raise=True):
     trial_name = args.trial_name
     expr_name = args.expr_name
     experiment = config_package.make_experiment(expr_name)
-    sched = scheduler.client.make(mode="slurm", expr_name=expr_name, trial_name=trial_name)
+    sched = schd_client.make(mode="slurm", expr_name=expr_name, trial_name=trial_name)
 
     setup = experiment.scheduling_setup()
 
@@ -112,7 +112,7 @@ def main(args, if_raise=True):
     # For local_ray mode, the controller will start all remote workers.
     sched.submit_array(
         worker_type="ctl",
-        cmd=scheduler.client.control_cmd(
+        cmd=schd_client.control_cmd(
             expr_name,
             trial_name,
             False,
@@ -150,7 +150,7 @@ def main(args, if_raise=True):
     timeout = None if not args.trace else TRACE_TIMEOUT  # run 5 mins to collect trace
     try:
         sched.wait(timeout=timeout)
-    except (KeyboardInterrupt, scheduler.client.JobException, TimeoutError) as e:
+    except (KeyboardInterrupt, schd_client.JobException, TimeoutError) as e:
         sched.stop_all()
         if if_raise:
             raise e
