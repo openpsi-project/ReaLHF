@@ -52,9 +52,11 @@ class LayerNormQKVLinear(nn.Module):
     ):
         super().__init__()
         if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
-            raise RuntimeError(
+            logger.warning(
                 "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
             )
+            sequence_parallel = False
+            gradient_accumulation_fusion = False
         if dtype is None:
             dtype = torch.float16
         if layer_norm_type is None:
@@ -233,9 +235,11 @@ class LayerNormMLP(nn.Module):
     ):
         super().__init__()
         if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
-            raise RuntimeError(
+            logger.warning(
                 "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
             )
+            sequence_parallel = False
+            gradient_accumulation_fusion = False
         if dtype is None:
             dtype = torch.float16
 
@@ -292,9 +296,11 @@ class LlamaLayerNormMLP(nn.Module):
     ):
         super().__init__()
         if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
-            raise RuntimeError(
+            logger.warning(
                 "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
             )
+            sequence_parallel = False
+            gradient_accumulation_fusion = False
 
         if dtype is None:
             dtype = torch.float16
