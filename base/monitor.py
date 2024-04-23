@@ -461,7 +461,7 @@ def dump_tmark_db(worker_idx):
     TIME_MARK_DB.clear()
 
 
-COMPUTE_KERNEL_KEYS =[
+COMPUTE_KERNEL_KEYS = [
     "elementwise_kernel",
     "gemm_",
     "aten::",
@@ -488,18 +488,19 @@ MISC_KERNEL_KEYS = [
     "CudaCodeGen",
 ]
 
+
 @dataclasses.dataclass
 class CUDAKernelTime:  # in us
     compute: int
     comm: int
     mem: int
     misc: int
-    
+
     @classmethod
     def from_profiler(cls, p):
         import torch
         compute_time = comm_time = mem_time = misc_time = 0
-        unknown_keys =[]
+        unknown_keys = []
         for x in p.key_averages():
             if x.device_type != torch.autograd.DeviceType.CUDA:
                 continue
@@ -518,9 +519,10 @@ class CUDAKernelTime:  # in us
             else:
                 unknown_keys.append(x)
         if unknown_keys:
-            raise NotImplementedError(f"Unknown keys: {[(x.key, x.self_cuda_time_total) for x in unknown_keys]}")
+            raise NotImplementedError(
+                f"Unknown keys: {[(x.key, x.self_cuda_time_total) for x in unknown_keys]}")
         return cls(compute=compute_time, comm=comm_time, mem=mem_time, misc=misc_time)
-    
+
     def __add__(self, other):
         return CUDAKernelTime(
             compute=self.compute + other.compute,
@@ -532,7 +534,7 @@ class CUDAKernelTime:  # in us
     @property
     def total_secs(self):
         return (self.compute + self.comm + self.mem + self.misc) / 1e6
-    
+
     def __truediv__(self, x):
         return CUDAKernelTime(
             compute=self.compute / x,
@@ -540,5 +542,6 @@ class CUDAKernelTime:  # in us
             mem=self.mem / x,
             misc=self.misc / x,
         )
+
     def __repr__(self):
         return f"CUDAKernelTime(compute={self.compute}us, comm={self.comm}us, mem={self.mem}us, misc={self.misc}us)"
