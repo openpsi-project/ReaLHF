@@ -9,7 +9,7 @@ except ModuleNotFoundError:
 import torch
 import transformers
 
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import PipeCacheData, PipeTransferData, ReaLModel
+from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData, ReaLModel
 from tests.utils import init_global_constants
 import reallm.api.huggingface
 

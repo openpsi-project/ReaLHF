@@ -24,7 +24,7 @@ from reallm.api.quickstart.model import FlashMQATConfig
 from reallm.base.constants import LOG_ROOT
 from reallm.base.monitor import CUDAKernelTime, gpu_utilization_monitor, time_mark
 from reallm.base.topology import ParallelGrid
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
+from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.profiler.comm import ProfileCommunication
 from reallm.profiler.engine import ProfileEngine
 from reallm.profiler.utils import make_stats_key, random_sample
@@ -32,7 +32,7 @@ import reallm.api.core.dfg
 # from reallm.impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
 import reallm.api.core.system as config_package
 import reallm.api.data
-import reallm.api.model
+import reallm.api.core.model as model_api
 import reallm.base.constants
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.logging as logging
@@ -167,15 +167,15 @@ class ProfileWorker(worker_base.Worker):
 
         with reallm.base.constants.model_scope(self.model_name):
             reallm.base.constants.set_max_seqlen(max(self.seq_len_list))
-            self.__interface = reallm.api.model.make_interface(self.interface_config)
-            self.__backend = reallm.api.model.make_backend(self.backend_config)
+            self.__interface = model_api.make_interface(self.interface_config)
+            self.__backend = model_api.make_backend(self.backend_config)
 
             # assert isinstance(self.__model.module, ReaLModel)
             self.__engine = None
 
     def __reinit_backend(self, bs, seq_len):
         with reallm.base.constants.model_scope(self.model_name):
-            self.__model = reallm.api.model.make_model(
+            self.__model = model_api.make_model(
                 self.model_config,
                 name=self.model_name,
                 device=self.__device,
@@ -188,7 +188,7 @@ class ProfileWorker(worker_base.Worker):
             self.__vocab_size = self.__nn_config.vocab_size
 
             bs_per_device = bs // reallm.base.constants.data_parallel_world_size()
-            ft_spec = reallm.api.model.FinetuneSpec(10, 100, 10, bs_per_device, seq_len)
+            ft_spec = model_api.FinetuneSpec(10, 100, 10, bs_per_device, seq_len)
             self.__model = self.__backend.initialize(self.__model, ft_spec)
             self.__engine = self.__model.module
 

@@ -9,10 +9,9 @@ import torch.distributed as dist
 import transformers
 
 from reallm.base.namedarray import NamedArray, recursive_apply
-from reallm.impl.model.nn.flash_mqat.flash_generate import GenerationConfig
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import HuggingfaceLikeFlashMQATForCausalLM
-import reallm.api.huggingface
-import reallm.api.model
+from reallm.impl.model.nn.real_llm_generate import GenerationConfig
+from reallm.impl.model.nn.real_llm_api import HuggingfaceLikeFlashMQATForCausalLM
+import reallm.api.core.model as model_api
 
 
 @dataclasses.dataclass
@@ -23,7 +22,7 @@ class PackedGenScoringInterface(api.model.ModelInterface):
         super().__post_init__()
         self.score_model = transformers.AutoModelForSequenceClassification.from_pretrained(
             "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english").cuda()
-        self.score_tokenizer = reallm.api.huggingface.load_hf_tokenizer(
+        self.score_tokenizer = model_api.load_hf_tokenizer(
             "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english")
 
         self.sft_model = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(
@@ -37,7 +36,7 @@ class PackedGenScoringInterface(api.model.ModelInterface):
         self.score_model.eval()
         self.sft_model.eval()
 
-    def save(self, model: reallm.api.model.Model, save_dir: str):
+    def save(self, model: model_api.Model, save_dir: str):
         os.makedirs(save_dir, exist_ok=True)
         with open(os.path.join(save_dir, "gen_score_data.jsonl"), "w") as f:
             for x in self.history_data:
@@ -45,7 +44,7 @@ class PackedGenScoringInterface(api.model.ModelInterface):
                 f.write("\n")
 
     @torch.inference_mode()
-    def generate(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
+    def generate(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         module = model.module
         if isinstance(module, deepspeed.DeepSpeedEngine):
             # we don't calculate gradient here, so it's safe to unwrap deepspeed

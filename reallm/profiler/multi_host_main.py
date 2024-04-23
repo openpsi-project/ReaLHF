@@ -4,9 +4,10 @@ import getpass
 import os
 import re
 
-import profiler.experiments
-import scheduler.client
-import system
+import reallm.profiler.experiments
+import reallm.scheduler as scheduler
+import reallm.system
+
 
 import reallm.api.core.system as config_package
 import reallm.base.logging as logging

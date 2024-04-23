@@ -150,7 +150,7 @@ def test_impl(
 
     assert not (profile and profile_compile)
     from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
-    from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, ReaLModel
+    from reallm.impl.model.nn.real_llm_api import add_helper_functions, ReaLModel
 
     hf_model_type = "llama" if model_size != 34 else "codellama"
     hf_config = transformers.AutoConfig.from_pretrained(MODEL_TYPE_TO_PATH[ModelType(

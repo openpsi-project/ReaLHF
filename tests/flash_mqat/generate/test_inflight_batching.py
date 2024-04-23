@@ -8,7 +8,7 @@ import torch
 import transformers
 
 from reallm.impl.model.nn.flash_mqat.flash_generate import *
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import PipeCacheData, PipeTransferData, ReaLModel
+from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData, ReaLModel
 import reallm.api.huggingface
 
 

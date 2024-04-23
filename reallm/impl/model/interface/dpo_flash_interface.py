@@ -8,7 +8,7 @@ import tqdm
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs
-import reallm.api.model
+import reallm.api.core.model as model_api
 import reallm.base.logging as logging
 import reallm.impl.model.utils.dpo_functional as dpo_functional
 
@@ -49,12 +49,12 @@ def _dpo_loss_from_model_outputs(
 
 
 @dataclasses.dataclass
-class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
+class PackedDirectPerferenceOptimizationInterface(model_api.ModelInterface):
     beta: float
     enable_save: bool = True
 
     @torch.inference_mode()
-    def inference(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -88,7 +88,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
 
         return from_dict(dict(seqlogp=torch.stack(logprob_sum)))
 
-    def train_step(self, model: reallm.api.model.Model, data: NamedArray) -> Dict:
+    def train_step(self, model: model_api.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
@@ -140,7 +140,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
             stats = {}
         return {k: float(v) for k, v in stats.items()}
 
-    def save(self, model: reallm.api.model.Model, output_dir):
+    def save(self, model: model_api.Model, output_dir):
         if not self.enable_save:
             return
         model.module.save(
@@ -151,4 +151,4 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
         )
 
 
-api.model.register_interface("flash_dpo", PackedDirectPerferenceOptimizationInterface)
+model_api.register_interface("flash_dpo", PackedDirectPerferenceOptimizationInterface)

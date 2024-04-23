@@ -27,7 +27,7 @@ import reallm.base.topology
 
 def get_model(mconfig):
     from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
-    from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, ReaLModel
+    from reallm.impl.model.nn.real_llm_api import add_helper_functions, ReaLModel
 
     m = ReaLModel(mconfig, device=torch.device("cuda:0"), dtype=torch.float16)
     m.instantiate()

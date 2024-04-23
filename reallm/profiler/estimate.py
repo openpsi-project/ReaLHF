@@ -15,8 +15,8 @@ import pprint
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+from reallm.impl.model.nn.real_llm_api import ReaLModel
+from reallm.impl.model.nn.real_llm_base import FlashMQATConfig
 from reallm.profiler.device_mesh import *
 from reallm.profiler.experiments import ProfileExperiment
 from reallm.profiler.rpc import CommStats

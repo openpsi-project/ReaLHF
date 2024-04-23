@@ -1,8 +1,8 @@
 def import_profiler_registers():
-    import profiler.comm
-    import profiler.engine
-    import profiler.experiments
-    import profiler.interface
-    import profiler.layers
-    import profiler.utils
-    import profiler.worker
+    import reallm.profiler.comm
+    import reallm.profiler.engine
+    import reallm.profiler.experiments
+    import reallm.profiler.interface
+    import reallm.profiler.layers
+    import reallm.profiler.utils
+    import reallm.profiler.worker

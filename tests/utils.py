@@ -67,8 +67,8 @@ def make_finetune_spec(bs_per_device,
                        total_train_steps=10,
                        steps_per_epoch=10,
                        max_seq_len=1024):
-    import reallm.api.model
-    finetune_spec = reallm.api.model.FinetuneSpec(
+    import reallm.api.core.model as model_api
+    finetune_spec = model_api.FinetuneSpec(
         total_train_epochs=total_train_epochs,
         total_train_steps=total_train_steps,
         steps_per_epoch=steps_per_epoch,
@@ -194,7 +194,7 @@ def get_memory(rank):
 
 
 def get_llama7b_flash_config():
-    from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+    from reallm.impl.model.nn.real_llm_base import FlashMQATConfig
 
     # codellama 34b config
     # return FlashMQATConfig(
@@ -228,7 +228,7 @@ def get_llama7b_flash_config():
 
 
 def get_llama_config(size):
-    from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+    from reallm.impl.model.nn.real_llm_base import FlashMQATConfig
     if size == 7:
         size_args = dict(
             n_layers=40,

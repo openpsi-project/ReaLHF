@@ -7,15 +7,15 @@ import tqdm
 
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from reallm.impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
 from reallm.impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
                                                 gather_packed_shifted_log_probs)
 from reallm.impl.model.utils.save_load import save_hf_or_lora_model
-import reallm.api.data
-import reallm.api.model
-import reallm.base.constants
-import reallm.base.dataparallel
+import reallm.api.core.data as data_api
+import reallm.api.core.model as model_api
+import reallm.base.constants as constants
+import reallm.base.dataparallel as dataparallel
 
 try:
     from flash_attn.bert_padding import unpad_input
@@ -39,9 +39,9 @@ def compute_packed_sft_loss(
     return loss, {"loss": loss.detach()}
 
 
-class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
+class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
 
-    def train_step(self, model: reallm.api.model.Model, data: NamedArray) -> Dict:
+    def train_step(self, model: model_api.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_input_ids: torch.Tensor = data['packed_input_ids']  # shape [tot_seqlen]
         cu_seqlens: torch.Tensor = data['cu_seqlens']
@@ -61,7 +61,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
                 loss_fn=compute_packed_sft_loss,
-                num_micro_batches=base.constants.pipe_parallel_world_size() * 2,
+                num_micro_batches=constants.pipe_parallel_world_size() * 2,
                 **loss_fn_kwargs,
             )
         else:
@@ -80,14 +80,14 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
             res['loss'] = float(loss)
         return res
 
-    def save(self, model: reallm.api.model.Model, save_dir: str):
+    def save(self, model: model_api.Model, save_dir: str):
         model.module.save(save_dir,
                           epoch=model.version.epoch,
                           epoch_step=model.version.epoch_step,
                           global_step=model.version.global_step)
 
     @torch.inference_mode()
-    def evaluate(self, model_: reallm.api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
+    def evaluate(self, model_: model_api.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
         device = model_.device
         module = model_.module
 
@@ -110,7 +110,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 loss, _ = module.eval_batch(packed_input_ids,
                                             cu_seqlens,
                                             loss_fn=compute_packed_sft_loss,
-                                            num_micro_batches=base.constants.pipe_parallel_world_size(),
+                                            num_micro_batches=constants.pipe_parallel_world_size(),
                                             **loss_fn_kwargs)
             else:
                 logits = module(packed_input_ids=packed_input_ids,
@@ -133,7 +133,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         return res
 
     @torch.no_grad()
-    def inference(self, model: reallm.api.model.Model, data: NamedArray) -> Dict:
+    def inference(self, model: model_api.Model, data: NamedArray) -> Dict:
         device = model.device
         module = model.module
         module.eval()
@@ -146,7 +146,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         if isinstance(module, DeepSpeedPipelineEngine):
             logits = module.forward(packed_input_ids=packed_input_ids,
                                     cu_seqlens=cu_seqlens,
-                                    num_micro_batches=base.constants.pipe_parallel_world_size())
+                                    num_micro_batches=constants.pipe_parallel_world_size())
         else:
             logits = model.module(packed_input_ids=packed_input_ids,
                                   cu_seqlens=cu_seqlens,
@@ -155,7 +155,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
 
     # for testing only
     @torch.no_grad()
-    def generate(self, model: reallm.api.model.Model, data: NamedArray,
+    def generate(self, model: model_api.Model, data: NamedArray,
                  gconfig: GenerationConfig) -> NamedArray:
         module = model.module
 
@@ -176,7 +176,7 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
                 packed_input_ids=data['packed_input_ids'],
                 cu_seqlens=data['cu_seqlens'],
                 gconfig=gconfig,
-                num_micro_batches=base.constants.pipe_parallel_world_size(),
+                num_micro_batches=constants.pipe_parallel_world_size(),
             )
             if res is None:
                 return dict()
@@ -200,4 +200,4 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
         )
 
 
-api.model.register_interface("flash_sft", PackedSupervisedFinetuningInterface)
+model_api.register_interface("flash_sft", PackedSupervisedFinetuningInterface)

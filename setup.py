@@ -239,4 +239,5 @@ setuptools.setup(
     name="reallm",
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
+    packages=setuptools.find_packages(),
 )

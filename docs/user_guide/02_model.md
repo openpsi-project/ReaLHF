@@ -17,7 +17,7 @@ As its core components, it encapsules a neural network and a tokenizer.
 To implement a new model, users should write a function with signature
 
 ```python
-def foo(name: str, device: Union[str, torch.device], **model_kwargs) -> reallm.api.model.Model:
+def foo(name: str, device: Union[str, torch.device], **model_kwargs) -> model_api.Model:
     ...
 ```
 

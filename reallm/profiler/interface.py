@@ -20,7 +20,7 @@ from reallm.impl.model.utils.functional import (build_leave_one_indices, build_s
 from reallm.impl.model.utils.save_load import save_hf_or_lora_model
 from reallm.profiler.engine import ProfileEngine
 import reallm.api.data
-import reallm.api.model
+import reallm.api.core.model as model_api
 import reallm.base.constants
 import reallm.base.dataparallel
 
@@ -49,7 +49,7 @@ def compute_packed_sft_loss(
 class ProfileInterface(api.model.ModelInterface):
     n_minibatches: int = 4
 
-    def train_step(self, model: reallm.api.model.Model, data: NamedArray, gen_tokens: int = 128) -> Dict:
+    def train_step(self, model: model_api.Model, data: NamedArray, gen_tokens: int = 128) -> Dict:
         module: deepspeed.DeepSpeedEngine = model.module
         data = recursive_apply(data, lambda x: x.to(model.device))
         datas = PackedParallelDataBroker.scatter_to(data,
@@ -103,7 +103,7 @@ class ProfileInterface(api.model.ModelInterface):
         return res
 
     @torch.no_grad()
-    def inference(self, model: reallm.api.model.Model, data: NamedArray, gen_tokens: int = 128) -> Dict:
+    def inference(self, model: model_api.Model, data: NamedArray, gen_tokens: int = 128) -> Dict:
         device = model.device
         module = model.module
         module.eval()
@@ -134,7 +134,7 @@ class ProfileInterface(api.model.ModelInterface):
         return dict(logits=logits)
 
     @torch.no_grad()
-    def generate(self, model: reallm.api.model.Model, data: NamedArray, gen_tokens: int = 256) -> NamedArray:
+    def generate(self, model: model_api.Model, data: NamedArray, gen_tokens: int = 256) -> NamedArray:
         module = model.module
         module.eval()
         # assert isinstance(module, ProfileEngine)

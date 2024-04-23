@@ -3,8 +3,8 @@ import os
 
 import transformers
 
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+from reallm.impl.model.nn.real_llm_api import ReaLModel
+from reallm.impl.model.nn.real_llm_base import FlashMQATConfig
 from reallm.impl.model.utils.save_load import load_from_disk
 
 

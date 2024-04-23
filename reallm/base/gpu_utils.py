@@ -11,7 +11,7 @@ import torch
 import torch.distributed
 
 from reallm.api.core.config import ModelName
-import reallm.api.core.system
+import reallm.api.core.system as system_api
 import reallm.base.logging as logging
 import reallm.base.name_resolve as name_resolve
 import reallm.base.names as names
@@ -100,17 +100,17 @@ class NCCLProcessGroupInfo:
 def _filter_match_mwids(
     model_name: ModelName,
     topo: topology.PipeModelDataParallelTopology,
-    msid2mwid: Dict[api.core.system.ModelShardID, int],
+    msid2mwid: Dict[system_api.ModelShardID, int],
     **conditions,
 ) -> List[int]:
     if len(conditions) == 0:
         mwids_this_model = [
-            msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(model_name, topo, j)]
+            msid2mwid[system_api.ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in range(topo.world_size())
         ]
     else:
         mwids_this_model = [
-            msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(model_name, topo, j)]
+            msid2mwid[system_api.ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in topo.filter_match(**conditions)
         ]
     mwids_this_model = sorted(mwids_this_model)
@@ -218,12 +218,12 @@ def _create_param_sync_groups(
     to_topo: topology.PipeModelDataParallelTopology,
     src: ModelName,
     dst: ModelName,
-    msid2mwid: Dict[api.core.system.ModelShardID, int],
+    msid2mwid: Dict[system_api.ModelShardID, int],
     param_sync_groups: Dict[ParamSyncPair, torch.distributed.ProcessGroup],
     param_sync_src_ranks: Dict[ParamSyncPair, int],
     param_sync_dst_ranks: Dict[ParamSyncPair, List[int]],
 ):
-    mwid2msid: Dict[int, Dict[ModelName, reallm.api.core.system.ModelShardID]] = defaultdict(dict)
+    mwid2msid: Dict[int, Dict[ModelName, system_api.ModelShardID]] = defaultdict(dict)
     for k, v in msid2mwid.items():
         mwid2msid[v][k.model_name] = k
     for pp_i, pp_j in itertools.product(range(from_topo.get_dim("pipe")), range(to_topo.get_dim("pipe"))):
@@ -301,7 +301,7 @@ def setup_ddp(
         trial_name: str,
         worker_index: int,
         model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
-        msid2mwid: Optional[Dict[api.core.system.ModelShardID, int]] = None,
+        msid2mwid: Optional[Dict[system_api.ModelShardID, int]] = None,
         param_sync_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
         data_transfer_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
         world_size: Optional[int] = None,  # for testing only

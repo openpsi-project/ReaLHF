@@ -18,10 +18,10 @@ maintainers = [
 ]
 keywords = ["large language models (LLMs)", "RLHF", "distributed training"]
 dependencies = [
-    "torch>=2.1.0",
-    "flash-attn>=2.3.6",
-    "transformers>=4.39.1",
-    "deepspeed>=0.14.0",
+    "torch",
+    "flash-attn",
+    "transformers",
+    "deepspeed",
     "hydra-core",
     "pyzmq",
 ]
@@ -45,9 +45,9 @@ Repository = "https://github.com/garrett4wade/distributed_llm"
 
 [tool.setuptools.packages.find]
 where = ["."]                    # ["."] by default
-include = ["csrc/*", "reallm/*"] # ["*"] by default
-exclude = ["tests", "docker"]    # empty by default
-namespaces = false               # true by default
+# include = ["csrc/*", "reallm/*"] # ["*"] by default
+# exclude = ["tests", "docker"]    # empty by default
+# namespaces = false               # true by default
 
 [tool.isort]
 from_first = true
@@ -66,5 +66,7 @@ blank_line_before_nested_class_or_def = true
 space_between_ending_comma_and_closing_bracket = false
 allow_split_before_dict_value = false
 
-[tool.pytest]
-pythonpath = "."
+[tool.pytest.ini_options]
+pythonpath = [
+  "."
+]

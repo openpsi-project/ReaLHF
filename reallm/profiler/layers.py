@@ -12,15 +12,15 @@ import torch.distributed as dist
 import transformers
 
 from reallm.base.topology import *
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, OutputHead,
+from reallm.impl.model.nn.real_llm_api import ReaLModel
+from reallm.impl.model.nn.real_llm_base import (FlashMQATBlock, FlashMQATConfig, OutputHead,
                                                              SequenceParallelActorHead,
                                                              SequenceParallelCriticHead,
                                                              VocabPositionEmbedding)
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 import reallm.api.core.system as config_package
 import reallm.api.huggingface
-import reallm.api.model
+import reallm.api.core.model as model_api
 import reallm.base.cluster
 import reallm.base.constants
 
@@ -134,11 +134,11 @@ class ProfileLayers:
         self.num_layers = len(self.layers)
 
         self.layers = [
-            reallm.api.model.Model(name, layer, tokenizer, device=device, dtype=dtype)
+            model_api.Model(name, layer, tokenizer, device=device, dtype=dtype)
             for layer, name in zip(self.layers, self.layer_names)
         ]
-        self.backend = reallm.api.model.make_backend(self.backend_config)
-        ft_spec = reallm.api.model.FinetuneSpec(10, 100, 10, 32, 256)
+        self.backend = model_api.make_backend(self.backend_config)
+        ft_spec = model_api.FinetuneSpec(10, 100, 10, 32, 256)
         self.layers = [self.backend.initialize(layer, ft_spec) for layer in self.layers]
 
     def reset_stats(self):

@@ -48,9 +48,9 @@ def main_worker(args):
 
     # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
     # profiler.import_profiler_registers()
-    import profiler.experiments
-    # import profiler.worker
-    import profiler.interface
+    import reallm.profiler.experiments
+    # import reallm.profiler.worker
+    import reallm.profiler.interface
     import system
 
     import reallm.experiments
@@ -112,7 +112,7 @@ def main_controller(args):
             config_index: the index of experiment configuration (experiment may return multiple configurations)
             ignore_worker_error: bool, if False, stop the experiment when any worker(s) fail.
     """
-    import profiler.experiments
+    import reallm.profiler.experiments
 
     import reallm.api.core.system as system_api
     import reallm.base.constants

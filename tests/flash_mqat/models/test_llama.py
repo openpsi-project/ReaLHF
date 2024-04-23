@@ -7,8 +7,8 @@ import torch.distributed
 import transformers
 
 from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, ReaLModel
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
+from reallm.impl.model.nn.real_llm_api import add_helper_functions, ReaLModel
+from reallm.impl.model.nn.real_llm_base import (flash_model_embed_param_count,
                                                              flash_model_head_param_count,
                                                              flash_model_tblock_param_count, FlashMQATBlock,
                                                              OutputHead, VocabPositionEmbedding)

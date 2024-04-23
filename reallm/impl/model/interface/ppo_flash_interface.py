@@ -13,11 +13,10 @@ from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
-from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
+from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
+from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
-import reallm.api.huggingface
-import reallm.api.model
+import reallm.api.core.model as model_api
 import reallm.base.constants
 import reallm.base.logging as logging
 import reallm.impl.model.utils.ppo_functional as ppo_functional
@@ -101,7 +100,7 @@ def _ppo_actor_loss_from_model_outputs(
 
 
 @dataclasses.dataclass
-class PackedActorInterface(api.model.ModelInterface):
+class PackedActorInterface(model_api.ModelInterface):
     n_minibatches: int = 4
 
     generation_config: Optional[Dict] = None
@@ -162,7 +161,7 @@ class PackedActorInterface(api.model.ModelInterface):
         if self.pipe_train_n_mbs is None:
             self.pipe_train_n_mbs = reallm.base.constants.pipe_parallel_world_size() * 2
 
-    def save(self, model: reallm.api.model.Model, save_dir: str):
+    def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
         model.module.save(save_dir,
@@ -171,7 +170,7 @@ class PackedActorInterface(api.model.ModelInterface):
                           global_step=model.version.global_step)
 
     @torch.no_grad()
-    def generate(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
+    def generate(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         module = model.module
 
         module.eval()
@@ -280,7 +279,7 @@ class PackedActorInterface(api.model.ModelInterface):
         return from_dict(res)
 
     @torch.no_grad()
-    def inference(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -317,7 +316,7 @@ class PackedActorInterface(api.model.ModelInterface):
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         return from_dict(dict(logprobs=logprobs))
 
-    def train_step(self, model: reallm.api.model.Model, data_: NamedArray) -> Dict:
+    def train_step(self, model: model_api.Model, data_: NamedArray) -> Dict:
         module = model.module
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
@@ -533,7 +532,7 @@ def _ppo_critic_loss_from_model_outputs(
 
 
 @dataclasses.dataclass
-class PackedCriticInterface(api.model.ModelInterface):
+class PackedCriticInterface(model_api.ModelInterface):
     n_minibatches: int = 4
     enable_save: bool = True
     kl_ctl: float = 0.1
@@ -578,7 +577,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         if self.pipe_inf_n_mbs is None:
             self.pipe_inf_n_mbs = reallm.base.constants.pipe_parallel_world_size()
 
-    def save(self, model: reallm.api.model.Model, save_dir: str):
+    def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
         model.module.save(save_dir,
@@ -587,7 +586,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                           global_step=model.version.global_step)
 
     @torch.no_grad()
-    def inference(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -613,7 +612,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         scores = scores.squeeze(-1)
         return from_dict(dict(scores=scores))
 
-    def train_step(self, model: reallm.api.model.Model, data_: NamedArray) -> Dict:
+    def train_step(self, model: model_api.Model, data_: NamedArray) -> Dict:
         module = model.module
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
@@ -765,5 +764,5 @@ class PackedCriticInterface(api.model.ModelInterface):
         return dict(train_stats)
 
 
-api.model.register_interface("flash_actor", PackedActorInterface)
-api.model.register_interface("flash_critic", PackedCriticInterface)
+model_api.register_interface("flash_actor", PackedActorInterface)
+model_api.register_interface("flash_critic", PackedCriticInterface)

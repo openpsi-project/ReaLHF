@@ -2,8 +2,9 @@ from typing import List
 import argparse
 import math
 
-import profiler.multi_host_main
-import scheduler.client
+import reallm.profiler.multi_host_main
+import reallm.scheduler.client
+import reallm.scheduler as scheduler
 
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelRPC

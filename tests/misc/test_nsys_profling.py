@@ -97,7 +97,7 @@ def get_pytorch_profiler(save_fn: str):
 
 def test_impl(world_size, profile: bool):
     from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
-    from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, ReaLModel
+    from reallm.impl.model.nn.real_llm_api import add_helper_functions, ReaLModel
 
     torch.distributed.barrier()
     mconfig = get_llama7b_flash_config()

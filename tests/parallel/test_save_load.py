@@ -18,8 +18,8 @@ BASE_MODEL_PATH = f"/lustre/public/pretrained_model_weights/Llama-2-{MODEL_SIZE}
 
 
 def make_model(device, from_type: str, load_dir=None):
-    import reallm.api.model
-    import reallm.impl.model.nn.flash_mqat.flash_mqat_api
+    import reallm.api.core.model as model_api
+    import reallm.impl.model.nn.real_llm_api
 
     model_config = config_package.Model(
         "flash_mqat",
@@ -33,7 +33,7 @@ def make_model(device, from_type: str, load_dir=None):
             gradient_accumulation_fusion=False,
         ),
     )
-    model = reallm.api.model.make_model(model_config, name=MODEL_NAME, device=device)
+    model = model_api.make_model(model_config, name=MODEL_NAME, device=device)
     return model
 
 

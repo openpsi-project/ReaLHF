@@ -6,7 +6,7 @@ import transformers
 
 from reallm.impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig, vanilla_cpu_generate,
                                                             vanilla_packed_generate)
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import PipeCacheData, PipeTransferData, ReaLModel
+from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData, ReaLModel
 from reallm.impl.model.utils.functional import gather_shifted_log_probs
 from tests.utils import init_global_constants
 import reallm.api.huggingface

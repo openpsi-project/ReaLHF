@@ -8,7 +8,7 @@ import transformers
 import viztracer
 
 from reallm.impl.model.nn.flash_mqat.flash_generate import *
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import *
+from reallm.impl.model.nn.real_llm_base import *
 
 
 class InflightBatchingThroughputTest(unittest.TestCase):

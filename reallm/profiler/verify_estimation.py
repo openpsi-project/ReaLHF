@@ -6,7 +6,7 @@ import json
 import os
 import time
 
-import profiler.estimate
+import reallm.profiler.estimate
 
 from reallm.profiler.utils import find_factors
 

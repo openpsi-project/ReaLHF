@@ -37,7 +37,7 @@ OFFLOAD_PARAM = False
 
 
 def make_backend():
-    import reallm.api.model
+    import reallm.api.core.model as model_api
 
     engine_type = "pipe" if NUM_PP > 1 else "deepspeed"
     args = dict(
@@ -55,23 +55,23 @@ def make_backend():
         sequence_parallel=USE_SEQ_PARALLEL,
         enable_async_p2p_communication=ASYNC_P2P,
     )
-    return reallm.api.model.make_backend(config_package.ModelBackend(
+    return model_api.make_backend(config_package.ModelBackend(
         type_="ds_train",
         args=args,
     ))
 
 
 def make_interface():
-    import profiler.interface
+    import reallm.profiler.interface
 
     import reallm.api.core.dfg
-    import reallm.api.model
-    return reallm.api.model.make_interface(api.core.dfg.ModelInterface(type_="profile", args=dict()))
+    import reallm.api.core.model as model_api
+    return model_api.make_interface(api.core.dfg.ModelInterface(type_="profile", args=dict()))
 
 
 def make_model(device):
-    import reallm.api.model
-    import reallm.impl.model.nn.flash_mqat.flash_mqat_api
+    import reallm.api.core.model as model_api
+    import reallm.impl.model.nn.real_llm_api
 
     # from_type = "self" if NUM_PP == 1 else "empty_actor"
     # if NUM_MP == NUM_PP == 1:
@@ -91,7 +91,7 @@ def make_model(device):
         ),
     )
 
-    model = reallm.api.model.make_model(model_config, name=MODEL_NAME, device=device)
+    model = model_api.make_model(model_config, name=MODEL_NAME, device=device)
     return model
 
 
@@ -354,8 +354,8 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
         self.tokenizer.padding_side = "left"
 
     def init_baseline_model(self):
-        from reallm.impl.model.nn.flash_mqat.flash_mqat_api import forward_helper, generate_helper
-        from reallm.impl.model.nn.flash_mqat.flash_mqat_base import ReaLModel
+        from reallm.impl.model.nn.real_llm_api import forward_helper, generate_helper
+        from reallm.impl.model.nn.real_llm_base import ReaLModel
         import reallm.impl.model.nn.flash_mqat.flash_from_hf_impl
 
         self.device = device = "cuda"

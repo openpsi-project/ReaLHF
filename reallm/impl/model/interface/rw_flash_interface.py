@@ -11,9 +11,9 @@ import tqdm
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
-import reallm.api.model
-import reallm.base.constants
+from reallm.impl.model.nn.real_llm_api import ReaLModel
+import reallm.api.core.model as model_api
+import reallm.base.constants as constants
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Packed Reward Modeling Interface", "benchmark")
@@ -38,7 +38,7 @@ def _paired_rw_loss_from_model_outputs(
 
 
 @dataclasses.dataclass
-class PackedPairedRewardInterface(api.model.ModelInterface):
+class PackedPairedRewardInterface(model_api.ModelInterface):
     enable_save: bool = True
 
     output_scaling: float = 1.0
@@ -50,10 +50,10 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
         super().__post_init__()
         self.train_total_predictions = self.train_total_correct_predictions = 0
         if self.pipe_inf_n_mbs is None:
-            self.pipe_inf_n_mbs = reallm.base.constants.pipe_parallel_world_size()
+            self.pipe_inf_n_mbs = constants.pipe_parallel_world_size()
 
     @torch.no_grad()
-    def inference(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
         cu_seqlens: torch.Tensor = data["cu_seqlens"].int()
@@ -95,7 +95,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
 
         return from_dict(dict(scores=chosen_end_scores))
 
-    def train_step(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
+    def train_step(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
@@ -146,7 +146,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
             stats = {}
         return {k: float(v) for k, v in stats.items()}
 
-    def save(self, model: reallm.api.model.Model, output_dir):
+    def save(self, model: model_api.Model, output_dir):
         if not self.enable_save:
             return
         model.module.save(output_dir,
@@ -155,7 +155,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
                           global_step=model.version.global_step)
 
     @torch.no_grad()
-    def evaluate(self, model_: reallm.api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
+    def evaluate(self, model_: model_api.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
         device = model_.device
         model = model_.module
 
@@ -210,7 +210,7 @@ class PackedPairedRewardInterface(api.model.ModelInterface):
         return dict()
 
 
-api.model.register_interface("flash_paired_rw", PackedPairedRewardInterface)
+model_api.register_interface("flash_paired_rw", PackedPairedRewardInterface)
 
 # @dataclasses.dataclass
 # class PackedPlackettLuceRewardInterface(api.model.ModelInterface):
@@ -220,7 +220,7 @@ api.model.register_interface("flash_paired_rw", PackedPairedRewardInterface)
 #         self.train_total_predictions = self.train_total_correct_predictions = 0
 
 #     @torch.no_grad()
-#     def inference(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
+#     def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
 #         data = recursive_apply(data, lambda x: x.to(model.device))
 #         packed_input_ids: torch.Tensor = data["packed_input_ids"].squeeze()
 #         cu_seqlens: torch.Tensor = data["cu_seqlens"].squeeze()
@@ -246,7 +246,7 @@ api.model.register_interface("flash_paired_rw", PackedPairedRewardInterface)
 
 #         return from_dict(dict(scores=chosen_end_scores.cpu()))
 
-#     def train_step(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
+#     def train_step(self, model: model_api.Model, data: NamedArray) -> NamedArray:
 #         contrastive_dim = data["contrastive_dim"].item()
 #         n_contrastive_batches = data["n_contrastive_batches"].item()
 #         n_valid_seqs = contrastive_dim * n_contrastive_batches
@@ -298,7 +298,7 @@ api.model.register_interface("flash_paired_rw", PackedPairedRewardInterface)
 
 #         return dict(loss=loss.detach().item(), acc=acc)
 
-#     def save(self, model: reallm.api.model.Model, output_dir):
+#     def save(self, model: model_api.Model, output_dir):
 #         if not self.enable_save:
 #             return
 #         from reallm.impl.model.nn.lora import is_lora_model
@@ -315,7 +315,7 @@ api.model.register_interface("flash_paired_rw", PackedPairedRewardInterface)
 #             torch.save(model.module.module.head.state_dict(), os.path.join(save_path, "rw_v_head.bin"))
 
 #     @torch.no_grad()
-#     def evaluate(self, model_: reallm.api.model.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
+#     def evaluate(self, model_: model_api.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
 #         device = model_.device
 #         model = model_.module
 
@@ -360,4 +360,4 @@ api.model.register_interface("flash_paired_rw", PackedPairedRewardInterface)
 
 #         return dict(loss=float(loss / total_predictions), acc=correct_predictions / total_predictions)
 
-# reallm.api.model.register_interface("flash_plrw", PackedPlackettLuceRewardInterface)
+# model_api.register_interface("flash_plrw", PackedPlackettLuceRewardInterface)
