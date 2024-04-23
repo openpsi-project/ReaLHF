@@ -11,7 +11,7 @@ import json
 import matplotlib.colors as colors
 import os
 import pickle
-from est_mscost_v2 import compute_cost
+from tests.misc.est_mscost_v2 import compute_cost
 from api.config.config_base import ModelName
 import base.topology
 from tests.utils import get_llama7b_flash_config

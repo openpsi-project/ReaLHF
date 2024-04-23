@@ -103,8 +103,14 @@ class ProfileWorker(worker_base.Worker):
         self.seq_len_list = cfg.seq_len_list
         # self.gen_tokens_list = cfg.gen_tokens_list
 
-        self.bs_list = [128]
-        self.seq_len_list = [1024]
+        if self.bs_list is None:
+            self.bs_list = [128, 256, 512]  # total bss
+            if len(self.rpcs) == 1:
+                self.bs_list = [256]
+        if self.seq_len_list is None:
+            self.seq_len_list = [1024, 512, 256]
+            if len(self.rpcs) == 1:
+                self.seq_len_list = [128]
         # if self.gen_tokens_list is None:
         #     self.gen_tokens_list = [128]
 
