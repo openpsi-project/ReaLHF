@@ -49,7 +49,6 @@ try:
     from flash_attn.bert_padding import pad_input, unpad_input
 except ModuleNotFoundError:
     pass
-import base.logging as logging
 
 logger = logging.getLogger("FlashMQAT Interface")
 

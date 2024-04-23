@@ -28,3 +28,6 @@ allow_split_before_dict_value = false
 
 [tool.yapfignore]
 ignore_patterns = ["thirdparty/*"]
+
+[tool.pytest]
+pythonpath = "."
