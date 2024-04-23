@@ -13,7 +13,7 @@ import torch.nn.init as init
 from .mappings import *
 from .utils import (_initialize_affine_weight_cpu, _initialize_affine_weight_gpu, divide,
                     set_tensor_model_parallel_attributes, VocabUtility)
-from base.constants import *
+from reallm.base.constants import *
 
 _grad_accum_fusion_available = True
 try:
@@ -30,7 +30,7 @@ def get_activation_fn(activation_function: str) -> Callable:
     if activation_function == "gelu":
         return nn.functional.gelu
     elif activation_function == "gelu_new":
-        from impl.model.modules.activations import new_gelu_activation
+        from reallm.impl.model.modules.activations import new_gelu_activation
 
         return new_gelu_activation
     elif activation_function == "silu":
@@ -123,7 +123,7 @@ class LinearWithFrozenWeight(torch.autograd.Function):
     mathematically-identical forward and DGRAD. 
 
     Conceptually this op is the same as torch.nn.functional.linear with
-    weight.requires_grad==False, but in experiments they are not identical 
+    weight.requires_grad==False, but in reallm.experiments they are not identical 
     mathematically. """
 
     @staticmethod

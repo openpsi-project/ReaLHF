@@ -6,8 +6,8 @@ import torch.utils.checkpoint
 
 from .mlp import LayerNormQKVLinear
 from .rotary import RotaryEmbedding
-from impl.model.parallelism.model_parallel.modules import RowParallelLinear
-from impl.model.utils.functional import apply_rotary_varlen, compute_varlen_position_indices, torch_attn_func
+from reallm.impl.model.parallelism.model_parallel.modules import RowParallelLinear
+from reallm.impl.model.utils.functional import apply_rotary_varlen, compute_varlen_position_indices, torch_attn_func
 import reallm.base.logging as logging
 
 try:

@@ -3,9 +3,9 @@ import dataclasses
 
 import numpy as np
 
-from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
-from api.config.config_flash_model import ModelTrainEvalConfig, ParallelismConfig
-from api.config.dfg import ModelRPC
+from reallm.api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
+from reallm.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
+from reallm.api.core.dfg import ModelRPC
 
 
 @dataclasses.dataclass

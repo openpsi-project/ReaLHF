@@ -7,9 +7,9 @@ from viztracer import VizTracer
 import torch
 import transformers
 
-from impl.model.nn.flash_mqat.flash_generate import *
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
-import api.huggingface
+from reallm.impl.model.nn.flash_mqat.flash_generate import *
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
+import reallm.api.huggingface
 
 
 @unittest.skip("")
@@ -21,7 +21,7 @@ class PackedKVCacheTest(unittest.TestCase):
         cls.device = device = "cuda"
         model_path = "/lustre/meizy/models/starcoder_4l/"
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
+        cls.tokenizer = reallm.api.huggingface.load_hf_tokenizer(model_path)
 
         cls.model = FlashMQATModel.from_starcoder(model_path=model_path, dtype=torch.float16, device=device)
         cls.model.eval()
@@ -95,7 +95,7 @@ class InflightBatchingGeneratorTest(unittest.TestCase):
         cls.device = device = "cuda"
         model_path = "/lustre/meizy/models/starcoder_4l"
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
+        cls.tokenizer = reallm.api.huggingface.load_hf_tokenizer(model_path)
 
         cls.model = FlashMQATModel.from_starcoder(model_path=model_path, dtype=torch.float16, device=device)
         cls.model.eval()

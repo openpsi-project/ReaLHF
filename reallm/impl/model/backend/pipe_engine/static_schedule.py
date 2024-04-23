@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from deepspeed.runtime.utils import call_to_str
 import torch
 
-from impl.model.backend.pipe_engine.instruction import *
+from reallm.impl.model.backend.pipe_engine.instruction import *
 
 
 class PipeSchedule(ABC):

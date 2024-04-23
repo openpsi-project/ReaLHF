@@ -4,7 +4,7 @@ import itertools
 import math
 import os
 
-from experiments.benchmark.system.sosp2024 import (_get_heuristic_device_partition,
+from reallm.experiments.benchmark.system.sosp2024 import (_get_heuristic_device_partition,
                                                    interested_parallel_strategies)
 
 

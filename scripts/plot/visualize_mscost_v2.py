@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from reallm.api.config.config_base import ModelName
+from reallm.api..config.config_base import ModelName
 from tests.misc.est_mscost_v2 import compute_cost
 from tests.utils import get_llama7b_flash_config
 import reallm.base.topology
@@ -105,8 +105,8 @@ def get_mem_shift_settings():
 def get_mconfig_from_size(model_size):
     import transformers
 
-    from reallm.api.config.config_base import MODEL_TYPE_TO_PATH, ModelType
-    from reallm.api.config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
+    from reallm.api..config.config_base import MODEL_TYPE_TO_PATH, ModelType
+    from reallm.api..config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
 
     hf_model_type = "llama" if model_size != 34 else "codellama"
     hf_config = transformers.AutoConfig.from_pretrained(MODEL_TYPE_TO_PATH[ModelType(

@@ -21,7 +21,8 @@ def get_random_tmp():
 
 class ClusterSpec(abc.ABC):
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def name(self):
         ...
 
@@ -31,11 +32,13 @@ class ClusterSpec(abc.ABC):
     def gpu_type_from_node_name(self, node_name: str) -> str:
         ...
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def fileroot(self) -> str:
         ...
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def default_mount(self) -> str:
         ...
 

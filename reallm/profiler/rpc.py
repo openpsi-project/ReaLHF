@@ -3,7 +3,7 @@ import dataclasses
 
 from profiler.device_mesh import DeviceMesh, ModelParallelStrategy
 
-from api.config.dfg import ModelRPC
+from reallm.api.core.dfg import ModelRPC
 
 
 @dataclasses.dataclass

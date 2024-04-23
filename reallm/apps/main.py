@@ -4,20 +4,21 @@ import getpass
 import os
 import re
 
-import api.config.config_system as config_package
+import reallm.api.core.system as config_package
 import reallm.base.logging as logging
-import reallm.base.name_resolve
-import reallm.base.names
-import experiments
-import scheduler.client
-import system
+import reallm.base.name_resolve as name_resolve
+import reallm.base.names as names
+import reallm.scheduler.client as sched_client
+import reallm.system as system
+import reallm.base.constants as constants
+
+# NOTE: This import is necessary to register all experiments.
+import reallm.experiments
 
 logger = logging.getLogger("main", "system")
 
 CONTROLLER_TIME_LIMIT = None
-TRACE_TIMEOUT = (
-    360  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
-)
+TRACE_TIMEOUT = 360  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
 
 
 def scheduler_mode(mode: str) -> str:
@@ -28,7 +29,7 @@ def scheduler_mode(mode: str) -> str:
 
 
 def _submit_workers(
-    sched: scheduler.client.SchedulerClient,
+    sched: sched_client.SchedulerClient,
     expr_name: str,
     trial_name: str,
     debug: bool,
@@ -45,13 +46,13 @@ def _submit_workers(
     for sch_cfg in scheduling_configs:
         job_environs = {**environs, **sch_cfg.scheduling.env_vars}
         if use_ray_cluster:
-            cmd = scheduler.client.ray_cluster_cmd(
+            cmd = sched_client.ray_cluster_cmd(
                 expr_name,
                 trial_name,
                 worker_type=worker_type,
             )
         else:
-            cmd = scheduler.client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
+            cmd = sched_client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
 
         logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
 
@@ -81,32 +82,34 @@ def _submit_workers(
                 begin=sch_cfg.scheduling.begin,
                 deadline=sch_cfg.scheduling.deadline,
                 time_limit=sch_cfg.scheduling.time_limit,
-            ),)
+            ),
+        )
     return scheduled_jobs
 
 
 def main_start(args):
     if args.mode == "ray" and args.image_name is None:
-        raise ValueError("--image_name must be specified when using ray cluster. "
-                         "This is becuase ray cluster requires all workers to have "
-                         "the same version of Python and ray.")
+        raise ValueError(
+            "--image_name must be specified when using ray cluster. "
+            "This is becuase ray cluster requires all workers to have "
+            "the same version of Python and ray."
+        )
 
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
-    import reallm.base.constants
-    base.constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
+    constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
     base_environs = {
         "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
         "WANDB_MODE": args.wandb_mode,
         "DLLM_MODE": args.mode.upper(),
         "DLLM_TRACE": "1" if args.trace else "0",
-        "IS_REMOTE": "1"
+        "IS_REMOTE": "1",
     }
     os.environ["IS_REMOTE"] = "1"
 
     experiment = config_package.make_experiment(args.experiment_name)
-    sched = scheduler.client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
+    sched = sched_client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
 
     setup = experiment.scheduling_setup()
     # exit(0)
@@ -116,7 +119,7 @@ def main_start(args):
     if args.remote_reset:
         sched.submit(
             "setup",
-            cmd=scheduler.client.setup_cmd(expr_name, trial_name, args.debug),
+            cmd=sched_client.setup_cmd(expr_name, trial_name, args.debug),
             env_vars=base_environs,
             container_image=args.image_name or setup.controller_image,
             multiprog=False,
@@ -129,8 +132,9 @@ def main_start(args):
             raise e
     else:
         try:
-            base.name_resolve.clear_subtree(
-                base.names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name))
+            name_resolve.clear_subtree(
+                names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name)
+            )
         except Exception as e:
             logger.warning(f"Resetting name resolving repo failed.")
             raise e
@@ -148,7 +152,7 @@ def main_start(args):
     # For local_ray mode, the controller will start all remote workers.
     sched.submit_array(
         worker_type="ctl",
-        cmd=scheduler.client.control_cmd(
+        cmd=sched_client.control_cmd(
             expr_name,
             trial_name,
             args.debug,
@@ -187,7 +191,7 @@ def main_start(args):
     timeout = None if not args.trace else TRACE_TIMEOUT  # run 5 mins to collect trace
     try:
         sched.wait(timeout=timeout)
-    except (KeyboardInterrupt, scheduler.client.JobException, TimeoutError) as e:
+    except (KeyboardInterrupt, sched_client.JobException, TimeoutError) as e:
         if args.trace and isinstance(e, TimeoutError):
             s = "#" * 30 + "  Trace complete. Killing all processes...  " + "#" * 30
             logger.info("\n" + "#" * len(s) + "\n" + s + "\n" + "#" * len(s))
@@ -196,7 +200,7 @@ def main_start(args):
 
 
 def main_stop(args):
-    sched = scheduler.client.make(
+    sched = sched_client.make(
         mode=scheduler_mode(args.mode),
         expr_name=args.experiment_name,
         trial_name=args.trial_name,
@@ -233,10 +237,9 @@ def main():
     )
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
-    subparser.add_argument("--wandb_mode",
-                           type=str,
-                           default="disabled",
-                           choices=["online", "offline", "disabled"])
+    subparser.add_argument(
+        "--wandb_mode", type=str, default="disabled", choices=["online", "offline", "disabled"]
+    )
     subparser.add_argument(
         "--image_name",
         type=str,
@@ -245,9 +248,9 @@ def main():
         help="if specified, all workers will use this image. Useful in CI/CD pipeline.",
     )
     subparser.add_argument("--ignore_worker_error", action="store_true")
-    subparser.add_argument("--debug",
-                           action="store_true",
-                           help="If True, activate all assertions in the code.")
+    subparser.add_argument(
+        "--debug", action="store_true", help="If True, activate all assertions in the code."
+    )
     subparser.add_argument(
         "--remote_reset",
         action="store_true",
@@ -267,8 +270,9 @@ def main():
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.set_defaults(func=main_stop)
 
-    subparser = subparsers.add_parser("find_config",
-                                      help="find configuration by matching regular expression.")
+    subparser = subparsers.add_parser(
+        "find_config", help="find configuration by matching regular expression."
+    )
     subparser.add_argument("--regex", "-r", type=str, required=True)
     subparser.set_defaults(func=main_find_config)
 

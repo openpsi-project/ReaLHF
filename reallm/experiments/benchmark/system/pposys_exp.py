@@ -2,12 +2,12 @@ import functools
 
 from omegaconf import MISSING
 
-from api.config.config_system import *
-from api.config.dfg import ModelInterfaceType, ModelRPC
-from base.topology import PipeModelDataParallelTopology
-from experiments.common.config_dataset import PromptOnlyDatasetConfig
-from experiments.common.config_model import get_flash_mqat_model_config, ModelConfig
-from experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
+from reallm.api.core.system import *
+from reallm.api.core.dfg import ModelInterfaceType, ModelRPC
+from reallm.base.topology import PipeModelDataParallelTopology
+from reallm.experiments.common.config_dataset import PromptOnlyDatasetConfig
+from reallm.experiments.common.config_model import get_flash_mqat_model_config, ModelConfig
+from reallm.experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
 import reallm.base.logging as logging
 
 rollout = ModelRPC(

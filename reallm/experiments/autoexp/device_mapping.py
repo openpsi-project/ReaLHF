@@ -10,14 +10,14 @@ from profiler.search import (data_pipe_device_mapping, full_model_device_mapping
 import numpy as np
 import transformers
 
-from api.config.config_base import MODEL_TYPE_TO_PATH
-from api.config.config_dataset import PromptOnlyDatasetConfig
-from api.config.config_device_mesh import *
-from api.config.config_flash_model import (FLASH_MODEL_CONFIG_CONVERTER, FlashMQATConfig,
+from reallm.api.core.config import MODEL_TYPE_TO_PATH
+from reallm.api.config.config_dataset import PromptOnlyDatasetConfig
+from reallm.api.config.config_device_mesh import *
+from reallm.api.quickstart.model import (FLASH_MODEL_CONFIG_CONVERTER, FlashMQATConfig,
                                            ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig)
-from api.config.config_system import *
-from api.config.dfg import *
-from base.topology import PipeModelDataParallelTopology
+from reallm.api.core.system import *
+from reallm.api.core.dfg import *
+from reallm.base.topology import PipeModelDataParallelTopology
 import reallm.base.logging as logging
 
 logger = logging.getLogger("DeviceMappingCompiler", "benchmark")

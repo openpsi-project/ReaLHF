@@ -21,17 +21,14 @@ except ImportError:
     TE_ENABLED = False
 USE_TE_BACKEND = TE_ENABLED and os.getenv("FLASH_MQAT_USE_TE") == "1"
 
-import impl.model.backend.deepspeed
-import impl.model.backend.pipe_inf
-import impl.model.interface.dpo_flash_interface
-# import impl.model.interface.flash.gen_scoring_flash_interface
-import impl.model.interface.ppo_flash_interface
-import impl.model.interface.rw_flash_interface
-import impl.model.interface.sft_flash_interface
-import impl.model.nn.basic_nn
-import impl.model.nn.flash_mqat.flash_from_hf_impl
-import impl.model.nn.flash_mqat.flash_generate
-import impl.model.nn.flash_mqat.flash_mqat_api
-import impl.model.nn.flash_mqat.flash_mqat_base
-import impl.model.nn.flash_mqat.flash_mqat_parallel
-import impl.model.nn.lora
+import reallm.impl.model.backend.deepspeed
+import reallm.impl.model.backend.pipe_inf
+import reallm.impl.model.interface.dpo_flash_interface
+import reallm.impl.model.interface.ppo_flash_interface
+import reallm.impl.model.interface.rw_flash_interface
+import reallm.impl.model.interface.sft_flash_interface
+import reallm.impl.model.nn.from_hf_impl
+import reallm.impl.model.nn.real_llm_generate
+import reallm.impl.model.nn.real_llm_api
+import reallm.impl.model.nn.real_llm_base
+import reallm.impl.model.nn.real_llm_parallel

@@ -21,16 +21,16 @@ import torch
 import torch.distributed as dist
 import torch.utils.data
 
-from api.config.config_flash_model import FlashMQATConfig
-from base.constants import LOG_ROOT
-from base.monitor import CUDAKernelTime, gpu_utilization_monitor, time_mark
-from base.topology import ParallelGrid
-from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
-# from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
-import api.config.config_system as config_package
-import api.config.dfg
-import api.data
-import api.model
+from reallm.api.quickstart.model import FlashMQATConfig
+from reallm.base.constants import LOG_ROOT
+from reallm.base.monitor import CUDAKernelTime, gpu_utilization_monitor, time_mark
+from reallm.base.topology import ParallelGrid
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+# from reallm.impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
+import reallm.api.core.system as config_package
+import reallm.api.core.dfg
+import reallm.api.data
+import reallm.api.model
 import reallm.base.constants
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.logging as logging
@@ -125,7 +125,7 @@ class ProfileWorker(worker_base.Worker):
 
     def __lazy_setup(self):
         """Setup pytorch ddp processes, and algorithms."""
-        # base.constants.set_model_name(self.config.model_name)
+        # reallm.base.constants.set_model_name(self.config.model_name)
 
         self.__pg_info = gpu_utils.setup_ddp_single_model(
             self.__experiment_name,
@@ -133,11 +133,11 @@ class ProfileWorker(worker_base.Worker):
             self.model_name,
             self.__worker_index,
         )
-        base.constants.set_parallelism_group(
+        reallm.base.constants.set_parallelism_group(
             self.model_name,
             dist.group.WORLD,
         )
-        base.constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
+        reallm.base.constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
 
         deepspeed.init_distributed()
 
@@ -146,8 +146,8 @@ class ProfileWorker(worker_base.Worker):
             topology=topo,
             process_group=dist.group.WORLD,
         )
-        base.constants.set_grid(self.model_name, grid)
-        base.constants.set_rank_mapping(self.model_name, topo)
+        reallm.base.constants.set_grid(self.model_name, grid)
+        reallm.base.constants.set_rank_mapping(self.model_name, topo)
 
         logger.info(f"SetUp Information - Model worker index {self.__worker_index}"
                     f' type "{self.model_name}" located at '
@@ -165,17 +165,17 @@ class ProfileWorker(worker_base.Worker):
             self.__profile_comm = ProfileCommunication("comm", self.__device, self.__pg_info.local_gpu_id,
                                                        self.__pg_info.global_rank, self.__pg_info.world_size)
 
-        with base.constants.model_scope(self.model_name):
-            base.constants.set_max_seqlen(max(self.seq_len_list))
-            self.__interface = api.model.make_interface(self.interface_config)
-            self.__backend = api.model.make_backend(self.backend_config)
+        with reallm.base.constants.model_scope(self.model_name):
+            reallm.base.constants.set_max_seqlen(max(self.seq_len_list))
+            self.__interface = reallm.api.model.make_interface(self.interface_config)
+            self.__backend = reallm.api.model.make_backend(self.backend_config)
 
             # assert isinstance(self.__model.module, FlashMQATModel)
             self.__engine = None
 
     def __reinit_backend(self, bs, seq_len):
-        with base.constants.model_scope(self.model_name):
-            self.__model = api.model.make_model(
+        with reallm.base.constants.model_scope(self.model_name):
+            self.__model = reallm.api.model.make_model(
                 self.model_config,
                 name=self.model_name,
                 device=self.__device,
@@ -187,23 +187,23 @@ class ProfileWorker(worker_base.Worker):
             # print(self.__nn_config)
             self.__vocab_size = self.__nn_config.vocab_size
 
-            bs_per_device = bs // base.constants.data_parallel_world_size()
-            ft_spec = api.model.FinetuneSpec(10, 100, 10, bs_per_device, seq_len)
+            bs_per_device = bs // reallm.base.constants.data_parallel_world_size()
+            ft_spec = reallm.api.model.FinetuneSpec(10, 100, 10, bs_per_device, seq_len)
             self.__model = self.__backend.initialize(self.__model, ft_spec)
             self.__engine = self.__model.module
 
-    def __run_model_function_call(self, rpc: api.config.dfg.ModelRPC, bs, seq_len) -> worker_base.PollResult:
-        with base.constants.model_scope(self.model_name):
+    def __run_model_function_call(self, rpc: reallm.api.core.dfg.ModelRPC, bs, seq_len) -> worker_base.PollResult:
+        with reallm.base.constants.model_scope(self.model_name):
             # initialize
             func_name = rpc.interface_type.value
-            num_pp = base.constants.pipe_parallel_world_size()
-            num_dp = base.constants.data_parallel_world_size()
+            num_pp = reallm.base.constants.pipe_parallel_world_size()
+            num_dp = reallm.base.constants.data_parallel_world_size()
             if bs < 2 * num_pp * num_dp and func_name == "train_step":
                 return worker_base.PollResult(sample_count=0, batch_count=0)
             elif bs < num_pp * num_dp:
                 return worker_base.PollResult(sample_count=0, batch_count=0)
 
-            if rpc.interface_type == api.config.dfg.ModelInterfaceType.GENERATE:
+            if rpc.interface_type == reallm.api.core.dfg.ModelInterfaceType.GENERATE:
                 data = random_sample(bs // num_dp, 128, self.__vocab_size)
             else:
                 data = random_sample(bs // num_dp, seq_len, self.__vocab_size)

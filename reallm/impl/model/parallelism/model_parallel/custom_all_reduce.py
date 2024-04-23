@@ -26,8 +26,8 @@ def init_custom_ar() -> None:
     global _CA_HANDLE
     if _CA_HANDLE is not None:
         return
-    rank = base.constants.model_parallel_rank()
-    world_size = base.constants.model_parallel_world_size()
+    rank = reallm.base.constants.model_parallel_rank()
+    world_size = reallm.base.constants.model_parallel_world_size()
     if world_size == 1:
         # No need to initialize custom allreduce for single GPU case.
         return

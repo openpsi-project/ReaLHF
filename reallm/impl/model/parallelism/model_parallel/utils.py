@@ -5,7 +5,7 @@ from typing import List, Sequence
 import numpy as np
 import torch
 
-from base.constants import *
+from reallm.base.constants import *
 
 _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS = {
     'tensor_model_parallel': False,

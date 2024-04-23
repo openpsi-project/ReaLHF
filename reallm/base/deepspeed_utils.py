@@ -8,7 +8,7 @@ import deepspeed
 import torch
 import torch.distributed
 
-from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
+from reallm.impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
 import reallm.base.constants
 import reallm.base.logging as logging
 
@@ -137,7 +137,7 @@ def deepspeed_initialize(
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
     if mpu is None:
-        mpu = base.constants.grid()
+        mpu = reallm.base.constants.grid()
     if engine_type == "deepspeed":
         # Disable zero.Init context if it's currently enabled
         zero.partition_parameters.shutdown_init_context()

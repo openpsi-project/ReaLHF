@@ -18,12 +18,12 @@ try:
 except ModuleNotFoundError:
     mdm_search = None
 
-from api.config.config_base import MODEL_TYPE_TO_PATH
-from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
-from api.config.config_flash_model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
-from api.config.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
-import api.config.config_system as config_package
+from reallm.api.core.config import MODEL_TYPE_TO_PATH
+from reallm.api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
+from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
+from reallm.api.core.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+import reallm.api.core.system as config_package
 import reallm.base.constants
 
 
@@ -38,14 +38,14 @@ def optimal_device_mapping(
     top_k: int = 10,
 ) -> Dict[str, RPCAllocation]:
     from_file = os.environ["IS_REMOTE"] == "1"
-    dump_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
-                            base.constants.trial_name(), "device_mapping.pkl")
-    log_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
-                           base.constants.trial_name(), "device_mapping")
-    rs_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
-                          base.constants.trial_name(), "raw_search_result")
-    rpc_exe_dir = os.path.join(base.constants.LOG_ROOT, base.constants.experiment_name(),
-                               base.constants.trial_name(), "rpc_exe_info")
+    dump_dir = os.path.join(base.constants.LOG_ROOT, reallm.base.constants.experiment_name(),
+                            reallm.base.constants.trial_name(), "device_mapping.pkl")
+    log_dir = os.path.join(base.constants.LOG_ROOT, reallm.base.constants.experiment_name(),
+                           reallm.base.constants.trial_name(), "device_mapping")
+    rs_dir = os.path.join(base.constants.LOG_ROOT, reallm.base.constants.experiment_name(),
+                          reallm.base.constants.trial_name(), "raw_search_result")
+    rpc_exe_dir = os.path.join(base.constants.LOG_ROOT, reallm.base.constants.experiment_name(),
+                               reallm.base.constants.trial_name(), "rpc_exe_info")
 
     if from_file:
         with open(dump_dir, "rb") as f:
@@ -57,7 +57,7 @@ def optimal_device_mapping(
     if profile_layers:
         profile_rpcs(model_rpcs)
 
-    # hack, only suitable for configs in experiments/autoexp/auto_ppo.py
+    # hack, only suitable for configs in reallm.experiments/autoexp/auto_ppo.py
     # rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
     # actor_train.pre_hooks.append(SyncParamHook(source=ModelName("actor", 0)))
     # actor_train.model_name = ModelName("actor", 1)
@@ -104,7 +104,7 @@ def optimal_device_mapping(
     r = rs[-1]
     # print(r)
 
-    # hack, only suitable for configs in experiments/autoexp/auto_ppo.py
+    # hack, only suitable for configs in reallm.experiments/autoexp/auto_ppo.py
     rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
     rollout_topo = (r[rollout.name]["device_mesh"], r[rollout.name]["num_pp"], r[rollout.name]["num_dp"],
                     r[rollout.name]["num_mp"])

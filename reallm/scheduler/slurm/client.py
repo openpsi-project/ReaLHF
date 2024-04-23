@@ -5,8 +5,8 @@ import re
 import subprocess
 import time
 
-from base.cluster import spec as cluster_spec
-from base.constants import SLURM_LOCK_FILE_NAME as LOCK_FILE_NAME
+from reallm.base.cluster import spec as cluster_spec
+from reallm.base.constants import SLURM_LOCK_FILE_NAME as LOCK_FILE_NAME
 from scheduler.client import JobException, JobInfo, JobState, SchedulerClient
 from scheduler.slurm.utils import (allocate_resources, SlurmLaunchInfo, SlurmResource,
                                    SlurmResourceNotEnoughException)

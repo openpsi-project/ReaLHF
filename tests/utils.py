@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from base.topology import ParallelGrid, PipeModelDataParallelTopology
+from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
 import reallm.base.constants
 import reallm.base.gpu_utils
 import reallm.base.name_resolve as name_resolve
@@ -35,13 +35,13 @@ def setup_gpu(rank, world_size):
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
     BARRIER.wait()
-    base.gpu_utils.isolate_cuda_device(WORKER_TYPE, rank, world_size, EXPR_NAME, TRIAL_NAME)
+    reallm.base.gpu_utils.isolate_cuda_device(WORKER_TYPE, rank, world_size, EXPR_NAME, TRIAL_NAME)
     # print(f"rank {rank} isolated cuda device")
     BARRIER.wait()
-    base.gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME, rank)
+    reallm.base.gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME, rank)
     # print(f"rank {rank} revealed ddp identity")
     BARRIER.wait()
-    info = base.gpu_utils.setup_ddp(EXPR_NAME, TRIAL_NAME, rank)
+    info = reallm.base.gpu_utils.setup_ddp(EXPR_NAME, TRIAL_NAME, rank)
     world_size = info.world_size
     device = torch.device("cuda", 0)
     # print(f"rank {rank} setup ddp")
@@ -67,8 +67,8 @@ def make_finetune_spec(bs_per_device,
                        total_train_steps=10,
                        steps_per_epoch=10,
                        max_seq_len=1024):
-    import api.model
-    finetune_spec = api.model.FinetuneSpec(
+    import reallm.api.model
+    finetune_spec = reallm.api.model.FinetuneSpec(
         total_train_epochs=total_train_epochs,
         total_train_steps=total_train_steps,
         steps_per_epoch=steps_per_epoch,
@@ -115,15 +115,15 @@ def init_global_constants(num_dp=None, num_mp=None, num_pp=None, topo=None, mode
     else:
         ws = topo.world_size()
 
-    with base.constants.model_scope(model_name):
-        base.constants.set_rank_mapping(model_name, topo, msid2mwid=msid2mwid)
-        wg = base.topology.new_or_get_group(ranks=[base.constants.to_global_pg_rank(i) for i in range(ws)])
+    with reallm.base.constants.model_scope(model_name):
+        reallm.base.constants.set_rank_mapping(model_name, topo, msid2mwid=msid2mwid)
+        wg = reallm.base.topology.new_or_get_group(ranks=[base.constants.to_global_pg_rank(i) for i in range(ws)])
 
-        base.constants.set_parallelism_group(model_name=model_name, pgroup=wg)
+        reallm.base.constants.set_parallelism_group(model_name=model_name, pgroup=wg)
         grid = ParallelGrid(process_group=wg, topology=topo)
-        base.constants.set_grid(model_name=model_name, grid=grid)
-        base.constants.set_experiment_trial_names(EXPR_NAME, TRIAL_NAME)
-        base.constants.set_max_seqlen(1024)
+        reallm.base.constants.set_grid(model_name=model_name, grid=grid)
+        reallm.base.constants.set_experiment_trial_names(EXPR_NAME, TRIAL_NAME)
+        reallm.base.constants.set_max_seqlen(1024)
 
 
 def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
@@ -131,12 +131,12 @@ def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
 
     if dp_rank == None:
         assert num_dp == None
-        dp_rank = base.constants.data_parallel_rank()
-        num_dp = base.constants.data_parallel_world_size()
+        dp_rank = reallm.base.constants.data_parallel_rank()
+        num_dp = reallm.base.constants.data_parallel_world_size()
     input_ids, attention_mask = make_batch(tokenizer, device, batch_size, dp_rank % num_dp, num_dp, seed=seed)
     packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
     prompt_mask = torch.zeros_like(packed_input_ids)
-    data = base.namedarray.NamedArray(
+    data = reallm.base.namedarray.NamedArray(
         packed_input_ids=packed_input_ids,
         cu_seqlens=cu_seqlens,
         prompts=input_ids,
@@ -156,7 +156,7 @@ def random_sample(bs, seq_len, vocab_size):
     attention_mask = torch.ones_like(input_ids)
     packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
     prompt_mask = torch.zeros_like(packed_input_ids)
-    data = base.namedarray.NamedArray(
+    data = reallm.base.namedarray.NamedArray(
         packed_input_ids=packed_input_ids,
         cu_seqlens=cu_seqlens,
         prompts=input_ids,
@@ -193,7 +193,7 @@ def get_memory(rank):
 
 
 def get_llama7b_flash_config():
-    from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+    from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 
     # codellama 34b config
     # return FlashMQATConfig(
@@ -227,7 +227,7 @@ def get_llama7b_flash_config():
 
 
 def get_llama_config(size):
-    from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+    from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
     if size == 7:
         size_args = dict(
             n_layers=40,

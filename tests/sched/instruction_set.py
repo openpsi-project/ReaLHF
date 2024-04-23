@@ -1,8 +1,8 @@
 import itertools
 import os
 
-from base.monitor import get_tracer
-from impl.model.backend.pipe_engine.instruction import BackwardPass, ForwardPass, InstructionSet
+from reallm.base.monitor import get_tracer
+from reallm.impl.model.backend.pipe_engine.instruction import BackwardPass, ForwardPass, InstructionSet
 
 if __name__ == "__main__":
     os.environ["DLLM_TRACE"] = "1"

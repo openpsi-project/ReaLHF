@@ -6,7 +6,7 @@ import re
 
 import profiler.experiments
 
-import api.config.config_system as config_package
+import reallm.api.core.system as config_package
 import reallm.base.logging as logging
 import reallm.base.name_resolve
 import reallm.base.names
@@ -96,8 +96,8 @@ def main(args, if_raise=True):
 
     logger.info(f"Resetting name resolving repo...")
     try:
-        base.name_resolve.clear_subtree(
-            base.names.trial_root(experiment_name=expr_name, trial_name=trial_name))
+        reallm.base.name_resolve.clear_subtree(
+            reallm.base.names.trial_root(experiment_name=expr_name, trial_name=trial_name))
     except Exception as e:
         logger.warning(f"Resetting name resolving repo failed.")
         if if_raise:

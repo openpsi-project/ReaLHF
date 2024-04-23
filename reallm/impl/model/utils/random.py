@@ -13,7 +13,7 @@ from torch.cuda import device as device_ctx_manager
 from torch.utils.checkpoint import detach_variable
 import torch
 
-from impl.model.utils.tensor import (gather_split_1d_tensor, safely_set_viewless_tensor_data,
+from reallm.impl.model.utils.tensor import (gather_split_1d_tensor, safely_set_viewless_tensor_data,
                                      split_tensor_into_1d_equal_chunks)
 import reallm.base.constants
 
@@ -159,7 +159,7 @@ def model_parallel_cuda_manual_seed(seed):
     tensor-model-parallel state: This state is different among a set of model parallel GPUs, but the same across data parallel groups. This is used for example for dropout in model parallel regions.
     """
     # 2718 is just for fun and any POSITIVE value will work.
-    model_parallel_rank = base.constants.model_parallel_rank()
+    model_parallel_rank = reallm.base.constants.model_parallel_rank()
     offset = seed + 2718
     tensor_model_parallel_seed = offset + model_parallel_rank
     # Data parallel gets the original seed.

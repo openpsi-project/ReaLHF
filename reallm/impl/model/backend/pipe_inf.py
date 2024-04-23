@@ -1,15 +1,15 @@
 import dataclasses
 
-from impl.model.backend.pipe_engine.inf_pipe_engine import InferencePipelineEngine
-import api.model
+from reallm.impl.model.backend.pipe_engine.inf_pipe_engine import InferencePipelineEngine
+import reallm.api.core.model as model_api
 
 
 @dataclasses.dataclass
-class PipelineInferenceBackend(api.model.ModelBackend):
+class PipelineInferenceBackend(model_api.ModelBackend):
 
-    def _initialize(self, model: api.model.Model, spec: api.model.FinetuneSpec):
+    def _initialize(self, model: model_api.Model, spec: model_api.FinetuneSpec):
         model.module = InferencePipelineEngine(model.module)
         return model
 
 
-api.model.register_backend("pipe_inference", PipelineInferenceBackend)
+model_api.register_backend("pipe_inference", PipelineInferenceBackend)

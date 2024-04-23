@@ -11,8 +11,8 @@ import torch
 import tqdm
 import transformers
 
-from base.monitor import process_memory_mb
-import api.model
+from reallm.base.monitor import process_memory_mb
+import reallm.api.model
 import reallm.base.constants
 import reallm.base.logging as logging
 
@@ -49,8 +49,8 @@ def save_hf_format(
         logger.warning("Cannot save fast tokenizer for llama.")
 
 
-def save_hf_or_lora_model(model: api.model.Model, output_dir: str):
-    from impl.model.nn.lora import get_lora_state_dict, is_lora_model
+def save_hf_or_lora_model(model: reallm.api.model.Model, output_dir: str):
+    from reallm.impl.model.nn.lora import get_lora_state_dict, is_lora_model
 
     module = model.module
     tokenizer = model.tokenizer

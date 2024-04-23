@@ -5,8 +5,8 @@ import json
 import numpy as np
 import torch.utils.data
 
-from base.datapack import ffd_with_result_unsorted, min_abs_diff_partition
-import api.data
+from reallm.base.datapack import ffd_with_result_unsorted, min_abs_diff_partition
+import reallm.api.data
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Packed Prompt Dataset")
@@ -16,7 +16,7 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
 
     def __init__(
         self,
-        util: api.data.DatasetUtility,
+        util: reallm.api.data.DatasetUtility,
         n_tokens_per_batch: int,
         min_seqs_per_batch: int = 1,
         max_length: Optional[int] = None,
@@ -61,7 +61,7 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
             assert dataset_builder is not None
             data = dataset_builder()
 
-        shuffle_indices = api.data.get_shuffle_indices(util.seed, len(data))
+        shuffle_indices = reallm.api.data.get_shuffle_indices(util.seed, len(data))
         data = [data[i] for i in shuffle_indices]
         for x in data:
             if x['answer'].startswith(x['prompt']):
@@ -149,7 +149,7 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
         self.rng.shuffle(self.__batch_indices)
 
     def _shuffle(self):
-        shuffle_indices = api.data.get_shuffle_indices(
+        shuffle_indices = reallm.api.data.get_shuffle_indices(
             self.util.seed + self.shuffle_cnt * 7 + self.util.ddp_rank * 3, len(self.seqlens))
 
         self.seqlens = [self.seqlens[i] for i in shuffle_indices]
@@ -204,12 +204,12 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
 
 
 if __name__ != "__main__":
-    api.data.register_dataset("packed_prompt_answer", PackedPromptAnswerDataset)
+    reallm.api.data.register_dataset("packed_prompt_answer", PackedPromptAnswerDataset)
 else:
     import transformers
 
-    from base.dataparallel import PackedParallelDataBroker
-    from base.namedarray import from_dict
+    from reallm.base.dataparallel import PackedParallelDataBroker
+    from reallm.base.namedarray import from_dict
 
     def have_common_prefix_at_least(a, b, n):
         return (a[:n] == b[:n]).all()
@@ -219,7 +219,7 @@ else:
     world_size = 1
     seed = 1
 
-    util = api.data.DatasetUtility(tokenizer=tokenizer, ddp_rank=ddp_rank, world_size=world_size, seed=seed)
+    util = reallm.api.data.DatasetUtility(tokenizer=tokenizer, ddp_rank=ddp_rank, world_size=world_size, seed=seed)
 
     n_dp = 100
     dataset = PackedPromptAnswerDataset(

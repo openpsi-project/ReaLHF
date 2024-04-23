@@ -2,9 +2,9 @@ import dataclasses
 import functools
 import itertools
 
-from api.config.config_system import *
-from api.config.config_system import register_experiment
-from experiments.common.ppo_exp import PPOConfig
+from reallm.api.core.system import *
+from reallm.api.core.system import register_experiment
+from reallm.experiments.common.ppo_exp import PPOConfig
 
 EXPR_DEADLINE = None
 EXPR_TIME_LIMIT = None

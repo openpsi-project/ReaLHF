@@ -17,12 +17,12 @@ from profiler.experiments import ProfileExperiment
 from profiler.rpc import CommStats
 from profiler.utils import make_stats_key
 
-from api.config.config_base import MODEL_TYPE_TO_PATH
-from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
-from api.config.dfg import ModelInterfaceType
-from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
-import api.config.config_system as config_package
+from reallm.api.core.config import MODEL_TYPE_TO_PATH
+from reallm.api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
+from reallm.api.core.dfg import ModelInterfaceType
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+import reallm.api.core.system as config_package
 import reallm.base.cluster
 
 # import reallm.base.logging as logging
@@ -36,7 +36,7 @@ def log_debug(*args, **kwargs):
 
 
 PROFILE_RESULT_PATH = os.path.join(
-    base.cluster.spec.fileroot,
+    reallm.base.cluster.spec.fileroot,
     "logs",
     getpass.getuser(),
     "profile",
@@ -44,7 +44,7 @@ PROFILE_RESULT_PATH = os.path.join(
     "profile_result",
 )
 PROFILE_NSYNC_RESULT_PATH = os.path.join(
-    base.cluster.spec.fileroot,
+    reallm.base.cluster.spec.fileroot,
     "logs",
     getpass.getuser(),
     "profile",

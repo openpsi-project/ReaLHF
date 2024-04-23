@@ -1,10 +1,10 @@
 from typing import List
 import dataclasses
 
-from api.config.dfg import ModelInterfaceType
-from api.config.dfg import ModelRPC as ModelFunctionCallDef
-from experiments.autoexp.device_mapping import auto_device_mapping as auto
-from experiments.common.ppo_exp import PPOHyperparameters
+from reallm.api.core.dfg import ModelInterfaceType
+from reallm.api.core.dfg import ModelRPC as ModelFunctionCallDef
+from reallm.experiments.autoexp.device_mapping import auto_device_mapping as auto
+from reallm.experiments.common.ppo_exp import PPOHyperparameters
 
 GENERATE = ModelInterfaceType.GENERATE
 INFERENCE = ModelInterfaceType.INFERENCE

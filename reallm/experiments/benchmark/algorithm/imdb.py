@@ -1,7 +1,7 @@
 import functools
 
-from api.config.config_system import register_experiment
-from experiments.common.sft_exp import SFTExperiment
+from reallm.api.core.system import register_experiment
+from reallm.experiments.common.sft_exp import SFTExperiment
 
 seeds = range(1, 64)
 for s in seeds:

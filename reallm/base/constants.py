@@ -6,12 +6,12 @@ import getpass
 
 import numpy as np
 
-from api.config.config_base import ModelName
-from base.cluster import spec as cluster_spec
+from reallm.api.core.config import ModelName
+from reallm.base.cluster import spec as cluster_spec
 
 if TYPE_CHECKING:
-    from api.config.config_system import ModelShardID
-    from base.topology import ParallelGrid, PipeModelDataParallelTopology
+    from reallm.api.core.system import ModelShardID
+    from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
 
 
 class GlobalMemoryBuffer:
@@ -274,7 +274,7 @@ def set_fake_mp_rank(rank):
 
 def set_fake_grid(model_name, rank, topo):
     # used only in scripts and tests
-    from base.topology import FakeGrid
+    from reallm.base.topology import FakeGrid
 
     global _grids
     _grids[model_name] = FakeGrid(rank=rank, topo=topo)

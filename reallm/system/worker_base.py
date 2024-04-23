@@ -9,8 +9,8 @@ import socket
 import threading
 import time
 
-from api.config import config_system as config_pkg
-from base.gpu_utils import set_cuda_device
+from reallm.api.config import config_system as config_pkg
+from reallm.base.gpu_utils import set_cuda_device
 import reallm.base.cluster
 import reallm.base.logging as logging
 import reallm.base.monitor
@@ -102,8 +102,8 @@ class WorkerServer:
         host_ip = socket.gethostbyname(socket.gethostname())
 
         try:
-            controller_status = base.name_resolve.wait(
-                base.names.worker_status(experiment_name, trial_name, "ctl"),
+            controller_status = reallm.base.name_resolve.wait(
+                reallm.base.names.worker_status(experiment_name, trial_name, "ctl"),
                 timeout=WORKER_WAIT_FOR_CONTROLLER_SECONDS,
             )
         except TimeoutError:
@@ -115,9 +115,9 @@ class WorkerServer:
             raise RuntimeError(f"Abnormal controller state on experiment launch {controller_status}.")
 
         if experiment_name is not None and trial_name is not None:
-            key = base.names.worker(experiment_name, trial_name, worker_name)
+            key = reallm.base.names.worker(experiment_name, trial_name, worker_name)
             address = f"{host_ip}:{self.__task_queue.port}"
-            base.name_resolve.add(key, address, keepalive_ttl=10, delete_on_exit=True)
+            reallm.base.name_resolve.add(key, address, keepalive_ttl=10, delete_on_exit=True)
             logger.info("Added name_resolve entry %s for worker server at %s", key, address)
 
     def register_handler(self, command, fn):
@@ -162,8 +162,8 @@ class WorkerServer:
 
     def set_status(self, status: WorkerServerStatus):
         """On graceful exit, worker status is cleared."""
-        base.name_resolve.add(
-            base.names.worker_status(
+        reallm.base.name_resolve.add(
+            reallm.base.names.worker_status(
                 experiment_name=self.__experiment_name,
                 trial_name=self.__trial_name,
                 worker_name=self.__worker_name,
@@ -285,7 +285,7 @@ class WorkerControlPanel:
                 if timeout is not None:
                     timeout = max(0, deadline - time.monotonic())
                 self.__logger.info(f"Connecting to worker {name}, timeout {timeout}")
-                server_address = base.name_resolve.wait(base.names.worker(self.__experiment_name,
+                server_address = reallm.base.name_resolve.wait(base.names.worker(self.__experiment_name,
                                                                           self.__trial_name, name),
                                                         timeout=timeout)
                 self.__logger.info(f"Connecting to worker {name} done")
@@ -304,8 +304,8 @@ class WorkerControlPanel:
         Returns:
             Names of successfully connected workers.
         """
-        name_root = base.names.worker_root(self.__experiment_name, self.__trial_name)
-        worker_names = [r[len(name_root):] for r in base.name_resolve.find_subtree(name_root)]
+        name_root = reallm.base.names.worker_root(self.__experiment_name, self.__trial_name)
+        worker_names = [r[len(name_root):] for r in reallm.base.name_resolve.find_subtree(name_root)]
         return self.connect(worker_names, timeout=0, raises_timeout_error=True)
 
     def request(self, worker_name: str, command, **kwargs) -> Any:
@@ -391,8 +391,8 @@ class WorkerControlPanel:
             ValueError if worker is not connected.
         """
         try:
-            status_str = base.name_resolve.wait(
-                base.names.worker_status(
+            status_str = reallm.base.name_resolve.wait(
+                reallm.base.names.worker_status(
                     experiment_name=self.__experiment_name,
                     trial_name=self.__trial_name,
                     worker_name=worker_name,
@@ -400,7 +400,7 @@ class WorkerControlPanel:
                 timeout=60,
             )
             status = WorkerServerStatus(status_str)
-        except base.name_resolve.NameEntryNotFoundError:
+        except reallm.base.name_resolve.NameEntryNotFoundError:
             status = WorkerServerStatus.LOST
         return status
 
@@ -504,18 +504,18 @@ class Worker:
         self.logger = logging.getLogger(r.worker_type + "-worker", 'colored')
         if r.host_key is not None:
             self.__host_key(
-                base.names.worker_key(experiment_name=r.experiment_name,
+                reallm.base.names.worker_key(experiment_name=r.experiment_name,
                                       trial_name=r.trial_name,
                                       key=r.host_key))
         if r.watch_keys is not None:
             keys = [r.watch_keys] if isinstance(r.watch_keys, str) else r.watch_keys
             self.__watch_keys([
-                base.names.worker_key(experiment_name=r.experiment_name, trial_name=r.trial_name, key=k)
+                reallm.base.names.worker_key(experiment_name=r.experiment_name, trial_name=r.trial_name, key=k)
                 for k in keys
             ])
 
         self._tracer_output_file = os.path.join(
-            base.cluster.spec.fileroot,
+            reallm.base.cluster.spec.fileroot,
             "logs",
             getpass.getuser(),
             r.experiment_name,
@@ -524,7 +524,7 @@ class Worker:
             f"{r.worker_type}-{r.worker_index}.json",
         )
         os.makedirs(os.path.dirname(self._tracer_output_file), exist_ok=True)
-        self.__tracer = base.monitor.get_tracer(
+        self.__tracer = reallm.base.monitor.get_tracer(
             tracer_entries=int(1e7),
             # max_stack_depth=25,
             ignore_c_function=False,
@@ -533,7 +533,7 @@ class Worker:
             min_duration=25,
             output_file=self._tracer_output_file,
         )
-        self.__tracer_save_freqctrl = base.timeutil.FrequencyControl(
+        self.__tracer_save_freqctrl = reallm.base.timeutil.FrequencyControl(
             frequency_seconds=TRACER_SAVE_INTERVAL_SECONDS)
 
         self.__is_configured = True
@@ -626,11 +626,11 @@ class Worker:
 
     def __host_key(self, key: str):
         self.logger.info(f"Hosting key: {key}")
-        base.name_resolve.add(key, "up", keepalive_ttl=15, replace=True, delete_on_exit=True)
+        reallm.base.name_resolve.add(key, "up", keepalive_ttl=15, replace=True, delete_on_exit=True)
 
     def __watch_keys(self, keys: List[str]):
         self.logger.info(f"Watching keys: {keys}")
-        base.name_resolve.watch_names(keys, call_back=self.exit)
+        reallm.base.name_resolve.watch_names(keys, call_back=self.exit)
 
 
 class MappingThread:

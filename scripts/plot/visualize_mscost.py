@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from reallm.api.config.config_base import ModelName
+from reallm.api..config.config_base import ModelName
 from tests.misc.est_mscost_v2 import compute_cost
 from tests.utils import get_llama7b_flash_config
 import reallm.base.topology

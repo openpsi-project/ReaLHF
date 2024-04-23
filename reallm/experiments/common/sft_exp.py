@@ -2,11 +2,11 @@ import dataclasses
 
 from omegaconf import MISSING
 
-from api.config.config_dataset import PromptAnswerDatasetConfig
-from api.config.config_flash_model import get_flash_mqat_model_config, ModelTrainEvalConfig, OptimizerConfig
-from api.config.config_system import *
-from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
-from base.topology import PipeModelDataParallelTopology
+from reallm.api.config.config_dataset import PromptAnswerDatasetConfig
+from reallm.api.quickstart.model import get_flash_mqat_model_config, ModelTrainEvalConfig, OptimizerConfig
+from reallm.api.core.system import *
+from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
+from reallm.base.topology import PipeModelDataParallelTopology
 
 
 @dataclasses.dataclass

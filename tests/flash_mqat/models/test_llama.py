@@ -6,14 +6,14 @@ import torch
 import torch.distributed
 import transformers
 
-from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
-from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
+from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
                                                       flash_model_head_param_count,
                                                       flash_model_tblock_param_count, FlashMQATBlock,
                                                       OutputHead, VocabPositionEmbedding)
 from tests.utils import init_global_constants, MODEL_NAME
-import api.huggingface
+import reallm.api.huggingface
 import reallm.base.constants
 
 torch.cuda.manual_seed_all(2)
@@ -49,14 +49,14 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         hf_config.num_key_value_heads = 2
         hf_config.intermediate_size = 1024
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer(hf_path)
+        cls.tokenizer = reallm.api.huggingface.load_hf_tokenizer(hf_path)
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.llama: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(hf_config).to(
             dtype=torch.float16, device=device)
         cls.llama.eval()
 
-        with base.constants.model_scope(MODEL_NAME):
+        with reallm.base.constants.model_scope(MODEL_NAME):
             cls.hf_like_model = FlashMQATModel.from_llama(from_model=cls.llama,
                                                           dtype=torch.float16,
                                                           device=device)
@@ -110,7 +110,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
     def testForward(self):
         seqlen_c = [20, 128]
         with_mask_c = [False, True]
-        with base.constants.model_scope(MODEL_NAME):
+        with reallm.base.constants.model_scope(MODEL_NAME):
             for with_mask, seqlen in itertools.product(with_mask_c, seqlen_c):
                 self._hf_like_forward(with_mask, seqlen)
 
@@ -148,7 +148,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
     def testGenerate(self):
         max_prompt_len_c = [10, 32, 64]
         with_mask_c = [False, True]
-        with base.constants.model_scope(MODEL_NAME):
+        with reallm.base.constants.model_scope(MODEL_NAME):
             for max_prompt_len, with_mask in itertools.product(max_prompt_len_c, with_mask_c):
                 self._generate(max_prompt_len, with_mask)
 
@@ -161,7 +161,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
             "/tmp/_flash_mqat_test/llama/",
             self.hf_path,
         )
-        from impl.model.utils.save_load import load_from_disk
+        from reallm.impl.model.utils.save_load import load_from_disk
 
         self.llama.load_state_dict(load_from_disk("/tmp/_flash_mqat_test/llama/"))
 

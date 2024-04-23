@@ -8,9 +8,9 @@ import time
 import torch
 import torch.distributed as dist
 
-from impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
-from impl.model.backend.pipe_engine.instruction import *
-from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
+from reallm.impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
+from reallm.impl.model.backend.pipe_engine.instruction import *
+from reallm.impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 import reallm.base.constants as constants
 import reallm.base.logging as logging
 import impl.model.backend.pipe_engine.static_schedule as schedule

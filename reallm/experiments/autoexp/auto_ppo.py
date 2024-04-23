@@ -4,12 +4,12 @@ import dataclasses
 import functools
 
 from .device_mapping import auto_device_mapping as auto
-from api.config.config_dataset import DatasetType, PromptOnlyDatasetConfig
-from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
-from api.config.config_system import _LLM_ENVVARS, ExperimentSaveEvalControl, register_experiment
-from api.config.dfg import ModelInterface, ModelInterfaceType, ModelName, ModelRPC, ModelType
-from base.topology import PipeModelDataParallelTopology
-from experiments.common.ppo_exp import PPOHyperparameters
+from reallm.api.config.config_dataset import DatasetType, PromptOnlyDatasetConfig
+from reallm.api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
+from reallm.api.core.system import _LLM_ENVVARS, ExperimentSaveEvalControl, register_experiment
+from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelName, ModelRPC, ModelType
+from reallm.base.topology import PipeModelDataParallelTopology
+from reallm.experiments.common.ppo_exp import PPOHyperparameters
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Auto PPO exp", "colored")

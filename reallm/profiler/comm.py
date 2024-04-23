@@ -8,7 +8,7 @@ import time
 import torch
 import torch.distributed as dist
 
-from base.network import gethostname
+from reallm.base.network import gethostname
 import reallm.base.cluster
 import reallm.base.constants
 import reallm.base.logging as logging
@@ -132,11 +132,11 @@ class ProfileCommunication:
         # full stats
         # dump_path = f"./profile_result/{self.device_mesh_name}/full-{gethostname()}-{self.local_gpu_id}.json"
         DUMP_DIR = os.path.join(
-            base.cluster.spec.fileroot,
+            reallm.base.cluster.spec.fileroot,
             "logs",
             getpass.getuser(),
-            base.constants.experiment_name(),
-            base.constants.trial_name(),
+            reallm.base.constants.experiment_name(),
+            reallm.base.constants.trial_name(),
             "profile_result",
         )
         dump_path = os.path.join(DUMP_DIR, self.device_mesh_name,

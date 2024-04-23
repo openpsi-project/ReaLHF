@@ -19,11 +19,11 @@ import torch.distributed as dist
 import tqdm
 import transformers
 
-from api.config.config_base import MODEL_TYPE_TO_PATH, ModelName, ModelShardID, ModelType
-from api.config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
-from api.config.config_system import ModelName, ModelShardID
-from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark
-from base.topology import PipeModelDataParallelTopology
+from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelName, ModelShardID, ModelType
+from reallm.api.quickstart.model import FLASH_MODEL_CONFIG_CONVERTER
+from reallm.api.core.system import ModelName, ModelShardID
+from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark
+from reallm.base.topology import PipeModelDataParallelTopology
 from scheduler.client import make as make_scheduer
 from tests.utils import clear_name_resolve, get_pytorch_profiler, init_global_constants, pytorch_memory_burnin
 import reallm.base.constants
@@ -149,8 +149,8 @@ def test_impl(
     dump_key = str((model_size, world_size, from_pp_mp_dp, to_pp_mp_dp))
 
     assert not (profile and profile_compile)
-    from impl.model.backend.pipe_inf import InferencePipelineEngine
-    from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
+    from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
+    from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
 
     hf_model_type = "llama" if model_size != 34 else "codellama"
     hf_config = transformers.AutoConfig.from_pretrained(MODEL_TYPE_TO_PATH[ModelType(
@@ -159,12 +159,12 @@ def test_impl(
     os.environ["DLLM_CUDA_TMARK"] = "1"
 
     if rank < from_topo.world_size():
-        with base.constants.model_scope(from_model_name):
+        with reallm.base.constants.model_scope(from_model_name):
             m1 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
             m1.instantiate()
             if check:
                 m1.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
-            if base.constants.pipe_parallel_world_size() > 1:
+            if reallm.base.constants.pipe_parallel_world_size() > 1:
                 engine1 = InferencePipelineEngine(m1)
             else:
                 add_helper_functions(m1)
@@ -188,9 +188,9 @@ def test_impl(
         m1 = None
 
     if rank >= world_size - to_topo.world_size():
-        with base.constants.model_scope(to_model_name):
+        with reallm.base.constants.model_scope(to_model_name):
             m2 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
-            if base.constants.pipe_parallel_world_size() > 1:
+            if reallm.base.constants.pipe_parallel_world_size() > 1:
                 engine2 = InferencePipelineEngine(m2)
             else:
                 add_helper_functions(m2)
@@ -243,7 +243,7 @@ def test_impl(
         if m2 is not None:
             m2.patch_reparallelization(res[:2])
 
-            with base.constants.model_scope(to_model_name):
+            with reallm.base.constants.model_scope(to_model_name):
                 comm_volume = res[-1]
                 dist.all_reduce(comm_volume, group=base.constants.parallelism_group())
                 entry = fetch_latest_tmark()
@@ -341,7 +341,7 @@ def test_impl(
 
         if m1 is not None:
             m1.patch_reparallelization(res[:2])
-            with base.constants.model_scope(from_model_name):
+            with reallm.base.constants.model_scope(from_model_name):
                 comm_volume = res[-1]
                 dist.all_reduce(comm_volume, group=base.constants.parallelism_group())
                 entry = fetch_latest_tmark()
@@ -420,7 +420,7 @@ def setup_gpu(rank, world_size, model_topos, msid2mwid, param_sync_pairs):
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(rank % 8)
     os.environ["GPU_DEVICES_ISOLATED"] = str(1)
-    info = base.gpu_utils.setup_ddp(
+    info = reallm.base.gpu_utils.setup_ddp(
         EXPR_NAME,
         TRIAL_NAME,
         rank,
@@ -468,8 +468,8 @@ def test(args):
         hf_model_type, args.model_size, False)])
     mconfig = FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
     torch.distributed.barrier()
-    # if check and base.constants.has_model_name(from_model_name):
-    #     with base.constants.model_scope(from_model_name):
+    # if check and reallm.base.constants.has_model_name(from_model_name):
+    #     with reallm.base.constants.model_scope(from_model_name):
     #         global_m = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
     #         global_m.instantiate()
     #         # if os.path.exists("/lustre/aigc/llm/checkpoints/reparallelize_test/"):

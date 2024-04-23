@@ -5,11 +5,9 @@ import time
 
 import numpy as np
 
-import api.config.dfg
-# import reallm.base.dataparallel as dataparallel
+import reallm.api.core.dfg as dfg
 import reallm.base.logging as logging
 
-# import reallm.base.namedarray as namedarray
 logger = logging.getLogger("buffer")
 
 
@@ -132,7 +130,7 @@ class AsyncIOSequenceBuffer:
 
     def __init__(
         self,
-        rpcs: List[api.config.dfg.ModelRPC],
+        rpcs: List[api.core.dfg.ModelRPC],
         max_size: int,
         fetch_ctl: asyncio.Queue,
         fetch_master_ctl: asyncio.Queue,
@@ -250,7 +248,7 @@ class AsyncIOSequenceBuffer:
         except asyncio.QueueFull:
             pass
 
-    async def get_batch_for_rpc(self, rpc: api.config.dfg.ModelRPC) -> SequenceSample:
+    async def get_batch_for_rpc(self, rpc: dfg.ModelRPC) -> SequenceSample:
         rpc_idx = self._rpc_names.index(rpc.name)
 
         def _can_do_rpc() -> bool:

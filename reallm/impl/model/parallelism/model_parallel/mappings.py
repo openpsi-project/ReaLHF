@@ -3,7 +3,7 @@
 import torch
 
 from .utils import split_tensor_along_last_dim
-from base.constants import *
+from reallm.base.constants import *
 
 
 def _reduce(input_):

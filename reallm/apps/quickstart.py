@@ -13,10 +13,10 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING, OmegaConf
 import hydra
 
-from base.cluster import spec as cluster_spec
-from base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
-from experiments.common import DPOConfig, PPOConfig, RWConfig, SFTConfig
-import api.config.config_system
+from reallm.base.cluster import spec as cluster_spec
+from reallm.base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
+from reallm.experiments.common import DPOConfig, PPOConfig, RWConfig, SFTConfig
+import reallm.api.core.system as system_api
 
 cs = ConfigStore.instance()
 
@@ -98,7 +98,7 @@ def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
         os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
         with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
             pickle.dump((exp_name, exp_fn), f)
-        api.config.config_system.register_experiment(exp_name, exp_fn)
+        system_api.register_experiment(exp_name, exp_fn)
 
         try:
             main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))

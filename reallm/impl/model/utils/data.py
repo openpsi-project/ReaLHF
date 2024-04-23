@@ -4,7 +4,7 @@ import dataclasses
 import torch
 import torch.distributed as dist
 
-from base.monitor import time_mark
+from reallm.base.monitor import time_mark
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Modeling Data Utils")

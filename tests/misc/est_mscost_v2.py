@@ -8,17 +8,17 @@ import time
 import torch
 import torch.distributed
 
-from api.config.config_base import ModelName
-from impl.model.nn.flash_mqat.flash_mqat_api import (_keys_from_layer_indices, _param_size_from_keys,
+from reallm.api.core.config import ModelName
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import (_keys_from_layer_indices, _param_size_from_keys,
                                                      ReparallelizeReceiverStep, ReparallelizeSenderStep)
-from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
                                                       flash_model_head_param_count,
                                                       flash_model_tblock_param_count, FlashMQATConfig)
-from impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape,
+from reallm.impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape,
                                                           partition_pipeline_layers,
                                                           pipeline_repartition_strategy)
 from tests.utils import get_llama7b_flash_config
-import api.config.config_system
+import reallm.api.core.system
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.topology
 import reallm.base.topology as topology
@@ -27,17 +27,17 @@ import reallm.base.topology as topology
 def _filter_match_mwids(
     model_name: ModelName,
     topo: topology.PipeModelDataParallelTopology,
-    msid2mwid: Dict[api.config.config_system.ModelShardID, int],
+    msid2mwid: Dict[api.core.system.ModelShardID, int],
     **conditions,
 ) -> List[int]:
     if len(conditions) == 0:
         mwids_this_model = [
-            msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(model_name, topo, j)]
+            msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in range(topo.world_size())
         ]
     else:
         mwids_this_model = [
-            msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(model_name, topo, j)]
+            msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in topo.filter_match(**conditions)
         ]
     mwids_this_model = sorted(mwids_this_model)
@@ -116,16 +116,16 @@ def _assign_src_to_dsts(node2srcs: Dict[int, List[int]], node2dsts: Dict[int,
 
 
 def _create_param_sync_groups(
-    from_topo: base.topology.PipeModelDataParallelTopology,
-    to_topo: base.topology.PipeModelDataParallelTopology,
+    from_topo: reallm.base.topology.PipeModelDataParallelTopology,
+    to_topo: reallm.base.topology.PipeModelDataParallelTopology,
     src: ModelName,
     dst: ModelName,
-    msid2mwid: Dict[api.config.config_system.ModelShardID, int],
+    msid2mwid: Dict[api.core.system.ModelShardID, int],
     param_sync_groups: Dict[gpu_utils.ParamSyncPair, torch.distributed.ProcessGroup],
     param_sync_src_ranks: Dict[gpu_utils.ParamSyncPair, int],
     param_sync_dst_ranks: Dict[gpu_utils.ParamSyncPair, List[int]],
 ):
-    mwid2msid: Dict[int, Dict[ModelName, api.config.config_system.ModelShardID]] = defaultdict(dict)
+    mwid2msid: Dict[int, Dict[ModelName, reallm.api.core.system.ModelShardID]] = defaultdict(dict)
     for k, v in msid2mwid.items():
         mwid2msid[v][k.model_name] = k
     for pp_i, pp_j in itertools.product(range(from_topo.get_dim("pipe")), range(to_topo.get_dim("pipe"))):
@@ -201,8 +201,8 @@ def _create_param_sync_groups(
 def _derive_reparallelize_comm_plan(
     from_model_name: ModelName,
     to_model_name: ModelName,
-    from_topo: base.topology.PipeModelDataParallelTopology,
-    to_topo: base.topology.PipeModelDataParallelTopology,
+    from_topo: reallm.base.topology.PipeModelDataParallelTopology,
+    to_topo: reallm.base.topology.PipeModelDataParallelTopology,
     from_model_config: FlashMQATConfig,
     to_model_config: FlashMQATConfig,
     pg_info: gpu_utils.NCCLProcessGroupInfo,
@@ -341,8 +341,8 @@ def compute_cost(
     world_size: int,
     from_model_name: ModelName,
     to_model_name: ModelName,
-    from_topo: base.topology.PipeModelDataParallelTopology,
-    to_topo: base.topology.PipeModelDataParallelTopology,
+    from_topo: reallm.base.topology.PipeModelDataParallelTopology,
+    to_topo: reallm.base.topology.PipeModelDataParallelTopology,
     model_config: FlashMQATConfig,
     bw: float,  # Gbps
     set_interval_cost: float,
@@ -353,10 +353,10 @@ def compute_cost(
     param_sync_dst_ranks = {}
     msid2mwid = {}
     for i in range(from_topo.world_size()):
-        msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(from_model_name, from_topo,
+        msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(from_model_name, from_topo,
                                                                               i)] = i
     for i in range(to_topo.world_size()):
-        msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(
+        msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(
             to_model_name, to_topo, i)] = (i + world_size - to_topo.world_size())
     _create_param_sync_groups(
         from_topo,
@@ -445,8 +445,8 @@ def main():
             world_size = data["world_size"]
             profile_res = data["mem_shift_time_ns"] / 1e9
 
-            from_topo = base.topology.PipeModelDataParallelTopology(*from_pp_mp_dp)
-            to_topo = base.topology.PipeModelDataParallelTopology(*to_pp_mp_dp)
+            from_topo = reallm.base.topology.PipeModelDataParallelTopology(*from_pp_mp_dp)
+            to_topo = reallm.base.topology.PipeModelDataParallelTopology(*to_pp_mp_dp)
             assert world_size >= from_topo.world_size()
             assert world_size >= to_topo.world_size()
 
@@ -506,8 +506,8 @@ def get_table():
         for config_id, (from_pp_mp_dp, to_pp_mp_dp) in enumerate(all_configs):
             world_size = max(a, b)
 
-            from_topo = base.topology.PipeModelDataParallelTopology(*from_pp_mp_dp)
-            to_topo = base.topology.PipeModelDataParallelTopology(*to_pp_mp_dp)
+            from_topo = reallm.base.topology.PipeModelDataParallelTopology(*from_pp_mp_dp)
+            to_topo = reallm.base.topology.PipeModelDataParallelTopology(*to_pp_mp_dp)
             assert world_size >= from_topo.world_size()
             assert world_size >= to_topo.world_size()
 

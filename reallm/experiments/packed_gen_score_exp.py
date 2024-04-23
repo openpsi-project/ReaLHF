@@ -2,9 +2,9 @@ import functools
 import math
 import random
 
-from api.config.config_system import *
-from api.config.dfg import ModelInterfaceType, ModelRPC
-from base.topology import PipeModelDataParallelTopology
+from reallm.api.core.system import *
+from reallm.api.core.dfg import ModelInterfaceType, ModelRPC
+from reallm.base.topology import PipeModelDataParallelTopology
 
 gen_score = ModelRPC(
     "default",

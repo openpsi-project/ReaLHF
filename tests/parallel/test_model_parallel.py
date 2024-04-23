@@ -7,10 +7,10 @@ import torch
 import torch.distributed
 import torch.multiprocessing as mp
 
-from api.config.config_base import MODEL_TYPE_TO_PATH, ModelType
-from base.monitor import get_tracer
+from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelType
+from reallm.base.monitor import get_tracer
 from tests.utils import *
-import api.config.config_system as config_package
+import reallm.api.core.system as config_package
 import reallm.base.constants
 
 # mp2pp4 8.4 0.57 mp4pp2 7.84 0.53
@@ -37,7 +37,7 @@ OFFLOAD_PARAM = False
 
 
 def make_backend():
-    import api.model
+    import reallm.api.model
 
     engine_type = "pipe" if NUM_PP > 1 else "deepspeed"
     args = dict(
@@ -55,7 +55,7 @@ def make_backend():
         sequence_parallel=USE_SEQ_PARALLEL,
         enable_async_p2p_communication=ASYNC_P2P,
     )
-    return api.model.make_backend(config_package.ModelBackend(
+    return reallm.api.model.make_backend(config_package.ModelBackend(
         type_="ds_train",
         args=args,
     ))
@@ -64,13 +64,13 @@ def make_backend():
 def make_interface():
     import profiler.interface
 
-    import api.config.dfg
-    import api.model
-    return api.model.make_interface(api.config.dfg.ModelInterface(type_="profile", args=dict()))
+    import reallm.api.core.dfg
+    import reallm.api.model
+    return reallm.api.model.make_interface(api.core.dfg.ModelInterface(type_="profile", args=dict()))
 
 
 def make_model(device):
-    import api.model
+    import reallm.api.model
     import impl.model.nn.flash_mqat.flash_mqat_api
 
     # from_type = "self" if NUM_PP == 1 else "empty_actor"
@@ -91,12 +91,12 @@ def make_model(device):
         ),
     )
 
-    model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
+    model = reallm.api.model.make_model(model_config, name=MODEL_NAME, device=device)
     return model
 
 
 def init_handles(rank):
-    with base.constants.model_scope(MODEL_NAME):
+    with reallm.base.constants.model_scope(MODEL_NAME):
         device = setup_gpu(rank, WORLD_SIZE)
         init_global_constants(NUM_DP, NUM_MP, NUM_PP)
         torch_dist_rank = torch.distributed.get_rank()
@@ -126,7 +126,7 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     # cu_seqlens = data['cu_seqlens']
     # max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
     import reallm.base.constants
-    with base.constants.model_scope(MODEL_NAME):
+    with reallm.base.constants.model_scope(MODEL_NAME):
         model.module.eval()
 
         st = time.monotonic()
@@ -143,7 +143,7 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
             res = interface.inference(model, data)
             logits = res["logits"]
             if logits is not None:
-                from impl.model.parallelism.model_parallel.mappings import \
+                from reallm.impl.model.parallelism.model_parallel.mappings import \
                     gather_from_tensor_model_parallel_region
 
                 logits = gather_from_tensor_model_parallel_region(logits)
@@ -151,7 +151,7 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
 
         import reallm.base.constants
 
-        if base.constants.pipe_parallel_rank() == NUM_PP - 1:
+        if reallm.base.constants.pipe_parallel_rank() == NUM_PP - 1:
             res_queue.put(logits)
         time.sleep(2)
 
@@ -163,7 +163,7 @@ def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
 
     # os.environ["DLLM_TRACE"] = "1"
 
-    with base.constants.model_scope(MODEL_NAME):
+    with reallm.base.constants.model_scope(MODEL_NAME):
         tracer = get_tracer(tracer_entries=int(2e6),
                             max_stack_depth=10,
                             ignore_c_function=False,
@@ -190,7 +190,7 @@ def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
 def run_generate(rank: int, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
     # data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
-    from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
+    from reallm.impl.model.nn.flash_mqat.flash_generate import GenerationConfig
 
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
 
@@ -198,7 +198,7 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
 
     import reallm.base.constants
 
-    with base.constants.model_scope(MODEL_NAME):
+    with reallm.base.constants.model_scope(MODEL_NAME):
         # os.environ["DLLM_TRACE"] = "1"
         tracer = get_tracer(
             tracer_entries=int(2e6),
@@ -240,7 +240,7 @@ def run_mixed(rank: int, seed: int):
     device, model, backend, interface = init_handles(rank)
     engine = model.module
 
-    # from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+    # from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
     # assert isinstance(engine, DeepSpeedPipelineEngine)
 
     import os
@@ -262,7 +262,7 @@ def run_mixed(rank: int, seed: int):
     gen_datas = [random_sample(32 * 4, 128, 32000) for _ in range(gen_iters)]
     # gen_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(gen_iters)]
 
-    from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
+    from reallm.impl.model.nn.flash_mqat.flash_generate import GenerationConfig
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
 
     def mixed_one_step():
@@ -293,7 +293,7 @@ def run_mixed(rank: int, seed: int):
 def run_linear(rank: int, res_queue: mp.Queue, seed: int):
     import torch.distributed as dist
 
-    from impl.model.parallelism.model_parallel.modules import ColumnParallelLinear, RowParallelLinear
+    from reallm.impl.model.parallelism.model_parallel.modules import ColumnParallelLinear, RowParallelLinear
     import reallm.base.constants
 
     # device, model, backend, interface = init_handles(rank)
@@ -323,8 +323,8 @@ def run_linear(rank: int, res_queue: mp.Queue, seed: int):
     col = ColumnParallelLinear(1024, 2048, bias=False, dtype=torch.float, device=device)
     row = RowParallelLinear(2048, 1024, bias=False, dtype=torch.float, device=device)
 
-    mp_rank = base.constants.model_parallel_rank()
-    mp_ws = base.constants.model_parallel_world_size()
+    mp_rank = reallm.base.constants.model_parallel_rank()
+    mp_ws = reallm.base.constants.model_parallel_world_size()
     w1 = w1.split(2048 // mp_ws, dim=0)[mp_rank]
     w2 = w2.split(2048 // mp_ws, dim=1)[mp_rank]
     col.load_state_dict({"weight": w1})
@@ -347,15 +347,15 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
         cls.baseline_model = None
 
     def init_tokenizer(self):
-        import api.huggingface
+        import reallm.api.huggingface
 
-        self.tokenizer = api.huggingface.load_hf_tokenizer(BASELINE_MODEL_PATH)
+        self.tokenizer = reallm.api.huggingface.load_hf_tokenizer(BASELINE_MODEL_PATH)
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.tokenizer.padding_side = "left"
 
     def init_baseline_model(self):
-        from impl.model.nn.flash_mqat.flash_mqat_api import forward_helper, generate_helper
-        from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
+        from reallm.impl.model.nn.flash_mqat.flash_mqat_api import forward_helper, generate_helper
+        from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
         import impl.model.nn.flash_mqat.flash_from_hf_impl
 
         self.device = device = "cuda"
@@ -458,7 +458,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
               f" mean {(r - res[0]).abs().mean()},")
 
         # import reallm.base.consistency
-        # base.consistency.check_all_model_parallel(NUM_MP)
+        # reallm.base.consistency.check_all_model_parallel(NUM_MP)
 
     @torch.no_grad()
     def testLinearAccordance(self):

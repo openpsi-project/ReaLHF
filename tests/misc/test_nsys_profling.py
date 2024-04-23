@@ -96,17 +96,17 @@ def get_pytorch_profiler(save_fn: str):
 
 
 def test_impl(world_size, profile: bool):
-    from impl.model.backend.pipe_inf import InferencePipelineEngine
-    from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
+    from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
+    from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
 
     torch.distributed.barrier()
     mconfig = get_llama7b_flash_config()
-    with base.constants.model_scope(MODEL_NAME):
+    with reallm.base.constants.model_scope(MODEL_NAME):
         m = FlashMQATModel(mconfig, device=torch.device("cuda:0"), dtype=torch.float16)
         m.instantiate()
         torch.cuda.synchronize()
         print("After model instantiation", get_memory(0))
-        if base.constants.pipe_parallel_world_size() == 1:
+        if reallm.base.constants.pipe_parallel_world_size() == 1:
             add_helper_functions(m)
             engine = m
         else:
@@ -123,7 +123,7 @@ def test_impl(world_size, profile: bool):
             torch.cuda.synchronize()
             tik = time.perf_counter()
         with torch.no_grad():
-            if base.constants.pipe_parallel_world_size() == 1:
+            if reallm.base.constants.pipe_parallel_world_size() == 1:
                 y = engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
                 for _ in range(5):
                     engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)

@@ -14,7 +14,7 @@ def main(rank, world_size, args):
     device = setup_gpu(rank, world_size)
     init_global_constants(1, world_size, 1)
 
-    with base.constants.model_scope(MODEL_NAME):
+    with reallm.base.constants.model_scope(MODEL_NAME):
         from profiler.layers import make_profile_layers
         profile_layers = make_profile_layers(device, args.model_path, args.model_name,
                                              args.use_sequence_parallel and world_size > 1,

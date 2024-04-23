@@ -5,7 +5,7 @@ from profiler.estimate import estimate_rpc_memory, estimate_rpc_time
 from profiler.experiments import *
 from profiler.rpc import *
 
-import api.config.dfg
+import reallm.api.core.dfg
 
 GPU_MEM_CAP = 80 * (1024**3)
 MEM_INDEX = 1.0
@@ -64,7 +64,7 @@ def build_graph(rpcs: List[ModelRPC], num_epoch: int = 5, epoch_dependency_inter
             edges between epoch i and epoch i+2, i+4, ...
     """
     # one epoch dependency graph
-    rpcs, edges = api.config.dfg.build_graph(rpcs)
+    rpcs, edges = reallm.api.core.dfg.build_graph(rpcs)
     rpc_names_mapping = {rpc.name: rpc for rpc in rpcs}
     rpc_instances = []
 

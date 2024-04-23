@@ -8,14 +8,14 @@ Datasets used in this system are subclasses of `torch.utils.data.Dataset`. Besid
 
 To implement a new dataset, uses should
 1. define a class by inheriting `torch.utils.data.Dataset`;
-2. implement the `__init__` function, with `util: api.data.DatasetUtility` as the first argument, and arbitrarily many other arguments;
+2. implement the `__init__` function, with `util: reallm.api.data.DatasetUtility` as the first argument, and arbitrarily many other arguments;
 3. implement the `__len__` function and the `__getitem__` methods just like ordinary PyTorch dataset implementations (or `__len__` and `__iter__` for iterable datasets);
 4. register the dataset by calling `api.data.register_dataset("my_cool_dataset", MyDataset)`.
 
 In configuration, users can define `api.config.Dataset` like this
 
 ```python
-dataset_cfg = api.config.Dataset(type_="my_cool_dataset",
+dataset_cfg = reallm.api.config.Dataset(type_="my_cool_dataset",
                                  args=dict(**other_arguments))
 ```
 
@@ -36,7 +36,7 @@ where we overwrite the arguments of `torch.utils.data.DataLoader` with a customi
 
 In configuration, users can define `api.config.DataLoader` like
 ```python
-dataloader = api.config.DataLoader(
+dataloader = reallm.api.config.DataLoader(
     'excel_propmt',
     args=dict(
         max_token_len=max_prompt_len,

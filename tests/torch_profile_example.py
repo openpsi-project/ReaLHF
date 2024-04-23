@@ -22,9 +22,9 @@ import torch
 import torch.distributed
 import torch.profiler
 
-from api.config.config_base import MODEL_TYPE_TO_PATH, ModelType
+from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelType
 from tests.utils import *
-import api.config.config_system as config_package
+import reallm.api.core.system as config_package
 import reallm.base.constants
 
 ## performance related config
@@ -54,7 +54,7 @@ OFFLOAD_PARAM = False
 
 
 def make_backend():
-    import api.model
+    import reallm.api.model
 
     engine_type = "pipe" if NUM_PP > 1 else "deepspeed"
     args = dict(
@@ -72,7 +72,7 @@ def make_backend():
         sequence_parallel=USE_SEQ_PARALLEL,
         enable_async_p2p_communication=ASYNC_P2P,
     )
-    return api.model.make_backend(config_package.ModelBackend(
+    return reallm.api.model.make_backend(config_package.ModelBackend(
         type_="ds_train",
         args=args,
     ))
@@ -81,13 +81,13 @@ def make_backend():
 def make_interface():
     import profiler.interface
 
-    import api.config.dfg
-    import api.model
-    return api.model.make_interface(api.config.dfg.ModelInterface(type_="flash_sft", args=dict()))
+    import reallm.api.core.dfg
+    import reallm.api.model
+    return reallm.api.model.make_interface(api.core.dfg.ModelInterface(type_="flash_sft", args=dict()))
 
 
 def make_model(device):
-    import api.model
+    import reallm.api.model
     import impl.model.nn.flash_mqat.flash_mqat_api
 
     # from_type = "self" if NUM_PP == 1 else "empty_actor"
@@ -108,12 +108,12 @@ def make_model(device):
         ),
     )
 
-    model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
+    model = reallm.api.model.make_model(model_config, name=MODEL_NAME, device=device)
     return model
 
 
 def init_handles(rank):
-    with base.constants.model_scope(MODEL_NAME):
+    with reallm.base.constants.model_scope(MODEL_NAME):
         device = setup_gpu(rank, WORLD_SIZE)
         init_global_constants(NUM_DP, NUM_MP, NUM_PP)
         torch_dist_rank = torch.distributed.get_rank()
@@ -159,14 +159,14 @@ def main(rank: int = None, world_size: int = None):
     # cu_seqlens = torch.arange(batch_size + 1, dtype=torch.int32, device=device) * seqlen
     # prompt_mask = torch.randint(0, 2, (batch_size * seqlen,), dtype=torch.bool, device=device)
 
-    # if base.constants.model_parallel_rank() == 0:
+    # if reallm.base.constants.model_parallel_rank() == 0:
     #     gpu_memory_mb("before model initialization")
 
     model = make_model(device)
     data = random_sample(BATCH_SIZE // NUM_DP, SEQ_LEN, 32000)
     if USE_GRADIENT_CHECKPOINTING:
         model.module.gradient_checkpointing_enable()
-    # if base.constants.model_parallel_rank() == 0:
+    # if reallm.base.constants.model_parallel_rank() == 0:
     #     gpu_memory_mb("after model initialization")
     backend = make_backend()
     ft_spec = make_finetune_spec(32)
@@ -181,7 +181,7 @@ def main(rank: int = None, world_size: int = None):
     os.makedirs(dirname, exist_ok=True)
 
     def trace_handler(p: torch.profiler._KinetoProfile):
-        if base.constants.model_parallel_rank() == 0 and base.constants.data_parallel_rank() == 0:
+        if reallm.base.constants.model_parallel_rank() == 0 and reallm.base.constants.data_parallel_rank() == 0:
             print(p.key_averages(group_by_input_shape=True).table(sort_by="cuda_memory_usage", row_limit=20))
             p.export_chrome_trace(os.path.join(dirname, f"rank{rank}.json"))
 
@@ -201,11 +201,11 @@ def main(rank: int = None, world_size: int = None):
             if PROFILE_INTERFACE_TYPE != "generate":
                 res = getattr(interface, PROFILE_INTERFACE_TYPE)(model, data)
             else:
-                from impl.model.nn.flash_mqat.flash_generate import GenerationConfig
+                from reallm.impl.model.nn.flash_mqat.flash_generate import GenerationConfig
                 gconfig = GenerationConfig(min_new_tokens=10, max_new_tokens=10)
                 res = interface.generate(model, data, gconfig=gconfig)
         torch.cuda.synchronize()
-        if (base.constants.model_parallel_rank() == 0 and base.constants.pipe_parallel_rank() == NUM_PP - 1):
+        if (base.constants.model_parallel_rank() == 0 and reallm.base.constants.pipe_parallel_rank() == NUM_PP - 1):
             if PROFILE_INTERFACE_TYPE == "generate":
                 print(
                     f"generate {res['gen_tokens'].shape[1]} tokens * batch size {res['gen_tokens'].shape[0]}, "
@@ -216,5 +216,5 @@ def main(rank: int = None, world_size: int = None):
 
 
 if __name__ == "__main__":
-    with base.constants.model_scope(MODEL_NAME):
+    with reallm.base.constants.model_scope(MODEL_NAME):
         main()

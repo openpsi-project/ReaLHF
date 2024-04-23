@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import tqdm
 
-from reallm.api.config.config_base import ModelName
+from reallm.api..config.config_base import ModelName
 from reallm.base.monitor import CUDATimeMarkType, TimeMarkEntry
 
 

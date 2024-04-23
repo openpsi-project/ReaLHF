@@ -5,8 +5,8 @@ from torch.cuda.amp import custom_bwd, custom_fwd
 import torch
 import torch.distributed
 
-from impl.model.parallelism.model_parallel.utils import VocabUtility
-from impl.model.utils.functional import build_leave_one_indices
+from reallm.impl.model.parallelism.model_parallel.utils import VocabUtility
+from reallm.impl.model.utils.functional import build_leave_one_indices
 import reallm.base.constants
 
 
@@ -131,8 +131,8 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         # Get the partition's vocab indecies
         get_vocab_range = VocabUtility.vocab_range_from_per_partition_vocab_size
         partition_vocab_size = vocab_parallel_logits.size()[-1]
-        rank = base.constants.model_parallel_rank()
-        world_size = base.constants.model_parallel_world_size()
+        rank = reallm.base.constants.model_parallel_rank()
+        world_size = reallm.base.constants.model_parallel_world_size()
         vocab_start_index, vocab_end_index = get_vocab_range(partition_vocab_size, rank, world_size)
 
         # Create a mask of valid vocab ids (1 means it needs to be masked).
@@ -301,7 +301,7 @@ def memory_efficient_ppo_loss_fn(
     advantages,
     eps_clip,
 ):
-    if base.constants.model_parallel_world_size() == 1:
+    if reallm.base.constants.model_parallel_world_size() == 1:
         return _MemoryEfficientPPOActorLossFn.apply(
             logits,
             cu_seqlens,

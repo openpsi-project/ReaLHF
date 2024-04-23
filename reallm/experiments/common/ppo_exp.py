@@ -2,11 +2,11 @@ import functools
 
 from omegaconf import MISSING
 
-from api.config.config_dataset import PromptOnlyDatasetConfig
-from api.config.config_flash_model import get_flash_mqat_model_config, ModelTrainEvalConfig
-from api.config.config_system import *
-from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType, OffloadHook, SyncParamHook
-from base.topology import PipeModelDataParallelTopology
+from reallm.api.config.config_dataset import PromptOnlyDatasetConfig
+from reallm.api.quickstart.model import get_flash_mqat_model_config, ModelTrainEvalConfig
+from reallm.api.core.system import *
+from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType, OffloadHook, SyncParamHook
+from reallm.base.topology import PipeModelDataParallelTopology
 import reallm.base.logging as logging
 
 logger = logging.getLogger("PPO exp", "colored")

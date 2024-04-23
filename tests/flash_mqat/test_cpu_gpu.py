@@ -4,12 +4,12 @@ import unittest
 import torch
 import transformers
 
-from impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig, vanilla_cpu_generate,
+from reallm.impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig, vanilla_cpu_generate,
                                                      vanilla_packed_generate)
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
-from impl.model.utils.functional import gather_shifted_log_probs
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
+from reallm.impl.model.utils.functional import gather_shifted_log_probs
 from tests.utils import init_global_constants
-import api.huggingface
+import reallm.api.huggingface
 
 try:
     from flash_attn.bert_padding import pad_input, unpad_input
@@ -47,7 +47,7 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
+        cls.tokenizer = reallm.api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(
@@ -122,7 +122,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
         sc_cfg.n_inner = 4096
         sc_cfg.n_positions = 512
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
+        cls.tokenizer = reallm.api.huggingface.load_hf_tokenizer("/lustre/meizy/models/starcoder_4l/")
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         starcoder: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_config(sc_cfg).to(

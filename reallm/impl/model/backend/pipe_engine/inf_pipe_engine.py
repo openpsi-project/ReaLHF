@@ -17,14 +17,14 @@ import torch
 import torch.nn as nn
 import transformers
 
-from base.dataparallel import PackedParallelDataBroker
-from base.monitor import time_mark
-from base.namedarray import NamedArray
-from base.topology import ParallelGrid
-from impl.model.nn.flash_mqat.flash_generate import GenerationConfig, genstep
-from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
-from impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
-from impl.model.utils.data import PipeCacheData, PipeTransferData
+from reallm.base.dataparallel import PackedParallelDataBroker
+from reallm.base.monitor import time_mark
+from reallm.base.namedarray import NamedArray
+from reallm.base.topology import ParallelGrid
+from reallm.impl.model.nn.real_llm_generate import GenerationConfig, genstep
+from reallm.impl.model.nn.real_llm_api import FlashMQATModel
+from reallm.impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
+from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 import reallm.base.constants
 import reallm.base.logging as logging
 import impl.model.backend.pipe_engine.static_schedule as schedule
@@ -64,7 +64,7 @@ class InferencePipelineEngine:
         self.sched_count = 0
 
         # parallelism constants
-        self.grid: ParallelGrid = base.constants.grid()
+        self.grid: ParallelGrid = reallm.base.constants.grid()
 
         self.global_rank = self.grid.get_global_rank()
         self.num_stages = self.grid.get_pipe_parallel_world_size()
@@ -567,7 +567,7 @@ class InferencePipelineEngine:
         # we defer the implementation of CUDAGraph generation in the future
         # if self._generate_mode and self.tensor_buffer.get("kv_cache_reserved", micro_batch_id):
         #     kvcache_seqlen = max(
-        #         base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
+        #         reallm.base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
         #         self.hidden_dim // self.head_dim + 10,
         #     )
         #     with torch.no_grad():
@@ -630,7 +630,7 @@ class InferencePipelineEngine:
         for y, layer_idx, bk_idx in zip(ys, layer_indices, gd_input_buffer_kv_cache_indices):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(
-                base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
+                reallm.base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
                 self.hidden_dim // self.head_dim + 10,
             )
             if (self._gd_graph is not None and self._gd_graph_bs >= bs

@@ -6,15 +6,15 @@ import numpy as np
 import torch
 import torch.utils.data
 
-from base.datapack import min_abs_diff_partition
-import api.data
+from reallm.base.datapack import min_abs_diff_partition
+import reallm.api.data
 
 
 class RewardModelingPairedDataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        util: api.data.DatasetUtility,
+        util: reallm.api.data.DatasetUtility,
         max_seq_len: int,
         pad_to_max_length: bool = False,
         max_pairs_per_prompt: Optional[int] = None,
@@ -54,7 +54,7 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
             assert dataset_builder is not None
             data = dataset_builder()
 
-        shuffle_indices = api.data.get_shuffle_indices(seed, len(data))
+        shuffle_indices = reallm.api.data.get_shuffle_indices(seed, len(data))
         data = [data[i] for i in shuffle_indices]
         print(">>>>", len(data))
 

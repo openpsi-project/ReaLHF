@@ -13,7 +13,7 @@ import subprocess
 
 import pandas as pd
 
-from base.constants import LOG_ROOT
+from reallm.base.constants import LOG_ROOT
 from scheduler.client import JobException, JobInfo, JobState
 import reallm.base.cluster
 import reallm.base.logging as logging
@@ -559,7 +559,7 @@ def available_hostnames(
         if hn not in all_hostnames:
             raise ValueError(f"Invalid host name: {hn}. Available host names: {all_hostnames}.")
 
-    return list(filter(lambda x: base.cluster.node_name_is_node_type(x, node_type), valid_hostnames))
+    return list(filter(lambda x: reallm.base.cluster.node_name_is_node_type(x, node_type), valid_hostnames))
 
 
 def get_all_node_resources() -> Dict[str, SlurmResource]:
@@ -587,7 +587,7 @@ def get_all_node_resources() -> Dict[str, SlurmResource]:
                 ctres = _parse_output_tres_line(l)
             if l.startswith("AllocTRES"):
                 atres = _parse_output_tres_line(l)
-        ctres.gpu_type = atres.gpu_type = base.cluster.spec.gpu_type_from_node_name(node_name)
+        ctres.gpu_type = atres.gpu_type = reallm.base.cluster.spec.gpu_type_from_node_name(node_name)
         rres = ctres - atres
         if rres.valid():
             all_rres[node_name] = rres

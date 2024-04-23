@@ -5,7 +5,7 @@ import unittest
 from transformers.generation.utils import top_k_top_p_filtering
 import torch
 
-from impl.model.utils.logits_warper import top_k_top_p_logits
+from reallm.impl.model.utils.logits_warper import top_k_top_p_logits
 
 vocab_size = 100
 

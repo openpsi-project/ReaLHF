@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
-from base.constants import data_parallel_group
+from reallm.base.constants import data_parallel_group
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Modules")

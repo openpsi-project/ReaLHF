@@ -6,7 +6,7 @@ import time
 
 import viztracer
 
-from base.monitor import get_tracer
+from reallm.base.monitor import get_tracer
 import reallm.base.constants
 import reallm.base.topology
 
@@ -18,10 +18,10 @@ WORLD_SIZE = NUM_PP * NUM_MP * NUM_DP
 
 def setup(rank):
     os.environ["DLLM_TRACE"] = "1"
-    base.constants.set_experiment_trial_names("test", "test")
-    base.constants.set_model_name("test_model")
-    topo = base.topology.PipeModelDataParallelTopology(num_pp=NUM_PP, num_mp=NUM_MP, num_dp=NUM_DP)
-    base.constants.set_fake_grid("test_model", rank, topo)
+    reallm.base.constants.set_experiment_trial_names("test", "test")
+    reallm.base.constants.set_model_name("test_model")
+    topo = reallm.base.topology.PipeModelDataParallelTopology(num_pp=NUM_PP, num_mp=NUM_MP, num_dp=NUM_DP)
+    reallm.base.constants.set_fake_grid("test_model", rank, topo)
 
 
 def rank_print(rank, *args, **kwargs):
@@ -31,9 +31,9 @@ def rank_print(rank, *args, **kwargs):
 def main(rank):
     setup(rank)
 
-    from impl.model.backend.pipe_engine.dynamic_schedule import (DynamicPipeSchedule, GenerationSchedule,
+    from reallm.impl.model.backend.pipe_engine.dynamic_schedule import (DynamicPipeSchedule, GenerationSchedule,
                                                                  InferenceSchedule, Train1F1BSchedule)
-    from impl.model.backend.pipe_engine.schedule_controller import (EngineScheduleClient,
+    from reallm.impl.model.backend.pipe_engine.schedule_controller import (EngineScheduleClient,
                                                                     EngineScheduleController)
 
     # tracer = get_tracer(

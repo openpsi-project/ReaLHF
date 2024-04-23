@@ -3,7 +3,7 @@ import importlib
 import os
 import traceback
 
-import api.config.config_system
+import reallm.api.core.system
 import reallm.base.logging as logging
 
 logger = logging.getLogger("system")

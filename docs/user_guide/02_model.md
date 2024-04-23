@@ -17,7 +17,7 @@ As its core components, it encapsules a neural network and a tokenizer.
 To implement a new model, users should write a function with signature
 
 ```python
-def foo(name: str, device: Union[str, torch.device], **model_kwargs) -> api.model.Model:
+def foo(name: str, device: Union[str, torch.device], **model_kwargs) -> reallm.api.model.Model:
     ...
 ```
 
@@ -32,7 +32,7 @@ api.model.register_model("my_model", foo)
 
 To configure such a model, the configuration is
 ```python
-model_cfg = api.config.Model("my_model", dict=model_kwargs)
+model_cfg = reallm.api.config.Model("my_model", dict=model_kwargs)
 ```
 
 See `impl/model/nn/basic.py` for examples.

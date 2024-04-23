@@ -15,13 +15,13 @@ from profiler.rpc import RPC, RPCExecution
 import numpy as np
 import profiler.cppsearch.mdm_search as mdm_search
 
-from api.config.config_base import MODEL_TYPE_TO_PATH
-from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
-from api.config.config_flash_model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
-from api.config.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
-import api.config.config_system as config_package
-# import experiments.autoexp.auto_ppo
+from reallm.api.core.config import MODEL_TYPE_TO_PATH
+from reallm.api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
+from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
+from reallm.api.core.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+import reallm.api.core.system as config_package
+# import reallm.experiments.autoexp.auto_ppo
 import reallm.base.constants
 
 
@@ -55,7 +55,7 @@ def file_to_allocation_pkl(  # model_rpcs: List[ModelRPC],
 
     # print(r)
     search_device_mesh = make_device_mesh_from_name(nodelist)
-    # hack, only suitable for configs in experiments/autoexp/auto_ppo.py
+    # hack, only suitable for configs in reallm.experiments/autoexp/auto_ppo.py
     for k, v in model_rpcs.items():
         v: ModelRPC
         print(v)

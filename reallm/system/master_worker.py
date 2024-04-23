@@ -19,17 +19,17 @@ import numpy as np
 import torch
 import torch.distributed
 
-from api.config.config_base import ModelName
-from api.config.config_flash_model import FlashMQATConfig
-from base.asyncio_utils import raise_asyncio_exception, setup_run_until_complete, teardown_run_util_complete
-from base.buffer import AsyncIOSequenceBuffer
-from base.cluster import spec as cluster_spec
-from base.constants import MODEL_SAVE_ROOT
-import api.config.config_base
-import api.config.config_system as config_pkg
-import api.config.dfg
-import api.data as data_api
-import api.model as model_api
+from reallm.api.core.config import ModelName
+from reallm.api.quickstart.model import FlashMQATConfig
+from reallm.base.asyncio_utils import raise_asyncio_exception, setup_run_until_complete, teardown_run_util_complete
+from reallm.base.buffer import AsyncIOSequenceBuffer
+from reallm.base.cluster import spec as cluster_spec
+from reallm.base.constants import MODEL_SAVE_ROOT
+import reallm.api.core.config
+import reallm.api.core.system as config_pkg
+import reallm.api.core.dfg
+import reallm.api.data as data_api
+import reallm.api.model as model_api
 import reallm.base.datapack as datapack
 import reallm.base.dataparallel as dataparallel
 import reallm.base.logging as logging
@@ -181,8 +181,8 @@ def _request_parameter_sync(
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     from_model_name: ModelName,
     to_model_name: ModelName,
-    from_topo: base.topology.PipeModelDataParallelTopology,
-    to_topo: base.topology.PipeModelDataParallelTopology,
+    from_topo: reallm.base.topology.PipeModelDataParallelTopology,
+    to_topo: reallm.base.topology.PipeModelDataParallelTopology,
     to_model_config: FlashMQATConfig,
 ):
 
@@ -283,20 +283,20 @@ class RPCCorountineControl:
 
 
 def _attach_payloads_with_hooks(
-    rpc: api.config.dfg.ModelRPC,
-    payloads: Dict[api.config.config_base.ModelShardID, request_reply_stream.Payload],
+    rpc: reallm.api.core.dfg.ModelRPC,
+    payloads: Dict[api.core.config.ModelShardID, request_reply_stream.Payload],
     mwids: List[int],
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     model_configs: Dict[str, None | FlashMQATConfig],
-    model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
+    model_topos: Dict[str, reallm.base.topology.PipeModelDataParallelTopology],
     main_handlers: List[config_pkg.ModelShardID],
     hook_type: str,
-) -> Tuple[Dict[api.config.config_base.ModelShardID, request_reply_stream.Payload], List[int]]:
+) -> Tuple[Dict[api.core.config.ModelShardID, request_reply_stream.Payload], List[int]]:
     assert hook_type in ["pre", "post"], hook_type
 
     main_mwids = set([msid2mwid[h] for h in main_handlers])
     for hook in getattr(rpc, f"{hook_type}_hooks"):
-        if isinstance(hook, api.config.dfg.SyncParamHook):
+        if isinstance(hook, reallm.api.core.dfg.SyncParamHook):
             assert (hook.source is None) != (hook.target is None), hook
             if hook.source is None:
                 src_topo = model_topos[rpc.model_name]
@@ -324,7 +324,7 @@ def _attach_payloads_with_hooks(
                 getattr(payloads[h], f"{hook_type}_hooks").append("param_sync")
                 getattr(payloads[h], f"{hook_type}_hook_data").append(ps_data)
             other_handlers = [
-                api.config.config_base.ModelShardID.from_parallelism_rank(other_model_name, other_topo, j)
+                reallm.api.core.config.ModelShardID.from_parallelism_rank(other_model_name, other_topo, j)
                 for j in range(other_topo.world_size())
             ]
             for h in other_handlers:
@@ -341,7 +341,7 @@ def _attach_payloads_with_hooks(
                     getattr(payloads[hh], f"{hook_type}_hooks").append("param_sync")
                     getattr(payloads[hh], f"{hook_type}_hook_data").append(ps_data)
 
-        elif isinstance(hook, api.config.dfg.OffloadHook):
+        elif isinstance(hook, reallm.api.core.dfg.OffloadHook):
             for h in main_handlers:
                 getattr(payloads[h], f"{hook_type}_hooks").append("offload")
                 getattr(payloads[h], f"{hook_type}_hook_data").append(dict(model_name=h.model_name))
@@ -351,10 +351,10 @@ def _attach_payloads_with_hooks(
 
 
 async def scatter_tensor_to_mws(
-    rpc: api.config.dfg.ModelRPC,
+    rpc: reallm.api.core.dfg.ModelRPC,
     stream: request_reply_stream.NameResolvingRequstClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
-    model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
+    model_topos: Dict[str, reallm.base.topology.PipeModelDataParallelTopology],
     model_configs: Dict[str, None | FlashMQATConfig],
     producer_names: Dict[str, str],
     producer_name2producer_handlers: Dict[str, List[config_pkg.ModelShardID]],
@@ -437,13 +437,13 @@ async def scatter_tensor_to_mws(
 
 
 async def model_rpc_request_func(
-    rpc: api.config.dfg.ModelRPC,
+    rpc: reallm.api.core.dfg.ModelRPC,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     src_rpc_model_name: ModelName,
     stream: request_reply_stream.NameResolvingRequstClient,
     buffer: AsyncIOSequenceBuffer,
     data_owner: Dict[Tuple[int, str], Tuple[str, int]],
-    model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
+    model_topos: Dict[str, reallm.base.topology.PipeModelDataParallelTopology],
     model_configs: Dict[str, None | FlashMQATConfig],
     ctrl: RPCCorountineControl,
 ):
@@ -489,16 +489,16 @@ async def model_rpc_request_func(
         if rpc.is_src:
             ctrl.training_buffer_indices = ctrl.training_buffer_indices.union(sample.indices)
 
-        if rpc.interface_type == api.config.dfg.ModelInterfaceType.GENERATE:
+        if rpc.interface_type == reallm.api.core.dfg.ModelInterfaceType.GENERATE:
             ctrl.data_amount.gen_configs.append(model_configs[rpc.model_name])
             ctrl.data_amount.gen_bs.append(len(sample.seqlens))
             ctrl.data_amount.gen_len.append(rpc.interface_impl.args["generation_config"]["min_new_tokens"])
             ctrl.data_amount.prompt_lens.append(sample.seqlens)
-        elif rpc.interface_type == api.config.dfg.ModelInterfaceType.TRAIN_STEP:
+        elif rpc.interface_type == reallm.api.core.dfg.ModelInterfaceType.TRAIN_STEP:
             ctrl.data_amount.train_configs.append(model_configs[rpc.model_name])
             ctrl.data_amount.train_bs.append(len(sample.seqlens))
             ctrl.data_amount.train_seqlens.append(sample.seqlens)
-        elif rpc.interface_type == api.config.dfg.ModelInterfaceType.INFERENCE:
+        elif rpc.interface_type == reallm.api.core.dfg.ModelInterfaceType.INFERENCE:
             ctrl.data_amount.inf_configs.append(model_configs[rpc.model_name])
             ctrl.data_amount.inf_bs.append(len(sample.seqlens))
             ctrl.data_amount.inf_seqlens.append(sample.seqlens)
@@ -564,10 +564,10 @@ async def model_rpc_request_func(
 
 async def model_rpc_reply_func(
     corountine_idx: int,
-    rpc: api.config.dfg.ModelRPC,
+    rpc: reallm.api.core.dfg.ModelRPC,
     stream: request_reply_stream.NameResolvingRequstClient,
     buffer: AsyncIOSequenceBuffer,
-    model_topos: Dict[str, base.topology.PipeModelDataParallelTopology],
+    model_topos: Dict[str, reallm.base.topology.PipeModelDataParallelTopology],
     ctrl: RPCCorountineControl,
 ):
     topo = model_topos[rpc.model_name]
@@ -725,7 +725,7 @@ class MasterWorker(worker_base.Worker):
         self.__model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = config.model_topos
 
         # Build execution graph and initialize concurrency utilities.
-        self.__model_rpcs, _ = api.config.dfg.build_graph(config.model_rpcs)
+        self.__model_rpcs, _ = reallm.api.core.dfg.build_graph(config.model_rpcs)
         for rpc in self.__model_rpcs:
             _dp_size = self.__model_topos[rpc.model_name].get_dim("data")
             _pp_size = self.__model_topos[rpc.model_name].get_dim("pipe")
@@ -747,12 +747,12 @@ class MasterWorker(worker_base.Worker):
 
         # Save and eval control.
         self.__total_train_epochs = config.exp_ctrl.total_train_epochs
-        self.__save_ctl = base.timeutil.EpochStepTimeFreqCtl(
+        self.__save_ctl = reallm.base.timeutil.EpochStepTimeFreqCtl(
             freq_epoch=config.exp_ctrl.save_frequency_epochs,
             freq_step=config.exp_ctrl.save_frequency_steps,
             freq_sec=config.exp_ctrl.save_frequency_seconds,
         )
-        self.__eval_ctl = base.timeutil.EpochStepTimeFreqCtl(
+        self.__eval_ctl = reallm.base.timeutil.EpochStepTimeFreqCtl(
             freq_epoch=config.exp_ctrl.eval_frequency_epochs,
             freq_step=config.exp_ctrl.eval_frequency_steps,
             freq_sec=config.exp_ctrl.eval_frequency_seconds,
@@ -1068,7 +1068,7 @@ class MasterWorker(worker_base.Worker):
 
         # calculate flops
         #########################################
-        from base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
+        from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
                                   calculate_llama_train_flops)
 
         flops = 0

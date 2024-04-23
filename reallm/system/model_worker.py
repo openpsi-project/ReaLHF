@@ -15,14 +15,14 @@ import torch
 import torch.distributed as dist
 import torch.utils.data
 
-from api.config.config_base import ModelName
-from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, dump_tmark_db, gpu_utilization_monitor
-from base.topology import ParallelGrid
-from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
-import api.config.config_system as config_system
-import api.config.dfg
-import api.data
-import api.model
+from reallm.api.core.config import ModelName
+from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, dump_tmark_db, gpu_utilization_monitor
+from reallm.base.topology import ParallelGrid
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+import reallm.api.core.system as config_system
+import reallm.api.core.dfg
+import reallm.api.data
+import reallm.api.model
 import reallm.base.constants
 import reallm.base.datapack as datapack
 import reallm.base.dataparallel as dataparallel
@@ -167,7 +167,7 @@ class ModelWorker(worker_base.Worker):
         self.__experiment_name = self.config.worker_info.experiment_name
         self.__trial_name = self.config.worker_info.trial_name
 
-        self.config.model_rpcs, _ = api.config.dfg.build_graph(self.config.model_rpcs)
+        self.config.model_rpcs, _ = reallm.api.core.dfg.build_graph(self.config.model_rpcs)
         self.data2required_rpc_names = self.config.model_rpcs[0].data2required_rpc_names
 
         # NOTE: here worker_index is different from peer/ddp rank
@@ -182,7 +182,7 @@ class ModelWorker(worker_base.Worker):
         gpu_utils.reveal_ddp_identity(self.__experiment_name, self.__trial_name, self.__worker_index)
         self.__dist_env_resolved = False
 
-        self.__clear_cache_frequency = base.timeutil.FrequencyControl(
+        self.__clear_cache_frequency = reallm.base.timeutil.FrequencyControl(
             frequency_steps=self.config.cuda_cache_clear_freq)
 
         r = self.config.worker_info
@@ -194,38 +194,38 @@ class ModelWorker(worker_base.Worker):
 
     @property
     def _mp_rank(self) -> int:
-        return base.constants.model_parallel_rank()
+        return reallm.base.constants.model_parallel_rank()
 
     @property
     def _pp_rank(self) -> int:
-        return base.constants.pipe_parallel_rank()
+        return reallm.base.constants.pipe_parallel_rank()
 
     @property
     def _dp_rank(self) -> int:
-        return base.constants.data_parallel_rank()
+        return reallm.base.constants.data_parallel_rank()
 
     @property
     def _pp_size(self) -> int:
-        return base.constants.pipe_parallel_world_size()
+        return reallm.base.constants.pipe_parallel_world_size()
 
     @property
     def _mp_size(self) -> int:
-        return base.constants.model_parallel_world_size()
+        return reallm.base.constants.model_parallel_world_size()
 
     @property
     def _dp_size(self) -> int:
-        return base.constants.data_parallel_world_size()
+        return reallm.base.constants.data_parallel_world_size()
 
     @property
     def _is_dp_head(self) -> bool:
         return self._mp_rank == 0 and self._pp_rank == self._pp_size - 1
 
     @property
-    def _model(self) -> api.model.Model:
+    def _model(self) -> reallm.api.model.Model:
         return self.__models[base.constants.model_name()]
 
     @property
-    def _interface(self) -> api.model.ModelInterface:
+    def _interface(self) -> reallm.api.model.ModelInterface:
         return self.__interfaces[base.constants.model_name()]
 
     @property
@@ -237,7 +237,7 @@ class ModelWorker(worker_base.Worker):
         return self.__unwrapped_models[base.constants.model_name()]
 
     @property
-    def _backend(self) -> api.model.ModelBackend:
+    def _backend(self) -> reallm.api.model.ModelBackend:
         return self.__backends[base.constants.model_name()]
 
     def __lazy_setup(self):
@@ -274,7 +274,7 @@ class ModelWorker(worker_base.Worker):
             data_transfer_pairs=self.config.data_transfer_pairs,
         )
 
-        base.constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
+        reallm.base.constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
 
         # logger.info(f"SetUp Information - Model worker index {self.__worker_index} located at "
         #             f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}.")
@@ -284,22 +284,22 @@ class ModelWorker(worker_base.Worker):
         self.__device = torch.device("cuda:0")
 
         for model_name_, topo_ in self.config.model_topos.items():
-            base.constants.set_parallelism_group(
+            reallm.base.constants.set_parallelism_group(
                 model_name_,
                 self.__pg_info.model_groups[model_name_],
             )
-            base.constants.set_rank_mapping(model_name_, topo_, self.config.msid2mwid)
+            reallm.base.constants.set_rank_mapping(model_name_, topo_, self.config.msid2mwid)
             grid = ParallelGrid(
                 topology=topo_,
                 rank_mapping=base.constants.rank_mapping_of_model(model_name_),
                 process_group=self.__pg_info.model_groups[model_name_],
             )
-            base.constants.set_grid(model_name_, grid)
+            reallm.base.constants.set_grid(model_name_, grid)
 
         # Set up training dataset for source RPCs.
         if self.__has_dataset:
             datasets = [
-                api.data.make_dataset(
+                reallm.api.data.make_dataset(
                     d,
                     self.config.seed,
                     self.__dataset_dp_rank,
@@ -316,7 +316,7 @@ class ModelWorker(worker_base.Worker):
             else:
                 self.__dataset = torch.utils.data.ConcatDataset(datasets)
             self.__max_seqlen = max(d.max_seqlen for d in datasets)
-            self.__dataloader = api.data.make_dataloader(self.config.dataloader, self.__dataset)
+            self.__dataloader = reallm.api.data.make_dataloader(self.config.dataloader, self.__dataset)
             self.__data_generator = enumerate([])
 
             self.__dataset_epoch = -1
@@ -325,22 +325,22 @@ class ModelWorker(worker_base.Worker):
 
             self.__fetched_data = None
 
-        self.__models: Dict[ModelName, api.model.Model] = dict()
+        self.__models: Dict[ModelName, reallm.api.model.Model] = dict()
         self.__model_is_handle: Dict[ModelName, bool] = dict()
-        self.__interfaces: Dict[ModelName, api.model.ModelInterface] = dict()
+        self.__interfaces: Dict[ModelName, reallm.api.model.ModelInterface] = dict()
         self.__eval_dataloaders: Dict[ModelName, torch.utils.data.DataLoader] = dict()
 
-        self.__backends: Dict[ModelName, api.model.ModelBackend] = dict()
+        self.__backends: Dict[ModelName, reallm.api.model.ModelBackend] = dict()
         self.__unwrapped_models: Dict[ModelName, torch.nn.Module | FlashMQATModel] = dict()
 
         self.__backend_initialized: Dict[ModelName, bool] = dict()
         self.__profiler_launched = False
 
         for s in self.config.shards:
-            with base.constants.model_scope(s.id.model_name):
+            with reallm.base.constants.model_scope(s.id.model_name):
                 self.__backend_initialized[s.id.model_name] = False
                 tik = time.perf_counter()
-                self.__models[s.id.model_name] = model = api.model.make_model(s.model,
+                self.__models[s.id.model_name] = model = reallm.api.model.make_model(s.model,
                                                                               name=s.id.model_name,
                                                                               device=self.__device)
                 if self._dp_rank == 0:
@@ -353,16 +353,16 @@ class ModelWorker(worker_base.Worker):
                     self.__model_is_handle[s.id.model_name] = False
                 else:
                     self.__model_is_handle[s.id.model_name] = True
-                self.__backends[s.id.model_name] = api.model.make_backend(s.backend)
+                self.__backends[s.id.model_name] = reallm.api.model.make_backend(s.backend)
                 interface_impl = [
                     rpc.interface_impl for rpc in self.config.model_rpcs if rpc.model_name == s.id.model_name
                 ]
                 assert all(x == interface_impl[0] for x in interface_impl)
-                self.__interfaces[s.id.model_name] = api.model.make_interface(interface_impl[0])
+                self.__interfaces[s.id.model_name] = reallm.api.model.make_interface(interface_impl[0])
 
                 if s.eval_datasets is not None and s.eval_dataloader is not None:
                     eval_datasets = [
-                        api.data.make_dataset(
+                        reallm.api.data.make_dataset(
                             d,
                             self.config.seed,
                             s.id.dp_rank,
@@ -378,7 +378,7 @@ class ModelWorker(worker_base.Worker):
                         eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
                     else:
                         eval_dataset = eval_datasets[0]
-                    eval_dataloader = api.data.make_dataloader(self.config.eval_dataloader, eval_dataset)
+                    eval_dataloader = reallm.api.data.make_dataloader(self.config.eval_dataloader, eval_dataset)
                 else:
                     eval_dataloader = None
                 self.__eval_dataloaders[s.id.model_name] = eval_dataloader
@@ -436,8 +436,8 @@ class ModelWorker(worker_base.Worker):
             # torch.cuda.synchronize()
             from_model_name: ModelName = hook_data["from_model_name"]
             to_model_name: ModelName = hook_data["to_model_name"]
-            from_topo: base.topology.PipeModelDataParallelTopology = hook_data["from_topo"]
-            to_topo: base.topology.PipeModelDataParallelTopology = hook_data["to_topo"]
+            from_topo: reallm.base.topology.PipeModelDataParallelTopology = hook_data["from_topo"]
+            to_topo: reallm.base.topology.PipeModelDataParallelTopology = hook_data["to_topo"]
             to_model_config = hook_data["to_model_config"]
             # profiler = get_pytorch_profiler()
             # profiler.start()
@@ -510,7 +510,7 @@ class ModelWorker(worker_base.Worker):
 
         assert not handled and res is None
 
-        with base.constants.model_scope(handler_model_name):
+        with reallm.base.constants.model_scope(handler_model_name):
             # if not isinstance(request.handler, str):
             #     if request.handler.model_name in self.__models:
             #         print(f"model {request.handler.model_name} handle_name {request.handle_name} module type {type(self._model.module)}")
@@ -523,7 +523,7 @@ class ModelWorker(worker_base.Worker):
             ############## initialization ##############
             elif request.handle_name == "initialize":
                 assert not self.__model_is_handle[request.handler.model_name]
-                base.constants.set_max_seqlen(data.max_seqlen)  # used by cuda graph buffer for generation
+                reallm.base.constants.set_max_seqlen(data.max_seqlen)  # used by cuda graph buffer for generation
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
                 self.__backend_initialized[request.handler.model_name] = True
                 # print(f"after initialize model {request.handler.model_name} module type {type(self._model.module)}")
@@ -533,7 +533,7 @@ class ModelWorker(worker_base.Worker):
             ############## data loading ##############
             elif request.handle_name == "fetch":
                 assert self.__fetched_data is None
-                res = api.data.DataBatch(
+                res = reallm.api.data.DataBatch(
                     data=self.__dict_sample,
                     epoch=self.__dataset_epoch,
                     epoch_step=self.__dataset_epoch_step,
@@ -558,7 +558,7 @@ class ModelWorker(worker_base.Worker):
                     # We assume that this is a packed dataset. Batch size equals to the number of tokens in the batch.
                     assert isinstance(self.__dataloader.dataset, torch.utils.data.IterableDataset)
                     batch_size = list(self.__dict_sample.values())[0].shape[0]
-                res = api.model.FinetuneSpec(
+                res = reallm.api.model.FinetuneSpec(
                     total_train_epochs=-1,  # place-holder, to be filled by master worker
                     total_train_steps=-1,  # place-holder, to be filled by master worker
                     steps_per_epoch=len(self.__dataloader),
@@ -591,11 +591,11 @@ class ModelWorker(worker_base.Worker):
                     request.handle_name].get_nowait()
                 data: namedarray.NamedArray
                 data.register_metadata(seqlens=seqlens)
-                # if base.constants.model_name().role == "reward":
+                # if reallm.base.constants.model_name().role == "reward":
                 #     profiler = get_pytorch_profiler()
                 #     profiler.start()
                 res = self._interface.inference(self._model, data)  # -> NamedArray
-                # if base.constants.model_name().role == "reward":
+                # if reallm.base.constants.model_name().role == "reward":
                 #     profiler.__exit__(None, None, None)
                 #     profiler.export_chrome_trace(
                 #         os.path.join(base.constants.LOG_ROOT, self.__experiment_name, self.__trial_name, f"reward_inf{self.__worker_index}.json")
@@ -646,7 +646,7 @@ class ModelWorker(worker_base.Worker):
 
     @cuda_tmark("data_transfer", CUDATimeMarkType.comm)
     def __data_transfer_among_workers(self, hook_data: Dict[str, Any]):
-        from impl.model.nn.flash_mqat.flash_mqat_parallel import pipeline_repartition_strategy
+        from reallm.impl.model.nn.flash_mqat.flash_mqat_parallel import pipeline_repartition_strategy
 
         keys = hook_data["keys"]
         target = hook_data["target"]
@@ -669,14 +669,14 @@ class ModelWorker(worker_base.Worker):
 
             target_dp_rank = producer_dp_rank = None
             if target in self.__models:
-                with base.constants.model_scope(target):
-                    target_dp_rank = base.constants.data_parallel_rank()
+                with reallm.base.constants.model_scope(target):
+                    target_dp_rank = reallm.base.constants.data_parallel_rank()
             if producer_name in self.__models:
-                with base.constants.model_scope(producer_name):
-                    producer_dp_rank = base.constants.data_parallel_rank()
-                    producer_mp_rank = base.constants.model_parallel_rank()
-                    producer_pp_rank = base.constants.pipe_parallel_rank()
-                    producer_pp_size = base.constants.pipe_parallel_world_size()
+                with reallm.base.constants.model_scope(producer_name):
+                    producer_dp_rank = reallm.base.constants.data_parallel_rank()
+                    producer_mp_rank = reallm.base.constants.model_parallel_rank()
+                    producer_pp_rank = reallm.base.constants.pipe_parallel_rank()
+                    producer_pp_size = reallm.base.constants.pipe_parallel_world_size()
                 producer_is_dp_head = producer_mp_rank == 0 and producer_pp_rank == producer_pp_size - 1
 
             for (dp_i, dp_j), comm_slots in repart_strat.items():
@@ -718,7 +718,7 @@ class ModelWorker(worker_base.Worker):
                                 assert len(shape) == 1, shape
                                 total_len += shape[0]
                             dtype = _get_dtype_from_key(k)
-                            buf = base.constants.get_global_memory_buffer().get_tensor((total_len,),
+                            buf = reallm.base.constants.get_global_memory_buffer().get_tensor((total_len,),
                                                                                        dtype,
                                                                                        name="data_transfer")
                             dist.broadcast(buf, src=bcast_src, group=group)
@@ -769,11 +769,11 @@ class ModelWorker(worker_base.Worker):
                             self.__data_sent_worker_indices[buf_idx][k].union(dst_ranks)
 
         # if target in self.__models:
-        #     with base.constants.model_scope(target):
+        #     with reallm.base.constants.model_scope(target):
         #         dist.barrier(group=base.constants.parallelism_group())
         # for producer_name in hook_data['producer_names'].keys():
         #     if producer_name in self.__models:
-        #         with base.constants.model_scope(target):
+        #         with reallm.base.constants.model_scope(target):
         #             dist.barrier(group=base.constants.parallelism_group())
 
         if len(data) > 0:
@@ -819,7 +819,7 @@ class ModelWorker(worker_base.Worker):
         # logger.info(f"handle_name {request.handle_name} Posted req id = {request.request_id}")
 
         if isinstance(request.handler, config_system.ModelShardID) and isinstance(res, namedarray.NamedArray):
-            with base.constants.model_scope(request.handler.model_name):
+            with reallm.base.constants.model_scope(request.handler.model_name):
                 if self._is_dp_head:
                     if new_seqlens is None:
                         xs = split_packed_batch_into_seqs(
@@ -904,7 +904,7 @@ class ModelWorker(worker_base.Worker):
                     self.tracer.start()
                     # self.__profiler.start()
                     self.__profiler_launched = True
-                    self.__profiler_ctl = base.timeutil.FrequencyControl(frequency_seconds=10)
+                    self.__profiler_ctl = reallm.base.timeutil.FrequencyControl(frequency_seconds=10)
                 self.__model_poll_step(request, data, handled, res)
             except queue.Empty:
                 break

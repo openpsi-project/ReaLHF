@@ -9,9 +9,9 @@ except ModuleNotFoundError:
 import torch
 import transformers
 
-from impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
 from tests.utils import init_global_constants
-import api.huggingface
+import reallm.api.huggingface
 
 
 class FlashMQATGPT2Test(unittest.TestCase):
@@ -37,7 +37,7 @@ class FlashMQATGPT2Test(unittest.TestCase):
 
         model_path = "/lustre/public/pretrained_model_weights/testOnly/gpt2-4l"
 
-        cls.tokenizer = api.huggingface.load_hf_tokenizer(model_path)
+        cls.tokenizer = reallm.api.huggingface.load_hf_tokenizer(model_path)
         cls.tokenizer.pad_token_id = cls.tokenizer.eos_token_id
 
         cls.gpt: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(

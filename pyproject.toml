@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "packaging", "torch"]
+requires = ["setuptools>=61.0", "packaging", "torch", "hydra-core"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -41,6 +41,13 @@ Documentation = "https://github.com/garrett4wade/distributed_llm/docs"
 Repository = "https://github.com/garrett4wade/distributed_llm"
 # Changelog = "https://github.com/garrett4wade/distributed_llm/CHANGELOG.md"
 
+[tool.setuptools.packages.find]
+# All the following settings are optional:
+where = ["."]  # ["."] by default
+include = ["csrc/", "reallm/"]  # ["*"] by default
+exclude = ["tests/"]  # empty by default
+namespaces = false  # true by default
+
 [tool.isort]
 from_first = true
 force_alphabetical_sort_within_sections = true
@@ -57,7 +64,6 @@ known_local_folder = [
     'system',
     'tests',
 ]
-skip = ["thirdparty"]
 
 [tool.yapf]
 based_on_style = "pep8"
@@ -68,9 +74,6 @@ blank_line_before_nested_class_or_def = true
 # split_all_comma_separated_values = true
 space_between_ending_comma_and_closing_bracket = false
 allow_split_before_dict_value = false
-
-[tool.yapfignore]
-ignore_patterns = ["thirdparty/*"]
 
 [tool.pytest]
 pythonpath = "."

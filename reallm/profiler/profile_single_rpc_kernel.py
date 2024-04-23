@@ -11,7 +11,7 @@ from profiler.multi_host_main import main
 from profiler.utils import find_factors
 import tqdm
 
-from api.config.dfg import ModelInterfaceType
+from reallm.api.core.dfg import ModelInterfaceType
 import reallm.base.constants
 
 

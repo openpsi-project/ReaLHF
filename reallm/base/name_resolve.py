@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 
-from base.cluster import spec as cluster_spec
+from reallm.base.cluster import spec as cluster_spec
 import reallm.base.logging as logging
 import reallm.base.security
 import reallm.base.timeutil
@@ -312,7 +312,7 @@ class NfsNameRecordRepository(NameRecordRepository):
 class RedisNameRecordRepository(NameRecordRepository):
     _IS_FRL = socket.gethostname().startswith("frl")
     REDIS_HOST = "redis" if _IS_FRL else "localhost"
-    REDIS_PASSWORD = base.security.read_key("redis") if _IS_FRL else None
+    REDIS_PASSWORD = reallm.base.security.read_key("redis") if _IS_FRL else None
     REDIS_DB = 0
     KEEPALIVE_POLL_FREQUENCY = 1
 

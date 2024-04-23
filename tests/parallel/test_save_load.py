@@ -9,7 +9,7 @@ import torch.distributed
 import torch.multiprocessing as mp
 
 from tests.utils import *
-import api.config.config_system as config_package
+import reallm.api.core.system as config_package
 import reallm.base.constants
 
 MODEL_TYPE = "llama"
@@ -18,7 +18,7 @@ BASE_MODEL_PATH = f"/lustre/public/pretrained_model_weights/Llama-2-{MODEL_SIZE}
 
 
 def make_model(device, from_type: str, load_dir=None):
-    import api.model
+    import reallm.api.model
     import impl.model.nn.flash_mqat.flash_mqat_api
 
     model_config = config_package.Model(
@@ -33,7 +33,7 @@ def make_model(device, from_type: str, load_dir=None):
             gradient_accumulation_fusion=False,
         ),
     )
-    model = api.model.make_model(model_config, name=MODEL_NAME, device=device)
+    model = reallm.api.model.make_model(model_config, name=MODEL_NAME, device=device)
     return model
 
 
@@ -86,9 +86,9 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
         cls.baseline_model = None
 
     def init_tokenizer(self):
-        import api.huggingface
+        import reallm.api.huggingface
 
-        self.tokenizer = api.huggingface.load_hf_tokenizer(BASE_MODEL_PATH)
+        self.tokenizer = reallm.api.huggingface.load_hf_tokenizer(BASE_MODEL_PATH)
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.tokenizer.padding_side = "left"
 
@@ -107,7 +107,7 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
             p.join()
 
     def testLoadFromHF(self):
-        with base.constants.model_scope(MODEL_NAME):
+        with reallm.base.constants.model_scope(MODEL_NAME):
             for is_critic, mp_size, pp_size in itertools.product([True, False], [1, 2], [1, 3]):
                 self._testLoadFromHF(is_critic, mp_size, pp_size)
 
@@ -151,7 +151,7 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
             p.join()
 
     def testSaveThenLoad(self):
-        with base.constants.model_scope(MODEL_NAME):
+        with reallm.base.constants.model_scope(MODEL_NAME):
             for (
                     save_critic,
                     load_critic,

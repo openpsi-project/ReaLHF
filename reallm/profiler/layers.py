@@ -11,15 +11,15 @@ import torch
 import torch.distributed as dist
 import transformers
 
-from base.topology import *
-from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
-from impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, OutputHead,
+from reallm.base.topology import *
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, OutputHead,
                                                       SequenceParallelActorHead, SequenceParallelCriticHead,
                                                       VocabPositionEmbedding)
-from impl.model.utils.data import PipeCacheData, PipeTransferData
-import api.config.config_system as config_package
-import api.huggingface
-import api.model
+from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
+import reallm.api.core.system as config_package
+import reallm.api.huggingface
+import reallm.api.model
 import reallm.base.cluster
 import reallm.base.constants
 
@@ -48,7 +48,7 @@ def make_layers(config: FlashMQATConfig, dtype, device):
     #         device=device,
     #         dtype=dtype,
     #     )
-    # elif not config.is_critic and base.constants.model_parallel_world_size() > 1:
+    # elif not config.is_critic and reallm.base.constants.model_parallel_world_size() > 1:
     #     head = SequenceParallelActorHead(
     #         config.hidden_dim,
     #         config.vocab_size,
@@ -133,11 +133,11 @@ class ProfileLayers:
         self.num_layers = len(self.layers)
 
         self.layers = [
-            api.model.Model(name, layer, tokenizer, device=device, dtype=dtype)
+            reallm.api.model.Model(name, layer, tokenizer, device=device, dtype=dtype)
             for layer, name in zip(self.layers, self.layer_names)
         ]
-        self.backend = api.model.make_backend(self.backend_config)
-        ft_spec = api.model.FinetuneSpec(10, 100, 10, 32, 256)
+        self.backend = reallm.api.model.make_backend(self.backend_config)
+        ft_spec = reallm.api.model.FinetuneSpec(10, 100, 10, 32, 256)
         self.layers = [self.backend.initialize(layer, ft_spec) for layer in self.layers]
 
     def reset_stats(self):
@@ -181,12 +181,12 @@ class ProfileLayers:
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(max_seqlen + self.max_new_tokens, self.hidden_dim // self.head_dim + 10)
             # fix of a flash attention bug
-            k_cache = base.constants.get_global_memory_buffer().get_tensor(
+            k_cache = reallm.base.constants.get_global_memory_buffer().get_tensor(
                 tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
                 dtype=y.k_cache.dtype,
                 name=f"kv_cache_{layer_idx}_k",
                 force_zero=True)
-            v_cache = base.constants.get_global_memory_buffer().get_tensor(
+            v_cache = reallm.base.constants.get_global_memory_buffer().get_tensor(
                 tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
                 dtype=y.v_cache.dtype,
                 name=f"kv_cache_{layer_idx}_v",
@@ -256,7 +256,7 @@ class ProfileLayers:
         if dist.get_rank() == 0:
             # dump full stats
             DUMP_DIR = os.path.join(
-                base.cluster.spec.fileroot,
+                reallm.base.cluster.spec.fileroot,
                 "logs",
                 getpass.getuser(),
                 "profile",
@@ -305,7 +305,7 @@ def make_profile_layers(device: torch.device,
     config.sequence_parallel = use_sequence_parallel
     # m.load(model_path, init_critic_from_actor=False)
     if tokenizer is None:
-        tokenizer = api.huggingface.load_hf_tokenizer(model_path)
+        tokenizer = reallm.api.huggingface.load_hf_tokenizer(model_path)
 
     profile_layers = ProfileLayers(model_name,
                                    config,

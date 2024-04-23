@@ -5,7 +5,7 @@ import torch
 import torch.distributed as dist
 import transformers
 
-from base.constants import data_parallel_group
+from reallm.base.constants import data_parallel_group
 import reallm.base.constants
 import reallm.base.logging as logging
 
@@ -156,15 +156,15 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
     """
     labels = torch.nn.functional.pad(labels[1:], (0, 1), value=0)
     leave_one_indices = build_leave_one_indices(logits, cu_seqlens)
-    if base.constants.model_parallel_world_size() > 1:
+    if reallm.base.constants.model_parallel_world_size() > 1:
         # NOTE: logprobs is freaking sensitive to input_ids. If the input sequence is a natural sequence, everything will be fine.
         # However, if we input random token IDs, parallel cross entropy can produce VERY different results than the normal
         # torch.gather based version (e.g., the maximum absolute different can reach ~50).
-        from impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
+        from reallm.impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
 
         logprobs = -vocab_parallel_cross_entropy(logits, labels)[leave_one_indices]
         ########### sanity check ###########
-        # world_size = base.constants.model_parallel_world_size()
+        # world_size = reallm.base.constants.model_parallel_world_size()
         # dim_size = [logits.shape[1] * world_size, logits.shape[0]]
         # all_gather_buffer = torch.zeros(*dim_size, dtype=logits.dtype, device=logits.device)
         # torch.distributed._all_gather_base(
@@ -289,7 +289,7 @@ def torch_attn_func(
     upcast_unscale: float = 1.0,
     attention_mask: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """PyTorch implementation of the attention function with a flash-attn-like API.
+    """PyTorch implementation of the attention function with a flash-attn-like reallm.api.
 
     We use this function to compare the output of our model and huggingface models.
     Flash-attn/float16/CUDAkernels will all more or less suffer from float point errors.

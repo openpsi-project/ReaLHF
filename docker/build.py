@@ -3,7 +3,7 @@ import os
 import socket
 import time
 
-from base.cluster import spec as cluster_spec
+from reallm.base.cluster import spec as cluster_spec
 
 LATEST_TV = "23.10"
 

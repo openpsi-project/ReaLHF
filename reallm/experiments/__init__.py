@@ -1,12 +1,12 @@
-# import experiments.benchmark.system.opt_1g
-# import experiments.benchmark.system.opt_16g
-# import experiments.benchmark.system.rlhf_benchmark
-# import experiments.benchmark.system.sosp2024
-# import experiments.benchmark.system.starcoder_16g
-import experiments.autoexp.auto_ppo
-import experiments.common.dpo_exp
-import experiments.common.ppo_exp
-import experiments.common.rw_exp
-import experiments.common.sft_exp
+# import reallm.experiments.benchmark.system.opt_1g
+# import reallm.experiments.benchmark.system.opt_16g
+# import reallm.experiments.benchmark.system.rlhf_benchmark
+# import reallm.experiments.benchmark.system.sosp2024
+# import reallm.experiments.benchmark.system.starcoder_16g
+import reallm.experiments.autoexp.auto_ppo
+import reallm.experiments.common.dpo_exp
+import reallm.experiments.common.ppo_exp
+import reallm.experiments.common.rw_exp
+import reallm.experiments.common.sft_exp
 
-# import experiments.packed_gen_score_exp
+# import reallm.experiments.packed_gen_score_exp

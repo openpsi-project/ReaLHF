@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
-from impl.model.parallelism.model_parallel.modules import (
+from reallm.impl.model.parallelism.model_parallel.modules import (
     ColumnParallelLinear, merged_linear_with_grad_accumulation_and_async_allreduce, RowParallelLinear)
 import reallm.base.constants
 import reallm.base.logging as logging
@@ -90,7 +90,7 @@ class LayerNormQKVLinear(nn.Module):
                 device=device,
             )
         else:
-            self.mp_worldsize = base.constants.model_parallel_world_size()
+            self.mp_worldsize = reallm.base.constants.model_parallel_world_size()
             assert n_q_heads % self.mp_worldsize == 0, (f"n_q_heads {n_q_heads} must be divisible by "
                                                         f"mp_worldsize {self.mp_worldsize}")
             hidden_dim = input_dim

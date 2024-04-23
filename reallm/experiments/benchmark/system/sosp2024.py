@@ -3,9 +3,9 @@ import functools
 import os
 
 from .pposys_exp import PPOSysExperiment
-from api.config.config_system import *
-from experiments.common import ModelBackend, ModelConfig, OptimizerConfig, ParallelismConfig
-from experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
+from reallm.api.core.system import *
+from reallm.experiments.common import ModelBackend, ModelConfig, OptimizerConfig, ParallelismConfig
+from reallm.experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
 
 
 def build_llama2_model(
@@ -58,7 +58,7 @@ def build_llama2_model(
 
 
 def register_sosp_experiments_with_fixed_bs(model_size: str, dp_size: int):
-    """The following experiments have a fixed batch size 512, max prompt len 1024, and max new tokens 1024.
+    """The following reallm.experiments have a fixed batch size 512, max prompt len 1024, and max new tokens 1024.
 
     Used for:
     1. Identifying the fastest data+pipe parallelism configuration;
@@ -139,7 +139,7 @@ def register_sosp_experiments_with_fixed_bs(model_size: str, dp_size: int):
 
     if pp_size == 1:
         return
-    # register experiments with n_mbs = pp_size
+    # register reallm.experiments with n_mbs = pp_size
     actor = deepcopy(actor)
     register_experiment(
         f"sosp-baseline-a{model_size_int}-{dp_size}x{pp_size}-c7r7-mb1",
@@ -157,7 +157,7 @@ def register_sosp_experiments_with_fixed_bs(model_size: str, dp_size: int):
         ),
     )
 
-    # register experiments with gen n_mbs = pp_size * 2 while train n_mbs = pp_size
+    # register reallm.experiments with gen n_mbs = pp_size * 2 while train n_mbs = pp_size
     actor = deepcopy(actor)
     register_experiment(
         f"sosp-baseline-a{model_size_int}-{dp_size}x{pp_size}-c7r7-mb1gen",

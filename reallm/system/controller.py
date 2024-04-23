@@ -13,10 +13,10 @@ import traceback
 import ray
 import ray.util.queue as rq
 
-from base.cluster import spec as cluster_spec
+from reallm.base.cluster import spec as cluster_spec
 from system import load_worker, WORKER_TYPES
 from system.worker_base import WorkerServerStatus as Wss
-import api.config.config_system
+import reallm.api.core.system
 import reallm.base.logging as logging
 import reallm.base.name_resolve
 import reallm.base.names as names
@@ -70,7 +70,7 @@ class Controller:
         """
         self.__control.auto_connect()
 
-    def start(self, experiment: api.config.config_system.Experiment, ignore_worker_error=False):
+    def start(self, experiment: reallm.api.core.system.Experiment, ignore_worker_error=False):
         if ignore_worker_error:
             check_worker_status = ()
             remove_worker_status = (Wss.COMPLETED, Wss.ERROR, Wss.LOST, Wss.UNKNOWN)
@@ -78,7 +78,7 @@ class Controller:
             check_worker_status = (Wss.ERROR, Wss.LOST, Wss.UNKNOWN)
             remove_worker_status = (Wss.COMPLETED,)
 
-        scheduling: api.config.config_system.ExperimentScheduling = experiment.scheduling_setup()
+        scheduling: reallm.api.core.system.ExperimentScheduling = experiment.scheduling_setup()
         setup = experiment.initial_setup()
         setup.set_worker_information(experiment_name=self.experiment_name, trial_name=self.trial_name)
 
@@ -99,11 +99,11 @@ class Controller:
                 raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
             logger.info(f"Configuration has {len(config)} {name}.")
 
-        base.name_resolve.add(names.trial_registry(self.experiment_name, self.trial_name),
+        reallm.base.name_resolve.add(names.trial_registry(self.experiment_name, self.trial_name),
                               value=datetime.now().strftime("%Y%m%d"),
                               delete_on_exit=False,
                               replace=True)
-        base.name_resolve.add(names.worker_status(experiment_name=self.experiment_name,
+        reallm.base.name_resolve.add(names.worker_status(experiment_name=self.experiment_name,
                                                   trial_name=self.trial_name,
                                                   worker_name="ctl"),
                               value="READY",
@@ -127,7 +127,7 @@ class Controller:
                 logger.info("Interrupted by user. Stopping all and exiting...")
                 raise e
 
-        base.name_resolve.delete(
+        reallm.base.name_resolve.delete(
             names.worker_status(experiment_name=self.experiment_name,
                                 trial_name=self.trial_name,
                                 worker_name="ctl"))
@@ -252,7 +252,7 @@ class RayController:
 
         self.__local_mode = local_mode
 
-    def _launch_workers(self, workers_configs: List[Tuple[str, List, api.config.config_system.TasksGroup]]):
+    def _launch_workers(self, workers_configs: List[Tuple[str, List, reallm.api.core.system.TasksGroup]]):
         # Launch remote workers.
         logger.info("Launching remote workers using Ray...")
         self.__workers_ref: Dict[str, ray.ObjectRef] = {}
@@ -260,7 +260,7 @@ class RayController:
         self.__workers_reply_comm: Dict[str, rq.Queue] = dict()
         for worker_type, config, schedule in workers_configs:
             count = len(config)
-            all_schedules: List[api.config.config_system.TasksGroup] = []
+            all_schedules: List[api.core.system.TasksGroup] = []
             if isinstance(schedule, List):
                 for s in schedule:
                     for _ in range(s.count):
@@ -300,12 +300,12 @@ class RayController:
         self.__base_controller = Controller(self.__experiment_name, self.__trial_name, panel)
         logger.info("All Ray workers are lauched.")
 
-    def start(self, experiment: api.config.config_system.Experiment, ignore_worker_error=False):
-        scheduling: api.config.config_system.ExperimentScheduling = experiment.scheduling_setup()
+    def start(self, experiment: reallm.api.core.system.Experiment, ignore_worker_error=False):
+        scheduling: reallm.api.core.system.ExperimentScheduling = experiment.scheduling_setup()
         setup = experiment.initial_setup()
         setup.set_worker_information(experiment_name=self.__experiment_name, trial_name=self.__trial_name)
         workers_configs = [(k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES]
-        workers_configs: List[Tuple[str, List, api.config.config_system.TasksGroup]]
+        workers_configs: List[Tuple[str, List, reallm.api.core.system.TasksGroup]]
 
         if self.__local_mode:
             ray.init()
@@ -317,7 +317,7 @@ class RayController:
                     raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
                 for idx in range(count):
                     try:
-                        base.name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
+                        reallm.base.name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
                                                                  f"{name}/{idx}"),
                                                timeout=300)
                     except TimeoutError:
@@ -325,7 +325,7 @@ class RayController:
             logger.info("Ray cluster started.")
 
             try:
-                ray_head_addr = base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
+                ray_head_addr = reallm.base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
                                                                          self.__trial_name, "address"),
                                                        timeout=300)
             except TimeoutError:
@@ -342,7 +342,7 @@ class RayController:
 
     def shutdown(self):
         ray_exiting_name = names.ray_cluster(self.__experiment_name, self.__trial_name, "exiting")
-        base.name_resolve.add(ray_exiting_name, value="1", delete_on_exit=True)
+        reallm.base.name_resolve.add(ray_exiting_name, value="1", delete_on_exit=True)
         del self.__workers_reply_comm
         del self.__workers_request_comm
         del self.__workers_ref

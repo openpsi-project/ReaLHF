@@ -4,8 +4,8 @@ import json
 import torch
 import torch.utils.data
 
-import api.data
-import api.huggingface
+import reallm.api.data
+import reallm.api.huggingface
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Prompt Dataset")
@@ -15,7 +15,7 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        util: api.data.DatasetUtility,
+        util: reallm.api.data.DatasetUtility,
         max_seq_len: int,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
@@ -52,7 +52,7 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
             data = dataset_builder()
 
         datasize_per_rank = len(data) // world_size
-        shuffle_indices = api.data.get_shuffle_indices(seed, datasize_per_rank * world_size)
+        shuffle_indices = reallm.api.data.get_shuffle_indices(seed, datasize_per_rank * world_size)
         subset_indices = shuffle_indices[ddp_rank * datasize_per_rank:(ddp_rank + 1) * datasize_per_rank]
         data: List[Dict[str, str]] = [data[i] for i in subset_indices]
 

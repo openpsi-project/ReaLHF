@@ -17,15 +17,15 @@ import numpy as np
 import torch
 import transformers
 
-from base.dataparallel import PackedParallelDataBroker
-from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, time_mark
-from base.namedarray import NamedArray
-from base.topology import ParallelGrid
-from impl.model.nn.flash_mqat.flash_generate import GenerationConfig, genstep
-from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
-from impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
-from impl.model.utils.data import PipeCacheData, PipeTransferData
-from impl.model.utils.tensor import pad_sequence_parallel_input
+from reallm.base.dataparallel import PackedParallelDataBroker
+from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, time_mark
+from reallm.base.namedarray import NamedArray
+from reallm.base.topology import ParallelGrid
+from reallm.impl.model.nn.real_llm_generate import GenerationConfig, genstep
+from reallm.impl.model.nn.real_llm_api import FlashMQATModel
+from reallm.impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
+from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
+from reallm.impl.model.utils.tensor import pad_sequence_parallel_input
 import reallm.base.constants
 import reallm.base.logging as logging
 import impl.model.backend.pipe_engine.static_schedule as schedule
@@ -78,7 +78,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.sched_count = 0
 
         # parallelism constants
-        self.grid: ParallelGrid = base.constants.grid()
+        self.grid: ParallelGrid = reallm.base.constants.grid()
         assert self.dp_world_size == self.grid.data_parallel_size
 
         self.global_rank = self.grid.get_global_rank()
@@ -271,7 +271,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
             else:
                 ys = [PipeCacheData() for _ in range(self.num_layers)]
             total_len = (packed_input_ids.shape[0] if not self.sequence_parallel else
-                         packed_input_ids.shape[0] // base.constants.model_parallel_world_size())
+                         packed_input_ids.shape[0] // reallm.base.constants.model_parallel_world_size())
             mb_seq_lens.append(total_len)
             return (x, ys)
 
@@ -822,7 +822,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         # we defer the implementation of CUDAGraph generation in the future
         # if self._generate_mode and self.tensor_buffer.get("kv_cache_reserved", micro_batch_id):
         #     kvcache_seqlen = max(
-        #         base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
+        #         reallm.base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
         #         self.hidden_dim // self.head_dim + 10,
         #     )
         #     with torch.no_grad():
@@ -887,7 +887,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         for y, layer_idx, bk_idx in zip(ys, layer_indices, gd_input_buffer_kv_cache_indices):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(
-                base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
+                reallm.base.constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
                 self.hidden_dim // self.head_dim + 10,
             )
             if (self._gd_graph is not None and self._gd_graph_bs >= bs
@@ -1146,7 +1146,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         #     ft = self.tensor_buffer.get("first_token", micro_batch_id, remove=False)
         #     if not ft:
         #         batch_length = self.tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
-        #         batch_length = batch_length // base.constants.model_parallel_world_size() \
+        #         batch_length = batch_length // reallm.base.constants.model_parallel_world_size() \
         #                        if self.sequence_parallel else batch_length
         #         act_shape = (batch_length, 1, self.hidden_dim)
         #     length = int(np.prod(act_shape))
@@ -1178,7 +1178,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                 buf = torch.empty(act_shape, dtype=self.dtype, device=self.device, requires_grad=False)
             else:
                 batch_length = self.tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
-                batch_length = (batch_length // base.constants.model_parallel_world_size()
+                batch_length = (batch_length // reallm.base.constants.model_parallel_world_size()
                                 if self.sequence_parallel else batch_length)
                 act_shape = (batch_length, 1, self.hidden_dim)
                 buf = torch.empty(act_shape, dtype=self.dtype, device=self.device, requires_grad=False)

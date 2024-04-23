@@ -231,12 +231,12 @@ search_extension = setuptools.Extension(
         "-fPIC",
         "-std=c++17",
     ],
-    include_dirs=[os.path.join(os.path.dirname(__file__), "search")],
+    include_dirs=[os.path.join(os.path.dirname(__file__), "csrc", "search")],
 )
 ext_modules.append(search_extension)
 
 setuptools.setup(
-    name="reallm_cpp",
+    name="reallm",
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
 )

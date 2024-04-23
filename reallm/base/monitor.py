@@ -17,7 +17,7 @@ import reallm.base.constants
 import reallm.base.logging as logging
 
 if TYPE_CHECKING:
-    from api.config.config_base import ModelName
+    from reallm.api.core.config import ModelName
 
 logger = logging.getLogger("benchmark")
 
@@ -403,7 +403,7 @@ def cuda_tmark(name: str, type_: CUDATimeMarkType):
             def _wrapped_f(*args, **kwargs):
                 import torch
 
-                from base.constants import _model_name
+                from reallm.base.constants import _model_name
 
                 torch.cuda.synchronize()
                 tik = time.time_ns()
@@ -429,7 +429,7 @@ def cuda_tmarked(name: str, type_: CUDATimeMarkType):
     if os.getenv("DLLM_CUDA_TMARK", None) == "1":
         import torch
 
-        from base.constants import _model_name
+        from reallm.base.constants import _model_name
 
         torch.cuda.synchronize()
         tik = time.time_ns()
@@ -450,9 +450,9 @@ def dump_tmark_db(worker_idx):
     if os.getenv("DLLM_CUDA_TMARK", None) != "1":
         return
     fn = os.path.join(
-        base.constants.LOG_ROOT,
-        base.constants.experiment_name(),
-        base.constants.trial_name(),
+        reallm.base.constants.LOG_ROOT,
+        reallm.base.constants.experiment_name(),
+        reallm.base.constants.trial_name(),
         f"time_marks{worker_idx}.pkl",
     )
     global TIME_MARK_DB

@@ -7,17 +7,17 @@ import time
 from deepspeed import DeepSpeedEngine
 import torch
 
-from base.constants import data_parallel_group
-from base.dataparallel import PackedParallelDataBroker
-from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
-from base.namedarray import from_dict, NamedArray, recursive_apply
-from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-from impl.model.backend.pipe_inf import InferencePipelineEngine
-from impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
-from impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
-import api.huggingface
-import api.model
+from reallm.base.constants import data_parallel_group
+from reallm.base.dataparallel import PackedParallelDataBroker
+from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
+from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
+from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
+from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
+import reallm.api.huggingface
+import reallm.api.model
 import reallm.base.constants
 import reallm.base.logging as logging
 import impl.model.utils.ppo_functional as ppo_functional
@@ -69,7 +69,7 @@ def _ppo_actor_loss_from_model_outputs(
     loss = loss * 0.0
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
-    mean_ref_kl = api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
+    mean_ref_kl = reallm.api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
     # importance_weight = loss_stat["importance_weight"]
@@ -145,7 +145,7 @@ class PackedActorInterface(api.model.ModelInterface):
         else:
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
         if self.value_norm:
-            from impl.model.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
+            from reallm.impl.model.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
 
             if self.value_norm_type == "exp":
                 self.rms = ExponentialRunningMeanStd(beta=self.value_norm_beta, epsilon=self.value_norm_eps)
@@ -156,13 +156,13 @@ class PackedActorInterface(api.model.ModelInterface):
         self.kl_ctl = None
 
         if self.pipe_gen_n_mbs is None:
-            self.pipe_gen_n_mbs = base.constants.pipe_parallel_world_size()
+            self.pipe_gen_n_mbs = reallm.base.constants.pipe_parallel_world_size()
         if self.pipe_inf_n_mbs is None:
-            self.pipe_inf_n_mbs = base.constants.pipe_parallel_world_size()
+            self.pipe_inf_n_mbs = reallm.base.constants.pipe_parallel_world_size()
         if self.pipe_train_n_mbs is None:
-            self.pipe_train_n_mbs = base.constants.pipe_parallel_world_size() * 2
+            self.pipe_train_n_mbs = reallm.base.constants.pipe_parallel_world_size() * 2
 
-    def save(self, model: api.model.Model, save_dir: str):
+    def save(self, model: reallm.api.model.Model, save_dir: str):
         if not self.enable_save:
             return
         model.module.save(save_dir,
@@ -171,7 +171,7 @@ class PackedActorInterface(api.model.ModelInterface):
                           global_step=model.version.global_step)
 
     @torch.no_grad()
-    def generate(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+    def generate(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
 
         module.eval()
@@ -280,7 +280,7 @@ class PackedActorInterface(api.model.ModelInterface):
         return from_dict(res)
 
     @torch.no_grad()
-    def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -308,8 +308,8 @@ class PackedActorInterface(api.model.ModelInterface):
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             packed_logits_mask = data["packed_logits_mask"]
-            if base.constants.model_parallel_world_size() > 1:
-                from impl.model.parallelism.model_parallel.mappings import \
+            if reallm.base.constants.model_parallel_world_size() > 1:
+                from reallm.impl.model.parallelism.model_parallel.mappings import \
                     gather_from_tensor_model_parallel_region
                 logits = gather_from_tensor_model_parallel_region(logits)
             logits.masked_fill_(packed_logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
@@ -317,7 +317,7 @@ class PackedActorInterface(api.model.ModelInterface):
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         return from_dict(dict(logprobs=logprobs))
 
-    def train_step(self, model: api.model.Model, data_: NamedArray) -> Dict:
+    def train_step(self, model: reallm.api.model.Model, data_: NamedArray) -> Dict:
         module = model.module
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
@@ -512,7 +512,7 @@ def _ppo_critic_loss_from_model_outputs(
     )
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
-    mean_ref_kl = api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
+    mean_ref_kl = reallm.api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
     clip_ratio = loss_stat["clip_ratio"]
@@ -563,7 +563,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         else:
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
         if self.value_norm:
-            from impl.model.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
+            from reallm.impl.model.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
 
             if self.value_norm_type == "exp":
                 self.rms = ExponentialRunningMeanStd(beta=self.value_norm_beta, epsilon=self.value_norm_eps)
@@ -574,11 +574,11 @@ class PackedCriticInterface(api.model.ModelInterface):
         self.kl_ctl = None
 
         if self.pipe_train_n_mbs is None:
-            self.pipe_train_n_mbs = base.constants.pipe_parallel_world_size() * 2
+            self.pipe_train_n_mbs = reallm.base.constants.pipe_parallel_world_size() * 2
         if self.pipe_inf_n_mbs is None:
-            self.pipe_inf_n_mbs = base.constants.pipe_parallel_world_size()
+            self.pipe_inf_n_mbs = reallm.base.constants.pipe_parallel_world_size()
 
-    def save(self, model: api.model.Model, save_dir: str):
+    def save(self, model: reallm.api.model.Model, save_dir: str):
         if not self.enable_save:
             return
         model.module.save(save_dir,
@@ -587,7 +587,7 @@ class PackedCriticInterface(api.model.ModelInterface):
                           global_step=model.version.global_step)
 
     @torch.no_grad()
-    def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -613,7 +613,7 @@ class PackedCriticInterface(api.model.ModelInterface):
         scores = scores.squeeze(-1)
         return from_dict(dict(scores=scores))
 
-    def train_step(self, model: api.model.Model, data_: NamedArray) -> Dict:
+    def train_step(self, model: reallm.api.model.Model, data_: NamedArray) -> Dict:
         module = model.module
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.

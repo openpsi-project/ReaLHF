@@ -6,10 +6,10 @@ from profiler.experiments import *
 from profiler.utils import find_factors
 import profiler.multi_host_main
 
-from api.config.config_base import MODEL_TYPE_TO_PATH
-from api.config.config_system import _LLM_ENVVARS
-from api.config.dfg import ModelRPC
-import api.config.config_system as config_package
+from reallm.api.core.config import MODEL_TYPE_TO_PATH
+from reallm.api.core.system import _LLM_ENVVARS
+from reallm.api.core.dfg import ModelRPC
+import reallm.api.core.system as config_package
 import scheduler.client
 
 

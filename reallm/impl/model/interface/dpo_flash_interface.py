@@ -5,10 +5,10 @@ import torch
 import torch.utils.data
 import tqdm
 
-from base.namedarray import from_dict, NamedArray, recursive_apply
-from impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-from impl.model.utils.functional import gather_packed_shifted_log_probs
-import api.model
+from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
+from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs
+import reallm.api.model
 import reallm.base.logging as logging
 import impl.model.utils.dpo_functional as dpo_functional
 
@@ -54,7 +54,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
     enable_save: bool = True
 
     @torch.inference_mode()
-    def inference(self, model: api.model.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: reallm.api.model.Model, data: NamedArray) -> NamedArray:
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -88,7 +88,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
 
         return from_dict(dict(seqlogp=torch.stack(logprob_sum)))
 
-    def train_step(self, model: api.model.Model, data: NamedArray) -> Dict:
+    def train_step(self, model: reallm.api.model.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
@@ -140,7 +140,7 @@ class PackedDirectPerferenceOptimizationInterface(api.model.ModelInterface):
             stats = {}
         return {k: float(v) for k, v in stats.items()}
 
-    def save(self, model: api.model.Model, output_dir):
+    def save(self, model: reallm.api.model.Model, output_dir):
         if not self.enable_save:
             return
         model.module.save(
