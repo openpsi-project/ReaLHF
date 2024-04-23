@@ -459,3 +459,86 @@ def dump_tmark_db(worker_idx):
     with open(fn, "wb") as f:
         pickle.dump(TIME_MARK_DB, f)
     TIME_MARK_DB.clear()
+
+
+COMPUTE_KERNEL_KEYS =[
+    "elementwise_kernel",
+    "gemm_",
+    "aten::",
+    "at::native::",
+    "flash",
+    "backward_kernel",
+    "reduce_kernel",
+    "multi_tensor_apply",
+]
+
+COMM_KERNEL_KEYS = [
+    "c10d::",
+    "nccl::",
+    "ncclDevKernel",
+]
+
+MEM_KERNEL_KEYS = [
+    "Memcpy",
+    "Memset",
+]
+
+MISC_KERNEL_KEYS = [
+    "at_cuda_detail",
+    "CudaCodeGen",
+]
+
+@dataclasses.dataclass
+class CUDAKernelTime:  # in us
+    compute: int
+    comm: int
+    mem: int
+    misc: int
+    
+    @classmethod
+    def from_profiler(cls, p):
+        import torch
+        compute_time = comm_time = mem_time = misc_time = 0
+        unknown_keys =[]
+        for x in p.key_averages():
+            if x.device_type != torch.autograd.DeviceType.CUDA:
+                continue
+            if x.self_cuda_time_total <= 0:
+                continue
+            if "waitevent" in x.key.lower():
+                print(x.key)
+            if any(k in x.key for k in COMPUTE_KERNEL_KEYS):
+                compute_time += x.self_cuda_time_total
+            elif any(k in x.key for k in COMM_KERNEL_KEYS):
+                comm_time += x.self_cuda_time_total
+            elif any(k in x.key for k in MEM_KERNEL_KEYS):
+                mem_time += x.self_cuda_time_total
+            elif any(k in x.key for k in MISC_KERNEL_KEYS):
+                misc_time += x.self_cuda_time_total
+            else:
+                unknown_keys.append(x)
+        if unknown_keys:
+            raise NotImplementedError(f"Unknown keys: {[(x.key, x.self_cuda_time_total) for x in unknown_keys]}")
+        return cls(compute=compute_time, comm=comm_time, mem=mem_time, misc=misc_time)
+    
+    def __add__(self, other):
+        return CUDAKernelTime(
+            compute=self.compute + other.compute,
+            comm=self.comm + other.comm,
+            mem=self.mem + other.mem,
+            misc=self.misc + other.misc,
+        )
+
+    @property
+    def total_secs(self):
+        return (self.compute + self.comm + self.mem + self.misc) / 1e6
+    
+    def __truediv__(self, x):
+        return CUDAKernelTime(
+            compute=self.compute / x,
+            comm=self.comm / x,
+            mem=self.mem / x,
+            misc=self.misc / x,
+        )
+    def __repr__(self):
+        return f"CUDAKernelTime(compute={self.compute}us, comm={self.comm}us, mem={self.mem}us, misc={self.misc}us)"
