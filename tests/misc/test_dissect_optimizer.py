@@ -1,11 +1,12 @@
 from typing import *
 import collections
-import torch
 import functools
 import gc
-import pynvml
-import torch.profiler
+
 from deepspeed.ops.adam.fused_adam import FusedAdam
+import pynvml
+import torch
+import torch.profiler
 
 
 def print_memory(idx):
@@ -40,16 +41,16 @@ def _compose_param_hook(optimizer: torch.optim.Optimizer, args, kwargs):
 
 
 class HookableFusedAdam(FusedAdam):
+
     def step(self, *args, **kwargs):
         return super().step()
 
 
 def trace_handler(p: torch.profiler._KinetoProfile):
-    print(
-        p.key_averages().table(
-            sort_by="cuda_memory_usage", row_limit=20, max_name_column_width=30, max_src_column_width=30
-        )
-    )
+    print(p.key_averages().table(sort_by="cuda_memory_usage",
+                                 row_limit=20,
+                                 max_name_column_width=30,
+                                 max_src_column_width=30))
     # p.export_chrome_trace(os.path.join(dirname, f"rank{rank}.json"))
 
 
@@ -90,9 +91,9 @@ def test():
     opt_state_cache = {}
 
     for _ in range(5):
-        a.weight = torch.nn.Parameter(
-            data=torch.randn(int(1e4), int(1e4), dtype=torch.float32, device="cuda"), requires_grad=True
-        )
+        a.weight = torch.nn.Parameter(data=torch.randn(int(1e4), int(1e4), dtype=torch.float32,
+                                                       device="cuda"),
+                                      requires_grad=True)
         a.weight.grad = None
 
         print_memory(2)

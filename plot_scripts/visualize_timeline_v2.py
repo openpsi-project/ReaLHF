@@ -1,16 +1,18 @@
-from typing import *
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
 from collections import defaultdict
 from enum import Enum
-import dataclasses
-from base.monitor import CUDATimeMarkType, TimeMarkEntry
-from api.config.config_base import ModelName
-import pickle
-import tqdm
-import matplotlib
+from typing import *
 import argparse
+import dataclasses
+import pickle
+
+from matplotlib.patches import Rectangle
+import matplotlib
+import matplotlib.pyplot as plt
 import seaborn as sns
+import tqdm
+
+from api.config.config_base import ModelName
+from base.monitor import CUDATimeMarkType, TimeMarkEntry
 
 
 def main():
@@ -19,45 +21,30 @@ def main():
 
     all_time_marks: List[List[TimeMarkEntry]] = []
     for i in tqdm.tqdm(range(32), desc="loading time marks"):
-        with open(
-            f"/lustre/aigc/llm/logs/meizy/sosp-a7c34s896g128t128-t/timemark/time_marks{i}.pkl", "rb"
-        ) as f:
+        with open(f"/lustre/aigc/llm/logs/meizy/sosp-a7c34s896g128t128-t/timemark/time_marks{i}.pkl",
+                  "rb") as f:
             time_marks: List[TimeMarkEntry] = pickle.load(f)
         all_time_marks.append(time_marks)
 
     # min_st_time = min(min(x.start_time for x in time_marks) for time_marks in all_time_marks)
     # max_ed_time = max(max(x.end_time for x in time_marks) for time_marks in all_time_marks)
     min_st_time = min(
-        min(
-            (
-                x.start_time
-                if x.type_ == CUDATimeMarkType.forward and x.model_name.role == "actor"
-                else float("inf")
-            )
-            for x in time_marks
-        )
-        for time_marks in all_time_marks
-    )
+        min((x.start_time
+             if x.type_ == CUDATimeMarkType.forward and x.model_name.role == "actor" else float("inf"))
+            for x in time_marks) for time_marks in all_time_marks)
     max_ed_time = max(
         max(x.end_time for x in time_marks if x.type_ == CUDATimeMarkType.comm)
-        for time_marks in all_time_marks
-    )
-    all_time_marks = [
-        [
-            TimeMarkEntry(
-                x.name,
-                x.model_name,
-                x.type_,
-                (x.start_time - min_st_time) / 1e9,
-                (x.end_time - min_st_time) / 1e9,
-            )
-            for x in time_marks
-            if x.start_time >= min_st_time
-            and x.end_time <= max_ed_time
-            and x.name not in ["receive_request", "post_response"]
-        ]
-        for time_marks in all_time_marks
-    ]
+        for time_marks in all_time_marks)
+    all_time_marks = [[
+        TimeMarkEntry(
+            x.name,
+            x.model_name,
+            x.type_,
+            (x.start_time - min_st_time) / 1e9,
+            (x.end_time - min_st_time) / 1e9,
+        ) for x in time_marks if x.start_time >= min_st_time and x.end_time <= max_ed_time
+        and x.name not in ["receive_request", "post_response"]
+    ] for time_marks in all_time_marks]
 
     glue_time = 0.05
     # merge near time marks

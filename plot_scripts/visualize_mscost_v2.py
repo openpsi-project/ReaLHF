@@ -1,29 +1,28 @@
-import json
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-from scipy.interpolate import make_interp_spline
-import numpy as np
-import math
-import dataclasses
 from typing import *
+import collections
+import dataclasses
+import itertools
 import json
-import matplotlib.colors as colors
+import math
 import os
 import pickle
-from tests.misc.est_mscost_v2 import compute_cost
+
+from scipy.interpolate import make_interp_spline
+import matplotlib.colors as colors
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+
 from api.config.config_base import ModelName
-import base.topology
-from tests.utils import get_llama7b_flash_config
-import itertools
-import collections
 from tests.misc.est_mscost_v2 import compute_cost
+from tests.utils import get_llama7b_flash_config
+import base.topology
 
 
 def get_n_gpus(main_model_size: int, case):
-    default_ngpus = (
-        8 if main_model_size == 7 else 16 if main_model_size == 13 else 32 if main_model_size == 34 else 64
-    )
+    default_ngpus = (8 if main_model_size == 7 else
+                     16 if main_model_size == 13 else 32 if main_model_size == 34 else 64)
     return default_ngpus if case <= 1 else 2 * default_ngpus
 
 
@@ -58,12 +57,10 @@ def get_mem_shift_settings():
             ref_size = rew_size = actor_size
         n_gpus = get_n_gpus(main_model_size, case)
         bs = 2**17 // (seqlen + 128)
-        df = data[
-            (data["actor_model_size"] == actor_size)
-            & (data["critic_model_size"] == critic_size)
-            & (data["seqlen"] == seqlen)
-            & (data["n_nodes"] == n_gpus // 8)
-        ]
+        df = data[(data["actor_model_size"] == actor_size)
+                  & (data["critic_model_size"] == critic_size)
+                  & (data["seqlen"] == seqlen)
+                  & (data["n_nodes"] == n_gpus // 8)]
         assert len(df) == 1, len(df)
         logpath = df["log_path"].tolist()[0]
         with open(os.path.join(logpath, "device_mapping.pkl"), "rb") as f:
@@ -107,13 +104,13 @@ def get_mem_shift_settings():
 
 def get_mconfig_from_size(model_size):
     import transformers
+
     from api.config.config_base import MODEL_TYPE_TO_PATH, ModelType
     from api.config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
 
     hf_model_type = "llama" if model_size != 34 else "codellama"
-    hf_config = transformers.AutoConfig.from_pretrained(
-        MODEL_TYPE_TO_PATH[ModelType(hf_model_type, model_size, False)]
-    )
+    hf_config = transformers.AutoConfig.from_pretrained(MODEL_TYPE_TO_PATH[ModelType(
+        hf_model_type, model_size, False)])
     return FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
 
 
@@ -135,12 +132,12 @@ def main():
                 world_size=w,
                 from_model_name=ModelName("actor", 0),
                 to_model_name=ModelName("actor", 1),
-                from_topo=base.topology.PipeModelDataParallelTopology(
-                    num_pp=from_topo[0], num_mp=from_topo[1], num_dp=from_topo[2]
-                ),
-                to_topo=base.topology.PipeModelDataParallelTopology(
-                    num_pp=to_topo[0], num_mp=to_topo[1], num_dp=to_topo[2]
-                ),
+                from_topo=base.topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
+                                                                      num_mp=from_topo[1],
+                                                                      num_dp=from_topo[2]),
+                to_topo=base.topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
+                                                                    num_mp=to_topo[1],
+                                                                    num_dp=to_topo[2]),
                 bw=200.0,
                 set_interval_cost=0.03,
                 model_config=get_mconfig_from_size(a),
@@ -149,12 +146,12 @@ def main():
                 world_size=w,
                 from_model_name=ModelName("actor", 1),
                 to_model_name=ModelName("actor", 0),
-                from_topo=base.topology.PipeModelDataParallelTopology(
-                    num_pp=to_topo[0], num_mp=to_topo[1], num_dp=to_topo[2]
-                ),
-                to_topo=base.topology.PipeModelDataParallelTopology(
-                    num_pp=from_topo[0], num_mp=from_topo[1], num_dp=from_topo[2]
-                ),
+                from_topo=base.topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
+                                                                      num_mp=to_topo[1],
+                                                                      num_dp=to_topo[2]),
+                to_topo=base.topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
+                                                                    num_mp=from_topo[1],
+                                                                    num_dp=from_topo[2]),
                 bw=200.0,
                 set_interval_cost=0.03,
                 model_config=get_mconfig_from_size(a),
@@ -180,12 +177,12 @@ def main():
                 world_size=w,
                 from_model_name=ModelName("critic", 0),
                 to_model_name=ModelName("critic", 1),
-                from_topo=base.topology.PipeModelDataParallelTopology(
-                    num_pp=from_topo[0], num_mp=from_topo[1], num_dp=from_topo[2]
-                ),
-                to_topo=base.topology.PipeModelDataParallelTopology(
-                    num_pp=to_topo[0], num_mp=to_topo[1], num_dp=to_topo[2]
-                ),
+                from_topo=base.topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
+                                                                      num_mp=from_topo[1],
+                                                                      num_dp=from_topo[2]),
+                to_topo=base.topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
+                                                                    num_mp=to_topo[1],
+                                                                    num_dp=to_topo[2]),
                 bw=200.0,
                 set_interval_cost=0.03,
                 model_config=get_mconfig_from_size(c),
@@ -194,12 +191,12 @@ def main():
                 world_size=w,
                 from_model_name=ModelName("critic", 1),
                 to_model_name=ModelName("critic", 0),
-                from_topo=base.topology.PipeModelDataParallelTopology(
-                    num_pp=to_topo[0], num_mp=to_topo[1], num_dp=to_topo[2]
-                ),
-                to_topo=base.topology.PipeModelDataParallelTopology(
-                    num_pp=from_topo[0], num_mp=from_topo[1], num_dp=from_topo[2]
-                ),
+                from_topo=base.topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
+                                                                      num_mp=to_topo[1],
+                                                                      num_dp=to_topo[2]),
+                to_topo=base.topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
+                                                                    num_mp=from_topo[1],
+                                                                    num_dp=from_topo[2]),
                 bw=200.0,
                 set_interval_cost=0.03,
                 model_config=get_mconfig_from_size(c),
@@ -222,8 +219,7 @@ def main():
                 realloc_cost=(actor_t + critic_t) / 1e9 / time,
                 local_volume=actor_local_volume + critic_local_volume,
                 remote_volume=actor_remote_volume + critic_remote_volume,
-            )
-        )
+            ))
 
     df = pd.DataFrame(plot_data)
     cmap = sns.color_palette(n_colors=8)
@@ -234,9 +230,11 @@ def main():
 
     ax = axes
     xlabel = [f"{a}B+{c}B" for a, c in zip(df["actor_size"], df["critic_size"])]
-    sns.barplot(ax=ax,
-                x=xlabel,
-                y=df["realloc_cost"],)
+    sns.barplot(
+        ax=ax,
+        x=xlabel,
+        y=df["realloc_cost"],
+    )
     # width = 0.35
     # hatch = None
     # barpos = np.arange(len(xlabel)) - width * 0.5

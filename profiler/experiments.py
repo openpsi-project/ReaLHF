@@ -14,7 +14,6 @@ from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelTy
 from base.topology import PipeModelDataParallelTopology
 
 
-
 def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
     prompt_seqlen = 128
     train_seqlen = prompt_seqlen + seqlen
@@ -31,9 +30,7 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
     )
     rw_interface = ModelInterface(
         "flash_paired_rw",
-        args=dict(
-            enable_save=False,
-        ),
+        args=dict(enable_save=False,),
     )
     actor_model_class = "llama" if actor_size != 34 else "codellama"
     critic_model_class = "llama" if critic_size != 34 else "codellama"
@@ -264,26 +261,22 @@ class ProfileExperiment(Experiment):
             return [rollout_alloc, inf_alloc, train_alloc]
 
     def scheduling_setup(self) -> ExperimentScheduling:
-        return ExperimentScheduling(
-            profile_worker=TasksGroup(
-                count=self.n_workers,
-                scheduling=Scheduling.profile_worker_default(
-                    cpu=4,
-                    gpu=1,
-                    gpu_type="tesla",
-                    mem=100000,
-                    nodelist=self.nodelist,
-                ),
-            )
-        )
+        return ExperimentScheduling(profile_worker=TasksGroup(
+            count=self.n_workers,
+            scheduling=Scheduling.profile_worker_default(
+                cpu=4,
+                gpu=1,
+                gpu_type="tesla",
+                mem=100000,
+                nodelist=self.nodelist,
+            ),
+        ))
 
     def initial_setup(self) -> ExperimentConfig:
-        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(
-            default_factory=functools.partial(
-                ExperimentSaveEvalControl,
-                benchmark_steps=10,
-            ),
-        )
+        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=functools.partial(
+            ExperimentSaveEvalControl,
+            benchmark_steps=10,
+        ),)
 
         # rpc allocation for each rpc
         rpc = self.rpcs[0]
@@ -322,13 +315,13 @@ class ProfileExperiment(Experiment):
                 profile_rpc=True,
                 warmup_rounds=2,
                 profile_rounds=1,
-            )
-            for _ in range(self.n_workers)
+            ) for _ in range(self.n_workers)
         ]
 
-        return ExperimentConfig(
-            exp_ctrl=exp_ctrl, model_rpcs=[], model_worker=[], profile_worker=profile_workers
-        )
+        return ExperimentConfig(exp_ctrl=exp_ctrl,
+                                model_rpcs=[],
+                                model_worker=[],
+                                profile_worker=profile_workers)
 
 
 def register_profile_experiment(

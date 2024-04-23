@@ -1,23 +1,24 @@
-import argparse
-import datetime
-import time
-import itertools
-import pickle
-import collections
-import os
 from typing import *
-import base.constants
+import argparse
+import collections
+import datetime
+import itertools
+import os
+import pickle
+import time
 
-from api.config.dfg import ModelInterfaceType
+import tqdm
+
 from profiler.multi_host_main import main
 from profiler.utils import find_factors
-import tqdm
+
+from api.config.dfg import ModelInterfaceType
+import base.constants
 
 
 def get_n_gpus(main_model_size: int, case):
-    default_ngpus = (
-        8 if main_model_size == 7 else 16 if main_model_size == 13 else 32 if main_model_size == 34 else 64
-    )
+    default_ngpus = (8 if main_model_size == 7 else
+                     16 if main_model_size == 13 else 32 if main_model_size == 34 else 64)
     return default_ngpus if case <= 1 else 2 * default_ngpus
 
 
@@ -52,13 +53,11 @@ def build_exp_names(mode: str) -> List:
             ref_size = rew_size = actor_size
         n_gpus = get_n_gpus(main_model_size, case)
         bs = 2**17 // (seqlen + 128)
-        df = data[
-            (data["actor_model_size"] == actor_size)
-            & (data["critic_model_size"] == critic_size)
-            & (data["seqlen"] == seqlen)
-            & (data["n_nodes"] == n_gpus // 8)
-            & (data["mode"] == mode)
-        ]
+        df = data[(data["actor_model_size"] == actor_size)
+                  & (data["critic_model_size"] == critic_size)
+                  & (data["seqlen"] == seqlen)
+                  & (data["n_nodes"] == n_gpus // 8)
+                  & (data["mode"] == mode)]
         assert len(df) == 1, df
         logpath = df["log_path"].tolist()[0]
         if mode == "s":
@@ -77,15 +76,13 @@ def build_exp_names(mode: str) -> List:
                 else:
                     raise NotImplementedError(role)
                 handle_name = k.split("@")[1]
-                rpcs_to_profile.add(
-                    (
-                        model_size,
-                        handle_name,
-                        v.train_eval_config.parallel.pipeline_parallel_size,
-                        v.train_eval_config.parallel.model_parallel_size,
-                        v.train_eval_config.parallel.data_parallel_size,
-                    )
-                )
+                rpcs_to_profile.add((
+                    model_size,
+                    handle_name,
+                    v.train_eval_config.parallel.pipeline_parallel_size,
+                    v.train_eval_config.parallel.model_parallel_size,
+                    v.train_eval_config.parallel.data_parallel_size,
+                ))
         else:
             mp_size = 8
             pp_size = n_gpus // mp_size
@@ -125,14 +122,11 @@ if __name__ == "__main__":
     n_gpus = list((n_gpus))
 
     for expr_name, gpu in tqdm.tqdm(zip(expr_names, n_gpus), total=len(expr_names)):
-        if all(
-            [
+        if all([
                 os.path.exists(
-                    os.path.join(base.constants.LOG_ROOT, expr_name, trial_name, f"kernel_time{i}.pkl")
-                )
+                    os.path.join(base.constants.LOG_ROOT, expr_name, trial_name, f"kernel_time{i}.pkl"))
                 for i in range(gpu)
-            ]
-        ):
+        ]):
             continue
         st = time.monotonic()
         print(f"running expr_name: {expr_name} trial_name")
@@ -141,7 +135,5 @@ if __name__ == "__main__":
         setattr(args, "trial_name", trial_name)
         setattr(args, "trace", False)
         error = main(args, if_raise=False)
-        print(
-            f"expr_name: {expr_name} cuda kernel profiling done, error: {error}, "
-            f"timecost {time.monotonic() - st:.2f}"
-        )
+        print(f"expr_name: {expr_name} cuda kernel profiling done, error: {error}, "
+              f"timecost {time.monotonic() - st:.2f}")

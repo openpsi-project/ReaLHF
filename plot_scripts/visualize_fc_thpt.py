@@ -1,26 +1,23 @@
 from typing import *
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-import os
-import transformers
-import itertools
-import pickle
 import argparse
-import numpy as np
-import scipy.stats
 import collections
+import itertools
 import json
-from matplotlib.gridspec import GridSpec
+import os
+import pickle
 
-from base.monitor import (
-    calculate_llama_gen_flops,
-    calculate_llama_train_flops,
-    caculuate_llama_forward_flops,
-    CUDAKernelTime,
-)
-from api.config.config_base import ModelType, MODEL_TYPE_TO_PATH
+from matplotlib.gridspec import GridSpec
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import scipy.stats
+import seaborn as sns
+import transformers
+
+from api.config.config_base import MODEL_TYPE_TO_PATH, ModelType
 from api.config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
+from base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
+                          calculate_llama_train_flops, CUDAKernelTime)
 
 
 def round_to_nearest_tenth(num):
@@ -109,19 +106,15 @@ def compute_rlhf_gen_pflops(
         mconfig = FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
         mconfigs[name] = mconfig
     assert (prompt_len + gen_len) * batch_size == 2**17, (batch_size, prompt_len, gen_len)
-    return (
-        calculate_llama_gen_flops(
-            batch_size,
-            [prompt_len] * batch_size,
-            gen_len,
-            num_layers=mconfigs["actor"].n_layers,
-            hidden_size=mconfigs["actor"].hidden_dim,
-            intermediate_size=mconfigs["actor"].intermediate_dim,
-            vocab_size=mconfigs["actor"].vocab_size,
-        )
-        / 1e15
-        / avg_time
-    )
+    return (calculate_llama_gen_flops(
+        batch_size,
+        [prompt_len] * batch_size,
+        gen_len,
+        num_layers=mconfigs["actor"].n_layers,
+        hidden_size=mconfigs["actor"].hidden_dim,
+        intermediate_size=mconfigs["actor"].intermediate_dim,
+        vocab_size=mconfigs["actor"].vocab_size,
+    ) / 1e15 / avg_time)
 
 
 def compute_rlhf_inf_pflops(
@@ -166,9 +159,8 @@ def get_model_sizes(main_model_size: int, case: int):
 
 
 def get_n_gpus(main_model_size: int, case):
-    default_ngpus = (
-        8 if main_model_size == 7 else 16 if main_model_size == 13 else 32 if main_model_size == 34 else 64
-    )
+    default_ngpus = (8 if main_model_size == 7 else
+                     16 if main_model_size == 13 else 32 if main_model_size == 34 else 64)
     return default_ngpus if case <= 1 else 2 * default_ngpus
 
 
@@ -204,12 +196,10 @@ def amend_baseline_data(all_data: List, baseline_name: str):
             ref_size = rew_size = actor_size
         n_gpus = get_n_gpus(main_model_size, case)
         bs = 2**17 // (seqlen + 128)
-        df = data[
-            (data["a"] == actor_size)
-            & (data["c"] == critic_size)
-            & (data["s"] == seqlen)
-            & (data["n_gpus"] == n_gpus)
-        ]
+        df = data[(data["a"] == actor_size)
+                  & (data["c"] == critic_size)
+                  & (data["s"] == seqlen)
+                  & (data["n_gpus"] == n_gpus)]
         assert len(df) == 1, len(df)
         all_data.append(
             dict(
@@ -262,8 +252,7 @@ def amend_baseline_data(all_data: List, baseline_name: str):
                     avg_time=np.mean(df["avg_ctt"]),
                 ),
                 System=baseline_name,
-            )
-        )
+            ))
     return all_data
 
 
@@ -292,12 +281,10 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
             ref_size = rew_size = actor_size
         n_gpus = get_n_gpus(main_model_size, case)
         bs = 2**17 // (seqlen + 128)
-        df = data[
-            (data["actor_model_size"] == actor_size)
-            & (data["critic_model_size"] == critic_size)
-            & (data["seqlen"] == seqlen)
-            & (data["n_nodes"] == n_gpus // 8)
-        ]
+        df = data[(data["actor_model_size"] == actor_size)
+                  & (data["critic_model_size"] == critic_size)
+                  & (data["seqlen"] == seqlen)
+                  & (data["n_nodes"] == n_gpus // 8)]
         assert len(df) == 1, len(df)
         logpath = df["log_path"].tolist()[0]
         handle_type2time = collections.defaultdict(list)
@@ -402,8 +389,7 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
                     avg_time=np.mean(handle_type2time[("critic", "train_step")]),
                 ),
                 System=name,
-            )
-        )
+            ))
     return all_data
 
 

@@ -8,4 +8,7 @@ def format_file(file_path):
 
 if __name__ == "__main__":
     pool = multiprocessing.Pool()
-    pool.map(format_file, ["api", "base", "impl", "scheduler", "apps", "experiments", "system"])
+    pool.map(format_file, [
+        "api", "apps", "base", "docker", "examples", "experiments", "impl", "plot_scripts", "profiler",
+        "scheduler", "scripts", "system", "tests"
+    ])

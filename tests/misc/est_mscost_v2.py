@@ -1,34 +1,27 @@
-from api.config.config_base import ModelName
-import base.topology
-from impl.model.nn.flash_mqat.flash_mqat_base import (
-    FlashMQATConfig,
-    flash_model_embed_param_count,
-    flash_model_tblock_param_count,
-    flash_model_head_param_count,
-)
-from impl.model.nn.flash_mqat.flash_mqat_api import (
-    ReparallelizeReceiverStep,
-    ReparallelizeSenderStep,
-    _param_size_from_keys,
-    _keys_from_layer_indices,
-)
-from impl.model.nn.flash_mqat.flash_mqat_parallel import (
-    partition_pipeline_layers,
-    get_flash_model_param_shape,
-    pipeline_repartition_strategy,
-)
-import base.gpu_utils as gpu_utils
-import torch
+from collections import defaultdict
 from typing import *
 import dataclasses
-import torch.distributed
 import itertools
-import api.config.config_system
-import base.topology as topology
-from collections import defaultdict
-from tests.utils import get_llama7b_flash_config
-import time
 import json
+import time
+
+import torch
+import torch.distributed
+
+from api.config.config_base import ModelName
+from impl.model.nn.flash_mqat.flash_mqat_api import (_keys_from_layer_indices, _param_size_from_keys,
+                                                     ReparallelizeReceiverStep, ReparallelizeSenderStep)
+from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
+                                                      flash_model_head_param_count,
+                                                      flash_model_tblock_param_count, FlashMQATConfig)
+from impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape,
+                                                          partition_pipeline_layers,
+                                                          pipeline_repartition_strategy)
+from tests.utils import get_llama7b_flash_config
+import api.config.config_system
+import base.gpu_utils as gpu_utils
+import base.topology
+import base.topology as topology
 
 
 def _filter_match_mwids(
@@ -64,9 +57,8 @@ def _squeeze_mwids_by_node(ranks: List[int]) -> List[int]:
     return [ranks[0] for ranks in node2ranks.values()]
 
 
-def _assign_src_to_dsts(
-    node2srcs: Dict[int, List[int]], node2dsts: Dict[int, List[int]]
-) -> Dict[int, List[int]]:
+def _assign_src_to_dsts(node2srcs: Dict[int, List[int]], node2dsts: Dict[int,
+                                                                         List[int]]) -> Dict[int, List[int]]:
     """Assign nodes with a greedy algorithm.
 
     All ranks in the values of node2srcs have the data required by all dst ranks.
@@ -161,9 +153,8 @@ def _create_param_sync_groups(
                 # This is not the optimal solution for intra-node communication
                 # because there may exist a source rank that is also dst rank,
                 # but we forcely select the first source rank on each node here.
-                assignment = _assign_src_to_dsts(
-                    _group_mwids_by_node(_src_ranks), _group_mwids_by_node(_all_dst_ranks)
-                )
+                assignment = _assign_src_to_dsts(_group_mwids_by_node(_src_ranks),
+                                                 _group_mwids_by_node(_all_dst_ranks))
                 _idle_src_ranks = [r for r in _src_ranks if r not in assignment]
                 for _src_rank in _idle_src_ranks:
                     dp_i, mp_i = (
@@ -222,16 +213,15 @@ def _derive_reparallelize_comm_plan(
     assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
     for k, v in dataclasses.asdict(to_model_config).items():
         if k not in [
-            "is_critic",
-            "sequence_parallel",
-            "gradient_accumulation_fusion",
-            "ckpt_attn",
-            "ckpt_mlp",
+                "is_critic",
+                "sequence_parallel",
+                "gradient_accumulation_fusion",
+                "ckpt_attn",
+                "ckpt_mlp",
         ] and v != getattr(from_model_config, k):
             raise ValueError(
                 f"Can't load a checkpoint with different config (key `{k}`, "
-                f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`)."
-            )
+                f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`).")
     if (from_model_config.n_kv_heads % src_mp_size == 0) != (from_model_config.n_kv_heads % dst_mp_size == 0):
         raise ValueError("Whether to partition kv heads should remain the same.")
 
@@ -318,8 +308,7 @@ def _derive_reparallelize_comm_plan(
                                 src=src,
                                 dst_ranks=dst_ranks,
                                 group=group,
-                            )
-                        )
+                            ))
                     comm_plan.append(
                         ReparallelizeSenderStep(
                             rank=src,
@@ -332,8 +321,7 @@ def _derive_reparallelize_comm_plan(
                             param_size=param_size,
                             group=group,
                             dst_ranks=dst_ranks,
-                        )
-                    )
+                        ))
 
     return comm_plan
 
@@ -365,13 +353,11 @@ def compute_cost(
     param_sync_dst_ranks = {}
     msid2mwid = {}
     for i in range(from_topo.world_size()):
-        msid2mwid[
-            api.config.config_system.ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)
-        ] = i
+        msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(from_model_name, from_topo,
+                                                                              i)] = i
     for i in range(to_topo.world_size()):
-        msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(to_model_name, to_topo, i)] = (
-            i + world_size - to_topo.world_size()
-        )
+        msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(
+            to_model_name, to_topo, i)] = (i + world_size - to_topo.world_size())
     _create_param_sync_groups(
         from_topo,
         to_topo,
@@ -437,7 +423,8 @@ def compute_cost(
                     else:
                         for n in [src_node] + dst_nodes[:-1]:
                             node_send_v[n] += step.param_size
-                        total_remote_comm_volume += step.param_size * sum([src_node != dst_node for dst_node in dst_nodes])
+                        total_remote_comm_volume += step.param_size * sum(
+                            [src_node != dst_node for dst_node in dst_nodes])
                     # bcast_cnt += 1
         max_cost = max(max_cost, cost)
         max_comm_volume = max(max_comm_volume, comm_volume)
@@ -497,9 +484,9 @@ def main():
 
 def decompose_to_three_factors(n: int):
     factors = []
-    for i in range(1, int(n ** (1 / 2)) + 1):
+    for i in range(1, int(n**(1 / 2)) + 1):
         if n % i == 0:
-            for j in range(i, int((n // i) ** (1 / 2)) + 1):
+            for j in range(i, int((n // i)**(1 / 2)) + 1):
                 if (n // i) % j == 0:
                     k = (n // i) // j
                     factors += list(set(itertools.permutations([i, j, k])))

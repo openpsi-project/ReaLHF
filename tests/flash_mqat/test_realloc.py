@@ -5,38 +5,29 @@ import itertools
 import json
 import multiprocessing as mp
 import os
+import pickle
 import queue
 import random
-import numpy as np
-import time
-import json
-import tqdm
 import subprocess
-from api.config.config_base import MODEL_TYPE_TO_PATH, ModelType
-import transformers
-from api.config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
+import time
 
+import numpy as np
+import pandas as pd
+import pynvml
 import torch
 import torch.distributed as dist
+import tqdm
+import transformers
 
-
-from api.config.config_base import ModelName, ModelShardID
+from api.config.config_base import MODEL_TYPE_TO_PATH, ModelName, ModelShardID, ModelType
+from api.config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
 from api.config.config_system import ModelName, ModelShardID
 from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark
 from base.topology import PipeModelDataParallelTopology
-from tests.utils import (
-    get_pytorch_profiler,
-    pytorch_memory_burnin,
-    init_global_constants,
-    clear_name_resolve,
-)
-import pickle
-import pandas as pd
-import pynvml
+from scheduler.client import make as make_scheduer
+from tests.utils import clear_name_resolve, get_pytorch_profiler, init_global_constants, pytorch_memory_burnin
 import base.constants
 import base.gpu_utils
-from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark
-from scheduler.client import make as make_scheduer
 
 EXPR_NAME = "test_reparallelize"
 TRIAL_NAME = "test"
@@ -56,9 +47,8 @@ NODELIST = {
 
 
 def get_n_gpus(main_model_size: int, case):
-    default_ngpus = (
-        8 if main_model_size == 7 else 16 if main_model_size == 13 else 32 if main_model_size == 34 else 64
-    )
+    default_ngpus = (8 if main_model_size == 7 else
+                     16 if main_model_size == 13 else 32 if main_model_size == 34 else 64)
     return default_ngpus if case <= 1 else 2 * default_ngpus
 
 
@@ -93,12 +83,10 @@ def get_mem_shift_settings():
             ref_size = rew_size = actor_size
         n_gpus = get_n_gpus(main_model_size, case)
         bs = 2**17 // (seqlen + 128)
-        df = data[
-            (data["actor_model_size"] == actor_size)
-            & (data["critic_model_size"] == critic_size)
-            & (data["seqlen"] == seqlen)
-            & (data["n_nodes"] == n_gpus // 8)
-        ]
+        df = data[(data["actor_model_size"] == actor_size)
+                  & (data["critic_model_size"] == critic_size)
+                  & (data["seqlen"] == seqlen)
+                  & (data["n_nodes"] == n_gpus // 8)]
         assert len(df) == 1, len(df)
         logpath = df["log_path"].tolist()[0]
         with open(os.path.join(logpath, "device_mapping.pkl"), "rb") as f:
@@ -165,9 +153,8 @@ def test_impl(
     from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
 
     hf_model_type = "llama" if model_size != 34 else "codellama"
-    hf_config = transformers.AutoConfig.from_pretrained(
-        MODEL_TYPE_TO_PATH[ModelType(hf_model_type, model_size, False)]
-    )
+    hf_config = transformers.AutoConfig.from_pretrained(MODEL_TYPE_TO_PATH[ModelType(
+        hf_model_type, model_size, False)])
     mconfig = FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
     os.environ["DLLM_CUDA_TMARK"] = "1"
 
@@ -316,11 +303,8 @@ def test_impl(
                     fwd_time_ns=fwd_time_ns.item(),
                     comm_volume=comm_volume.item(),
                 )
-                if (
-                    it == n_iterations - 1
-                    and dump_to_file is not None
-                    and dist.get_rank() == dist.get_process_group_ranks(base.constants.parallelism_group())[0]
-                ):
+                if (it == n_iterations - 1 and dump_to_file is not None and dist.get_rank()
+                        == dist.get_process_group_ranks(base.constants.parallelism_group())[0]):
                     assert dump_to_file.endswith("json"), dump_to_file
                     with open(dump_to_file, "r") as f:
                         _dump = json.load(f)
@@ -416,11 +400,8 @@ def test_impl(
                     fwd_time_ns=fwd_time_ns.item(),
                     comm_volume=comm_volume.item(),
                 )
-                if (
-                    it == n_iterations - 1
-                    and dump_to_file is not None
-                    and dist.get_rank() == dist.get_process_group_ranks(base.constants.parallelism_group())[0]
-                ):
+                if (it == n_iterations - 1 and dump_to_file is not None and dist.get_rank()
+                        == dist.get_process_group_ranks(base.constants.parallelism_group())[0]):
                     assert dump_to_file.endswith("json"), dump_to_file
                     with open(dump_to_file, "r") as f:
                         _dump = json.load(f)
@@ -474,9 +455,8 @@ def test(args):
     for i in range(from_topo.world_size()):
         msid2mwid[ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)] = i
     for i in range(to_topo.world_size()):
-        msid2mwid[ModelShardID.from_parallelism_rank(to_model_name, to_topo, i)] = (
-            i + world_size - to_topo.world_size()
-        )
+        msid2mwid[ModelShardID.from_parallelism_rank(to_model_name, to_topo,
+                                                     i)] = (i + world_size - to_topo.world_size())
     pg_info = setup_gpu(rank, world_size, model_topos, msid2mwid, param_sync_pairs)
     if rank < from_topo.world_size():
         init_global_constants(topo=from_topo, model_name=from_model_name, msid2mwid=msid2mwid)
@@ -484,9 +464,8 @@ def test(args):
         init_global_constants(topo=to_topo, model_name=to_model_name, msid2mwid=msid2mwid)
 
     hf_model_type = "llama" if args.model_size != 34 else "codellama"
-    hf_config = transformers.AutoConfig.from_pretrained(
-        MODEL_TYPE_TO_PATH[ModelType(hf_model_type, args.model_size, False)]
-    )
+    hf_config = transformers.AutoConfig.from_pretrained(MODEL_TYPE_TO_PATH[ModelType(
+        hf_model_type, args.model_size, False)])
     mconfig = FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
     torch.distributed.barrier()
     # if check and base.constants.has_model_name(from_model_name):

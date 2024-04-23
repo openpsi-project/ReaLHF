@@ -1,18 +1,19 @@
 from typing import *
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-import os
-import transformers
-import itertools
-import pickle
 import argparse
-import numpy as np
-import scipy.stats
+import itertools
+import os
+import pickle
 
-from base.monitor import calculate_llama_gen_flops, calculate_llama_train_flops, caculuate_llama_forward_flops
-from api.config.config_base import ModelType, MODEL_TYPE_TO_PATH
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import scipy.stats
+import seaborn as sns
+import transformers
+
+from api.config.config_base import MODEL_TYPE_TO_PATH, ModelType
 from api.config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
+from base.monitor import caculuate_llama_forward_flops, calculate_llama_gen_flops, calculate_llama_train_flops
 
 
 def compute_rlhf_pflops(
@@ -82,9 +83,8 @@ def get_model_sizes(main_model_size: int, case: int):
 
 
 def get_n_gpus(main_model_size: int, case):
-    default_ngpus = (
-        8 if main_model_size == 7 else 16 if main_model_size == 13 else 32 if main_model_size == 34 else 64
-    )
+    default_ngpus = (8 if main_model_size == 7 else
+                     16 if main_model_size == 13 else 32 if main_model_size == 34 else 64)
     return default_ngpus if case <= 1 else 2 * default_ngpus
 
 
@@ -104,12 +104,10 @@ def amend_baseline_data(all_data: List, baseline_name: str):
             actor_size, ref_size, critic_size, rew_size = get_model_sizes(main_model_size, case)
             n_gpus = get_n_gpus(main_model_size, case)
             bs = 2**17 // (seqlen + 128)
-            df = data[
-                (data["a"] == actor_size)
-                & (data["c"] == critic_size)
-                & (data["s"] == seqlen)
-                & (data["n_gpus"] == n_gpus)
-            ]
+            df = data[(data["a"] == actor_size)
+                      & (data["c"] == critic_size)
+                      & (data["s"] == seqlen)
+                      & (data["n_gpus"] == n_gpus)]
             if len(df) == 0:
                 all_data.append(
                     dict(
@@ -121,8 +119,7 @@ def amend_baseline_data(all_data: List, baseline_name: str):
                         cil=None,
                         System=baseline_name,
                         t=None,
-                    )
-                )
+                    ))
                 continue
             assert len(df) == 1, df
             d = df.to_dict(orient="records")[0]
@@ -166,8 +163,7 @@ def amend_baseline_data(all_data: List, baseline_name: str):
                     cil=cil,
                     System=baseline_name,
                     t=df['avg_t'].values.item(),
-                )
-            )
+                ))
     return all_data
 
 
@@ -203,12 +199,10 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
             actor_size, ref_size, critic_size, rew_size = get_model_sizes(main_model_size, case)
             n_gpus = get_n_gpus(main_model_size, case)
             bs = 2**17 // (seqlen + 128)
-            df = data[
-                (data["actor_model_size"] == actor_size)
-                & (data["critic_model_size"] == critic_size)
-                & (data["seqlen"] == seqlen)
-                & (data["n_nodes"] == n_gpus // 8)
-            ]
+            df = data[(data["actor_model_size"] == actor_size)
+                      & (data["critic_model_size"] == critic_size)
+                      & (data["seqlen"] == seqlen)
+                      & (data["n_nodes"] == n_gpus // 8)]
             assert len(df) == 1, df
             d = df.to_dict(orient="records")[0]
             p = compute_rlhf_pflops(
@@ -252,8 +246,7 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
                     cil=cil,
                     t=d['time'],
                     System=name,
-                )
-            )
+                ))
     return all_data
 
 
@@ -287,27 +280,20 @@ def main():
     print(
         f"Relative improvement over heuristic plan: {((real_flops - heuristic_flops) / heuristic_flops * _n_gpus).sum() / (_n_gpus.sum())}, min {rel.min()}, max {rel.max()}"
     )
-    _real_flops_7b34b = df[
-        (df["System"] == "ReaL (Ours)")
-        & (df["subplot_x"] == 1)
-        & (df["subplot_y"] == 1)
-        & (df["ngpus"] == 32)
-    ]["pflops"].values
-    _heuristic_flops_7b34b = df[
-        (df["System"] == "ReaL-Heuristic")
-        & (df["ngpus"] == 32)
-        & (df["subplot_x"] == 1)
-        & (df["subplot_y"] == 1)
-    ]["pflops"].values
-    _dschat_flops_7b34b = df[
-        (df["System"] == "DeepSpeedChat")
-        & (df["ngpus"] == 32)
-        & (df["subplot_x"] == 1)
-        & (df["subplot_y"] == 1)
-    ]["pflops"].values
-    _openrlhf_flops_7b34b = df[
-        (df["System"] == "OpenRLHF") & (df["ngpus"] == 32) & (df["subplot_x"] == 1) & (df["subplot_y"] == 1)
-    ]["pflops"].values
+    _real_flops_7b34b = df[(df["System"] == "ReaL (Ours)")
+                           & (df["subplot_x"] == 1)
+                           & (df["subplot_y"] == 1)
+                           & (df["ngpus"] == 32)]["pflops"].values
+    _heuristic_flops_7b34b = df[(df["System"] == "ReaL-Heuristic")
+                                & (df["ngpus"] == 32)
+                                & (df["subplot_x"] == 1)
+                                & (df["subplot_y"] == 1)]["pflops"].values
+    _dschat_flops_7b34b = df[(df["System"] == "DeepSpeedChat")
+                             & (df["ngpus"] == 32)
+                             & (df["subplot_x"] == 1)
+                             & (df["subplot_y"] == 1)]["pflops"].values
+    _openrlhf_flops_7b34b = df[(df["System"] == "OpenRLHF") & (df["ngpus"] == 32) & (df["subplot_x"] == 1) &
+                               (df["subplot_y"] == 1)]["pflops"].values
     print(
         f"Relative improvement in 7b+34b genlen 896 #GPU 32 case: ",
         (_real_flops_7b34b - _heuristic_flops_7b34b) / _heuristic_flops_7b34b,
@@ -330,7 +316,7 @@ def main():
     _min = np.where(mask, rel, 100.0).min()
     _max = np.where(mask, rel, 0.0).max()
     print(f"Relative improvement over openrlhf: {_mean}, min {_min}, max {_max}")
-    
+
     _d = df[(df['subplot_x'] == 2) & (df['subplot_y'] == 0) & (df['ngpus'] == 128)]
     _complete_train_hours = _d['t'].values * 1600 / 3600
     print(f"Complete training hours for {_d['System']}: ", _complete_train_hours)

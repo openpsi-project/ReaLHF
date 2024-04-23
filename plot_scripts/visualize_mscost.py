@@ -1,20 +1,21 @@
-import json
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-from scipy.interpolate import make_interp_spline
-import numpy as np
-import math
-import dataclasses
 from typing import *
+import dataclasses
 import json
-import matplotlib.colors as colors
+import math
 import os
 import pickle
-from tests.misc.est_mscost_v2 import compute_cost
+
+from scipy.interpolate import make_interp_spline
+import matplotlib.colors as colors
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+
 from api.config.config_base import ModelName
-import base.topology
+from tests.misc.est_mscost_v2 import compute_cost
 from tests.utils import get_llama7b_flash_config
+import base.topology
 
 
 def abs_ratio(x, y):
@@ -73,19 +74,21 @@ def build_plot_data():
             world_size=d["world_size"],
             from_model_name=ModelName("Actor", 0),
             to_model_name=ModelName("Actor", 1),
-            from_topo=base.topology.PipeModelDataParallelTopology(
-                num_pp=d["from_pp_size"], num_mp=d["from_mp_size"], num_dp=d["from_dp_size"]
-            ),
-            to_topo=base.topology.PipeModelDataParallelTopology(
-                num_pp=d["to_pp_size"], num_mp=d["to_mp_size"], num_dp=d["to_dp_size"]
-            ),
+            from_topo=base.topology.PipeModelDataParallelTopology(num_pp=d["from_pp_size"],
+                                                                  num_mp=d["from_mp_size"],
+                                                                  num_dp=d["from_dp_size"]),
+            to_topo=base.topology.PipeModelDataParallelTopology(num_pp=d["to_pp_size"],
+                                                                num_mp=d["to_mp_size"],
+                                                                num_dp=d["to_dp_size"]),
             model_config=get_llama7b_flash_config(),
             bw=200.0,
             set_interval_cost=0.03,
         )
         key1 = (d["world_size"], d["from_dp_size"], d["from_mp_size"], d["from_pp_size"])
         key2 = (d["world_size"], d["to_dp_size"], d["to_mp_size"], d["to_pp_size"])
-        print(max(x1 + x2 for x1, x2 in zip(node_recv_v.values(), node_send_v.values())) * 2 * 8 / 1e9 / 400 / est_cost)
+        print(
+            max(x1 + x2
+                for x1, x2 in zip(node_recv_v.values(), node_send_v.values())) * 2 * 8 / 1e9 / 400 / est_cost)
         new_data[(key1, key2)] = Entry(
             world_size=d["world_size"],
             dp_mp_pp1=(d["from_dp_size"], d["from_mp_size"], d["from_pp_size"]),
@@ -116,20 +119,16 @@ def build_plot_data():
             cost=d1.time_cost + d2.time_cost,
             est_cost=d1.estimate_cost + d2.estimate_cost,
             bcast_cnt=d1.max_bcast_cnt + d2.max_bcast_cnt,
-            local_comm_ratio=(d1.total_local_volume + d2.total_local_volume)
-            / (
-                d1.total_local_volume
-                + d2.total_local_volume
-                + d1.total_remote_volume
-                + d2.total_remote_volume
-            ),
+            local_comm_ratio=(d1.total_local_volume + d2.total_local_volume) /
+            (d1.total_local_volume + d2.total_local_volume + d1.total_remote_volume + d2.total_remote_volume),
             total_remote_volume=d1.total_remote_volume + d2.total_remote_volume,
             total_local_volume=d1.total_local_volume + d2.total_local_volume,
             dp_mp_pp1=d1.dp_mp_pp1,
             dp_mp_pp2=d1.dp_mp_pp2,
             overlapped=int(np.prod(d1.dp_mp_pp1) == np.prod(d1.dp_mp_pp2) == d1.world_size),
             max_comm_volume=max(d1.max_comm_volume, d2.max_comm_volume),
-            bw_util=(d1.max_remote_volume + d1.max_remote_volume) * 2 * 8 / 1e9 / ((d1.time_cost + d2.time_cost) * 400),
+            bw_util=(d1.max_remote_volume + d1.max_remote_volume) * 2 * 8 / 1e9 /
+            ((d1.time_cost + d2.time_cost) * 400),
         )
         plot_data[(from_dp_mp_pp, to_dp_mp_pp)] = d
     data = list(plot_data.values())

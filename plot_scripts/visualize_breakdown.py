@@ -1,25 +1,22 @@
 from typing import *
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-import os
-import transformers
-import itertools
-import pickle
 import argparse
-import numpy as np
-import scipy.stats
 import collections
+import itertools
 import json
+import os
+import pickle
 
-from base.monitor import (
-    calculate_llama_gen_flops,
-    calculate_llama_train_flops,
-    caculuate_llama_forward_flops,
-    CUDAKernelTime,
-)
-from api.config.config_base import ModelType, MODEL_TYPE_TO_PATH
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import scipy.stats
+import seaborn as sns
+import transformers
+
+from api.config.config_base import MODEL_TYPE_TO_PATH, ModelType
 from api.config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
+from base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
+                          calculate_llama_train_flops, CUDAKernelTime)
 
 
 def round_to_nearest_tenth(num):
@@ -105,9 +102,8 @@ def get_model_sizes(main_model_size: int, case: int):
 
 
 def get_n_gpus(main_model_size: int, case):
-    default_ngpus = (
-        8 if main_model_size == 7 else 16 if main_model_size == 13 else 32 if main_model_size == 34 else 64
-    )
+    default_ngpus = (8 if main_model_size == 7 else
+                     16 if main_model_size == 13 else 32 if main_model_size == 34 else 64)
     return default_ngpus if case <= 1 else 2 * default_ngpus
 
 
@@ -121,7 +117,7 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
         seqlen = 896
         main_model_size = max(actor_size, critic_size)
         # HACK:
-        if (actor_size == 70 and critic_size == 70) or (actor_size !=7 and critic_size != 7):
+        if (actor_size == 70 and critic_size == 70) or (actor_size != 7 and critic_size != 7):
             continue
         if actor_size != critic_size and actor_size > 7 and critic_size > 7:
             continue
@@ -142,12 +138,10 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
             ref_size = rew_size = actor_size
         n_gpus = get_n_gpus(main_model_size, case)
         bs = 2**17 // (seqlen + 128)
-        df = data[
-            (data["actor_model_size"] == actor_size)
-            & (data["critic_model_size"] == critic_size)
-            & (data["seqlen"] == seqlen)
-            & (data["n_nodes"] == n_gpus // 8)
-        ]
+        df = data[(data["actor_model_size"] == actor_size)
+                  & (data["critic_model_size"] == critic_size)
+                  & (data["seqlen"] == seqlen)
+                  & (data["n_nodes"] == n_gpus // 8)]
         assert len(df) == 1, len(df)
         logpath = df["log_path"].tolist()[0]
         handle_type2time = collections.defaultdict(list)
@@ -181,14 +175,13 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
                 else:
                     _phn = "gen"
                 _profile_log_path = (
-                    f"/lustre/aigc/llm/logs/fw/profile-s{model_size}p{p}m{m}d{d}-{_phn}/cudakernel/"
-                )
+                    f"/lustre/aigc/llm/logs/fw/profile-s{model_size}p{p}m{m}d{d}-{_phn}/cudakernel/")
                 kernel_time = CUDAKernelTime(0, 0, 0, 0)
                 for _j in range(p * m * d):
                     with open(os.path.join(_profile_log_path, f"kernel_time{_j}.pkl"), "rb") as f:
                         kernel_time = kernel_time + pickle.load(f)
                 handle_type2gpu_time[(role, handle_name)] = kernel_time
-                handle_type2device_count[(role, handle_name)] = p*m*d
+                handle_type2device_count[(role, handle_name)] = p * m * d
                 topo = (p, m, d)
                 if role == "actor":
                     actor_topos.append((topo, v.mapping))
@@ -241,14 +234,13 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
                 else:
                     _phn = "gen"
                 _profile_log_path = (
-                    f"/lustre/aigc/llm/logs/fw/profile-s{actor_size}p{p}m{m}d{d}-{_phn}/cudakernel/"
-                )
+                    f"/lustre/aigc/llm/logs/fw/profile-s{actor_size}p{p}m{m}d{d}-{_phn}/cudakernel/")
                 kernel_time = CUDAKernelTime(0, 0, 0, 0)
                 for _j in range(p * m * d):
                     with open(os.path.join(_profile_log_path, f"kernel_time{_j}.pkl"), "rb") as f:
-                         kernel_time = kernel_time + pickle.load(f)
+                        kernel_time = kernel_time + pickle.load(f)
                 handle_type2gpu_time[(role, handle_name)] = kernel_time
-                handle_type2device_count[(role, handle_name)] = p*m*d
+                handle_type2device_count[(role, handle_name)] = p * m * d
 
         for fn in os.listdir(logpath):
             if not fn.startswith("model_worker"):
@@ -271,16 +263,17 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
             ("ref", "inference"),
             ("reward", "inference"),
         ]:
-            factor = handle_type2gpu_time[_key].total_secs / np.mean(handle_type2time[_key]) / handle_type2device_count[_key]
+            factor = handle_type2gpu_time[_key].total_secs / np.mean(
+                handle_type2time[_key]) / handle_type2device_count[_key]
             handle_type2gpu_time[_key] = handle_type2gpu_time[_key] / factor
         compute_time = comm_time = misc_time = 0
         for x in [
-            handle_type2gpu_time[("actor", "generate")],
-            handle_type2gpu_time[("actor", "train_step")],
-            handle_type2gpu_time[("critic", "train_step")],
-            handle_type2gpu_time[("critic", "inference")],
-            handle_type2gpu_time[("ref", "inference")],
-            handle_type2gpu_time[("reward", "inference")],
+                handle_type2gpu_time[("actor", "generate")],
+                handle_type2gpu_time[("actor", "train_step")],
+                handle_type2gpu_time[("critic", "train_step")],
+                handle_type2gpu_time[("critic", "inference")],
+                handle_type2gpu_time[("ref", "inference")],
+                handle_type2gpu_time[("reward", "inference")],
         ]:
             x: CUDAKernelTime
             compute_time += (x.compute + x.mem) / 1e6
@@ -308,8 +301,7 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
                     avg_time=np.mean(df["time"]),
                 ),
                 System=name,
-            )
-        )
+            ))
     return all_data
 
 
@@ -436,7 +428,13 @@ def main():
         )
         for xpos, t1, t2 in zip(barpos, compute_time, comm_time):
             ax.text(xpos, t1 / 2, f"{(float(t1) * 100):.0f}%", ha='center', color='white', weight='bold')
-            ax.text(xpos,  t1 + t2 / 2, f"{(float(t2) * 100):.0f}%", ha='center', color='white', weight='bold', va='center')
+            ax.text(xpos,
+                    t1 + t2 / 2,
+                    f"{(float(t2) * 100):.0f}%",
+                    ha='center',
+                    color='white',
+                    weight='bold',
+                    va='center')
         if i == 0:
             ax.set_xticks(np.arange(len(settings)))
             ax.set_xticklabels(settings, rotation=0, fontsize=xlabel_fontsize)

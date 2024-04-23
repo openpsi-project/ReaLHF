@@ -17,7 +17,6 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.utils.data
-from base.monitor import CUDAKernelTime
 
 from profiler.comm import ProfileCommunication
 from profiler.engine import ProfileEngine
@@ -25,7 +24,7 @@ from profiler.utils import make_stats_key, random_sample
 
 from api.config.config_flash_model import FlashMQATConfig
 from base.constants import LOG_ROOT
-from base.monitor import gpu_utilization_monitor, time_mark
+from base.monitor import CUDAKernelTime, gpu_utilization_monitor, time_mark
 from base.topology import ParallelGrid
 from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 # from impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
@@ -223,10 +222,9 @@ class ProfileWorker(worker_base.Worker):
             def trace_handler(p: torch.profiler._KinetoProfile):
                 import pickle
                 kernel_time = CUDAKernelTime.from_profiler(p)
-                with open(os.path.join(base.constants.LOG_ROOT,
-                                       self.__experiment_name,
-                                       self.__trial_name,
-                                       f"kernel_time{self.__worker_index}.pkl"), 'wb') as f:
+                with open(
+                        os.path.join(base.constants.LOG_ROOT, self.__experiment_name, self.__trial_name,
+                                     f"kernel_time{self.__worker_index}.pkl"), 'wb') as f:
                     pickle.dump(kernel_time, f)
 
             st = time.monotonic()

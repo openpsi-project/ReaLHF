@@ -1,25 +1,22 @@
 from typing import *
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-import os
-import transformers
-import itertools
-import pickle
 import argparse
-import numpy as np
-import scipy.stats
 import collections
+import itertools
 import json
+import os
+import pickle
 
-from base.monitor import (
-    calculate_llama_gen_flops,
-    calculate_llama_train_flops,
-    caculuate_llama_forward_flops,
-    CUDAKernelTime,
-)
-from api.config.config_base import ModelType, MODEL_TYPE_TO_PATH
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import scipy.stats
+import seaborn as sns
+import transformers
+
+from api.config.config_base import MODEL_TYPE_TO_PATH, ModelType
 from api.config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
+from base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
+                          calculate_llama_train_flops, CUDAKernelTime)
 
 
 def round_to_nearest_tenth(num):
@@ -105,9 +102,8 @@ def get_model_sizes(main_model_size: int, case: int):
 
 
 def get_n_gpus(main_model_size: int, case):
-    default_ngpus = (
-        8 if main_model_size == 7 else 16 if main_model_size == 13 else 32 if main_model_size == 34 else 64
-    )
+    default_ngpus = (8 if main_model_size == 7 else
+                     16 if main_model_size == 13 else 32 if main_model_size == 34 else 64)
     return default_ngpus if case <= 1 else 2 * default_ngpus
 
 
@@ -121,7 +117,7 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
         seqlen = 896
         main_model_size = max(actor_size, critic_size)
         # HACK:
-        if (actor_size == 70 and critic_size == 70) or (actor_size !=7 and critic_size != 7):
+        if (actor_size == 70 and critic_size == 70) or (actor_size != 7 and critic_size != 7):
             continue
         if actor_size != critic_size and actor_size > 7 and critic_size > 7:
             continue
@@ -142,12 +138,10 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
             ref_size = rew_size = actor_size
         n_gpus = get_n_gpus(main_model_size, case)
         bs = 2**17 // (seqlen + 128)
-        df = data[
-            (data["actor_model_size"] == actor_size)
-            & (data["critic_model_size"] == critic_size)
-            & (data["seqlen"] == seqlen)
-            & (data["n_nodes"] == n_gpus // 8)
-        ]
+        df = data[(data["actor_model_size"] == actor_size)
+                  & (data["critic_model_size"] == critic_size)
+                  & (data["seqlen"] == seqlen)
+                  & (data["n_nodes"] == n_gpus // 8)]
         assert len(df) == 1, len(df)
         logpath = df["log_path"].tolist()[0]
         print(logpath)
@@ -188,8 +182,7 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
                     avg_time=np.mean(df["time"]),
                 ),
                 System=name,
-            )
-        )
+            ))
     return all_data
 
 
@@ -241,18 +234,20 @@ def main():
     group = df[(df["System"] == "ReaL (Ours)")]
     settings = [f"{a}B+{c}B" for a, c in zip(group["actor_size"], group["critic_size"])]
     gen_time = round_to_nearest_tenth(group["gen_time"].to_numpy())
-    train_time = round_to_nearest_tenth(
-        group["actor_train_time"].to_numpy() + group["critic_train_time"].to_numpy()
-    )
-    inf_time = round_to_nearest_tenth(
-        group["critic_inf_time"].to_numpy()
-        + group["ref_inf_time"].to_numpy()
-        + group["rew_inf_time"].to_numpy()
-    )
-    overlap_ratio = (gen_time + train_time + inf_time - group["overall_time"].to_numpy()) / group[
-        "overall_time"
-    ].to_numpy()
-    sns.barplot(x=settings, y=overlap_ratio, ax=ax, color=cmap[3], lw=2, edgecolor="black", hatch=r"\\", width=width)
+    train_time = round_to_nearest_tenth(group["actor_train_time"].to_numpy() +
+                                        group["critic_train_time"].to_numpy())
+    inf_time = round_to_nearest_tenth(group["critic_inf_time"].to_numpy() + group["ref_inf_time"].to_numpy() +
+                                      group["rew_inf_time"].to_numpy())
+    overlap_ratio = (gen_time + train_time + inf_time -
+                     group["overall_time"].to_numpy()) / group["overall_time"].to_numpy()
+    sns.barplot(x=settings,
+                y=overlap_ratio,
+                ax=ax,
+                color=cmap[3],
+                lw=2,
+                edgecolor="black",
+                hatch=r"\\",
+                width=width)
     ax.set_ylim((0, 0.32))
     ax.set_xticklabels(settings, rotation=0, fontsize=xlabel_fontsize)
     ax.set_yticklabels([round_to_nearest_tenth(x) for x in ax.get_yticks()], fontsize=ylabel_fontsize)

@@ -1,26 +1,20 @@
 from typing import *
 import collections
-import torch
+import dataclasses
 import functools
 import gc
-import pynvml
-import torch.profiler
-import torch.distributed
-import dataclasses
-import base.constants
-from tests.utils import (
-    get_llama7b_flash_config,
-    MODEL_NAME,
-    get_memory,
-    clear_gpu_cache,
-    setup_gpu,
-    init_global_constants,
-    setup_barrier,
-    clear_name_resolve,
-)
 import time
 
-COMPUTE_KERNEL_KEYS =[
+import pynvml
+import torch
+import torch.distributed
+import torch.profiler
+
+from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_flash_config, get_memory,
+                         init_global_constants, MODEL_NAME, setup_barrier, setup_gpu)
+import base.constants
+
+COMPUTE_KERNEL_KEYS = [
     "elementwise_kernel",
     "gemm_",
     "aten::",
@@ -44,17 +38,18 @@ MISC_KERNEL_KEYS = [
     "CudaCodeGen",
 ]
 
+
 @dataclasses.dataclass
 class CUDAKernelTime:  # in us
     compute: int
     comm: int
     mem: int
     misc: int
-    
+
     @classmethod
     def from_profiler(cls, p: torch.profiler._KinetoProfile):
         compute_time = comm_time = mem_time = misc_time = 0
-        unknown_keys =[]
+        unknown_keys = []
         for x in p.key_averages():
             if x.device_type != torch.autograd.DeviceType.CUDA:
                 continue
@@ -73,11 +68,13 @@ class CUDAKernelTime:  # in us
             else:
                 unknown_keys.append(x)
         if unknown_keys:
-            raise NotImplementedError(f"Unknown keys: {[(x.key, x.self_cuda_time_total) for x in unknown_keys]}")
+            raise NotImplementedError(
+                f"Unknown keys: {[(x.key, x.self_cuda_time_total) for x in unknown_keys]}")
         return cls(compute=compute_time, comm=comm_time, mem=mem_time, misc=misc_time)
-    
+
     def __repr__(self):
         return f"CUDAKernelTime(compute={self.compute}us, comm={self.comm}us, mem={self.mem}us, misc={self.misc}us)"
+
 
 def get_pytorch_profiler(save_fn: str):
 
@@ -99,8 +96,8 @@ def get_pytorch_profiler(save_fn: str):
 
 
 def test_impl(world_size, profile: bool):
-    from impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel, add_helper_functions
     from impl.model.backend.pipe_inf import InferencePipelineEngine
+    from impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
 
     torch.distributed.barrier()
     mconfig = get_llama7b_flash_config()
@@ -109,7 +106,7 @@ def test_impl(world_size, profile: bool):
         m.instantiate()
         torch.cuda.synchronize()
         print("After model instantiation", get_memory(0))
-        if base.constants.pipe_parallel_world_size()  == 1:
+        if base.constants.pipe_parallel_world_size() == 1:
             add_helper_functions(m)
             engine = m
         else:
