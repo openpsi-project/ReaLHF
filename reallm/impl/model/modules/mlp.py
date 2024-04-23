@@ -10,7 +10,7 @@ import torch.nn as nn
 
 from reallm.impl.model.parallelism.model_parallel.modules import (
     ColumnParallelLinear, merged_linear_with_grad_accumulation_and_async_allreduce, RowParallelLinear)
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Modules")
@@ -90,7 +90,7 @@ class LayerNormQKVLinear(nn.Module):
                 device=device,
             )
         else:
-            self.mp_worldsize = reallm.base.constants.model_parallel_world_size()
+            self.mp_worldsize = constants.model_parallel_world_size()
             assert n_q_heads % self.mp_worldsize == 0, (f"n_q_heads {n_q_heads} must be divisible by "
                                                         f"mp_worldsize {self.mp_worldsize}")
             hidden_dim = input_dim
@@ -148,24 +148,24 @@ class LayerNormQKVLinear(nn.Module):
                 dist.all_reduce(
                     self.k_attn.weight.data,
                     op=dist.ReduceOp.SUM,
-                    group=base.constants.model_parallel_group(),
+                    group=constants.model_parallel_group(),
                 )
                 if use_attention_bias:
                     dist.all_reduce(
                         self.k_attn.bias.data,
                         op=dist.ReduceOp.SUM,
-                        group=base.constants.model_parallel_group(),
+                        group=constants.model_parallel_group(),
                     )
                 dist.all_reduce(
                     self.v_attn.weight.data,
                     op=dist.ReduceOp.SUM,
-                    group=base.constants.model_parallel_group(),
+                    group=constants.model_parallel_group(),
                 )
                 if use_attention_bias:
                     dist.all_reduce(
                         self.v_attn.bias.data,
                         op=dist.ReduceOp.SUM,
-                        group=base.constants.model_parallel_group(),
+                        group=constants.model_parallel_group(),
                     )
 
         self.d = head_dim
@@ -472,8 +472,8 @@ if USE_TE_BACKEND:
             eps=layer_norm_epsilon,
             sequence_parallel=sequence_parallel,
             return_bias=False,
-            tp_group=base.constants.model_parallel_group(),
-            tp_size=base.constants.model_parallel_world_size(),
+            tp_group=constants.model_parallel_group(),
+            tp_size=constants.model_parallel_world_size(),
             bias=False,
             normalization="RMSNorm",
             activation="swiglu",

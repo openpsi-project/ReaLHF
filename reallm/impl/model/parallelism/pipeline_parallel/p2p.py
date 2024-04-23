@@ -11,7 +11,7 @@ from packaging.version import Version
 import torch
 import torch.distributed
 
-import reallm.base.constants
+import reallm.base.constants as constants
 
 _async = []
 
@@ -53,17 +53,17 @@ assert can_send_recv()
 #     global _groups, _grid
 #     _grid = grid
 
-#     assert reallm.base.constants.grid().pipe_parallel_size > 1, "There is no pipeline parallelism"
+#     assert constants.grid().pipe_parallel_size > 1, "There is no pipeline parallelism"
 
 #     if not can_send_recv():
-#         # _groups = [dist.new_group(ranks=[base.constants.to_global_pg_rank(g) for g in group]) for group in reallm.base.constants.grid().p2p_groups]
+#         # _groups = [dist.new_group(ranks=[constants.to_global_pg_rank(g) for g in group]) for group in constants.grid().p2p_groups]
 #         raise NotImplementedError("Cannot use send/recv with torch version < 1.8."
 #                                   f" PyTorch version {Version(torch.__version__)}.")
 
 
 def _is_valid_send_recv(src_stage, dest_stage):
     first_stage = 0
-    last_stage = reallm.base.constants.grid().pipe_parallel_size - 1
+    last_stage = constants.grid().pipe_parallel_size - 1
     assert (
         abs(src_stage - dest_stage) == 1 or (src_stage == first_stage and dest_stage == last_stage)
         or (src_stage == last_stage and dest_stage == first_stage)
@@ -74,33 +74,33 @@ def send(tensor, dest_stage, async_op=False):
     # NOTE: The input is the stage id rather than the global rank
     # global _groups
     # assert async_op == False, "Doesn't support async_op true"
-    src_stage = reallm.base.constants.grid().get_stage_id()
+    src_stage = constants.grid().get_stage_id()
     _is_valid_send_recv(src_stage, dest_stage)
 
-    dest_rank = reallm.base.constants.grid().stage_to_global(stage_id=dest_stage)
+    dest_rank = constants.grid().stage_to_global(stage_id=dest_stage)
     # if can_send_recv():
     send_method = torch.distributed.isend if async_op else dist.send
-    return send_method(tensor, reallm.base.constants.to_global_pg_rank(dest_rank))
+    return send_method(tensor, constants.to_global_pg_rank(dest_rank))
     # else:
     #     group = _get_send_recv_group(src_stage, dest_stage)
-    #     src_rank = reallm.base.constants.grid().stage_to_global(stage_id=src_stage)
-    #     return dist.broadcast(tensor, reallm.base.constants.to_global_pg_rank(src_rank), group=group, async_op=async_op)
+    #     src_rank = constants.grid().stage_to_global(stage_id=src_stage)
+    #     return dist.broadcast(tensor, constants.to_global_pg_rank(src_rank), group=group, async_op=async_op)
 
 
 def recv(tensor, src_stage, async_op=False):
     # NOTE: The input is the stage id rather than the global rank
     # global _groups
     # assert async_op == False, "Doesn't support async_op true"
-    dest_stage = reallm.base.constants.grid().get_stage_id()
+    dest_stage = constants.grid().get_stage_id()
     _is_valid_send_recv(src_stage, dest_stage)
 
-    src_rank = reallm.base.constants.grid().stage_to_global(stage_id=src_stage)
+    src_rank = constants.grid().stage_to_global(stage_id=src_stage)
     # if can_send_recv():
     recv_method = torch.distributed.irecv if async_op else dist.recv
-    return recv_method(tensor, reallm.base.constants.to_global_pg_rank(src_rank))
+    return recv_method(tensor, constants.to_global_pg_rank(src_rank))
     # else:
     #     group = _get_send_recv_group(src_stage, dest_stage)
-    #     return dist.broadcast(tensor, reallm.base.constants.to_global_pg_rank(src_rank), group=group, async_op=async_op)
+    #     return dist.broadcast(tensor, constants.to_global_pg_rank(src_rank), group=group, async_op=async_op)
 
 
 def wait():
@@ -193,7 +193,7 @@ def recv_obj(sender: int) -> typing.Any:
 #     stage_id = None
 
 #     first_stage = 0
-#     last_stage = reallm.base.constants.grid().pipe_parallel_size - 1
+#     last_stage = constants.grid().pipe_parallel_size - 1
 
 #     if (src_stage == first_stage and dest_stage == last_stage
 #             or dest_stage == first_stage and src_stage == last_stage):
@@ -206,7 +206,7 @@ def recv_obj(sender: int) -> typing.Any:
 #      unless group_id is the rank of the last stage
 #      in which case group_id corresponds to group[group_id-num_stages+1, group_id]
 #      """
-#     group_id = reallm.base.constants.grid().stage_to_global(stage_id=stage_id)
+#     group_id = constants.grid().stage_to_global(stage_id=stage_id)
 
 #     return _groups[group_id]
 

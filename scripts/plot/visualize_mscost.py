@@ -12,10 +12,11 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from reallm.api..config.config_base import ModelName
+from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelName, ModelType
+from reallm.api.core.model_api import FLASH_MODEL_CONFIG_CONVERTER
 from tests.misc.est_mscost_v2 import compute_cost
 from tests.utils import get_llama7b_flash_config
-import reallm.base.topology
+import reallm.base.topology as topology
 
 
 def abs_ratio(x, y):
@@ -74,12 +75,12 @@ def build_plot_data():
             world_size=d["world_size"],
             from_model_name=ModelName("Actor", 0),
             to_model_name=ModelName("Actor", 1),
-            from_topo=base.topology.PipeModelDataParallelTopology(num_pp=d["from_pp_size"],
-                                                                  num_mp=d["from_mp_size"],
-                                                                  num_dp=d["from_dp_size"]),
-            to_topo=base.topology.PipeModelDataParallelTopology(num_pp=d["to_pp_size"],
-                                                                num_mp=d["to_mp_size"],
-                                                                num_dp=d["to_dp_size"]),
+            from_topo=topology.PipeModelDataParallelTopology(num_pp=d["from_pp_size"],
+                                                             num_mp=d["from_mp_size"],
+                                                             num_dp=d["from_dp_size"]),
+            to_topo=topology.PipeModelDataParallelTopology(num_pp=d["to_pp_size"],
+                                                           num_mp=d["to_mp_size"],
+                                                           num_dp=d["to_dp_size"]),
             model_config=get_llama7b_flash_config(),
             bw=200.0,
             set_interval_cost=0.03,

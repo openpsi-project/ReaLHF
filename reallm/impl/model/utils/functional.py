@@ -162,13 +162,13 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
 
         logprobs = -vocab_parallel_cross_entropy(logits, labels)[leave_one_indices]
         ########### sanity check ###########
-        # world_size = reallm.base.constants.model_parallel_world_size()
+        # world_size = constants.model_parallel_world_size()
         # dim_size = [logits.shape[1] * world_size, logits.shape[0]]
         # all_gather_buffer = torch.zeros(*dim_size, dtype=logits.dtype, device=logits.device)
         # torch.distributed._all_gather_base(
         #     all_gather_buffer,
         #     logits.transpose(0, 1).contiguous(),
-        #     group=base.constants.model_parallel_group(),
+        #     group=constants.model_parallel_group(),
         # )
         # logits2 = all_gather_buffer.transpose(0, 1).contiguous()
         # logprobs2 = gather_packed_shifted_log_probs(logits2, cu_seqlens, packed_input_ids).float()

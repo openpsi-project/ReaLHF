@@ -1,4 +1,4 @@
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.base.namedarray
 
 

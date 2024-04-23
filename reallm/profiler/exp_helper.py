@@ -21,7 +21,7 @@ from reallm.profiler.profile_layers import profile_rpcs
 from reallm.profiler.rpc import RPC, RPCExecution
 import reallm.api.core.system_api as config_package
 # import reallm.experiments.autoexp.auto_ppo
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.profiler.cppsearch.mdm_search as mdm_search
 
 

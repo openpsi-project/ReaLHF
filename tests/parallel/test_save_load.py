@@ -10,7 +10,7 @@ import torch.multiprocessing as mp
 
 from reallm.api.core import model_api, system_api
 from tests.utils import *
-import reallm.base.constants
+import reallm.base.constants as constants
 
 MODEL_TYPE = "llama"
 MODEL_SIZE = 7
@@ -106,7 +106,7 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
             p.join()
 
     def testLoadFromHF(self):
-        with reallm.base.constants.model_scope(MODEL_NAME):
+        with constants.model_scope(MODEL_NAME):
             for is_critic, mp_size, pp_size in itertools.product([True, False], [1, 2], [1, 3]):
                 self._testLoadFromHF(is_critic, mp_size, pp_size)
 
@@ -150,7 +150,7 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
             p.join()
 
     def testSaveThenLoad(self):
-        with reallm.base.constants.model_scope(MODEL_NAME):
+        with constants.model_scope(MODEL_NAME):
             for (
                     save_critic,
                     load_critic,

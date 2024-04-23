@@ -20,7 +20,7 @@ from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 import reallm.api.core.model_api as model_api
 import reallm.api.core.system_api as config_package
 import reallm.base.cluster
-import reallm.base.constants
+import reallm.base.constants as constants
 
 
 def make_layers(config: FlashMQATConfig, dtype, device):
@@ -47,7 +47,7 @@ def make_layers(config: FlashMQATConfig, dtype, device):
     #         device=device,
     #         dtype=dtype,
     #     )
-    # elif not config.is_critic and reallm.base.constants.model_parallel_world_size() > 1:
+    # elif not config.is_critic and constants.model_parallel_world_size() > 1:
     #     head = SequenceParallelActorHead(
     #         config.hidden_dim,
     #         config.vocab_size,
@@ -180,16 +180,16 @@ class ProfileLayers:
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(max_seqlen + self.max_new_tokens, self.hidden_dim // self.head_dim + 10)
             # fix of a flash attention bug
-            k_cache = reallm.base.constants.get_global_memory_buffer().get_tensor(
-                tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-                dtype=y.k_cache.dtype,
-                name=f"kv_cache_{layer_idx}_k",
-                force_zero=True)
-            v_cache = reallm.base.constants.get_global_memory_buffer().get_tensor(
-                tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-                dtype=y.v_cache.dtype,
-                name=f"kv_cache_{layer_idx}_v",
-                force_zero=True)
+            k_cache = constants.get_global_memory_buffer().get_tensor(tensor_shape=(bs, kvcache_seqlen,
+                                                                                    *y.k_cache.shape[1:]),
+                                                                      dtype=y.k_cache.dtype,
+                                                                      name=f"kv_cache_{layer_idx}_k",
+                                                                      force_zero=True)
+            v_cache = constants.get_global_memory_buffer().get_tensor(tensor_shape=(bs, kvcache_seqlen,
+                                                                                    *y.v_cache.shape[1:]),
+                                                                      dtype=y.v_cache.dtype,
+                                                                      name=f"kv_cache_{layer_idx}_v",
+                                                                      force_zero=True)
             indices = torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
                                    dtype=torch.long)[None, :] < input_lens[:, None]
             k_cache[indices] = y.k_cache

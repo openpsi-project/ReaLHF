@@ -20,7 +20,7 @@ import torch.profiler
 from reallm.base.topology import PipeModelDataParallelTopology
 from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_flash_config, get_memory,
                          get_pytorch_profiler, MODEL_NAME, pytorch_memory_burnin)
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.base.gpu_utils
 import reallm.base.topology
 
@@ -31,7 +31,7 @@ def get_model(mconfig):
 
     m = ReaLModel(mconfig, device=torch.device("cuda:0"), dtype=torch.float16)
     m.instantiate()
-    if reallm.base.constants.pipe_parallel_world_size() == 1:
+    if constants.pipe_parallel_world_size() == 1:
         add_helper_functions(m)
         engine = m
     else:
@@ -43,7 +43,7 @@ def get_model(mconfig):
 @torch.no_grad()
 def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_to_file):
     mconfig = get_llama7b_flash_config()
-    with reallm.base.constants.model_scope(MODEL_NAME):
+    with constants.model_scope(MODEL_NAME):
         m, engine = get_model(mconfig)
         if check:
             original_state_dict = m.state_dict()
@@ -58,11 +58,11 @@ def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_
             packed_input_ids = torch.randint(
                 0,
                 mconfig.vocab_size,
-                (2**17 // reallm.base.constants.data_parallel_world_size(),),
+                (2**17 // constants.data_parallel_world_size(),),
                 dtype=torch.long,
                 device="cuda",
             )
-            bs = 2**17 // reallm.base.constants.data_parallel_world_size() // 256
+            bs = 2**17 // constants.data_parallel_world_size() // 256
             if bs == 0:
                 return
             cu_seqlens = torch.linspace(0, 256 * bs, bs + 1, dtype=torch.int32, device="cuda")
@@ -73,14 +73,14 @@ def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_
             torch.distributed.barrier()
             torch.cuda.synchronize()
             tik = time.perf_counter_ns()
-            if reallm.base.constants.pipe_parallel_world_size() == 1:
+            if constants.pipe_parallel_world_size() == 1:
                 engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
             else:
                 engine.forward(
                     seqlens_cpu=seqlens_cpu,
                     packed_input_ids=packed_input_ids,
                     cu_seqlens=cu_seqlens,
-                    num_micro_batches=base.constants.pipe_parallel_world_size(),
+                    num_micro_batches=constants.pipe_parallel_world_size(),
                 )
             torch.cuda.synchronize()
             normal_fwd_t = time.perf_counter_ns() - tik
@@ -92,14 +92,14 @@ def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_
             torch.distributed.barrier()
             torch.cuda.synchronize()
             tik = time.perf_counter_ns()
-            if reallm.base.constants.pipe_parallel_world_size() == 1:
+            if constants.pipe_parallel_world_size() == 1:
                 engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
             else:
                 engine.forward(
                     seqlens_cpu=seqlens_cpu,
                     packed_input_ids=packed_input_ids,
                     cu_seqlens=cu_seqlens,
-                    num_micro_batches=base.constants.pipe_parallel_world_size(),
+                    num_micro_batches=constants.pipe_parallel_world_size(),
                 )
             torch.cuda.synchronize()
             load_fwd_t = time.perf_counter_ns() - tik
@@ -123,14 +123,14 @@ def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_
             torch.cuda.synchronize()
             tik = time.perf_counter_ns()
             m.async_offload()
-            if reallm.base.constants.pipe_parallel_world_size() == 1:
+            if constants.pipe_parallel_world_size() == 1:
                 engine2.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
             else:
                 engine2.forward(
                     seqlens_cpu=seqlens_cpu,
                     packed_input_ids=packed_input_ids,
                     cu_seqlens=cu_seqlens,
-                    num_micro_batches=base.constants.pipe_parallel_world_size(),
+                    num_micro_batches=constants.pipe_parallel_world_size(),
                 )
             torch.cuda.synchronize()
             offload_fwd_t = time.perf_counter_ns() - tik
@@ -207,14 +207,14 @@ def test(
     assert world_size == topo.get_dim("pipe") * topo.get_dim("model") * topo.get_dim("data")
     setup_gpu(idx, world_size)
 
-    with reallm.base.constants.model_scope(MODEL_NAME):
-        reallm.base.constants.set_rank_mapping(MODEL_NAME, topo)
+    with constants.model_scope(MODEL_NAME):
+        constants.set_rank_mapping(MODEL_NAME, topo)
         wg = reallm.base.topology.new_or_get_group(
-            ranks=[base.constants.to_global_pg_rank(i) for i in range(world_size)])
+            ranks=[constants.to_global_pg_rank(i) for i in range(world_size)])
 
-        reallm.base.constants.set_parallelism_group(model_name=MODEL_NAME, pgroup=wg)
+        constants.set_parallelism_group(model_name=MODEL_NAME, pgroup=wg)
         grid = reallm.base.topology.ParallelGrid(process_group=wg, topology=topo)
-        reallm.base.constants.set_grid(model_name=MODEL_NAME, grid=grid)
+        constants.set_grid(model_name=MODEL_NAME, grid=grid)
 
     print("After setup memory", get_memory(0))
 

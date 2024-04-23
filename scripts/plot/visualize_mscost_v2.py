@@ -14,10 +14,11 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from reallm.api..config.config_base import ModelName
+from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelName, ModelType
+from reallm.api.core.model_api import FLASH_MODEL_CONFIG_CONVERTER
 from tests.misc.est_mscost_v2 import compute_cost
 from tests.utils import get_llama7b_flash_config
-import reallm.base.topology
+import reallm.base.topology as topology
 
 
 def get_n_gpus(main_model_size: int, case):
@@ -105,9 +106,6 @@ def get_mem_shift_settings():
 def get_mconfig_from_size(model_size):
     import transformers
 
-    from reallm.api..config.config_base import MODEL_TYPE_TO_PATH, ModelType
-    from reallm.api..config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
-
     hf_model_type = "llama" if model_size != 34 else "codellama"
     hf_config = transformers.AutoConfig.from_pretrained(MODEL_TYPE_TO_PATH[ModelType(
         hf_model_type, model_size, False)])
@@ -132,12 +130,12 @@ def main():
                 world_size=w,
                 from_model_name=ModelName("actor", 0),
                 to_model_name=ModelName("actor", 1),
-                from_topo=base.topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
-                                                                      num_mp=from_topo[1],
-                                                                      num_dp=from_topo[2]),
-                to_topo=base.topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
-                                                                    num_mp=to_topo[1],
-                                                                    num_dp=to_topo[2]),
+                from_topo=topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
+                                                                 num_mp=from_topo[1],
+                                                                 num_dp=from_topo[2]),
+                to_topo=topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
+                                                               num_mp=to_topo[1],
+                                                               num_dp=to_topo[2]),
                 bw=200.0,
                 set_interval_cost=0.03,
                 model_config=get_mconfig_from_size(a),
@@ -146,12 +144,12 @@ def main():
                 world_size=w,
                 from_model_name=ModelName("actor", 1),
                 to_model_name=ModelName("actor", 0),
-                from_topo=base.topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
-                                                                      num_mp=to_topo[1],
-                                                                      num_dp=to_topo[2]),
-                to_topo=base.topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
-                                                                    num_mp=from_topo[1],
-                                                                    num_dp=from_topo[2]),
+                from_topo=topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
+                                                                 num_mp=to_topo[1],
+                                                                 num_dp=to_topo[2]),
+                to_topo=topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
+                                                               num_mp=from_topo[1],
+                                                               num_dp=from_topo[2]),
                 bw=200.0,
                 set_interval_cost=0.03,
                 model_config=get_mconfig_from_size(a),
@@ -177,12 +175,12 @@ def main():
                 world_size=w,
                 from_model_name=ModelName("critic", 0),
                 to_model_name=ModelName("critic", 1),
-                from_topo=base.topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
-                                                                      num_mp=from_topo[1],
-                                                                      num_dp=from_topo[2]),
-                to_topo=base.topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
-                                                                    num_mp=to_topo[1],
-                                                                    num_dp=to_topo[2]),
+                from_topo=topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
+                                                                 num_mp=from_topo[1],
+                                                                 num_dp=from_topo[2]),
+                to_topo=topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
+                                                               num_mp=to_topo[1],
+                                                               num_dp=to_topo[2]),
                 bw=200.0,
                 set_interval_cost=0.03,
                 model_config=get_mconfig_from_size(c),
@@ -191,12 +189,12 @@ def main():
                 world_size=w,
                 from_model_name=ModelName("critic", 1),
                 to_model_name=ModelName("critic", 0),
-                from_topo=base.topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
-                                                                      num_mp=to_topo[1],
-                                                                      num_dp=to_topo[2]),
-                to_topo=base.topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
-                                                                    num_mp=from_topo[1],
-                                                                    num_dp=from_topo[2]),
+                from_topo=topology.PipeModelDataParallelTopology(num_pp=to_topo[0],
+                                                                 num_mp=to_topo[1],
+                                                                 num_dp=to_topo[2]),
+                to_topo=topology.PipeModelDataParallelTopology(num_pp=from_topo[0],
+                                                               num_mp=from_topo[1],
+                                                               num_dp=from_topo[2]),
                 bw=200.0,
                 set_interval_cost=0.03,
                 model_config=get_mconfig_from_size(c),

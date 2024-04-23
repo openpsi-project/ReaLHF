@@ -17,7 +17,7 @@ from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallel
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import compute_varlen_position_indices
 from reallm.impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.impl.model.parallelism.model_parallel.mappings as tensor_parallel
 
@@ -54,7 +54,7 @@ class FlashMQATBlock(nn.Module):
             rotary_interleaved=config.rotary_interleaved,
             rotary_scaling=config.rotary_scaling,
             rotary_scaling_type=config.rotary_scaling_type,
-            model_parallel=base.constants.model_parallel_world_size() > 1,
+            model_parallel=constants.model_parallel_world_size() > 1,
             sequence_parallel=config.sequence_parallel,
             gradient_accumulation_fusion=config.gradient_accumulation_fusion,
             dtype=dtype,
@@ -67,7 +67,7 @@ class FlashMQATBlock(nn.Module):
                 resid_pdrop=config.resid_pdrop,
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
-                model_parallel=base.constants.model_parallel_world_size() > 1,
+                model_parallel=constants.model_parallel_world_size() > 1,
                 sequence_parallel=config.sequence_parallel,
                 gradient_accumulation_fusion=config.gradient_accumulation_fusion,
                 dtype=dtype,
@@ -79,7 +79,7 @@ class FlashMQATBlock(nn.Module):
                 intermediate_dim=config.intermediate_dim,
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
-                model_parallel=base.constants.model_parallel_world_size() > 1,
+                model_parallel=constants.model_parallel_world_size() > 1,
                 sequence_parallel=config.sequence_parallel,
                 gradient_accumulation_fusion=config.gradient_accumulation_fusion,
                 dtype=dtype,
@@ -217,7 +217,7 @@ class VocabPositionEmbedding(nn.Module):
         self.n_positions = config.n_positions
         self.sequence_parallel = config.sequence_parallel
 
-        model_parallel = reallm.base.constants.model_parallel_world_size() > 1
+        model_parallel = constants.model_parallel_world_size() > 1
         if model_parallel:
             embed_cls = ParallelEmbedding
         else:

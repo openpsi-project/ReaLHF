@@ -13,10 +13,10 @@ import scipy.stats
 import seaborn as sns
 import transformers
 
-from reallm.api..config.config_base import MODEL_TYPE_TO_PATH, ModelType
-from reallm.api..config.config_flash_model import FLASH_MODEL_CONFIG_CONVERTER
+from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelName, ModelType
+from reallm.api.core.model_api import FLASH_MODEL_CONFIG_CONVERTER
 from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
-                          calculate_llama_train_flops, CUDAKernelTime)
+                                 calculate_llama_train_flops, CUDAKernelTime)
 
 
 def round_to_nearest_tenth(num):

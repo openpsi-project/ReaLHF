@@ -6,6 +6,7 @@ import time
 
 from deepspeed import DeepSpeedEngine
 import torch
+import torch.distributed
 
 from reallm.base.constants import data_parallel_group
 from reallm.base.dataparallel import PackedParallelDataBroker
@@ -17,7 +18,7 @@ from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
 import reallm.api.core.model_api as model_api
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.impl.model.utils.ppo_functional as ppo_functional
 
@@ -68,7 +69,8 @@ def _ppo_actor_loss_from_model_outputs(
     loss = loss * 0.0
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
-    mean_ref_kl = reallm.api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
+    mean_ref_kl = torch.distributed.all_reduce(mean_ref_kl) / torch.distributed.get_world_size(
+        data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
     # importance_weight = loss_stat["importance_weight"]
@@ -155,11 +157,11 @@ class PackedActorInterface(model_api.ModelInterface):
         self.kl_ctl = None
 
         if self.pipe_gen_n_mbs is None:
-            self.pipe_gen_n_mbs = reallm.base.constants.pipe_parallel_world_size()
+            self.pipe_gen_n_mbs = constants.pipe_parallel_world_size()
         if self.pipe_inf_n_mbs is None:
-            self.pipe_inf_n_mbs = reallm.base.constants.pipe_parallel_world_size()
+            self.pipe_inf_n_mbs = constants.pipe_parallel_world_size()
         if self.pipe_train_n_mbs is None:
-            self.pipe_train_n_mbs = reallm.base.constants.pipe_parallel_world_size() * 2
+            self.pipe_train_n_mbs = constants.pipe_parallel_world_size() * 2
 
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
@@ -307,7 +309,7 @@ class PackedActorInterface(model_api.ModelInterface):
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             packed_logits_mask = data["packed_logits_mask"]
-            if reallm.base.constants.model_parallel_world_size() > 1:
+            if constants.model_parallel_world_size() > 1:
                 from reallm.impl.model.parallelism.model_parallel.mappings import \
                     gather_from_tensor_model_parallel_region
                 logits = gather_from_tensor_model_parallel_region(logits)
@@ -511,7 +513,8 @@ def _ppo_critic_loss_from_model_outputs(
     )
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
-    mean_ref_kl = reallm.api.huggingface.get_all_reduce_mean(mean_ref_kl, group=data_parallel_group())
+    mean_ref_kl = torch.distributed.all_reduce(mean_ref_kl) / torch.distributed.get_world_size(
+        data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
     clip_ratio = loss_stat["clip_ratio"]
@@ -573,9 +576,9 @@ class PackedCriticInterface(model_api.ModelInterface):
         self.kl_ctl = None
 
         if self.pipe_train_n_mbs is None:
-            self.pipe_train_n_mbs = reallm.base.constants.pipe_parallel_world_size() * 2
+            self.pipe_train_n_mbs = constants.pipe_parallel_world_size() * 2
         if self.pipe_inf_n_mbs is None:
-            self.pipe_inf_n_mbs = reallm.base.constants.pipe_parallel_world_size()
+            self.pipe_inf_n_mbs = constants.pipe_parallel_world_size()
 
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:

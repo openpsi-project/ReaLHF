@@ -8,13 +8,8 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
+from reallm.base import constants, gpu_utils, name_resolve, namedarray, names, topology
 from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
-import reallm.base.constants as constants
-import reallm.base.gpu_utils
-import reallm.base.name_resolve as name_resolve
-import reallm.base.namedarray
-import reallm.base.names as names
-import reallm.base.topology
 
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
@@ -35,13 +30,13 @@ def setup_gpu(rank, world_size):
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
     BARRIER.wait()
-    reallm.base.gpu_utils.isolate_cuda_device(WORKER_TYPE, rank, world_size, EXPR_NAME, TRIAL_NAME)
+    gpu_utils.isolate_cuda_device(WORKER_TYPE, rank, world_size, EXPR_NAME, TRIAL_NAME)
     # print(f"rank {rank} isolated cuda device")
     BARRIER.wait()
-    reallm.base.gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME, rank)
+    gpu_utils.reveal_ddp_identity(EXPR_NAME, TRIAL_NAME, rank)
     # print(f"rank {rank} revealed ddp identity")
     BARRIER.wait()
-    info = reallm.base.gpu_utils.setup_ddp(EXPR_NAME, TRIAL_NAME, rank)
+    info = gpu_utils.setup_ddp(EXPR_NAME, TRIAL_NAME, rank)
     world_size = info.world_size
     device = torch.device("cuda", 0)
     # print(f"rank {rank} setup ddp")
@@ -68,6 +63,7 @@ def make_finetune_spec(bs_per_device,
                        steps_per_epoch=10,
                        max_seq_len=1024):
     import reallm.api.core.model_api as model_api
+
     finetune_spec = model_api.FinetuneSpec(
         total_train_epochs=total_train_epochs,
         total_train_steps=total_train_steps,
@@ -115,15 +111,15 @@ def init_global_constants(num_dp=None, num_mp=None, num_pp=None, topo=None, mode
     else:
         ws = topo.world_size()
 
-    with reallm.base.constants.model_scope(model_name):
-        reallm.base.constants.set_rank_mapping(model_name, topo, msid2mwid=msid2mwid)
-        wg = reallm.base.topology.new_or_get_group(ranks=[constants.to_global_pg_rank(i) for i in range(ws)])
+    with constants.model_scope(model_name):
+        constants.set_rank_mapping(model_name, topo, msid2mwid=msid2mwid)
+        wg = topology.new_or_get_group(ranks=[constants.to_global_pg_rank(i) for i in range(ws)])
 
-        reallm.base.constants.set_parallelism_group(model_name=model_name, pgroup=wg)
+        constants.set_parallelism_group(model_name=model_name, pgroup=wg)
         grid = ParallelGrid(process_group=wg, topology=topo)
-        reallm.base.constants.set_grid(model_name=model_name, grid=grid)
-        reallm.base.constants.set_experiment_trial_names(EXPR_NAME, TRIAL_NAME)
-        reallm.base.constants.set_max_seqlen(1024)
+        constants.set_grid(model_name=model_name, grid=grid)
+        constants.set_experiment_trial_names(EXPR_NAME, TRIAL_NAME)
+        constants.set_max_seqlen(1024)
 
 
 def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
@@ -131,12 +127,12 @@ def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
 
     if dp_rank == None:
         assert num_dp == None
-        dp_rank = reallm.base.constants.data_parallel_rank()
-        num_dp = reallm.base.constants.data_parallel_world_size()
+        dp_rank = constants.data_parallel_rank()
+        num_dp = constants.data_parallel_world_size()
     input_ids, attention_mask = make_batch(tokenizer, device, batch_size, dp_rank % num_dp, num_dp, seed=seed)
     packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
     prompt_mask = torch.zeros_like(packed_input_ids)
-    data = reallm.base.namedarray.NamedArray(
+    data = namedarray.NamedArray(
         packed_input_ids=packed_input_ids,
         cu_seqlens=cu_seqlens,
         prompts=input_ids,
@@ -150,13 +146,11 @@ def random_sample(bs, seq_len, vocab_size):
     from flash_attn.bert_padding import unpad_input
     import torch
 
-    import reallm.base.constants
-    import reallm.base.namedarray
     input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)
     packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
     prompt_mask = torch.zeros_like(packed_input_ids)
-    data = reallm.base.namedarray.NamedArray(
+    data = namedarray.NamedArray(
         packed_input_ids=packed_input_ids,
         cu_seqlens=cu_seqlens,
         prompts=input_ids,
@@ -228,6 +222,7 @@ def get_llama7b_flash_config():
 
 def get_llama_config(size):
     from reallm.impl.model.nn.real_llm_base import FlashMQATConfig
+
     if size == 7:
         size_args = dict(
             n_layers=40,

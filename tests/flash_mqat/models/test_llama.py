@@ -13,7 +13,7 @@ from reallm.impl.model.nn.real_llm_base import (flash_model_embed_param_count, f
                                                 VocabPositionEmbedding)
 from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from tests.utils import init_global_constants, MODEL_NAME
-import reallm.base.constants
+import reallm.base.constants as constants
 
 torch.cuda.manual_seed_all(2)
 
@@ -55,7 +55,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
             dtype=torch.float16, device=device)
         cls.llama.eval()
 
-        with reallm.base.constants.model_scope(MODEL_NAME):
+        with constants.model_scope(MODEL_NAME):
             cls.hf_like_model = ReaLModel.from_llama(from_model=cls.llama, dtype=torch.float16, device=device)
             cls.hf_like_model = add_helper_functions(cls.hf_like_model)
             cls.hf_like_model.eval()
@@ -107,7 +107,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
     def testForward(self):
         seqlen_c = [20, 128]
         with_mask_c = [False, True]
-        with reallm.base.constants.model_scope(MODEL_NAME):
+        with constants.model_scope(MODEL_NAME):
             for with_mask, seqlen in itertools.product(with_mask_c, seqlen_c):
                 self._hf_like_forward(with_mask, seqlen)
 
@@ -145,7 +145,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
     def testGenerate(self):
         max_prompt_len_c = [10, 32, 64]
         with_mask_c = [False, True]
-        with reallm.base.constants.model_scope(MODEL_NAME):
+        with constants.model_scope(MODEL_NAME):
             for max_prompt_len, with_mask in itertools.product(max_prompt_len_c, with_mask_c):
                 self._generate(max_prompt_len, with_mask)
 

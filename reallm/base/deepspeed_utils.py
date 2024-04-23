@@ -9,7 +9,7 @@ import torch
 import torch.distributed
 
 from reallm.impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.base.logging as logging
 
 DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU = 32  # A place-holder for inference.
@@ -83,7 +83,7 @@ def get_eval_ds_config(offload=False, stage=0, enable_fp16: bool = True, enable_
         "steps_per_print": 10,
         "zero_optimization": zero_opt_dict,
         "train_micro_batch_size_per_gpu": DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU,
-        "train_batch_size": torch.distributed.get_world_size(group=base.constants.data_parallel_group()) *
+        "train_batch_size": torch.distributed.get_world_size(group=constants.data_parallel_group()) *
         DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU,
         "fp16": {
             "enabled": enable_fp16,
@@ -137,7 +137,7 @@ def deepspeed_initialize(
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
     if mpu is None:
-        mpu = reallm.base.constants.grid()
+        mpu = constants.grid()
     if engine_type == "deepspeed":
         # Disable zero.Init context if it's currently enabled
         zero.partition_parameters.shutdown_init_context()

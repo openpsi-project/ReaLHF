@@ -12,7 +12,7 @@ import tqdm
 from reallm.api.core.dfg import ModelInterfaceType
 from reallm.profiler.multi_host_main import main
 from reallm.profiler.utils import find_factors
-import reallm.base.constants
+import reallm.base.constants as constants
 
 
 def get_n_gpus(main_model_size: int, case):
@@ -122,8 +122,7 @@ if __name__ == "__main__":
 
     for expr_name, gpu in tqdm.tqdm(zip(expr_names, n_gpus), total=len(expr_names)):
         if all([
-                os.path.exists(
-                    os.path.join(base.constants.LOG_ROOT, expr_name, trial_name, f"kernel_time{i}.pkl"))
+                os.path.exists(os.path.join(constants.LOG_ROOT, expr_name, trial_name, f"kernel_time{i}.pkl"))
                 for i in range(gpu)
         ]):
             continue

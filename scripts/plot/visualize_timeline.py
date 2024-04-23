@@ -10,7 +10,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 import tqdm
 
-from reallm.api..config.config_base import ModelName
+from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelName, ModelType
+from reallm.api.core.model_api import FLASH_MODEL_CONFIG_CONVERTER
 from reallm.base.monitor import CUDATimeMarkType, TimeMarkEntry
 
 

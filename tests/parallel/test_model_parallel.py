@@ -11,7 +11,7 @@ from reallm.api.core import dfg, model_api, system_api
 from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelType
 from reallm.base.monitor import get_tracer
 from tests.utils import *
-import reallm.base.constants
+import reallm.base.constants as constants
 
 # mp2pp4 8.4 0.57 mp4pp2 7.84 0.53
 NUM_MP = 4
@@ -95,7 +95,7 @@ def make_model(device):
 
 
 def init_handles(rank):
-    with reallm.base.constants.model_scope(MODEL_NAME):
+    with constants.model_scope(MODEL_NAME):
         device = setup_gpu(rank, WORLD_SIZE)
         init_global_constants(NUM_DP, NUM_MP, NUM_PP)
         torch_dist_rank = torch.distributed.get_rank()
@@ -124,8 +124,8 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     # packed_input_ids = data['packed_input_ids']
     # cu_seqlens = data['cu_seqlens']
     # max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
-    import reallm.base.constants
-    with reallm.base.constants.model_scope(MODEL_NAME):
+    import reallm.base.constants as constants
+    with constants.model_scope(MODEL_NAME):
         model.module.eval()
 
         st = time.monotonic()
@@ -148,9 +148,9 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
                 logits = gather_from_tensor_model_parallel_region(logits)
                 print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
 
-        import reallm.base.constants
+        import reallm.base.constants as constants
 
-        if reallm.base.constants.pipe_parallel_rank() == NUM_PP - 1:
+        if constants.pipe_parallel_rank() == NUM_PP - 1:
             res_queue.put(logits)
         time.sleep(2)
 
@@ -158,11 +158,11 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
 def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
     # data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
-    import reallm.base.constants
+    import reallm.base.constants as constants
 
     # os.environ["DLLM_TRACE"] = "1"
 
-    with reallm.base.constants.model_scope(MODEL_NAME):
+    with constants.model_scope(MODEL_NAME):
         tracer = get_tracer(tracer_entries=int(2e6),
                             max_stack_depth=10,
                             ignore_c_function=False,
@@ -195,9 +195,9 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
 
     import os
 
-    import reallm.base.constants
+    import reallm.base.constants as constants
 
-    with reallm.base.constants.model_scope(MODEL_NAME):
+    with constants.model_scope(MODEL_NAME):
         # os.environ["DLLM_TRACE"] = "1"
         tracer = get_tracer(
             tracer_entries=int(2e6),
@@ -293,7 +293,7 @@ def run_linear(rank: int, res_queue: mp.Queue, seed: int):
     import torch.distributed as dist
 
     from reallm.impl.model.parallelism.model_parallel.modules import ColumnParallelLinear, RowParallelLinear
-    import reallm.base.constants
+    import reallm.base.constants as constants
 
     # device, model, backend, interface = init_handles(rank)
 
@@ -322,8 +322,8 @@ def run_linear(rank: int, res_queue: mp.Queue, seed: int):
     col = ColumnParallelLinear(1024, 2048, bias=False, dtype=torch.float, device=device)
     row = RowParallelLinear(2048, 1024, bias=False, dtype=torch.float, device=device)
 
-    mp_rank = reallm.base.constants.model_parallel_rank()
-    mp_ws = reallm.base.constants.model_parallel_world_size()
+    mp_rank = constants.model_parallel_rank()
+    mp_ws = constants.model_parallel_world_size()
     w1 = w1.split(2048 // mp_ws, dim=0)[mp_rank]
     w2 = w2.split(2048 // mp_ws, dim=1)[mp_rank]
     col.load_state_dict({"weight": w1})

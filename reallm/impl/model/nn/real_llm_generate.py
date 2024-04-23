@@ -11,12 +11,11 @@ import torch.utils.checkpoint
 import transformers
 
 from reallm.api.quickstart.model import FlashMQATConfig
+# import reallm.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
+from reallm.base import constants, logging
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import mask_eos_token
 from reallm.impl.model.utils.logits_warper import top_k_top_p_logits
-# import reallm.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
-import reallm.base.constants
-import reallm.base.logging as logging
 
 try:
     from flash_attn.bert_padding import index_first_axis, unpad_input
@@ -68,7 +67,7 @@ def genstep(
             unfinished_sequences: Bool tensor indicator of whether a sequence is finished.
                 Shape [bs].
     """
-    if reallm.base.constants.model_parallel_world_size() > 1:
+    if constants.model_parallel_world_size() > 1:
         from reallm.impl.model.parallelism.model_parallel.mappings import \
             gather_from_tensor_model_parallel_region
 
@@ -103,19 +102,19 @@ def genstep(
     next_tokens = distrb.mode if gconfig.greedy else distrb.sample()
     logprob = distrb.log_prob(next_tokens)
 
-    if reallm.base.constants.model_parallel_world_size() > 1:
-        if reallm.base.constants.model_parallel_rank() > 0:
+    if constants.model_parallel_world_size() > 1:
+        if constants.model_parallel_rank() > 0:
             logprob[:] = 0
             next_tokens[:] = 0
         handle = torch.distributed.all_reduce(
             logprob,
             torch.distributed.ReduceOp.SUM,
             async_op=True,
-            group=base.constants.model_parallel_group(),
+            group=constants.model_parallel_group(),
         )
         torch.distributed.all_reduce(next_tokens,
                                      torch.distributed.ReduceOp.SUM,
-                                     group=base.constants.model_parallel_group())
+                                     group=constants.model_parallel_group())
 
     if tokenizer.eos_token_id is not None:
         if tokenizer.pad_token_id is None:
@@ -136,7 +135,7 @@ def genstep(
     if logits_mask.all():
         logits_mask = None
 
-    if reallm.base.constants.model_parallel_world_size() > 1:
+    if constants.model_parallel_world_size() > 1:
         handle.wait()
 
     return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
@@ -316,7 +315,7 @@ def generate(
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             # fix of a flash attention bug
             kvcache_seqlen = max(
-                reallm.base.constants.dataset_max_seqlen() + gconfig.max_new_tokens,
+                constants.dataset_max_seqlen() + gconfig.max_new_tokens,
                 mconfig.hidden_dim // mconfig.head_dim + 10,
             )
             # TODO: since pytorch all-reduce has bug during capturing and vllm all-reduce does not support >8 GPUs,

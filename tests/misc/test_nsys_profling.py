@@ -12,7 +12,7 @@ import torch.profiler
 
 from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_flash_config, get_memory,
                          init_global_constants, MODEL_NAME, setup_barrier, setup_gpu)
-import reallm.base.constants
+import reallm.base.constants as constants
 
 COMPUTE_KERNEL_KEYS = [
     "elementwise_kernel",
@@ -101,12 +101,12 @@ def test_impl(world_size, profile: bool):
 
     torch.distributed.barrier()
     mconfig = get_llama7b_flash_config()
-    with reallm.base.constants.model_scope(MODEL_NAME):
+    with constants.model_scope(MODEL_NAME):
         m = ReaLModel(mconfig, device=torch.device("cuda:0"), dtype=torch.float16)
         m.instantiate()
         torch.cuda.synchronize()
         print("After model instantiation", get_memory(0))
-        if reallm.base.constants.pipe_parallel_world_size() == 1:
+        if constants.pipe_parallel_world_size() == 1:
             add_helper_functions(m)
             engine = m
         else:
@@ -123,7 +123,7 @@ def test_impl(world_size, profile: bool):
             torch.cuda.synchronize()
             tik = time.perf_counter()
         with torch.no_grad():
-            if reallm.base.constants.pipe_parallel_world_size() == 1:
+            if constants.pipe_parallel_world_size() == 1:
                 y = engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
                 for _ in range(5):
                     engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)

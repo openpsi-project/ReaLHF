@@ -10,7 +10,7 @@ import torch.distributed as dist
 
 from reallm.base.network import gethostname
 import reallm.base.cluster
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Profile", "benchmark")
@@ -135,8 +135,8 @@ class ProfileCommunication:
             reallm.base.cluster.spec.fileroot,
             "logs",
             getpass.getuser(),
-            reallm.base.constants.experiment_name(),
-            reallm.base.constants.trial_name(),
+            constants.experiment_name(),
+            constants.trial_name(),
             "profile_result",
         )
         dump_path = os.path.join(DUMP_DIR, self.device_mesh_name,

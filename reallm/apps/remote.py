@@ -10,11 +10,8 @@ import torch
 
 multiprocessing.set_start_method("spawn", force=True)
 
+from reallm.base import constants, gpu_utils, logging, name_resolve, names
 from reallm.base.constants import QUICKSTART_EXPR_CACHE_PATH
-import reallm.base.gpu_utils as gpu_utils
-import reallm.base.logging as logging
-import reallm.base.name_resolve as name_resolve
-import reallm.base.names as names
 
 RAY_HEAD_WAIT_TIME = 500
 logger = logging.getLogger("Main-Workers")
@@ -26,9 +23,9 @@ def main_reset_name_resolve(args):
 
 
 def main_worker(args):
-    import reallm.base.constants
+    import reallm.base.constants as constants
 
-    reallm.base.constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
+    constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
     worker_index_start = args.jobstep_id * args.wprocs_per_jobstep + args.wproc_offset
     worker_index_end = min(worker_index_start + args.wprocs_per_jobstep,
@@ -113,12 +110,12 @@ def main_controller(args):
             ignore_worker_error: bool, if False, stop the experiment when any worker(s) fail.
     """
     import reallm.api.core.system_api as system_api
-    import reallm.base.constants
+    import reallm.base.constants as constants
     import reallm.experiments
     import reallm.profiler.experiments
     import reallm.system as system
 
-    reallm.base.constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
+    constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
     if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
         with open(QUICKSTART_EXPR_CACHE_PATH, "rb") as f:

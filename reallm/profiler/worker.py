@@ -33,7 +33,7 @@ import reallm.api.core.dfg
 import reallm.api.core.model_api as model_api
 # from reallm.impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
 import reallm.api.core.system_api as config_package
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.logging as logging
 import reallm.base.namedarray as namedarray
@@ -125,7 +125,7 @@ class ProfileWorker(worker_base.Worker):
 
     def __lazy_setup(self):
         """Setup pytorch ddp processes, and algorithms."""
-        # reallm.base.constants.set_model_name(self.config.model_name)
+        # constants.set_model_name(self.config.model_name)
 
         self.__pg_info = gpu_utils.setup_ddp_single_model(
             self.__experiment_name,
@@ -133,11 +133,11 @@ class ProfileWorker(worker_base.Worker):
             self.model_name,
             self.__worker_index,
         )
-        reallm.base.constants.set_parallelism_group(
+        constants.set_parallelism_group(
             self.model_name,
             dist.group.WORLD,
         )
-        reallm.base.constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
+        constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
 
         deepspeed.init_distributed()
 
@@ -146,8 +146,8 @@ class ProfileWorker(worker_base.Worker):
             topology=topo,
             process_group=dist.group.WORLD,
         )
-        reallm.base.constants.set_grid(self.model_name, grid)
-        reallm.base.constants.set_rank_mapping(self.model_name, topo)
+        constants.set_grid(self.model_name, grid)
+        constants.set_rank_mapping(self.model_name, topo)
 
         logger.info(f"SetUp Information - Model worker index {self.__worker_index}"
                     f' type "{self.model_name}" located at '
@@ -165,8 +165,8 @@ class ProfileWorker(worker_base.Worker):
             self.__profile_comm = ProfileCommunication("comm", self.__device, self.__pg_info.local_gpu_id,
                                                        self.__pg_info.global_rank, self.__pg_info.world_size)
 
-        with reallm.base.constants.model_scope(self.model_name):
-            reallm.base.constants.set_max_seqlen(max(self.seq_len_list))
+        with constants.model_scope(self.model_name):
+            constants.set_max_seqlen(max(self.seq_len_list))
             self.__interface = model_api.make_interface(self.interface_config)
             self.__backend = model_api.make_backend(self.backend_config)
 
@@ -174,7 +174,7 @@ class ProfileWorker(worker_base.Worker):
             self.__engine = None
 
     def __reinit_backend(self, bs, seq_len):
-        with reallm.base.constants.model_scope(self.model_name):
+        with constants.model_scope(self.model_name):
             self.__model = model_api.make_model(
                 self.model_config,
                 name=self.model_name,
@@ -187,18 +187,18 @@ class ProfileWorker(worker_base.Worker):
             # print(self.__nn_config)
             self.__vocab_size = self.__nn_config.vocab_size
 
-            bs_per_device = bs // reallm.base.constants.data_parallel_world_size()
+            bs_per_device = bs // constants.data_parallel_world_size()
             ft_spec = model_api.FinetuneSpec(10, 100, 10, bs_per_device, seq_len)
             self.__model = self.__backend.initialize(self.__model, ft_spec)
             self.__engine = self.__model.module
 
     def __run_model_function_call(self, rpc: reallm.api.core.dfg.ModelRPC, bs,
                                   seq_len) -> worker_base.PollResult:
-        with reallm.base.constants.model_scope(self.model_name):
+        with constants.model_scope(self.model_name):
             # initialize
             func_name = rpc.interface_type.value
-            num_pp = reallm.base.constants.pipe_parallel_world_size()
-            num_dp = reallm.base.constants.data_parallel_world_size()
+            num_pp = constants.pipe_parallel_world_size()
+            num_dp = constants.data_parallel_world_size()
             if bs < 2 * num_pp * num_dp and func_name == "train_step":
                 return worker_base.PollResult(sample_count=0, batch_count=0)
             elif bs < num_pp * num_dp:
@@ -223,7 +223,7 @@ class ProfileWorker(worker_base.Worker):
                 import pickle
                 kernel_time = CUDAKernelTime.from_profiler(p)
                 with open(
-                        os.path.join(base.constants.LOG_ROOT, self.__experiment_name, self.__trial_name,
+                        os.path.join(constants.LOG_ROOT, self.__experiment_name, self.__trial_name,
                                      f"kernel_time{self.__worker_index}.pkl"), 'wb') as f:
                     pickle.dump(kernel_time, f)
 

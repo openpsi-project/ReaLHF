@@ -7,7 +7,7 @@ import time
 import viztracer
 
 from reallm.base.monitor import get_tracer
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.base.topology
 
 NUM_PP = 4
@@ -18,10 +18,10 @@ WORLD_SIZE = NUM_PP * NUM_MP * NUM_DP
 
 def setup(rank):
     os.environ["DLLM_TRACE"] = "1"
-    reallm.base.constants.set_experiment_trial_names("test", "test")
-    reallm.base.constants.set_model_name("test_model")
+    constants.set_experiment_trial_names("test", "test")
+    constants.set_model_name("test_model")
     topo = reallm.base.topology.PipeModelDataParallelTopology(num_pp=NUM_PP, num_mp=NUM_MP, num_dp=NUM_DP)
-    reallm.base.constants.set_fake_grid("test_model", rank, topo)
+    constants.set_fake_grid("test_model", rank, topo)
 
 
 def rank_print(rank, *args, **kwargs):
@@ -51,7 +51,7 @@ def main(rank):
         controller = EngineScheduleController(NUM_PP)
         controller.start()
 
-    client = EngineScheduleClient(stage_id=base.constants.pipe_parallel_rank())
+    client = EngineScheduleClient(stage_id=constants.pipe_parallel_rank())
 
     time.sleep(0.5)
     rank_print(rank, "Setup complete")

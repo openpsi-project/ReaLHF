@@ -13,7 +13,7 @@ import psutil
 import pynvml
 import viztracer
 
-import reallm.base.constants
+import reallm.base.constants as constants
 import reallm.base.logging as logging
 
 if TYPE_CHECKING:
@@ -450,9 +450,9 @@ def dump_tmark_db(worker_idx):
     if os.getenv("DLLM_CUDA_TMARK", None) != "1":
         return
     fn = os.path.join(
-        reallm.base.constants.LOG_ROOT,
-        reallm.base.constants.experiment_name(),
-        reallm.base.constants.trial_name(),
+        constants.LOG_ROOT,
+        constants.experiment_name(),
+        constants.trial_name(),
         f"time_marks{worker_idx}.pkl",
     )
     global TIME_MARK_DB
