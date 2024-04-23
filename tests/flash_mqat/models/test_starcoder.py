@@ -5,11 +5,12 @@ import torch
 import transformers
 
 from reallm.impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig, vanilla_cpu_generate,
-                                                     vanilla_packed_generate)
+                                                            vanilla_packed_generate)
 from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import gather_shifted_log_probs
-from tests.utils import *
 import reallm.api.huggingface
+
+from tests.utils import *
 
 torch.cuda.manual_seed_all(0)
 

@@ -2,22 +2,23 @@ from collections import defaultdict
 from typing import Any, Callable, Dict, Optional, Union
 import abc
 import dataclasses
+import os
 
 import deepspeed
 import torch
 import torch.utils.data
 import transformers
-import os
 
 from reallm.api.core.config import ModelName
 from reallm.base.namedarray import NamedArray
-import reallm.api.core.system
 import reallm.api.core.dfg
+import reallm.api.core.system
 import reallm.base.logging as logging
 
 logger = logging.getLogger("model")
 
 NeuralNetwork = Union[deepspeed.DeepSpeedEngine, transformers.PreTrainedModel, torch.nn.Module]
+
 
 def load_hf_tokenizer(model_name_or_path: str,
                       fast_tokenizer=True,
@@ -43,6 +44,7 @@ def load_hf_tokenizer(model_name_or_path: str,
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
     return tokenizer
+
 
 @dataclasses.dataclass
 class ModelVersion:
@@ -161,8 +163,7 @@ def make_model_wrapper(cfg: reallm.api.core.system.ModelWrapper) -> Callable[[Mo
     return cls_(**cfg.args)
 
 
-def make_model(cfg: reallm.api.core.system.Model, name: ModelName, device: Union[str,
-                                                                                   torch.device]) -> Model:
+def make_model(cfg: reallm.api.core.system.Model, name: ModelName, device: Union[str, torch.device]) -> Model:
     logger.info(f"making model {cfg.type_} on {device}")
     model_cls = ALL_MODEL_CLASSES[cfg.type_]
     model = model_cls(**cfg.args, name=name, device=device)

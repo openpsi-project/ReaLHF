@@ -2,8 +2,9 @@
 
 import torch
 
-from .utils import split_tensor_along_last_dim
 from reallm.base.constants import *
+
+from .utils import split_tensor_along_last_dim
 
 
 def _reduce(input_):

@@ -50,10 +50,11 @@ def main(rank: int = None, world_size: int = None):
 
     deepspeed.init_distributed()
 
-    from .test_model_parallel import init_global_constants
     from reallm.impl.model.parallelism.model_parallel.mappings import gather_from_tensor_model_parallel_region
     from reallm.impl.model.parallelism.model_parallel.modules import (
         ColumnParallelLinear, merged_linear_with_grad_accumulation_and_async_allreduce)
+
+    from .test_model_parallel import init_global_constants
 
     NUM_MP = 8
     NUM_PP = NUM_DP = 1

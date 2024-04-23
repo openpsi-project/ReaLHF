@@ -21,13 +21,14 @@ import torch.distributed
 
 from reallm.api.core.config import ModelName
 from reallm.api.quickstart.model import FlashMQATConfig
-from reallm.base.asyncio_utils import raise_asyncio_exception, setup_run_until_complete, teardown_run_util_complete
+from reallm.base.asyncio_utils import (raise_asyncio_exception, setup_run_until_complete,
+                                       teardown_run_util_complete)
 from reallm.base.buffer import AsyncIOSequenceBuffer
 from reallm.base.cluster import spec as cluster_spec
 from reallm.base.constants import MODEL_SAVE_ROOT
 import reallm.api.core.config
-import reallm.api.core.system as config_pkg
 import reallm.api.core.dfg
+import reallm.api.core.system as config_pkg
 import reallm.api.data as data_api
 import reallm.api.model as model_api
 import reallm.base.datapack as datapack
@@ -38,6 +39,7 @@ import reallm.base.numpy_utils
 import reallm.base.timeutil
 import reallm.base.topology
 import reallm.base.topology as topology
+
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
@@ -1069,7 +1071,7 @@ class MasterWorker(worker_base.Worker):
         # calculate flops
         #########################################
         from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
-                                  calculate_llama_train_flops)
+                                         calculate_llama_train_flops)
 
         flops = 0
         for train_bs, train_seqlens, flash_config in zip(

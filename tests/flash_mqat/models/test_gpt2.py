@@ -10,8 +10,9 @@ import torch
 import transformers
 
 from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
-from tests.utils import init_global_constants
 import reallm.api.huggingface
+
+from tests.utils import init_global_constants
 
 
 class FlashMQATGPT2Test(unittest.TestCase):

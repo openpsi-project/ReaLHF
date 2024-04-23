@@ -14,8 +14,9 @@ import transformers
 from reallm.base.topology import *
 from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from reallm.impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, OutputHead,
-                                                      SequenceParallelActorHead, SequenceParallelCriticHead,
-                                                      VocabPositionEmbedding)
+                                                             SequenceParallelActorHead,
+                                                             SequenceParallelCriticHead,
+                                                             VocabPositionEmbedding)
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 import reallm.api.core.system as config_package
 import reallm.api.huggingface

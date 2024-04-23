@@ -31,10 +31,11 @@ def rank_print(rank, *args, **kwargs):
 def main(rank):
     setup(rank)
 
-    from reallm.impl.model.backend.pipe_engine.dynamic_schedule import (DynamicPipeSchedule, GenerationSchedule,
-                                                                 InferenceSchedule, Train1F1BSchedule)
+    from reallm.impl.model.backend.pipe_engine.dynamic_schedule import (DynamicPipeSchedule,
+                                                                        GenerationSchedule, InferenceSchedule,
+                                                                        Train1F1BSchedule)
     from reallm.impl.model.backend.pipe_engine.schedule_controller import (EngineScheduleClient,
-                                                                    EngineScheduleController)
+                                                                           EngineScheduleController)
 
     # tracer = get_tracer(
     #         tracer_entries=int(2e6),

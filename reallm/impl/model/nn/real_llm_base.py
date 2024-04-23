@@ -13,12 +13,13 @@ import transformers
 from reallm.api.quickstart.model import FlashMQATConfig
 from reallm.impl.model.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
 from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, parallel_lm_logits,
-                                                           ParallelEmbedding, RowParallelLinear)
+                                                                  ParallelEmbedding, RowParallelLinear)
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import compute_varlen_position_indices
 from reallm.impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
 import reallm.base.constants
 import reallm.base.logging as logging
+
 import impl.model.parallelism.model_parallel.mappings as tensor_parallel
 
 logger = logging.getLogger("FlashMQATBase")

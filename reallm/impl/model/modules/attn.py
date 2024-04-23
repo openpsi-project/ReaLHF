@@ -4,11 +4,13 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 
+from reallm.impl.model.parallelism.model_parallel.modules import RowParallelLinear
+from reallm.impl.model.utils.functional import (apply_rotary_varlen, compute_varlen_position_indices,
+                                                torch_attn_func)
+import reallm.base.logging as logging
+
 from .mlp import LayerNormQKVLinear
 from .rotary import RotaryEmbedding
-from reallm.impl.model.parallelism.model_parallel.modules import RowParallelLinear
-from reallm.impl.model.utils.functional import apply_rotary_varlen, compute_varlen_position_indices, torch_attn_func
-import reallm.base.logging as logging
 
 try:
     from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,

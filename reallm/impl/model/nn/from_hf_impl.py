@@ -5,7 +5,8 @@ import torch
 import transformers
 
 from reallm.api.quickstart.model import (convert_config_llama, convert_config_starcoder, FlashMQATConfig,
-                                           gpt2_config_converter)
+                                         gpt2_config_converter)
+
 from .real_llm_api import FlashMQATModel
 
 try:

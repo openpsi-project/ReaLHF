@@ -10,10 +10,9 @@ import os
 import sys
 
 from reallm.api.core.config import *
-import reallm.api.core.dfg
 from reallm.base.cluster import spec as cluster_spec
 from reallm.base.constants import (DATASET_CACHE_PATH, PYTORCH_KERNEL_CACHE_PATH, TORCH_EXTENSIONS_DIR,
-                            TRITON_CACHE_PATH)
+                                   TRITON_CACHE_PATH)
 import reallm.api.core.dfg
 import reallm.base.topology
 

@@ -23,9 +23,10 @@ import torch.distributed
 import torch.profiler
 
 from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelType
-from tests.utils import *
 import reallm.api.core.system as config_package
 import reallm.base.constants
+
+from tests.utils import *
 
 ## performance related config
 PROFILE_INTERFACE_TYPE = "inference"
@@ -88,6 +89,7 @@ def make_interface():
 
 def make_model(device):
     import reallm.api.model
+
     import impl.model.nn.flash_mqat.flash_mqat_api
 
     # from_type = "self" if NUM_PP == 1 else "empty_actor"
@@ -181,7 +183,8 @@ def main(rank: int = None, world_size: int = None):
     os.makedirs(dirname, exist_ok=True)
 
     def trace_handler(p: torch.profiler._KinetoProfile):
-        if reallm.base.constants.model_parallel_rank() == 0 and reallm.base.constants.data_parallel_rank() == 0:
+        if reallm.base.constants.model_parallel_rank() == 0 and reallm.base.constants.data_parallel_rank(
+        ) == 0:
             print(p.key_averages(group_by_input_shape=True).table(sort_by="cuda_memory_usage", row_limit=20))
             p.export_chrome_trace(os.path.join(dirname, f"rank{rank}.json"))
 
@@ -205,7 +208,8 @@ def main(rank: int = None, world_size: int = None):
                 gconfig = GenerationConfig(min_new_tokens=10, max_new_tokens=10)
                 res = interface.generate(model, data, gconfig=gconfig)
         torch.cuda.synchronize()
-        if (base.constants.model_parallel_rank() == 0 and reallm.base.constants.pipe_parallel_rank() == NUM_PP - 1):
+        if (base.constants.model_parallel_rank() == 0
+                and reallm.base.constants.pipe_parallel_rank() == NUM_PP - 1):
             if PROFILE_INTERFACE_TYPE == "generate":
                 print(
                     f"generate {res['gen_tokens'].shape[1]} tokens * batch size {res['gen_tokens'].shape[0]}, "

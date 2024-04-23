@@ -16,47 +16,31 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
-
 from reallm.api.core.config import ModelName
 from reallm.api.quickstart.model import FlashMQATConfig
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
-from .real_llm_generate import generate, GenerationConfig
-from .real_llm_base import (
-    flash_model_embed_param_count,
-    flash_model_embedding_param_keys,
-    flash_model_head_param_count,
-    flash_model_head_param_keys,
-    flash_model_tblock_param_count,
-    flash_model_tblock_param_keys,
-    FlashMQATBlock,
-    OutputHead,
-    SequenceParallelActorHead,
-    SequenceParallelCriticHead,
-    VocabPositionEmbedding,
-)
-from .real_llm_parallel import (
-    get_flash_model_param_shape,
-    intervals_partition_fn,
-    mp_merge_flash_mqat_state_dict,
-    mp_partition_flash_mqat_state_dict,
-    mp_partition_key,
-    partition_pipeline_layers,
-    pipeline_repartition_strategy,
-    shape_partition_fn,
-)
-from reallm.impl.model.parallelism.model_parallel.modules import (
-    ColumnParallelLinear,
-    ParallelEmbedding,
-    RowParallelLinear,
-)
-from reallm.impl.model.utils.data import DuckGenerationOutput, DuckModelOutput, PipeCacheData, PipeTransferData
+from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
+                                                                  RowParallelLinear)
+from reallm.impl.model.utils.data import (DuckGenerationOutput, DuckModelOutput, PipeCacheData,
+                                          PipeTransferData)
 from reallm.impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
-import reallm.api.core.system as system_api
 import reallm.api.core.model as model_api
+import reallm.api.core.system as system_api
 import reallm.base.constants as constants
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.logging as logging
 import reallm.base.topology as topology
+
+from .real_llm_base import (flash_model_embed_param_count, flash_model_embedding_param_keys,
+                            flash_model_head_param_count, flash_model_head_param_keys,
+                            flash_model_tblock_param_count, flash_model_tblock_param_keys, FlashMQATBlock,
+                            OutputHead, SequenceParallelActorHead, SequenceParallelCriticHead,
+                            VocabPositionEmbedding)
+from .real_llm_generate import generate, GenerationConfig
+from .real_llm_parallel import (get_flash_model_param_shape, intervals_partition_fn,
+                                mp_merge_flash_mqat_state_dict, mp_partition_flash_mqat_state_dict,
+                                mp_partition_key, partition_pipeline_layers, pipeline_repartition_strategy,
+                                shape_partition_fn)
 
 try:
     from flash_attn.bert_padding import pad_input, unpad_input
@@ -138,7 +122,7 @@ def slice_intervals(
 ) -> torch.Tensor:
     assert len(tensor.shape) == 1
     if len(intervals_cpu) == 1:
-        return tensor[intervals_cpu[0][0] : intervals_cpu[0][1]]
+        return tensor[intervals_cpu[0][0]:intervals_cpu[0][1]]
     elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
         return torch.cat([tensor[start:end] for start, end in intervals_cpu])
     try:
@@ -171,7 +155,7 @@ def set_intervals(
     if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
         offset = 0
         for i, j in intervals_cpu:
-            dst[i:j] = src[offset : offset + j - i]
+            dst[i:j] = src[offset:offset + j - i]
             offset += j - i
         assert offset == src.shape[0]
         return
@@ -193,7 +177,7 @@ def set_intervals(
         logger.warning("interval_op_cuda not found, falling back to PyTorch implementation.")
         offset = 0
         for i, j in intervals_cpu:
-            dst[i:j] = src[offset : offset + j - i]
+            dst[i:j] = src[offset:offset + j - i]
             offset += j - i
         assert offset == src.shape[0]
         return
@@ -250,11 +234,11 @@ def _param_intervals_from_keys(
     intervals = []
     for k in sd_keys:
         if (
-            model_name,
-            k.split(".", 1)[1],
-            mp_size,
-            portion_rank,
-            portion_size,
+                model_name,
+                k.split(".", 1)[1],
+                mp_size,
+                portion_rank,
+                portion_size,
         ) not in _FLAT_PARAM_INDICES_CACHE:
             zero_start_intervals = mp_partition_key(
                 k,
@@ -264,13 +248,11 @@ def _param_intervals_from_keys(
                 config,
                 partition_fn=intervals_partition_fn,
             )
-            _FLAT_PARAM_INDICES_CACHE[
-                (model_name, k.split(".", 1)[1], mp_size, portion_rank, portion_size)
-            ] = zero_start_intervals
+            _FLAT_PARAM_INDICES_CACHE[(model_name, k.split(".", 1)[1], mp_size, portion_rank,
+                                       portion_size)] = zero_start_intervals
         else:
-            zero_start_intervals = _FLAT_PARAM_INDICES_CACHE[
-                (model_name, k.split(".", 1)[1], mp_size, portion_rank, portion_size)
-            ]
+            zero_start_intervals = _FLAT_PARAM_INDICES_CACHE[(model_name, k.split(".", 1)[1], mp_size,
+                                                              portion_rank, portion_size)]
         intervals += (zero_start_intervals + param_spec[k].start_idx).tolist()
     # assert len(set([x[0] for x in intervals])) == len(intervals)
     intervals = sorted(intervals, key=lambda x: x[0])
@@ -322,9 +304,8 @@ def _disable_sequence_parallel_of_module(l: nn.Module):
     assert len(_states) == 0
 
 
-def _build_param_spec(
-    layer_indices: List[int], config: FlashMQATConfig, mp_size: int
-) -> Tuple[Dict[str, ContiguousParamSpec], int]:
+def _build_param_spec(layer_indices: List[int], config: FlashMQATConfig,
+                      mp_size: int) -> Tuple[Dict[str, ContiguousParamSpec], int]:
     if len(layer_indices) == 0:
         return {}, 0
     param_spec = {}
@@ -356,7 +337,7 @@ def map_param_to_contigous_memory(
         for k, v in l.named_parameters():
             spec = param_spec[f"{layer_idx}.{k}"]
             old_param_data = v.data
-            recursive_getattr(l, k).data = contiguous_param[spec.start_idx : spec.end_idx].view(spec.shape)
+            recursive_getattr(l, k).data = contiguous_param[spec.start_idx:spec.end_idx].view(spec.shape)
             # This is for reward model. We should initialize the reward head instead of letting it be all-zero.
             if old_param_data.shape == spec.shape:
                 v.data.copy_(old_param_data)
@@ -399,16 +380,15 @@ def _derive_reparallelize_comm_plan(
     assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
     for k, v in dataclasses.asdict(to_model_config).items():
         if k not in [
-            "is_critic",
-            "sequence_parallel",
-            "gradient_accumulation_fusion",
-            "ckpt_attn",
-            "ckpt_mlp",
+                "is_critic",
+                "sequence_parallel",
+                "gradient_accumulation_fusion",
+                "ckpt_attn",
+                "ckpt_mlp",
         ] and v != getattr(from_model_config, k):
             raise ValueError(
                 f"Can't load a checkpoint with different config (key `{k}`, "
-                f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`)."
-            )
+                f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`).")
     if (from_model_config.n_kv_heads % src_mp_size == 0) != (from_model_config.n_kv_heads % dst_mp_size == 0):
         raise ValueError("Whether to partition kv heads should remain the same.")
 
@@ -433,15 +413,13 @@ def _derive_reparallelize_comm_plan(
     if constants.has_model_name(from_model_name):
         with constants.model_scope(from_model_name):
             from_layer_indices = from_layer_mapping[constants.pipe_parallel_rank()]
-            from_model_param_specs, _ = _build_param_spec(
-                from_layer_indices, from_model_config, from_topo.get_dim("model")
-            )
+            from_model_param_specs, _ = _build_param_spec(from_layer_indices, from_model_config,
+                                                          from_topo.get_dim("model"))
     if constants.has_model_name(to_model_name):
         with constants.model_scope(to_model_name):
             to_layer_indices = to_layer_mapping[constants.pipe_parallel_rank()]
-            to_model_param_specs, _ = _build_param_spec(
-                to_layer_indices, to_model_config, to_topo.get_dim("model")
-            )
+            to_model_param_specs, _ = _build_param_spec(to_layer_indices, to_model_config,
+                                                        to_topo.get_dim("model"))
 
     comm_plan = []
 
@@ -496,15 +474,14 @@ def _derive_reparallelize_comm_plan(
                                 portion_rank=sender_mp_portion_id,
                             )
                             if len(param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
-                                param_intervals_cpu = _split_intervals(
-                                    param_intervals_cpu, CUDA_INTERVAL_OP_CHUNK_SIZE
-                                )
+                                param_intervals_cpu = _split_intervals(param_intervals_cpu,
+                                                                       CUDA_INTERVAL_OP_CHUNK_SIZE)
                                 max_param_interval_size = CUDA_INTERVAL_OP_CHUNK_SIZE
                             else:
                                 max_param_interval_size = max(j - i for i, j in param_intervals_cpu)
-                            param_intervals = torch.tensor(
-                                param_intervals_cpu, dtype=torch.long, device="cuda"
-                            )
+                            param_intervals = torch.tensor(param_intervals_cpu,
+                                                           dtype=torch.long,
+                                                           device="cuda")
                         if torch.distributed.get_rank() in dst_ranks:
                             receiver_param_intervals_cpu = _param_intervals_from_keys(
                                 model_name=to_model_name,
@@ -517,16 +494,14 @@ def _derive_reparallelize_comm_plan(
                             )
                             if len(receiver_param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
                                 receiver_param_intervals_cpu = _split_intervals(
-                                    receiver_param_intervals_cpu, CUDA_INTERVAL_OP_CHUNK_SIZE
-                                )
+                                    receiver_param_intervals_cpu, CUDA_INTERVAL_OP_CHUNK_SIZE)
                                 max_receiver_param_interval_size = CUDA_INTERVAL_OP_CHUNK_SIZE
                             else:
                                 max_receiver_param_interval_size = max(
-                                    j - i for i, j in receiver_param_intervals_cpu
-                                )
-                            receiver_param_intervals = torch.tensor(
-                                receiver_param_intervals_cpu, dtype=torch.long, device="cuda"
-                            )
+                                    j - i for i, j in receiver_param_intervals_cpu)
+                            receiver_param_intervals = torch.tensor(receiver_param_intervals_cpu,
+                                                                    dtype=torch.long,
+                                                                    device="cuda")
                         param_size = _param_size_from_keys(
                             config=from_model_config,
                             src_mp_size=src_mp_size,
@@ -553,8 +528,7 @@ def _derive_reparallelize_comm_plan(
                                 src=src,
                                 dst_ranks=dst_ranks,
                                 group=group,
-                            )
-                        )
+                            ))
                     comm_plan.append(
                         ReparallelizeSenderStep(
                             rank=src,
@@ -567,19 +541,15 @@ def _derive_reparallelize_comm_plan(
                             param_size=param_size,
                             group=group,
                             dst_ranks=dst_ranks,
-                        )
-                    )
+                        ))
     for i, step in enumerate(comm_plan):
         if isinstance(step, ReparallelizeReceiverStep):
             continue
         step: ReparallelizeSenderStep
         required_by_nex_steps = False
-        for nex_step in comm_plan[i + 1 :]:
-            if (
-                isinstance(nex_step, ReparallelizeSenderStep)
-                and nex_step.rank == step.rank
-                and nex_step.param_keys == step.param_keys
-            ):
+        for nex_step in comm_plan[i + 1:]:
+            if (isinstance(nex_step, ReparallelizeSenderStep) and nex_step.rank == step.rank
+                    and nex_step.param_keys == step.param_keys):
                 required_by_nex_steps = True
                 break
         step.remove = not required_by_nex_steps
@@ -643,9 +613,8 @@ class FlashMQATModel(nn.Module):
         self.layers = nn.ModuleList(layers)
 
         self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
-        map_param_to_contigous_memory(
-            self.layers, self._param_spec, self.contiguous_param, self.layer_idx_start
-        )
+        map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
+                                      self.layer_idx_start)
 
         for h in self._instantiation_hooks:
             h()
@@ -658,9 +627,10 @@ class FlashMQATModel(nn.Module):
         assert self._instantiated
         assert self.contiguous_param is not None
         if self._offload_buffer is None:
-            self._offload_buffer = torch.empty_like(
-                self.contiguous_param, dtype=self.dtype, device="cpu", pin_memory=True
-            )
+            self._offload_buffer = torch.empty_like(self.contiguous_param,
+                                                    dtype=self.dtype,
+                                                    device="cpu",
+                                                    pin_memory=True)
         else:
             assert self._offload_buffer.shape == self.contiguous_param.shape
         dummy_tensor = torch.tensor((), device=self.device, dtype=self.dtype)
@@ -672,9 +642,8 @@ class FlashMQATModel(nn.Module):
             with torch.cuda.stream(self._offload_stream):
                 for k, p in l.named_parameters():
                     spec = self._param_spec[f"{layer_idx}.{k}"]
-                    self._offload_buffer[spec.start_idx : spec.end_idx].copy_(
-                        p.data.view(-1), non_blocking=True
-                    )
+                    self._offload_buffer[spec.start_idx:spec.end_idx].copy_(p.data.view(-1),
+                                                                            non_blocking=True)
                     p.data = dummy_tensor
         self._offload_event.record(self._offload_stream)
         self._offloaded = True
@@ -764,37 +733,33 @@ class FlashMQATModel(nn.Module):
         yield
         self.sequence_parallel = x
 
-    def __overlapped_load_forward(
-        self, x: PipeTransferData, ys: List[PipeCacheData]
-    ) -> Tuple[PipeTransferData, List[PipeCacheData]]:
+    def __overlapped_load_forward(self, x: PipeTransferData,
+                                  ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
         assert len(ys) == self.num_layers
         raw_pp_input = x.pp_input
         self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
-        map_param_to_contigous_memory(
-            self.layers, self._param_spec, self.contiguous_param, self.layer_idx_start
-        )
+        map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
+                                      self.layer_idx_start)
         self.wait_for_offload()
 
         stream = torch.cuda.Stream()
         events: List[torch.cuda.Event] = [torch.cuda.Event() for _ in range(self.num_layers)]
         with torch.cuda.stream(stream):
-            for layer_idx, y, l, e in zip(
-                range(self.layer_idx_start, self.layer_idx_end), ys, self.layers, events
-            ):
+            for layer_idx, y, l, e in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers,
+                                          events):
                 # NOTE: although we can do more fine-grained overlapping, the overhead that can be
                 # reduced is very small (~50ms), which is unnecessary for now.
                 for k, v in l.named_parameters():
                     spec = self._param_spec[f"{layer_idx}.{k}"]
                     v.data.copy_(
-                        self._offload_buffer[spec.start_idx : spec.end_idx].view(spec.shape),
+                        self._offload_buffer[spec.start_idx:spec.end_idx].view(spec.shape),
                         non_blocking=True,
                     )
                 e: torch.cuda.Event
                 e.record(stream)
 
-        for layer_idx, y, l, e in zip(
-            range(self.layer_idx_start, self.layer_idx_end), ys, self.layers, events
-        ):
+        for layer_idx, y, l, e in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers,
+                                      events):
             torch.cuda.default_stream().wait_event(e)
             if not self.sequence_parallel:
                 with _disable_sequence_parallel_of_module(l):
@@ -806,9 +771,8 @@ class FlashMQATModel(nn.Module):
         x.pp_input = raw_pp_input
         return x, ys
 
-    def __forward(
-        self, x: PipeTransferData, ys: List[PipeCacheData]
-    ) -> Tuple[PipeTransferData, List[PipeCacheData]]:
+    def __forward(self, x: PipeTransferData,
+                  ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
         layers = self.layers
         assert len(ys) == len(layers)
         raw_pp_input = x.pp_input
@@ -825,9 +789,8 @@ class FlashMQATModel(nn.Module):
         x.pp_input = raw_pp_input
         return x, ys
 
-    def forward(
-        self, x: PipeTransferData, ys: List[PipeCacheData]
-    ) -> Tuple[PipeTransferData, List[PipeCacheData]]:
+    def forward(self, x: PipeTransferData,
+                ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
         if x.max_seqlen is not None and not isinstance(x.max_seqlen, int):
             x.max_seqlen = int(x.max_seqlen)
         if x.cu_seqlens is not None and not isinstance(x.cu_seqlens, torch.IntTensor):
@@ -1005,12 +968,10 @@ class FlashMQATModel(nn.Module):
         if not init_from_scratch:
             if model_path is not None:
                 model._instantiation_hooks.append(
-                    lambda: model.load_from_hf(model_path, init_critic_from_actor=is_critic)
-                )
+                    lambda: model.load_from_hf(model_path, init_critic_from_actor=is_critic))
             else:
                 model._instantiation_hooks.append(
-                    lambda: model.load_state_dict(state_dict_converter(from_model.state_dict(), config))
-                )
+                    lambda: model.load_state_dict(state_dict_converter(from_model.state_dict(), config)))
         return model
 
     # Template function used for FlashMQAT to HF models, similar to C++ template but is ugly in python.
@@ -1076,8 +1037,7 @@ class FlashMQATModel(nn.Module):
                     FlashMQATModel._from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
-                )
-            ),
+                )),
         )
         setattr(
             FlashMQATModel,
@@ -1086,8 +1046,7 @@ class FlashMQATModel(nn.Module):
                 functools.partial(
                     FlashMQATModel._config_from_hf_template,
                     config_converter=config_converter,
-                )
-            ),
+                )),
         )
         if state_dict_converter_to_hf:
             setattr(
@@ -1097,17 +1056,16 @@ class FlashMQATModel(nn.Module):
                     functools.partial(
                         FlashMQATModel._to_hf_template,
                         state_dict_converter_to_hf=state_dict_converter_to_hf,
-                    )
-                ),
+                    )),
             )
         FlashMQATModel._parallelism_helpers[model_name] = FlashMQATParallelismHelper(
             embedding_param_names,
             tblock_param_names,
             head_param_names,
         )
-        FlashMQATModel._convert_helpers[model_name] = FlashMQATConvertHelper(
-            config_converter, state_dict_converter, state_dict_converter_to_hf
-        )
+        FlashMQATModel._convert_helpers[model_name] = FlashMQATConvertHelper(config_converter,
+                                                                             state_dict_converter,
+                                                                             state_dict_converter_to_hf)
 
     def load_from_hf(self, load_dir: str, init_critic_from_actor: bool = False):
         # NOTE: moving this upwards will result in circular import
@@ -1152,8 +1110,7 @@ class FlashMQATModel(nn.Module):
                     self.config,
                     constants.model_parallel_world_size(),
                     constants.model_parallel_rank(),
-                )
-            )
+                ))
             load_times.append(partition_tik - load_tik)
             partition_times.append(time.perf_counter() - partition_tik)
 
@@ -1169,24 +1126,22 @@ class FlashMQATModel(nn.Module):
         if os.getenv("FLASH_MQAT_LOG_LOAD_TIME", None) == "1":
             logger.info(
                 f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
-                f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s"
-            )
+                f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s")
 
     def load_from_saved_flash_model(self, load_dir: str, init_critic_from_actor: bool = False):
         with open(os.path.join(load_dir, "flash_mqat_config.json"), "r") as f:
             ckpt_config = FlashMQATConfig(**json.load(f))
         for k, v in dataclasses.asdict(ckpt_config).items():
             if k not in [
-                "is_critic",
-                "sequence_parallel",
-                "gradient_accumulation_fusion",
-                "ckpt_attn",
-                "ckpt_mlp",
+                    "is_critic",
+                    "sequence_parallel",
+                    "gradient_accumulation_fusion",
+                    "ckpt_attn",
+                    "ckpt_mlp",
             ] and v != getattr(self.config, k):
                 raise ValueError(
                     f"Can't load a checkpoint with different config (key `{k}`, "
-                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`)."
-                )
+                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`).")
 
         pp_rank = constants.pipe_parallel_rank()
         mp_rank = constants.model_parallel_rank()
@@ -1194,10 +1149,8 @@ class FlashMQATModel(nn.Module):
 
         ckpt_spec = get_ckpt_spec(load_dir)
         if ckpt_spec.mp_size % mp_size != 0 and mp_size % ckpt_spec.mp_size != 0:
-            raise ValueError(
-                f"Trying to load checkpoint {load_dir} with mp_size={ckpt_spec.mp_size}, "
-                f"which is neither the multiple nor a factor of current mp_size={mp_size}."
-            )
+            raise ValueError(f"Trying to load checkpoint {load_dir} with mp_size={ckpt_spec.mp_size}, "
+                             f"which is neither the multiple nor a factor of current mp_size={mp_size}.")
 
         if (self.config.n_kv_heads % mp_size == 0) != (self.config.n_kv_heads % ckpt_spec.mp_size == 0):
             raise RuntimeError(
@@ -1228,9 +1181,9 @@ class FlashMQATModel(nn.Module):
             for (_, target_pp_rank), global_layer_indices in repartition_strategy.items():
                 mp_sds = []
                 for i in interested_mp_ranks:
-                    sd = load_from_disk(
-                        load_dir, fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{i:02d}-" + r"s-(\d{2}).*"
-                    )
+                    sd = load_from_disk(load_dir,
+                                        fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{i:02d}-" +
+                                        r"s-(\d{2}).*")
                     sd = {k: v for k, v in sd.items() if int(k.split(".")[0]) in global_layer_indices}
                     mp_sds.append(sd)
                 state_dict.update(mp_merge_flash_mqat_state_dict(mp_sds, self.config))
@@ -1244,9 +1197,10 @@ class FlashMQATModel(nn.Module):
                     fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{target_mp_rank:02d}-" + r"s-(\d{2}).*",
                 )
                 sd = {k: v for k, v in sd.items() if int(k.split(".")[0]) in global_layer_indices}
-                sd = mp_partition_flash_mqat_state_dict(
-                    sd, self.config, mp_size=factor, mp_rank=mp_rank % factor
-                )
+                sd = mp_partition_flash_mqat_state_dict(sd,
+                                                        self.config,
+                                                        mp_size=factor,
+                                                        mp_rank=mp_rank % factor)
                 state_dict.update(sd)
 
         if init_critic_from_actor and f"{self.config.n_layers + 1}.weight" in state_dict:
@@ -1315,16 +1269,14 @@ class FlashMQATModel(nn.Module):
             with constants.model_scope(to_model_name):
                 to_pp_rank = constants.pipe_parallel_rank()
                 to_layer_indices = list(
-                    range(to_layer_mapping[to_pp_rank][0], to_layer_mapping[to_pp_rank][1])
-                )
+                    range(to_layer_mapping[to_pp_rank][0], to_layer_mapping[to_pp_rank][1]))
                 for _to_layer_idx in to_layer_indices:
                     l = self._build_layer(_to_layer_idx, to_model_config)
                     for v in l.parameters():
                         v.data = torch.tensor((), dtype=self.dtype, device=self.device)
                     to_layers_handle_dict[_to_layer_idx] = l
-        to_param_spec, to_param_size = _build_param_spec(
-            to_layer_indices, to_model_config, to_topo.get_dim("model")
-        )
+        to_param_spec, to_param_size = _build_param_spec(to_layer_indices, to_model_config,
+                                                         to_topo.get_dim("model"))
         if len(to_layer_indices) > 0:
             to_layer_idx_start = min(to_layer_indices)
             to_layer_idx_end = max(to_layer_indices) + 1
@@ -1409,8 +1361,7 @@ class FlashMQATModel(nn.Module):
                         intervals=step.receiver_param_intervals,
                         intervals_cpu=step.receiver_param_intervals_cpu,
                         max_interval_size=step.receiver_max_interval_size,
-                    )
-                )
+                    ))
 
             if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
                 if step.group is not None:
@@ -1427,9 +1378,8 @@ class FlashMQATModel(nn.Module):
                         layer_idx, k = param_key.split(".", 1)
                         layer_idx = int(layer_idx)
                         dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
-                        recursive_getattr(self.layers[layer_idx - self.layer_idx_start], k).data = (
-                            dummy_tensor
-                        )
+                        recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
+                                          k).data = (dummy_tensor)
 
         # Run boradcast!
         streams = [torch.cuda.Stream() for step in rtgt.comm_plan]
@@ -1471,17 +1421,17 @@ class FlashMQATModel(nn.Module):
 
 # a helper function to make flash_mqat look like huggingface model
 def generate_helper(
-    self: FlashMQATModel,
-    tokenizer: transformers.PreTrainedTokenizerFast,
-    input_ids: Optional[torch.Tensor] = None,
-    attention_mask: Optional[torch.Tensor] = None,
-    packed_input_ids: Optional[torch.Tensor] = None,
-    cu_seqlens: Optional[torch.Tensor] = None,
-    max_seqlen: Optional[int] = None,
-    k_caches: Optional[List[torch.Tensor]] = None,
-    v_caches: Optional[List[torch.Tensor]] = None,
-    cache_seqlens: Optional[torch.Tensor] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        self: FlashMQATModel,
+        tokenizer: transformers.PreTrainedTokenizerFast,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        packed_input_ids: Optional[torch.Tensor] = None,
+        cu_seqlens: Optional[torch.Tensor] = None,
+        max_seqlen: Optional[int] = None,
+        k_caches: Optional[List[torch.Tensor]] = None,
+        v_caches: Optional[List[torch.Tensor]] = None,
+        cache_seqlens: Optional[torch.Tensor] = None,
+        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
 ) -> DuckGenerationOutput:
     current_forward = self.forward
     self.forward = functools.partial(FlashMQATModel.forward, self)
@@ -1521,9 +1471,8 @@ def forward_helper(
         batch_size, seqlen = input_ids.shape[:2]
     if packed_input_ids is not None:
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        ys = [PipeCacheData(input_ids=packed_input_ids)] + [
-            PipeCacheData() for _ in range(self.config.n_layers + 1)
-        ]
+        ys = [PipeCacheData(input_ids=packed_input_ids)
+              ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
     else:
         x = PipeTransferData()
         ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]

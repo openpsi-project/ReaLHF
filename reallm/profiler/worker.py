@@ -26,9 +26,9 @@ from reallm.base.constants import LOG_ROOT
 from reallm.base.monitor import CUDAKernelTime, gpu_utilization_monitor, time_mark
 from reallm.base.topology import ParallelGrid
 from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+import reallm.api.core.dfg
 # from reallm.impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
 import reallm.api.core.system as config_package
-import reallm.api.core.dfg
 import reallm.api.data
 import reallm.api.model
 import reallm.base.constants
@@ -38,6 +38,7 @@ import reallm.base.namedarray as namedarray
 import reallm.base.numpy_utils
 import reallm.base.seeding as seeding
 import reallm.base.timeutil
+
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
@@ -192,7 +193,8 @@ class ProfileWorker(worker_base.Worker):
             self.__model = self.__backend.initialize(self.__model, ft_spec)
             self.__engine = self.__model.module
 
-    def __run_model_function_call(self, rpc: reallm.api.core.dfg.ModelRPC, bs, seq_len) -> worker_base.PollResult:
+    def __run_model_function_call(self, rpc: reallm.api.core.dfg.ModelRPC, bs,
+                                  seq_len) -> worker_base.PollResult:
         with reallm.base.constants.model_scope(self.model_name):
             # initialize
             func_name = rpc.interface_type.value

@@ -5,15 +5,14 @@ import os
 import re
 
 import reallm.api.core.system as config_package
+import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.base.name_resolve as name_resolve
 import reallm.base.names as names
-import reallm.scheduler.client as sched_client
-import reallm.system as system
-import reallm.base.constants as constants
-
 # NOTE: This import is necessary to register all experiments.
 import reallm.experiments
+import reallm.scheduler.client as sched_client
+import reallm.system as system
 
 logger = logging.getLogger("main", "system")
 
@@ -82,18 +81,15 @@ def _submit_workers(
                 begin=sch_cfg.scheduling.begin,
                 deadline=sch_cfg.scheduling.deadline,
                 time_limit=sch_cfg.scheduling.time_limit,
-            ),
-        )
+            ),)
     return scheduled_jobs
 
 
 def main_start(args):
     if args.mode == "ray" and args.image_name is None:
-        raise ValueError(
-            "--image_name must be specified when using ray cluster. "
-            "This is becuase ray cluster requires all workers to have "
-            "the same version of Python and ray."
-        )
+        raise ValueError("--image_name must be specified when using ray cluster. "
+                         "This is becuase ray cluster requires all workers to have "
+                         "the same version of Python and ray.")
 
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
@@ -133,8 +129,7 @@ def main_start(args):
     else:
         try:
             name_resolve.clear_subtree(
-                names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name)
-            )
+                names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name))
         except Exception as e:
             logger.warning(f"Resetting name resolving repo failed.")
             raise e
@@ -237,9 +232,10 @@ def main():
     )
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
-    subparser.add_argument(
-        "--wandb_mode", type=str, default="disabled", choices=["online", "offline", "disabled"]
-    )
+    subparser.add_argument("--wandb_mode",
+                           type=str,
+                           default="disabled",
+                           choices=["online", "offline", "disabled"])
     subparser.add_argument(
         "--image_name",
         type=str,
@@ -248,9 +244,9 @@ def main():
         help="if specified, all workers will use this image. Useful in CI/CD pipeline.",
     )
     subparser.add_argument("--ignore_worker_error", action="store_true")
-    subparser.add_argument(
-        "--debug", action="store_true", help="If True, activate all assertions in the code."
-    )
+    subparser.add_argument("--debug",
+                           action="store_true",
+                           help="If True, activate all assertions in the code.")
     subparser.add_argument(
         "--remote_reset",
         action="store_true",
@@ -270,9 +266,8 @@ def main():
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.set_defaults(func=main_stop)
 
-    subparser = subparsers.add_parser(
-        "find_config", help="find configuration by matching regular expression."
-    )
+    subparser = subparsers.add_parser("find_config",
+                                      help="find configuration by matching regular expression.")
     subparser.add_argument("--regex", "-r", type=str, required=True)
     subparser.set_defaults(func=main_find_config)
 

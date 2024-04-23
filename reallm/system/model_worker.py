@@ -16,11 +16,12 @@ import torch.distributed as dist
 import torch.utils.data
 
 from reallm.api.core.config import ModelName
-from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, dump_tmark_db, gpu_utilization_monitor
+from reallm.base.monitor import (cuda_tmark, cuda_tmarked, CUDATimeMarkType, dump_tmark_db,
+                                 gpu_utilization_monitor)
 from reallm.base.topology import ParallelGrid
 from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
-import reallm.api.core.system as config_system
 import reallm.api.core.dfg
+import reallm.api.core.system as config_system
 import reallm.api.data
 import reallm.api.model
 import reallm.base.constants
@@ -33,6 +34,7 @@ import reallm.base.numpy_utils
 import reallm.base.seeding as seeding
 import reallm.base.timeutil
 import reallm.base.topology
+
 import system.request_reply_stream as request_reply_stream
 import system.worker_base as worker_base
 
@@ -341,8 +343,8 @@ class ModelWorker(worker_base.Worker):
                 self.__backend_initialized[s.id.model_name] = False
                 tik = time.perf_counter()
                 self.__models[s.id.model_name] = model = reallm.api.model.make_model(s.model,
-                                                                              name=s.id.model_name,
-                                                                              device=self.__device)
+                                                                                     name=s.id.model_name,
+                                                                                     device=self.__device)
                 if self._dp_rank == 0:
                     self.logger.info(
                         f"Model {s.id.model_name} initialized in {time.perf_counter() - tik:.4f}s.")
@@ -378,7 +380,8 @@ class ModelWorker(worker_base.Worker):
                         eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
                     else:
                         eval_dataset = eval_datasets[0]
-                    eval_dataloader = reallm.api.data.make_dataloader(self.config.eval_dataloader, eval_dataset)
+                    eval_dataloader = reallm.api.data.make_dataloader(self.config.eval_dataloader,
+                                                                      eval_dataset)
                 else:
                     eval_dataloader = None
                 self.__eval_dataloaders[s.id.model_name] = eval_dataloader
@@ -523,7 +526,8 @@ class ModelWorker(worker_base.Worker):
             ############## initialization ##############
             elif request.handle_name == "initialize":
                 assert not self.__model_is_handle[request.handler.model_name]
-                reallm.base.constants.set_max_seqlen(data.max_seqlen)  # used by cuda graph buffer for generation
+                reallm.base.constants.set_max_seqlen(
+                    data.max_seqlen)  # used by cuda graph buffer for generation
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
                 self.__backend_initialized[request.handler.model_name] = True
                 # print(f"after initialize model {request.handler.model_name} module type {type(self._model.module)}")
@@ -718,9 +722,8 @@ class ModelWorker(worker_base.Worker):
                                 assert len(shape) == 1, shape
                                 total_len += shape[0]
                             dtype = _get_dtype_from_key(k)
-                            buf = reallm.base.constants.get_global_memory_buffer().get_tensor((total_len,),
-                                                                                       dtype,
-                                                                                       name="data_transfer")
+                            buf = reallm.base.constants.get_global_memory_buffer().get_tensor(
+                                (total_len,), dtype, name="data_transfer")
                             dist.broadcast(buf, src=bcast_src, group=group)
                             vs = buf.clone()
                             for buf_idx in buf_indices:

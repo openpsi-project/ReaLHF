@@ -10,18 +10,20 @@ import torch.distributed
 
 from reallm.api.core.config import ModelName
 from reallm.impl.model.nn.flash_mqat.flash_mqat_api import (_keys_from_layer_indices, _param_size_from_keys,
-                                                     ReparallelizeReceiverStep, ReparallelizeSenderStep)
+                                                            ReparallelizeReceiverStep,
+                                                            ReparallelizeSenderStep)
 from reallm.impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
-                                                      flash_model_head_param_count,
-                                                      flash_model_tblock_param_count, FlashMQATConfig)
+                                                             flash_model_head_param_count,
+                                                             flash_model_tblock_param_count, FlashMQATConfig)
 from reallm.impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape,
-                                                          partition_pipeline_layers,
-                                                          pipeline_repartition_strategy)
-from tests.utils import get_llama7b_flash_config, get_llama_config
+                                                                 partition_pipeline_layers,
+                                                                 pipeline_repartition_strategy)
 import reallm.api.core.system
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.topology
 import reallm.base.topology as topology
+
+from tests.utils import get_llama7b_flash_config, get_llama_config
 
 
 def _filter_match_mwids(
@@ -353,8 +355,7 @@ def compute_cost(
     param_sync_dst_ranks = {}
     msid2mwid = {}
     for i in range(from_topo.world_size()):
-        msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(from_model_name, from_topo,
-                                                                              i)] = i
+        msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)] = i
     for i in range(to_topo.world_size()):
         msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(
             to_model_name, to_topo, i)] = (i + world_size - to_topo.world_size())

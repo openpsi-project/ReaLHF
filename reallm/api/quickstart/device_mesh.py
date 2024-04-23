@@ -4,8 +4,8 @@ import dataclasses
 import numpy as np
 
 from reallm.api.core.config import ModelBackend
-from reallm.api.quickstart.model import ModelTrainEvalConfig
 from reallm.api.core.dfg import ModelRPC
+from reallm.api.quickstart.model import ModelTrainEvalConfig
 from reallm.base.topology import PipeModelDataParallelTopology
 
 

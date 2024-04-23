@@ -17,7 +17,7 @@ from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationC
 from reallm.impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
-                                         gather_packed_shifted_log_probs)
+                                                gather_packed_shifted_log_probs)
 from reallm.impl.model.utils.save_load import save_hf_or_lora_model
 import reallm.api.data
 import reallm.api.model
@@ -54,7 +54,8 @@ class ProfileInterface(api.model.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
         datas = PackedParallelDataBroker.scatter_to(data,
                                                     self.n_minibatches,
-                                                    min_size=2 * reallm.base.constants.pipe_parallel_world_size())
+                                                    min_size=2 *
+                                                    reallm.base.constants.pipe_parallel_world_size())
         offset = 0
         batch_seqlens = data.metadata['seqlens']
 

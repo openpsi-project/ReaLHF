@@ -69,7 +69,8 @@ def genstep(
                 Shape [bs].
     """
     if reallm.base.constants.model_parallel_world_size() > 1:
-        from reallm.impl.model.parallelism.model_parallel.mappings import gather_from_tensor_model_parallel_region
+        from reallm.impl.model.parallelism.model_parallel.mappings import \
+            gather_from_tensor_model_parallel_region
 
         next_token_logits = gather_from_tensor_model_parallel_region(next_token_logits)
 

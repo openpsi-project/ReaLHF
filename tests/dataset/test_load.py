@@ -1,5 +1,6 @@
 import reallm.api.core.system
 import reallm.api.data
+
 import impl.dataset
 import impl.model
 
@@ -15,13 +16,14 @@ if __name__ == "__main__":
             json_path="/data/aigc/llm/datasets/wps-formula-rw/dataset_val.jsonl",
         ))
     dataloader_cfg = reallm.api.core.system.DataLoader('iterable_dataset_loader')
-    dataset = reallm.api.data.make_dataset(dataset_config,
-                                    seed=1,
-                                    ddp_rank=0,
-                                    world_size=1,
-                                    tokenizer_or_tokenizer_name="/data/aigc/llm/checkpoints/4l-starcoder/",
-                                    experiment_name="dataset_test",
-                                    trial_name='test')
+    dataset = reallm.api.data.make_dataset(
+        dataset_config,
+        seed=1,
+        ddp_rank=0,
+        world_size=1,
+        tokenizer_or_tokenizer_name="/data/aigc/llm/checkpoints/4l-starcoder/",
+        experiment_name="dataset_test",
+        trial_name='test')
     dataloder = reallm.api.data.make_dataloader(dataloader_cfg, dataset)
 
     for x in dataloder:

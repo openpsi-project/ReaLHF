@@ -252,7 +252,10 @@ else:
     world_size = 1
     seed = 1
 
-    util = reallm.api.data.DatasetUtility(tokenizer=tokenizer, ddp_rank=ddp_rank, world_size=world_size, seed=seed)
+    util = reallm.api.data.DatasetUtility(tokenizer=tokenizer,
+                                          ddp_rank=ddp_rank,
+                                          world_size=world_size,
+                                          seed=seed)
 
     n_dp = 32
     dataset = RewardModelingPackedPairedDataset(

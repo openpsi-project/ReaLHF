@@ -6,11 +6,8 @@ import math
 import deepspeed
 import torch
 
-from reallm.base.constants import (
-    data_parallel_world_size,
-    model_parallel_world_size,
-    pipe_parallel_world_size,
-)
+from reallm.base.constants import (data_parallel_world_size, model_parallel_world_size,
+                                   pipe_parallel_world_size)
 from reallm.impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
 import reallm.api.core.model as model_api
 import reallm.base.constants as constants
@@ -24,8 +21,7 @@ logger = logging.getLogger("DeepSpeed Backend")
 class DeepspeedTrainBackend(model_api.ModelBackend):
     optimizer_name: str = "adam"
     optimizer_config: dict = dataclasses.field(
-        default_factory=lambda: dict(lr=1e-5, weight_decay=0.1, betas=(0.9, 0.95), eps=1e-5)
-    )
+        default_factory=lambda: dict(lr=1e-5, weight_decay=0.1, betas=(0.9, 0.95), eps=1e-5))
     lr_scheduler_type: str = "cosine"
     warmup_steps_proportion: float = 0.0
     min_lr_ratio: float = 0.0  # will be used for linear and cosine schedule
@@ -60,10 +56,8 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
 
     def __post_init__(self):
         if constants.model_parallel_world_size() == 1 and self.sequence_parallel:
-            logger.warning(
-                "Sequence parallel only works with tensor model parallelism, but currently "
-                f"model_parallel_world_size = {constants.model_parallel_world_size()}. "
-            )
+            logger.warning("Sequence parallel only works with tensor model parallelism, but currently "
+                           f"model_parallel_world_size = {constants.model_parallel_world_size()}. ")
             self.sequence_parallel = False
         if self.engine_type == "pipe":
             assert self.zero_stage < 2
@@ -105,21 +99,16 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
         )
 
         ds_config["train_micro_batch_size_per_gpu"] = spec.batch_size_per_device
-        ds_config["train_batch_size"] = (
-            spec.batch_size_per_device
-            * data_parallel_world_size()
-            * model_parallel_world_size()
-            * pipe_parallel_world_size()
-        )
+        ds_config["train_batch_size"] = (spec.batch_size_per_device * data_parallel_world_size() *
+                                         model_parallel_world_size() * pipe_parallel_world_size())
 
         def warmup_then_cosine_anneal(step, warmup_steps_proportion, total_steps, min_lr_ratio):
             warmup_steps = max(5, int(total_steps * warmup_steps_proportion))
             cosine_steps = total_steps - warmup_steps
             if step < warmup_steps:
                 return 1.0 / warmup_steps * step
-            return min_lr_ratio + 0.5 * (1.0 - min_lr_ratio) * (
-                1 + math.cos((step - warmup_steps) / cosine_steps * math.pi)
-            )
+            return min_lr_ratio + 0.5 * (1.0 - min_lr_ratio) * (1 + math.cos(
+                (step - warmup_steps) / cosine_steps * math.pi))
 
         def warmup_then_linear_anneal(step, warmup_steps_proportion, total_steps, min_lr_ratio):
             warmup_steps = max(5, int(total_steps * warmup_steps_proportion))
@@ -170,10 +159,8 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
         if self.engine_type == "pipe":
             # log pipeline infos
             assert isinstance(module, DeepSpeedPipelineEngine)
-            logger.info(
-                f"PipelineEngine:: ddp rank = {torch.distributed.get_rank()}; "
-                f"pipe id = {module.stage_id}; dp id = {module.dp_id};"
-            )
+            logger.info(f"PipelineEngine:: ddp rank = {torch.distributed.get_rank()}; "
+                        f"pipe id = {module.stage_id}; dp id = {module.dp_id};")
 
         model.module = module
         return model
@@ -193,10 +180,8 @@ class DeepspeedInferenceBackend(model_api.ModelBackend):
 
     def __post_init__(self):
         if constants.model_parallel_world_size() == 1 and self.sequence_parallel:
-            logger.warning(
-                "Sequence parallel only works with tensor model parallelism, but currently "
-                f"model_parallel_world_size = {constants.model_parallel_world_size()}. "
-            )
+            logger.warning("Sequence parallel only works with tensor model parallelism, but currently "
+                           f"model_parallel_world_size = {constants.model_parallel_world_size()}. ")
             self.sequence_parallel = False
 
     def _initialize(self, model: model_api.Model, spec: model_api.FinetuneSpec):

@@ -10,10 +10,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 
+from reallm.base.constants import *
+
 from .mappings import *
 from .utils import (_initialize_affine_weight_cpu, _initialize_affine_weight_gpu, divide,
                     set_tensor_model_parallel_attributes, VocabUtility)
-from reallm.base.constants import *
 
 _grad_accum_fusion_available = True
 try:

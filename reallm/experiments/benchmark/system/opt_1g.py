@@ -1,8 +1,9 @@
 import functools
 import itertools
 
-from .rlhf_benchmark import ChatRLHFBenchmarkConfig, get_exp_cls
 from reallm.api.core.system import register_experiment
+
+from .rlhf_benchmark import ChatRLHFBenchmarkConfig, get_exp_cls
 
 spec_to_n_params = {
     (9216, 64): "66b",

@@ -5,7 +5,7 @@ import math
 import os
 
 from reallm.experiments.benchmark.system.sosp2024 import (_get_heuristic_device_partition,
-                                                   interested_parallel_strategies)
+                                                          interested_parallel_strategies)
 
 
 def sweep_model_size(model_size: int, verbose_only: bool):

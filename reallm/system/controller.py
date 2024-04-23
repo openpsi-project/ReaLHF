@@ -14,12 +14,13 @@ import ray
 import ray.util.queue as rq
 
 from reallm.base.cluster import spec as cluster_spec
-from system import load_worker, WORKER_TYPES
-from system.worker_base import WorkerServerStatus as Wss
 import reallm.api.core.system
 import reallm.base.logging as logging
 import reallm.base.name_resolve
 import reallm.base.names as names
+
+from system import load_worker, WORKER_TYPES
+from system.worker_base import WorkerServerStatus as Wss
 import system.worker_base
 import system.worker_control
 
@@ -100,14 +101,14 @@ class Controller:
             logger.info(f"Configuration has {len(config)} {name}.")
 
         reallm.base.name_resolve.add(names.trial_registry(self.experiment_name, self.trial_name),
-                              value=datetime.now().strftime("%Y%m%d"),
-                              delete_on_exit=False,
-                              replace=True)
+                                     value=datetime.now().strftime("%Y%m%d"),
+                                     delete_on_exit=False,
+                                     replace=True)
         reallm.base.name_resolve.add(names.worker_status(experiment_name=self.experiment_name,
-                                                  trial_name=self.trial_name,
-                                                  worker_name="ctl"),
-                              value="READY",
-                              delete_on_exit=True)
+                                                         trial_name=self.trial_name,
+                                                         worker_name="ctl"),
+                                     value="READY",
+                                     delete_on_exit=True)
 
         while True:
             try:
@@ -317,17 +318,17 @@ class RayController:
                     raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
                 for idx in range(count):
                     try:
-                        reallm.base.name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
-                                                                 f"{name}/{idx}"),
-                                               timeout=300)
+                        reallm.base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
+                                                                        self.__trial_name, f"{name}/{idx}"),
+                                                      timeout=300)
                     except TimeoutError:
                         raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
             logger.info("Ray cluster started.")
 
             try:
-                ray_head_addr = reallm.base.name_resolve.wait(names.ray_cluster(self.__experiment_name,
-                                                                         self.__trial_name, "address"),
-                                                       timeout=300)
+                ray_head_addr = reallm.base.name_resolve.wait(names.ray_cluster(
+                    self.__experiment_name, self.__trial_name, "address"),
+                                                              timeout=300)
             except TimeoutError:
                 raise RuntimeError("Timeout waiting for ray cluster head address.")
             ray.init(address=ray_head_addr)

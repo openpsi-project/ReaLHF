@@ -5,10 +5,11 @@ import socket
 import ray.util.queue as rq
 import zmq
 
-from system.worker_base import WorkerServerStatus
 import reallm.base.logging as logging
 import reallm.base.name_resolve
 import reallm.base.names as names
+
+from system.worker_base import WorkerServerStatus
 import system.worker_base as worker_base
 
 logger = logging.getLogger("worker-control")

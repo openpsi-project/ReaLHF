@@ -6,8 +6,9 @@ import subprocess
 
 import psutil
 
-from scheduler.client import JobInfo, JobState, SchedulerClient, SchedulerError
 import reallm.base.logging as logging
+
+from scheduler.client import JobInfo, JobState, SchedulerClient, SchedulerError
 
 logger = logging.getLogger("Local Scheduler")
 

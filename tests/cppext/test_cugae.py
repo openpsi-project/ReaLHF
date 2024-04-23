@@ -4,8 +4,9 @@ import time
 import pytest
 import torch
 
-from reallm.impl.model.utils.ppo_functional import (cugae1d_nolp_misalign_func, cugae2d_nolp_func, cugae2d_olp_func,
-                                             pygae1d_nolp_misalign, pygae2d_nolp, pygae2d_olp)
+from reallm.impl.model.utils.ppo_functional import (cugae1d_nolp_misalign_func, cugae2d_nolp_func,
+                                                    cugae2d_olp_func, pygae1d_nolp_misalign, pygae2d_nolp,
+                                                    pygae2d_olp)
 
 
 @pytest.mark.parametrize("max_seqlen", [32, 128, 512])

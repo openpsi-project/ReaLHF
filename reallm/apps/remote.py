@@ -22,8 +22,7 @@ logger = logging.getLogger("Main-Workers")
 
 def main_reset_name_resolve(args):
     name_resolve.clear_subtree(
-        names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name)
-    )
+        names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name))
 
 
 def main_worker(args):
@@ -32,28 +31,23 @@ def main_worker(args):
     reallm.base.constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
     worker_index_start = args.jobstep_id * args.wprocs_per_jobstep + args.wproc_offset
-    worker_index_end = min(
-        worker_index_start + args.wprocs_per_jobstep, args.wprocs_in_job + args.wproc_offset
-    )
+    worker_index_end = min(worker_index_start + args.wprocs_per_jobstep,
+                           args.wprocs_in_job + args.wproc_offset)
 
     group_name = f"{args.worker_type}-{args.worker_submission_index}"
-    logger.info(
-        f"{args.worker_type} group id {args.jobstep_id}, "
-        f"worker index {worker_index_start}:{worker_index_end}"
-    )
+    logger.info(f"{args.worker_type} group id {args.jobstep_id}, "
+                f"worker index {worker_index_start}:{worker_index_end}")
 
     # Isolate within the same slurm job, among different jobsteps.
     if torch.cuda.is_initialized():
         raise RuntimeError("CUDA already initialized before isolating CUDA devices. This should not happen.")
-    gpu_utils.isolate_cuda_device(
-        group_name, args.jobstep_id, args.n_jobsteps, args.experiment_name, args.trial_name
-    )
+    gpu_utils.isolate_cuda_device(group_name, args.jobstep_id, args.n_jobsteps, args.experiment_name,
+                                  args.trial_name)
     if os.environ.get("CUDA_VISIBLE_DEVICES", None):
         logger.info("CUDA_VISIBLE_DEVICES: %s", os.environ["CUDA_VISIBLE_DEVICES"])
 
     # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
     import profiler.experiments
-
     # import profiler.worker
     import profiler.interface
 
@@ -66,8 +60,7 @@ def main_worker(args):
 
     logger.info(f"Run {args.worker_type} worker with args: %s", args)
     assert not args.experiment_name.startswith(
-        "/"
-    ), f'Invalid experiment_name "{args.experiment_name}" starts with "/"'
+        "/"), f'Invalid experiment_name "{args.experiment_name}" starts with "/"'
     if args.wprocs_per_jobstep == 1:
         system.run_worker(
             worker_type=args.worker_type,
@@ -157,9 +150,9 @@ def main_controller(args):
         ray_addr_name = names.ray_cluster(args.experiment_name, args.trial_name, "address")
         name_resolve.add(ray_addr_name, addr, delete_on_exit=True, keepalive_ttl=RAY_HEAD_WAIT_TIME)
 
-    controller = system.make_controller(
-        type_=args.type, experiment_name=args.experiment_name, trial_name=args.trial_name
-    )
+    controller = system.make_controller(type_=args.type,
+                                        experiment_name=args.experiment_name,
+                                        trial_name=args.trial_name)
     experiment = system_api.make_experiment(args.experiment_name)
     controller.start(
         experiment=experiment,
@@ -223,12 +216,16 @@ def main():
     subparser.add_argument("--experiment_name", "-e", type=str, required=True)
     subparser.add_argument("--trial_name", "-f", type=str, required=True)
     subparser.add_argument("--worker_type", "-w", type=str, required=True)
-    subparser.add_argument(
-        "--jobstep_id", "-i", type=int, required=True, help="jobstep/task ID in a slurm job."
-    )
-    subparser.add_argument(
-        "--n_jobsteps", "-g", type=int, required=True, help="`--ntasks` of `srun`, aka SLURM_NPROCS."
-    )
+    subparser.add_argument("--jobstep_id",
+                           "-i",
+                           type=int,
+                           required=True,
+                           help="jobstep/task ID in a slurm job.")
+    subparser.add_argument("--n_jobsteps",
+                           "-g",
+                           type=int,
+                           required=True,
+                           help="`--ntasks` of `srun`, aka SLURM_NPROCS.")
     subparser.add_argument(
         "--worker_submission_index",
         "-r",
@@ -243,9 +240,11 @@ def main():
         required=True,
         help="Number of worker processes launched by multiprocessing in this script.",
     )
-    subparser.add_argument(
-        "--wprocs_in_job", "-j", type=int, required=True, help="Number of worker processes in this slurm job."
-    )
+    subparser.add_argument("--wprocs_in_job",
+                           "-j",
+                           type=int,
+                           required=True,
+                           help="Number of worker processes in this slurm job.")
     subparser.add_argument(
         "--wproc_offset",
         "-o",

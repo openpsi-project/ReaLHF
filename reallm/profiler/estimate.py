@@ -17,8 +17,8 @@ from profiler.experiments import ProfileExperiment
 from profiler.rpc import CommStats
 from profiler.utils import make_stats_key
 
-from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
+from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType
 from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
 from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig

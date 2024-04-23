@@ -10,7 +10,7 @@ from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipeli
 from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from reallm.impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
 from reallm.impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
-                                         gather_packed_shifted_log_probs)
+                                                gather_packed_shifted_log_probs)
 from reallm.impl.model.utils.save_load import save_hf_or_lora_model
 import reallm.api.data
 import reallm.api.model
@@ -155,7 +155,8 @@ class PackedSupervisedFinetuningInterface(api.model.ModelInterface):
 
     # for testing only
     @torch.no_grad()
-    def generate(self, model: reallm.api.model.Model, data: NamedArray, gconfig: GenerationConfig) -> NamedArray:
+    def generate(self, model: reallm.api.model.Model, data: NamedArray,
+                 gconfig: GenerationConfig) -> NamedArray:
         module = model.module
 
         module.eval()
