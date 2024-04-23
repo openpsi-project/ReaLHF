@@ -26,8 +26,8 @@ from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_lates
 from base.topology import PipeModelDataParallelTopology
 from scheduler.client import make as make_scheduer
 from tests.utils import clear_name_resolve, get_pytorch_profiler, init_global_constants, pytorch_memory_burnin
-import base.constants
-import base.gpu_utils
+import reallm.base.constants
+import reallm.base.gpu_utils
 
 EXPR_NAME = "test_reparallelize"
 TRIAL_NAME = "test"

@@ -11,7 +11,7 @@ from api.config.config_base import MODEL_TYPE_TO_PATH, ModelType
 from base.monitor import get_tracer
 from tests.utils import *
 import api.config.config_system as config_package
-import base.constants
+import reallm.base.constants
 
 # mp2pp4 8.4 0.57 mp4pp2 7.84 0.53
 NUM_MP = 4
@@ -125,7 +125,7 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     # packed_input_ids = data['packed_input_ids']
     # cu_seqlens = data['cu_seqlens']
     # max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
-    import base.constants
+    import reallm.base.constants
     with base.constants.model_scope(MODEL_NAME):
         model.module.eval()
 
@@ -149,7 +149,7 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
                 logits = gather_from_tensor_model_parallel_region(logits)
                 print(f"rank {rank} mp inference time cost {time.monotonic() - st:.4f}")
 
-        import base.constants
+        import reallm.base.constants
 
         if base.constants.pipe_parallel_rank() == NUM_PP - 1:
             res_queue.put(logits)
@@ -159,7 +159,7 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
 def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     device, model, backend, interface = init_handles(rank)
     # data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
-    import base.constants
+    import reallm.base.constants
 
     # os.environ["DLLM_TRACE"] = "1"
 
@@ -196,7 +196,7 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
 
     import os
 
-    import base.constants
+    import reallm.base.constants
 
     with base.constants.model_scope(MODEL_NAME):
         # os.environ["DLLM_TRACE"] = "1"
@@ -294,7 +294,7 @@ def run_linear(rank: int, res_queue: mp.Queue, seed: int):
     import torch.distributed as dist
 
     from impl.model.parallelism.model_parallel.modules import ColumnParallelLinear, RowParallelLinear
-    import base.constants
+    import reallm.base.constants
 
     # device, model, backend, interface = init_handles(rank)
 
@@ -457,7 +457,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
         print(f"diff: {r - res[0]}, max/correct_max {(r - res[0]).abs().max()}/{r.abs().max()}, "
               f" mean {(r - res[0]).abs().mean()},")
 
-        # import base.consistency
+        # import reallm.base.consistency
         # base.consistency.check_all_model_parallel(NUM_MP)
 
     @torch.no_grad()

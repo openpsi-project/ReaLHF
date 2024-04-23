@@ -9,12 +9,12 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 
 from base.topology import ParallelGrid, PipeModelDataParallelTopology
-import base.constants
-import base.gpu_utils
-import base.name_resolve as name_resolve
-import base.namedarray
-import base.names as names
-import base.topology
+import reallm.base.constants
+import reallm.base.gpu_utils
+import reallm.base.name_resolve as name_resolve
+import reallm.base.namedarray
+import reallm.base.names as names
+import reallm.base.topology
 
 EXPR_NAME = "test"
 TRIAL_NAME = "test"
@@ -150,8 +150,8 @@ def random_sample(bs, seq_len, vocab_size):
     from flash_attn.bert_padding import unpad_input
     import torch
 
-    import base.constants
-    import base.namedarray
+    import reallm.base.constants
+    import reallm.base.namedarray
     input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)
     packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)

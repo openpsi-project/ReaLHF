@@ -12,7 +12,7 @@ import torch.profiler
 
 from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_flash_config, get_memory,
                          init_global_constants, MODEL_NAME, setup_barrier, setup_gpu)
-import base.constants
+import reallm.base.constants
 
 COMPUTE_KERNEL_KEYS = [
     "elementwise_kernel",

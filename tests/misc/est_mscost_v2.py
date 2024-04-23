@@ -19,9 +19,9 @@ from impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_
                                                           pipeline_repartition_strategy)
 from tests.utils import get_llama7b_flash_config
 import api.config.config_system
-import base.gpu_utils as gpu_utils
-import base.topology
-import base.topology as topology
+import reallm.base.gpu_utils as gpu_utils
+import reallm.base.topology
+import reallm.base.topology as topology
 
 
 def _filter_match_mwids(

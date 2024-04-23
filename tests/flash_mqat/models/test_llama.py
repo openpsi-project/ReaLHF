@@ -14,7 +14,7 @@ from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_co
                                                       OutputHead, VocabPositionEmbedding)
 from tests.utils import init_global_constants, MODEL_NAME
 import api.huggingface
-import base.constants
+import reallm.base.constants
 
 torch.cuda.manual_seed_all(2)
 

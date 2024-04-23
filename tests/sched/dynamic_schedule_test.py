@@ -7,8 +7,8 @@ import time
 import viztracer
 
 from base.monitor import get_tracer
-import base.constants
-import base.topology
+import reallm.base.constants
+import reallm.base.topology
 
 NUM_PP = 4
 NUM_MP = 1
@@ -99,8 +99,8 @@ def main(rank):
 
 
 if __name__ == "__main__":
-    import base.name_resolve as name_resolve
-    import base.names as names
+    import reallm.base.name_resolve as name_resolve
+    import reallm.base.names as names
     name_resolve.clear_subtree(names.trial_root(experiment_name="test", trial_name="test"))
     ps = [mp.Process(target=main, args=(rank,)) for rank in range(WORLD_SIZE)]
     for p in ps:

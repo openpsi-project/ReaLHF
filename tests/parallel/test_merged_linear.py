@@ -19,7 +19,7 @@ import torch
 import torch.distributed
 import torch.profiler
 
-import base.namedarray
+import reallm.base.namedarray
 
 batch_size = 8
 seqlen = 4096

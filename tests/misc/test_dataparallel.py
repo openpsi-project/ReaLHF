@@ -2,8 +2,8 @@ import unittest
 
 import torch
 
-import base.dataparallel as dp
-import base.namedarray as namedarray
+import reallm.base.dataparallel as dp
+import reallm.base.namedarray as namedarray
 
 
 def get_packed_namedarray(nseqs):
