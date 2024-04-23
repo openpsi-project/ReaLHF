@@ -155,8 +155,7 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
 
     # for testing only
     @torch.no_grad()
-    def generate(self, model: model_api.Model, data: NamedArray,
-                 gconfig: GenerationConfig) -> NamedArray:
+    def generate(self, model: model_api.Model, data: NamedArray, gconfig: GenerationConfig) -> NamedArray:
         module = model.module
 
         module.eval()

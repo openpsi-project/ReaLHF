@@ -6,7 +6,6 @@ import pickle
 import pprint
 
 import numpy as np
-import reallm.profiler.cppsearch.mdm_search as mdm_search
 
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
@@ -23,6 +22,7 @@ from reallm.profiler.rpc import RPC, RPCExecution
 import reallm.api.core.system as config_package
 # import reallm.experiments.autoexp.auto_ppo
 import reallm.base.constants
+import reallm.profiler.cppsearch.mdm_search as mdm_search
 
 
 def file_to_allocation_pkl(  # model_rpcs: List[ModelRPC],

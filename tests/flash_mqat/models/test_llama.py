@@ -8,10 +8,9 @@ import transformers
 
 from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
 from reallm.impl.model.nn.real_llm_api import add_helper_functions, ReaLModel
-from reallm.impl.model.nn.real_llm_base import (flash_model_embed_param_count,
-                                                             flash_model_head_param_count,
-                                                             flash_model_tblock_param_count, FlashMQATBlock,
-                                                             OutputHead, VocabPositionEmbedding)
+from reallm.impl.model.nn.real_llm_base import (flash_model_embed_param_count, flash_model_head_param_count,
+                                                flash_model_tblock_param_count, FlashMQATBlock, OutputHead,
+                                                VocabPositionEmbedding)
 from tests.utils import init_global_constants, MODEL_NAME
 import reallm.api.huggingface
 import reallm.base.constants

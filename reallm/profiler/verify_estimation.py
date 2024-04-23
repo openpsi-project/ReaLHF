@@ -6,9 +6,8 @@ import json
 import os
 import time
 
-import reallm.profiler.estimate
-
 from reallm.profiler.utils import find_factors
+import reallm.profiler.estimate
 
 
 def verify_compute():

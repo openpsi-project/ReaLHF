@@ -14,13 +14,12 @@ import transformers
 from reallm.base.topology import *
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_base import (FlashMQATBlock, FlashMQATConfig, OutputHead,
-                                                             SequenceParallelActorHead,
-                                                             SequenceParallelCriticHead,
-                                                             VocabPositionEmbedding)
+                                                SequenceParallelActorHead, SequenceParallelCriticHead,
+                                                VocabPositionEmbedding)
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
+import reallm.api.core.model as model_api
 import reallm.api.core.system as config_package
 import reallm.api.huggingface
-import reallm.api.core.model as model_api
 import reallm.base.cluster
 import reallm.base.constants
 

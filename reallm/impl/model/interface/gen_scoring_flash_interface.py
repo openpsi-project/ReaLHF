@@ -9,8 +9,8 @@ import torch.distributed as dist
 import transformers
 
 from reallm.base.namedarray import NamedArray, recursive_apply
-from reallm.impl.model.nn.real_llm_generate import GenerationConfig
 from reallm.impl.model.nn.real_llm_api import HuggingfaceLikeFlashMQATForCausalLM
+from reallm.impl.model.nn.real_llm_generate import GenerationConfig
 import reallm.api.core.model as model_api
 
 

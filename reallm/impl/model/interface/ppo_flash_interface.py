@@ -13,8 +13,8 @@ from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
-from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from reallm.impl.model.nn.real_llm_api import ReaLModel
+from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
 import reallm.api.core.model as model_api
 import reallm.base.constants

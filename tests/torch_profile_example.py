@@ -79,10 +79,9 @@ def make_backend():
 
 
 def make_interface():
-    import reallm.profiler.interface
-
     import reallm.api.core.dfg
     import reallm.api.core.model as model_api
+    import reallm.profiler.interface
     return model_api.make_interface(api.core.dfg.ModelInterface(type_="flash_sft", args=dict()))
 
 

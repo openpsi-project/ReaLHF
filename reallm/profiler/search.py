@@ -35,14 +35,14 @@ def optimal_device_mapping(
     top_k: int = 10,
 ) -> Dict[str, RPCAllocation]:
     from_file = os.environ["IS_REMOTE"] == "1"
-    dump_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(),
-                            constants.trial_name(), "device_mapping.pkl")
-    log_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(),
-                           constants.trial_name(), "device_mapping")
-    rs_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(),
-                          constants.trial_name(), "raw_search_result")
-    rpc_exe_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(),
-                               constants.trial_name(), "rpc_exe_info")
+    dump_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
+                            "device_mapping.pkl")
+    log_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
+                           "device_mapping")
+    rs_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
+                          "raw_search_result")
+    rpc_exe_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
+                               "rpc_exe_info")
 
     if from_file:
         with open(dump_dir, "rb") as f:
