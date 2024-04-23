@@ -9,8 +9,8 @@ from reallm.base.cluster import spec as cluster_spec
 from reallm.base.constants import SLURM_LOCK_FILE_NAME as LOCK_FILE_NAME
 import reallm.base.logging as logging
 
-from scheduler.client import JobException, JobInfo, JobState, SchedulerClient
-from scheduler.slurm.utils import (allocate_resources, SlurmLaunchInfo, SlurmResource,
+from reallm.scheduler.client import JobException, JobInfo, JobState, SchedulerClient
+from reallm.scheduler.slurm.utils import (allocate_resources, SlurmLaunchInfo, SlurmResource,
                                    SlurmResourceNotEnoughException)
 
 logger = logging.getLogger("Slurm-scheduler")

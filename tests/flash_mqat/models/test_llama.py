@@ -7,7 +7,7 @@ import torch.distributed
 import transformers
 
 from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, ReaLModel
 from reallm.impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
                                                              flash_model_head_param_count,
                                                              flash_model_tblock_param_count, FlashMQATBlock,
@@ -58,7 +58,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
         cls.llama.eval()
 
         with reallm.base.constants.model_scope(MODEL_NAME):
-            cls.hf_like_model = FlashMQATModel.from_llama(from_model=cls.llama,
+            cls.hf_like_model = ReaLModel.from_llama(from_model=cls.llama,
                                                           dtype=torch.float16,
                                                           device=device)
             cls.hf_like_model = add_helper_functions(cls.hf_like_model)
@@ -156,7 +156,7 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
     @unittest.skip("skip because it is slow")
     def testDumpLoad(self):
         os.makedirs("/tmp/_flash_mqat_test/llama/", exist_ok=True)
-        FlashMQATModel.dump_to_llama(
+        ReaLModel.dump_to_llama(
             self.hf_like_model.config,
             self.hf_like_model.state_dict(),
             "/tmp/_flash_mqat_test/llama/",

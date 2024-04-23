@@ -12,7 +12,7 @@ import torch.distributed as dist
 import transformers
 
 from reallm.base.topology import *
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
 from reallm.impl.model.nn.flash_mqat.flash_mqat_base import (FlashMQATBlock, FlashMQATConfig, OutputHead,
                                                              SequenceParallelActorHead,
                                                              SequenceParallelCriticHead,
@@ -300,7 +300,7 @@ def make_profile_layers(device: torch.device,
     else:
         raise NotImplementedError(f"Unsupported dtype {dtype}")
     tokenizer = None
-    config: FlashMQATConfig = getattr(FlashMQATModel, f"config_from_{hf_model_type}")(model_path=model_path,)
+    config: FlashMQATConfig = getattr(ReaLModel, f"config_from_{hf_model_type}")(model_path=model_path,)
     # with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
     #     config = FlashMQATConfig(**json.load(f))
     config.sequence_parallel = use_sequence_parallel

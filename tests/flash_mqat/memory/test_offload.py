@@ -28,9 +28,9 @@ from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_flash_
 
 def get_model(mconfig):
     from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
-    from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
+    from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, ReaLModel
 
-    m = FlashMQATModel(mconfig, device=torch.device("cuda:0"), dtype=torch.float16)
+    m = ReaLModel(mconfig, device=torch.device("cuda:0"), dtype=torch.float16)
     m.instantiate()
     if reallm.base.constants.pipe_parallel_world_size() == 1:
         add_helper_functions(m)

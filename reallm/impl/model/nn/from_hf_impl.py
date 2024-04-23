@@ -7,7 +7,7 @@ import transformers
 from reallm.api.quickstart.model import (convert_config_llama, convert_config_starcoder, FlashMQATConfig,
                                          gpt2_config_converter)
 
-from .real_llm_api import FlashMQATModel
+from .real_llm_api import ReaLModel
 
 try:
     import transformer_engine.pytorch as te
@@ -68,7 +68,7 @@ def state_dict_to_starcoder(state_dict, config):
 
 
 # FIXME:
-# FlashMQATModel.register_hf_model(
+# ReaLModel.register_hf_model(
 #     "starcoder", convert_config_starcoder, state_dict_from_starcoder, state_dict_to_starcoder
 # )
 
@@ -151,7 +151,7 @@ def state_dict_to_gpt2(state_dict, config):
 
 
 # FIXME:
-# FlashMQATModel.register_hf_model(
+# ReaLModel.register_hf_model(
 #     "gpt2",
 #     gpt2_config_converter,
 #     gpt2_state_dict_converter,
@@ -308,7 +308,7 @@ def llama_output_head_param_name(config: FlashMQATConfig) -> List[str]:
 
 
 for name in ["llama", "deepseek", "codellama"]:
-    FlashMQATModel.register_hf_model(
+    ReaLModel.register_hf_model(
         name,
         convert_config_llama,
         convert_state_dict_llama,

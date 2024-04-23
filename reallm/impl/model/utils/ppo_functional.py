@@ -7,7 +7,7 @@ import torch.distributed
 
 from reallm.impl.model.parallelism.model_parallel.utils import VocabUtility
 from reallm.impl.model.utils.functional import build_leave_one_indices
-import reallm.base.constants
+import reallm.base.constants as constants
 
 
 class KLController:
@@ -124,15 +124,15 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         logits_max = torch.max(vocab_parallel_logits, dim=-1)[0]
         torch.distributed.all_reduce(logits_max,
                                      op=torch.distributed.ReduceOp.MAX,
-                                     group=base.constants.model_parallel_group())
+                                     group=constants.model_parallel_group())
         # Subtract the maximum value.
         vocab_parallel_logits = vocab_parallel_logits - logits_max.unsqueeze(dim=-1)
 
         # Get the partition's vocab indecies
         get_vocab_range = VocabUtility.vocab_range_from_per_partition_vocab_size
         partition_vocab_size = vocab_parallel_logits.size()[-1]
-        rank = reallm.base.constants.model_parallel_rank()
-        world_size = reallm.base.constants.model_parallel_world_size()
+        rank = constants.model_parallel_rank()
+        world_size = constants.model_parallel_world_size()
         vocab_start_index, vocab_end_index = get_vocab_range(partition_vocab_size, rank, world_size)
 
         # Create a mask of valid vocab ids (1 means it needs to be masked).
@@ -154,7 +154,7 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         torch.distributed.all_reduce(
             predicted_logits,
             op=torch.distributed.ReduceOp.SUM,
-            group=base.constants.model_parallel_group(),
+            group=constants.model_parallel_group(),
         )
 
         # Sum of exponential of logits along vocab dimension across all GPUs.
@@ -164,7 +164,7 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         torch.distributed.all_reduce(
             sum_exp_logits,
             op=torch.distributed.ReduceOp.SUM,
-            group=base.constants.model_parallel_group(),
+            group=constants.model_parallel_group(),
         )
 
         # Loss = log(sum(exp(logits))) - predicted-logit.
@@ -301,7 +301,7 @@ def memory_efficient_ppo_loss_fn(
     advantages,
     eps_clip,
 ):
-    if reallm.base.constants.model_parallel_world_size() == 1:
+    if constants.model_parallel_world_size() == 1:
         return _MemoryEfficientPPOActorLossFn.apply(
             logits,
             cu_seqlens,

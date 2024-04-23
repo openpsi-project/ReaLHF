@@ -6,7 +6,7 @@ import transformers
 
 from reallm.impl.model.nn.flash_mqat.flash_generate import (generate, GenerationConfig, vanilla_cpu_generate,
                                                             vanilla_packed_generate)
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import ReaLModel, PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import gather_shifted_log_probs
 import reallm.api.huggingface
 
@@ -55,7 +55,7 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
             dtype=dtype, device=device)
         starcoder.eval()
 
-        cls.model = FlashMQATModel.from_starcoder(from_model=starcoder, dtype=dtype, device=device)
+        cls.model = ReaLModel.from_starcoder(from_model=starcoder, dtype=dtype, device=device)
         cls.model.eval()
         cls.config = cls.model.config
 
@@ -130,7 +130,7 @@ class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
             dtype=dtype, device=device)
         starcoder.eval()
 
-        cls.model = FlashMQATModel.from_starcoder(from_model=starcoder, dtype=dtype, device=device)
+        cls.model = ReaLModel.from_starcoder(from_model=starcoder, dtype=dtype, device=device)
         cls.model.eval()
         cls.config = cls.model.config
 

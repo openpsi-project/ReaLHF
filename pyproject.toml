@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "packaging", "torch", "hydra-core"]
+requires = ["setuptools>=61.0", "packaging", "torch", "hydra-core", "pyzmq"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -54,16 +54,6 @@ force_alphabetical_sort_within_sections = true
 lexicographical = true
 src_paths = ["."]
 line_length = 110
-known_local_folder = [
-    'api',
-    'apps',
-    'base',
-    'impl',
-    'experiments',
-    'scheduler',
-    'system',
-    'tests',
-]
 
 [tool.yapf]
 based_on_style = "pep8"

@@ -20,7 +20,7 @@ from profiler.utils import make_stats_key
 from reallm.api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
 from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
 import reallm.api.core.system as config_package
 import reallm.base.cluster
@@ -333,7 +333,7 @@ def _estimate_rpc_cost(
 
 
 def load_model_config(rpc: ModelRPC) -> FlashMQATConfig:
-    return getattr(FlashMQATModel,
+    return getattr(ReaLModel,
                    f"config_from_{rpc.model_type._class}")(model_path=MODEL_TYPE_TO_PATH[rpc.model_type])
 
 

@@ -21,7 +21,7 @@ from reallm.base.dataparallel import PackedParallelDataBroker
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, time_mark
 from reallm.base.namedarray import NamedArray
 from reallm.base.topology import ParallelGrid
-from reallm.impl.model.nn.real_llm_api import FlashMQATModel
+from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig, genstep
 from reallm.impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
@@ -55,7 +55,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         assert (self.zero_optimization_stage()
                 < 2), "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
 
-        self.module: FlashMQATModel
+        self.module: ReaLModel
         # print(f"module cls name {type(self.module)}")
 
         # deepspeed enigne attributes

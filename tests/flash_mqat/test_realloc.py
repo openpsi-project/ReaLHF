@@ -151,7 +151,7 @@ def test_impl(
 
     assert not (profile and profile_compile)
     from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
-    from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
+    from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, ReaLModel
 
     hf_model_type = "llama" if model_size != 34 else "codellama"
     hf_config = transformers.AutoConfig.from_pretrained(MODEL_TYPE_TO_PATH[ModelType(
@@ -161,7 +161,7 @@ def test_impl(
 
     if rank < from_topo.world_size():
         with reallm.base.constants.model_scope(from_model_name):
-            m1 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
+            m1 = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
             m1.instantiate()
             if check:
                 m1.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
@@ -190,7 +190,7 @@ def test_impl(
 
     if rank >= world_size - to_topo.world_size():
         with reallm.base.constants.model_scope(to_model_name):
-            m2 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
+            m2 = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
             if reallm.base.constants.pipe_parallel_world_size() > 1:
                 engine2 = InferencePipelineEngine(m2)
             else:
@@ -256,7 +256,7 @@ def test_impl(
 
                 if check:
                     torch.cuda.synchronize()
-                    m3 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
+                    m3 = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
                     m3.instantiate()
                     m3.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
                     assert len(m2.state_dict()) == len(m3.state_dict()) > 0
@@ -354,7 +354,7 @@ def test_impl(
 
                 if check:
                     torch.cuda.synchronize()
-                    m4 = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
+                    m4 = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
                     m4.instantiate()
                     m4.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
                     assert len(m1.state_dict()) == len(m4.state_dict()) > 0
@@ -471,7 +471,7 @@ def test(args):
     torch.distributed.barrier()
     # if check and reallm.base.constants.has_model_name(from_model_name):
     #     with reallm.base.constants.model_scope(from_model_name):
-    #         global_m = FlashMQATModel(mconfig, dtype=torch.float16, device="cuda")
+    #         global_m = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
     #         global_m.instantiate()
     #         # if os.path.exists("/lustre/aigc/llm/checkpoints/reparallelize_test/"):
     #         #     global_m.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")

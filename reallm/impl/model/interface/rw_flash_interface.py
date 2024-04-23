@@ -11,7 +11,7 @@ import tqdm
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
 import reallm.api.model
 import reallm.base.constants
 import reallm.base.logging as logging

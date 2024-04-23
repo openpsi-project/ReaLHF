@@ -8,7 +8,7 @@ import psutil
 
 import reallm.base.logging as logging
 
-from scheduler.client import JobInfo, JobState, SchedulerClient, SchedulerError
+from reallm.scheduler.client import JobInfo, JobState, SchedulerClient, SchedulerError
 
 logger = logging.getLogger("Local Scheduler")
 

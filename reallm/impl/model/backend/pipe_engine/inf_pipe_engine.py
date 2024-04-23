@@ -21,7 +21,7 @@ from reallm.base.dataparallel import PackedParallelDataBroker
 from reallm.base.monitor import time_mark
 from reallm.base.namedarray import NamedArray
 from reallm.base.topology import ParallelGrid
-from reallm.impl.model.nn.real_llm_api import FlashMQATModel
+from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig, genstep
 from reallm.impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
@@ -43,12 +43,12 @@ class InferencePipelineEngine:
 
     def __init__(
         self,
-        module: FlashMQATModel,
+        module: ReaLModel,
         enable_async_p2p_communication=False,
         enable_async_instruction=False,
     ):
 
-        self.module: FlashMQATModel = module
+        self.module: ReaLModel = module
 
         # configs for data shape
         self.config = self.module.config

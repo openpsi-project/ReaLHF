@@ -9,7 +9,7 @@ except ModuleNotFoundError:
 import torch
 import transformers
 
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel, PipeCacheData, PipeTransferData
+from reallm.impl.model.nn.flash_mqat.flash_mqat_base import ReaLModel, PipeCacheData, PipeTransferData
 import reallm.api.huggingface
 
 from tests.utils import init_global_constants
@@ -45,7 +45,7 @@ class FlashMQATGPT2Test(unittest.TestCase):
             model_path).to(dtype=dtype, device=device)
         cls.gpt.eval()
 
-        cls.model = FlashMQATModel.from_gpt2(model_path=model_path, dtype=dtype, device=device)
+        cls.model = ReaLModel.from_gpt2(model_path=model_path, dtype=dtype, device=device)
         cls.model.eval()
         cls.config = cls.model.config
 

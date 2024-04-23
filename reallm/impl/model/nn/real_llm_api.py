@@ -557,7 +557,7 @@ def _derive_reparallelize_comm_plan(
     return comm_plan
 
 
-class FlashMQATModel(nn.Module):
+class ReaLModel(nn.Module):
     _parallelism_helpers: Dict[str, FlashMQATParallelismHelper] = {}
     _convert_helpers: Dict[str, FlashMQATConvertHelper] = {}
 
@@ -955,7 +955,7 @@ class FlashMQATModel(nn.Module):
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
-        config = FlashMQATModel._config_from_hf_template(
+        config = ReaLModel._config_from_hf_template(
             config_converter=config_converter,
             model_path=model_path,
             from_model=from_model,
@@ -977,7 +977,7 @@ class FlashMQATModel(nn.Module):
     # Template function used for FlashMQAT to HF models, similar to C++ template but is ugly in python.
     def _to_hf_template(config, state_dict, output_dir, hf_base_model_path, state_dict_converter_to_hf):
         save_to_disk(
-            state_dict_converter_to_hf(FlashMQATModel.from_pipe_state_dict(config, state_dict), config),
+            state_dict_converter_to_hf(ReaLModel.from_pipe_state_dict(config, state_dict), config),
             output_dir,
             with_hf_format=True,
             hf_base_model_path=hf_base_model_path,
@@ -1001,22 +1001,22 @@ class FlashMQATModel(nn.Module):
         ```
         # 1. Register a model called `starcoder` with helper functions.
         # Check `impl/model/nn/flash_mqat/flash_from_hf_impl.py` for details.
-        FlashMQATModel.register_hf_model("starcoder",
+        ReaLModel.register_hf_model("starcoder",
                                          convert_config_starcoder,
                                          state_dict_from_starcoder,
                                          state_dict_to_starcoder)
 
         # 2. Obtain the config
-        config: FlashMQATConfig = FlashMQATModel.config_from_starcoder(model_path)
+        config: FlashMQATConfig = ReaLModel.config_from_starcoder(model_path)
 
         # 3. Obtain config and state_dict (also support init_from_scratch=True)
-        config, state_dict = FlashMQATModel.config_and_param_from_starcoder(model_path)
+        config, state_dict = ReaLModel.config_and_param_from_starcoder(model_path)
 
         # 4. Directly construct from HuggingFace model (also support init_from_scratch=True)
-        model = FlashMQATModel.from_starcoder(model_path="/lustre/public/pretrained_model_weights/starcoder-16bit")
+        model = ReaLModel.from_starcoder(model_path="/lustre/public/pretrained_model_weights/starcoder-16bit")
 
         # 5. Dump to HuggingFace model
-        FlashMQATModel.dump_to_starcoder(model.config,
+        ReaLModel.dump_to_starcoder(model.config,
                                          model.state_dict(),
                                          save_path,
                                          "/lustre/public/pretrained_model_weights/starcoder-16bit")
@@ -1030,40 +1030,40 @@ class FlashMQATModel(nn.Module):
 
         """
         setattr(
-            FlashMQATModel,
+            ReaLModel,
             f"from_{model_name}",
             classmethod(
                 functools.partial(
-                    FlashMQATModel._from_hf_template,
+                    ReaLModel._from_hf_template,
                     config_converter=config_converter,
                     state_dict_converter=state_dict_converter,
                 )),
         )
         setattr(
-            FlashMQATModel,
+            ReaLModel,
             f"config_from_{model_name}",
             staticmethod(
                 functools.partial(
-                    FlashMQATModel._config_from_hf_template,
+                    ReaLModel._config_from_hf_template,
                     config_converter=config_converter,
                 )),
         )
         if state_dict_converter_to_hf:
             setattr(
-                FlashMQATModel,
+                ReaLModel,
                 f"dump_to_{model_name}",
                 staticmethod(
                     functools.partial(
-                        FlashMQATModel._to_hf_template,
+                        ReaLModel._to_hf_template,
                         state_dict_converter_to_hf=state_dict_converter_to_hf,
                     )),
             )
-        FlashMQATModel._parallelism_helpers[model_name] = FlashMQATParallelismHelper(
+        ReaLModel._parallelism_helpers[model_name] = FlashMQATParallelismHelper(
             embedding_param_names,
             tblock_param_names,
             head_param_names,
         )
-        FlashMQATModel._convert_helpers[model_name] = FlashMQATConvertHelper(config_converter,
+        ReaLModel._convert_helpers[model_name] = FlashMQATConvertHelper(config_converter,
                                                                              state_dict_converter,
                                                                              state_dict_converter_to_hf)
 
@@ -1421,7 +1421,7 @@ class FlashMQATModel(nn.Module):
 
 # a helper function to make flash_mqat look like huggingface model
 def generate_helper(
-        self: FlashMQATModel,
+        self: ReaLModel,
         tokenizer: transformers.PreTrainedTokenizerFast,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
@@ -1434,7 +1434,7 @@ def generate_helper(
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
 ) -> DuckGenerationOutput:
     current_forward = self.forward
-    self.forward = functools.partial(FlashMQATModel.forward, self)
+    self.forward = functools.partial(ReaLModel.forward, self)
     seq, scores, mask, _, _ = generate(
         model=self,
         tokenizer=tokenizer,
@@ -1454,7 +1454,7 @@ def generate_helper(
 
 # a helper function to make flash_mqat look like huggingface model
 def forward_helper(
-    self: FlashMQATModel,
+    self: ReaLModel,
     input_ids: Optional[torch.Tensor] = None,
     attention_mask: Optional[torch.Tensor] = None,
     packed_input_ids: Optional[torch.Tensor] = None,
@@ -1476,13 +1476,13 @@ def forward_helper(
     else:
         x = PipeTransferData()
         ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
-    scores = FlashMQATModel.forward(self, x, ys)[0].pp_output
+    scores = ReaLModel.forward(self, x, ys)[0].pp_output
     if build_packed:
         scores = pad_input(scores, indices, batch_size, seqlen)
     return scores
 
 
-def add_helper_functions(m: FlashMQATModel):
+def add_helper_functions(m: ReaLModel):
     m.forward = functools.partial(forward_helper, m)
     m.generate = functools.partial(generate_helper, m)
     return m
@@ -1511,7 +1511,7 @@ def make_flash_model(
     tokenizer = None
     if from_type == "hf_as_critic":
         # Convert a HuggingFace model into FlashMQAT.
-        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
+        m = getattr(ReaLModel, f"from_{hf_model_type}")(
             model_path=model_path,
             dtype=dtype,
             device=device,
@@ -1523,7 +1523,7 @@ def make_flash_model(
         tokenizer = model_api.load_hf_tokenizer(model_path)
     elif from_type == "hf_as_actor":
         # Convert a HuggingFace model into FlashMQAT.
-        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
+        m = getattr(ReaLModel, f"from_{hf_model_type}")(
             model_path=model_path,
             dtype=dtype,
             device=device,
@@ -1540,11 +1540,11 @@ def make_flash_model(
         config.is_critic = True
         config.sequence_parallel = sequence_parallel
         config.gradient_accumulation_fusion = gradient_accumulation_fusion
-        m = FlashMQATModel(config=config, dtype=dtype, device=device)
+        m = ReaLModel(config=config, dtype=dtype, device=device)
         m.load_from_saved_flash_model(model_path, init_critic_from_actor=True)
     elif from_type == "random_actor":
         # randomly initialize a actor
-        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
+        m = getattr(ReaLModel, f"from_{hf_model_type}")(
             model_path=tokenizer_path,
             dtype=dtype,
             device=device,
@@ -1555,7 +1555,7 @@ def make_flash_model(
         )
     elif from_type == "random_critic":
         # randomly initialize a critic
-        m = getattr(FlashMQATModel, f"from_{hf_model_type}")(
+        m = getattr(ReaLModel, f"from_{hf_model_type}")(
             model_path=tokenizer_path,
             dtype=dtype,
             device=device,
@@ -1571,7 +1571,7 @@ def make_flash_model(
             config = FlashMQATConfig(**json.load(f))
         config.sequence_parallel = sequence_parallel
         config.gradient_accumulation_fusion = gradient_accumulation_fusion
-        m = FlashMQATModel(config=config, dtype=dtype, device=device)
+        m = ReaLModel(config=config, dtype=dtype, device=device)
         m.load_from_saved_flash_model(model_path, init_critic_from_actor=False)
 
     if tokenizer is None:

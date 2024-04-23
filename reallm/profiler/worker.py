@@ -25,7 +25,7 @@ from reallm.api.quickstart.model import FlashMQATConfig
 from reallm.base.constants import LOG_ROOT
 from reallm.base.monitor import CUDAKernelTime, gpu_utilization_monitor, time_mark
 from reallm.base.topology import ParallelGrid
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
 import reallm.api.core.dfg
 # from reallm.impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
 import reallm.api.core.system as config_package
@@ -171,7 +171,7 @@ class ProfileWorker(worker_base.Worker):
             self.__interface = reallm.api.model.make_interface(self.interface_config)
             self.__backend = reallm.api.model.make_backend(self.backend_config)
 
-            # assert isinstance(self.__model.module, FlashMQATModel)
+            # assert isinstance(self.__model.module, ReaLModel)
             self.__engine = None
 
     def __reinit_backend(self, bs, seq_len):
@@ -181,7 +181,7 @@ class ProfileWorker(worker_base.Worker):
                 name=self.model_name,
                 device=self.__device,
             )
-            if isinstance(self.__model.module, FlashMQATModel):
+            if isinstance(self.__model.module, ReaLModel):
                 self.__model.module.instantiate()
 
             self.__nn_config = self.__model.module.config

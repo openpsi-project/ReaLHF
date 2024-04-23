@@ -10,15 +10,10 @@ import socket
 import time
 import uuid
 
-import torch
 import zmq
 
-import reallm.api.core.dfg
-import reallm.api.core.system
-import reallm.base.logging as logging
-import reallm.base.name_resolve as name_resolve
-import reallm.base.namedarray as namedarray
-import reallm.base.names as names
+import reallm.api.core.system as system_api
+from reallm.base import (logging, name_resolve, names)
 
 logger = logging.getLogger("Request-Replay Stream")
 ZMQ_IO_THREADS = 8
@@ -32,7 +27,7 @@ class NoMessage(Exception):
 
 @dataclasses.dataclass
 class Payload:
-    handler: Union[api.core.system.ModelShardID, str]
+    handler: Union[system_api.ModelShardID, str]
     handle_name: str
 
     request_id: uuid.UUID = None
@@ -67,7 +62,7 @@ class NameResolvingRequstClient:
         experiment_name: str,
         trial_name: str,
         n_subscribers: int,
-        handler_routing: Dict[str | reallm.api.core.system.ModelShardID, int],
+        handler_routing: Dict[str | system_api.ModelShardID, int],
     ):
 
         self.context = zmq.Context.instance(io_threads=ZMQ_IO_THREADS)
@@ -255,9 +250,9 @@ class NameResolvingReplyServer:
 
 
 def make_master_stream(
-    worker_info: reallm.api.core.system.WorkerInformation,
+    worker_info: system_api.WorkerInformation,
     n_subscribers: int,
-    handler_routing: Dict[str | reallm.api.core.system.ModelShardID, int],
+    handler_routing: Dict[str | system_api.ModelShardID, int],
 ) -> NameResolvingRequstClient:
     return NameResolvingRequstClient(
         experiment_name=worker_info.experiment_name,
@@ -268,7 +263,7 @@ def make_master_stream(
 
 
 def make_worker_stream(
-    worker_info: reallm.api.core.system.WorkerInformation,
+    worker_info: system_api.WorkerInformation,
     idx: int,
 ) -> NameResolvingReplyServer:
     return NameResolvingReplyServer(

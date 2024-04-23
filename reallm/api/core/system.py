@@ -309,7 +309,7 @@ class ExperimentConfig:
                                                     not (model_configs[rpc.model_name].type_ ==
                                                          model_configs[hook.source].type_ == "flash_mqat")):
                     raise ValueError(
-                        "To synchronize parameters between two models, both models must be FlashMQATModel.")
+                        "To synchronize parameters between two models, both models must be ReaLModel.")
                 other_model_name = hook.target if hook.target is not None else hook.source
                 other_topo = model_topos[hook.target] if hook.target is not None else model_topos[hook.source]
                 self_topo = model_topos[rpc.model_name]

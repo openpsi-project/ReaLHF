@@ -12,9 +12,8 @@ import tqdm
 import transformers
 
 from reallm.base.monitor import process_memory_mb
-import reallm.api.model
-import reallm.base.constants
-import reallm.base.logging as logging
+import reallm.api.core.model as model_api
+from reallm.base import constants, logging
 
 logger = logging.getLogger("Model Save")
 
@@ -49,8 +48,8 @@ def save_hf_format(
         logger.warning("Cannot save fast tokenizer for llama.")
 
 
-def save_hf_or_lora_model(model: reallm.api.model.Model, output_dir: str):
-    from reallm.impl.model.nn.lora import get_lora_state_dict, is_lora_model
+def save_hf_or_lora_model(model: model_api.Model, output_dir: str):
+    # from reallm.impl.model.nn.lora import get_lora_state_dict, is_lora_model
 
     module = model.module
     tokenizer = model.tokenizer
@@ -62,17 +61,17 @@ def save_hf_or_lora_model(model: reallm.api.model.Model, output_dir: str):
         )),
         exist_ok=True,
     )
-    if not is_lora_model(module):
-        save_hf_format(
-            module,
-            tokenizer,
-            output_dir,
-            sub_folder=f"epoch{model.version.epoch}step{model.version.epoch_step}",
-        )
-        return
-    lora_sd = get_lora_state_dict(module)
-    save_to_disk(lora_sd, os.path.join(output_dir,
-                                       f"epoch{model.version.epoch}step{model.version.epoch_step}"))
+    # if not is_lora_model(module):
+    save_hf_format(
+        module,
+        tokenizer,
+        output_dir,
+        sub_folder=f"epoch{model.version.epoch}step{model.version.epoch_step}",
+    )
+    # return
+    # lora_sd = get_lora_state_dict(module)
+    # save_to_disk(lora_sd, os.path.join(output_dir,
+    #                                    f"epoch{model.version.epoch}step{model.version.epoch_step}"))
 
 
 ################################ these functions are currently not used ################################

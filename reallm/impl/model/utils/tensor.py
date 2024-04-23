@@ -1,7 +1,7 @@
 # adopted from megatron
 import torch
 
-import reallm.base.constants
+import reallm.base.constants as constants
 
 
 def assert_viewless_tensor(tensor, extra_msg=None):
@@ -46,8 +46,8 @@ def split_tensor_into_1d_equal_chunks(tensor, new_buffer=False):
                                Default is False
 
     """
-    partition_size = torch.numel(tensor) // reallm.base.constants.model_parallel_world_size()
-    start_index = partition_size * reallm.base.constants.model_parallel_rank()
+    partition_size = torch.numel(tensor) // constants.model_parallel_world_size()
+    start_index = partition_size * constants.model_parallel_rank()
     end_index = start_index + partition_size
     if new_buffer:
         data = torch.empty(
@@ -75,7 +75,7 @@ def pad_sequence_parallel_input(packed_input_ids: torch.Tensor, cu_seqlens: torc
     Returns:
         (torch.Tensor, torch.Tensor, int, int): padded (packed_input_ids, cu_seqlens, max_seqlen, pad_size)
     """
-    mp_world_size = reallm.base.constants.model_parallel_world_size()
+    mp_world_size = constants.model_parallel_world_size()
     pad_size = 0
     if len(packed_input_ids) % mp_world_size != 0:
         pad_size = mp_world_size - len(packed_input_ids) % mp_world_size
@@ -99,7 +99,7 @@ def pad_sequence_parallel_generate_input(packed_input_ids: torch.Tensor, cu_seql
     Returns:
         (torch.Tensor, torch.Tensor, int, int, int): padded (packed_input_ids, cu_seqlens, max_seqlen, pad_size, pad_seq_size)
     """
-    mp_world_size = reallm.base.constants.model_parallel_world_size()
+    mp_world_size = constants.model_parallel_world_size()
     pad_size, pad_seq_size = 0, 0
     if len(packed_input_ids) % mp_world_size != 0 or (len(cu_seqlens) - 1) % mp_world_size != 0:
         pad_size = mp_world_size - len(packed_input_ids) % mp_world_size

@@ -5,9 +5,7 @@ import torch
 import torch.distributed as dist
 import transformers
 
-from reallm.base.constants import data_parallel_group
-import reallm.base.constants
-import reallm.base.logging as logging
+from reallm.base import constants, logging
 
 logger = logging.getLogger("Modeling Functional Utils")
 
@@ -156,7 +154,7 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
     """
     labels = torch.nn.functional.pad(labels[1:], (0, 1), value=0)
     leave_one_indices = build_leave_one_indices(logits, cu_seqlens)
-    if reallm.base.constants.model_parallel_world_size() > 1:
+    if constants.model_parallel_world_size() > 1:
         # NOTE: logprobs is freaking sensitive to input_ids. If the input sequence is a natural sequence, everything will be fine.
         # However, if we input random token IDs, parallel cross entropy can produce VERY different results than the normal
         # torch.gather based version (e.g., the maximum absolute different can reach ~50).
@@ -249,9 +247,9 @@ def masked_normalization(
     x_sum = x.sum(dim=dim, keepdim=True)
     x_sum_sq = x.square().sum(dim=dim, keepdim=True)
     if dist.is_initialized():
-        dist.all_reduce(factor, op=dist.ReduceOp.SUM, group=data_parallel_group())
-        dist.all_reduce(x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group())
-        dist.all_reduce(x_sum_sq, op=dist.ReduceOp.SUM, group=data_parallel_group())
+        dist.all_reduce(factor, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+        dist.all_reduce(x_sum, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+        dist.all_reduce(x_sum_sq, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
     mean = x_sum / factor
     meansq = x_sum_sq / factor
     var = meansq - mean**2

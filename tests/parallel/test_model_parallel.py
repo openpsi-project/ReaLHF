@@ -357,7 +357,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
     def init_baseline_model(self):
         from reallm.impl.model.nn.flash_mqat.flash_mqat_api import forward_helper, generate_helper
-        from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATModel
+        from reallm.impl.model.nn.flash_mqat.flash_mqat_base import ReaLModel
 
         import impl.model.nn.flash_mqat.flash_from_hf_impl
 
@@ -378,7 +378,7 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
         deepspeed.init_distributed()
         init_global_constants(1, 1, 1, model_name="baseline")
-        self.baseline_model = getattr(FlashMQATModel, f"from_{MODEL_TYPE}")(model_path=BASELINE_MODEL_PATH,
+        self.baseline_model = getattr(ReaLModel, f"from_{MODEL_TYPE}")(model_path=BASELINE_MODEL_PATH,
                                                                             dtype=dtype,
                                                                             device=device)
         self.baseline_model.forward = functools.partial(forward_helper, self.baseline_model)

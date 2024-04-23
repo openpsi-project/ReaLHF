@@ -14,7 +14,7 @@ from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
 from reallm.impl.model.nn.flash_mqat.flash_generate import generate, GenerationConfig
-from reallm.impl.model.nn.flash_mqat.flash_mqat_api import FlashMQATModel
+from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
 import reallm.api.huggingface
 import reallm.api.model

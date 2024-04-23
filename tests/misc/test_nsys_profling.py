@@ -98,12 +98,12 @@ def get_pytorch_profiler(save_fn: str):
 
 def test_impl(world_size, profile: bool):
     from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
-    from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, FlashMQATModel
+    from reallm.impl.model.nn.flash_mqat.flash_mqat_api import add_helper_functions, ReaLModel
 
     torch.distributed.barrier()
     mconfig = get_llama7b_flash_config()
     with reallm.base.constants.model_scope(MODEL_NAME):
-        m = FlashMQATModel(mconfig, device=torch.device("cuda:0"), dtype=torch.float16)
+        m = ReaLModel(mconfig, device=torch.device("cuda:0"), dtype=torch.float16)
         m.instantiate()
         torch.cuda.synchronize()
         print("After model instantiation", get_memory(0))

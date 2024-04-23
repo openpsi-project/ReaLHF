@@ -5,12 +5,9 @@ import socket
 import ray.util.queue as rq
 import zmq
 
-import reallm.base.logging as logging
-import reallm.base.name_resolve
-import reallm.base.names as names
-
-from system.worker_base import WorkerServerStatus
-import system.worker_base as worker_base
+from reallm.base import logging
+from reallm.system.worker_base import WorkerServerStatus
+import reallm.system.worker_base as worker_base
 
 logger = logging.getLogger("worker-control")
 WORKER_WAIT_FOR_CONTROLLER_SECONDS = 3600

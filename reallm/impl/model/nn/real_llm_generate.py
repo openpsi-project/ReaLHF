@@ -24,7 +24,7 @@ except ModuleNotFoundError:
     pass
 
 if TYPE_CHECKING:
-    from .real_llm_api import FlashMQATModel
+    from .real_llm_api import ReaLModel
 
 logger = logging.getLogger("FlashMQAT Generation")
 
@@ -150,7 +150,7 @@ def genstep(
 
 # @torch.no_grad()
 # def get_decoding_cuda_graph(
-#     model: "FlashMQATModel",
+#     model: "ReaLModel",
 #     bs: int,
 #     k_caches: List[torch.Tensor],
 #     v_caches: List[torch.Tensor],
@@ -209,7 +209,7 @@ def genstep(
 
 @torch.no_grad()
 def generate(
-    model: "FlashMQATModel",
+    model: "ReaLModel",
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: Optional[torch.Tensor] = None,
     attention_mask: Optional[torch.Tensor] = None,
@@ -224,7 +224,7 @@ def generate(
     """Generete a sequence with a FlashMQAT.
 
     Args:
-        model (FlashMQATModel): .
+        model (ReaLModel): .
         tokenizer (transformers.PreTrainedTokenizerFast): .
         input_ids (torch.Tensor): Prompts, may be padded. Shape [bs, seqlen].
         attention_mask (Optional[torch.Tensor], optional): The same as huggingface.
@@ -429,7 +429,7 @@ def generate(
 
 @torch.no_grad()
 def vanilla_packed_generate(
-    model: "FlashMQATModel",
+    model: "ReaLModel",
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
@@ -486,7 +486,7 @@ def vanilla_packed_generate(
 
 @torch.no_grad()
 def vanilla_cpu_generate(
-    model: "FlashMQATModel",
+    model: "ReaLModel",
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
@@ -545,7 +545,7 @@ class InflightBatchingGenerator:
         self,
         inqueue: queue.Queue,
         outqueue: queue.Queue,
-        model: "FlashMQATModel",
+        model: "ReaLModel",
         tokenizer: transformers.PreTrainedTokenizerFast,
         gconfig: GenerationConfig,
         batch_size: int,
