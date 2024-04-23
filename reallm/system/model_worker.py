@@ -415,11 +415,11 @@ class ModelWorker(worker_base.Worker):
             # torch.cuda.synchronize()
             tik = time.perf_counter()
             self.__data_transfer_among_workers(hook_data)
-            blogger.debug(
-                f"data transfer CPU time: {time.perf_counter() - tik:.4f}s, "
-                f"# remaining data in local storage: {sum([len([x for x in xs if isinstance(x, torch.Tensor) and x.device == self.__device]) for xs in self.__data_owner_storage.values()])}, "
-                f"# remaining data in receiver cache: {sum([len(xs) for xs in self.__data_receive_cache.values()])}."
-            )
+            # blogger.debug(
+            #     f"data transfer CPU time: {time.perf_counter() - tik:.4f}s, "
+            #     f"# remaining data in local storage: {sum([len([x for x in xs if isinstance(x, torch.Tensor) and x.device == self.__device]) for xs in self.__data_owner_storage.values()])}, "
+            #     f"# remaining data in receiver cache: {sum([len(xs) for xs in self.__data_receive_cache.values()])}."
+            # )
             # torch.cuda.synchronize()
         elif hook == "param_sync":
             tik = time.perf_counter()

@@ -8,7 +8,6 @@ from deepspeed import DeepSpeedEngine
 import torch
 import torch.distributed
 
-from reallm.base.constants import data_parallel_group
 from reallm.base.dataparallel import PackedParallelDataBroker
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
@@ -69,8 +68,8 @@ def _ppo_actor_loss_from_model_outputs(
     loss = loss * 0.0
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
-    mean_ref_kl = torch.distributed.all_reduce(mean_ref_kl) / torch.distributed.get_world_size(
-        data_parallel_group())
+    torch.distributed.all_reduce(mean_ref_kl)
+    mean_ref_kl = mean_ref_kl / torch.distributed.get_world_size(constants.data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
     # importance_weight = loss_stat["importance_weight"]
@@ -166,10 +165,12 @@ class PackedActorInterface(model_api.ModelInterface):
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
-        model.module.save(save_dir,
-                          epoch=model.version.epoch,
-                          epoch_step=model.version.epoch_step,
-                          global_step=model.version.global_step)
+        model.module.save(
+            save_dir,
+            epoch=model.version.epoch,
+            epoch_step=model.version.epoch_step,
+            global_step=model.version.global_step,
+        )
 
     @torch.no_grad()
     def generate(self, model: model_api.Model, data: NamedArray) -> NamedArray:
@@ -189,7 +190,7 @@ class PackedActorInterface(model_api.ModelInterface):
         # st = time.monotonic()
         if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
             res = module.generate(
-                seqlens_cpu=data.metadata['seqlens'],
+                seqlens_cpu=data.metadata["seqlens"],
                 tokenizer=model.tokenizer,
                 packed_input_ids=packed_prompts,
                 cu_seqlens=cu_seqlens,
@@ -291,10 +292,12 @@ class PackedActorInterface(model_api.ModelInterface):
         max_seqlen = int(max(input_lens))
 
         if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
-            res = module.forward(seqlens_cpu=data.metadata['seqlens'],
-                                 packed_input_ids=data["packed_seq"],
-                                 cu_seqlens=cu_seqlens,
-                                 num_micro_batches=self.pipe_inf_n_mbs)
+            res = module.forward(
+                seqlens_cpu=data.metadata["seqlens"],
+                packed_input_ids=data["packed_seq"],
+                cu_seqlens=cu_seqlens,
+                num_micro_batches=self.pipe_inf_n_mbs,
+            )
             if res is None:
                 return None
             logits = res
@@ -312,6 +315,7 @@ class PackedActorInterface(model_api.ModelInterface):
             if constants.model_parallel_world_size() > 1:
                 from reallm.impl.model.parallelism.model_parallel.mappings import \
                     gather_from_tensor_model_parallel_region
+
                 logits = gather_from_tensor_model_parallel_region(logits)
             logits.masked_fill_(packed_logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
         # FIXME: the following line will OOM
@@ -392,7 +396,7 @@ class PackedActorInterface(model_api.ModelInterface):
         if self.adv_norm:
             advantages = masked_normalization(advantages, loss_mask)
 
-        batch_seqlens = data_.metadata['seqlens']
+        batch_seqlens = data_.metadata["seqlens"]
         data_ = from_dict(
             dict(
                 advantages=advantages,
@@ -513,8 +517,8 @@ def _ppo_critic_loss_from_model_outputs(
     )
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
-    mean_ref_kl = torch.distributed.all_reduce(mean_ref_kl) / torch.distributed.get_world_size(
-        data_parallel_group())
+    torch.distributed.all_reduce(mean_ref_kl)
+    mean_ref_kl = mean_ref_kl / torch.distributed.get_world_size(constants.data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
     clip_ratio = loss_stat["clip_ratio"]
@@ -583,10 +587,12 @@ class PackedCriticInterface(model_api.ModelInterface):
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
-        model.module.save(save_dir,
-                          epoch=model.version.epoch,
-                          epoch_step=model.version.epoch_step,
-                          global_step=model.version.global_step)
+        model.module.save(
+            save_dir,
+            epoch=model.version.epoch,
+            epoch_step=model.version.epoch_step,
+            global_step=model.version.global_step,
+        )
 
     @torch.no_grad()
     def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
@@ -599,10 +605,12 @@ class PackedCriticInterface(model_api.ModelInterface):
         max_seqlen = int(max(input_lens))
 
         if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
-            scores = module.forward(seqlens_cpu=data.metadata['seqlens'],
-                                    packed_input_ids=data["packed_seq"],
-                                    cu_seqlens=cu_seqlens,
-                                    num_micro_batches=self.pipe_inf_n_mbs)
+            scores = module.forward(
+                seqlens_cpu=data.metadata["seqlens"],
+                packed_input_ids=data["packed_seq"],
+                cu_seqlens=cu_seqlens,
+                num_micro_batches=self.pipe_inf_n_mbs,
+            )
             if scores is None:
                 return None
         else:
@@ -682,7 +690,7 @@ class PackedCriticInterface(model_api.ModelInterface):
 
         global_stats = dict(returns=returns.mean().detach())
 
-        batch_seqlens = data_.metadata['seqlens']
+        batch_seqlens = data_.metadata["seqlens"]
         data_ = from_dict(
             dict(
                 returns=normalized_returns,
