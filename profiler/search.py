@@ -569,7 +569,6 @@ def profile_search(rank):
             cost_table = pickle.load(open("profile_result/param_sync_cost_table_parallel.pkl", "rb"))
             model_size_dict = make_model_size_dict(rpcs, if_print=False)
 
-            
             rs = mdm_search.mcmc_search_time_profile(rpc_list, rpc_exe_list, graph, cost_table,
                                                      model_size_dict, 0.0001, time_limit)
             import pprint

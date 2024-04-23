@@ -2,6 +2,7 @@ from typing import *
 import argparse
 import dataclasses
 import itertools
+import json
 import multiprocessing as mp
 import os
 import queue
@@ -21,6 +22,7 @@ import torch.distributed as dist
 
 from api.config.config_base import ModelName, ModelShardID
 from api.config.config_system import ModelName, ModelShardID
+from base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark
 from base.topology import PipeModelDataParallelTopology
 from tests.utils import (
     get_pytorch_profiler,
@@ -231,17 +233,15 @@ def test_impl(
         # from m1 to m2
         if m1 is not None:
             tik = time.perf_counter()
-            res = m1.build_reparallelized_layers_async(
-                from_model_name, to_model_name, from_topo, to_topo, mconfig, pg_info
-            )
+            res = m1.build_reparallelized_layers_async(from_model_name, to_model_name, from_topo, to_topo,
+                                                       mconfig, pg_info)
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
         else:
             tik = time.perf_counter()
-            res = m2.build_reparallelized_layers_async(
-                from_model_name, to_model_name, from_topo, to_topo, mconfig, pg_info
-            )
+            res = m2.build_reparallelized_layers_async(from_model_name, to_model_name, from_topo, to_topo,
+                                                       mconfig, pg_info)
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
@@ -262,9 +262,8 @@ def test_impl(
                 entry = fetch_latest_tmark()
                 assert entry.type_ == CUDATimeMarkType.mem_layout
                 mem_shift_time_ns = (
-                    torch.tensor(entry.end_time - entry.start_time, dtype=torch.long, device="cuda")
-                    / to_topo.world_size()
-                )
+                    torch.tensor(entry.end_time - entry.start_time, dtype=torch.long, device="cuda") /
+                    to_topo.world_size())
                 dist.all_reduce(mem_shift_time_ns, group=base.constants.parallelism_group())
 
                 if check:
@@ -287,9 +286,11 @@ def test_impl(
                         device="cuda",
                     )
                     bs = 2**17 // to_topo.get_dim("data") // 256 + 1
-                    cu_seqlens = torch.linspace(
-                        0, 256, 2**17 // to_topo.get_dim("data") // 256 + 1, dtype=torch.int32, device="cuda"
-                    )
+                    cu_seqlens = torch.linspace(0,
+                                                256,
+                                                2**17 // to_topo.get_dim("data") // 256 + 1,
+                                                dtype=torch.int32,
+                                                device="cuda")
                     seqlens_cpu = [256 for _ in range(bs)]
                     max_seqlen = 256
 
@@ -297,18 +298,17 @@ def test_impl(
                     torch.cuda.synchronize()
                     tik = time.time_ns()
                     if isinstance(engine2, InferencePipelineEngine):
-                        engine2.forward(
-                            seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
-                        )
+                        engine2.forward(seqlens_cpu=seqlens_cpu,
+                                        packed_input_ids=packed_input_ids,
+                                        cu_seqlens=cu_seqlens)
                     else:
-                        engine2(
-                            packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
-                        )
+                        engine2(packed_input_ids=packed_input_ids,
+                                cu_seqlens=cu_seqlens,
+                                max_seqlen=max_seqlen)
                     dist.barrier(group=base.constants.parallelism_group())
                     torch.cuda.synchronize()
-                fwd_time_ns = (
-                    torch.tensor(time.time_ns() - tik, dtype=torch.long, device="cuda") / to_topo.world_size()
-                )
+                fwd_time_ns = (torch.tensor(time.time_ns() - tik, dtype=torch.long, device="cuda") /
+                               to_topo.world_size())
                 dist.all_reduce(fwd_time_ns, group=base.constants.parallelism_group())
 
                 d = dict(
@@ -335,17 +335,15 @@ def test_impl(
         # convert m2 back to m1
         if m2 is not None:
             tik = time.perf_counter()
-            res = m2.build_reparallelized_layers_async(
-                to_model_name, from_model_name, to_topo, from_topo, mconfig, pg_info
-            )
+            res = m2.build_reparallelized_layers_async(to_model_name, from_model_name, to_topo, from_topo,
+                                                       mconfig, pg_info)
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
         else:
             tik = time.perf_counter()
-            res = m1.build_reparallelized_layers_async(
-                to_model_name, from_model_name, to_topo, from_topo, mconfig, pg_info
-            )
+            res = m1.build_reparallelized_layers_async(to_model_name, from_model_name, to_topo, from_topo,
+                                                       mconfig, pg_info)
             cpu_time = time.perf_counter() - tik
             torch.cuda.synchronize()
             print(f"param sync request time: {time.perf_counter() - tik:.4f}s, cpu time: {cpu_time:.4f}s")
@@ -365,9 +363,8 @@ def test_impl(
                 entry = fetch_latest_tmark()
                 assert entry.type_ == CUDATimeMarkType.mem_layout
                 mem_shift_time_ns = (
-                    torch.tensor(entry.end_time - entry.start_time, dtype=torch.long, device="cuda")
-                    / from_topo.world_size()
-                )
+                    torch.tensor(entry.end_time - entry.start_time, dtype=torch.long, device="cuda") /
+                    from_topo.world_size())
                 dist.all_reduce(mem_shift_time_ns, group=base.constants.parallelism_group())
 
                 if check:
@@ -390,9 +387,11 @@ def test_impl(
                         device="cuda",
                     )
                     bs = 2**17 // to_topo.get_dim("data") // 256 + 1
-                    cu_seqlens = torch.linspace(
-                        0, 256, 2**17 // to_topo.get_dim("data") // 256 + 1, dtype=torch.int32, device="cuda"
-                    )
+                    cu_seqlens = torch.linspace(0,
+                                                256,
+                                                2**17 // to_topo.get_dim("data") // 256 + 1,
+                                                dtype=torch.int32,
+                                                device="cuda")
                     seqlens_cpu = [256 for _ in range(bs)]
                     max_seqlen = 256
 
@@ -400,19 +399,17 @@ def test_impl(
                     torch.cuda.synchronize()
                     tik = time.time_ns()
                     if isinstance(engine1, InferencePipelineEngine):
-                        engine1.forward(
-                            seqlens_cpu=seqlens_cpu, packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
-                        )
+                        engine1.forward(seqlens_cpu=seqlens_cpu,
+                                        packed_input_ids=packed_input_ids,
+                                        cu_seqlens=cu_seqlens)
                     else:
-                        engine1(
-                            packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
-                        )
+                        engine1(packed_input_ids=packed_input_ids,
+                                cu_seqlens=cu_seqlens,
+                                max_seqlen=max_seqlen)
                     dist.barrier(group=base.constants.parallelism_group())
                     torch.cuda.synchronize()
-                fwd_time_ns = (
-                    torch.tensor(time.time_ns() - tik, dtype=torch.long, device="cuda")
-                    / from_topo.world_size()
-                )
+                fwd_time_ns = (torch.tensor(time.time_ns() - tik, dtype=torch.long, device="cuda") /
+                               from_topo.world_size())
                 dist.all_reduce(fwd_time_ns, group=base.constants.parallelism_group())
                 d = dict(
                     mem_shift_time_ns=mem_shift_time_ns.item(),
@@ -531,9 +528,9 @@ def test(args):
 
 def decompose_to_three_factors(n: int):
     factors = []
-    for i in range(1, int(n ** (1 / 2)) + 1):
+    for i in range(1, int(n**(1 / 2)) + 1):
         if n % i == 0:
-            for j in range(i, int((n // i) ** (1 / 2)) + 1):
+            for j in range(i, int((n // i)**(1 / 2)) + 1):
                 if (n // i) % j == 0:
                     k = (n // i) // j
                     factors += list(set(itertools.permutations([i, j, k])))

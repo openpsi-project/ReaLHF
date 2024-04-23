@@ -103,12 +103,13 @@ def main_start(args):
         "DLLM_TRACE": "1" if args.trace else "0",
         "IS_REMOTE": "1"
     }
-    os.environ["IS_REMOTE"] = "0"
+    os.environ["IS_REMOTE"] = "1"
 
     experiment = config_package.make_experiment(args.experiment_name)
     sched = scheduler.client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
 
     setup = experiment.scheduling_setup()
+    # exit(0)
 
     logger.info(f"Resetting name resolving repo...")
 

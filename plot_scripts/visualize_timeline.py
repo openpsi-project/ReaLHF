@@ -1,15 +1,17 @@
-from typing import *
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
 from collections import defaultdict
 from enum import Enum
-import dataclasses
-from base.monitor import CUDATimeMarkType, TimeMarkEntry
-from api.config.config_base import ModelName
-import pickle
-import tqdm
-import matplotlib
+from typing import *
 import argparse
+import dataclasses
+import pickle
+
+from matplotlib.patches import Rectangle
+import matplotlib
+import matplotlib.pyplot as plt
+import tqdm
+
+from api.config.config_base import ModelName
+from base.monitor import CUDATimeMarkType, TimeMarkEntry
 
 
 def main():
@@ -23,30 +25,31 @@ def main():
     fig_type = args.fig_type
     all_time_marks: List[List[TimeMarkEntry]] = []
     for i in tqdm.tqdm(range(8), desc="loading time marks"):
-        with open(
-            f"/lustre/aigc/llm/logs/fw/sosp-a0s896g64t64-{fig_type}/test20240405/time_marks{i}.pkl", "rb"
-        ) as f:
+        with open(f"/lustre/aigc/llm/logs/fw/sosp-a0s896g64t64-{fig_type}/test20240405/time_marks{i}.pkl",
+                  "rb") as f:
             time_marks: List[TimeMarkEntry] = pickle.load(f)
         all_time_marks.append(time_marks)
 
-    min_st_time = min(min(x.start_time for x in time_marks if x.type_ == CUDATimeMarkType.forward) for time_marks in all_time_marks)
-    max_ed_time = max(max(x.end_time for x in time_marks if x.type_ == CUDATimeMarkType.mem_layout or x.type_ == CUDATimeMarkType.optim_step) for time_marks in all_time_marks)
-    all_time_marks = [
-        [
-            TimeMarkEntry(
-                x.name,
-                x.model_name,
-                x.type_,
-                (x.start_time - min_st_time) / 1e9,
-                (x.end_time - min_st_time) / 1e9,
-            )
-            for x in time_marks
-            if x.start_time >= min_st_time and x.end_time <= max_ed_time
-        ]
-        for time_marks in all_time_marks
-    ]
+    min_st_time = min(
+        min(x.start_time for x in time_marks if x.type_ == CUDATimeMarkType.forward)
+        for time_marks in all_time_marks)
+    max_ed_time = max(
+        max(x.end_time for x in time_marks
+            if x.type_ == CUDATimeMarkType.mem_layout or x.type_ == CUDATimeMarkType.optim_step)
+        for time_marks in all_time_marks)
+    all_time_marks = [[
+        TimeMarkEntry(
+            x.name,
+            x.model_name,
+            x.type_,
+            (x.start_time - min_st_time) / 1e9,
+            (x.end_time - min_st_time) / 1e9,
+        ) for x in time_marks if x.start_time >= min_st_time and x.end_time <= max_ed_time
+    ] for time_marks in all_time_marks]
 
-    all_types = ["actor", "misc_compute", "critic", "misc", "ref", "memory_layout", "reward", "comm", "optim_step"]
+    all_types = [
+        "actor", "misc_compute", "critic", "misc", "ref", "memory_layout", "reward", "comm", "optim_step"
+    ]
     all_types_labeled = [False for _ in all_types]
 
     # Prepare data for plotting
@@ -91,12 +94,19 @@ def main():
             long_durations = [d for d in durations if d >= 0.1]
             short_starts = [s for s, d in zip(starts, durations) if d < 0.1]
             long_starts = [s for s, d in zip(starts, durations) if d >= 0.1]
-            ax.barh(
-                gpu_idx, short_durations, left=short_starts, color=color, linewidth=0.0, edgecolor="black"
-            )
-            ax.barh(
-                gpu_idx, long_durations, left=long_starts, color=color, label=label, linewidth=0.5, edgecolor="black"
-            )
+            ax.barh(gpu_idx,
+                    short_durations,
+                    left=short_starts,
+                    color=color,
+                    linewidth=0.0,
+                    edgecolor="black")
+            ax.barh(gpu_idx,
+                    long_durations,
+                    left=long_starts,
+                    color=color,
+                    label=label,
+                    linewidth=0.5,
+                    edgecolor="black")
         y_ticks.append(gpu_idx)
         y_ticklabels.append(f"GPU {gpu_idx}")
 

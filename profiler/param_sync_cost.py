@@ -1,34 +1,27 @@
-from api.config.config_base import ModelName
-import base.topology
-from impl.model.nn.flash_mqat.flash_mqat_base import (
-    FlashMQATConfig,
-    flash_model_embed_param_count,
-    flash_model_tblock_param_count,
-    flash_model_head_param_count,
-)
-from impl.model.nn.flash_mqat.flash_mqat_api import (
-    ReparallelizeReceiverStep,
-    ReparallelizeSenderStep,
-    _param_size_from_keys,
-    _keys_from_layer_indices,
-)
-from impl.model.nn.flash_mqat.flash_mqat_parallel import (
-    partition_pipeline_layers,
-    get_flash_model_param_shape,
-    pipeline_repartition_strategy,
-)
-import base.gpu_utils as gpu_utils
-import torch
+from collections import defaultdict
 from typing import *
 import dataclasses
-import torch.distributed
 import itertools
-import api.config.config_system
-import base.topology as topology
-from collections import defaultdict
-from tests.utils import get_llama7b_flash_config
-import time
 import json
+import time
+
+import torch
+import torch.distributed
+
+from api.config.config_base import ModelName
+from impl.model.nn.flash_mqat.flash_mqat_api import (_keys_from_layer_indices, _param_size_from_keys,
+                                                     ReparallelizeReceiverStep, ReparallelizeSenderStep)
+from impl.model.nn.flash_mqat.flash_mqat_base import (flash_model_embed_param_count,
+                                                      flash_model_head_param_count,
+                                                      flash_model_tblock_param_count, FlashMQATConfig)
+from impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape,
+                                                          partition_pipeline_layers,
+                                                          pipeline_repartition_strategy)
+from tests.utils import get_llama7b_flash_config, get_llama_config
+import api.config.config_system
+import base.gpu_utils as gpu_utils
+import base.topology
+import base.topology as topology
 
 
 def _filter_match_mwids(
@@ -64,9 +57,8 @@ def _squeeze_mwids_by_node(ranks: List[int]) -> List[int]:
     return [ranks[0] for ranks in node2ranks.values()]
 
 
-def _assign_src_to_dsts(
-    node2srcs: Dict[int, List[int]], node2dsts: Dict[int, List[int]]
-) -> Dict[int, List[int]]:
+def _assign_src_to_dsts(node2srcs: Dict[int, List[int]], node2dsts: Dict[int,
+                                                                         List[int]]) -> Dict[int, List[int]]:
     """Assign nodes with a greedy algorithm.
 
     All ranks in the values of node2srcs have the data required by all dst ranks.
@@ -161,9 +153,8 @@ def _create_param_sync_groups(
                 # This is not the optimal solution for intra-node communication
                 # because there may exist a source rank that is also dst rank,
                 # but we forcely select the first source rank on each node here.
-                assignment = _assign_src_to_dsts(
-                    _group_mwids_by_node(_src_ranks), _group_mwids_by_node(_all_dst_ranks)
-                )
+                assignment = _assign_src_to_dsts(_group_mwids_by_node(_src_ranks),
+                                                 _group_mwids_by_node(_all_dst_ranks))
                 _idle_src_ranks = [r for r in _src_ranks if r not in assignment]
                 for _src_rank in _idle_src_ranks:
                     dp_i, mp_i = (
@@ -222,16 +213,15 @@ def _derive_reparallelize_comm_plan(
     assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
     for k, v in dataclasses.asdict(to_model_config).items():
         if k not in [
-            "is_critic",
-            "sequence_parallel",
-            "gradient_accumulation_fusion",
-            "ckpt_attn",
-            "ckpt_mlp",
+                "is_critic",
+                "sequence_parallel",
+                "gradient_accumulation_fusion",
+                "ckpt_attn",
+                "ckpt_mlp",
         ] and v != getattr(from_model_config, k):
             raise ValueError(
                 f"Can't load a checkpoint with different config (key `{k}`, "
-                f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`)."
-            )
+                f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`).")
     if (from_model_config.n_kv_heads % src_mp_size == 0) != (from_model_config.n_kv_heads % dst_mp_size == 0):
         raise ValueError("Whether to partition kv heads should remain the same.")
 
@@ -318,8 +308,7 @@ def _derive_reparallelize_comm_plan(
                                 src=src,
                                 dst_ranks=dst_ranks,
                                 group=group,
-                            )
-                        )
+                            ))
                     comm_plan.append(
                         ReparallelizeSenderStep(
                             rank=src,
@@ -332,8 +321,7 @@ def _derive_reparallelize_comm_plan(
                             param_size=param_size,
                             group=group,
                             dst_ranks=dst_ranks,
-                        )
-                    )
+                        ))
 
     return comm_plan
 
@@ -365,13 +353,11 @@ def compute_cost(
     param_sync_dst_ranks = {}
     msid2mwid = {}
     for i in range(from_topo.world_size()):
-        msid2mwid[
-            api.config.config_system.ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)
-        ] = i
+        msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(from_model_name, from_topo,
+                                                                              i)] = i
     for i in range(to_topo.world_size()):
-        msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(to_model_name, to_topo, i)] = (
-            i + world_size - to_topo.world_size()
-        )
+        msid2mwid[api.config.config_system.ModelShardID.from_parallelism_rank(
+            to_model_name, to_topo, i)] = (i + world_size - to_topo.world_size())
     _create_param_sync_groups(
         from_topo,
         to_topo,
@@ -406,13 +392,6 @@ def compute_cost(
 
     # Run boradcast!
     max_cost = max_comm_volume = max_bcast_cnt = 0
-    total_local_comm_volume = 0
-    total_remote_comm_volume = 0
-    assert world_size % 8 == 0
-    node_send_v = {(i, 0): 0 for i in range(world_size // 8)}
-    node_send_v.update({(i, 1): 0 for i in range(world_size // 8)})
-    node_recv_v = {(i, 0): 0 for i in range(world_size // 8)}
-    node_recv_v.update({(i, 1): 0 for i in range(world_size // 8)})
     for _rank in range(world_size):
         cost = comm_volume = bcast_cnt = 0
         for step in comm_plan:
@@ -421,29 +400,16 @@ def compute_cost(
                     cost += bcast_cost(step.param_size, bw, step.src, step.dst_ranks)
                     comm_volume += step.param_size
                     bcast_cnt += 1
-                    src_node = step.rank // 8
-                    self_node = step.src // 8
-                    cur_node_receivers = [rank for rank in step.dst_ranks if rank // 8 == src_node]
-                    if src_node != self_node and step.rank == cur_node_receivers[0]:
-                        node_recv_v[self_node] += step.param_size
                 cost += set_interval_cost
             if isinstance(step, ReparallelizeSenderStep) and step.rank == _rank:
                 if step.group is not None:
                     cost += bcast_cost(step.param_size, bw, step.rank, step.dst_ranks)
-                    src_node = step.rank // 8
-                    dst_nodes = list(sorted(set([dst // 8 for dst in step.dst_ranks])))
-                    if len(dst_nodes) == 1 and dst_nodes[0] == src_node:
-                        total_local_comm_volume += step.param_size
-                    else:
-                        for n in [src_node] + dst_nodes[:-1]:
-                            node_send_v[n] += step.param_size
-                        total_remote_comm_volume += step.param_size * sum([src_node != dst_node for dst_node in dst_nodes])
-                    # bcast_cnt += 1
+                    bcast_cnt += 1
         max_cost = max(max_cost, cost)
         max_comm_volume = max(max_comm_volume, comm_volume)
         max_bcast_cnt = max(max_bcast_cnt, bcast_cnt)
 
-    return max_cost, total_local_comm_volume, total_remote_comm_volume, max_bcast_cnt, max_comm_volume, node_send_v, node_recv_v
+    return max_cost
 
 
 def main():
@@ -497,26 +463,39 @@ def main():
 
 def decompose_to_three_factors(n: int):
     factors = []
-    for i in range(1, int(n ** (1 / 2)) + 1):
+    for i in range(1, int(n**(1 / 2)) + 1):
         if n % i == 0:
-            for j in range(i, int((n // i) ** (1 / 2)) + 1):
+            for j in range(i, int((n // i)**(1 / 2)) + 1):
                 if (n // i) % j == 0:
                     k = (n // i) // j
                     factors += list(set(itertools.permutations([i, j, k])))
     return factors
 
 
-def get_table():
+def dump_table(n_nodes, model_size, res_queue, rank=0, parallel=1):
     from_model_name = ModelName("actor", 0)
     to_model_name = ModelName("actor", 1)
-    for a, b in [(64, 56), (56, 64)]:
+
+    def hash_tuple_into_str(t) -> str:
+        return ",".join([str(i) for i in t])
+
+        # time.sleep(10)
+
+    import tqdm
+    res = {}
+    device_mesh_sizes = [4] + [8 * i for i in range(1, n_nodes + 1)]
+    space = list(itertools.product(device_mesh_sizes, device_mesh_sizes))
+    sub_space = space[rank::parallel]
+    # for a, b in set(small_spaces + large_spaces):
+    for a, b in sub_space:
+        mtik = time.perf_counter()
         all_configs = list(itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)))
         all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
         all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
         all_configs = list(filter(lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8], all_configs))
         all_configs = list(filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs))
         all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
-        for config_id, (from_pp_mp_dp, to_pp_mp_dp) in enumerate(all_configs):
+        for config_id, (from_pp_mp_dp, to_pp_mp_dp) in tqdm.tqdm(enumerate(all_configs)):
             world_size = max(a, b)
 
             from_topo = base.topology.PipeModelDataParallelTopology(*from_pp_mp_dp)
@@ -524,7 +503,7 @@ def get_table():
             assert world_size >= from_topo.world_size()
             assert world_size >= to_topo.world_size()
 
-            mconfig = get_llama7b_flash_config()
+            mconfig = get_llama_config(size=model_size)
 
             tik = time.perf_counter()
             cost = compute_cost(
@@ -537,26 +516,97 @@ def get_table():
                 bw=200.0,
                 set_interval_cost=0.03,
             )
-            print(
-                f"direction: {from_pp_mp_dp} -> {to_pp_mp_dp}, cost {cost:.4f}",
-                time.perf_counter() - tik,
-            )
-            cost = compute_cost(
-                world_size,
-                to_model_name,
-                from_model_name,
-                to_topo,
-                from_topo,
-                mconfig,
-                bw=200.0,
-                set_interval_cost=0.03,
-            )
-            print(
-                f"direction: {to_pp_mp_dp} -> {from_pp_mp_dp}, cost {cost:.4f}",
-                time.perf_counter() - tik,
-            )
+            # print(
+            #     f"Model size {model_size}: {from_pp_mp_dp} -> {to_pp_mp_dp}, cost {cost:.4f}",
+            #     time.perf_counter() - tik,
+            # )
+            res[hash_tuple_into_str((model_size, *from_pp_mp_dp, *to_pp_mp_dp))] = int(cost * 1000 * 1000)
+        print(
+            f"Time for model size {model_size} {a} -> {b} {rank}/{parallel}: {time.perf_counter() - mtik:.4f}, num res entries {len(res)}"
+        )
+
+    print(f"Rank {rank} of model size  {model_size} finished, res size {len(res)}.")
+    if res_queue is not None:
+        # res_queue.put(res)
+        import pickle
+        with open(f"profile_result/param_sync_cost_table_parallel-{model_size}-{rank}-{parallel}.pkl",
+                  "wb") as f:
+            pickle.dump(res, f)
+        print(f"dumped table with {len(res)} entries to {model_size}-{rank}-{parallel}.")
+    else:
+        return res
+
+
+# def dump_table_test(n_nodes, model_size, res_queue, rank = 0, parallel = 1):
+#     r = {model_size: rank}
+#     res_queue.put(r)
+#     print(f"Rank {rank} of model size  {model_size} finished.")
+#     time.sleep(5)
+
+
+def get_table():
+    r = {}
+    for i, model_size in enumerate([7, 13, 34, 70]):
+        n_nodes = 8
+        res = dump_table(n_nodes, model_size, None, 0, 1)
+        r.update(res)
+
+    print(f"dumping table with {len(r)} entries.")
+    import pickle
+    with open("profile_result/param_sync_cost_table.pkl", "wb") as f:
+        pickle.dump(r, f)
+    return r
+
+
+def get_table_parallel(parallel=4):
+    import torch.multiprocessing as mp
+
+    mp.set_start_method("spawn", force=True)
+
+    rq = mp.Queue()
+    ps = []
+    for i, model_size in enumerate([7, 13, 34, 70]):
+        # n_nodes = 8 if model_size != 70 else 16
+        n_nodes = 8
+        for rank in range(parallel):
+            ps.append(mp.Process(target=dump_table, args=(n_nodes, model_size, rq, rank, parallel)))
+
+    for p in ps:
+        p.start()
+
+    for p in ps:
+        p.join()
+
+    # r = {}
+    # while not rq.empty():
+    #     print("res_queue size", rq.qsize())
+    #     res = rq.get()
+    #     # print(r)
+    #     r.update(res)
+
+    # print(f"dumping table with {len(r)} entries.")
+    # import pickle
+    # with open("profile_result/param_sync_cost_table_parallel.pkl", "wb") as f:
+    #     pickle.dump(r, f)
+    # return r
+
+
+def merge_parallel_table():
+    import os
+    import pickle
+    r = {}
+    for path in os.listdir("profile_result"):
+        if path.endswith(".pkl") and path.startswith("param_sync_cost_table_parallel"):
+            path = os.path.join("profile_result", path)
+            with open(path, "rb") as f:
+                r.update(pickle.load(f))
+    with open("profile_result/param_sync_cost_table_parallel.pkl", "wb") as f:
+        pickle.dump(r, f)
+    return r
 
 
 if __name__ == "__main__":
     # main()
-    get_table()
+    # get_table_parallel(16)
+    # get_table()
+    merge_parallel_table()

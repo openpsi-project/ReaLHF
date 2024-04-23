@@ -409,6 +409,5 @@ for num_gpus in [1, 2, 4, 8, 16, 24, 32, 48, 56, 64, 128]:
         remain = num_gpus // num_mp
         for num_dp in find_factors(remain):
             num_pp = remain // num_dp
-            if num_pp <= 8:
-                for size in [7, 13, 34, 70]:
-                    register_profile_experiment(size, num_pp, num_mp, num_dp)
+            for size in [7, 13, 34, 70]:
+                register_profile_experiment(size, num_pp, num_mp, num_dp)

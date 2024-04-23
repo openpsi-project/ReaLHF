@@ -1,35 +1,28 @@
 from typing import *
+import argparse
 import collections
 import dataclasses
+import datetime
 import functools
 import gc
+import itertools
+import json
+import multiprocessing as mp
+import os
+import queue
 import time
 
 import pynvml
 import torch
+import torch.distributed
 import torch.profiler
 
-from tests.utils import (
-    clear_gpu_cache,
-    get_llama7b_flash_config,
-    get_memory,
-    get_pytorch_profiler,
-    MODEL_NAME,
-    pytorch_memory_burnin,
-    clear_name_resolve,
-)
-import datetime
-import base.constants
-import argparse
-import itertools
-import multiprocessing as mp
-import base.gpu_utils
-import queue
-import json
-import base.topology
-import torch.distributed
-import os
 from base.topology import PipeModelDataParallelTopology
+from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_flash_config, get_memory,
+                         get_pytorch_profiler, MODEL_NAME, pytorch_memory_burnin)
+import base.constants
+import base.gpu_utils
+import base.topology
 
 
 def get_model(mconfig):
@@ -217,8 +210,7 @@ def test(
     with base.constants.model_scope(MODEL_NAME):
         base.constants.set_rank_mapping(MODEL_NAME, topo)
         wg = base.topology.new_or_get_group(
-            ranks=[base.constants.to_global_pg_rank(i) for i in range(world_size)]
-        )
+            ranks=[base.constants.to_global_pg_rank(i) for i in range(world_size)])
 
         base.constants.set_parallelism_group(model_name=MODEL_NAME, pgroup=wg)
         grid = base.topology.ParallelGrid(process_group=wg, topology=topo)
@@ -241,9 +233,9 @@ def test(
 
 def decompose_to_three_factors(n: int):
     factors = []
-    for i in range(1, int(n ** (1 / 2)) + 1):
+    for i in range(1, int(n**(1 / 2)) + 1):
         if n % i == 0:
-            for j in range(i, int((n // i) ** (1 / 2)) + 1):
+            for j in range(i, int((n // i)**(1 / 2)) + 1):
                 if (n // i) % j == 0:
                     k = (n // i) // j
                     factors += list(set(itertools.permutations([i, j, k])))
@@ -271,8 +263,7 @@ if __name__ == "__main__":
                 with open("offload_cost.jsonl", "r") as f:
                     cost_data = [json.loads(line) for line in f]
                 if any(
-                    [d["world_size"] == world_size and tuple(d["pp_mp_dp"]) == tuple(x) for d in cost_data]
-                ):
+                    [d["world_size"] == world_size and tuple(d["pp_mp_dp"]) == tuple(x) for d in cost_data]):
                     continue
             print(f"Testing offload with topo {x}")
 

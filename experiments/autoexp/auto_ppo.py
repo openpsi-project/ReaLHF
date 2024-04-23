@@ -7,7 +7,7 @@ from .device_mapping import auto_device_mapping as auto
 from api.config.config_dataset import DatasetType, PromptOnlyDatasetConfig
 from api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from api.config.config_system import _LLM_ENVVARS, ExperimentSaveEvalControl, register_experiment
-from api.config.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
+from api.config.dfg import ModelInterface, ModelInterfaceType, ModelName, ModelRPC, ModelType
 from base.topology import PipeModelDataParallelTopology
 from experiments.common.ppo_exp import PPOHyperparameters
 import base.logging as logging
@@ -15,28 +15,49 @@ import base.logging as logging
 logger = logging.getLogger("Auto PPO exp", "colored")
 
 
-def register_auto_ppo_experiment(
-    size: int,
-    gen_bs: int,
-    train_bs: int,
-    seqlen: int,
-    mode: str,
-):
-    assert size in [7, 13, 34, 70]
-    if size == 7:
+def register_auto_ppo_experiment(actor_size: int,
+                                 critic_size: int,
+                                 gen_bs: int,
+                                 train_bs: int,
+                                 seqlen: int,
+                                 mode: str,
+                                 n_node_multiplier: int = 1):
+    assert actor_size in [7, 13, 34, 70] and critic_size in [7, 13, 34, 70]
+    if (actor_size == 7 and critic_size == 7)\
+        or (critic_size == 7 and actor_size == 7):
         n_nodes = 1
-        nodelist = "QH-com41"
-    elif size == 13:
+    elif (actor_size == 13 and critic_size == 7)\
+        or (critic_size == 13 and actor_size == 7):
         n_nodes = 2
-        nodelist = "QH-com[41-42]"
-    elif size == 34:
+    elif (actor_size == 34 and critic_size == 7)\
+        or (critic_size == 34 and actor_size == 7)\
+        or (actor_size == 13 and critic_size == 13):
         n_nodes = 4
-        nodelist = "QH-com[41-44]"
-    elif size == 70:
+    elif (actor_size == 70 and critic_size == 7)\
+        or (critic_size == 70 and actor_size == 7)\
+        or (actor_size == 34 and critic_size == 34):
         n_nodes = 8
-        nodelist = "QH-com[41-48]"
+    elif (actor_size == 70 and critic_size == 70):
+        n_nodes = 16
+    else:
+        return
 
-    model_class = "llama" if size != 34 else "codellama"
+    n_nodes = n_nodes * n_node_multiplier
+    assert n_nodes <= 16, f"n_node_multiplier {n_node_multiplier}, n_nodes {n_nodes}"
+
+    if n_nodes == 1:
+        nodelist = "QH-com28"
+    elif n_nodes == 2:
+        nodelist = "QH-com[27-28]"
+    elif n_nodes == 4:
+        nodelist = "QH-com[25-28]"
+    elif n_nodes == 8:
+        nodelist = "QH-com[20-22,24-28]"
+    elif n_nodes == 16:
+        nodelist = "QH-com[20-22,24-28,41-48]"
+
+    actor_model_class = "llama" if actor_size != 34 else "codellama"
+    critic_model_class = "llama" if critic_size != 34 else "codellama"
 
     @auto(n_nodes=n_nodes, nodelist=nodelist, mode=mode)
     @dataclasses.dataclass
@@ -112,8 +133,8 @@ def register_auto_ppo_experiment(
             )
             return [
                 ModelRPC(
-                    model_name="actor",
-                    model_type=ModelType(model_class, size, is_critic=False),
+                    model_name=ModelName("actor", 0),
+                    model_type=ModelType(actor_model_class, actor_size, is_critic=False),
                     interface_type=ModelInterfaceType.GENERATE,
                     interface_impl=actor_interface,
                     input_data=["packed_prompts", "prompt_cu_seqlens"],
@@ -130,8 +151,8 @@ def register_auto_ppo_experiment(
                     max_n_tokens=gen_bs * 128,
                 ),
                 ModelRPC(
-                    model_name="reward",
-                    model_type=ModelType("llama", 7, is_critic=True),
+                    model_name=ModelName("reward", 0),
+                    model_type=ModelType(critic_model_class, critic_size, is_critic=True),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=rw_interface,
                     input_data=["packed_seq", "cu_seqlens"],
@@ -143,8 +164,8 @@ def register_auto_ppo_experiment(
                     max_n_tokens=gen_bs * (128 + seqlen),
                 ),
                 ModelRPC(
-                    model_name="ref",
-                    model_type=ModelType(model_class, size, is_critic=False),
+                    model_name=ModelName("ref", 0),
+                    model_type=ModelType(actor_model_class, actor_size, is_critic=False),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=ref_interface,
                     input_data=[
@@ -158,8 +179,8 @@ def register_auto_ppo_experiment(
                     max_n_tokens=gen_bs * (128 + seqlen),
                 ),
                 ModelRPC(
-                    model_name="critic",
-                    model_type=ModelType("llama", 7, is_critic=True),
+                    model_name=ModelName("critic", 0),
+                    model_type=ModelType(critic_model_class, critic_size, is_critic=True),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=critic_interface,
                     input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
@@ -170,8 +191,8 @@ def register_auto_ppo_experiment(
                     max_n_tokens=gen_bs * (128 + seqlen),
                 ),
                 ModelRPC(
-                    model_name="actor",
-                    model_type=ModelType(model_class, size, is_critic=False),
+                    model_name=ModelName("actor", 0),
+                    model_type=ModelType(actor_model_class, actor_size, is_critic=False),
                     interface_type=ModelInterfaceType.TRAIN_STEP,
                     interface_impl=actor_interface,
                     input_data=[
@@ -192,9 +213,9 @@ def register_auto_ppo_experiment(
                     max_n_tokens=train_bs * (128 + seqlen),
                 ),
                 ModelRPC(
-                    model_name="critic",
+                    model_name=ModelName("critic", 0),
                     interface_type=ModelInterfaceType.TRAIN_STEP,
-                    model_type=ModelType("llama", 7, is_critic=True),
+                    model_type=ModelType(critic_model_class, critic_size, is_critic=True),
                     interface_impl=critic_interface,
                     input_data=[
                         "packed_seq",
@@ -216,13 +237,37 @@ def register_auto_ppo_experiment(
             ]
 
     short_mode = mode[0]
-    register_experiment(f"sosp-a{size}s{seqlen}g{gen_bs}t{train_bs}-{short_mode}", AutoPPOExperiment)
+    n_node_multiplier_str = f"nx{n_node_multiplier}" if n_node_multiplier > 1 else ""
+    if critic_size == 7:
+        register_experiment(
+            f"sosp-a{actor_size}s{seqlen}g{gen_bs}t{train_bs}"
+            f"{n_node_multiplier_str}-{short_mode}", AutoPPOExperiment)
+    else:
+        register_experiment(
+            f"sosp-a{actor_size}c{critic_size}s{seqlen}g{gen_bs}t{train_bs}"
+            f"{n_node_multiplier_str}-{short_mode}", AutoPPOExperiment)
 
 
-for size in [7, 13, 34, 70]:
-    for gen_bs in [16, 32, 48, 64, 80, 100, 128, 160, 200, 240, 256, 288, 320, 360, 400, 512, 640, 1024]:
+import itertools
+
+for actor_sz, critic_sz in itertools.product([7, 13, 34, 70], [7, 13, 34, 70]):
+    for gen_bs in [128, 256, 512, 1024, 2048, 4096]:
         # for seqlen in [256, 512, 1024]:
         for seqlen in [128, 384, 896]:
-            for mode in ["search", "model_pipe", "data_pipe"]:
+            for mode in ["search", "model_pipe", "data_pipe", "test", "full_model"]:
                 train_bs = gen_bs
-                register_auto_ppo_experiment(size, gen_bs, train_bs, seqlen, mode)
+                register_auto_ppo_experiment(actor_sz, critic_sz, gen_bs, train_bs, seqlen, mode)
+
+actor_sz = critic_sz = 7
+for gen_bs in [128, 256, 512, 1024, 2048, 4096]:
+    # for seqlen in [256, 512, 1024]:
+    for seqlen in [128, 384, 896]:
+        for mode in ["search", "model_pipe", "data_pipe", "test", "full_model"]:
+            train_bs = gen_bs
+            register_auto_ppo_experiment(actor_sz,
+                                         critic_sz,
+                                         gen_bs,
+                                         train_bs,
+                                         seqlen,
+                                         mode,
+                                         n_node_multiplier=2)

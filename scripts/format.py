@@ -1,5 +1,5 @@
-import os
 import multiprocessing
+import os
 
 
 def format_file(file_path):

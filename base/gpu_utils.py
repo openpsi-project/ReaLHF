@@ -568,6 +568,7 @@ def setup_ddp_single_model(expr_name: str, trial_name: str, model_name: str, wor
         model_groups=None,
         data_transfer_groups=None,
         data_transfer_src_ranks=None,
+        data_transfer_dst_ranks=None,
         param_sync_groups=None,
         param_sync_src_ranks=None,
         param_sync_dst_ranks=None,
