@@ -12,16 +12,15 @@ import json
 import os
 import pprint
 
-from profiler.device_mesh import *
-from profiler.experiments import ProfileExperiment
-from profiler.rpc import CommStats
-from profiler.utils import make_stats_key
-
-from reallm.api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType
+from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
 from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+from reallm.profiler.device_mesh import *
+from reallm.profiler.experiments import ProfileExperiment
+from reallm.profiler.rpc import CommStats
+from reallm.profiler.utils import make_stats_key
 import reallm.api.core.system as config_package
 import reallm.base.cluster
 

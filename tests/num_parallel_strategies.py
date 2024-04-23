@@ -1,4 +1,4 @@
-from profiler.device_mesh import *
+from reallm.profiler.device_mesh import *
 
 
 def find_all_sub_device_meshes(device_mesh: DeviceMesh):

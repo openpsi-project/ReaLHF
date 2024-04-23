@@ -13,8 +13,6 @@ from deepspeed import comm as dist
 from deepspeed.runtime.bf16_optimizer import BF16_Optimizer
 from deepspeed.runtime.engine import DeepSpeedEngine, MEMORY_OPT_ALLREDUCE_SIZE
 from deepspeed.runtime.zero.config import ZeroStageEnum
-import impl.model.backend.pipe_engine.static_schedule as schedule
-import impl.model.parallelism.pipeline_parallel.p2p as p2p
 import numpy as np
 import torch
 import transformers
@@ -30,6 +28,8 @@ from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.tensor import pad_sequence_parallel_input
 import reallm.base.constants
 import reallm.base.logging as logging
+import reallm.impl.model.backend.pipe_engine.static_schedule as schedule
+import reallm.impl.model.parallelism.pipeline_parallel.p2p as p2p
 
 logger = logging.getLogger("DeepSpeedPipelineEngine", "benchmark")
 

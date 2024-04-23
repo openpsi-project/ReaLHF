@@ -5,7 +5,6 @@ import functools
 import json
 import os
 
-import impl.model.parallelism.model_parallel.mappings as tensor_parallel
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
@@ -20,6 +19,7 @@ from reallm.impl.model.utils.functional import compute_varlen_position_indices
 from reallm.impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
 import reallm.base.constants
 import reallm.base.logging as logging
+import reallm.impl.model.parallelism.model_parallel.mappings as tensor_parallel
 
 logger = logging.getLogger("FlashMQATBase")
 

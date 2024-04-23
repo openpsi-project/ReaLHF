@@ -2,8 +2,8 @@ import argparse
 import datetime
 import time
 
-from profiler.multi_host_main import main
-from profiler.utils import find_factors
+from reallm.profiler.multi_host_main import main
+from reallm.profiler.utils import find_factors
 
 if __name__ == "__main__":
     date = datetime.datetime.now().strftime("%Y%m%d") + "-0"

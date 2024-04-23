@@ -2,15 +2,15 @@ from typing import List
 import dataclasses
 import functools
 
-from profiler.utils import find_factors
 import numpy as np
 
-from reallm.api.config.config_device_mesh import make_train_backend_config, RPCAllocation
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
 from reallm.api.core.system import *
+from reallm.api.quickstart.device_mesh import make_train_backend_config, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
 from reallm.base.topology import PipeModelDataParallelTopology
+from reallm.profiler.utils import find_factors
 
 
 def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):

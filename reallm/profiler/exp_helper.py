@@ -5,21 +5,21 @@ import os
 import pickle
 import pprint
 
-from profiler.device_mesh import DeviceMesh, make_device_mesh_from_name, ModelParallelStrategy
-from profiler.enumerate import build_graph, enumerate_rpc_executions
-from profiler.estimate import (comm_stats, estimate_model_size, estimate_rpc_memory, estimate_rpc_time,
-                               load_model_config)
-from profiler.experiments import ppo_rpcs_example
-from profiler.profile_layers import profile_rpcs
-from profiler.rpc import RPC, RPCExecution
 import numpy as np
 import profiler.cppsearch.mdm_search as mdm_search
 
-from reallm.api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
+from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
 from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+from reallm.profiler.device_mesh import DeviceMesh, make_device_mesh_from_name, ModelParallelStrategy
+from reallm.profiler.enumerate import build_graph, enumerate_rpc_executions
+from reallm.profiler.estimate import (comm_stats, estimate_model_size, estimate_rpc_memory, estimate_rpc_time,
+                                      load_model_config)
+from reallm.profiler.experiments import ppo_rpcs_example
+from reallm.profiler.profile_layers import profile_rpcs
+from reallm.profiler.rpc import RPC, RPCExecution
 import reallm.api.core.system as config_package
 # import reallm.experiments.autoexp.auto_ppo
 import reallm.base.constants

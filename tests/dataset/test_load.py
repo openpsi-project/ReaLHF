@@ -1,8 +1,7 @@
-import impl.dataset
-import impl.model
-
 import reallm.api.core.system
 import reallm.api.data
+import reallm.impl.dataset
+import reallm.impl.model
 
 if __name__ == "__main__":
     dataset_config = reallm.api.core.system.Dataset(

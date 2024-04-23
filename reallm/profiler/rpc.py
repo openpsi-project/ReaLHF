@@ -1,9 +1,8 @@
 from typing import List
 import dataclasses
 
-from profiler.device_mesh import DeviceMesh, ModelParallelStrategy
-
 from reallm.api.core.dfg import ModelRPC
+from reallm.profiler.device_mesh import DeviceMesh, ModelParallelStrategy
 
 
 @dataclasses.dataclass

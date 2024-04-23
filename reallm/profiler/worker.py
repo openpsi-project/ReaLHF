@@ -11,9 +11,6 @@ import time
 
 from deepspeed.accelerator import get_accelerator
 from flash_attn.bert_padding import unpad_input
-from profiler.comm import ProfileCommunication
-from profiler.engine import ProfileEngine
-from profiler.utils import make_stats_key, random_sample
 import colorama
 import deepspeed
 import numpy as np
@@ -28,6 +25,9 @@ from reallm.base.constants import LOG_ROOT
 from reallm.base.monitor import CUDAKernelTime, gpu_utilization_monitor, time_mark
 from reallm.base.topology import ParallelGrid
 from reallm.impl.model.nn.flash_mqat.flash_mqat_api import ReaLModel
+from reallm.profiler.comm import ProfileCommunication
+from reallm.profiler.engine import ProfileEngine
+from reallm.profiler.utils import make_stats_key, random_sample
 import reallm.api.core.dfg
 # from reallm.impl.model.backend.pipe_engine.stream_pipe_engine import EngineFuture, StreamPipeEngine
 import reallm.api.core.system as config_package
@@ -42,8 +42,8 @@ import reallm.base.seeding as seeding
 import reallm.base.timeutil
 
 # Register all implemented datasets and models.
-import impl.model  # isort:skip
-import impl.dataset  # isort:skip
+import reallm.impl.model  # isort:skip
+import reallm.impl.dataset  # isort:skip
 
 logger = logging.getLogger("Model Worker", "colored")
 blogger = logging.getLogger("benchmark")

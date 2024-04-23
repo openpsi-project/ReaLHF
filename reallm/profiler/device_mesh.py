@@ -3,8 +3,8 @@ import dataclasses
 
 import numpy as np
 
-from reallm.api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.core.dfg import ModelRPC
+from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 
 

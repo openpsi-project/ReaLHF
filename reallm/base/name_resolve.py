@@ -11,10 +11,8 @@ import threading
 import time
 import uuid
 
+from reallm.base import logging, security, timeutil
 from reallm.base.cluster import spec as cluster_spec
-import reallm.base.logging as logging
-import reallm.base.security
-import reallm.base.timeutil
 
 logger = logging.getLogger("name-resolve")
 
@@ -312,7 +310,7 @@ class NfsNameRecordRepository(NameRecordRepository):
 class RedisNameRecordRepository(NameRecordRepository):
     _IS_FRL = socket.gethostname().startswith("frl")
     REDIS_HOST = "redis" if _IS_FRL else "localhost"
-    REDIS_PASSWORD = reallm.base.security.read_key("redis") if _IS_FRL else None
+    REDIS_PASSWORD = security.read_key("redis") if _IS_FRL else None
     REDIS_DB = 0
     KEEPALIVE_POLL_FREQUENCY = 1
 
@@ -320,7 +318,7 @@ class RedisNameRecordRepository(NameRecordRepository):
     class _Entry:
         value: str
         keepalive_ttl: Optional[int] = None
-        keeper: Optional[base.timeutil.FrequencyControl] = None
+        keeper: Optional[timeutil.FrequencyControl] = None
 
     def __init__(self, **kwargs):
         from redis.backoff import ExponentialBackoff
@@ -364,7 +362,7 @@ class RedisNameRecordRepository(NameRecordRepository):
             self.__entries[name] = self._Entry(
                 value=value,
                 keepalive_ttl=keepalive_ttl,
-                keeper=base.timeutil.FrequencyControl(frequency_seconds=keepalive_ttl / 1000 / 3),
+                keeper=timeutil.FrequencyControl(frequency_seconds=keepalive_ttl / 1000 / 3),
             )
 
     def delete(self, name):

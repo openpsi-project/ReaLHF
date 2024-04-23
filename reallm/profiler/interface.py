@@ -3,7 +3,6 @@ from typing import Dict, List, Optional
 import time
 
 from deepspeed.runtime.engine import DeepSpeedEngine
-from profiler.engine import ProfileEngine
 import deepspeed
 import torch
 import torch.utils.data
@@ -19,6 +18,7 @@ from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
                                                 gather_packed_shifted_log_probs)
 from reallm.impl.model.utils.save_load import save_hf_or_lora_model
+from reallm.profiler.engine import ProfileEngine
 import reallm.api.data
 import reallm.api.model
 import reallm.base.constants

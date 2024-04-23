@@ -1,10 +1,9 @@
 import time
 
-from profiler.device_mesh import *
-from profiler.estimate import estimate_rpc_memory, estimate_rpc_time
-from profiler.experiments import *
-from profiler.rpc import *
-
+from reallm.profiler.device_mesh import *
+from reallm.profiler.estimate import estimate_rpc_memory, estimate_rpc_time
+from reallm.profiler.experiments import *
+from reallm.profiler.rpc import *
 import reallm.api.core.dfg
 
 GPU_MEM_CAP = 80 * (1024**3)

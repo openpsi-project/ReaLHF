@@ -4,27 +4,24 @@ import functools
 import os
 import pickle
 
-from profiler.device_mesh import DeviceMesh, make_device_mesh_from_name, ModelParallelStrategy
-from profiler.enumerate import build_graph, enumerate_rpc_executions
-from profiler.estimate import (comm_stats, estimate_model_size, estimate_rpc_memory, estimate_rpc_time,
-                               load_model_config)
-from profiler.experiments import ppo_rpcs_example
-from profiler.profile_layers import profile_rpcs
-from profiler.rpc import RPC, RPCExecution
 import numpy as np
 
-try:
-    import profiler.cppsearch.mdm_search as mdm_search
-except ModuleNotFoundError:
-    mdm_search = None
-
-from reallm.api.config.config_device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
-from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
-from reallm.impl.model.nn.flash_mqat.flash_mqat_base import FlashMQATConfig
+from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
+from reallm.api.quickstart.model import (FlashMQATConfig, ModelTrainEvalConfig, OptimizerConfig,
+                                         ParallelismConfig)
+import reallm._C.mdm_search as mdm_search
 import reallm.api.core.system as config_package
 import reallm.base.constants
+
+from .device_mesh import DeviceMesh, make_device_mesh_from_name, ModelParallelStrategy
+from .enumerate import build_graph, enumerate_rpc_executions
+from .estimate import (comm_stats, estimate_model_size, estimate_rpc_memory, estimate_rpc_time,
+                       load_model_config)
+from .experiments import ppo_rpcs_example
+from .profile_layers import profile_rpcs
+from .rpc import RPC, RPCExecution
 
 
 def optimal_device_mapping(
@@ -599,7 +596,7 @@ if __name__ == "__main__":
     # rpcs = ppo_rpcs_example(size, size, bs, seqlen)
     # device_mesh = make_device_mesh_from_name(nodelist)
 
-    # # from profiler.device_mesh import find_sub_device_meshes
+    # # from reallm.profiler.device_mesh import find_sub_device_meshes
     # # import pprint
     # # pprint.pprint(find_sub_device_meshes(device_mesh))
 

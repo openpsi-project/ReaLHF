@@ -2,14 +2,14 @@ from typing import List
 import argparse
 import math
 
-from profiler.experiments import *
-from profiler.utils import find_factors
 import profiler.multi_host_main
 import scheduler.client
 
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelRPC
 from reallm.api.core.system import _LLM_ENVVARS
+from reallm.profiler.experiments import *
+from reallm.profiler.utils import find_factors
 import reallm.api.core.system as config_package
 
 

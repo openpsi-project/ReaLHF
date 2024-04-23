@@ -87,9 +87,8 @@ def make_interface():
 
 
 def make_model(device):
-    import impl.model.nn.flash_mqat.flash_mqat_api
-
     import reallm.api.model
+    import reallm.impl.model.nn.flash_mqat.flash_mqat_api
 
     # from_type = "self" if NUM_PP == 1 else "empty_actor"
     # if NUM_MP == NUM_PP == 1:
