@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "packaging", "torch", "hydra-core", "pyzmq"]
+requires = ["setuptools>=61.0", "packaging", "torch"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -22,6 +22,8 @@ dependencies = [
     "flash-attn>=2.3.6",
     "transformers>=4.39.1",
     "deepspeed>=0.14.0",
+    "hydra-core",
+    "pyzmq",
 ]
 classifiers = [
     #   3 - Alpha
@@ -42,11 +44,10 @@ Repository = "https://github.com/garrett4wade/distributed_llm"
 # Changelog = "https://github.com/garrett4wade/distributed_llm/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
-# All the following settings are optional:
-where = ["."]  # ["."] by default
-include = ["csrc/", "reallm/"]  # ["*"] by default
-exclude = ["tests/"]  # empty by default
-namespaces = false  # true by default
+where = ["."]                    # ["."] by default
+include = ["csrc/*", "reallm/*"] # ["*"] by default
+exclude = ["tests", "docker"]    # empty by default
+namespaces = false               # true by default
 
 [tool.isort]
 from_first = true
