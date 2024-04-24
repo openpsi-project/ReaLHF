@@ -15,7 +15,7 @@ from reallm.impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model
 from reallm.impl.model.nn.real_llm_api import (_keys_from_layer_indices, _param_size_from_keys,
                                                ReparallelizeReceiverStep, ReparallelizeSenderStep)
 from reallm.impl.model.nn.real_llm_base import (flash_model_embed_param_count, flash_model_head_param_count,
-                                                flash_model_tblock_param_count, FlashMQATConfig)
+                                                flash_model_tblock_param_count, ReaLModelConfig)
 from tests.utils import get_llama7b_flash_config, get_llama_config
 import reallm.api.core.system_api
 import reallm.base.gpu_utils as gpu_utils
@@ -202,8 +202,8 @@ def _derive_reparallelize_comm_plan(
     to_model_name: ModelName,
     from_topo: reallm.base.topology.PipeModelDataParallelTopology,
     to_topo: reallm.base.topology.PipeModelDataParallelTopology,
-    from_model_config: FlashMQATConfig,
-    to_model_config: FlashMQATConfig,
+    from_model_config: ReaLModelConfig,
+    to_model_config: ReaLModelConfig,
     pg_info: gpu_utils.NCCLProcessGroupInfo,
     dtype: Optional[torch.dtype] = torch.float16,
 ) -> List[ReparallelizeReceiverStep | ReparallelizeSenderStep]:
@@ -342,7 +342,7 @@ def compute_cost(
     to_model_name: ModelName,
     from_topo: reallm.base.topology.PipeModelDataParallelTopology,
     to_topo: reallm.base.topology.PipeModelDataParallelTopology,
-    model_config: FlashMQATConfig,
+    model_config: ReaLModelConfig,
     bw: float,  # Gbps
     set_interval_cost: float,
 ) -> int:

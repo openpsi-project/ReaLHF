@@ -4,7 +4,7 @@ import os
 import torch
 import transformers
 
-from reallm.api.quickstart.model import (convert_config_llama, convert_config_starcoder, FlashMQATConfig,
+from reallm.api.quickstart.model import (convert_config_llama, convert_config_starcoder, ReaLModelConfig,
                                          gpt2_config_converter)
 
 from .real_llm_api import ReaLModel
@@ -26,7 +26,7 @@ HF_ARCH_TO_MODEL_TYPE = {
 ################################ StarCoder Begin ################################
 
 
-def _starcoder_key_mapping_fn(config: FlashMQATConfig) -> Dict[str, str]:
+def _starcoder_key_mapping_fn(config: ReaLModelConfig) -> Dict[str, str]:
     assert not USE_TE_BACKEND, "starcoder does not support TE backend now"
     key_mappings = {
         "transformer.wte.weight": "transformer.embedding_layer.wte.weight",
@@ -77,7 +77,7 @@ def state_dict_to_starcoder(state_dict, config):
 ################################ GPT2 Begin ################################
 
 
-def gpt2_state_dict_converter(state_dict: Dict, config: FlashMQATConfig) -> Dict:
+def gpt2_state_dict_converter(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     assert not USE_TE_BACKEND, "gpt does not support TE backend now"
     new_state_dict = {}
     replace_from = [
@@ -164,7 +164,7 @@ def state_dict_to_gpt2(state_dict, config):
 ################################ LLaMa Begin ################################
 
 
-def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
+def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     new_state_dict = {}
     for k, v in state_dict.items():
         if k == "model.embed_tokens.weight":
@@ -217,7 +217,7 @@ def convert_state_dict_llama(state_dict: Dict, config: FlashMQATConfig) -> Dict:
     return new_state_dict
 
 
-def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: FlashMQATConfig) -> Dict:
+def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: ReaLModelConfig) -> Dict:
     if USE_TE_BACKEND:
         # remove all extra states
         keys = list(state_dict.keys())
@@ -281,11 +281,11 @@ def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: FlashMQATCo
 
 
 # param name is used to load directly from huggingface checkpoints
-def llama_embedding_layer_names(config: FlashMQATConfig) -> List[str]:
+def llama_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
     return ["model.embed_tokens.weight"]
 
 
-def llama_transformer_block_param_name(config: FlashMQATConfig, idx: int) -> List[str]:
+def llama_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
     names = [
         f"model.layers.{idx}.input_layernorm.weight",
         f"model.layers.{idx}.mlp.down_proj.weight",
@@ -303,7 +303,7 @@ def llama_transformer_block_param_name(config: FlashMQATConfig, idx: int) -> Lis
     return names
 
 
-def llama_output_head_param_name(config: FlashMQATConfig) -> List[str]:
+def llama_output_head_param_name(config: ReaLModelConfig) -> List[str]:
     return ["lm_head.weight"]
 
 

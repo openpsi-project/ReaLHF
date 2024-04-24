@@ -17,7 +17,7 @@ import torch.utils.checkpoint
 import transformers
 
 from reallm.api.core.config import ModelName
-from reallm.api.quickstart.model import FlashMQATConfig
+from reallm.api.quickstart.model import ReaLModelConfig
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
                                                                   RowParallelLinear)
@@ -55,16 +55,16 @@ CUDA_INTERVAL_OP_CHUNK_SIZE = 2048
 
 @dataclasses.dataclass
 class FlashMQATParallelismHelper:
-    embedding_param_names: Callable[[FlashMQATConfig], List[str]]
-    tblock_param_names: Callable[[FlashMQATConfig, int], List[str]]
-    head_param_names: Callable[[FlashMQATConfig], List[str]]
+    embedding_param_names: Callable[[ReaLModelConfig], List[str]]
+    tblock_param_names: Callable[[ReaLModelConfig, int], List[str]]
+    head_param_names: Callable[[ReaLModelConfig], List[str]]
 
 
 @dataclasses.dataclass
 class FlashMQATConvertHelper:
-    config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig]
-    state_dict_converter: Optional[Callable[[Dict, FlashMQATConfig], Dict]]
-    state_dict_converter_to_hf: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None
+    config_converter: Callable[[transformers.PretrainedConfig], ReaLModelConfig]
+    state_dict_converter: Optional[Callable[[Dict, ReaLModelConfig], Dict]]
+    state_dict_converter_to_hf: Optional[Callable[[Dict, ReaLModelConfig], Dict]] = None
 
 
 @dataclasses.dataclass
@@ -190,7 +190,7 @@ def recursive_getattr(obj, attr_string):
     return obj
 
 
-def _keys_from_layer_indices(config: FlashMQATConfig, layer_indices: List[int]) -> List[str]:
+def _keys_from_layer_indices(config: ReaLModelConfig, layer_indices: List[int]) -> List[str]:
     # assert _is_integer_list_contiguous(layer_indices)
     sd_keys = []
     for layer_idx in layer_indices:
@@ -215,7 +215,7 @@ _FLAT_PARAM_INDICES_CACHE = {}
 
 def _param_intervals_from_keys(
     model_name: ModelName,
-    config: FlashMQATConfig,
+    config: ReaLModelConfig,
     param_spec: Dict[str, ContiguousParamSpec],
     mp_size: int,
     sd_keys: List[str],
@@ -260,7 +260,7 @@ def _param_intervals_from_keys(
 
 
 def _param_size_from_keys(
-    config: FlashMQATConfig,
+    config: ReaLModelConfig,
     src_mp_size: int,
     sd_keys: List[str],
     src2dst_tp_size: int,
@@ -304,7 +304,7 @@ def _disable_sequence_parallel_of_module(l: nn.Module):
     assert len(_states) == 0
 
 
-def _build_param_spec(layer_indices: List[int], config: FlashMQATConfig,
+def _build_param_spec(layer_indices: List[int], config: ReaLModelConfig,
                       mp_size: int) -> Tuple[Dict[str, ContiguousParamSpec], int]:
     if len(layer_indices) == 0:
         return {}, 0
@@ -370,8 +370,8 @@ def _derive_reparallelize_comm_plan(
     to_model_name: ModelName,
     from_topo: topology.PipeModelDataParallelTopology,
     to_topo: topology.PipeModelDataParallelTopology,
-    from_model_config: FlashMQATConfig,
-    to_model_config: FlashMQATConfig,
+    from_model_config: ReaLModelConfig,
+    to_model_config: ReaLModelConfig,
     pg_info: gpu_utils.NCCLProcessGroupInfo,
     dtype: Optional[torch.dtype] = torch.float16,
 ) -> List[ReparallelizeReceiverStep | ReparallelizeSenderStep]:
@@ -563,7 +563,7 @@ class ReaLModel(nn.Module):
 
     def __init__(
         self,
-        config: FlashMQATConfig,
+        config: ReaLModelConfig,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -660,7 +660,7 @@ class ReaLModel(nn.Module):
     def is_critic(self):
         return self.config.is_critic
 
-    def _build_layer(self, idx: int, config: FlashMQATConfig) -> nn.Module:
+    def _build_layer(self, idx: int, config: ReaLModelConfig) -> nn.Module:
         dtype = self.dtype
         device = self.device
         if idx == 0:
@@ -677,7 +677,7 @@ class ReaLModel(nn.Module):
             )
         return l
 
-    def _build_output_head(self, config: FlashMQATConfig) -> nn.Module:
+    def _build_output_head(self, config: ReaLModelConfig) -> nn.Module:
         dtype = self.dtype
         device = self.device
         if config.is_critic and config.sequence_parallel:
@@ -923,13 +923,13 @@ class ReaLModel(nn.Module):
 
     # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
     def _config_from_hf_template(
-        config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
+        config_converter: Callable[[transformers.PretrainedConfig], ReaLModelConfig],
         from_model: Optional[transformers.PreTrainedModel] = None,
         model_path: Optional[str] = None,
         is_critic: bool = False,
         sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
-    ) -> FlashMQATConfig:
+    ) -> ReaLModelConfig:
         if model_path is not None:
             hf_config = transformers.AutoConfig.from_pretrained(os.path.join(model_path, "config.json"))
         else:
@@ -944,8 +944,8 @@ class ReaLModel(nn.Module):
     # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
     def _from_hf_template(
         cls,
-        config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
-        state_dict_converter: Callable[[Dict, FlashMQATConfig], Dict],
+        config_converter: Callable[[transformers.PretrainedConfig], ReaLModelConfig],
+        state_dict_converter: Callable[[Dict, ReaLModelConfig], Dict],
         from_model: Optional[transformers.PreTrainedModel] = None,
         model_path: Optional[str] = None,
         init_from_scratch: bool = False,
@@ -986,12 +986,12 @@ class ReaLModel(nn.Module):
     @staticmethod
     def register_hf_model(
         model_name: str,
-        config_converter: Callable[[transformers.PretrainedConfig], FlashMQATConfig],
-        state_dict_converter: Callable[[Dict, FlashMQATConfig], Dict],
-        embedding_param_names: Callable[[FlashMQATConfig], List[str]],
-        tblock_param_names: Callable[[FlashMQATConfig, int], List[str]],
-        head_param_names: Callable[[FlashMQATConfig], List[str]],
-        state_dict_converter_to_hf: Optional[Callable[[Dict, FlashMQATConfig], Dict]] = None,
+        config_converter: Callable[[transformers.PretrainedConfig], ReaLModelConfig],
+        state_dict_converter: Callable[[Dict, ReaLModelConfig], Dict],
+        embedding_param_names: Callable[[ReaLModelConfig], List[str]],
+        tblock_param_names: Callable[[ReaLModelConfig, int], List[str]],
+        head_param_names: Callable[[ReaLModelConfig], List[str]],
+        state_dict_converter_to_hf: Optional[Callable[[Dict, ReaLModelConfig], Dict]] = None,
     ):
         """Register a HuggingFace model with `model_name`, such that models can be converted back-and-forth.
         # TODO: the documentation is OOD.
@@ -1007,7 +1007,7 @@ class ReaLModel(nn.Module):
                                          state_dict_to_starcoder)
 
         # 2. Obtain the config
-        config: FlashMQATConfig = ReaLModel.config_from_starcoder(model_path)
+        config: ReaLModelConfig = ReaLModel.config_from_starcoder(model_path)
 
         # 3. Obtain config and state_dict (also support init_from_scratch=True)
         config, state_dict = ReaLModel.config_and_param_from_starcoder(model_path)
@@ -1130,7 +1130,7 @@ class ReaLModel(nn.Module):
 
     def load_from_saved_flash_model(self, load_dir: str, init_critic_from_actor: bool = False):
         with open(os.path.join(load_dir, "flash_mqat_config.json"), "r") as f:
-            ckpt_config = FlashMQATConfig(**json.load(f))
+            ckpt_config = ReaLModelConfig(**json.load(f))
         for k, v in dataclasses.asdict(ckpt_config).items():
             if k not in [
                     "is_critic",
@@ -1250,9 +1250,9 @@ class ReaLModel(nn.Module):
         to_model_name: ModelName,
         from_topo: topology.PipeModelDataParallelTopology,
         to_topo: topology.PipeModelDataParallelTopology,
-        to_model_config: FlashMQATConfig,
+        to_model_config: ReaLModelConfig,
         pg_info: gpu_utils.NCCLProcessGroupInfo,
-        from_model_config: None | FlashMQATConfig = None,
+        from_model_config: None | ReaLModelConfig = None,
     ):
         if from_model_config is None:
             from_model_config = self.config
@@ -1311,7 +1311,7 @@ class ReaLModel(nn.Module):
         to_model_name: ModelName,
         from_topo: topology.PipeModelDataParallelTopology,
         to_topo: topology.PipeModelDataParallelTopology,
-        to_model_config: FlashMQATConfig,
+        to_model_config: ReaLModelConfig,
         pg_info: gpu_utils.NCCLProcessGroupInfo,
     ) -> Tuple[nn.ModuleList, torch.Tensor, torch.Tensor]:
         # FIXME: remote synchronization deletes the local model, but sometimes it is uncessary.
@@ -1536,7 +1536,7 @@ def make_flash_model(
     elif from_type == "actor_as_critic":
         # initialize a critic from actor
         with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
-            config = FlashMQATConfig(**json.load(f))
+            config = ReaLModelConfig(**json.load(f))
         config.is_critic = True
         config.sequence_parallel = sequence_parallel
         config.gradient_accumulation_fusion = gradient_accumulation_fusion
@@ -1568,7 +1568,7 @@ def make_flash_model(
         # actor loads from saved actor or critic loads from saved critic
         assert from_type == "self"
         with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
-            config = FlashMQATConfig(**json.load(f))
+            config = ReaLModelConfig(**json.load(f))
         config.sequence_parallel = sequence_parallel
         config.gradient_accumulation_fusion = gradient_accumulation_fusion
         m = ReaLModel(config=config, dtype=dtype, device=device)

@@ -20,7 +20,7 @@ import torch
 import torch.distributed
 
 from reallm.api.core.config import ModelName
-from reallm.api.quickstart.model import FlashMQATConfig
+from reallm.api.quickstart.model import ReaLModelConfig
 from reallm.base import datapack, dataparallel, logging, namedarray, numpy_utils, timeutil, topology
 from reallm.base.asyncio_utils import (raise_asyncio_exception, setup_run_until_complete,
                                        teardown_run_util_complete)
@@ -177,7 +177,7 @@ def _request_parameter_sync(
     to_model_name: ModelName,
     from_topo: topology.PipeModelDataParallelTopology,
     to_topo: topology.PipeModelDataParallelTopology,
-    to_model_config: FlashMQATConfig,
+    to_model_config: ReaLModelConfig,
 ):
 
     model_name = from_model_name
@@ -224,15 +224,15 @@ def _request_parameter_sync(
 
 @dataclasses.dataclass
 class InterfaceDataAmount:
-    train_configs: List[FlashMQATConfig] = dataclasses.field(default_factory=list)
+    train_configs: List[ReaLModelConfig] = dataclasses.field(default_factory=list)
     train_bs: List[int] = dataclasses.field(default_factory=list)
     train_seqlens: List[List[int]] = dataclasses.field(default_factory=list)
 
-    inf_configs: List[FlashMQATConfig] = dataclasses.field(default_factory=list)
+    inf_configs: List[ReaLModelConfig] = dataclasses.field(default_factory=list)
     inf_bs: List[int] = dataclasses.field(default_factory=list)
     inf_seqlens: List[List[int]] = dataclasses.field(default_factory=list)
 
-    gen_configs: List[FlashMQATConfig] = dataclasses.field(default_factory=list)
+    gen_configs: List[ReaLModelConfig] = dataclasses.field(default_factory=list)
     gen_bs: List[int] = dataclasses.field(default_factory=list)
     prompt_lens: List[List[int]] = dataclasses.field(default_factory=list)
     gen_len: List[int] = dataclasses.field(default_factory=list)
@@ -281,7 +281,7 @@ def _attach_payloads_with_hooks(
     payloads: Dict[config_api.ModelShardID, request_reply_stream.Payload],
     mwids: List[int],
     msid2mwid: Dict[config_pkg.ModelShardID, int],
-    model_configs: Dict[str, None | FlashMQATConfig],
+    model_configs: Dict[str, None | ReaLModelConfig],
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
     main_handlers: List[config_pkg.ModelShardID],
     hook_type: str,
@@ -349,7 +349,7 @@ async def scatter_tensor_to_mws(
     stream: request_reply_stream.NameResolvingRequstClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
-    model_configs: Dict[str, None | FlashMQATConfig],
+    model_configs: Dict[str, None | ReaLModelConfig],
     producer_names: Dict[str, str],
     producer_name2producer_handlers: Dict[str, List[config_pkg.ModelShardID]],
     producer_mappings: Dict[str, Dict[str, List[int]]],
@@ -438,7 +438,7 @@ async def model_rpc_request_func(
     buffer: AsyncIOSequenceBuffer,
     data_owner: Dict[Tuple[int, str], Tuple[str, int]],
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
-    model_configs: Dict[str, None | FlashMQATConfig],
+    model_configs: Dict[str, None | ReaLModelConfig],
     ctrl: RPCCorountineControl,
 ):
     topo = model_topos[rpc.model_name]
@@ -835,7 +835,7 @@ class MasterWorker(worker_base.Worker):
             ]
 
         # logger.info("before create task initialize")
-        self.__model_configs: Dict[ModelName, None | FlashMQATConfig] = {}
+        self.__model_configs: Dict[ModelName, None | ReaLModelConfig] = {}
         for model_name in self.config.model_topos:
             p = request_reply_stream.Payload(
                 handler=config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, 0),

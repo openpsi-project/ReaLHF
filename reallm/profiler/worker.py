@@ -21,7 +21,7 @@ import torch.distributed as dist
 import torch.utils.data
 
 from reallm.api.core import data_api
-from reallm.api.quickstart.model import FlashMQATConfig
+from reallm.api.quickstart.model import ReaLModelConfig
 from reallm.base.constants import LOG_ROOT
 from reallm.base.monitor import CUDAKernelTime, gpu_utilization_monitor, time_mark
 from reallm.base.topology import ParallelGrid

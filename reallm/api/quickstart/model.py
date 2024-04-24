@@ -12,7 +12,7 @@ logger = logging.getLogger("Flash Model Config")
 
 
 @dataclasses.dataclass
-class FlashMQATConfig:
+class ReaLModelConfig:
     n_layers: int
     n_kv_heads: int
     head_dim: int
@@ -50,8 +50,8 @@ class FlashMQATConfig:
     ckpt_mlp: bool = False
 
 
-def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig) -> FlashMQATConfig:
-    return FlashMQATConfig(
+def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig) -> ReaLModelConfig:
+    return ReaLModelConfig(
         n_layers=starcoder_config.n_layer,
         n_kv_heads=1,
         attn_pdrop=starcoder_config.attn_pdrop,
@@ -66,8 +66,8 @@ def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig) ->
     )
 
 
-def gpt2_config_converter(gpt2config: transformers.GPT2Config) -> FlashMQATConfig:
-    return FlashMQATConfig(
+def gpt2_config_converter(gpt2config: transformers.GPT2Config) -> ReaLModelConfig:
+    return ReaLModelConfig(
         n_layers=gpt2config.n_layer,
         n_kv_heads=gpt2config.n_head,
         attn_pdrop=gpt2config.attn_pdrop,
@@ -85,8 +85,8 @@ def gpt2_config_converter(gpt2config: transformers.GPT2Config) -> FlashMQATConfi
     )
 
 
-def convert_config_llama(hf_config: transformers.LlamaConfig) -> FlashMQATConfig:
-    return FlashMQATConfig(
+def convert_config_llama(hf_config: transformers.LlamaConfig) -> ReaLModelConfig:
+    return ReaLModelConfig(
         n_layers=hf_config.num_hidden_layers,
         n_kv_heads=hf_config.num_key_value_heads,
         hidden_dim=hf_config.hidden_size,
@@ -110,7 +110,7 @@ def convert_config_llama(hf_config: transformers.LlamaConfig) -> FlashMQATConfig
     )
 
 
-FLASH_MODEL_CONFIG_CONVERTER: Dict[str, Callable[[Any], FlashMQATConfig]] = {
+FLASH_MODEL_CONFIG_CONVERTER: Dict[str, Callable[[Any], ReaLModelConfig]] = {
     "starcoder": convert_config_starcoder,
     "gpt2": gpt2_config_converter,
     "llama": convert_config_llama,

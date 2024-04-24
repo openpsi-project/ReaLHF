@@ -9,7 +9,7 @@ import numpy as np
 from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
-from reallm.api.quickstart.model import (FlashMQATConfig, ModelTrainEvalConfig, OptimizerConfig,
+from reallm.api.quickstart.model import (ReaLModelConfig, ModelTrainEvalConfig, OptimizerConfig,
                                          ParallelismConfig)
 import reallm._C.mdm_search as mdm_search
 import reallm.api.core.system_api as config_package
@@ -27,7 +27,7 @@ from .rpc import RPC, RPCExecution
 def optimal_device_mapping(
     device_mesh: ClusterDeviceMesh,
     model_rpcs: List[ModelRPC],
-    model_configs: Dict[str, FlashMQATConfig],
+    model_configs: Dict[str, ReaLModelConfig],
     nodelist: Optional[str] = None,
     profile_layers: bool = False,
     num_gen_tokens: int = 256,
@@ -310,7 +310,7 @@ def print_model_device_mapping_by_index(rpcs: List[ModelRPC], device_mesh: Devic
 def handpicked_model_device_mapping(
     device_mesh: ClusterDeviceMesh,
     model_rpcs: List[ModelRPC],
-    model_configs: Dict[str, FlashMQATConfig],
+    model_configs: Dict[str, ReaLModelConfig],
     nodelist: Optional[str] = None,
     profile_layers: bool = False,
     num_gen_tokens: int = 256,
@@ -421,7 +421,7 @@ full_model_device_mapping = functools.partial(handpicked_model_device_mapping, m
 def test_model_device_mapping(
     device_mesh: ClusterDeviceMesh,
     model_rpcs: List[ModelRPC],
-    model_configs: Dict[str, FlashMQATConfig],
+    model_configs: Dict[str, ReaLModelConfig],
     nodelist: Optional[str] = None,
     profile_layers: bool = False,
     num_gen_tokens: int = 256,

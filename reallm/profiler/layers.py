@@ -13,7 +13,7 @@ import transformers
 
 from reallm.base.topology import *
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_base import (FlashMQATBlock, FlashMQATConfig, OutputHead,
+from reallm.impl.model.nn.real_llm_base import (FlashMQATBlock, ReaLModelConfig, OutputHead,
                                                 SequenceParallelActorHead, SequenceParallelCriticHead,
                                                 VocabPositionEmbedding)
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
@@ -23,7 +23,7 @@ import reallm.base.cluster
 import reallm.base.constants as constants
 
 
-def make_layers(config: FlashMQATConfig, dtype, device):
+def make_layers(config: ReaLModelConfig, dtype, device):
     embedding_layer = VocabPositionEmbedding(
         config,
         dtype=dtype,
@@ -86,7 +86,7 @@ class ProfileLayers:
     def __init__(
         self,
         model_name: str,
-        config: FlashMQATConfig,
+        config: ReaLModelConfig,
         use_sequence_parallel: bool = False,
         use_gradient_checkpointing: bool = False,
         tokenizer: transformers.PreTrainedTokenizerFast = None,
@@ -298,9 +298,9 @@ def make_profile_layers(device: torch.device,
     else:
         raise NotImplementedError(f"Unsupported dtype {dtype}")
     tokenizer = None
-    config: FlashMQATConfig = getattr(ReaLModel, f"config_from_{hf_model_type}")(model_path=model_path,)
+    config: ReaLModelConfig = getattr(ReaLModel, f"config_from_{hf_model_type}")(model_path=model_path,)
     # with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
-    #     config = FlashMQATConfig(**json.load(f))
+    #     config = ReaLModelConfig(**json.load(f))
     config.sequence_parallel = use_sequence_parallel
     # m.load(model_path, init_critic_from_actor=False)
     if tokenizer is None:

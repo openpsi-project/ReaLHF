@@ -16,7 +16,7 @@ from reallm.api.core.config import MODEL_TYPE_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_base import FlashMQATConfig
+from reallm.impl.model.nn.real_llm_base import ReaLModelConfig
 from reallm.profiler.device_mesh import *
 from reallm.profiler.experiments import ProfileExperiment
 from reallm.profiler.rpc import CommStats
@@ -331,7 +331,7 @@ def _estimate_rpc_cost(
     return compute_cost + comm_cost
 
 
-def load_model_config(rpc: ModelRPC) -> FlashMQATConfig:
+def load_model_config(rpc: ModelRPC) -> ReaLModelConfig:
     return getattr(ReaLModel,
                    f"config_from_{rpc.model_type._class}")(model_path=MODEL_TYPE_TO_PATH[rpc.model_type])
 
@@ -398,7 +398,7 @@ def comm_stats(if_print=False):
     return r
 
 
-def estimate_model_size(model_config: FlashMQATConfig):
+def estimate_model_size(model_config: ReaLModelConfig):
     h = model_config.hidden_dim
     i = model_config.intermediate_dim
     v = model_config.vocab_size

@@ -187,10 +187,10 @@ def get_memory(rank):
 
 
 def get_llama7b_flash_config():
-    from reallm.impl.model.nn.real_llm_base import FlashMQATConfig
+    from reallm.impl.model.nn.real_llm_base import ReaLModelConfig
 
     # codellama 34b config
-    # return FlashMQATConfig(
+    # return ReaLModelConfig(
     #     n_layers=80,
     #     n_kv_heads=8,
     #     head_dim=128,
@@ -204,7 +204,7 @@ def get_llama7b_flash_config():
     #     mlp_type="llama",
     #     apply_rotary=True,
     # )
-    return FlashMQATConfig(
+    return ReaLModelConfig(
         n_layers=40,
         n_kv_heads=32,
         head_dim=128,
@@ -221,7 +221,7 @@ def get_llama7b_flash_config():
 
 
 def get_llama_config(size):
-    from reallm.impl.model.nn.real_llm_base import FlashMQATConfig
+    from reallm.impl.model.nn.real_llm_base import ReaLModelConfig
 
     if size == 7:
         size_args = dict(
@@ -262,7 +262,7 @@ def get_llama_config(size):
     else:
         raise ValueError(f"size {size} not supported")
 
-    return FlashMQATConfig(
+    return ReaLModelConfig(
         vocab_size=32000,
         activation_function="silu",
         use_attention_bias=False,

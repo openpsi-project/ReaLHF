@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.utils.checkpoint
 import transformers
 
-from reallm.api.quickstart.model import FlashMQATConfig
+from reallm.api.quickstart.model import ReaLModelConfig
 from reallm.impl.model.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
 from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, parallel_lm_logits,
                                                                   ParallelEmbedding, RowParallelLinear)
@@ -28,7 +28,7 @@ class FlashMQATBlock(nn.Module):
 
     def __init__(
         self,
-        config: FlashMQATConfig,
+        config: ReaLModelConfig,
         layer_index: int,
         output_layernorm: bool = False,
         dtype: Optional[torch.dtype] = None,
@@ -209,7 +209,7 @@ class VocabPositionEmbedding(nn.Module):
 
     def __init__(
         self,
-        config: FlashMQATConfig,
+        config: ReaLModelConfig,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -374,21 +374,21 @@ class SequenceParallelActorHead(ColumnParallelLinear):
 
 # Paramter count, used for partitioning pipeline stages
 # Ignoring tensor model parallel since it will evenly partition parameters.
-def flash_model_embed_param_count(config: FlashMQATConfig) -> int:
+def flash_model_embed_param_count(config: ReaLModelConfig) -> int:
     count = config.vocab_size * config.hidden_dim
     if not config.apply_rotary:
         count += config.n_positions * config.hidden_dim
     return count
 
 
-def flash_model_embedding_param_keys(config: FlashMQATConfig) -> int:
+def flash_model_embedding_param_keys(config: ReaLModelConfig) -> int:
     keys = ["0.wte.weight"]
     if not config.apply_rotary:
         keys += ["0.wpe.weight"]
     return keys
 
 
-def flash_model_tblock_param_count(config: FlashMQATConfig, idx: int) -> int:
+def flash_model_tblock_param_count(config: ReaLModelConfig, idx: int) -> int:
     count = 0
     nq = config.hidden_dim // config.head_dim
 
@@ -426,7 +426,7 @@ def flash_model_tblock_param_count(config: FlashMQATConfig, idx: int) -> int:
     return count
 
 
-def flash_model_tblock_param_keys(config: FlashMQATConfig, idx: int) -> List[str]:
+def flash_model_tblock_param_keys(config: ReaLModelConfig, idx: int) -> List[str]:
     keys = [
         f"{idx + 1}.attn.c_attn.ln.weight",
         f"{idx + 1}.attn.c_attn.q_attn.weight",
@@ -457,12 +457,12 @@ def flash_model_tblock_param_keys(config: FlashMQATConfig, idx: int) -> List[str
     return keys
 
 
-def flash_model_head_param_count(config: FlashMQATConfig) -> int:
+def flash_model_head_param_count(config: ReaLModelConfig) -> int:
     # NOTE: To hold consistent partitions between actor and critic models,
     # we count the number of parameters of the critic head as config.hidden_dim * config.vocab_size.
     # This is the intended behavior rather than a bug.
     return config.hidden_dim * config.vocab_size
 
 
-def flash_model_head_param_keys(config: FlashMQATConfig) -> List[str]:
+def flash_model_head_param_keys(config: ReaLModelConfig) -> List[str]:
     return [f"{config.n_layers + 1}.weight"]

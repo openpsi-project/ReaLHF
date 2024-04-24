@@ -4,7 +4,7 @@ import os
 import numpy as np
 import torch
 
-from reallm.api.quickstart.model import FlashMQATConfig
+from reallm.api.quickstart.model import ReaLModelConfig
 import reallm.base.logging as logging
 
 try:
@@ -110,7 +110,7 @@ def mp_partition_key(
     tensor_or_shape: torch.Tensor | torch.Size,
     mp_rank: Optional[int],
     mp_size: Optional[int],
-    config: FlashMQATConfig,
+    config: ReaLModelConfig,
     partition_fn: Callable[[torch.Tensor, Optional[int], int, Optional[int]],
                            Union[List[torch.Tensor], torch.Tensor]] = tensor_slice_partition_fn,
 ) -> torch.Tensor:
@@ -140,7 +140,7 @@ def mp_partition_key(
 
 def mp_partition_flash_mqat_state_dict(
     state_dict: Dict[str, torch.Tensor],
-    config: FlashMQATConfig,
+    config: ReaLModelConfig,
     mp_size: int,
     mp_rank: Optional[int] = None,
 ) -> Union[Dict, List[Dict]]:
@@ -161,7 +161,7 @@ def mp_partition_flash_mqat_state_dict(
         return new_state_dict
 
 
-def get_flash_model_param_shape(k: str, config: FlashMQATConfig, mp_size: int) -> Tuple:
+def get_flash_model_param_shape(k: str, config: ReaLModelConfig, mp_size: int) -> Tuple:
 
     if "wte.weight" in k:
         assert config.vocab_size % mp_size == 0
@@ -211,7 +211,7 @@ def get_flash_model_param_shape(k: str, config: FlashMQATConfig, mp_size: int) -
 def mp_merge_key(
     k: str,
     tensors: List[torch.Tensor],
-    config: FlashMQATConfig,
+    config: ReaLModelConfig,
 ) -> torch.Tensor:
     if any([ek in k for ek in EMBEDDING_KEYS]) and "weight" in k:
         return torch.cat(tensors, dim=0)
@@ -227,7 +227,7 @@ def mp_merge_key(
 
 def mp_merge_flash_mqat_state_dict(
     state_dicts: List[Dict[str, torch.Tensor]],
-    config: FlashMQATConfig,
+    config: ReaLModelConfig,
 ) -> Dict:
     mp_size = len(state_dicts)
     if mp_size == 1:
@@ -241,11 +241,11 @@ def mp_merge_flash_mqat_state_dict(
 
 
 def partition_pipeline_layers(
-    config: FlashMQATConfig,
+    config: ReaLModelConfig,
     num_stages: int,
-    embed_param_counter: Callable[[FlashMQATConfig], int],
-    transformer_block_param_counter: Callable[[FlashMQATConfig, int], int],
-    head_param_counter: Callable[[FlashMQATConfig], int],
+    embed_param_counter: Callable[[ReaLModelConfig], int],
+    transformer_block_param_counter: Callable[[ReaLModelConfig, int], int],
+    head_param_counter: Callable[[ReaLModelConfig], int],
     method: str = "parameters_balanced",
 ) -> Dict[int, Tuple[int, int]]:
     from deepspeed.runtime import utils as ds_utils

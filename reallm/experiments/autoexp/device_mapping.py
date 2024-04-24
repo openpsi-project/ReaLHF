@@ -13,7 +13,7 @@ from reallm.api.core.dfg import *
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
 from reallm.api.quickstart.device_mesh import *
-from reallm.api.quickstart.model import (FLASH_MODEL_CONFIG_CONVERTER, FlashMQATConfig, ModelTrainEvalConfig,
+from reallm.api.quickstart.model import (FLASH_MODEL_CONFIG_CONVERTER, ReaLModelConfig, ModelTrainEvalConfig,
                                          OptimizerConfig, ParallelismConfig)
 from reallm.base.topology import PipeModelDataParallelTopology
 from reallm.profiler.search import (data_pipe_device_mapping, full_model_device_mapping,
