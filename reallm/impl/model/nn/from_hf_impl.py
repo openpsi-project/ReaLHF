@@ -4,8 +4,8 @@ import os
 import torch
 import transformers
 
-from reallm.api.quickstart.model import (convert_config_llama, convert_config_starcoder, ReaLModelConfig,
-                                         gpt2_config_converter)
+from reallm.api.quickstart.model import (convert_config_llama, convert_config_starcoder,
+                                         gpt2_config_converter, ReaLModelConfig)
 
 from .real_llm_api import ReaLModel
 
