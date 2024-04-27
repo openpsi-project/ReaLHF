@@ -288,7 +288,7 @@ class ProfileWorker(worker_base.Worker):
                 self.__profile_comm.print_stats()
                 self.__profile_comm.dump_stats()
 
-            if os.environ["DLLM_TRACE"] == "1":
+            if os.environ["REAL_TRACE"] == "1":
                 return r
 
             raise ProfileCompelte(f"Profile rounds {self.warmup_rounds + self.profile_rounds} complete !!! "

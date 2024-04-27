@@ -169,7 +169,7 @@ def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_
 
 
 def setup_gpu(rank, world_size):
-    os.environ["DLLM_MODE"] = "LOCAL"
+    os.environ["REAL_MODE"] = "LOCAL"
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 

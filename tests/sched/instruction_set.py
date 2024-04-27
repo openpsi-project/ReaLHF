@@ -5,7 +5,7 @@ from reallm.base.monitor import get_tracer
 from reallm.impl.model.backend.pipe_engine.instruction import BackwardPass, ForwardPass, InstructionSet
 
 if __name__ == "__main__":
-    os.environ["DLLM_TRACE"] = "1"
+    os.environ["REAL_TRACE"] = "1"
     tracer = get_tracer(
         tracer_entries=int(2e6),
         # max_stack_depth=10,

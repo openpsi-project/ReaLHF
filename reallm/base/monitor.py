@@ -280,8 +280,8 @@ def get_tracer(
     min_duration: int = 0,
     output_file: str = "result.json",
 ) -> viztracer.VizTracer:
-    print("trace: ", os.environ.get("DLLM_TRACE"))
-    if os.environ.get("DLLM_TRACE") == "1":
+    print("trace: ", os.environ.get("REAL_TRACE"))
+    if os.environ.get("REAL_TRACE") == "1":
         print("initialized viztracer")
         return viztracer.VizTracer(
             tracer_entries=tracer_entries,
@@ -396,7 +396,7 @@ TIME_MARK_DB = []
 
 
 def cuda_tmark(name: str, type_: CUDATimeMarkType):
-    if os.getenv("DLLM_CUDA_TMARK", None) == "1":
+    if os.getenv("REAL_CUDA_TMARK", None) == "1":
 
         def wrapper(f: Callable):
 
@@ -426,7 +426,7 @@ def cuda_tmark(name: str, type_: CUDATimeMarkType):
 
 @contextlib.contextmanager
 def cuda_tmarked(name: str, type_: CUDATimeMarkType):
-    if os.getenv("DLLM_CUDA_TMARK", None) == "1":
+    if os.getenv("REAL_CUDA_TMARK", None) == "1":
         import torch
 
         from reallm.base.constants import _model_name
@@ -434,7 +434,7 @@ def cuda_tmarked(name: str, type_: CUDATimeMarkType):
         torch.cuda.synchronize()
         tik = time.time_ns()
     yield
-    if os.getenv("DLLM_CUDA_TMARK", None) == "1":
+    if os.getenv("REAL_CUDA_TMARK", None) == "1":
         torch.cuda.synchronize()
         tok = time.time_ns()
         global TIME_MARK_DB
@@ -447,7 +447,7 @@ def fetch_latest_tmark():
 
 
 def dump_tmark_db(worker_idx):
-    if os.getenv("DLLM_CUDA_TMARK", None) != "1":
+    if os.getenv("REAL_CUDA_TMARK", None) != "1":
         return
     fn = os.path.join(
         constants.LOG_ROOT,

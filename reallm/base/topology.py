@@ -13,6 +13,7 @@ GLOBAL_PROCESS_GROUP_REGISTRY: Dict[Tuple, torch.distributed.ProcessGroup] = {}
 
 
 def new_or_get_group(ranks: List[int], backend="nccl"):
+    print(">>>>>>>>>", ranks)
     ranks = tuple(sorted(ranks))
     global GLOBAL_PROCESS_GROUP_REGISTRY
     if ranks not in GLOBAL_PROCESS_GROUP_REGISTRY:
@@ -334,8 +335,8 @@ class ParallelGrid:
         # self.world_size=-1 will trigger assertion errors.
         self.world_size = topology.world_size()
 
-        if self.global_rank == 0:
-            print("Using topology:", topology)
+        # if self.global_rank == 0:
+        #     print("Using topology:", topology)
         self._topo = topology
 
         self.data_parallel_size = max(self._topo.get_dim("data"), 1)
@@ -358,9 +359,9 @@ class ParallelGrid:
                 self.ds_model_proc_group = proc_group
                 self.ds_model_world_size = len(ranks)
                 self.ds_model_rank = ranks.index(self.global_rank)
-                logger.info(f"parallelism_rank={self.global_rank} (global_rank={dist.get_rank()}) "
-                            f"dp_rank={dp} building DeepSpeed model group "
-                            f"(i.e., pipeline+model parallel group) with global ranks: {ranks}")
+                # logger.info(f"parallelism_rank={self.global_rank} (global_rank={dist.get_rank()}) "
+                #             f"dp_rank={dp} building DeepSpeed model group "
+                #             f"(i.e., pipeline+model parallel group) with global ranks: {ranks}")
         if self.global_rank != -1:
             assert self.ds_model_rank > -1
             assert self.ds_model_proc_group is not None

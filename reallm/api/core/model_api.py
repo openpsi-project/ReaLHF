@@ -5,7 +5,6 @@ import copy
 import dataclasses
 import os
 
-import deepspeed
 import torch
 import torch.utils.data
 import transformers
@@ -16,8 +15,6 @@ from reallm.base.namedarray import NamedArray
 import reallm.base.logging as logging
 
 logger = logging.getLogger("model")
-
-NeuralNetwork = Union[deepspeed.DeepSpeedEngine, transformers.PreTrainedModel, torch.nn.Module]
 
 
 @dataclasses.dataclass
@@ -104,7 +101,7 @@ class FinetuneSpec:
 @dataclasses.dataclass
 class Model:
     name: ModelName
-    module: NeuralNetwork
+    module: torch.nn.Module
     tokenizer: transformers.PreTrainedTokenizerFast
     device: Union[str, torch.device]
     dtype: Optional[torch.dtype] = None

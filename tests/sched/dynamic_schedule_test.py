@@ -17,7 +17,7 @@ WORLD_SIZE = NUM_PP * NUM_MP * NUM_DP
 
 
 def setup(rank):
-    os.environ["DLLM_TRACE"] = "1"
+    os.environ["REAL_TRACE"] = "1"
     constants.set_experiment_trial_names("test", "test")
     constants.set_model_name("test_model")
     topo = reallm.base.topology.PipeModelDataParallelTopology(num_pp=NUM_PP, num_mp=NUM_MP, num_dp=NUM_DP)

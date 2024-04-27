@@ -117,8 +117,7 @@ class HFModelRegistry:
         global_step: Optional[int] = None,
     ):
         dp_rank = constants.data_parallel_rank()
-        if dp_rank > 0:  # only save on dp_rank = 0
-            return
+        # FIXME
 
         subfolder = ""
         if epoch is not None:
@@ -143,8 +142,10 @@ class HFModelRegistry:
         approx_param_size = sum(v.numel() * v.element_size() for v in model.state_dict().values()) * mp_size
         max_shard_size_byte = os.getenv("REAL_SAVE_MAX_SHARD_SIZE_BYTE", int(1e10))
         n_shards_this_stage = (approx_param_size + max_shard_size_byte - 1) // max_shard_size_byte
+        print("=========", approx_param_size, n_shards_this_stage)
         n_shards_this_stage = torch.tensor(n_shards_this_stage, dtype=torch.int32, device="cuda")
-        pp_stage_n_shards = [torch.zeros(1, dtype=torch.int32, device="cuda") for _ in range(pp_size)]
+        pp_stage_n_shards = [torch.zeros_like(n_shards_this_stage) for _ in range(pp_size)]
+        print(n_shards_this_stage, dist.get_process_group_ranks(constants.pipe_parallel_group()))
         dist.all_gather(pp_stage_n_shards, n_shards_this_stage, group=constants.pipe_parallel_group())
         pp_stage_n_shards = [int(n.item()) for n in pp_stage_n_shards]
         assert all(x >= 1 for x in pp_stage_n_shards)

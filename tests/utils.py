@@ -1,6 +1,7 @@
 from typing import Callable, Dict
 import dataclasses
 import gc
+import multiprocessing as mp
 import os
 import queue
 import random
@@ -9,7 +10,8 @@ import time
 import pynvml
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as mp
+
+mp.set_start_method("spawn", force=True)  # Otherwise a CUDA reinitialization error will be thrown
 
 from reallm.api.core import config
 from reallm.base import constants, gpu_utils, name_resolve, namedarray, names, topology
@@ -56,20 +58,26 @@ class StandaloneTestingProcess(mp.Process):
         return self.func(*self.args, **self.kwargs)
 
     def run(self) -> None:
-        import deepspeed
-
-        os.environ["DLLM_MODE"] = "LOCAL"
+        assert not torch.cuda.is_initialized()
+        os.environ["REAL_MODE"] = "LOCAL"
         os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
 
         # isolate cuda devices
         os.environ["CUDA_VISIBLE_DEVICES"] = str(self.rank)
+        os.environ["GPU_DEVICES_ISOLATED"] = str(1)
         torch.cuda.set_device(0)
+
         self.barrier.wait()
 
         # init process group
         gpu_utils.reveal_ddp_identity(self.expr_name, self.trial_name, self.rank)
         self.barrier.wait()
-        gpu_utils.setup_ddp(self.expr_name, self.trial_name, self.rank)
+        from reallm.impl.model.comm.global_comm import setup_global_comm
+
+        setup_global_comm(self.expr_name, self.trial_name, self.rank)
+        # NOTE: The import must be here.
+        import deepspeed
+
         deepspeed.init_distributed()
 
         # setup some useful constants
@@ -136,7 +144,9 @@ class LocalMultiProcessTest:
         ]
 
     def launch(self):
+        assert not torch.cuda.is_initialized()
         [p.start() for p in self.processes]
+        assert not torch.cuda.is_initialized()
         while any([p.is_alive() for p in self.processes]):
             try:
                 err = self.err_queue.get_nowait()

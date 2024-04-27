@@ -42,7 +42,7 @@ def filter_match_mwids(
     return list(mwids_this_model)
 
 
-def setup_ddp(
+def setup_global_comm(
         expr_name: str,
         trial_name: str,
         worker_index: int,
@@ -70,7 +70,7 @@ def setup_ddp(
         for model_name, topo in model_topos.items():
             mw_ranks[model_name] = filter_match_mwids(model_name, topo, msid2mwid)
 
-    if "GPU_DEVICES_ISOLATED" not in os.environ and "RAY" not in os.environ["DLLM_MODE"]:
+    if "GPU_DEVICES_ISOLATED" not in os.environ and "RAY" not in os.environ["REAL_MODE"]:
         raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
 
     assert len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")) == 1, os.environ["CUDA_VISIBLE_DEVICES"]

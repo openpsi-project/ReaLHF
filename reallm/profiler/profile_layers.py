@@ -22,8 +22,8 @@ def profile_model_type(model_type: ModelFamily):
     base_environs = {
         "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
         "WANDB_MODE": "disabled",
-        "DLLM_MODE": "SLURM",
-        "DLLM_TRACE": "0",
+        "REAL_MODE": "SLURM",
+        "REAL_TRACE": "0",
         **_LLM_ENVVARS,
     }
     sched = scheduler.client.make(mode="slurm", expr_name="profile", trial_name="profile")

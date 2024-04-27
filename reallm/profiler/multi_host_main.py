@@ -89,8 +89,8 @@ def main(args, if_raise=True):
     base_environs = {
         "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
         "WANDB_MODE": "disabled",
-        "DLLM_MODE": "SLURM",
-        "DLLM_TRACE": "0" if not args.trace else "1",
+        "REAL_MODE": "SLURM",
+        "REAL_TRACE": "0" if not args.trace else "1",
     }
 
     logger.info(f"Resetting name resolving repo...")

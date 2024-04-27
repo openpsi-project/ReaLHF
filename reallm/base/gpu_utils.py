@@ -110,7 +110,7 @@ def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment
     elif len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")) == 1:
         local_gpu_id = int(os.environ["CUDA_VISIBLE_DEVICES"])
     else:
-        if not os.environ.get("DLLM_MODE") == "LOCAL":
+        if not os.environ.get("REAL_MODE") == "LOCAL":
             raise RuntimeError(
                 f"Unresolvable CUDA_VISIBLE_DEVICES {os.environ['CUDA_VISIBLE_DEVICES']} on host {network.gethostname()}, "
                 f"local peers (global ranks) {local_peers}, local peer index {local_peer_index}.")

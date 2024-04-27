@@ -156,7 +156,7 @@ def test_impl(
     hf_config = transformers.AutoConfig.from_pretrained(MODEL_FAMILY_TO_PATH[ModelFamily(
         hf_model_type, model_size, False)])
     mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
-    os.environ["DLLM_CUDA_TMARK"] = "1"
+    os.environ["REAL_CUDA_TMARK"] = "1"
 
     if rank < from_topo.world_size():
         with constants.model_scope(from_model_name):
@@ -414,7 +414,7 @@ def test_impl(
 
 
 def setup_gpu(rank, world_size, model_topos, msid2mwid, param_realloc_pairs):
-    os.environ["DLLM_MODE"] = "LOCAL"
+    os.environ["REAL_MODE"] = "LOCAL"
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 

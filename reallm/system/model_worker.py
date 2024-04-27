@@ -917,7 +917,7 @@ class ModelWorker(worker_base.Worker):
             #     round(get_accelerator().max_memory_allocated() / 1024**3, 2),
             # )))
             # blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
-            # if os.environ.get("DLLM_TRACE", "0") == "1":
+            # if os.environ.get("REAL_TRACE", "0") == "1":
             #     self.tracer.save()
             if self.__profiler_launched and self.__profiler_ctl.check():
                 self.tracer.save()

@@ -160,7 +160,7 @@ def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     # data = init_data(model.tokenizer, device, BATCH_SIZE, seed=seed)
     import reallm.base.constants as constants
 
-    # os.environ["DLLM_TRACE"] = "1"
+    # os.environ["REAL_TRACE"] = "1"
 
     with constants.model_scope(MODEL_NAME):
         tracer = get_tracer(tracer_entries=int(2e6),
@@ -198,7 +198,7 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
     import reallm.base.constants as constants
 
     with constants.model_scope(MODEL_NAME):
-        # os.environ["DLLM_TRACE"] = "1"
+        # os.environ["REAL_TRACE"] = "1"
         tracer = get_tracer(
             tracer_entries=int(2e6),
             # max_stack_depth=10,
@@ -244,7 +244,7 @@ def run_mixed(rank: int, seed: int):
 
     import os
 
-    os.environ["DLLM_TRACE"] = "1"
+    os.environ["REAL_TRACE"] = "1"
     tracer = get_tracer(tracer_entries=int(2e6),
                         max_stack_depth=10,
                         ignore_c_function=False,

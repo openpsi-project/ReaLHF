@@ -98,8 +98,8 @@ def main_start(args):
     base_environs = {
         "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
         "WANDB_MODE": args.wandb_mode,
-        "DLLM_MODE": args.mode.upper(),
-        "DLLM_TRACE": "1" if args.trace else "0",
+        "REAL_MODE": args.mode.upper(),
+        "REAL_TRACE": "1" if args.trace else "0",
         "IS_REMOTE": "1",
     }
     os.environ["IS_REMOTE"] = "1"
