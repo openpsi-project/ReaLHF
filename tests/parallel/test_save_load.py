@@ -22,7 +22,7 @@ def make_model(device, from_type: str, load_dir=None):
     import reallm.impl.model.nn.real_llm_api
 
     model_config = system_api.Model(
-        "flash_mqat",
+        "real_model",
         args=dict(
             model_path=load_dir if load_dir is not None else BASE_MODEL_PATH,
             from_type=from_type,
@@ -45,7 +45,7 @@ def build_hf_model(is_critic, rank, world_size, mp_size, pp_size, save_dir=None)
     # print(
     #     f"PROCESS RANK: {rank}; \n" f"TORCH DIST RANK: {torch_dist_rank}; \n" f"CUDA VISIBLE: {cuda_visible}"
     # )
-    os.environ["FLASH_MQAT_LOG_LOAD_TIME"] = "1"
+    os.environ["REAL_LOG_LOAD_TIME"] = "1"
     torch.cuda.synchronize()
     tik = time.perf_counter()
     model = make_model(device, from_type="hf_as_critic" if is_critic else "hf_as_actor")
@@ -62,7 +62,7 @@ def build_hf_model(is_critic, rank, world_size, mp_size, pp_size, save_dir=None)
 def load_model(save_critic, is_critic, rank, world_size, mp_size, pp_size, load_dir):
     device = setup_gpu(rank, world_size)
     init_global_constants(1, mp_size, pp_size)
-    os.environ["FLASH_MQAT_LOG_LOAD_TIME"] = "1"
+    os.environ["REAL_LOG_LOAD_TIME"] = "1"
     torch.cuda.synchronize()
     tik = time.perf_counter()
     if is_critic and not save_critic:
@@ -78,7 +78,7 @@ def load_model(save_critic, is_critic, rank, world_size, mp_size, pp_size, load_
     return device, model
 
 
-class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
+class ParallelReaLModelSaveLoadTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -120,7 +120,7 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
         load_pp_size: int,
     ):
         clear_name_resolve()
-        save_dir = os.path.join("/tmp/flash_mqat_sl_test/")
+        save_dir = os.path.join("/tmp/real_model_sl_test/")
         os.system(f"rm -rf {save_dir}")
         save_world_size = save_mp_size * save_pp_size
         setup_barrier(save_world_size)
@@ -173,4 +173,4 @@ class ParallelFlashMQATSaveLoadTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ParallelFlashMQATSaveLoadTest.testSaveThenLoad")
+    unittest.main(defaultTest="ParallelReaLModelSaveLoadTest.testSaveThenLoad")

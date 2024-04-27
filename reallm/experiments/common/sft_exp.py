@@ -2,10 +2,10 @@ import dataclasses
 
 from omegaconf import MISSING
 
-from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
+from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptAnswerDatasetConfig
-from reallm.api.quickstart.model import get_flash_mqat_model_config, ModelTrainEvalConfig, OptimizerConfig
+from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
 from reallm.base.topology import PipeModelDataParallelTopology
 
 
@@ -105,7 +105,7 @@ class SFTConfig(Experiment):
             ),
         )
 
-        model = get_flash_mqat_model_config(
+        model = get_real_model_config(
             from_type="hf_as_actor",
             model_path=model_path,
             hf_model_type=self.model.type,
@@ -154,7 +154,7 @@ class SFTConfig(Experiment):
             model_name="default",
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
-            model_type=ModelType("llama", 7, False),
+            model_type=ModelFamily("llama", 7, False),
             input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
             log_return_value=True,
             min_n_tokens=100000,

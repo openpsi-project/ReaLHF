@@ -1,0 +1,233 @@
+from typing import *
+import os
+
+import torch
+import transformers
+
+from reallm.api.core.model_api import ReaLModelConfig, register_hf_family, register_hf_path
+
+
+def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
+    try:
+        import transformer_engine.pytorch as te
+
+        TE_ENABLED = True
+    except ImportError:
+        TE_ENABLED = False
+    USE_TE_BACKEND = TE_ENABLED and os.getenv("REAL_LLM_USE_TE") == "1"
+
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        if k == "model.embed_tokens.weight":
+            new_state_dict["0.wte.weight"] = v
+        elif k == "lm_head.weight":
+            new_state_dict[f"{config.n_layers + 1}.weight"] = v
+        elif k == "model.norm.weight":
+            new_state_dict[f"{config.n_layers}.ln_f.weight"] = v
+        elif "inv_freq" in k:
+            continue
+        else:
+            block_idx = int(k.split(".")[2])
+            name = k.split(".", 3)[3]
+            replace_pairs = [
+                ("self_attn.", "attn."),
+                ("post_attention_layernorm.", "mlp.ln."),
+                ("input_layernorm.", "attn.c_attn.ln."),
+                ("attn.o_proj.", "attn.c_proj."),
+                ("q_proj.", "c_attn.q_attn."),
+                ("k_proj.", "c_attn.k_attn."),
+                ("v_proj.", "c_attn.v_attn."),
+            ]
+            for k1, k2 in replace_pairs:
+                if k1 in name:
+                    name = name.replace(k1, k2)
+            new_state_dict[f"{block_idx + 1}.{name}"] = v
+
+    if USE_TE_BACKEND:
+        state_dict = new_state_dict
+        new_state_dict = {}
+        te_replace_pairs = [
+            (".mlp.ln.weight", ".mlp.layer_norm_weight"),
+            (".mlp.down_proj.weight", ".mlp.fc2_weight"),
+        ]
+        for k, v in state_dict.items():
+            for k1, k2 in te_replace_pairs:
+                if k1 in k:
+                    k = k.replace(k1, k2)
+            new_state_dict[k] = v
+
+        # fuse gate && up weight
+        for i in range(config.n_layers):
+            gate_w = new_state_dict[f"{i+1}.mlp.gate_proj.weight"]
+            upproj_w = new_state_dict[f"{i+1}.mlp.up_proj.weight"]
+            w = torch.cat([gate_w, upproj_w], dim=0)
+            new_state_dict[f"{i+1}.mlp.fc1_weight"] = w
+            new_state_dict[f"{i+1}.mlp._extra_state"] = None
+            new_state_dict.pop(f"{i+1}.mlp.gate_proj.weight")
+            new_state_dict.pop(f"{i+1}.mlp.up_proj.weight")
+    return new_state_dict
+
+
+def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: ReaLModelConfig) -> Dict:
+    try:
+        import transformer_engine.pytorch as te
+
+        TE_ENABLED = True
+    except ImportError:
+        TE_ENABLED = False
+    USE_TE_BACKEND = TE_ENABLED and os.getenv("REAL_LLM_USE_TE") == "1"
+    if USE_TE_BACKEND:
+        # remove all extra states
+        keys = list(state_dict.keys())
+        for k in keys:
+            if k.endswith("_extra_state"):
+                state_dict.pop(k)
+
+        # split gate && up weight
+        for i in range(config.n_layers):
+            w = state_dict[f"transformer.h.{i}.mlp.fc1_weight"]
+            gate_w, upproj_w = w.split((w.shape[0] // 2, w.shape[0] // 2), dim=0)
+            state_dict[f"transformer.h.{i}.mlp.gate_proj.weight"] = gate_w.contiguous()
+            state_dict[f"transformer.h.{i}.mlp.up_proj.weight"] = upproj_w.contiguous()
+            state_dict.pop(f"transformer.h.{i}.mlp.fc1_weight")
+
+        # rename
+        new_state_dict = {}
+        te_replace_pairs = [
+            (".mlp.layer_norm_weight", ".mlp.ln.weight"),
+            (".mlp.fc2_weight", ".mlp.down_proj.weight"),
+        ]
+        for k, v in state_dict.items():
+            for k1, k2 in te_replace_pairs:
+                if k1 in k:
+                    k = k.replace(k1, k2)
+            new_state_dict[k] = v
+        state_dict = new_state_dict
+
+    replace_pairs = [
+        ("model.", "transformer."),
+        (".embed_tokens.", ".embedding_layer.wte."),
+        (".layers.", ".h."),
+        (".self_attn.", ".attn."),
+        (".post_attention_layernorm.", ".mlp.ln."),
+        (".input_layernorm.", ".attn.c_attn.ln."),
+        ("attn.o_proj.", "attn.c_proj."),
+        (f".norm.", f".h.{config.n_layers - 1}.ln_f."),
+        ("lm_head", "head"),
+        (".input_layernorm.", ".self_attn.c_attn.ln."),
+        ("model.norm.weight", f"model.layers.{config.n_layers - 1}.ln_f.weight"),
+    ]
+    for k2, k1 in replace_pairs:
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if k1 in k:
+                k = k.replace(k1, k2)
+            new_state_dict[k] = v
+        state_dict = new_state_dict
+    for i in range(config.n_layers):
+        w = state_dict[f"model.layers.{i}.self_attn.c_attn.linear.weight"]
+        nq = config.hidden_dim // config.head_dim
+        q_proj_w = w[:nq * config.head_dim]
+        k_proj_w = w[nq * config.head_dim:(nq + config.n_kv_heads) * config.head_dim]
+        v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim:]
+        w = torch.cat([q_proj_w, k_proj_w, v_proj_w], dim=0)
+        state_dict[f"model.layers.{i}.self_attn.q_proj.weight"] = q_proj_w
+        state_dict[f"model.layers.{i}.self_attn.k_proj.weight"] = k_proj_w
+        state_dict[f"model.layers.{i}.self_attn.v_proj.weight"] = v_proj_w
+        state_dict.pop(f"model.layers.{i}.self_attn.c_attn.linear.weight")
+    return state_dict
+
+
+# param name is used to load directly from huggingface checkpoints
+def llama_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
+    return ["model.embed_tokens.weight"]
+
+
+def llama_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
+    names = [
+        f"model.layers.{idx}.input_layernorm.weight",
+        f"model.layers.{idx}.mlp.down_proj.weight",
+        f"model.layers.{idx}.mlp.gate_proj.weight",
+        f"model.layers.{idx}.mlp.up_proj.weight",
+        f"model.layers.{idx}.post_attention_layernorm.weight",
+        f"model.layers.{idx}.self_attn.k_proj.weight",
+        f"model.layers.{idx}.self_attn.o_proj.weight",
+        f"model.layers.{idx}.self_attn.q_proj.weight",
+        # f"model.layers.{idx}.self_attn.rotary_emb.inv_freq",
+        f"model.layers.{idx}.self_attn.v_proj.weight",
+    ]
+    if idx == config.n_layers - 1:
+        names += ["model.norm.weight"]
+    return names
+
+
+def llama_output_head_param_name(config: ReaLModelConfig) -> List[str]:
+    return ["lm_head.weight"]
+
+
+def convert_config_llama(hf_config: transformers.LlamaConfig) -> ReaLModelConfig:
+    return ReaLModelConfig(
+        n_layers=hf_config.num_hidden_layers,
+        n_kv_heads=hf_config.num_key_value_heads,
+        hidden_dim=hf_config.hidden_size,
+        head_dim=hf_config.hidden_size // hf_config.num_attention_heads,
+        intermediate_dim=hf_config.intermediate_size,
+        vocab_size=hf_config.vocab_size,
+        n_positions=hf_config.max_position_embeddings,
+        embd_pdrop=0.0,
+        attn_pdrop=hf_config.attention_dropout if hasattr(hf_config, "attention_dropout") else 0.1,
+        layer_norm_epsilon=hf_config.rms_norm_eps,
+        activation_function=hf_config.hidden_act,
+        use_attention_bias=hf_config.attention_bias,
+        scale_attn_by_inverse_layer_idx=False,
+        layer_norm_type="rms",
+        mlp_type="llama",
+        apply_rotary=True,
+        rotary_base=hf_config.rope_theta,
+        rotary_interleaved=False,
+        rotary_scaling=None if hf_config.rope_scaling is None else hf_config.rope_scaling["factor"],
+        rotary_scaling_type=None if hf_config.rope_scaling is None else hf_config.rope_scaling["type"],
+    )
+
+
+def convert_config_back_llama(config: ReaLModelConfig) -> transformers.LlamaConfig:
+    rope_scaling = {}
+    if config.rotary_scaling is not None:
+        rope_scaling["factor"] = config.rotary_scaling
+    if config.rotary_scaling_type is not None:
+        rope_scaling["type"] = config.rotary_scaling_type
+    return transformers.LlamaConfig(
+        vocab_size=config.vocab_size,
+        hidden_size=config.hidden_dim,
+        intermediate_size=config.intermediate_dim,
+        num_hidden_layers=config.n_layers,
+        num_key_value_heads=config.n_kv_heads,
+        num_attention_heads=config.hidden_dim // config.head_dim,
+        max_position_embeddings=config.n_positions,
+        rms_norm_eps=config.layer_norm_epsilon,
+        hidden_act=config.activation_function,
+        attention_dropout=config.attn_pdrop,
+        attention_bias=config.use_attention_bias,
+        rope_theta=config.rotary_base,
+        rope_scaling=rope_scaling if rope_scaling else None,
+    )
+
+
+for name in ["llama", "codellama", "deepspeek"]:
+    register_hf_family(
+        name=name,
+        hf_cls_name="LlamaForCausalLM",
+        config_from_hf_converter=convert_config_llama,
+        config_to_hf_converter=convert_config_back_llama,
+        sd_from_hf_converter=convert_state_dict_llama,
+        sd_to_hf_converter=to_llama_state_dict,
+        embedding_param_names=llama_embedding_layer_names,
+        tblock_param_names=llama_transformer_block_param_name,
+        head_param_names=llama_output_head_param_name,
+    )
+
+register_hf_path("llama", 0, "/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/")
+register_hf_path("llama", 7, "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/")
+register_hf_path("llama", 13, "/lustre/public/pretrained_model_weights/Llama-2-13b-hf/")
+register_hf_path("llama", 70, "/lustre/public/pretrained_model_weights/Llama-2-70b-hf/")
+register_hf_path("codellama", 34, "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf")

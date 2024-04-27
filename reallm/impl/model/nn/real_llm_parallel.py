@@ -1,21 +1,12 @@
 from typing import *
-import os
 
 import numpy as np
 import torch
 
-from reallm.api.quickstart.model import ReaLModelConfig
-import reallm.base.logging as logging
+from reallm.api.core import model_api
+from reallm.base import constants, logging
 
-try:
-    import transformer_engine.pytorch as te
-
-    TE_ENABLED = True
-except ImportError:
-    TE_ENABLED = False
-USE_TE_BACKEND = TE_ENABLED and os.getenv("FLASH_MQAT_USE_TE") == "1"
-
-logger = logging.getLogger("flash mqat parallel")
+logger = logging.getLogger("ReaL parallel")
 
 # keys used to identify modules
 EMBEDDING_KEYS = [".wte", ".wpe"]  # dim=0 no bias
@@ -29,7 +20,7 @@ COLUMN_LINEAR_KEYS = [
 ]  # dim=0 + partition bias
 ROW_LINEAR_KEYS = [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
 
-if USE_TE_BACKEND:
+if constants.use_te_impl():
     COLUMN_LINEAR_KEYS = [
         ".attn.c_attn.q_attn",
         ".attn.c_attn.k_attn",
@@ -40,13 +31,13 @@ if USE_TE_BACKEND:
     ROW_LINEAR_KEYS = [".attn.c_proj", ".mlp.fc2_weight"]
 
 
-# model parallel partition util functions
 def tensor_slice_partition_fn(
     tensor: torch.Tensor,
     mp_rank: Optional[int],
     mp_world_size: int,
     dim: Optional[int],
 ) -> Union[List[torch.Tensor], torch.Tensor]:
+    """Partition a pytorch tensor for model parallelism."""
     if dim is None:
         splits = [tensor for _ in range(mp_world_size)]
     else:
@@ -64,6 +55,11 @@ def intervals_partition_fn(
     mp_world_size: int,
     dim: Optional[int],
 ) -> Union[List[torch.Tensor], torch.Tensor]:
+    """Get the intervals of a MP-partitioned tensor in the flatten view.
+
+    For example, if a tensor of shape (2, 4) is partitioned along the second dimension
+    into 2 parts, then the intervals are [(0, 2), (2, 4)].
+    """
     # HACK: some add-hoc implementations to make this function efficient.
     assert mp_rank is not None
     param_size = int(np.prod(shape))
@@ -92,6 +88,7 @@ def shape_partition_fn(
     mp_world_size: int,
     dim: Optional[int],
 ):
+    """Get the partitioned shape of a tensor for model parallelism."""
     if dim is None:
         splits = [shape for _ in range(mp_world_size)]
     else:
@@ -110,10 +107,11 @@ def mp_partition_key(
     tensor_or_shape: torch.Tensor | torch.Size,
     mp_rank: Optional[int],
     mp_size: Optional[int],
-    config: ReaLModelConfig,
+    config: model_api.ReaLModelConfig,
     partition_fn: Callable[[torch.Tensor, Optional[int], int, Optional[int]],
                            Union[List[torch.Tensor], torch.Tensor]] = tensor_slice_partition_fn,
 ) -> torch.Tensor:
+    """Partition a parameter of ReaLModel with name `key` by the method `partition_fn`."""
     if any([ek in key for ek in EMBEDDING_KEYS]):
         assert "weight" in key
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
@@ -138,13 +136,12 @@ def mp_partition_key(
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
 
 
-def mp_partition_flash_mqat_state_dict(
+def mp_partition_real_model_state_dict(
     state_dict: Dict[str, torch.Tensor],
-    config: ReaLModelConfig,
+    config: model_api.ReaLModelConfig,
     mp_size: int,
     mp_rank: Optional[int] = None,
 ) -> Union[Dict, List[Dict]]:
-    # the qkv linear in non-paralleled model is merged. We should split it first.
     if mp_size == 1:
         if mp_rank is None:
             return [state_dict]
@@ -161,8 +158,7 @@ def mp_partition_flash_mqat_state_dict(
         return new_state_dict
 
 
-def get_flash_model_param_shape(k: str, config: ReaLModelConfig, mp_size: int) -> Tuple:
-
+def get_real_model_param_shape(k: str, config: model_api.ReaLModelConfig, mp_size: int) -> Tuple:
     if "wte.weight" in k:
         assert config.vocab_size % mp_size == 0
         return (config.vocab_size // mp_size, config.hidden_dim)
@@ -211,7 +207,7 @@ def get_flash_model_param_shape(k: str, config: ReaLModelConfig, mp_size: int) -
 def mp_merge_key(
     k: str,
     tensors: List[torch.Tensor],
-    config: ReaLModelConfig,
+    config: model_api.ReaLModelConfig,
 ) -> torch.Tensor:
     if any([ek in k for ek in EMBEDDING_KEYS]) and "weight" in k:
         return torch.cat(tensors, dim=0)
@@ -225,9 +221,9 @@ def mp_merge_key(
         return tensors[0]
 
 
-def mp_merge_flash_mqat_state_dict(
+def mp_merge_real_model_state_dict(
     state_dicts: List[Dict[str, torch.Tensor]],
-    config: ReaLModelConfig,
+    config: model_api.ReaLModelConfig,
 ) -> Dict:
     mp_size = len(state_dicts)
     if mp_size == 1:
@@ -241,11 +237,11 @@ def mp_merge_flash_mqat_state_dict(
 
 
 def partition_pipeline_layers(
-    config: ReaLModelConfig,
+    config: model_api.ReaLModelConfig,
     num_stages: int,
-    embed_param_counter: Callable[[ReaLModelConfig], int],
-    transformer_block_param_counter: Callable[[ReaLModelConfig, int], int],
-    head_param_counter: Callable[[ReaLModelConfig], int],
+    embed_param_counter: Callable[[model_api.ReaLModelConfig], int],
+    transformer_block_param_counter: Callable[[model_api.ReaLModelConfig, int], int],
+    head_param_counter: Callable[[model_api.ReaLModelConfig], int],
     method: str = "parameters_balanced",
 ) -> Dict[int, Tuple[int, int]]:
     from deepspeed.runtime import utils as ds_utils

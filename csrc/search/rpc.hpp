@@ -80,9 +80,9 @@ class RPCInstance {
   std::vector<RPCExecution *> tmp_exes;  // pointers to tmp rpc executions
 
   RPCExecution *rpc_exe_ptr = nullptr;
-  RPCExecution *param_sync_rpc_exe_ptr = nullptr;
-  bool param_sync = false;
-  uint64_t param_sync_size = 0;
+  RPCExecution *param_realloc_rpc_exe_ptr = nullptr;
+  bool param_realloc = false;
+  uint64_t param_realloc_size = 0;
   bool offload = false;
   uint64_t offload_size = 0;
 
@@ -109,7 +109,7 @@ class RPCInstance {
 uint64_t parameter_sync_cost(uint64_t param_size_bytes, RPCExecution *src, RPCExecution *dst,
                              std::unordered_map<std::string, uint64_t> &cost_table);
 
-uint64_t remote_param_sync_size(uint64_t size, RPCExecution *src, RPCExecution *dst);
+uint64_t remote_param_realloc_size(uint64_t size, RPCExecution *src, RPCExecution *dst);
 
 // class ModelConfig {
 //     std::string model_name;

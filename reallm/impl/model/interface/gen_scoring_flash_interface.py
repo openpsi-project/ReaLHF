@@ -9,7 +9,7 @@ import torch.distributed as dist
 import transformers
 
 from reallm.base.namedarray import NamedArray, recursive_apply
-from reallm.impl.model.nn.real_llm_api import HuggingfaceLikeFlashMQATForCausalLM
+from reallm.impl.model.nn.real_llm_api import HuggingfaceLikeReaLModelForCausalLM
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
 import reallm.api.core.model_api as model_api
 
@@ -25,7 +25,7 @@ class PackedGenScoringInterface(api.model.ModelInterface):
         self.score_tokenizer = model_api.load_hf_tokenizer(
             "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english")
 
-        self.sft_model = HuggingfaceLikeFlashMQATForCausalLM.from_pretrained(
+        self.sft_model = HuggingfaceLikeReaLModelForCausalLM.from_pretrained(
             model_path=
             "/data/aigc/llm/checkpoints/fw/flash-ppo-s42/run20231106-rw2/actor@pp_00-mp_00-dp_00/epoch0step0/",
             dtype=torch.float16,
@@ -51,7 +51,7 @@ class PackedGenScoringInterface(api.model.ModelInterface):
             module = module.module
 
         module.eval()
-        assert isinstance(module, HuggingfaceLikeFlashMQATForCausalLM)
+        assert isinstance(module, HuggingfaceLikeReaLModelForCausalLM)
 
         gconfig = GenerationConfig(**self.generation_config)
         num_samples = gconfig.num_samples

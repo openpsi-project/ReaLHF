@@ -31,7 +31,7 @@ deepspeed.init_distributed()
 init_global_constants(1, 1, 1)
 
 
-class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
+class ReaLModelGPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -106,7 +106,7 @@ class FlashMQATGPUGPUAccordanceTest(unittest.TestCase):
         assert torch.allclose(mask, vgmask)
 
 
-class FlashMQATCPUGPUAccordanceTest(unittest.TestCase):
+class ReaLModelCPUGPUAccordanceTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):

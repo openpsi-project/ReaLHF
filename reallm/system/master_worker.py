@@ -209,7 +209,7 @@ def _request_parameter_sync(
     payloads = [
         request_reply_stream.Payload(handler=h,
                                      handle_name="empty",
-                                     pre_hooks=["param_sync"],
+                                     pre_hooks=["param_realloc"],
                                      pre_hook_data=[ps_data]) for h in handlers
     ]
     request_ids = [stream.post(p) for p in payloads]
@@ -315,7 +315,7 @@ def _attach_payloads_with_hooks(
                 "to_model_config": dst_config,
             }
             for h in main_handlers:
-                getattr(payloads[h], f"{hook_type}_hooks").append("param_sync")
+                getattr(payloads[h], f"{hook_type}_hooks").append("param_realloc")
                 getattr(payloads[h], f"{hook_type}_hook_data").append(ps_data)
             other_handlers = [
                 config_api.ModelShardID.from_parallelism_rank(other_model_name, other_topo, j)
@@ -327,12 +327,12 @@ def _attach_payloads_with_hooks(
                         handler=h,
                         handle_name="empty",
                     )
-                    setattr(payloads[h], f"{hook_type}_hooks", ["param_sync"])
+                    setattr(payloads[h], f"{hook_type}_hooks", ["param_realloc"])
                     setattr(payloads[h], f"{hook_type}_hook_data", [ps_data])
                     mwids.append(msid2mwid[h])
                 elif msid2mwid[h] not in main_mwids:
                     hh = next(hh for hh in payloads if msid2mwid[hh] == msid2mwid[h])
-                    getattr(payloads[hh], f"{hook_type}_hooks").append("param_sync")
+                    getattr(payloads[hh], f"{hook_type}_hooks").append("param_realloc")
                     getattr(payloads[hh], f"{hook_type}_hook_data").append(ps_data)
 
         elif isinstance(hook, dfg.OffloadHook):
@@ -860,13 +860,13 @@ class MasterWorker(worker_base.Worker):
 
             if model_name.replica_id > 0:
                 assert model_name in _param_recevers
-                _param_sync_src = _param_senders[_param_recevers.index(model_name)]
+                _param_realloc_src = _param_senders[_param_recevers.index(model_name)]
                 _request_parameter_sync(
                     stream=self.__stream,
                     msid2mwid=self.config.msid2mwid,
-                    from_model_name=_param_sync_src,
+                    from_model_name=_param_realloc_src,
                     to_model_name=model_name,
-                    from_topo=self.config.model_topos[_param_sync_src],
+                    from_topo=self.config.model_topos[_param_realloc_src],
                     to_topo=self.config.model_topos[model_name],
                     to_model_config=self.__model_configs[model_name],
                 )
@@ -886,10 +886,10 @@ class MasterWorker(worker_base.Worker):
                     stream=self.__stream,
                     msid2mwid=self.config.msid2mwid,
                     from_model_name=model_name,
-                    to_model_name=_param_sync_src,
-                    to_topo=self.config.model_topos[_param_sync_src],
+                    to_model_name=_param_realloc_src,
+                    to_topo=self.config.model_topos[_param_realloc_src],
                     from_topo=self.config.model_topos[model_name],
-                    to_model_config=self.__model_configs[_param_sync_src],
+                    to_model_config=self.__model_configs[_param_realloc_src],
                 )
 
         logger.info("initialize complete")
@@ -1066,7 +1066,7 @@ class MasterWorker(worker_base.Worker):
                                          calculate_llama_train_flops)
 
         flops = 0
-        for train_bs, train_seqlens, flash_config in zip(
+        for train_bs, train_seqlens, real_config in zip(
                 self.__rpc_ctrl.data_amount.train_bs,
                 self.__rpc_ctrl.data_amount.train_seqlens,
                 self.__rpc_ctrl.data_amount.train_configs,
@@ -1075,12 +1075,12 @@ class MasterWorker(worker_base.Worker):
                 checkpoint_activations_factor=4,
                 batch_size=train_bs,
                 seqlens=train_seqlens,
-                num_layers=flash_config.n_layers,
-                hidden_size=flash_config.hidden_dim,
-                intermediate_size=flash_config.intermediate_dim,
-                vocab_size=flash_config.vocab_size,
+                num_layers=real_config.n_layers,
+                hidden_size=real_config.hidden_dim,
+                intermediate_size=real_config.intermediate_dim,
+                vocab_size=real_config.vocab_size,
             )
-        for inf_bs, inf_seqlens, flash_config in zip(
+        for inf_bs, inf_seqlens, real_config in zip(
                 self.__rpc_ctrl.data_amount.inf_bs,
                 self.__rpc_ctrl.data_amount.inf_seqlens,
                 self.__rpc_ctrl.data_amount.inf_configs,
@@ -1088,12 +1088,12 @@ class MasterWorker(worker_base.Worker):
             flops += caculuate_llama_forward_flops(
                 batch_size=inf_bs,
                 seqlens=inf_seqlens,
-                num_layers=flash_config.n_layers,
-                hidden_size=flash_config.hidden_dim,
-                intermediate_size=flash_config.intermediate_dim,
-                vocab_size=flash_config.vocab_size,
+                num_layers=real_config.n_layers,
+                hidden_size=real_config.hidden_dim,
+                intermediate_size=real_config.intermediate_dim,
+                vocab_size=real_config.vocab_size,
             )
-        for gen_bs, prompt_lens, gen_len, flash_config in zip(
+        for gen_bs, prompt_lens, gen_len, real_config in zip(
                 self.__rpc_ctrl.data_amount.gen_bs,
                 self.__rpc_ctrl.data_amount.prompt_lens,
                 self.__rpc_ctrl.data_amount.gen_len,
@@ -1103,10 +1103,10 @@ class MasterWorker(worker_base.Worker):
                 batch_size=gen_bs,
                 prompt_lens=prompt_lens,
                 gen_len=gen_len,
-                num_layers=flash_config.n_layers,
-                hidden_size=flash_config.hidden_dim,
-                intermediate_size=flash_config.intermediate_dim,
-                vocab_size=flash_config.vocab_size,
+                num_layers=real_config.n_layers,
+                hidden_size=real_config.hidden_dim,
+                intermediate_size=real_config.intermediate_dim,
+                vocab_size=real_config.vocab_size,
             )
         self.__rpc_ctrl.data_amount.clear()
         tflops_per_gpu = flops / (e2e_time * (10**12))

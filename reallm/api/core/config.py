@@ -2,7 +2,7 @@ from typing import *
 import copy
 import dataclasses
 
-import reallm.base.topology
+import reallm.base.topology as topology
 
 
 @dataclasses.dataclass
@@ -43,7 +43,7 @@ class ModelName:
 
 
 @dataclasses.dataclass(unsafe_hash=True)
-class ModelType:
+class ModelFamily:
     _class: str
     size: int
     is_critic: bool
@@ -58,8 +58,8 @@ class ModelShardID:
     dp_rank: int
     mp_rank: int
     pp_rank: int
-    topo: reallm.base.topology.PipeModelDataParallelTopology = dataclasses.field(
-        default_factory=lambda: reallm.base.topology.PipeModelDataParallelTopology(1, 1, 1))
+    topo: topology.PipeModelDataParallelTopology = dataclasses.field(
+        default_factory=lambda: topology.PipeModelDataParallelTopology(1, 1, 1))
 
     def __post_init__(self):
         assert self.dp_rank >= 0 and self.mp_rank >= 0 and self.pp_rank >= 0
@@ -112,20 +112,3 @@ class StandaloneModelShard:
     # evaluation
     eval_datasets: Optional[List[Dataset]] = None
     eval_dataloader: Optional[DataLoader] = None
-
-
-MODEL_TYPE_TO_PATH: Dict[ModelType, str] = {
-    ModelType("llama", 0, True): "/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/",
-    ModelType("llama", 7, True): "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/",
-    ModelType("llama", 13, True): "/lustre/public/pretrained_model_weights/Llama-2-13b-hf/",
-    ModelType("llama", 70, True): "/lustre/public/pretrained_model_weights/Llama-2-70b-hf/",
-    ModelType("codellama", 34, True): "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf",
-}
-_d = {}
-for k, v in MODEL_TYPE_TO_PATH.items():
-    k_ = copy.deepcopy(k)
-    k_.is_critic = False
-    _d[k_] = v
-MODEL_TYPE_TO_PATH.update(_d)
-
-SUPPORTED_MODELS = ["starcoder", "llama", "gpt2", "deepseek", "codellama"]

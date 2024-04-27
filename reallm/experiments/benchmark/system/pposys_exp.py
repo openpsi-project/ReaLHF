@@ -6,7 +6,7 @@ from reallm.api.core.dfg import ModelInterfaceType, ModelRPC
 from reallm.api.core.system_api import *
 from reallm.base.topology import PipeModelDataParallelTopology
 from reallm.experiments.common.config_dataset import PromptOnlyDatasetConfig
-from reallm.experiments.common.config_model import get_flash_mqat_model_config, ModelConfig
+from reallm.experiments.common.config_model import get_real_model_config, ModelConfig
 from reallm.experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
 import reallm.base.logging as logging
 
@@ -157,7 +157,7 @@ class PPOSysExperiment(Experiment):
         base_setup = self.base_config.initial_setup()
 
         def _make_model_config(cfg: ModelConfig, is_critic: bool):
-            return get_flash_mqat_model_config(
+            return get_real_model_config(
                 from_type="hf_as_actor" if not is_critic else "hf_as_critic",
                 model_path=cfg.path,
                 hf_model_type=cfg.type,

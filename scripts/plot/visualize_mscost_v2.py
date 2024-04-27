@@ -14,10 +14,10 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelName, ModelType
-from reallm.api.core.model_api import FLASH_MODEL_CONFIG_CONVERTER
+from reallm.api.core.config import MODEL_FAMILY_TO_PATH, ModelFamily, ModelName
+from reallm.api.core.model_api import REAL_MODEL_CONFIG_CONVERTER
 from tests.misc.est_mscost_v2 import compute_cost
-from tests.utils import get_llama7b_flash_config
+from tests.utils import get_llama7b_real_config
 import reallm.base.topology as topology
 
 
@@ -107,9 +107,9 @@ def get_mconfig_from_size(model_size):
     import transformers
 
     hf_model_type = "llama" if model_size != 34 else "codellama"
-    hf_config = transformers.AutoConfig.from_pretrained(MODEL_TYPE_TO_PATH[ModelType(
+    hf_config = transformers.AutoConfig.from_pretrained(MODEL_FAMILY_TO_PATH[ModelFamily(
         hf_model_type, model_size, False)])
-    return FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
+    return REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
 
 
 def main():

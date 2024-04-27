@@ -410,7 +410,7 @@ class _LlamaRMSNorm(nn.Module):
         return self.weight * hidden_states.to(input_dtype)
 
 
-if os.getenv("FLASH_MQAT_USE_TE") == "1":
+if os.getenv("REAL_LLM_USE_TE") == "1":
     try:
         # HACK: we use transformer engine's rms norm as long as we can find the transformer engine package
         import transformer_engine.pytorch as te
@@ -444,7 +444,7 @@ try:
 except ImportError:
     TE_ENABLED = False
 
-USE_TE_BACKEND = TE_ENABLED and os.getenv("FLASH_MQAT_USE_TE") == "1"
+USE_TE_BACKEND = TE_ENABLED and os.getenv("REAL_LLM_USE_TE") == "1"
 
 if USE_TE_BACKEND:
     from transformer_engine.pytorch.module.layernorm_mlp import LayerNormMLP as _TELayerNormMLP

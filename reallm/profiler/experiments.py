@@ -4,8 +4,8 @@ import functools
 
 import numpy as np
 
-from reallm.api.core.config import MODEL_TYPE_TO_PATH
-from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
+from reallm.api.core.config import MODEL_FAMILY_TO_PATH
+from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.device_mesh import make_train_backend_config, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
@@ -37,7 +37,7 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
     return [
         ModelRPC(
             model_name="actor",
-            model_type=ModelType(actor_model_class, actor_size, is_critic=False),
+            model_type=ModelFamily(actor_model_class, actor_size, is_critic=False),
             interface_type=ModelInterfaceType.GENERATE,
             interface_impl=actor_interface,
             input_data=["packed_prompts", "prompt_cu_seqlens"],
@@ -55,7 +55,7 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
         ),
         ModelRPC(
             model_name="reward",
-            model_type=ModelType(critic_model_class, critic_size, is_critic=True),
+            model_type=ModelFamily(critic_model_class, critic_size, is_critic=True),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
             input_data=["packed_seq", "cu_seqlens"],
@@ -68,7 +68,7 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
         ),
         ModelRPC(
             model_name="ref",
-            model_type=ModelType(actor_model_class, actor_size, is_critic=False),
+            model_type=ModelFamily(actor_model_class, actor_size, is_critic=False),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=ref_interface,
             input_data=[
@@ -83,7 +83,7 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
         ),
         ModelRPC(
             model_name="critic",
-            model_type=ModelType(critic_model_class, critic_size, is_critic=True),
+            model_type=ModelFamily(critic_model_class, critic_size, is_critic=True),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=critic_interface,
             input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
@@ -95,7 +95,7 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
         ),
         ModelRPC(
             model_name="actor",
-            model_type=ModelType(actor_model_class, actor_size, is_critic=False),
+            model_type=ModelFamily(actor_model_class, actor_size, is_critic=False),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=actor_interface,
             input_data=[
@@ -117,7 +117,7 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
         ModelRPC(
             model_name="critic",
             interface_type=ModelInterfaceType.TRAIN_STEP,
-            model_type=ModelType(critic_model_class, critic_size, is_critic=True),
+            model_type=ModelFamily(critic_model_class, critic_size, is_critic=True),
             interface_impl=critic_interface,
             input_data=[
                 "packed_seq",
@@ -142,7 +142,7 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
 # experiment config to run profiler (single instruction and model rpc)
 @dataclasses.dataclass
 class ProfileExperiment(Experiment):
-    model_type: ModelType
+    model_type: ModelFamily
     interface: ModelInterface
 
     n_nodes: int
@@ -223,8 +223,8 @@ class ProfileExperiment(Experiment):
             mapping=np.ones((self.n_nodes, self.num_gpus_per_node), dtype=np.int32),
             train_eval_config=ModelTrainEvalConfig(
                 type=rollout.model_type._class,
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 parallel=self.parallelism_config,
             ),
         )
@@ -233,8 +233,8 @@ class ProfileExperiment(Experiment):
             mapping=np.ones((self.n_nodes, self.num_gpus_per_node), dtype=np.int32),
             train_eval_config=ModelTrainEvalConfig(
                 type=inf.model_type._class,
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 parallel=self.parallelism_config,
             ),
         )
@@ -243,8 +243,8 @@ class ProfileExperiment(Experiment):
             mapping=np.ones((self.n_nodes, self.num_gpus_per_node), dtype=np.int32),
             train_eval_config=ModelTrainEvalConfig(
                 type=train.model_type._class,
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 gradient_checkpointing=self.use_gradient_checkpointing,
                 parallel=self.parallelism_config,
                 optimizer=OptimizerConfig(type="adam"),
@@ -281,13 +281,13 @@ class ProfileExperiment(Experiment):
         rpc = self.rpcs[0]
         m = self.rpc_allocations[0]
         model = Model(
-            "flash_mqat",
+            "real_model",
             args=dict(
-                model_path=MODEL_TYPE_TO_PATH[rpc.model_type],
+                model_path=MODEL_FAMILY_TO_PATH[rpc.model_type],
                 from_type="hf_as_actor",
                 dtype="fp16",
                 hf_model_type=rpc.model_type._class,
-                tokenizer_path=MODEL_TYPE_TO_PATH[rpc.model_type],
+                tokenizer_path=MODEL_FAMILY_TO_PATH[rpc.model_type],
                 sequence_parallel=m.topo.get_dim("model") > 1,
                 gradient_accumulation_fusion=False,
             ),
@@ -331,7 +331,7 @@ def register_profile_experiment(
 ):
     assert size in [7, 13, 34, 70]
     model_class = "llama" if size != 34 else "codellama"
-    actor_model_type = ModelType(model_class, size, False)
+    actor_model_type = ModelFamily(model_class, size, False)
     n_nodes = max(1, (num_pp * num_mp * num_dp) // 8)
 
     # node_start = 42

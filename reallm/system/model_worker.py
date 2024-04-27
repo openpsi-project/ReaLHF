@@ -260,7 +260,7 @@ class ModelWorker(worker_base.Worker):
             worker_index=self.__worker_index,
             model_topos=self.config.model_topos,
             msid2mwid=self.config.msid2mwid,
-            param_sync_pairs=self.config.sync_param_pairs,
+            param_realloc_pairs=self.config.sync_param_pairs,
             data_transfer_pairs=self.config.data_transfer_pairs,
         )
 
@@ -421,7 +421,7 @@ class ModelWorker(worker_base.Worker):
             #     f"# remaining data in receiver cache: {sum([len(xs) for xs in self.__data_receive_cache.values()])}."
             # )
             # torch.cuda.synchronize()
-        elif hook == "param_sync":
+        elif hook == "param_realloc":
             tik = time.perf_counter()
             # torch.cuda.synchronize()
             from_model_name: ModelName = hook_data["from_model_name"]
@@ -449,7 +449,7 @@ class ModelWorker(worker_base.Worker):
             if to_model_name in self.__models:
                 self.__unwrapped_models[to_model_name].patch_reparallelization((new_layers, new_param))
                 self.__model_is_handle[to_model_name] = False
-            blogger.debug(f"param_sync CPU time: {time.perf_counter() - tik:.4f}s")
+            blogger.debug(f"param_realloc CPU time: {time.perf_counter() - tik:.4f}s")
             # profiler.__exit__(None, None, None)
             # profiler.export_chrome_trace(
             #     f"/lustre/aigc/llm/logs/fw/sosp-profile/paramsync_{from_model_name}-{to_model_name}@{self.__worker_index}.json"

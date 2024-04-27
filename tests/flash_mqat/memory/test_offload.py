@@ -18,7 +18,7 @@ import torch.distributed
 import torch.profiler
 
 from reallm.base.topology import PipeModelDataParallelTopology
-from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_flash_config, get_memory,
+from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_real_config, get_memory,
                          get_pytorch_profiler, MODEL_NAME, pytorch_memory_burnin)
 import reallm.base.constants as constants
 import reallm.base.gpu_utils
@@ -42,7 +42,7 @@ def get_model(mconfig):
 
 @torch.no_grad()
 def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_to_file):
-    mconfig = get_llama7b_flash_config()
+    mconfig = get_llama7b_real_config()
     with constants.model_scope(MODEL_NAME):
         m, engine = get_model(mconfig)
         if check:

@@ -3,10 +3,10 @@ import functools
 
 from omegaconf import MISSING
 
-from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC, ModelType
+from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
-from reallm.api.quickstart.model import get_flash_mqat_model_config, ModelTrainEvalConfig, OptimizerConfig
+from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
 from reallm.base.topology import PipeModelDataParallelTopology
 import reallm.base.logging as logging
 
@@ -122,7 +122,7 @@ class DPOConfig(Experiment):
         )
 
         # We should merge pipeline model weights for the reference model to load.
-        ref_model = get_flash_mqat_model_config(
+        ref_model = get_real_model_config(
             from_type="self",
             model_path=self.ref.path,
             hf_model_type=self.ref.type,
@@ -132,7 +132,7 @@ class DPOConfig(Experiment):
             sequence_parallel=self.ref.parallel.use_sequence_parallel,
             partition_method=self.ref.parallel.partition_method,
         )
-        model = get_flash_mqat_model_config(
+        model = get_real_model_config(
             from_type="self",
             model_path=self.actor.path,
             hf_model_type=self.actor.type,
@@ -195,7 +195,7 @@ class DPOConfig(Experiment):
             model_name="ref",
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=ref_interface,
-            model_type=ModelType("llama", 7, False),
+            model_type=ModelFamily("llama", 7, False),
             input_data=["packed_input_ids", "input_lens", "pair_input_lens", "prompt_lens"],
             output_data=["seqlogp"],
             output_key_remap={"seqlogp": "pair_ref_seqlogp"},
@@ -204,7 +204,7 @@ class DPOConfig(Experiment):
             model_name="actor",
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
-            model_type=ModelType("llama", 7, False),
+            model_type=ModelFamily("llama", 7, False),
             input_data=[
                 "packed_input_ids", "input_lens", "pair_input_lens", "pair_ref_seqlogp", "prompt_lens"
             ],

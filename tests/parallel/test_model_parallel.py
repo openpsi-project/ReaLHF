@@ -8,7 +8,7 @@ import torch.distributed
 import torch.multiprocessing as mp
 
 from reallm.api.core import dfg, model_api, system_api
-from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelType
+from reallm.api.core.config import MODEL_FAMILY_TO_PATH, ModelFamily
 from reallm.base.monitor import get_tracer
 from tests.utils import *
 import reallm.base.constants as constants
@@ -21,7 +21,7 @@ NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
 
-MODEL_PARALLEL_PATH = BASELINE_MODEL_PATH = MODEL_TYPE_TO_PATH[ModelType("llama", 7, False)]
+MODEL_PARALLEL_PATH = BASELINE_MODEL_PATH = MODEL_FAMILY_TO_PATH[ModelFamily("llama", 7, False)]
 BATCH_SIZE = 512
 MIN_NEW_TOKENS = 256
 MAX_NEW_TOKENS = 256
@@ -78,7 +78,7 @@ def make_model(device):
     from_type = "hf_as_actor"
 
     model_config = system_api.Model(
-        "flash_mqat",
+        "real_model",
         args=dict(
             model_path=MODEL_PARALLEL_PATH,
             from_type=from_type,
@@ -338,7 +338,7 @@ def run_linear(rank: int, res_queue: mp.Queue, seed: int):
     time.sleep(1)
 
 
-class ModelParallelFlashMQATTest(unittest.TestCase):
+class ModelParallelReaLModelTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -518,4 +518,4 @@ class ModelParallelFlashMQATTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(defaultTest="ModelParallelFlashMQATTest.testTrainStep")
+    unittest.main(defaultTest="ModelParallelReaLModelTest.testTrainStep")

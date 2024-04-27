@@ -146,14 +146,14 @@ uint64_t parameter_sync_cost(uint64_t model_size, RPCExecution *src, RPCExecutio
   //     // uint64_t host_size = std::max(src_size_bytes_per_host,
   //     //                               dst_size_bytes_per_host);
 
-  //     uint64_t remote_size = remote_param_sync_size(total_param_size, src, dst);
+  //     uint64_t remote_size = remote_param_realloc_size(total_param_size, src, dst);
   //     std::cout  << " remote_size " << remote_size << "cost" << remote_size/20000 << std::endl;
   //     return remote_size/20000;
   // }
   // return uint64_t(0);
 }
 
-uint64_t remote_param_sync_size(uint64_t size, RPCExecution *src, RPCExecution *dst) {
+uint64_t remote_param_realloc_size(uint64_t size, RPCExecution *src, RPCExecution *dst) {
   ModelParallelStrategy src_p = src->model_parallel_strategy;
   ModelParallelStrategy dst_p = dst->model_parallel_strategy;
   // std::cout << "src device_mesh " << src -> device_mesh.device_mesh_name
@@ -214,22 +214,22 @@ uint64_t remote_param_sync_size(uint64_t size, RPCExecution *src, RPCExecution *
 void RPCInstance::resolve_parameter_sync(std::vector<RPCInstance *> tmp_graph,
                                          std::unordered_map<std::string, uint64_t> &cost_table) {
   // add parameter synchronization edges
-  if (!param_sync) return;
+  if (!param_realloc) return;
 
   // dst to train
   uint64_t from_cost =
-      parameter_sync_cost(param_sync_size, param_sync_rpc_exe_ptr, rpc_exe_ptr, cost_table);
+      parameter_sync_cost(param_realloc_size, param_realloc_rpc_exe_ptr, rpc_exe_ptr, cost_table);
   uint64_t to_cost =
-      parameter_sync_cost(param_sync_size, rpc_exe_ptr, param_sync_rpc_exe_ptr, cost_table);
-  // if (param_sync_cost > 0)
-  //     std::cout << "Param sync cost " << param_sync_cost << " from "
-  //             << param_sync_rpc_exe_ptr -> rpc_ptr -> rpc_name << " to "
+      parameter_sync_cost(param_realloc_size, rpc_exe_ptr, param_realloc_rpc_exe_ptr, cost_table);
+  // if (param_realloc_cost > 0)
+  //     std::cout << "Param sync cost " << param_realloc_cost << " from "
+  //             << param_realloc_rpc_exe_ptr -> rpc_ptr -> rpc_name << " to "
   //             << rpc_exe_ptr -> rpc_ptr -> rpc_name << std::endl;
 
   // add param sync from src to dst
   RPCExecution *from_src_exe =
-      new RPCExecution(rpc_ptr, param_sync_rpc_exe_ptr->device_mesh,
-                       param_sync_rpc_exe_ptr->model_parallel_strategy, from_cost, 0, 0);
+      new RPCExecution(rpc_ptr, param_realloc_rpc_exe_ptr->device_mesh,
+                       param_realloc_rpc_exe_ptr->model_parallel_strategy, from_cost, 0, 0);
   RPCInstance *from_src = new RPCInstance(rpc_ptr, id, name + ":from_src");
   from_src->rpc_exe_ptr = from_src_exe;
 
@@ -270,8 +270,8 @@ void RPCInstance::resolve_parameter_sync(std::vector<RPCInstance *> tmp_graph,
   to_src->rpc_exe_ptr = to_src_exe;
 
   RPCExecution *to_dst_exe =
-      new RPCExecution(rpc_ptr, param_sync_rpc_exe_ptr->device_mesh,
-                       param_sync_rpc_exe_ptr->model_parallel_strategy, to_cost, 0, 0);
+      new RPCExecution(rpc_ptr, param_realloc_rpc_exe_ptr->device_mesh,
+                       param_realloc_rpc_exe_ptr->model_parallel_strategy, to_cost, 0, 0);
   RPCInstance *to_dst = new RPCInstance(rpc_ptr, id, name + ":to_dst");
   to_dst->rpc_exe_ptr = to_dst_exe;
 

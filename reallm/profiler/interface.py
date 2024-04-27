@@ -18,7 +18,6 @@ from reallm.impl.model.parallelism.model_parallel.modules import vocab_parallel_
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
                                                 gather_packed_shifted_log_probs)
-from reallm.impl.model.utils.save_load import save_hf_or_lora_model
 from reallm.profiler.engine import ProfileEngine
 import reallm.base.constants as constants
 import reallm.base.dataparallel as dataparallel

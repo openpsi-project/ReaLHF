@@ -2,11 +2,11 @@ import functools
 
 from omegaconf import MISSING
 
-from reallm.api.core.dfg import (ModelInterface, ModelInterfaceType, ModelRPC, ModelType, OffloadHook,
+from reallm.api.core.dfg import (ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC, OffloadHook,
                                  SyncParamHook)
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
-from reallm.api.quickstart.model import get_flash_mqat_model_config, ModelTrainEvalConfig
+from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig
 from reallm.base.topology import PipeModelDataParallelTopology
 import reallm.base.logging as logging
 
@@ -172,7 +172,7 @@ class PPOConfig(Experiment):
         )
 
         def _make_model_config(cfg: ModelTrainEvalConfig, from_type: str):
-            return get_flash_mqat_model_config(
+            return get_real_model_config(
                 from_type=from_type,
                 model_path=cfg.path,
                 hf_model_type=cfg.type,
@@ -372,7 +372,7 @@ class PPOConfig(Experiment):
         rollout = ModelRPC(
             model_name="actor",
             interface_type=ModelInterfaceType.GENERATE,
-            model_type=ModelType("llama", 7, False),
+            model_type=ModelFamily("llama", 7, False),
             interface_impl=actor_interface,
             input_data=["packed_prompts", "prompt_cu_seqlens"],
             output_data=[
@@ -391,7 +391,7 @@ class PPOConfig(Experiment):
             model_name="reward",
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
-            model_type=ModelType("llama", 7, True),
+            model_type=ModelFamily("llama", 7, True),
             input_data=["packed_seq", "cu_seqlens"],
             input_key_remap={"packed_seq": "packed_input_ids"},
             output_data=["scores"],
@@ -401,7 +401,7 @@ class PPOConfig(Experiment):
         inf_ref_logits = ModelRPC(
             model_name="ref",
             interface_type=ModelInterfaceType.INFERENCE,
-            model_type=ModelType("llama", 7, False),
+            model_type=ModelFamily("llama", 7, False),
             interface_impl=ref_interface,
             input_data=[
                 "packed_seq",
@@ -415,7 +415,7 @@ class PPOConfig(Experiment):
             model_name="critic",
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=critic_interface,
-            model_type=ModelType("llama", 7, True),
+            model_type=ModelFamily("llama", 7, True),
             input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
             output_data=["scores"],
             output_key_remap={"scores": "values"},
@@ -424,7 +424,7 @@ class PPOConfig(Experiment):
         train_actor = ModelRPC(
             model_name="actor",
             interface_type=ModelInterfaceType.TRAIN_STEP,
-            model_type=ModelType("llama", 7, False),
+            model_type=ModelFamily("llama", 7, False),
             interface_impl=actor_interface,
             input_data=[
                 "packed_seq",
@@ -444,7 +444,7 @@ class PPOConfig(Experiment):
             model_name="critic",
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=critic_interface,
-            model_type=ModelType("llama", 7, True),
+            model_type=ModelFamily("llama", 7, True),
             input_data=[
                 "packed_seq",
                 "cu_seqlens",

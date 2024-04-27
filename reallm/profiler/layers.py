@@ -13,7 +13,7 @@ import transformers
 
 from reallm.base.topology import *
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_base import (FlashMQATBlock, OutputHead, ReaLModelConfig,
+from reallm.impl.model.nn.real_llm_base import (OutputHead, ReaLModelBlock, ReaLModelConfig,
                                                 SequenceParallelActorHead, SequenceParallelCriticHead,
                                                 VocabPositionEmbedding)
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
@@ -29,8 +29,8 @@ def make_layers(config: ReaLModelConfig, dtype, device):
         dtype=dtype,
         device=device,
     )
-    flash_mqat_blocks = [
-        FlashMQATBlock(
+    real_model_blocks = [
+        ReaLModelBlock(
             config,
             layer_index=i,
             output_layernorm=(i == 1),
@@ -67,9 +67,9 @@ def make_layers(config: ReaLModelConfig, dtype, device):
         dtype=dtype,
     )
 
-    # layer_names = ["embedding_layer", "flash_mqat_block_0", "flash_mqat_block_1", "head"]
-    layer_names = ["embedding_layer", "flash_mqat_block_0", "head"]
-    return [embedding_layer] + flash_mqat_blocks + [head], layer_names
+    # layer_names = ["embedding_layer", "real_model_block_0", "real_model_block_1", "head"]
+    layer_names = ["embedding_layer", "real_model_block_0", "head"]
+    return [embedding_layer] + real_model_blocks + [head], layer_names
 
 
 def make_stats_key(layer_name, name, bs, seq_len):
@@ -299,7 +299,7 @@ def make_profile_layers(device: torch.device,
         raise NotImplementedError(f"Unsupported dtype {dtype}")
     tokenizer = None
     config: ReaLModelConfig = getattr(ReaLModel, f"config_from_{hf_model_type}")(model_path=model_path,)
-    # with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
+    # with open(os.path.join(model_path, "real_model_config.json"), "r") as f:
     #     config = ReaLModelConfig(**json.load(f))
     config.sequence_parallel = use_sequence_parallel
     # m.load(model_path, init_critic_from_actor=False)

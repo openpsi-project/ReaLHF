@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import functools
 
-from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelName, ModelRPC, ModelType
+from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelName, ModelRPC
 from reallm.api.core.system_api import _LLM_ENVVARS, ExperimentSaveEvalControl, register_experiment
 from reallm.api.quickstart.dataset import DatasetType, PromptOnlyDatasetConfig
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
@@ -135,7 +135,7 @@ def register_auto_ppo_experiment(actor_size: int,
             return [
                 ModelRPC(
                     model_name=ModelName("actor", 0),
-                    model_type=ModelType(actor_model_class, actor_size, is_critic=False),
+                    model_type=ModelFamily(actor_model_class, actor_size, is_critic=False),
                     interface_type=ModelInterfaceType.GENERATE,
                     interface_impl=actor_interface,
                     input_data=["packed_prompts", "prompt_cu_seqlens"],
@@ -153,7 +153,7 @@ def register_auto_ppo_experiment(actor_size: int,
                 ),
                 ModelRPC(
                     model_name=ModelName("reward", 0),
-                    model_type=ModelType(critic_model_class, critic_size, is_critic=True),
+                    model_type=ModelFamily(critic_model_class, critic_size, is_critic=True),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=rw_interface,
                     input_data=["packed_seq", "cu_seqlens"],
@@ -166,7 +166,7 @@ def register_auto_ppo_experiment(actor_size: int,
                 ),
                 ModelRPC(
                     model_name=ModelName("ref", 0),
-                    model_type=ModelType(actor_model_class, actor_size, is_critic=False),
+                    model_type=ModelFamily(actor_model_class, actor_size, is_critic=False),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=ref_interface,
                     input_data=[
@@ -181,7 +181,7 @@ def register_auto_ppo_experiment(actor_size: int,
                 ),
                 ModelRPC(
                     model_name=ModelName("critic", 0),
-                    model_type=ModelType(critic_model_class, critic_size, is_critic=True),
+                    model_type=ModelFamily(critic_model_class, critic_size, is_critic=True),
                     interface_type=ModelInterfaceType.INFERENCE,
                     interface_impl=critic_interface,
                     input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
@@ -193,7 +193,7 @@ def register_auto_ppo_experiment(actor_size: int,
                 ),
                 ModelRPC(
                     model_name=ModelName("actor", 0),
-                    model_type=ModelType(actor_model_class, actor_size, is_critic=False),
+                    model_type=ModelFamily(actor_model_class, actor_size, is_critic=False),
                     interface_type=ModelInterfaceType.TRAIN_STEP,
                     interface_impl=actor_interface,
                     input_data=[
@@ -216,7 +216,7 @@ def register_auto_ppo_experiment(actor_size: int,
                 ModelRPC(
                     model_name=ModelName("critic", 0),
                     interface_type=ModelInterfaceType.TRAIN_STEP,
-                    model_type=ModelType(critic_model_class, critic_size, is_critic=True),
+                    model_type=ModelFamily(critic_model_class, critic_size, is_critic=True),
                     interface_impl=critic_interface,
                     input_data=[
                         "packed_seq",

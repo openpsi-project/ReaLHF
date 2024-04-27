@@ -14,7 +14,7 @@ from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData, 
 from tests.utils import init_global_constants
 
 
-class FlashMQATGPT2Test(unittest.TestCase):
+class ReaLModelGPT2Test(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):

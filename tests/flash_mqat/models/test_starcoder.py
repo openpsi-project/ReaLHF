@@ -14,7 +14,7 @@ from tests.utils import *
 torch.cuda.manual_seed_all(0)
 
 
-class FlashMQATStarCoderCPUTest(unittest.TestCase):
+class ReaLModelStarCoderCPUTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -161,7 +161,7 @@ class FlashMQATStarCoderCPUTest(unittest.TestCase):
         assert torch.allclose(vglogprob, tlogprob), (vglogprob - tlogprob).abs().max()
 
 
-class FlashMQATStarCoderTest(unittest.TestCase):
+class ReaLModelStarCoderTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):

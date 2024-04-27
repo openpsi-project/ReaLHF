@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
-from reallm.api.quickstart.model import ReaLModelConfig
+from reallm.api.core import model_api
 # import reallm.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
 from reallm.base import constants, logging
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
@@ -25,7 +25,7 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from .real_llm_api import ReaLModel
 
-logger = logging.getLogger("FlashMQAT Generation")
+logger = logging.getLogger("ReaLModel Generation")
 
 
 @dataclasses.dataclass
@@ -220,7 +220,7 @@ def generate(
     cache_seqlens: Optional[torch.Tensor] = None,
     gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData], Optional[torch.Tensor]]:
-    """Generete a sequence with a FlashMQAT.
+    """Generete a sequence with a ReaLModel.
 
     Args:
         model (ReaLModel): .
@@ -280,7 +280,7 @@ def generate(
         bs = cu_seqlens.shape[0] - 1
 
     device = torch.cuda.current_device()
-    mconfig: ReaLModelConfig = model.config
+    mconfig: model_api.ReaLModelConfig = model.config
 
     terminate = False
     generated_idx = 0
@@ -435,7 +435,7 @@ def vanilla_packed_generate(
     gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
-    mconfig: ReaLModelConfig = model.config
+    mconfig: model_api.ReaLModelConfig = model.config
 
     terminate = False
     generated_idx = 0
@@ -492,7 +492,7 @@ def vanilla_cpu_generate(
     gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
-    mconfig: ReaLModelConfig = model.config
+    mconfig: model_api.ReaLModelConfig = model.config
     assert str(input_ids.device) == "cpu"
 
     terminate = False

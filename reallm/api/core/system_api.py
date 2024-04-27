@@ -13,8 +13,8 @@ from reallm.api.core.config import *
 from reallm.base.cluster import spec as cluster_spec
 from reallm.base.constants import (DATASET_CACHE_PATH, PYTORCH_KERNEL_CACHE_PATH, TORCH_EXTENSIONS_DIR,
                                    TRITON_CACHE_PATH)
-import reallm.api.core.dfg
-import reallm.base.topology
+import reallm.api.core.dfg as dfg
+import reallm.base.topology as topology
 
 _LLM_ENVVARS = {
     # "NCCL_P2P_DISABLE": "1",
@@ -150,8 +150,8 @@ class ModelWorker:
     cuda_cache_cleanliness: bool = True
     cuda_cache_clear_freq: int = 10
     # model_topos and worker_info will be configured automatically
-    model_rpcs: List[reallm.api.core.dfg.ModelRPC] = None
-    model_topos: Dict[ModelName, reallm.base.topology.PipeModelDataParallelTopology] = None
+    model_rpcs: List[dfg.ModelRPC] = None
+    model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = None
     msid2mwid: Dict[ModelShardID, int] = None
     data_transfer_pairs: List[Tuple[str, str]] = None
     sync_param_pairs: List[Tuple[str, str]] = None
@@ -170,12 +170,12 @@ class ProfileWorker:
     seed: int
     model: Model
     backend: ModelBackend
-    interface: reallm.api.core.dfg.ModelInterface
-    rpcs: List[reallm.api.core.dfg.ModelRPC]
+    interface: dfg.ModelInterface
+    rpcs: List[dfg.ModelRPC]
     bs_list: Optional[List[int]] = None
     seq_len_list: Optional[List[int]] = None
     gen_tokens_list: Optional[List[int]] = None
-    topo: Optional[reallm.base.topology.PipeModelDataParallelTopology] = None
+    topo: Optional[topology.PipeModelDataParallelTopology] = None
     profile_communication: bool = False
     profile_rpc: bool = False
     warmup_rounds: int = 2
@@ -202,9 +202,9 @@ class ExperimentSaveEvalControl:
 class MasterWorker:
     exp_ctrl: ExperimentSaveEvalControl
     # main components
-    model_rpcs: List[reallm.api.core.dfg.ModelRPC]
+    model_rpcs: List[dfg.ModelRPC]
     n_model_workers: int
-    model_topos: Dict[ModelName, reallm.base.topology.PipeModelDataParallelTopology]
+    model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology]
     msid2mwid: Dict[ModelShardID, int] = None
     data_transfer_pairs: List[Tuple[str, str]] = None
     sync_param_pairs: List[Tuple[str, str]] = None
@@ -229,7 +229,7 @@ class ExperimentScheduling:
 class ExperimentConfig:
     exp_ctrl: ExperimentSaveEvalControl
     # dataflow
-    model_rpcs: List[reallm.api.core.dfg.ModelRPC]
+    model_rpcs: List[dfg.ModelRPC]
     model_worker: List[ModelWorker] = dataclasses.field(default_factory=list)
     profile_worker: List[ProfileWorker] = dataclasses.field(default_factory=list)
     # master_worker will be set automatically
@@ -261,7 +261,7 @@ class ExperimentConfig:
                 raise ValueError(f"Model replica ids should be 0, 1, 2, ... for each role: {_replica_ids}.")
         ############### Sanity check of model names ###############
 
-        model_topos: Dict[ModelName, reallm.base.topology.PipeModelDataParallelTopology] = {}
+        model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = {}
         model_configs: Dict[ModelName, Model] = {}
         for model_name in model_names:
             _this_mws = list(
@@ -287,7 +287,7 @@ class ExperimentConfig:
             ##### Sanity check of parallelism ranks. #####
 
         data_transfer_pairs: List[Tuple[ModelName, ModelName]] = []
-        _, edges = reallm.api.core.dfg.build_graph(self.model_rpcs, verbose=True)
+        _, edges = dfg.build_graph(self.model_rpcs, verbose=True)
         for i in range(len(self.model_rpcs)):
             for j in range(len(self.model_rpcs)):
                 if len(edges[i][j]) > 0:
@@ -301,13 +301,13 @@ class ExperimentConfig:
         ######### sanity check of sync param hooks #########
         for rpc in self.model_rpcs:
             for hook in rpc.pre_hooks + rpc.post_hooks:
-                if not isinstance(hook, reallm.api.core.dfg.SyncParamHook):
+                if not isinstance(hook, dfg.SyncParamHook):
                     continue
                 if (hook.target is not None
                         and not (model_configs[rpc.model_name].type_ == model_configs[hook.target].type_ ==
-                                 "flash_mqat")) or (hook.source is not None and
+                                 "real_model")) or (hook.source is not None and
                                                     not (model_configs[rpc.model_name].type_ ==
-                                                         model_configs[hook.source].type_ == "flash_mqat")):
+                                                         model_configs[hook.source].type_ == "real_model")):
                     raise ValueError(
                         "To synchronize parameters between two models, both models must be ReaLModel.")
                 other_model_name = hook.target if hook.target is not None else hook.source

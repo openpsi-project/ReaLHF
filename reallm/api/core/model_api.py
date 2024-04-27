@@ -1,6 +1,7 @@
 from collections import defaultdict
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 import abc
+import copy
 import dataclasses
 import os
 
@@ -10,13 +11,52 @@ import torch.utils.data
 import transformers
 
 from reallm.api.core import dfg, system_api
-from reallm.api.core.config import ModelName
+from reallm.api.core.config import ModelFamily, ModelName
 from reallm.base.namedarray import NamedArray
 import reallm.base.logging as logging
 
 logger = logging.getLogger("model")
 
 NeuralNetwork = Union[deepspeed.DeepSpeedEngine, transformers.PreTrainedModel, torch.nn.Module]
+
+
+@dataclasses.dataclass
+class ReaLModelConfig:
+    n_layers: int
+    n_kv_heads: int
+    head_dim: int
+    hidden_dim: int
+    intermediate_dim: int  # for mlp, usually 4*h
+    vocab_size: int
+    n_positions: Optional[int] = None
+    embd_pdrop: float = 0.1
+    resid_pdrop: float = 0.1
+    attn_pdrop: float = 0.1
+    layer_norm_epsilon: float = 1e-5
+    activation_function: str = "gelu"
+    scale_attn_by_inverse_layer_idx: bool = True
+    # llama does not use attention bias and uses special MLP/LayerNorm layers
+    use_attention_bias: bool = True
+    layer_norm_type: Optional[str] = None
+    mlp_type: Optional[str] = None
+    # rotary embedding
+    apply_rotary: bool = False
+    rotary_base: float = 10000.0
+    rotary_interleaved: bool = False
+    rotary_scaling: Optional[float] = None
+    rotary_scaling_type: Optional[str] = None
+    # parallelism optimization
+    sequence_parallel: bool = False
+    gradient_accumulation_fusion: bool = False
+
+    is_critic: bool = False
+
+    # only used for debugging, True for GPT2
+    fixed_abs_position_ids: bool = False
+
+    # remained for compatibility, not used any more
+    ckpt_attn: bool = False
+    ckpt_mlp: bool = False
 
 
 def load_hf_tokenizer(model_name_or_path: str,
@@ -184,3 +224,39 @@ def make_backend(cfg: system_api.ModelBackend) -> ModelBackend:
 
 
 register_backend("null", NullBackend)
+
+SUPPORTED_MODELS = []
+MODEL_FAMILY_TO_PATH: Dict[ModelFamily, str] = {}
+HF_MODEL_FAMILY_REGISTRY = {}
+
+
+def register_hf_family(
+    name: str,
+    hf_cls_name: str,
+    config_from_hf_converter: Callable[[transformers.PretrainedConfig], ReaLModelConfig],
+    config_to_hf_converter: Callable[[ReaLModelConfig], transformers.PretrainedConfig],
+    sd_from_hf_converter: Callable[[Dict, ReaLModelConfig], Dict],
+    sd_to_hf_converter: Callable[[Dict, ReaLModelConfig], Dict],
+    embedding_param_names: Callable[[ReaLModelConfig], List[str]],
+    tblock_param_names: Callable[[ReaLModelConfig, int], List[str]],
+    head_param_names: Callable[[ReaLModelConfig], List[str]],
+):
+    if name in SUPPORTED_MODELS:
+        raise ValueError(f"Model {name} is already registered.")
+    SUPPORTED_MODELS.append(name)
+    HF_MODEL_FAMILY_REGISTRY[name] = dict(
+        name=name,
+        hf_cls_name=hf_cls_name,
+        config_from_hf_converter=config_from_hf_converter,
+        config_to_hf_converter=config_to_hf_converter,
+        sd_from_hf_converter=sd_from_hf_converter,
+        sd_to_hf_converter=sd_to_hf_converter,
+        embedding_param_names=embedding_param_names,
+        tblock_param_names=tblock_param_names,
+        head_param_names=head_param_names,
+    )
+
+
+def register_hf_path(name: str, size: int, path: str):
+    MODEL_FAMILY_TO_PATH[ModelFamily(name, size, False)] = path
+    MODEL_FAMILY_TO_PATH[ModelFamily(name, size, True)] = path

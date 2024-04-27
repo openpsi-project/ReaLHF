@@ -14,8 +14,8 @@ import scipy.stats
 import seaborn as sns
 import transformers
 
-from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelName, ModelType
-from reallm.api.core.model_api import FLASH_MODEL_CONFIG_CONVERTER
+from reallm.api.core.config import MODEL_FAMILY_TO_PATH, ModelFamily, ModelName
+from reallm.api.core.model_api import REAL_MODEL_CONFIG_CONVERTER
 from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
                                  calculate_llama_train_flops, CUDAKernelTime)
 
@@ -54,9 +54,9 @@ def compute_rlhf_pflops(
         ("rw", rw_size),
     ]:
         hf_model_type = "llama" if model_size != 34 else "codellama"
-        path = MODEL_TYPE_TO_PATH[ModelType(hf_model_type, model_size, True)]
+        path = MODEL_FAMILY_TO_PATH[ModelFamily(hf_model_type, model_size, True)]
         hf_config = transformers.AutoConfig.from_pretrained(path)
-        mconfig = FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
+        mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
         mconfigs[name] = mconfig
     assert (prompt_len + gen_len) * batch_size == 2**17, (batch_size, prompt_len, gen_len)
     flops = 0
@@ -101,9 +101,9 @@ def compute_rlhf_gen_pflops(
     mconfigs = {}
     for name, model_size in [("actor", actor_size)]:
         hf_model_type = "llama" if model_size != 34 else "codellama"
-        path = MODEL_TYPE_TO_PATH[ModelType(hf_model_type, model_size, True)]
+        path = MODEL_FAMILY_TO_PATH[ModelFamily(hf_model_type, model_size, True)]
         hf_config = transformers.AutoConfig.from_pretrained(path)
-        mconfig = FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
+        mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
         mconfigs[name] = mconfig
     assert (prompt_len + gen_len) * batch_size == 2**17, (batch_size, prompt_len, gen_len)
     return (calculate_llama_gen_flops(
@@ -124,9 +124,9 @@ def compute_rlhf_inf_pflops(
     avg_time: float,
 ):
     hf_model_type = "llama" if model_size != 34 else "codellama"
-    path = MODEL_TYPE_TO_PATH[ModelType(hf_model_type, model_size, True)]
+    path = MODEL_FAMILY_TO_PATH[ModelFamily(hf_model_type, model_size, True)]
     hf_config = transformers.AutoConfig.from_pretrained(path)
-    mconfig = FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
+    mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
     flops = caculuate_llama_forward_flops(
         batch_size,
         [seqlen] * batch_size,

@@ -8,9 +8,9 @@ import transformers
 
 from reallm.api.core import model_api
 from reallm.impl.model.nn.real_llm_api import add_helper_functions, ReaLModel
-from reallm.impl.model.nn.real_llm_base import (flash_model_embed_param_count, flash_model_head_param_count,
-                                                flash_model_tblock_param_count, FlashMQATBlock, OutputHead,
-                                                VocabPositionEmbedding)
+from reallm.impl.model.nn.real_llm_base import (OutputHead, real_model_embed_param_count,
+                                                real_model_head_param_count, real_model_tblock_param_count,
+                                                ReaLModelBlock, VocabPositionEmbedding)
 from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from tests.utils import init_global_constants, MODEL_NAME
 import reallm.base.constants as constants
@@ -18,7 +18,7 @@ import reallm.base.constants as constants
 torch.cuda.manual_seed_all(2)
 
 
-class LlamaFlashMQATForwardTest(unittest.TestCase):
+class LlamaReaLModelForwardTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -71,17 +71,17 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
             if isinstance(l, VocabPositionEmbedding):
                 self.assertEqual(
                     count_nn_module_params(l),
-                    flash_model_embed_param_count(self.hf_like_model.config),
+                    real_model_embed_param_count(self.hf_like_model.config),
                 )
-            elif isinstance(l, FlashMQATBlock):
+            elif isinstance(l, ReaLModelBlock):
                 self.assertEqual(
                     count_nn_module_params(l),
-                    flash_model_tblock_param_count(self.hf_like_model.config, idx - 1),
+                    real_model_tblock_param_count(self.hf_like_model.config, idx - 1),
                 )
             elif isinstance(l, OutputHead):
                 self.assertEqual(
                     count_nn_module_params(l),
-                    flash_model_head_param_count(self.hf_like_model.config),
+                    real_model_head_param_count(self.hf_like_model.config),
                 )
             else:
                 raise NotImplementedError()
@@ -151,18 +151,17 @@ class LlamaFlashMQATForwardTest(unittest.TestCase):
 
     @unittest.skip("skip because it is slow")
     def testDumpLoad(self):
-        os.makedirs("/tmp/_flash_mqat_test/llama/", exist_ok=True)
+        os.makedirs("/tmp/_real_model_test/llama/", exist_ok=True)
         ReaLModel.dump_to_llama(
             self.hf_like_model.config,
             self.hf_like_model.state_dict(),
-            "/tmp/_flash_mqat_test/llama/",
+            "/tmp/_real_model_test/llama/",
             self.hf_path,
         )
-        from reallm.impl.model.utils.save_load import load_from_disk
 
-        self.llama.load_state_dict(load_from_disk("/tmp/_flash_mqat_test/llama/"))
+        self.llama.load_state_dict(load_from_disk("/tmp/_real_model_test/llama/"))
 
 
 if __name__ == "__main__":
-    # unittest.main(defaultTest="LlamaFlashMQATForwardTest.testDumpLoad")
+    # unittest.main(defaultTest="LlamaReaLModelForwardTest.testDumpLoad")
     unittest.main()

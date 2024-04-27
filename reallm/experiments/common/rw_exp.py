@@ -8,7 +8,7 @@ from omegaconf import MISSING
 from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
-from reallm.api.quickstart.model import get_flash_mqat_model_config, ModelTrainEvalConfig, OptimizerConfig
+from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
 from reallm.base.topology import PipeModelDataParallelTopology
 
 
@@ -109,7 +109,7 @@ class RWConfig(Experiment):
             ),
         )
 
-        model = get_flash_mqat_model_config(
+        model = get_real_model_config(
             from_type="actor_as_critic",
             model_path=self.model.path,
             hf_model_type=self.model.type,

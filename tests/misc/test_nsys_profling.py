@@ -10,7 +10,7 @@ import torch
 import torch.distributed
 import torch.profiler
 
-from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_flash_config, get_memory,
+from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_real_config, get_memory,
                          init_global_constants, MODEL_NAME, setup_barrier, setup_gpu)
 import reallm.base.constants as constants
 
@@ -100,7 +100,7 @@ def test_impl(world_size, profile: bool):
     from reallm.impl.model.nn.real_llm_api import add_helper_functions, ReaLModel
 
     torch.distributed.barrier()
-    mconfig = get_llama7b_flash_config()
+    mconfig = get_llama7b_real_config()
     with constants.model_scope(MODEL_NAME):
         m = ReaLModel(mconfig, device=torch.device("cuda:0"), dtype=torch.float16)
         m.instantiate()

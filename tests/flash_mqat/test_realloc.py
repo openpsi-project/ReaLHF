@@ -19,9 +19,9 @@ import torch.distributed as dist
 import tqdm
 import transformers
 
-from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelName, ModelShardID, ModelType
+from reallm.api.core.config import MODEL_FAMILY_TO_PATH, ModelFamily, ModelName, ModelShardID
 from reallm.api.core.system_api import ModelName, ModelShardID
-from reallm.api.quickstart.model import FLASH_MODEL_CONFIG_CONVERTER
+from reallm.api.quickstart.model import REAL_MODEL_CONFIG_CONVERTER
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark
 from reallm.base.topology import PipeModelDataParallelTopology
 from reallm.scheduler.client import make as make_scheduer
@@ -153,9 +153,9 @@ def test_impl(
     from reallm.impl.model.nn.real_llm_api import add_helper_functions, ReaLModel
 
     hf_model_type = "llama" if model_size != 34 else "codellama"
-    hf_config = transformers.AutoConfig.from_pretrained(MODEL_TYPE_TO_PATH[ModelType(
+    hf_config = transformers.AutoConfig.from_pretrained(MODEL_FAMILY_TO_PATH[ModelFamily(
         hf_model_type, model_size, False)])
-    mconfig = FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
+    mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
     os.environ["DLLM_CUDA_TMARK"] = "1"
 
     if rank < from_topo.world_size():
@@ -163,7 +163,7 @@ def test_impl(
             m1 = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
             m1.instantiate()
             if check:
-                m1.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
+                m1.load_from_saved_real_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
             if constants.pipe_parallel_world_size() > 1:
                 engine1 = InferencePipelineEngine(m1)
             else:
@@ -257,7 +257,7 @@ def test_impl(
                     torch.cuda.synchronize()
                     m3 = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
                     m3.instantiate()
-                    m3.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
+                    m3.load_from_saved_real_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
                     assert len(m2.state_dict()) == len(m3.state_dict()) > 0
                     for k in m2.state_dict().keys():
                         v1 = m2.state_dict()[k]
@@ -355,7 +355,7 @@ def test_impl(
                     torch.cuda.synchronize()
                     m4 = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
                     m4.instantiate()
-                    m4.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
+                    m4.load_from_saved_real_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
                     assert len(m1.state_dict()) == len(m4.state_dict()) > 0
                     for k in m1.state_dict().keys():
                         v1 = m1.state_dict()[k]
@@ -413,7 +413,7 @@ def test_impl(
             profiler.__exit__(None, None, None)
 
 
-def setup_gpu(rank, world_size, model_topos, msid2mwid, param_sync_pairs):
+def setup_gpu(rank, world_size, model_topos, msid2mwid, param_realloc_pairs):
     os.environ["DLLM_MODE"] = "LOCAL"
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -426,7 +426,7 @@ def setup_gpu(rank, world_size, model_topos, msid2mwid, param_sync_pairs):
         rank,
         model_topos=model_topos,
         msid2mwid=msid2mwid,
-        param_sync_pairs=param_sync_pairs,
+        param_realloc_pairs=param_realloc_pairs,
         world_size=world_size,
         global_rank=rank,
     )
@@ -449,7 +449,7 @@ def test(args):
 
     from_model_name = ModelName("actor", 0)
     to_model_name = ModelName("actor", 1)
-    param_sync_pairs = [(from_model_name, to_model_name), (to_model_name, from_model_name)]
+    param_realloc_pairs = [(from_model_name, to_model_name), (to_model_name, from_model_name)]
     model_topos = {from_model_name: from_topo, to_model_name: to_topo}
     msid2mwid = {}
     for i in range(from_topo.world_size()):
@@ -457,23 +457,23 @@ def test(args):
     for i in range(to_topo.world_size()):
         msid2mwid[ModelShardID.from_parallelism_rank(to_model_name, to_topo,
                                                      i)] = (i + world_size - to_topo.world_size())
-    pg_info = setup_gpu(rank, world_size, model_topos, msid2mwid, param_sync_pairs)
+    pg_info = setup_gpu(rank, world_size, model_topos, msid2mwid, param_realloc_pairs)
     if rank < from_topo.world_size():
         init_global_constants(topo=from_topo, model_name=from_model_name, msid2mwid=msid2mwid)
     if rank >= world_size - to_topo.world_size():
         init_global_constants(topo=to_topo, model_name=to_model_name, msid2mwid=msid2mwid)
 
     hf_model_type = "llama" if args.model_size != 34 else "codellama"
-    hf_config = transformers.AutoConfig.from_pretrained(MODEL_TYPE_TO_PATH[ModelType(
+    hf_config = transformers.AutoConfig.from_pretrained(MODEL_FAMILY_TO_PATH[ModelFamily(
         hf_model_type, args.model_size, False)])
-    mconfig = FLASH_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
+    mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
     torch.distributed.barrier()
     # if check and constants.has_model_name(from_model_name):
     #     with constants.model_scope(from_model_name):
     #         global_m = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
     #         global_m.instantiate()
     #         # if os.path.exists("/lustre/aigc/llm/checkpoints/reparallelize_test/"):
-    #         #     global_m.load_from_saved_flash_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
+    #         #     global_m.load_from_saved_real_model("/lustre/aigc/llm/checkpoints/reparallelize_test/")
     #         # else:
     #         # torch.distributed.barrier(group=constants.parallelism_group())
     #         # os.system("rm -rf /lustre/aigc/llm/checkpoints/reparallelize_test/")

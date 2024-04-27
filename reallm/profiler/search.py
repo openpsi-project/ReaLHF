@@ -6,7 +6,7 @@ import pickle
 
 import numpy as np
 
-from reallm.api.core.config import MODEL_TYPE_TO_PATH
+from reallm.api.core.config import MODEL_FAMILY_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import (ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig,
@@ -74,7 +74,7 @@ def optimal_device_mapping(
                                      log_dir=rpc_exe_dir)
     rpc_list = make_rpc_list(model_rpcs, if_print=False)
     graph = build_graph(model_rpcs, 5, 1, if_print=False)
-    cost_table = pickle.load(open("profile_result/param_sync_cost_table_parallel.pkl", "rb"))
+    cost_table = pickle.load(open("profile_result/param_realloc_cost_table_parallel.pkl", "rb"))
     model_size_dict = make_model_size_dict(model_rpcs, if_print=False)
 
     # rpc_dict = {rpc.name: rpc for rpc in model_rpcs}
@@ -164,8 +164,8 @@ def optimal_device_mapping(
         sub_device_mesh = make_device_mesh_from_name(alloc_info["device_mesh"])
         train_eval_config = ModelTrainEvalConfig(
             type=rpc.model_type._class,
-            path=MODEL_TYPE_TO_PATH[rpc.model_type],
-            base_model_path=MODEL_TYPE_TO_PATH[rpc.model_type],
+            path=MODEL_FAMILY_TO_PATH[rpc.model_type],
+            base_model_path=MODEL_FAMILY_TO_PATH[rpc.model_type],
             gradient_checkpointing=gradient_checkpointing,
             parallel=parallel_config,
             optimizer=optim_config,
@@ -198,7 +198,7 @@ def make_rpc_exe_list(rpcs: List[ModelRPC],
     rpc_exe_list = []
     log_flag = False
     for rpc in rpcs:
-        # flash_mqat_config = load_model_config(rpc)
+        # real_model_config = load_model_config(rpc)
         feasible = enumerate_rpc_executions(rpc,
                                             device_mesh,
                                             num_gen_tokens=num_gen_tokens,
@@ -240,8 +240,8 @@ def make_model_size_dict(rpcs: List[ModelRPC], if_print: bool = False) -> Dict[s
     for rpc in rpcs:
         if rpc.model_name.role in model_size_dict:
             continue
-        flash_mqat_config = load_model_config(rpc)
-        # model_size_dict[rpc.model_name.role] = estimate_model_size(flash_mqat_config)
+        real_model_config = load_model_config(rpc)
+        # model_size_dict[rpc.model_name.role] = estimate_model_size(real_model_config)
         model_size_dict[rpc.model_name.role] = rpc.model_type.size
 
         if if_print:
@@ -291,7 +291,7 @@ def print_model_device_mapping_by_index(rpcs: List[ModelRPC], device_mesh: Devic
     avg_time_cost = []
 
     for i, rpc in enumerate(rpcs):
-        flash_mqat_config = load_model_config(rpc)
+        real_model_config = load_model_config(rpc)
         feasible = enumerate_rpc_executions(rpc, device_mesh)
         print(f"{rpc.name} feasible: {len(feasible)}")
         feasible.sort(key=lambda x: x.time_cost)
@@ -347,8 +347,8 @@ def handpicked_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 gradient_checkpointing=True,
                 parallel=parallel_config,
                 optimizer=OptimizerConfig(type="adam", offload=False),
@@ -359,8 +359,8 @@ def handpicked_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 parallel=parallel_config,
             ),
         ),
@@ -369,8 +369,8 @@ def handpicked_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 parallel=parallel_config,
             ),
         ),
@@ -379,8 +379,8 @@ def handpicked_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 gradient_checkpointing=True,
                 parallel=parallel_config,
                 optimizer=OptimizerConfig(type="adam", offload=False),
@@ -391,8 +391,8 @@ def handpicked_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 gradient_checkpointing=True,
                 parallel=parallel_config,
                 optimizer=OptimizerConfig(type="adam", offload=False),
@@ -403,8 +403,8 @@ def handpicked_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 gradient_checkpointing=True,
                 parallel=parallel_config,
                 optimizer=OptimizerConfig(type="adam", offload=False),
@@ -455,8 +455,8 @@ def test_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 gradient_checkpointing=True,
                 parallel=rollout_config,
             ),
@@ -466,8 +466,8 @@ def test_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 parallel=parallel_config,
             ),
         ),
@@ -476,8 +476,8 @@ def test_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 parallel=parallel_config,
             ),
         ),
@@ -486,8 +486,8 @@ def test_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 gradient_checkpointing=True,
                 parallel=parallel_config,
                 optimizer=OptimizerConfig(type="adam", offload=False),
@@ -498,8 +498,8 @@ def test_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 gradient_checkpointing=True,
                 parallel=parallel_config,
                 optimizer=OptimizerConfig(type="adam", offload=False),
@@ -510,8 +510,8 @@ def test_model_device_mapping(
             mapping=mapping,
             train_eval_config=ModelTrainEvalConfig(
                 type="llama",
-                path=MODEL_TYPE_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_TYPE_TO_PATH[rollout.model_type],
+                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
                 gradient_checkpointing=True,
                 parallel=parallel_config,
                 optimizer=OptimizerConfig(type="adam", offload=False),
@@ -563,7 +563,7 @@ def profile_search(rank):
                                              if_print=False)
             rpc_list = make_rpc_list(rpcs, if_print=False)
             graph = build_graph(rpcs, 5, 1, if_print=False)
-            cost_table = pickle.load(open("profile_result/param_sync_cost_table_parallel.pkl", "rb"))
+            cost_table = pickle.load(open("profile_result/param_realloc_cost_table_parallel.pkl", "rb"))
             model_size_dict = make_model_size_dict(rpcs, if_print=False)
 
             rs = mdm_search.mcmc_search_time_profile(rpc_list, rpc_exe_list, graph, cost_table,

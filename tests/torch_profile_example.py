@@ -22,7 +22,7 @@ import torch
 import torch.distributed
 import torch.profiler
 
-from reallm.api.core.config import MODEL_TYPE_TO_PATH, ModelType
+from reallm.api.core.config import MODEL_FAMILY_TO_PATH, ModelFamily
 from tests.utils import *
 import reallm.api.core.system_api as config_package
 import reallm.base.constants as constants
@@ -38,7 +38,7 @@ NUM_SHARDS = 3
 WORLD_SIZE = NUM_MP * NUM_DP * NUM_PP
 MODEL_TYPE = "llama"
 
-MODEL_PARALLEL_PATH = BASELINE_MODEL_PATH = MODEL_TYPE_TO_PATH[ModelType("llama", 7, False)]
+MODEL_PARALLEL_PATH = BASELINE_MODEL_PATH = MODEL_FAMILY_TO_PATH[ModelFamily("llama", 7, False)]
 BATCH_SIZE = 512
 SEQ_LEN = 256
 MIN_NEW_TOKENS = 256
@@ -95,7 +95,7 @@ def make_model(device):
     from_type = "hf_as_actor"
 
     model_config = config_package.Model(
-        "flash_mqat",
+        "real_model",
         args=dict(
             model_path=MODEL_PARALLEL_PATH,
             from_type=from_type,

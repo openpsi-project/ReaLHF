@@ -3,13 +3,14 @@ from typing import *
 import contextlib
 import copy
 import getpass
+import os
 
 import numpy as np
 
-from reallm.api.core.config import ModelName
 from reallm.base.cluster import spec as cluster_spec
 
 if TYPE_CHECKING:
+    from reallm.api.core.config import ModelName
     from reallm.api.core.system_api import ModelShardID
     from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
 
@@ -54,16 +55,16 @@ TORCH_EXTENSIONS_DIR = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torc
 QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/quickstart.pkl"
 
 # _model_name will be changed in the model_scope context manager
-_model_name: ModelName = None
+_model_name: "ModelName" = None
 
 # constants in worker/process scope
 _experiment_name = None
 _trial_name = None
 
-_grids: Dict[ModelName, "ParallelGrid"] = {}
-_pgroups: Dict[ModelName,
+_grids: Dict["ModelName", "ParallelGrid"] = {}
+_pgroups: Dict["ModelName",
                Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
-_rank_mapping: Dict[ModelName, Dict["ModelShardID", int]] = {}
+_rank_mapping: Dict["ModelName", Dict["ModelShardID", int]] = {}
 _global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
 _max_seqlen: int = None
 
@@ -75,7 +76,7 @@ _fake_mp_rank = None
 
 
 @contextlib.contextmanager
-def model_scope(model_name: ModelName):
+def model_scope(model_name: "ModelName"):
     global _model_name
     assert _model_name is None
     _model_name = model_name
@@ -96,31 +97,41 @@ def model_scope_disabled():
 ################# setter functions #################
 def set_max_seqlen(max_seqlen: int):
     global _max_seqlen
+    if _max_seqlen is not None:
+        raise RuntimeError("Global constant `max_seqlen` is already set.")
     _max_seqlen = max_seqlen
 
 
 def set_experiment_trial_names(expr_name: str, trial_name: str):
     global _experiment_name, _trial_name
+    if _experiment_name is not None or _trial_name is not None:
+        raise RuntimeError("Experiment and trial names are already set.")
     _experiment_name = expr_name
     _trial_name = trial_name
 
 
-def set_grid(model_name: ModelName, grid: "ParallelGrid"):
+def set_grid(model_name: "ModelName", grid: "ParallelGrid"):
     global _grids
+    if model_name in _grids:
+        raise RuntimeError(f"Grid for model {model_name} is already set.")
     _grids[model_name] = grid
 
 
-def set_parallelism_group(model_name: ModelName, pgroup):
+def set_parallelism_group(model_name: "ModelName", pgroup):
     global _pgroups
+    if model_name in _pgroups:
+        raise RuntimeError(f"Parallelism group for model {model_name} is already set.")
     _pgroups[model_name] = pgroup
 
 
 def set_rank_mapping(
-    model_name: ModelName,
+    model_name: "ModelName",
     topo: "PipeModelDataParallelTopology",
     msid2mwid: Optional[Dict["ModelShardID", int]] = None,
 ):
     global _rank_mapping
+    if model_name in _rank_mapping:
+        raise RuntimeError(f"Rank mapping for model {model_name} is already set.")
     if msid2mwid is None:
         _rank_mapping[model_name] = {i: i for i in range(topo.world_size())}
     else:
@@ -132,6 +143,17 @@ def set_rank_mapping(
 
 
 ################# attribute functions #################
+# FIXME: move sequence parallel and gradien accumulation fusion here
+def use_te_impl() -> bool:
+    try:
+        import transformer_engine.pytorch as te
+
+        TE_ENABLED = True
+    except ImportError:
+        TE_ENABLED = False
+    return TE_ENABLED and os.getenv("REAL_LLM_USE_TE") == "1"
+
+
 def dataset_max_seqlen() -> int:
     global _max_seqlen
     if _max_seqlen is None:

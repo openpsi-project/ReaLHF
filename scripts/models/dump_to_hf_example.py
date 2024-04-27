@@ -5,7 +5,6 @@ import transformers
 
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_base import ReaLModelConfig
-from reallm.impl.model.utils.save_load import load_from_disk
 
 
 def main():
@@ -23,7 +22,7 @@ def main():
 
     # llama_path = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
     # model_dir = "/lustre/public/pretrained_model_weights/sharded_new/Llama-2-7b-hf_2pp_1mp/"
-    # with open(os.path.join(model_dir, "flash_mqat_config.json"), "r") as f:
+    # with open(os.path.join(model_dir, "real_model_config.json"), "r") as f:
     #     config = ReaLModelConfig(**json.load(f))
     # state_dict = load_from_disk(model_dir)
     # print("loaded state dict")

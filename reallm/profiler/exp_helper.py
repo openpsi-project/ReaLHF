@@ -7,7 +7,7 @@ import pprint
 
 import numpy as np
 
-from reallm.api.core.config import MODEL_TYPE_TO_PATH
+from reallm.api.core.config import MODEL_FAMILY_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
@@ -137,8 +137,8 @@ def file_to_allocation_pkl(  # model_rpcs: List[ModelRPC],
         sub_device_mesh = make_device_mesh_from_name(alloc_info["device_mesh"])
         train_eval_config = ModelTrainEvalConfig(
             type=rpc.model_type._class,
-            path=MODEL_TYPE_TO_PATH[rpc.model_type],
-            base_model_path=MODEL_TYPE_TO_PATH[rpc.model_type],
+            path=MODEL_FAMILY_TO_PATH[rpc.model_type],
+            base_model_path=MODEL_FAMILY_TO_PATH[rpc.model_type],
             gradient_checkpointing=gradient_checkpointing,
             parallel=parallel_config,
             optimizer=optim_config,

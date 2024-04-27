@@ -48,9 +48,9 @@ SimulateResult simulate(
       if (rpc_instance->rpc_ptr->interface_type == "ModelInterfaceType.TRAIN_STEP"
           && rpc->interface_type != "ModelInterfaceType.TRAIN_STEP") {
         // param_dst[rpc -> model_name] = rpc_exe;
-        rpc_instance->param_sync = true;
-        rpc_instance->param_sync_size = model_sizes[rpc_instance->rpc_ptr->model_name];
-        rpc_instance->param_sync_rpc_exe_ptr = rpc_exe;
+        rpc_instance->param_realloc = true;
+        rpc_instance->param_realloc_size = model_sizes[rpc_instance->rpc_ptr->model_name];
+        rpc_instance->param_realloc_rpc_exe_ptr = rpc_exe;
       }
     }
     grouped_rpc_exe.add(rpc_exe);
@@ -72,7 +72,7 @@ SimulateResult simulate(
     node->tmp_children = node->children;
     node->tmp_parents = node->parents;
     // std::cout << "Resolve parameter sync: " << node -> name
-    //           << " " << node -> param_sync << std::endl;
+    //           << " " << node -> param_realloc << std::endl;
     node->resolve_parameter_sync(tmp_graph, cost_table);
     // node -> resolve_offload(tmp_graph, comm_stats);
   }

@@ -12,7 +12,7 @@ import json
 import os
 import pprint
 
-from reallm.api.core.config import MODEL_TYPE_TO_PATH
+from reallm.api.core.config import MODEL_FAMILY_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.impl.model.nn.real_llm_api import ReaLModel
@@ -154,13 +154,13 @@ def find_nearest_key(k, d):
 #         real_op_key = op_key
 #     if op_key in op_cost["embedding_layer"]:
 #         embedding_layer_cost = op_cost["embedding_layer"][real_op_key]
-#         flash_mqat_block_0_cost = op_cost["flash_mqat_block_0"][real_op_key]
+#         real_model_block_0_cost = op_cost["real_model_block_0"][real_op_key]
 #         head_cost = op_cost["head"][real_op_key]
 #     else:
 #         embedding_layer_cost = fitting_key(op_key, op_cost["embedding_layer"])
-#         flash_mqat_block_0_cost = fitting_key(op_key, op_cost["flash_mqat_block_0"])
+#         real_model_block_0_cost = fitting_key(op_key, op_cost["real_model_block_0"])
 #         head_cost = fitting_key(op_key, op_cost["head"])
-#     cost = (embedding_layer_cost + num_layers * flash_mqat_block_0_cost\
+#     cost = (embedding_layer_cost + num_layers * real_model_block_0_cost\
 #             + head_cost) / num_pp
 #     return cost
 
@@ -173,18 +173,18 @@ def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen):
         real_op_key = op_key
 
     embedding_layer_cost = op_cost["embedding_layer"][real_op_key]
-    flash_mqat_block_0_cost = op_cost["flash_mqat_block_0"][real_op_key]
+    real_model_block_0_cost = op_cost["real_model_block_0"][real_op_key]
     head_cost = op_cost["head"][real_op_key]
-    cost = (embedding_layer_cost + num_layers * flash_mqat_block_0_cost\
+    cost = (embedding_layer_cost + num_layers * real_model_block_0_cost\
             + head_cost) / num_pp
 
     # if op_name == "fwd_gen_1":
     #     print(f"op key {op_key} real op key {real_op_key}")
-    #     print(f"{cost} = ({embedding_layer_cost} + {num_layers} * {flash_mqat_block_0_cost} + {head_cost})/{num_pp}")
+    #     print(f"{cost} = ({embedding_layer_cost} + {num_layers} * {real_model_block_0_cost} + {head_cost})/{num_pp}")
 
     log_debug(f"op key {op_key} real op key {real_op_key}")
     log_debug(
-        f"{cost} = ({embedding_layer_cost} + {num_layers} * {flash_mqat_block_0_cost} + {head_cost}) / {num_pp}"
+        f"{cost} = ({embedding_layer_cost} + {num_layers} * {real_model_block_0_cost} + {head_cost}) / {num_pp}"
     )
 
     # if op_name == "fwd_gen_1":
@@ -219,7 +219,7 @@ def estimate_instruction_cost(
     num_gpus = parallel_strategy.num_dp * num_mp * num_pp
     layer_stats = layer_stats[num_mp]
     op_cost = {}
-    layer_names = ["embedding_layer", "flash_mqat_block_0", "head"]
+    layer_names = ["embedding_layer", "real_model_block_0", "head"]
     for k, v in layer_stats.items():
         layer_name, op_name, bs, seqlen = k.split("-")
         bs, seqlen = int(bs), int(seqlen)
@@ -333,7 +333,7 @@ def _estimate_rpc_cost(
 
 def load_model_config(rpc: ModelRPC) -> ReaLModelConfig:
     return getattr(ReaLModel,
-                   f"config_from_{rpc.model_type._class}")(model_path=MODEL_TYPE_TO_PATH[rpc.model_type])
+                   f"config_from_{rpc.model_type._class}")(model_path=MODEL_FAMILY_TO_PATH[rpc.model_type])
 
 
 def estimate_rpc_time(rpc: ModelRPC,

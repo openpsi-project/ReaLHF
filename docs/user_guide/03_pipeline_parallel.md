@@ -1,5 +1,5 @@
 # Pipeline Parallel
-Pipeline parallel in the system follows the implementation of DeepSpeed [PipelineEngine](https://github.com/microsoft/DeepSpeed/blob/master/deepspeed/runtime/pipe/engine.py), supports GPipe and 1F1B style pipeline parallel training and generating. We only support pipeline parallel for FlashMQAT models.
+Pipeline parallel in the system follows the implementation of DeepSpeed [PipelineEngine](https://github.com/microsoft/DeepSpeed/blob/master/deepspeed/runtime/pipe/engine.py), supports GPipe and 1F1B style pipeline parallel training and generating. We only support pipeline parallel for ReaLModel models.
 
 
 ## Preparing Checkpoints

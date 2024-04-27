@@ -63,7 +63,7 @@ def verify_compute():
                     print(f"key {k} pr {vv:.2f} r {rr:.2f} error {(rr - vv) / rr:.2f}")
 
 
-def verify_param_sync():
+def verify_param_realloc():
     pass
 
 

@@ -9,14 +9,14 @@ import torch
 import torch.distributed
 
 from reallm.api.core.config import ModelName
-from reallm.impl.model.nn.flash_mqat.flash_mqat_parallel import (get_flash_model_param_shape,
-                                                                 partition_pipeline_layers,
-                                                                 pipeline_repartition_strategy)
 from reallm.impl.model.nn.real_llm_api import (_keys_from_layer_indices, _param_size_from_keys,
                                                ReparallelizeReceiverStep, ReparallelizeSenderStep)
-from reallm.impl.model.nn.real_llm_base import (flash_model_embed_param_count, flash_model_head_param_count,
-                                                flash_model_tblock_param_count, ReaLModelConfig)
-from tests.utils import get_llama7b_flash_config, get_llama_config
+from reallm.impl.model.nn.real_llm_base import (real_model_embed_param_count, real_model_head_param_count,
+                                                real_model_tblock_param_count, ReaLModelConfig)
+from reallm.impl.model.nn.real_model.real_model_parallel import (get_real_model_param_shape,
+                                                                 partition_pipeline_layers,
+                                                                 pipeline_repartition_strategy)
+from tests.utils import get_llama7b_real_config, get_llama_config
 import reallm.api.core.system_api
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.topology
@@ -114,15 +114,15 @@ def _assign_src_to_dsts(node2srcs: Dict[int, List[int]], node2dsts: Dict[int,
     return assignment
 
 
-def _create_param_sync_groups(
+def _create_param_realloc_groups(
     from_topo: reallm.base.topology.PipeModelDataParallelTopology,
     to_topo: reallm.base.topology.PipeModelDataParallelTopology,
     src: ModelName,
     dst: ModelName,
     msid2mwid: Dict[api.core.system.ModelShardID, int],
-    param_sync_groups: Dict[gpu_utils.ParamSyncPair, torch.distributed.ProcessGroup],
-    param_sync_src_ranks: Dict[gpu_utils.ParamSyncPair, int],
-    param_sync_dst_ranks: Dict[gpu_utils.ParamSyncPair, List[int]],
+    param_realloc_groups: Dict[gpu_utils.ParamReallocPair, torch.distributed.ProcessGroup],
+    param_realloc_src_ranks: Dict[gpu_utils.ParamReallocPair, int],
+    param_realloc_dst_ranks: Dict[gpu_utils.ParamReallocPair, List[int]],
 ):
     mwid2msid: Dict[int, Dict[ModelName, system_api.ModelShardID]] = defaultdict(dict)
     for k, v in msid2mwid.items():
@@ -160,7 +160,7 @@ def _create_param_sync_groups(
                         from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).data,
                         from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).model,
                     )
-                    key = gpu_utils.ParamSyncPair(
+                    key = gpu_utils.ParamReallocPair(
                         src=src,
                         src_dp_rank=dp_i,
                         src_mp_rank=mp_i,
@@ -169,15 +169,15 @@ def _create_param_sync_groups(
                         dst_mp_rank=mp_j,
                         dst_pp_rank=pp_j,
                     )
-                    param_sync_dst_ranks[key] = []
-                    param_sync_groups[key] = None
-                    param_sync_src_ranks[key] = _src_rank
+                    param_realloc_dst_ranks[key] = []
+                    param_realloc_groups[key] = None
+                    param_realloc_src_ranks[key] = _src_rank
                 for _src_rank, _dst_ranks in assignment.items():
                     dp_i, mp_i = (
                         from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).data,
                         from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).model,
                     )
-                    key = gpu_utils.ParamSyncPair(
+                    key = gpu_utils.ParamReallocPair(
                         src=src,
                         src_dp_rank=dp_i,
                         src_mp_rank=mp_i,
@@ -186,15 +186,15 @@ def _create_param_sync_groups(
                         dst_mp_rank=mp_j,
                         dst_pp_rank=pp_j,
                     )
-                    param_sync_dst_ranks[key] = _dst_ranks
+                    param_realloc_dst_ranks[key] = _dst_ranks
                     if _src_rank not in _dst_ranks:
                         _dst_ranks = [_src_rank] + _dst_ranks
                     assert len(set(_dst_ranks)) == len(_dst_ranks)
                     if len(_dst_ranks) > 1:
-                        param_sync_groups[key] = 1
+                        param_realloc_groups[key] = 1
                     else:
-                        param_sync_groups[key] = None
-                    param_sync_src_ranks[key] = _src_rank
+                        param_realloc_groups[key] = None
+                    param_realloc_src_ranks[key] = _src_rank
 
 
 def _derive_reparallelize_comm_plan(
@@ -227,17 +227,17 @@ def _derive_reparallelize_comm_plan(
     from_layer_mapping = partition_pipeline_layers(
         from_model_config,
         from_topo.get_dim("pipe"),
-        flash_model_embed_param_count,
-        flash_model_tblock_param_count,
-        flash_model_head_param_count,
+        real_model_embed_param_count,
+        real_model_tblock_param_count,
+        real_model_head_param_count,
     )
     from_layer_mapping = {k: list(range(v[0], v[1])) for k, v in from_layer_mapping.items()}
     to_layer_mapping = partition_pipeline_layers(
         to_model_config,
         to_topo.get_dim("pipe"),
-        flash_model_embed_param_count,
-        flash_model_tblock_param_count,
-        flash_model_head_param_count,
+        real_model_embed_param_count,
+        real_model_tblock_param_count,
+        real_model_head_param_count,
     )
     to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in to_layer_mapping.items()}
     repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
@@ -263,7 +263,7 @@ def _derive_reparallelize_comm_plan(
             for sender_mp_portion_id, mp_j in enumerate(mp_js):
 
                 for dp_i in range(src_dp_size):
-                    key = gpu_utils.ParamSyncPair(
+                    key = gpu_utils.ParamReallocPair(
                         src=from_model_name,
                         src_dp_rank=dp_i,
                         src_mp_rank=mp_i,
@@ -272,9 +272,9 @@ def _derive_reparallelize_comm_plan(
                         dst_mp_rank=mp_j,
                         dst_pp_rank=pp_j,
                     )
-                    src = pg_info.param_sync_src_ranks[key]
-                    group = pg_info.param_sync_groups[key]
-                    dst_ranks = pg_info.param_sync_dst_ranks[key]
+                    src = pg_info.param_realloc_src_ranks[key]
+                    group = pg_info.param_realloc_groups[key]
+                    dst_ranks = pg_info.param_realloc_dst_ranks[key]
 
                     param_intervals = param_keys = receiver_param_intervals = None
                     max_param_interval_size = max_receiver_param_interval_size = -1
@@ -347,24 +347,24 @@ def compute_cost(
     set_interval_cost: float,
 ) -> int:
 
-    param_sync_groups = {}
-    param_sync_src_ranks = {}
-    param_sync_dst_ranks = {}
+    param_realloc_groups = {}
+    param_realloc_src_ranks = {}
+    param_realloc_dst_ranks = {}
     msid2mwid = {}
     for i in range(from_topo.world_size()):
         msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)] = i
     for i in range(to_topo.world_size()):
         msid2mwid[api.core.system.ModelShardID.from_parallelism_rank(
             to_model_name, to_topo, i)] = (i + world_size - to_topo.world_size())
-    _create_param_sync_groups(
+    _create_param_realloc_groups(
         from_topo,
         to_topo,
         from_model_name,
         to_model_name,
         msid2mwid,
-        param_sync_groups,
-        param_sync_src_ranks,
-        param_sync_dst_ranks,
+        param_realloc_groups,
+        param_realloc_src_ranks,
+        param_realloc_dst_ranks,
     )
     pg_info = gpu_utils.NCCLProcessGroupInfo(
         None,
@@ -374,9 +374,9 @@ def compute_cost(
         None,
         None,
         None,
-        param_sync_groups,
-        param_sync_src_ranks,
-        param_sync_dst_ranks,
+        param_realloc_groups,
+        param_realloc_src_ranks,
+        param_realloc_dst_ranks,
     )
     comm_plan = _derive_reparallelize_comm_plan(
         from_model_name,
@@ -427,7 +427,7 @@ def main():
             assert world_size >= from_topo.world_size()
             assert world_size >= to_topo.world_size()
 
-            mconfig = get_llama7b_flash_config()
+            mconfig = get_llama7b_real_config()
 
             tik = time.perf_counter()
             cost = compute_cost(
@@ -527,7 +527,7 @@ def dump_table(n_nodes, model_size, res_queue, rank=0, parallel=1):
     if res_queue is not None:
         # res_queue.put(res)
         import pickle
-        with open(f"profile_result/param_sync_cost_table_parallel-{model_size}-{rank}-{parallel}.pkl",
+        with open(f"profile_result/param_realloc_cost_table_parallel-{model_size}-{rank}-{parallel}.pkl",
                   "wb") as f:
             pickle.dump(res, f)
         print(f"dumped table with {len(res)} entries to {model_size}-{rank}-{parallel}.")
@@ -551,7 +551,7 @@ def get_table():
 
     print(f"dumping table with {len(r)} entries.")
     import pickle
-    with open("profile_result/param_sync_cost_table.pkl", "wb") as f:
+    with open("profile_result/param_realloc_cost_table.pkl", "wb") as f:
         pickle.dump(r, f)
     return r
 
@@ -584,7 +584,7 @@ def get_table_parallel(parallel=4):
 
     # print(f"dumping table with {len(r)} entries.")
     # import pickle
-    # with open("profile_result/param_sync_cost_table_parallel.pkl", "wb") as f:
+    # with open("profile_result/param_realloc_cost_table_parallel.pkl", "wb") as f:
     #     pickle.dump(r, f)
     # return r
 
@@ -594,11 +594,11 @@ def merge_parallel_table():
     import pickle
     r = {}
     for path in os.listdir("profile_result"):
-        if path.endswith(".pkl") and path.startswith("param_sync_cost_table_parallel"):
+        if path.endswith(".pkl") and path.startswith("param_realloc_cost_table_parallel"):
             path = os.path.join("profile_result", path)
             with open(path, "rb") as f:
                 r.update(pickle.load(f))
-    with open("profile_result/param_sync_cost_table_parallel.pkl", "wb") as f:
+    with open("profile_result/param_realloc_cost_table_parallel.pkl", "wb") as f:
         pickle.dump(r, f)
     return r
 

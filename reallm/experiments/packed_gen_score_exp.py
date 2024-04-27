@@ -121,7 +121,7 @@ class PackedGenerateScoringExperiment(Experiment):
             raise NotImplementedError()
 
         model = Model(
-            "flash_mqat_clm_hf",
+            "real_model_clm_hf",
             args=dict(
                 model_path=model_path,
                 from_type="self",

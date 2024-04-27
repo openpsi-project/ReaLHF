@@ -2,7 +2,7 @@ from typing import List
 import argparse
 import math
 
-from reallm.api.core.config import MODEL_TYPE_TO_PATH
+from reallm.api.core.config import MODEL_FAMILY_TO_PATH
 from reallm.api.core.dfg import ModelRPC
 from reallm.api.core.system_api import _LLM_ENVVARS
 from reallm.profiler.experiments import *
@@ -13,11 +13,11 @@ import reallm.scheduler as scheduler
 import reallm.scheduler.client
 
 
-def profile_model_type(model_type: ModelType):
+def profile_model_type(model_type: ModelFamily):
     if model_type.is_critic:
         return
 
-    model_path = MODEL_TYPE_TO_PATH[model_type]
+    model_path = MODEL_FAMILY_TO_PATH[model_type]
 
     base_environs = {
         "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
@@ -84,7 +84,7 @@ def profile_all_model_types():
     sizes = [7, 13, 34, 70]
     for size in sizes:
         _class = "llama" if size != 34 else "codellama"
-        model_type = ModelType(_class=_class, size=size, is_critic=False)
+        model_type = ModelFamily(_class=_class, size=size, is_critic=False)
         profile_model_type(model_type)
 
 

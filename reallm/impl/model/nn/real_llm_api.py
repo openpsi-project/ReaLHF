@@ -17,88 +17,38 @@ import torch.utils.checkpoint
 import transformers
 
 from reallm.api.core.config import ModelName
-from reallm.api.quickstart.model import ReaLModelConfig
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
+from reallm.impl.model.comm.global_comm import NCCLProcessGroupInfo
 from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
                                                                   RowParallelLinear)
 from reallm.impl.model.utils.data import (DuckGenerationOutput, DuckModelOutput, PipeCacheData,
                                           PipeTransferData)
-from reallm.impl.model.utils.save_load import get_ckpt_spec, load_from_disk, save_to_disk
 import reallm.api.core.model_api as model_api
 import reallm.api.core.system_api as system_api
 import reallm.base.constants as constants
-import reallm.base.gpu_utils as gpu_utils
 import reallm.base.logging as logging
 import reallm.base.topology as topology
 
-from .real_llm_base import (flash_model_embed_param_count, flash_model_embedding_param_keys,
-                            flash_model_head_param_count, flash_model_head_param_keys,
-                            flash_model_tblock_param_count, flash_model_tblock_param_keys, FlashMQATBlock,
-                            OutputHead, SequenceParallelActorHead, SequenceParallelCriticHead,
-                            VocabPositionEmbedding)
+from .real_llm_base import (ContiguousParamSpec, OutputHead, real_model_embed_param_count,
+                            real_model_embedding_param_keys, real_model_head_param_count,
+                            real_model_head_param_keys, real_model_tblock_param_count,
+                            real_model_tblock_param_keys, ReaLModelBlock, SequenceParallelActorHead,
+                            SequenceParallelCriticHead, VocabPositionEmbedding)
 from .real_llm_generate import generate, GenerationConfig
-from .real_llm_parallel import (get_flash_model_param_shape, intervals_partition_fn,
-                                mp_merge_flash_mqat_state_dict, mp_partition_flash_mqat_state_dict,
-                                mp_partition_key, partition_pipeline_layers, pipeline_repartition_strategy,
-                                shape_partition_fn)
+from .real_llm_parallel import (get_real_model_param_shape, intervals_partition_fn,
+                                mp_merge_real_model_state_dict, mp_partition_key,
+                                mp_partition_real_model_state_dict, partition_pipeline_layers,
+                                pipeline_repartition_strategy, shape_partition_fn)
 
 try:
     from flash_attn.bert_padding import pad_input, unpad_input
 except ModuleNotFoundError:
     pass
 
-logger = logging.getLogger("FlashMQAT Interface")
+logger = logging.getLogger("ReaLModel Interface")
 
 MAX_PYTORCH_N_INTERVALS = 1024
 CUDA_INTERVAL_OP_CHUNK_SIZE = 2048
-
-
-@dataclasses.dataclass
-class FlashMQATParallelismHelper:
-    embedding_param_names: Callable[[ReaLModelConfig], List[str]]
-    tblock_param_names: Callable[[ReaLModelConfig, int], List[str]]
-    head_param_names: Callable[[ReaLModelConfig], List[str]]
-
-
-@dataclasses.dataclass
-class FlashMQATConvertHelper:
-    config_converter: Callable[[transformers.PretrainedConfig], ReaLModelConfig]
-    state_dict_converter: Optional[Callable[[Dict, ReaLModelConfig], Dict]]
-    state_dict_converter_to_hf: Optional[Callable[[Dict, ReaLModelConfig], Dict]] = None
-
-
-@dataclasses.dataclass
-class ReparallelizeSenderStep:
-    rank: int
-    sender_mp_portion_id: int
-    receiver_mp_portion_id: int
-    param_keys: List[str]
-    param_intervals: torch.Tensor
-    param_intervals_cpu: List[Tuple[int, int]]
-    max_interval_size: int
-    param_size: int
-    group: torch.distributed.ProcessGroup
-    dst_ranks: List[int]
-    remove: bool = False
-
-
-@dataclasses.dataclass
-class ReparallelizeReceiverStep:
-    rank: int
-    sender_mp_portion_id: int
-    receiver_mp_portion_id: int
-    sender_param_intervals: torch.Tensor
-    sender_param_intervals_cpu: List[Tuple[int, int]]
-    sender_max_interval_size: int
-    receiver_param_intervals: torch.Tensor
-    receiver_param_intervals_cpu: List[Tuple[int, int]]
-    receiver_max_interval_size: int
-    param_size: int
-    param_keys: List[str]
-    param_dtype: torch.dtype
-    src: int
-    dst_ranks: List[int]
-    group: torch.distributed.ProcessGroup
 
 
 def _is_integer_list_contiguous(l: List[int]) -> bool:
@@ -190,24 +140,17 @@ def recursive_getattr(obj, attr_string):
     return obj
 
 
-def _keys_from_layer_indices(config: ReaLModelConfig, layer_indices: List[int]) -> List[str]:
+def _keys_from_layer_indices(config: model_api.ReaLModelConfig, layer_indices: List[int]) -> List[str]:
     # assert _is_integer_list_contiguous(layer_indices)
     sd_keys = []
     for layer_idx in layer_indices:
         if layer_idx == 0:
-            sd_keys += flash_model_embedding_param_keys(config)
+            sd_keys += real_model_embedding_param_keys(config)
         elif layer_idx == config.n_layers + 1:
-            sd_keys += flash_model_head_param_keys(config)
+            sd_keys += real_model_head_param_keys(config)
         else:
-            sd_keys += flash_model_tblock_param_keys(config, layer_idx - 1)
+            sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
     return sd_keys
-
-
-@dataclasses.dataclass
-class ContiguousParamSpec:
-    start_idx: int
-    end_idx: int
-    shape: torch.Size
 
 
 _FLAT_PARAM_INDICES_CACHE = {}
@@ -215,7 +158,7 @@ _FLAT_PARAM_INDICES_CACHE = {}
 
 def _param_intervals_from_keys(
     model_name: ModelName,
-    config: ReaLModelConfig,
+    config: model_api.ReaLModelConfig,
     param_spec: Dict[str, ContiguousParamSpec],
     mp_size: int,
     sd_keys: List[str],
@@ -242,7 +185,7 @@ def _param_intervals_from_keys(
         ) not in _FLAT_PARAM_INDICES_CACHE:
             zero_start_intervals = mp_partition_key(
                 k,
-                get_flash_model_param_shape(k, config, mp_size),
+                get_real_model_param_shape(k, config, mp_size),
                 portion_rank,
                 portion_size,
                 config,
@@ -260,7 +203,7 @@ def _param_intervals_from_keys(
 
 
 def _param_size_from_keys(
-    config: ReaLModelConfig,
+    config: model_api.ReaLModelConfig,
     src_mp_size: int,
     sd_keys: List[str],
     src2dst_tp_size: int,
@@ -270,7 +213,7 @@ def _param_size_from_keys(
     for k in sd_keys:
         new_shape = mp_partition_key(
             k,
-            get_flash_model_param_shape(k, config, src_mp_size),
+            get_real_model_param_shape(k, config, src_mp_size),
             src2dst_tp_rank,
             src2dst_tp_size,
             config,
@@ -278,16 +221,6 @@ def _param_size_from_keys(
         )
         param_size += int(np.prod(new_shape))
     return param_size
-
-
-@dataclasses.dataclass
-class ReparallelizeTraget:
-    comm_plan: List[Union[ReparallelizeSenderStep, ReparallelizeReceiverStep]]
-    to_param_spec: Dict[str, ContiguousParamSpec]
-    to_param_size: int
-    to_layers_handle: nn.ModuleList
-    to_layer_start_idx: int
-    to_layer_end_idx: int
 
 
 @contextlib.contextmanager
@@ -304,7 +237,7 @@ def _disable_sequence_parallel_of_module(l: nn.Module):
     assert len(_states) == 0
 
 
-def _build_param_spec(layer_indices: List[int], config: ReaLModelConfig,
+def _build_param_spec(layer_indices: List[int], config: model_api.ReaLModelConfig,
                       mp_size: int) -> Tuple[Dict[str, ContiguousParamSpec], int]:
     if len(layer_indices) == 0:
         return {}, 0
@@ -313,14 +246,14 @@ def _build_param_spec(layer_indices: List[int], config: ReaLModelConfig,
     for layer_idx in layer_indices:
         sd_keys = []
         if layer_idx == 0:
-            sd_keys += flash_model_embedding_param_keys(config)
+            sd_keys += real_model_embedding_param_keys(config)
         elif layer_idx == config.n_layers + 1:
-            sd_keys += flash_model_head_param_keys(config)
+            sd_keys += real_model_head_param_keys(config)
         else:
-            sd_keys += flash_model_tblock_param_keys(config, layer_idx - 1)
+            sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
 
         for k in sd_keys:
-            shape = get_flash_model_param_shape(k, config, mp_size)
+            shape = get_real_model_param_shape(k, config, mp_size)
             param_spec[k] = ContiguousParamSpec(param_size, param_size + int(np.prod(shape)), shape)
             param_size += int(np.prod(shape))
     return param_spec, param_size
@@ -365,205 +298,11 @@ def _split_intervals(intervals, K):
     return result
 
 
-def _derive_reparallelize_comm_plan(
-    from_model_name: ModelName,
-    to_model_name: ModelName,
-    from_topo: topology.PipeModelDataParallelTopology,
-    to_topo: topology.PipeModelDataParallelTopology,
-    from_model_config: ReaLModelConfig,
-    to_model_config: ReaLModelConfig,
-    pg_info: gpu_utils.NCCLProcessGroupInfo,
-    dtype: Optional[torch.dtype] = torch.float16,
-) -> List[ReparallelizeReceiverStep | ReparallelizeSenderStep]:
-    src_mp_size = from_topo.get_dim("model")
-    dst_mp_size = to_topo.get_dim("model")
-    assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
-    for k, v in dataclasses.asdict(to_model_config).items():
-        if k not in [
-                "is_critic",
-                "sequence_parallel",
-                "gradient_accumulation_fusion",
-                "ckpt_attn",
-                "ckpt_mlp",
-        ] and v != getattr(from_model_config, k):
-            raise ValueError(
-                f"Can't load a checkpoint with different config (key `{k}`, "
-                f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`).")
-    if (from_model_config.n_kv_heads % src_mp_size == 0) != (from_model_config.n_kv_heads % dst_mp_size == 0):
-        raise ValueError("Whether to partition kv heads should remain the same.")
-
-    from_layer_mapping = partition_pipeline_layers(
-        from_model_config,
-        from_topo.get_dim("pipe"),
-        flash_model_embed_param_count,
-        flash_model_tblock_param_count,
-        flash_model_head_param_count,
-    )
-    from_layer_mapping = {k: list(range(v[0], v[1])) for k, v in from_layer_mapping.items()}
-    to_layer_mapping = partition_pipeline_layers(
-        to_model_config,
-        to_topo.get_dim("pipe"),
-        flash_model_embed_param_count,
-        flash_model_tblock_param_count,
-        flash_model_head_param_count,
-    )
-    to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in to_layer_mapping.items()}
-    repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
-
-    if constants.has_model_name(from_model_name):
-        with constants.model_scope(from_model_name):
-            from_layer_indices = from_layer_mapping[constants.pipe_parallel_rank()]
-            from_model_param_specs, _ = _build_param_spec(from_layer_indices, from_model_config,
-                                                          from_topo.get_dim("model"))
-    if constants.has_model_name(to_model_name):
-        with constants.model_scope(to_model_name):
-            to_layer_indices = to_layer_mapping[constants.pipe_parallel_rank()]
-            to_model_param_specs, _ = _build_param_spec(to_layer_indices, to_model_config,
-                                                        to_topo.get_dim("model"))
-
-    comm_plan = []
-
-    src_dp_size = from_topo.get_dim("data")
-
-    # derive a global NCCL communication plan
-    for (pp_i, pp_j), layer_indices in repart_strat.items():
-        if len(layer_indices) == 0:
-            continue
-
-        for mp_i in range(src_mp_size):
-            if dst_mp_size > src_mp_size:
-                factor = dst_mp_size // src_mp_size
-                mp_js = [i + factor * mp_i for i in range(factor)]
-                receiver_mp_portion_id = 0
-            else:
-                factor = src_mp_size // dst_mp_size
-                mp_js = [mp_i // factor]
-                receiver_mp_portion_id = mp_i % factor
-            for sender_mp_portion_id, mp_j in enumerate(mp_js):
-
-                for dp_i in range(src_dp_size):
-                    key = gpu_utils.ParamSyncPair(
-                        src=from_model_name,
-                        src_dp_rank=dp_i,
-                        src_mp_rank=mp_i,
-                        src_pp_rank=pp_i,
-                        dst=to_model_name,
-                        dst_mp_rank=mp_j,
-                        dst_pp_rank=pp_j,
-                    )
-                    src = pg_info.param_sync_src_ranks[key]
-                    group = pg_info.param_sync_groups[key]
-                    dst_ranks = pg_info.param_sync_dst_ranks[key]
-
-                    param_intervals = param_keys = receiver_param_intervals = None
-                    max_param_interval_size = max_receiver_param_interval_size = -1
-                    param_intervals_cpu = receiver_param_intervals_cpu = None
-                    param_size = -1
-                    if torch.distributed.get_rank() in dst_ranks or torch.distributed.get_rank() == src:
-                        param_keys = _keys_from_layer_indices(from_model_config, layer_indices)
-
-                        if torch.distributed.get_rank() == src:
-
-                            param_intervals_cpu = _param_intervals_from_keys(
-                                model_name=from_model_name,
-                                config=from_model_config,
-                                mp_size=src_mp_size,
-                                param_spec=from_model_param_specs,
-                                sd_keys=param_keys,
-                                portion_size=max(dst_mp_size // src_mp_size, 1),
-                                portion_rank=sender_mp_portion_id,
-                            )
-                            if len(param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
-                                param_intervals_cpu = _split_intervals(param_intervals_cpu,
-                                                                       CUDA_INTERVAL_OP_CHUNK_SIZE)
-                                max_param_interval_size = CUDA_INTERVAL_OP_CHUNK_SIZE
-                            else:
-                                max_param_interval_size = max(j - i for i, j in param_intervals_cpu)
-                            param_intervals = torch.tensor(param_intervals_cpu,
-                                                           dtype=torch.long,
-                                                           device="cuda")
-                        if torch.distributed.get_rank() in dst_ranks:
-                            receiver_param_intervals_cpu = _param_intervals_from_keys(
-                                model_name=to_model_name,
-                                config=to_model_config,
-                                mp_size=dst_mp_size,
-                                param_spec=to_model_param_specs,
-                                sd_keys=param_keys,
-                                portion_size=max(src_mp_size // dst_mp_size, 1),
-                                portion_rank=receiver_mp_portion_id,
-                            )
-                            if len(receiver_param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
-                                receiver_param_intervals_cpu = _split_intervals(
-                                    receiver_param_intervals_cpu, CUDA_INTERVAL_OP_CHUNK_SIZE)
-                                max_receiver_param_interval_size = CUDA_INTERVAL_OP_CHUNK_SIZE
-                            else:
-                                max_receiver_param_interval_size = max(
-                                    j - i for i, j in receiver_param_intervals_cpu)
-                            receiver_param_intervals = torch.tensor(receiver_param_intervals_cpu,
-                                                                    dtype=torch.long,
-                                                                    device="cuda")
-                        param_size = _param_size_from_keys(
-                            config=from_model_config,
-                            src_mp_size=src_mp_size,
-                            sd_keys=param_keys,
-                            src2dst_tp_size=max(dst_mp_size // src_mp_size, 1),
-                            src2dst_tp_rank=sender_mp_portion_id,
-                        )
-
-                    for dst_rank in dst_ranks:
-                        comm_plan.append(
-                            ReparallelizeReceiverStep(
-                                rank=dst_rank,
-                                sender_mp_portion_id=sender_mp_portion_id,
-                                receiver_mp_portion_id=receiver_mp_portion_id,
-                                param_keys=param_keys,
-                                sender_param_intervals_cpu=param_intervals_cpu,
-                                sender_param_intervals=param_intervals,
-                                sender_max_interval_size=max_param_interval_size,
-                                receiver_param_intervals_cpu=receiver_param_intervals_cpu,
-                                receiver_param_intervals=receiver_param_intervals,
-                                receiver_max_interval_size=max_receiver_param_interval_size,
-                                param_size=param_size,
-                                param_dtype=dtype,
-                                src=src,
-                                dst_ranks=dst_ranks,
-                                group=group,
-                            ))
-                    comm_plan.append(
-                        ReparallelizeSenderStep(
-                            rank=src,
-                            sender_mp_portion_id=sender_mp_portion_id,
-                            receiver_mp_portion_id=receiver_mp_portion_id,
-                            param_keys=param_keys,
-                            param_intervals=param_intervals,
-                            param_intervals_cpu=param_intervals_cpu,
-                            max_interval_size=max_param_interval_size,
-                            param_size=param_size,
-                            group=group,
-                            dst_ranks=dst_ranks,
-                        ))
-    for i, step in enumerate(comm_plan):
-        if isinstance(step, ReparallelizeReceiverStep):
-            continue
-        step: ReparallelizeSenderStep
-        required_by_nex_steps = False
-        for nex_step in comm_plan[i + 1:]:
-            if (isinstance(nex_step, ReparallelizeSenderStep) and nex_step.rank == step.rank
-                    and nex_step.param_keys == step.param_keys):
-                required_by_nex_steps = True
-                break
-        step.remove = not required_by_nex_steps
-
-    return comm_plan
-
-
 class ReaLModel(nn.Module):
-    _parallelism_helpers: Dict[str, FlashMQATParallelismHelper] = {}
-    _convert_helpers: Dict[str, FlashMQATConvertHelper] = {}
 
     def __init__(
         self,
-        config: ReaLModelConfig,
+        config: model_api.ReaLModelConfig,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -577,9 +316,9 @@ class ReaLModel(nn.Module):
         self.layer_mapping = partition_pipeline_layers(
             config,
             constants.pipe_parallel_world_size(),
-            flash_model_embed_param_count,
-            flash_model_tblock_param_count,
-            flash_model_head_param_count,
+            real_model_embed_param_count,
+            real_model_tblock_param_count,
+            real_model_head_param_count,
         )
         self.layer_idx_start = self.layer_mapping[constants.pipe_parallel_rank()][0]
         self.layer_idx_end = self.layer_mapping[constants.pipe_parallel_rank()][1]
@@ -660,7 +399,7 @@ class ReaLModel(nn.Module):
     def is_critic(self):
         return self.config.is_critic
 
-    def _build_layer(self, idx: int, config: ReaLModelConfig) -> nn.Module:
+    def _build_layer(self, idx: int, config: model_api.ReaLModelConfig) -> nn.Module:
         dtype = self.dtype
         device = self.device
         if idx == 0:
@@ -668,7 +407,7 @@ class ReaLModel(nn.Module):
         elif idx == config.n_layers + 1:
             l = self._build_output_head(config)
         else:
-            l = FlashMQATBlock(
+            l = ReaLModelBlock(
                 config=config,
                 layer_index=idx - 1,
                 output_layernorm=(idx == config.n_layers),
@@ -677,7 +416,7 @@ class ReaLModel(nn.Module):
             )
         return l
 
-    def _build_output_head(self, config: ReaLModelConfig) -> nn.Module:
+    def _build_output_head(self, config: model_api.ReaLModelConfig) -> nn.Module:
         dtype = self.dtype
         device = self.device
         if config.is_critic and config.sequence_parallel:
@@ -711,19 +450,19 @@ class ReaLModel(nn.Module):
 
     def gradient_checkpointing_enable(self, attn: Optional[bool] = False, mlp: Optional[bool] = False):
         for l in self.layers:
-            if isinstance(l, FlashMQATBlock):
+            if isinstance(l, ReaLModelBlock):
                 l.gradient_checkpointing_enable(attn, mlp)
 
     @contextlib.contextmanager
     def gradient_checkpointing_disable(self):
         _states = []
         for l in self.layers:
-            if isinstance(l, FlashMQATBlock):
+            if isinstance(l, ReaLModelBlock):
                 _states.append((l.ckpt_attn, l.ckpt_mlp, l.ckpt_full))
                 l.gradient_checkpointing_disable()
         yield
         for l in self.layers:
-            if isinstance(l, FlashMQATBlock):
+            if isinstance(l, ReaLModelBlock):
                 l.ckpt_attn, l.ckpt_mlp, l.ckpt_full = _states.pop(0)
 
     @contextlib.contextmanager
@@ -819,7 +558,7 @@ class ReaLModel(nn.Module):
                 input_ids_buf = constants.get_global_memory_buffer().get_tensor(
                     (padded_batch_length,),
                     dtype=torch.long,
-                    name="flash_model_input_ids",
+                    name="real_model_input_ids",
                     force_zero=True,
                 )
                 input_ids_buf[:batch_length] = ys[0].input_ids
@@ -829,7 +568,7 @@ class ReaLModel(nn.Module):
                 pp_input_buf = constants.get_global_memory_buffer().get_tensor(
                     (padded_batch_length, *x.pp_input.shape[1:]),
                     dtype=x.pp_input.dtype,
-                    name="flash_model_pp_input",
+                    name="real_model_pp_input",
                     force_zero=True,
                 )
                 pp_input_buf[:batch_length] = x.pp_input
@@ -881,7 +620,7 @@ class ReaLModel(nn.Module):
         for idx, l in enumerate(self.layers):
             if isinstance(l, VocabPositionEmbedding):
                 h = l._forward(input_ids, position_ids)
-            elif isinstance(l, FlashMQATBlock):
+            elif isinstance(l, ReaLModelBlock):
                 h, _, _ = l._forward(
                     h,
                     cu_seqlens=cu_seqlens,
@@ -921,347 +660,24 @@ class ReaLModel(nn.Module):
             assign=assign,
         )
 
-    # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
-    def _config_from_hf_template(
-        config_converter: Callable[[transformers.PretrainedConfig], ReaLModelConfig],
-        from_model: Optional[transformers.PreTrainedModel] = None,
-        model_path: Optional[str] = None,
-        is_critic: bool = False,
-        sequence_parallel: bool = False,
-        gradient_accumulation_fusion: bool = False,
-    ) -> ReaLModelConfig:
-        if model_path is not None:
-            hf_config = transformers.AutoConfig.from_pretrained(os.path.join(model_path, "config.json"))
-        else:
-            assert from_model is not None
-            hf_config = from_model.config
-        config = config_converter(hf_config)
-        config.is_critic = is_critic
-        config.sequence_parallel = sequence_parallel
-        config.gradient_accumulation_fusion = gradient_accumulation_fusion
-        return config
-
-    # Template function used for converting HF model to FlashMQAT, similar to C++ template but is ugly in python.
-    def _from_hf_template(
-        cls,
-        config_converter: Callable[[transformers.PretrainedConfig], ReaLModelConfig],
-        state_dict_converter: Callable[[Dict, ReaLModelConfig], Dict],
-        from_model: Optional[transformers.PreTrainedModel] = None,
-        model_path: Optional[str] = None,
-        init_from_scratch: bool = False,
-        is_critic: bool = False,
-        sequence_parallel: bool = False,
-        gradient_accumulation_fusion: bool = False,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[str, torch.device]] = None,
-    ):
-        config = ReaLModel._config_from_hf_template(
-            config_converter=config_converter,
-            model_path=model_path,
-            from_model=from_model,
-            is_critic=is_critic,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-        )
-        model = cls(config=config, dtype=dtype, device=device)
-        assert not model._instantiated
-        if not init_from_scratch:
-            if model_path is not None:
-                model._instantiation_hooks.append(
-                    lambda: model.load_from_hf(model_path, init_critic_from_actor=is_critic))
-            else:
-                model._instantiation_hooks.append(
-                    lambda: model.load_state_dict(state_dict_converter(from_model.state_dict(), config)))
-        return model
-
-    # Template function used for FlashMQAT to HF models, similar to C++ template but is ugly in python.
-    def _to_hf_template(config, state_dict, output_dir, hf_base_model_path, state_dict_converter_to_hf):
-        save_to_disk(
-            state_dict_converter_to_hf(ReaLModel.from_pipe_state_dict(config, state_dict), config),
-            output_dir,
-            with_hf_format=True,
-            hf_base_model_path=hf_base_model_path,
-        )
-
-    @staticmethod
-    def register_hf_model(
-        model_name: str,
-        config_converter: Callable[[transformers.PretrainedConfig], ReaLModelConfig],
-        state_dict_converter: Callable[[Dict, ReaLModelConfig], Dict],
-        embedding_param_names: Callable[[ReaLModelConfig], List[str]],
-        tblock_param_names: Callable[[ReaLModelConfig, int], List[str]],
-        head_param_names: Callable[[ReaLModelConfig], List[str]],
-        state_dict_converter_to_hf: Optional[Callable[[Dict, ReaLModelConfig], Dict]] = None,
-    ):
-        """Register a HuggingFace model with `model_name`, such that models can be converted back-and-forth.
-        # TODO: the documentation is OOD.
-
-        Example usage:
-
-        ```
-        # 1. Register a model called `starcoder` with helper functions.
-        # Check `impl/model/nn/flash_mqat/flash_from_hf_impl.py` for details.
-        ReaLModel.register_hf_model("starcoder",
-                                         convert_config_starcoder,
-                                         state_dict_from_starcoder,
-                                         state_dict_to_starcoder)
-
-        # 2. Obtain the config
-        config: ReaLModelConfig = ReaLModel.config_from_starcoder(model_path)
-
-        # 3. Obtain config and state_dict (also support init_from_scratch=True)
-        config, state_dict = ReaLModel.config_and_param_from_starcoder(model_path)
-
-        # 4. Directly construct from HuggingFace model (also support init_from_scratch=True)
-        model = ReaLModel.from_starcoder(model_path="/lustre/public/pretrained_model_weights/starcoder-16bit")
-
-        # 5. Dump to HuggingFace model
-        ReaLModel.dump_to_starcoder(model.config,
-                                         model.state_dict(),
-                                         save_path,
-                                         "/lustre/public/pretrained_model_weights/starcoder-16bit")
-
-        # 6. Use the dumped weights
-        from reallm.impl.model.nn.utils.save_load import load_from_disk
-        config = transformers.AutoConfig.from_pretrained(model_path)
-        hf_model = transformers.AutoModelForCausalLM.from_config(config)
-        hf_model.load_state_dict(load_from_disk(save_path))
-        ```
-
-        """
-        setattr(
-            ReaLModel,
-            f"from_{model_name}",
-            classmethod(
-                functools.partial(
-                    ReaLModel._from_hf_template,
-                    config_converter=config_converter,
-                    state_dict_converter=state_dict_converter,
-                )),
-        )
-        setattr(
-            ReaLModel,
-            f"config_from_{model_name}",
-            staticmethod(
-                functools.partial(
-                    ReaLModel._config_from_hf_template,
-                    config_converter=config_converter,
-                )),
-        )
-        if state_dict_converter_to_hf:
-            setattr(
-                ReaLModel,
-                f"dump_to_{model_name}",
-                staticmethod(
-                    functools.partial(
-                        ReaLModel._to_hf_template,
-                        state_dict_converter_to_hf=state_dict_converter_to_hf,
-                    )),
-            )
-        ReaLModel._parallelism_helpers[model_name] = FlashMQATParallelismHelper(
-            embedding_param_names,
-            tblock_param_names,
-            head_param_names,
-        )
-        ReaLModel._convert_helpers[model_name] = FlashMQATConvertHelper(config_converter,
-                                                                        state_dict_converter,
-                                                                        state_dict_converter_to_hf)
-
-    def load_from_hf(self, load_dir: str, init_critic_from_actor: bool = False):
-        # NOTE: moving this upwards will result in circular import
-        from .from_hf_impl import HF_ARCH_TO_MODEL_TYPE
-
-        tik = time.perf_counter()
-        with open(os.path.join(load_dir, "config.json"), "r") as f:
-            hf_config = json.load(f)
-        model_type = HF_ARCH_TO_MODEL_TYPE[hf_config["architectures"][0]]
-        ph = self._parallelism_helpers[model_type]
-        layer_indices = range(self.layer_idx_start, self.layer_idx_end)
-
-        required_hf_sd_names = []
-        for lidx in layer_indices:
-            if lidx == 0:
-                required_hf_sd_names += ph.embedding_param_names(self.config)
-            elif lidx == self.config.n_layers + 1:
-                required_hf_sd_names += ph.head_param_names(self.config)
-            else:
-                required_hf_sd_names += ph.tblock_param_names(self.config, lidx - 1)
-
-        if os.path.exists(os.path.join(load_dir, "pytorch_model.bin.index.json")):
-            with open(os.path.join(load_dir, "pytorch_model.bin.index.json"), "r") as f:
-                hf_sd_mapping = json.load(f)["weight_map"]
-            files_to_load = set(hf_sd_mapping[name] for name in required_hf_sd_names)
-        else:
-            files_to_load = ["pytorch_model.bin"]
-        setup_time = time.perf_counter() - tik
-
-        load_times, partition_times = [], []
-        state_dict = {}
-        for fn in files_to_load:
-            load_tik = time.perf_counter()
-            # set map_location to be CPU is a little bit faster
-            sd = torch.load(os.path.join(load_dir, fn), map_location="cpu")
-            partition_tik = time.perf_counter()
-            sd = {k: v for k, v in sd.items() if k in required_hf_sd_names}
-            sd = self._convert_helpers[model_type].state_dict_converter(sd, self.config)
-            state_dict.update(
-                mp_partition_flash_mqat_state_dict(
-                    sd,
-                    self.config,
-                    constants.model_parallel_world_size(),
-                    constants.model_parallel_rank(),
-                ))
-            load_times.append(partition_tik - load_tik)
-            partition_times.append(time.perf_counter() - partition_tik)
-
-        copy_tik = time.perf_counter()
-        if init_critic_from_actor and f"{self.config.n_layers + 1}.weight" in state_dict:
-            state_dict.pop(f"{self.config.n_layers + 1}.weight")
-            self.load_state_dict(state_dict, strict=False)
-        else:
-            self.load_state_dict(state_dict, strict=True)
-        copy_time = time.perf_counter() - copy_tik
-        load_times = "[" + ", ".join(f"{t:.2f}" for t in load_times) + "]"
-        partition_times = "[" + ", ".join(f"{t:.2f}" for t in partition_times) + "]"
-        if os.getenv("FLASH_MQAT_LOG_LOAD_TIME", None) == "1":
-            logger.info(
-                f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
-                f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s")
-
-    def load_from_saved_flash_model(self, load_dir: str, init_critic_from_actor: bool = False):
-        with open(os.path.join(load_dir, "flash_mqat_config.json"), "r") as f:
-            ckpt_config = ReaLModelConfig(**json.load(f))
-        for k, v in dataclasses.asdict(ckpt_config).items():
-            if k not in [
-                    "is_critic",
-                    "sequence_parallel",
-                    "gradient_accumulation_fusion",
-                    "ckpt_attn",
-                    "ckpt_mlp",
-            ] and v != getattr(self.config, k):
-                raise ValueError(
-                    f"Can't load a checkpoint with different config (key `{k}`, "
-                    f"value in checkpoint is `{v}`, current value is `{getattr(self.config, k)}`).")
-
-        pp_rank = constants.pipe_parallel_rank()
-        mp_rank = constants.model_parallel_rank()
-        mp_size = constants.model_parallel_world_size()
-
-        ckpt_spec = get_ckpt_spec(load_dir)
-        if ckpt_spec.mp_size % mp_size != 0 and mp_size % ckpt_spec.mp_size != 0:
-            raise ValueError(f"Trying to load checkpoint {load_dir} with mp_size={ckpt_spec.mp_size}, "
-                             f"which is neither the multiple nor a factor of current mp_size={mp_size}.")
-
-        if (self.config.n_kv_heads % mp_size == 0) != (self.config.n_kv_heads % ckpt_spec.mp_size == 0):
-            raise RuntimeError(
-                "The partition methods of KV heads of the checkpoint and the current model are not compatible. "
-                "To load the checkpoint, KV heads must be able to evenly partitioned (i.e.,  #kv_heads % mp_size == 0) "
-                "or unable to be partitioned (i.e., #kv_heads % mp_size != 0) for both models. "
-                f"Number of kv heads={self.config.n_kv_heads}, mp_size={mp_size}, ckpt mp_size={ckpt_spec.mp_size}.",
-            )
-
-        ckpt_layer_partition = partition_pipeline_layers(
-            self.config,
-            ckpt_spec.pp_size,
-            flash_model_embed_param_count,
-            flash_model_tblock_param_count,
-            flash_model_head_param_count,
-        )
-
-        ckpt_layer_mapping_list = {k: list(range(v[0], v[1])) for k, v in ckpt_layer_partition.items()}
-        self_layer_mapping_list = {k: list(range(v[0], v[1])) for k, v in self.layer_mapping.items()}
-
-        repartition_strategy = pipeline_repartition_strategy(self_layer_mapping_list, ckpt_layer_mapping_list)
-        repartition_strategy = {k: v for k, v in repartition_strategy.items() if k[0] == pp_rank}
-
-        if mp_size <= ckpt_spec.mp_size:
-            factor = ckpt_spec.mp_size // mp_size
-            interested_mp_ranks = list(range(factor * mp_rank, factor * (mp_rank + 1)))
-            state_dict = {}
-            for (_, target_pp_rank), global_layer_indices in repartition_strategy.items():
-                mp_sds = []
-                for i in interested_mp_ranks:
-                    sd = load_from_disk(load_dir,
-                                        fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{i:02d}-" +
-                                        r"s-(\d{2}).*")
-                    sd = {k: v for k, v in sd.items() if int(k.split(".")[0]) in global_layer_indices}
-                    mp_sds.append(sd)
-                state_dict.update(mp_merge_flash_mqat_state_dict(mp_sds, self.config))
-        else:
-            factor = mp_size // ckpt_spec.mp_size
-            target_mp_rank = mp_rank // factor
-            state_dict = {}
-            for (_, target_pp_rank), global_layer_indices in repartition_strategy.items():
-                sd = load_from_disk(
-                    load_dir,
-                    fn_pattern=r".*" + f"-pp-{target_pp_rank:02d}-mp-{target_mp_rank:02d}-" + r"s-(\d{2}).*",
-                )
-                sd = {k: v for k, v in sd.items() if int(k.split(".")[0]) in global_layer_indices}
-                sd = mp_partition_flash_mqat_state_dict(sd,
-                                                        self.config,
-                                                        mp_size=factor,
-                                                        mp_rank=mp_rank % factor)
-                state_dict.update(sd)
-
-        if init_critic_from_actor and f"{self.config.n_layers + 1}.weight" in state_dict:
-            state_dict.pop(f"{self.config.n_layers + 1}.weight")
-            self.load_state_dict(state_dict, strict=False)
-        else:
-            self.load_state_dict(state_dict, strict=True)
-
-    def save(
-        self,
-        save_dir: str,
-        epoch: Optional[int] = None,
-        epoch_step: Optional[int] = None,
-        global_step: Optional[int] = None,
-    ):
-        pp_rank = constants.pipe_parallel_rank()
-        dp_rank = constants.data_parallel_rank()
-        mp_rank = constants.model_parallel_rank()
-        if dp_rank > 0:  # only save on dp_rank = 0
-            return
-
-        subfolder = ""
-        if epoch is not None:
-            subfolder += f"epoch{epoch}"
-        if epoch_step is not None:
-            subfolder += f"epochstep{epoch_step}"
-        if global_step is not None:
-            subfolder += f"globalstep{global_step}"
-        save_dir = os.path.join(save_dir, subfolder)
-        os.makedirs(save_dir, exist_ok=True)
-
-        with open(os.path.join(save_dir, "flash_mqat_config.json"), "w") as f:
-            json.dump(dataclasses.asdict(self.config), f)
-
-        save_to_disk(
-            self.state_dict(),
-            save_dir,
-            output_fn=f"pytorch_model-pp-{pp_rank:02d}-mp-{mp_rank:02d}-s-" + "{shard:02d}.bin",
-            save_type="pt",
-            n_shards=int(os.getenv("FLASH_MQAT_N_SHARDS", "3")),
-            with_hf_format=True,
-        )
-
     def build_reparallelization_plan(
         self,
         from_model_name: ModelName,
         to_model_name: ModelName,
         from_topo: topology.PipeModelDataParallelTopology,
         to_topo: topology.PipeModelDataParallelTopology,
-        to_model_config: ReaLModelConfig,
-        pg_info: gpu_utils.NCCLProcessGroupInfo,
-        from_model_config: None | ReaLModelConfig = None,
+        to_model_config: model_api.ReaLModelConfig,
+        pg_info: NCCLProcessGroupInfo,
+        from_model_config: None | model_api.ReaLModelConfig = None,
     ):
         if from_model_config is None:
             from_model_config = self.config
         to_layer_mapping = partition_pipeline_layers(
             to_model_config,
             to_topo.get_dim("pipe"),
-            flash_model_embed_param_count,
-            flash_model_tblock_param_count,
-            flash_model_head_param_count,
+            real_model_embed_param_count,
+            real_model_tblock_param_count,
+            real_model_head_param_count,
         )
         to_layers_handle_dict = {}
         to_layer_indices = []
@@ -1304,15 +720,15 @@ class ReaLModel(nn.Module):
         )
         self._reparallelize_targets[(from_model_name, to_model_name)] = rtgt
 
-    @cuda_tmark("param_sync", CUDATimeMarkType.mem_layout)
+    @cuda_tmark("param_realloc", CUDATimeMarkType.mem_layout)
     def build_reparallelized_layers_async(
         self,
         from_model_name: ModelName,
         to_model_name: ModelName,
         from_topo: topology.PipeModelDataParallelTopology,
         to_topo: topology.PipeModelDataParallelTopology,
-        to_model_config: ReaLModelConfig,
-        pg_info: gpu_utils.NCCLProcessGroupInfo,
+        to_model_config: model_api.ReaLModelConfig,
+        pg_info: NCCLProcessGroupInfo,
     ) -> Tuple[nn.ModuleList, torch.Tensor, torch.Tensor]:
         # FIXME: remote synchronization deletes the local model, but sometimes it is uncessary.
 
@@ -1419,7 +835,7 @@ class ReaLModel(nn.Module):
         self.layers, self.contiguous_param = x
 
 
-# a helper function to make flash_mqat look like huggingface model
+# a helper function to make real_model look like huggingface model
 def generate_helper(
         self: ReaLModel,
         tokenizer: transformers.PreTrainedTokenizerFast,
@@ -1452,7 +868,7 @@ def generate_helper(
     return DuckGenerationOutput(seq, scores, mask)
 
 
-# a helper function to make flash_mqat look like huggingface model
+# a helper function to make real_model look like huggingface model
 def forward_helper(
     self: ReaLModel,
     input_ids: Optional[torch.Tensor] = None,
@@ -1488,7 +904,7 @@ def add_helper_functions(m: ReaLModel):
     return m
 
 
-def make_flash_model(
+def make_real_model(
     name: ModelName,
     device: torch.device,
     model_path: str,
@@ -1510,7 +926,7 @@ def make_flash_model(
 
     tokenizer = None
     if from_type == "hf_as_critic":
-        # Convert a HuggingFace model into FlashMQAT.
+        # Convert a HuggingFace model into ReaLModel.
         m = getattr(ReaLModel, f"from_{hf_model_type}")(
             model_path=model_path,
             dtype=dtype,
@@ -1522,7 +938,7 @@ def make_flash_model(
         )
         tokenizer = model_api.load_hf_tokenizer(model_path)
     elif from_type == "hf_as_actor":
-        # Convert a HuggingFace model into FlashMQAT.
+        # Convert a HuggingFace model into ReaLModel.
         m = getattr(ReaLModel, f"from_{hf_model_type}")(
             model_path=model_path,
             dtype=dtype,
@@ -1535,13 +951,13 @@ def make_flash_model(
         tokenizer = model_api.load_hf_tokenizer(model_path)
     elif from_type == "actor_as_critic":
         # initialize a critic from actor
-        with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
-            config = ReaLModelConfig(**json.load(f))
+        with open(os.path.join(model_path, "real_model_config.json"), "r") as f:
+            config = model_api.ReaLModelConfig(**json.load(f))
         config.is_critic = True
         config.sequence_parallel = sequence_parallel
         config.gradient_accumulation_fusion = gradient_accumulation_fusion
         m = ReaLModel(config=config, dtype=dtype, device=device)
-        m.load_from_saved_flash_model(model_path, init_critic_from_actor=True)
+        m.load_from_saved_real_model(model_path, init_critic_from_actor=True)
     elif from_type == "random_actor":
         # randomly initialize a actor
         m = getattr(ReaLModel, f"from_{hf_model_type}")(
@@ -1567,12 +983,12 @@ def make_flash_model(
     else:
         # actor loads from saved actor or critic loads from saved critic
         assert from_type == "self"
-        with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
-            config = ReaLModelConfig(**json.load(f))
+        with open(os.path.join(model_path, "real_model_config.json"), "r") as f:
+            config = model_api.ReaLModelConfig(**json.load(f))
         config.sequence_parallel = sequence_parallel
         config.gradient_accumulation_fusion = gradient_accumulation_fusion
         m = ReaLModel(config=config, dtype=dtype, device=device)
-        m.load_from_saved_flash_model(model_path, init_critic_from_actor=False)
+        m.load_from_saved_real_model(model_path, init_critic_from_actor=False)
 
     if tokenizer is None:
         tokenizer = model_api.load_hf_tokenizer(tokenizer_path)
@@ -1582,4 +998,4 @@ def make_flash_model(
     return model_api.Model(name, m, tokenizer, device, dtype=dtype)
 
 
-model_api.register_model("flash_mqat", make_flash_model)
+model_api.register_model("real_model", make_real_model)

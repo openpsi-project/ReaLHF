@@ -6,7 +6,7 @@ import itertools
 
 import numpy as np
 
-from reallm.api.core.config import ModelName, ModelType
+from reallm.api.core.config import ModelFamily, ModelName
 import reallm.base.logging as logging
 import reallm.base.namedarray as namedarray
 
@@ -47,7 +47,7 @@ class ModelInterfaceType(enum.Enum):
 @dataclasses.dataclass
 class ModelRPC:
     model_name: ModelName
-    model_type: ModelType
+    model_type: ModelFamily
     interface_type: ModelInterfaceType
     interface_impl: ModelInterface
 

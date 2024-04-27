@@ -8,13 +8,13 @@ import subprocess
 import numpy as np
 import transformers
 
-from reallm.api.core.config import MODEL_TYPE_TO_PATH
+from reallm.api.core.config import MODEL_FAMILY_TO_PATH
 from reallm.api.core.dfg import *
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
 from reallm.api.quickstart.device_mesh import *
-from reallm.api.quickstart.model import (FLASH_MODEL_CONFIG_CONVERTER, ModelTrainEvalConfig, OptimizerConfig,
-                                         ParallelismConfig, ReaLModelConfig)
+from reallm.api.quickstart.model import (ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig,
+                                         REAL_MODEL_CONFIG_CONVERTER)
 from reallm.base.topology import PipeModelDataParallelTopology
 from reallm.profiler.search import (data_pipe_device_mapping, full_model_device_mapping,
                                     model_pipe_device_mapping, optimal_device_mapping,
@@ -231,9 +231,9 @@ def auto_device_mapping(
 
                 model_configs = {}
                 for rpc in self._internal_exp.rpcs:
-                    path = MODEL_TYPE_TO_PATH[rpc.model_type]
+                    path = MODEL_FAMILY_TO_PATH[rpc.model_type]
                     hf_config = transformers.AutoConfig.from_pretrained(os.path.join(path, "config.json"))
-                    config = FLASH_MODEL_CONFIG_CONVERTER[rpc.model_type._class](hf_config)
+                    config = REAL_MODEL_CONFIG_CONVERTER[rpc.model_type._class](hf_config)
                     if rpc.model_name not in model_configs:
                         model_configs[rpc.model_name] = config
                     else:
@@ -280,9 +280,9 @@ def auto_device_mapping(
                     if rpc.model_name in model_configs:
                         continue
                     m: RPCAllocation = self._allocations[rpc.name]
-                    path = MODEL_TYPE_TO_PATH[rpc.model_type]
+                    path = MODEL_FAMILY_TO_PATH[rpc.model_type]
                     model_configs[rpc.model_name] = Model(
-                        "flash_mqat",
+                        "real_model",
                         args=dict(
                             model_path=path,
                             from_type="hf_as_critic" if rpc.model_type.is_critic else "hf_as_actor",
@@ -294,7 +294,7 @@ def auto_device_mapping(
                         ),
                     )
                 src_rpc: ModelRPC = [rpc for rpc in self._rpcs if rpc.is_src][0]
-                tokenizer_path = MODEL_TYPE_TO_PATH[src_rpc.model_type]
+                tokenizer_path = MODEL_FAMILY_TO_PATH[src_rpc.model_type]
 
                 if isinstance(self._internal_exp.dataset, PromptOnlyDatasetConfig):
                     dataset = Dataset(

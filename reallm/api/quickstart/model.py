@@ -8,115 +8,7 @@ import transformers
 from reallm.api.core.config import Model, ModelWrapper, SUPPORTED_MODELS
 import reallm.base.logging as logging
 
-logger = logging.getLogger("Flash Model Config")
-
-
-@dataclasses.dataclass
-class ReaLModelConfig:
-    n_layers: int
-    n_kv_heads: int
-    head_dim: int
-    hidden_dim: int
-    intermediate_dim: int  # for mlp, usually 4*h
-    vocab_size: int
-    n_positions: Optional[int] = None
-    embd_pdrop: float = 0.1
-    resid_pdrop: float = 0.1
-    attn_pdrop: float = 0.1
-    layer_norm_epsilon: float = 1e-5
-    activation_function: str = "gelu"
-    scale_attn_by_inverse_layer_idx: bool = True
-    # llama does not use attention bias and uses special MLP/LayerNorm layers
-    use_attention_bias: bool = True
-    layer_norm_type: Optional[str] = None
-    mlp_type: Optional[str] = None
-    # rotary embedding
-    apply_rotary: bool = False
-    rotary_base: float = 10000.0
-    rotary_interleaved: bool = False
-    rotary_scaling: Optional[float] = None
-    rotary_scaling_type: Optional[str] = None
-    # parallelism optimization
-    sequence_parallel: bool = False
-    gradient_accumulation_fusion: bool = False
-
-    is_critic: bool = False
-
-    # only used for debugging, True for GPT2
-    fixed_abs_position_ids: bool = False
-
-    # remained for compatibility, not used any more
-    ckpt_attn: bool = False
-    ckpt_mlp: bool = False
-
-
-def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig) -> ReaLModelConfig:
-    return ReaLModelConfig(
-        n_layers=starcoder_config.n_layer,
-        n_kv_heads=1,
-        attn_pdrop=starcoder_config.attn_pdrop,
-        embd_pdrop=starcoder_config.embd_pdrop,
-        layer_norm_epsilon=starcoder_config.layer_norm_epsilon,
-        hidden_dim=starcoder_config.n_embd,
-        head_dim=starcoder_config.n_embd // starcoder_config.n_head,
-        intermediate_dim=starcoder_config.n_inner,
-        n_positions=starcoder_config.n_positions,
-        resid_pdrop=starcoder_config.resid_pdrop,
-        vocab_size=starcoder_config.vocab_size,
-    )
-
-
-def gpt2_config_converter(gpt2config: transformers.GPT2Config) -> ReaLModelConfig:
-    return ReaLModelConfig(
-        n_layers=gpt2config.n_layer,
-        n_kv_heads=gpt2config.n_head,
-        attn_pdrop=gpt2config.attn_pdrop,
-        embd_pdrop=gpt2config.embd_pdrop,
-        layer_norm_epsilon=gpt2config.layer_norm_epsilon,
-        hidden_dim=gpt2config.n_embd,
-        head_dim=gpt2config.n_embd // gpt2config.n_head,
-        intermediate_dim=gpt2config.n_inner if gpt2config.n_inner is not None else 4 * gpt2config.n_embd,
-        n_positions=gpt2config.n_positions,
-        resid_pdrop=gpt2config.resid_pdrop,
-        vocab_size=gpt2config.vocab_size,
-        activation_function=gpt2config.activation_function,
-        scale_attn_by_inverse_layer_idx=False,
-        fixed_abs_position_ids=True,
-    )
-
-
-def convert_config_llama(hf_config: transformers.LlamaConfig) -> ReaLModelConfig:
-    return ReaLModelConfig(
-        n_layers=hf_config.num_hidden_layers,
-        n_kv_heads=hf_config.num_key_value_heads,
-        hidden_dim=hf_config.hidden_size,
-        head_dim=hf_config.hidden_size // hf_config.num_attention_heads,
-        intermediate_dim=hf_config.intermediate_size,
-        vocab_size=hf_config.vocab_size,
-        n_positions=hf_config.max_position_embeddings,
-        embd_pdrop=0.0,
-        attn_pdrop=hf_config.attention_dropout if hasattr(hf_config, "attention_dropout") else 0.1,
-        layer_norm_epsilon=hf_config.rms_norm_eps,
-        activation_function=hf_config.hidden_act,
-        use_attention_bias=hf_config.attention_bias,
-        scale_attn_by_inverse_layer_idx=False,
-        layer_norm_type="rms",
-        mlp_type="llama",
-        apply_rotary=True,
-        rotary_base=hf_config.rope_theta,
-        rotary_interleaved=False,
-        rotary_scaling=None if hf_config.rope_scaling is None else hf_config.rope_scaling["factor"],
-        rotary_scaling_type=None if hf_config.rope_scaling is None else hf_config.rope_scaling["type"],
-    )
-
-
-FLASH_MODEL_CONFIG_CONVERTER: Dict[str, Callable[[Any], ReaLModelConfig]] = {
-    "starcoder": convert_config_starcoder,
-    "gpt2": gpt2_config_converter,
-    "llama": convert_config_llama,
-    "codellama": convert_config_llama,
-    "deepseek": convert_config_llama,
-}
+logger = logging.getLogger("Quickstart Model Config")
 
 
 @dataclasses.dataclass
@@ -205,7 +97,7 @@ class OptimizerConfig:
 class ModelTrainEvalConfig:
     """Model configuration.
 
-    We use customized model class, i.e., impl.nn.model.flash_mqat, instead of HuggingFace's.
+    We use customized model class, i.e., impl.nn.model.real_model, instead of HuggingFace's.
     This class enables 3D parallelism and flash-attention for better scalibility.
     The model uses no-pad flash-attn to save GPU memory, i.e., input sequences are packed into
     a single 1D tensor. The price is that we need to convert each HuggingFace model of interest
@@ -263,7 +155,7 @@ class ModelTrainEvalConfig:
             self.zero_stage = 1
 
 
-def get_flash_mqat_model_config(
+def get_real_model_config(
     from_type: str,
     model_path: str,
     hf_model_type: str,
@@ -293,9 +185,9 @@ def get_flash_mqat_model_config(
     if gradient_accumulation_fusion:
         raise RuntimeError("gradient_accumulation_fusion is not supported yet")
 
-    if os.path.exists(os.path.join(model_path, "flash_mqat_config.json")):
+    if os.path.exists(os.path.join(model_path, "real_model_config.json")):
         # This is a saved model from a previous run
-        with open(os.path.join(model_path, "flash_mqat_config.json"), "r") as f:
+        with open(os.path.join(model_path, "real_model_config.json"), "r") as f:
             original_is_critic = json.load(f)["is_critic"]
         # correct from_type if necessary
         if from_type == "hf_as_critic":
@@ -310,7 +202,7 @@ def get_flash_mqat_model_config(
             from_type = "hf_as_actor"
 
     model = Model(
-        "flash_mqat",
+        "real_model",
         args=dict(
             model_path=model_path,
             from_type=from_type,
