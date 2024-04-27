@@ -204,6 +204,27 @@ def get_real_model_param_shape(k: str, config: model_api.ReaLModelConfig, mp_siz
         raise NotImplementedError(f"unkown shape of key {k}.")
 
 
+def param_size_from_keys(
+    config: model_api.ReaLModelConfig,
+    src_mp_size: int,
+    sd_keys: List[str],
+    src2dst_tp_size: int,
+    src2dst_tp_rank: int,
+) -> Tuple[List[int], int]:
+    param_size = 0
+    for k in sd_keys:
+        new_shape = mp_partition_key(
+            k,
+            get_real_model_param_shape(k, config, src_mp_size),
+            src2dst_tp_rank,
+            src2dst_tp_size,
+            config,
+            partition_fn=shape_partition_fn,
+        )
+        param_size += int(np.prod(new_shape))
+    return param_size
+
+
 def mp_merge_key(
     k: str,
     tensors: List[torch.Tensor],

@@ -16,29 +16,25 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
+from reallm.api.core import model_api
 from reallm.api.core.config import ModelName
+from reallm.base import constants, logging, topology
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.impl.model.comm.global_comm import NCCLProcessGroupInfo
+from reallm.impl.model.comm.param_realloc import (_derive_reparallelize_comm_plan, ReparallelizeReceiverStep,
+                                                  ReparallelizeSenderStep, ReparallelizeTraget)
+from reallm.impl.model.nn.flatten_param import set_intervals, slice_intervals
 from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
                                                                   RowParallelLinear)
 from reallm.impl.model.utils.data import (DuckGenerationOutput, DuckModelOutput, PipeCacheData,
                                           PipeTransferData)
-import reallm.api.core.model_api as model_api
-import reallm.api.core.system_api as system_api
-import reallm.base.constants as constants
-import reallm.base.logging as logging
-import reallm.base.topology as topology
 
-from .real_llm_base import (ContiguousParamSpec, OutputHead, real_model_embed_param_count,
-                            real_model_embedding_param_keys, real_model_head_param_count,
-                            real_model_head_param_keys, real_model_tblock_param_count,
-                            real_model_tblock_param_keys, ReaLModelBlock, SequenceParallelActorHead,
+from .flatten_param import build_param_spec, map_param_to_contigous_memory, recursive_getattr
+from .real_llm_base import (OutputHead, real_model_embed_param_count, real_model_head_param_count,
+                            real_model_tblock_param_count, ReaLModelBlock, SequenceParallelActorHead,
                             SequenceParallelCriticHead, VocabPositionEmbedding)
 from .real_llm_generate import generate, GenerationConfig
-from .real_llm_parallel import (get_real_model_param_shape, intervals_partition_fn,
-                                mp_merge_real_model_state_dict, mp_partition_key,
-                                mp_partition_real_model_state_dict, partition_pipeline_layers,
-                                pipeline_repartition_strategy, shape_partition_fn)
+from .real_llm_parallel import partition_pipeline_layers
 
 try:
     from flash_attn.bert_padding import pad_input, unpad_input
@@ -46,181 +42,6 @@ except ModuleNotFoundError:
     pass
 
 logger = logging.getLogger("ReaLModel Interface")
-
-MAX_PYTORCH_N_INTERVALS = 1024
-CUDA_INTERVAL_OP_CHUNK_SIZE = 2048
-
-
-def _is_integer_list_contiguous(l: List[int]) -> bool:
-    return np.all(np.array(l) == np.arange(len(l)) + l[0])
-
-
-def _are_intervals_contiguous(l: List[Tuple[int, int]]) -> bool:
-    l = sorted(l, key=lambda x: x[0])
-    res = True
-    for i in range(len(l) - 1):
-        res &= l[i][1] == l[i + 1][0]
-    return res
-
-
-def slice_intervals(
-    tensor: torch.Tensor,
-    intervals: torch.IntTensor,
-    intervals_cpu: List[Tuple[int, int]],
-    max_interval_size: int,
-    output_size: int,
-) -> torch.Tensor:
-    assert len(tensor.shape) == 1
-    if len(intervals_cpu) == 1:
-        return tensor[intervals_cpu[0][0]:intervals_cpu[0][1]]
-    elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
-        return torch.cat([tensor[start:end] for start, end in intervals_cpu])
-    try:
-        import reallm._C.interval_op_cuda as interval_op_cuda
-
-        interval_sizes = intervals[:, 1] - intervals[:, 0]
-        offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
-        assert tensor.dtype == torch.half
-        return interval_op_cuda.slice_intervals_cuda_half(
-            tensor,
-            intervals,
-            interval_sizes,
-            offsets,
-            max_interval_size,
-            output_size,
-        )
-    except ModuleNotFoundError:
-        logger.warning("interval_op_cuda not found, falling back to PyTorch implementation.")
-        return torch.cat([tensor[start:end] for start, end in intervals_cpu])
-
-
-def set_intervals(
-    src: torch.Tensor,
-    dst: torch.Tensor,
-    intervals: torch.IntTensor,
-    intervals_cpu: List[Tuple[int, int]],
-    max_interval_size: int,
-):
-    assert len(dst.shape) == len(src.shape) == 1
-    if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
-        offset = 0
-        for i, j in intervals_cpu:
-            dst[i:j] = src[offset:offset + j - i]
-            offset += j - i
-        assert offset == src.shape[0]
-        return
-    try:
-        import reallm._C.interval_op_cuda as interval_op_cuda
-
-        interval_sizes = intervals[:, 1] - intervals[:, 0]
-        offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
-        interval_op_cuda.set_intervals_cuda_half(
-            src,
-            dst,
-            intervals,
-            interval_sizes,
-            offsets,
-            max_interval_size,
-        )
-        return
-    except ModuleNotFoundError:
-        logger.warning("interval_op_cuda not found, falling back to PyTorch implementation.")
-        offset = 0
-        for i, j in intervals_cpu:
-            dst[i:j] = src[offset:offset + j - i]
-            offset += j - i
-        assert offset == src.shape[0]
-        return
-
-
-def recursive_getattr(obj, attr_string):
-    attrs = attr_string.split(".")
-    for attr in attrs:
-        obj = getattr(obj, attr)
-    return obj
-
-
-def _keys_from_layer_indices(config: model_api.ReaLModelConfig, layer_indices: List[int]) -> List[str]:
-    # assert _is_integer_list_contiguous(layer_indices)
-    sd_keys = []
-    for layer_idx in layer_indices:
-        if layer_idx == 0:
-            sd_keys += real_model_embedding_param_keys(config)
-        elif layer_idx == config.n_layers + 1:
-            sd_keys += real_model_head_param_keys(config)
-        else:
-            sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
-    return sd_keys
-
-
-_FLAT_PARAM_INDICES_CACHE = {}
-
-
-def _param_intervals_from_keys(
-    model_name: ModelName,
-    config: model_api.ReaLModelConfig,
-    param_spec: Dict[str, ContiguousParamSpec],
-    mp_size: int,
-    sd_keys: List[str],
-    portion_size: int,
-    portion_rank: int,
-) -> List[int]:
-    if portion_size == 1:
-        start, end = None, None
-        for k in sd_keys:
-            if start is None or param_spec[k].start_idx < start:
-                start = param_spec[k].start_idx
-            if end is None or param_spec[k].end_idx > end:
-                end = param_spec[k].end_idx
-        return [(start, end)]
-
-    intervals = []
-    for k in sd_keys:
-        if (
-                model_name,
-                k.split(".", 1)[1],
-                mp_size,
-                portion_rank,
-                portion_size,
-        ) not in _FLAT_PARAM_INDICES_CACHE:
-            zero_start_intervals = mp_partition_key(
-                k,
-                get_real_model_param_shape(k, config, mp_size),
-                portion_rank,
-                portion_size,
-                config,
-                partition_fn=intervals_partition_fn,
-            )
-            _FLAT_PARAM_INDICES_CACHE[(model_name, k.split(".", 1)[1], mp_size, portion_rank,
-                                       portion_size)] = zero_start_intervals
-        else:
-            zero_start_intervals = _FLAT_PARAM_INDICES_CACHE[(model_name, k.split(".", 1)[1], mp_size,
-                                                              portion_rank, portion_size)]
-        intervals += (zero_start_intervals + param_spec[k].start_idx).tolist()
-    # assert len(set([x[0] for x in intervals])) == len(intervals)
-    intervals = sorted(intervals, key=lambda x: x[0])
-    return intervals
-
-
-def _param_size_from_keys(
-    config: model_api.ReaLModelConfig,
-    src_mp_size: int,
-    sd_keys: List[str],
-    src2dst_tp_size: int,
-    src2dst_tp_rank: int,
-) -> Tuple[List[int], int]:
-    param_size = 0
-    for k in sd_keys:
-        new_shape = mp_partition_key(
-            k,
-            get_real_model_param_shape(k, config, src_mp_size),
-            src2dst_tp_rank,
-            src2dst_tp_size,
-            config,
-            partition_fn=shape_partition_fn,
-        )
-        param_size += int(np.prod(new_shape))
-    return param_size
 
 
 @contextlib.contextmanager
@@ -235,67 +56,6 @@ def _disable_sequence_parallel_of_module(l: nn.Module):
         if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
             m.sequence_parallel_enable(_states.pop(0))
     assert len(_states) == 0
-
-
-def _build_param_spec(layer_indices: List[int], config: model_api.ReaLModelConfig,
-                      mp_size: int) -> Tuple[Dict[str, ContiguousParamSpec], int]:
-    if len(layer_indices) == 0:
-        return {}, 0
-    param_spec = {}
-    param_size = 0
-    for layer_idx in layer_indices:
-        sd_keys = []
-        if layer_idx == 0:
-            sd_keys += real_model_embedding_param_keys(config)
-        elif layer_idx == config.n_layers + 1:
-            sd_keys += real_model_head_param_keys(config)
-        else:
-            sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
-
-        for k in sd_keys:
-            shape = get_real_model_param_shape(k, config, mp_size)
-            param_spec[k] = ContiguousParamSpec(param_size, param_size + int(np.prod(shape)), shape)
-            param_size += int(np.prod(shape))
-    return param_spec, param_size
-
-
-def map_param_to_contigous_memory(
-    layers: nn.ModuleList,
-    param_spec: Dict[str, ContiguousParamSpec],
-    contiguous_param: torch.Tensor,
-    layer_idx_offset: int,
-):
-    for local_layer_idx, l in enumerate(layers):
-        layer_idx = local_layer_idx + layer_idx_offset
-        for k, v in l.named_parameters():
-            spec = param_spec[f"{layer_idx}.{k}"]
-            old_param_data = v.data
-            recursive_getattr(l, k).data = contiguous_param[spec.start_idx:spec.end_idx].view(spec.shape)
-            # This is for reward model. We should initialize the reward head instead of letting it be all-zero.
-            if old_param_data.shape == spec.shape:
-                v.data.copy_(old_param_data)
-            else:
-                assert old_param_data.shape == torch.Size([0]), (old_param_data.shape, spec.shape)
-
-
-def _split_intervals(intervals, K):
-    result = []
-    for start, end in intervals:
-        if end - start <= K:
-            result.append((start, end))
-        else:
-            # Calculate how many chunks are needed
-            num_chunks = (end - start) // K
-            remainder = (end - start) % K
-
-            # Generate the chunks
-            for i in range(num_chunks):
-                result.append((start, start + K))
-                start += K
-            if remainder:
-                result.append((start, start + remainder))
-
-    return result
 
 
 class ReaLModel(nn.Module):
@@ -333,7 +93,7 @@ class ReaLModel(nn.Module):
         self._reparallelize_targets: Dict[Tuple[ModelName, ModelName], ReparallelizeTraget] = {}
 
         # Flatten all parameters to a contiguous GPU buffer to reduce the time of CUDAFree and CUDAMalloc
-        self._param_spec, self._param_size = _build_param_spec(
+        self._param_spec, self._param_size = build_param_spec(
             list(range(self.layer_idx_start, self.layer_idx_end)),
             self.config,
             constants.model_parallel_world_size(),
@@ -691,8 +451,8 @@ class ReaLModel(nn.Module):
                     for v in l.parameters():
                         v.data = torch.tensor((), dtype=self.dtype, device=self.device)
                     to_layers_handle_dict[_to_layer_idx] = l
-        to_param_spec, to_param_size = _build_param_spec(to_layer_indices, to_model_config,
-                                                         to_topo.get_dim("model"))
+        to_param_spec, to_param_size = build_param_spec(to_layer_indices, to_model_config,
+                                                        to_topo.get_dim("model"))
         if len(to_layer_indices) > 0:
             to_layer_idx_start = min(to_layer_indices)
             to_layer_idx_end = max(to_layer_indices) + 1

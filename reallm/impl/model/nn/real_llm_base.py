@@ -446,8 +446,9 @@ def real_model_tblock_param_keys(config: model_api.ReaLModelConfig, idx: int) ->
         keys += [f"{idx + 1}.mlp.c_fc.weight", f"{idx + 1}.mlp.c_proj.weight"]
     elif config.mlp_type == "llama":
         keys += [
-            f"{idx + 1}.mlp.gate_proj.weight", f"{idx + 1}.mlp.up_proj.weight",
-            f"{idx + 1}.mlp.down_proj.weight"
+            f"{idx + 1}.mlp.gate_proj.weight",
+            f"{idx + 1}.mlp.up_proj.weight",
+            f"{idx + 1}.mlp.down_proj.weight",
         ]
     else:
         raise NotImplementedError()
@@ -467,8 +468,14 @@ def real_model_head_param_keys(config: model_api.ReaLModelConfig) -> List[str]:
     return [f"{config.n_layers + 1}.weight"]
 
 
-@dataclasses.dataclass
-class ContiguousParamSpec:
-    start_idx: int
-    end_idx: int
-    shape: torch.Size
+def keys_from_layer_indices(config: model_api.ReaLModelConfig, layer_indices: List[int]) -> List[str]:
+    # assert _is_integer_list_contiguous(layer_indices)
+    sd_keys = []
+    for layer_idx in layer_indices:
+        if layer_idx == 0:
+            sd_keys += real_model_embedding_param_keys(config)
+        elif layer_idx == config.n_layers + 1:
+            sd_keys += real_model_head_param_keys(config)
+        else:
+            sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
+    return sd_keys

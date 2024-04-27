@@ -3,6 +3,7 @@ from typing import *
 import dataclasses
 import itertools
 
+import scipy.optimize
 import torch.distributed
 import torch.nn as nn
 
@@ -10,7 +11,13 @@ from reallm.api.core import model_api, system_api
 from reallm.api.core.config import ModelName
 from reallm.base import constants, topology
 from reallm.impl.model.comm.global_comm import filter_match_mwids
-from reallm.impl.model.nn.real_llm_base import ContiguousParamSpec
+from reallm.impl.model.nn.flatten_param import (build_param_spec, ContiguousParamSpec,
+                                                CUDA_INTERVAL_OP_CHUNK_SIZE, MAX_PYTORCH_N_INTERVALS,
+                                                param_intervals_from_keys)
+from reallm.impl.model.nn.real_llm_base import (keys_from_layer_indices, real_model_embed_param_count,
+                                                real_model_head_param_count, real_model_tblock_param_count)
+from reallm.impl.model.nn.real_llm_parallel import (param_size_from_keys, partition_pipeline_layers,
+                                                    pipeline_repartition_strategy)
 
 
 @dataclasses.dataclass(unsafe_hash=True)
@@ -33,8 +40,6 @@ class ParamReallocInfo:
 
 
 def _max_match(_src_ranks: List[int], _grouped_dst_ranks: List[List[int]]):
-    from scipy.optimize import linear_sum_assignment
-
     cost_matrix = []
     for source in _src_ranks:
         costs = []
@@ -43,7 +48,7 @@ def _max_match(_src_ranks: List[int], _grouped_dst_ranks: List[List[int]]):
             costs.append(cost)
         cost_matrix.append(costs)
 
-    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+    row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_matrix)
     return row_ind, col_ind
 
 
@@ -261,6 +266,26 @@ class ReparallelizeReceiverStep:
     group: torch.distributed.ProcessGroup
 
 
+def _split_intervals(intervals, K):
+    result = []
+    for start, end in intervals:
+        if end - start <= K:
+            result.append((start, end))
+        else:
+            # Calculate how many chunks are needed
+            num_chunks = (end - start) // K
+            remainder = (end - start) % K
+
+            # Generate the chunks
+            for i in range(num_chunks):
+                result.append((start, start + K))
+                start += K
+            if remainder:
+                result.append((start, start + remainder))
+
+    return result
+
+
 def _derive_reparallelize_comm_plan(
     from_model_name: ModelName,
     to_model_name: ModelName,
@@ -309,13 +334,13 @@ def _derive_reparallelize_comm_plan(
     if constants.has_model_name(from_model_name):
         with constants.model_scope(from_model_name):
             from_layer_indices = from_layer_mapping[constants.pipe_parallel_rank()]
-            from_model_param_specs, _ = _build_param_spec(from_layer_indices, from_model_config,
-                                                          from_topo.get_dim("model"))
+            from_model_param_specs, _ = build_param_spec(from_layer_indices, from_model_config,
+                                                         from_topo.get_dim("model"))
     if constants.has_model_name(to_model_name):
         with constants.model_scope(to_model_name):
             to_layer_indices = to_layer_mapping[constants.pipe_parallel_rank()]
-            to_model_param_specs, _ = _build_param_spec(to_layer_indices, to_model_config,
-                                                        to_topo.get_dim("model"))
+            to_model_param_specs, _ = build_param_spec(to_layer_indices, to_model_config,
+                                                       to_topo.get_dim("model"))
 
     comm_plan = []
 
@@ -338,7 +363,7 @@ def _derive_reparallelize_comm_plan(
             for sender_mp_portion_id, mp_j in enumerate(mp_js):
 
                 for dp_i in range(src_dp_size):
-                    key = gpu_utils.ParamReallocPair(
+                    key = ParamReallocPair(
                         src=from_model_name,
                         src_dp_rank=dp_i,
                         src_mp_rank=mp_i,
@@ -356,11 +381,11 @@ def _derive_reparallelize_comm_plan(
                     param_intervals_cpu = receiver_param_intervals_cpu = None
                     param_size = -1
                     if torch.distributed.get_rank() in dst_ranks or torch.distributed.get_rank() == src:
-                        param_keys = _keys_from_layer_indices(from_model_config, layer_indices)
+                        param_keys = keys_from_layer_indices(from_model_config, layer_indices)
 
                         if torch.distributed.get_rank() == src:
 
-                            param_intervals_cpu = _param_intervals_from_keys(
+                            param_intervals_cpu = param_intervals_from_keys(
                                 model_name=from_model_name,
                                 config=from_model_config,
                                 mp_size=src_mp_size,
@@ -379,7 +404,7 @@ def _derive_reparallelize_comm_plan(
                                                            dtype=torch.long,
                                                            device="cuda")
                         if torch.distributed.get_rank() in dst_ranks:
-                            receiver_param_intervals_cpu = _param_intervals_from_keys(
+                            receiver_param_intervals_cpu = param_intervals_from_keys(
                                 model_name=to_model_name,
                                 config=to_model_config,
                                 mp_size=dst_mp_size,
@@ -398,7 +423,7 @@ def _derive_reparallelize_comm_plan(
                             receiver_param_intervals = torch.tensor(receiver_param_intervals_cpu,
                                                                     dtype=torch.long,
                                                                     device="cuda")
-                        param_size = _param_size_from_keys(
+                        param_size = param_size_from_keys(
                             config=from_model_config,
                             src_mp_size=src_mp_size,
                             sd_keys=param_keys,
