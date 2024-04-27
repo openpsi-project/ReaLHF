@@ -17,7 +17,6 @@ from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
 
 # mp.set_start_method("spawn", force=True)  # Otherwise a CUDA reinitialization error will be thrown
 
-
 MODEL_NAME = "default"
 _DEFAULT_EXPR_NAME = "test"
 _DEFAULT_TRIAL_NAME = "test"
