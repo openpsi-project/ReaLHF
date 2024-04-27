@@ -11,11 +11,12 @@ import pynvml
 import torch
 import torch.distributed as dist
 
-mp.set_start_method("spawn", force=True)  # Otherwise a CUDA reinitialization error will be thrown
-
 from reallm.api.core import config
 from reallm.base import constants, gpu_utils, name_resolve, namedarray, names, topology
 from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
+
+# mp.set_start_method("spawn", force=True)  # Otherwise a CUDA reinitialization error will be thrown
+
 
 MODEL_NAME = "default"
 _DEFAULT_EXPR_NAME = "test"

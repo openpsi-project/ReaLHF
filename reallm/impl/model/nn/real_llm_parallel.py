@@ -18,7 +18,7 @@ COLUMN_LINEAR_KEYS = [
     ".mlp.gate_proj",
     ".mlp.up_proj",
 ]  # dim=0 + partition bias
-ROW_LINEAR_KEYS = [".attn.c_proj", ".mlp.down_proj"]  # dim=-1 + no partition bias
+ROW_LINEAR_KEYS = [".attn.c_proj", ".mlp.down_proj"]  # dim=1 + no partition bias
 
 if constants.use_te_impl():
     COLUMN_LINEAR_KEYS = [
@@ -124,14 +124,14 @@ def mp_partition_key(
         else:
             return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif any([ck in key for ck in COLUMN_LINEAR_KEYS]):
-        if ("k_attn" or "v_attn" in key) and config.n_kv_heads % mp_size != 0:
+        if (("k_attn" in key) or ("v_attn" in key)) and config.n_kv_heads % mp_size != 0:
             logger.warning(f"Cannot split {config.n_kv_heads} kv heads evenly among "
                            f"{mp_size} model parallel ranks, "
                            f"use unsplitted linear for kv heads instead")
             return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif any([rk in key for rk in ROW_LINEAR_KEYS]):
-        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=-1)
+        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=1)
     else:
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
 

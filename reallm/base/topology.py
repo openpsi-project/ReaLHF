@@ -13,7 +13,6 @@ GLOBAL_PROCESS_GROUP_REGISTRY: Dict[Tuple, torch.distributed.ProcessGroup] = {}
 
 
 def new_or_get_group(ranks: List[int], backend="nccl"):
-    print(">>>>>>>>>", ranks)
     ranks = tuple(sorted(ranks))
     global GLOBAL_PROCESS_GROUP_REGISTRY
     if ranks not in GLOBAL_PROCESS_GROUP_REGISTRY:

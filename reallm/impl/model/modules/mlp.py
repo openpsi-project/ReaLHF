@@ -410,7 +410,7 @@ class _LlamaRMSNorm(nn.Module):
         return self.weight * hidden_states.to(input_dtype)
 
 
-if os.getenv("REAL_LLM_USE_TE") == "1":
+if constants.use_te_impl():
     try:
         # HACK: we use transformer engine's rms norm as long as we can find the transformer engine package
         import transformer_engine.pytorch as te
@@ -437,16 +437,7 @@ if os.getenv("REAL_LLM_USE_TE") == "1":
 else:
     LlamaRMSNorm = _LlamaRMSNorm
 
-try:
-    import transformer_engine.pytorch as te
-
-    TE_ENABLED = True
-except ImportError:
-    TE_ENABLED = False
-
-USE_TE_BACKEND = TE_ENABLED and os.getenv("REAL_LLM_USE_TE") == "1"
-
-if USE_TE_BACKEND:
+if constants.use_te_impl():
     from transformer_engine.pytorch.module.layernorm_mlp import LayerNormMLP as _TELayerNormMLP
 
     # The same signature as LlamaLayerNormMLP

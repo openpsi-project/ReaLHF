@@ -50,8 +50,9 @@ class HFModelRegistry:
         tik = time.perf_counter()
         with open(os.path.join(load_dir, "config.json"), "r") as f:
             hf_config = json.load(f)
-        assert (self.hf_cls_name == hf_config["architectures"][0]
-                ), f"{self.hf_cls_name} != {hf_config['architectures'][0]}"
+        if "architectures" in hf_config:
+            assert (self.hf_cls_name == hf_config["architectures"][0]
+                    ), f"{self.hf_cls_name} != {hf_config['architectures'][0]}"
 
         layer_indices = range(model.layer_idx_start, model.layer_idx_end)
 
@@ -81,13 +82,13 @@ class HFModelRegistry:
             partition_tik = time.perf_counter()
             sd = {k: v for k, v in sd.items() if k in required_hf_sd_names}
             sd = self.sd_from_hf_converter(sd, model.config)
-            state_dict.update(
-                mp_partition_real_model_state_dict(
-                    sd,
-                    model.config,
-                    constants.model_parallel_world_size(),
-                    constants.model_parallel_rank(),
-                ))
+            psd = mp_partition_real_model_state_dict(
+                sd,
+                model.config,
+                constants.model_parallel_world_size(),
+                constants.model_parallel_rank(),
+            )
+            state_dict.update(psd)
             load_times.append(partition_tik - load_tik)
             partition_times.append(time.perf_counter() - partition_tik)
 
@@ -116,8 +117,11 @@ class HFModelRegistry:
         epoch_step: Optional[int] = None,
         global_step: Optional[int] = None,
     ):
+        tik = time.perf_counter()
+
         dp_rank = constants.data_parallel_rank()
-        # FIXME
+        if dp_rank > 0:
+            return
 
         subfolder = ""
         if epoch is not None:
@@ -140,26 +144,34 @@ class HFModelRegistry:
         # To decrease the size of each saved file, we also split the file
         # of each pipeline stage into smaller shards.
         approx_param_size = sum(v.numel() * v.element_size() for v in model.state_dict().values()) * mp_size
-        max_shard_size_byte = os.getenv("REAL_SAVE_MAX_SHARD_SIZE_BYTE", int(1e10))
+        max_shard_size_byte = int(os.getenv("REAL_SAVE_MAX_SHARD_SIZE_BYTE", int(1e10)))
         n_shards_this_stage = (approx_param_size + max_shard_size_byte - 1) // max_shard_size_byte
-        print("=========", approx_param_size, n_shards_this_stage)
+        if approx_param_size <= 0 or n_shards_this_stage <= 0:
+            raise ValueError(
+                f"Invalid param_size={approx_param_size}, n_shards_this_stage={n_shards_this_stage}. "
+                "Have you instantiated the model?")
+
         n_shards_this_stage = torch.tensor(n_shards_this_stage, dtype=torch.int32, device="cuda")
         pp_stage_n_shards = [torch.zeros_like(n_shards_this_stage) for _ in range(pp_size)]
-        print(n_shards_this_stage, dist.get_process_group_ranks(constants.pipe_parallel_group()))
         dist.all_gather(pp_stage_n_shards, n_shards_this_stage, group=constants.pipe_parallel_group())
         pp_stage_n_shards = [int(n.item()) for n in pp_stage_n_shards]
         assert all(x >= 1 for x in pp_stage_n_shards)
+
+        t1 = time.perf_counter()
 
         # Gather parameters across the model parallel group.
         sd = model.state_dict()
         cpu_sd = {}
         for k, v in sd.items():
-            # For simplicity, we gather all parameters no matter whether
-            # it is indeed partitioned.
-            gather_list = [torch.zeros_like(v) for _ in range(mp_size)]
-            dist.all_gather(gather_list, v, group=constants.model_parallel_group())
-            gathered = mp_merge_key(k, gather_list, model.config)
+            if ("k_attn" in k or "v_attn" in k) and model.config.n_kv_heads % mp_size != 0:
+                gathered = v
+            else:
+                gather_list = [torch.zeros_like(v) for _ in range(mp_size)]
+                dist.all_gather(gather_list, v, group=constants.model_parallel_group())
+                gathered = mp_merge_key(k, gather_list, model.config)
             cpu_sd[k] = gathered.cpu()
+
+        t2 = time.perf_counter()
 
         if mp_rank > 0:
             return
@@ -174,7 +186,7 @@ class HFModelRegistry:
 
         if pp_rank == 0:
             hf_config.to_json_file(os.path.join(save_dir, "config.json"))
-            tokenizer.save_vocabulary(save_dir)
+            tokenizer.save_pretrained(save_dir)
 
         # Dump parameters to disk.
         if len(pp_stage_n_shards) == 1 and pp_stage_n_shards[0] == 1:
@@ -191,12 +203,26 @@ class HFModelRegistry:
             bin_index = {}
             bin_index["metadata"] = dict(total_size=param_size)
             bin_index["weight_map"] = {}
+            weight_map = {}
             for i, shard in enumerate(shards):
                 shard_idx = shard_offset + i
                 torch.save(shard, os.path.join(save_dir, output_fn.format(shard=shard_idx + 1)))
                 for k in shard:
-                    bin_index["weight_map"][k] = output_fn.format(shard=shard_idx + 1)
+                    weight_map[k] = output_fn.format(shard=shard_idx + 1)
+
+            weight_map_list = [None for _ in range(pp_size)]
+            dist.all_gather_object(weight_map_list, weight_map, group=constants.pipe_parallel_group())
+            for wm in weight_map_list:
+                bin_index["weight_map"].update(wm)
 
             if pp_rank == 0:
                 with open(os.path.join(save_dir, "pytorch_model.bin.index.json"), "w") as f:
                     json.dump(bin_index, f, indent=4)
+        t3 = time.perf_counter()
+
+        metadata_t = t1 - tik
+        gather_cpu_t = t2 - t1
+        dump_t = t3 - t2
+        logger.info(
+            f"Saving to HuggingFace Model metadata cost={metadata_t:.2f}s, gather/cpu copy cost={gather_cpu_t:.2f}s, "
+            f"dump cost={dump_t:.2f}s")

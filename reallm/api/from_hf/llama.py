@@ -5,16 +5,10 @@ import torch
 import transformers
 
 from reallm.api.core.model_api import ReaLModelConfig, register_hf_family, register_hf_path
+from reallm.base import constants
 
 
 def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
-    try:
-        import transformer_engine.pytorch as te
-
-        TE_ENABLED = True
-    except ImportError:
-        TE_ENABLED = False
-    USE_TE_BACKEND = TE_ENABLED and os.getenv("REAL_LLM_USE_TE") == "1"
 
     new_state_dict = {}
     for k, v in state_dict.items():
@@ -43,7 +37,7 @@ def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
                     name = name.replace(k1, k2)
             new_state_dict[f"{block_idx + 1}.{name}"] = v
 
-    if USE_TE_BACKEND:
+    if constants.use_te_impl():
         state_dict = new_state_dict
         new_state_dict = {}
         te_replace_pairs = [
@@ -69,14 +63,7 @@ def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
 
 
 def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: ReaLModelConfig) -> Dict:
-    try:
-        import transformer_engine.pytorch as te
-
-        TE_ENABLED = True
-    except ImportError:
-        TE_ENABLED = False
-    USE_TE_BACKEND = TE_ENABLED and os.getenv("REAL_LLM_USE_TE") == "1"
-    if USE_TE_BACKEND:
+    if constants.use_te_impl():
         # remove all extra states
         keys = list(state_dict.keys())
         for k in keys:
@@ -85,11 +72,11 @@ def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: ReaLModelCo
 
         # split gate && up weight
         for i in range(config.n_layers):
-            w = state_dict[f"transformer.h.{i}.mlp.fc1_weight"]
+            w = state_dict[f"{i + 1}.mlp.fc1_weight"]
             gate_w, upproj_w = w.split((w.shape[0] // 2, w.shape[0] // 2), dim=0)
-            state_dict[f"transformer.h.{i}.mlp.gate_proj.weight"] = gate_w.contiguous()
-            state_dict[f"transformer.h.{i}.mlp.up_proj.weight"] = upproj_w.contiguous()
-            state_dict.pop(f"transformer.h.{i}.mlp.fc1_weight")
+            state_dict[f"{i + 1}.mlp.gate_proj.weight"] = gate_w.contiguous()
+            state_dict[f"{i + 1}.mlp.up_proj.weight"] = upproj_w.contiguous()
+            state_dict.pop(f"{i + 1}.mlp.fc1_weight")
 
         # rename
         new_state_dict = {}
@@ -104,38 +91,36 @@ def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: ReaLModelCo
             new_state_dict[k] = v
         state_dict = new_state_dict
 
-    replace_pairs = [
-        ("model.", "transformer."),
-        (".embed_tokens.", ".embedding_layer.wte."),
-        (".layers.", ".h."),
-        (".self_attn.", ".attn."),
-        (".post_attention_layernorm.", ".mlp.ln."),
-        (".input_layernorm.", ".attn.c_attn.ln."),
-        ("attn.o_proj.", "attn.c_proj."),
-        (f".norm.", f".h.{config.n_layers - 1}.ln_f."),
-        ("lm_head", "head"),
-        (".input_layernorm.", ".self_attn.c_attn.ln."),
-        ("model.norm.weight", f"model.layers.{config.n_layers - 1}.ln_f.weight"),
-    ]
-    for k2, k1 in replace_pairs:
-        new_state_dict = {}
-        for k, v in state_dict.items():
-            if k1 in k:
-                k = k.replace(k1, k2)
-            new_state_dict[k] = v
-        state_dict = new_state_dict
-    for i in range(config.n_layers):
-        w = state_dict[f"model.layers.{i}.self_attn.c_attn.linear.weight"]
-        nq = config.hidden_dim // config.head_dim
-        q_proj_w = w[:nq * config.head_dim]
-        k_proj_w = w[nq * config.head_dim:(nq + config.n_kv_heads) * config.head_dim]
-        v_proj_w = w[(nq + config.n_kv_heads) * config.head_dim:]
-        w = torch.cat([q_proj_w, k_proj_w, v_proj_w], dim=0)
-        state_dict[f"model.layers.{i}.self_attn.q_proj.weight"] = q_proj_w
-        state_dict[f"model.layers.{i}.self_attn.k_proj.weight"] = k_proj_w
-        state_dict[f"model.layers.{i}.self_attn.v_proj.weight"] = v_proj_w
-        state_dict.pop(f"model.layers.{i}.self_attn.c_attn.linear.weight")
-    return state_dict
+    _k = list(state_dict.keys())[0]
+    device = state_dict[_k].device
+
+    layer_indices = list(set([int(k.split(".")[0]) for k in state_dict.keys()]))
+
+    new_sd = {}
+    for i in layer_indices:
+        if i == 0:
+            new_sd["model.embed_tokens.weight"] = state_dict["0.wte.weight"]
+        elif i == config.n_layers + 1:
+            new_sd["lm_head.weight"] = state_dict[f"{i}.weight"]
+        else:
+            new_sd[f"model.layers.{i-1}.input_layernorm.weight"] = state_dict[f"{i}.attn.c_attn.ln.weight"]
+            new_sd[f"model.layers.{i-1}.mlp.down_proj.weight"] = state_dict[f"{i}.mlp.down_proj.weight"]
+            new_sd[f"model.layers.{i-1}.mlp.gate_proj.weight"] = state_dict[f"{i}.mlp.gate_proj.weight"]
+            new_sd[f"model.layers.{i-1}.mlp.up_proj.weight"] = state_dict[f"{i}.mlp.up_proj.weight"]
+            new_sd[f"model.layers.{i-1}.post_attention_layernorm.weight"] = state_dict[f"{i}.mlp.ln.weight"]
+            new_sd[f"model.layers.{i-1}.self_attn.k_proj.weight"] = state_dict[
+                f"{i}.attn.c_attn.k_attn.weight"]
+            new_sd[f"model.layers.{i-1}.self_attn.o_proj.weight"] = state_dict[f"{i}.attn.c_proj.weight"]
+            new_sd[f"model.layers.{i-1}.self_attn.q_proj.weight"] = state_dict[
+                f"{i}.attn.c_attn.q_attn.weight"]
+            new_sd[f"model.layers.{i-1}.self_attn.v_proj.weight"] = state_dict[
+                f"{i}.attn.c_attn.v_attn.weight"]
+            new_sd[f"model.layers.{i-1}.self_attn.rotary_emb.inv_freq"] = 1.0 / (config.rotary_base**(
+                torch.arange(0, config.head_dim, 2, device=device, dtype=torch.float32) / config.head_dim))
+            if i == config.n_layers:
+                new_sd["model.norm.weight"] = state_dict[f"{i}.ln_f.weight"]
+
+    return new_sd
 
 
 # param name is used to load directly from huggingface checkpoints
