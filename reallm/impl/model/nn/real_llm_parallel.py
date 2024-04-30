@@ -18,7 +18,7 @@ COLUMN_LINEAR_KEYS = [
     ".mlp.gate_proj",
     ".mlp.up_proj",
 ]  # dim=0 + partition bias
-ROW_LINEAR_KEYS = [".attn.c_proj", ".mlp.down_proj"]  # dim=1 + no partition bias
+ROW_LINEAR_KEYS = [".attn.c_proj", ".mlp.down_proj", ".mlp.c_proj"]  # dim=1 + no partition bias
 
 if constants.use_te_impl():
     COLUMN_LINEAR_KEYS = [
@@ -60,16 +60,21 @@ def intervals_partition_fn(
     For example, if a tensor of shape (2, 4) is partitioned along the second dimension
     into 2 parts, then the intervals are [(0, 2), (2, 4)].
     """
-    # HACK: some add-hoc implementations to make this function efficient.
     assert mp_rank is not None
     param_size = int(np.prod(shape))
     if dim is None:
         return np.array([(0, param_size)], dtype=np.int64)
+
+    if dim < 0:
+        dim = len(shape) + dim
+    assert shape[dim] % mp_world_size == 0
+
+    if len(shape) == 1:
+        assert dim == 0
+        partition_size = shape[0] // mp_world_size
+        return np.array([(partition_size * mp_rank, partition_size * (mp_rank + 1))], dtype=np.int64)
     else:
-        assert shape[dim] % mp_world_size == 0
         assert len(shape) == 2, shape
-        if dim < 0:
-            dim = len(shape) + dim
         if dim == 0:
             row_start = mp_rank * shape[0] // mp_world_size
             row_end = (mp_rank + 1) * shape[0] // mp_world_size
@@ -129,9 +134,15 @@ def mp_partition_key(
                            f"{mp_size} model parallel ranks, "
                            f"use unsplitted linear for kv heads instead")
             return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
+        # partition both weight and bias
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif any([rk in key for rk in ROW_LINEAR_KEYS]):
-        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=1)
+        # only partition weight
+        if "weight" in key:
+            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=1)
+        else:
+            assert "bias" in key, key
+            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
     else:
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
 
@@ -167,7 +178,7 @@ def get_real_model_param_shape(k: str, config: model_api.ReaLModelConfig, mp_siz
         return (config.n_positions // mp_size, config.hidden_dim)
     elif ".ln." in k or ".ln_f." in k:
         return (config.hidden_dim,)
-    elif k == f"{config.n_layers + 1}.weight":
+    elif k == f"{config.n_layers + 1}.weight":  # output head
         if config.is_critic and config.sequence_parallel:
             return (1, config.hidden_dim)
         elif not config.is_critic and mp_size > 1:
@@ -183,46 +194,34 @@ def get_real_model_param_shape(k: str, config: model_api.ReaLModelConfig, mp_siz
                 else:
                     return (config.head_dim * config.n_kv_heads, config.hidden_dim)
             else:
-                raise NotImplementedError(f"unkown shape of key {k}.")
+                assert "bias" in k
+                if config.n_kv_heads % mp_size == 0:
+                    return (config.head_dim * config.n_kv_heads // mp_size,)
+                else:
+                    return (config.head_dim * config.n_kv_heads,)
         if "mlp" in k:
-            return (config.intermediate_dim // mp_size, config.hidden_dim)
+            if "weight" in k:
+                return (config.intermediate_dim // mp_size, config.hidden_dim)
+            else:
+                assert "bias" in k
+                return (config.intermediate_dim // mp_size,)
         if "weight" in k:
             assert config.hidden_dim // config.head_dim % mp_size == 0
             return (config.hidden_dim // mp_size, config.hidden_dim)
         else:
-            raise NotImplementedError(f"unkown shape of key {k}.")
+            assert "bias" in k
+            return (config.hidden_dim // mp_size,)
     elif any([rk in k for rk in ROW_LINEAR_KEYS]):
         if "mlp" in k and "weight" in k:
             return (config.hidden_dim, config.intermediate_dim // mp_size)
         elif "attn" in k and "weight" in k:
             return (config.hidden_dim, config.hidden_dim // mp_size)
         elif "bias" in k:
-            return (config.hidden_dim // mp_size,)
+            return (config.hidden_dim,)
         else:
             raise NotImplementedError(f"unkown shape of key {k}.")
     else:
         raise NotImplementedError(f"unkown shape of key {k}.")
-
-
-def param_size_from_keys(
-    config: model_api.ReaLModelConfig,
-    src_mp_size: int,
-    sd_keys: List[str],
-    src2dst_tp_size: int,
-    src2dst_tp_rank: int,
-) -> Tuple[List[int], int]:
-    param_size = 0
-    for k in sd_keys:
-        new_shape = mp_partition_key(
-            k,
-            get_real_model_param_shape(k, config, src_mp_size),
-            src2dst_tp_rank,
-            src2dst_tp_size,
-            config,
-            partition_fn=shape_partition_fn,
-        )
-        param_size += int(np.prod(new_shape))
-    return param_size
 
 
 def mp_merge_key(

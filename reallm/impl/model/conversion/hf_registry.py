@@ -119,10 +119,6 @@ class HFModelRegistry:
     ):
         tik = time.perf_counter()
 
-        dp_rank = constants.data_parallel_rank()
-        if dp_rank > 0:
-            return
-
         subfolder = ""
         if epoch is not None:
             subfolder += f"epoch{epoch}"
@@ -133,10 +129,12 @@ class HFModelRegistry:
         save_dir = os.path.join(save_dir, subfolder)
         os.makedirs(save_dir, exist_ok=True)
 
+        dp_rank = constants.data_parallel_rank()
         pp_rank = constants.pipe_parallel_rank()
         mp_rank = constants.model_parallel_rank()
         mp_size = constants.model_parallel_world_size()
         pp_size = constants.pipe_parallel_world_size()
+        dp_size = constants.data_parallel_world_size()
 
         # We will gather parameters across the model parallel group,
         # and save parameters to separate shards across the pipeline parallel group.
@@ -144,7 +142,9 @@ class HFModelRegistry:
         # To decrease the size of each saved file, we also split the file
         # of each pipeline stage into smaller shards.
         approx_param_size = sum(v.numel() * v.element_size() for v in model.state_dict().values()) * mp_size
-        max_shard_size_byte = int(os.getenv("REAL_SAVE_MAX_SHARD_SIZE_BYTE", int(1e10)))
+
+        # By default a shard is at most 1GB. A small size enables parallel saving during training.
+        max_shard_size_byte = int(os.getenv("REAL_SAVE_MAX_SHARD_SIZE_BYTE", int(1e9)))
         n_shards_this_stage = (approx_param_size + max_shard_size_byte - 1) // max_shard_size_byte
         if approx_param_size <= 0 or n_shards_this_stage <= 0:
             raise ValueError(
@@ -173,9 +173,6 @@ class HFModelRegistry:
 
         t2 = time.perf_counter()
 
-        if mp_rank > 0:
-            return
-
         hf_sd = self.sd_to_hf_converter(cpu_sd, model.config)
         hf_config = self.config_to_hf_converter(model.config)
 
@@ -184,14 +181,16 @@ class HFModelRegistry:
         dist.all_reduce(param_size, op=dist.ReduceOp.SUM, group=constants.pipe_parallel_group())
         param_size = param_size.item()
 
-        if pp_rank == 0:
+        # Save tokenizer and huggingface model config.
+        if pp_rank == 0 and dp_rank == 0 and mp_rank == 0:
             hf_config.to_json_file(os.path.join(save_dir, "config.json"))
             tokenizer.save_pretrained(save_dir)
 
         # Dump parameters to disk.
         if len(pp_stage_n_shards) == 1 and pp_stage_n_shards[0] == 1:
             fn = "pytorch_model.bin"
-            torch.save(hf_sd, os.path.join(save_dir, fn))
+            if pp_rank == 0 and dp_rank == 0 and mp_rank == 0:
+                torch.save(hf_sd, os.path.join(save_dir, fn))
         else:
             output_fn = "pytorch_model" + "-{shard:05d}" + f"-of-{sum(pp_stage_n_shards):05d}.bin"
 
@@ -204,9 +203,21 @@ class HFModelRegistry:
             bin_index["metadata"] = dict(total_size=param_size)
             bin_index["weight_map"] = {}
             weight_map = {}
+
+            mesh_size = dp_size * mp_size
+            mesh_idx = dp_rank * mp_size + mp_rank
+            n_shards_per_gpu = (n_shards + mesh_size - 1) // mesh_size
+            if mesh_idx < len(range(0, n_shards, n_shards_per_gpu)):
+                s = list(range(0, n_shards, n_shards_per_gpu))[mesh_idx]
+            else:
+                s = n_shards
+
+            for i, shard in enumerate(shards[s:s + n_shards_per_gpu]):
+                shard_idx = shard_offset + i + s
+                torch.save(shard, os.path.join(save_dir, output_fn.format(shard=shard_idx + 1)))
+
             for i, shard in enumerate(shards):
                 shard_idx = shard_offset + i
-                torch.save(shard, os.path.join(save_dir, output_fn.format(shard=shard_idx + 1)))
                 for k in shard:
                     weight_map[k] = output_fn.format(shard=shard_idx + 1)
 
@@ -215,7 +226,7 @@ class HFModelRegistry:
             for wm in weight_map_list:
                 bin_index["weight_map"].update(wm)
 
-            if pp_rank == 0:
+            if pp_rank == 0 and dp_rank == 0 and mp_rank == 0:
                 with open(os.path.join(save_dir, "pytorch_model.bin.index.json"), "w") as f:
                     json.dump(bin_index, f, indent=4)
         t3 = time.perf_counter()

@@ -3,6 +3,7 @@ from typing import *
 import dataclasses
 import itertools
 
+import numpy as np
 import scipy.optimize
 import torch.distributed
 import torch.nn as nn
@@ -16,8 +17,9 @@ from reallm.impl.model.nn.flatten_param import (build_param_spec, ContiguousPara
                                                 param_intervals_from_keys)
 from reallm.impl.model.nn.real_llm_base import (keys_from_layer_indices, real_model_embed_param_count,
                                                 real_model_head_param_count, real_model_tblock_param_count)
-from reallm.impl.model.nn.real_llm_parallel import (param_size_from_keys, partition_pipeline_layers,
-                                                    pipeline_repartition_strategy)
+from reallm.impl.model.nn.real_llm_parallel import (get_real_model_param_shape, mp_partition_key,
+                                                    partition_pipeline_layers, pipeline_repartition_strategy,
+                                                    shape_partition_fn)
 
 
 @dataclasses.dataclass(unsafe_hash=True)
@@ -284,6 +286,27 @@ def _split_intervals(intervals, K):
                 result.append((start, start + remainder))
 
     return result
+
+
+def param_size_from_keys(
+    config: model_api.ReaLModelConfig,
+    src_mp_size: int,
+    sd_keys: List[str],
+    src2dst_tp_size: int,
+    src2dst_tp_rank: int,
+) -> Tuple[List[int], int]:
+    param_size = 0
+    for k in sd_keys:
+        new_shape = mp_partition_key(
+            k,
+            get_real_model_param_shape(k, config, src_mp_size),
+            src2dst_tp_rank,
+            src2dst_tp_size,
+            config,
+            partition_fn=shape_partition_fn,
+        )
+        param_size += int(np.prod(new_shape))
+    return param_size
 
 
 def _derive_reparallelize_comm_plan(

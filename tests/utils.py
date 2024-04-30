@@ -6,6 +6,7 @@ import os
 import queue
 import random
 import time
+import traceback
 
 import pynvml
 import torch
@@ -90,6 +91,7 @@ class StandaloneTestingProcess(mp.Process):
         try:
             self._run()
         except Exception as e:
+            print(traceback.format_exc(), flush=True)
             self.err_queue.put(e)
             raise e
 
@@ -150,6 +152,7 @@ class LocalMultiProcessTest:
         while any([p.is_alive() for p in self.processes]):
             try:
                 err = self.err_queue.get_nowait()
+                [p.terminate() for p in self.processes]
                 raise err
             except queue.Empty:
                 time.sleep(0.1)

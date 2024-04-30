@@ -198,7 +198,14 @@ def convert_config_back_llama(config: ReaLModelConfig) -> transformers.LlamaConf
     )
 
 
-for name in ["llama", "codellama", "deepspeek"]:
+for name in [
+        "llama",
+        "codellama",
+        "deepseek-base",
+        "deepseek-chat",
+        "deepseek-coder",
+        "deepseek-coder-instr",
+]:
     register_hf_family(
         name=name,
         hf_cls_name="LlamaForCausalLM",
@@ -211,8 +218,17 @@ for name in ["llama", "codellama", "deepspeek"]:
         head_param_names=llama_output_head_param_name,
     )
 
+# yapf: disable
 register_hf_path("llama", 0, "/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/")
 register_hf_path("llama", 7, "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/")
 register_hf_path("llama", 13, "/lustre/public/pretrained_model_weights/Llama-2-13b-hf/")
 register_hf_path("llama", 70, "/lustre/public/pretrained_model_weights/Llama-2-70b-hf/")
 register_hf_path("codellama", 34, "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf")
+register_hf_path("deepseek-base", 7, "/lustre/public/pretrained_model_weights/deepseek-llm-7b-base/")
+register_hf_path("deepseek-chat", 7, "/lustre/public/pretrained_model_weights/deepseek-llm-7b-chat/")
+register_hf_path("deepseek-base", 67, "/lustre/public/pretrained_model_weights/deepseek-67b-base/")
+register_hf_path("deepseek-chat", 67, "/lustre/public/pretrained_model_weights/deepseek-67B-chat/")
+register_hf_path("deepseek-coder", 33, "/lustre/public/pretrained_model_weights/deepseek-coder-33b-base/")
+register_hf_path("deepseek-coder-instr", 33, "/lustre/public/pretrained_model_weights/deepseek-coder-33b-instruct/")
+register_hf_path("deepseek-coder", 7, "/lustre/public/pretrained_model_weights/deepseek-coder-6.7b-base/")
+register_hf_path("deepseek-coder-instr", 7, "/lustre/public/pretrained_model_weights/deepseek-coder-6.7b-instruct/")

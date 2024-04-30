@@ -12,8 +12,12 @@ import transformers
 
 from reallm.api.core import model_api
 from reallm.impl.model.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
-from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, parallel_lm_logits,
-                                                                  ParallelEmbedding, RowParallelLinear)
+from reallm.impl.model.parallelism.model_parallel.modules import (
+    ColumnParallelLinear,
+    parallel_lm_logits,
+    ParallelEmbedding,
+    RowParallelLinear,
+)
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import compute_varlen_position_indices
 import reallm.base.constants as constants
@@ -231,7 +235,8 @@ class VocabPositionEmbedding(nn.Module):
         self.embed_drop = nn.Dropout(config.embd_pdrop)
 
         self.self_attention_mask = torch.tril(
-            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device))
+            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device)
+        )
         self.fixed_abs_position_ids = config.fixed_abs_position_ids
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
@@ -260,9 +265,9 @@ class VocabPositionEmbedding(nn.Module):
                 y.position_ids = y.position_ids.repeat(batch_size, 1)
         elif y.position_ids is None:
             # packed_input_ids is given
-            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0],
-                                                             cu_seqlens=x.cu_seqlens,
-                                                             seqlen_offsets=y.cache_seqlens)
+            y.position_ids = compute_varlen_position_indices(
+                total_seqlen=y.input_ids.shape[0], cu_seqlens=x.cu_seqlens, seqlen_offsets=y.cache_seqlens
+            )
             # lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
             # if y.cache_seqlens is None:
             #     y.position_ids = torch.cat(
@@ -285,16 +290,17 @@ class VocabPositionEmbedding(nn.Module):
             # For debugging only.
             attention_mask = x.attention_mask
             if self.fixed_abs_position_ids:
-                y.position_ids = torch.arange(y.input_ids.shape[-1],
-                                              dtype=torch.long,
-                                              device=y.input_ids.device).unsqueeze(0)
+                y.position_ids = torch.arange(
+                    y.input_ids.shape[-1], dtype=torch.long, device=y.input_ids.device
+                ).unsqueeze(0)
             else:
                 y.position_ids = attention_mask.long().cumsum(-1) - 1
                 y.position_ids.masked_fill_(attention_mask == 0, 1)
             seqlen = y.input_ids.shape[-1]
             self_attention_mask = self.self_attention_mask[None, :seqlen, :seqlen]
             self_attention_mask = self_attention_mask * attention_mask.view(batch_size, 1, -1).to(
-                dtype=torch.bool, device=self_attention_mask.device)
+                dtype=torch.bool, device=self_attention_mask.device
+            )
             x.attention_mask = self_attention_mask.unsqueeze(1)
 
         x.pp_output = self._forward(y.input_ids, y.position_ids)
@@ -408,7 +414,7 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
     # attention projection
     count += config.hidden_dim * config.hidden_dim
     if config.use_attention_bias:
-        config += config.hidden_dim
+        count += config.hidden_dim
     # NOTE: we ignore the parameters of RotoaryEmbedding here
 
     # mlp
@@ -432,6 +438,8 @@ def real_model_tblock_param_keys(config: model_api.ReaLModelConfig, idx: int) ->
         f"{idx + 1}.attn.c_attn.k_attn.weight",
         f"{idx + 1}.attn.c_attn.v_attn.weight",
     ]
+    if config.layer_norm_type is None:
+        keys += [f"{idx + 1}.attn.c_attn.ln.bias"]
     if config.use_attention_bias:
         keys += [
             f"{idx + 1}.attn.c_attn.q_attn.bias",
@@ -442,8 +450,15 @@ def real_model_tblock_param_keys(config: model_api.ReaLModelConfig, idx: int) ->
     if config.use_attention_bias:
         keys += [f"{idx + 1}.attn.c_proj.bias"]
     keys += [f"{idx + 1}.mlp.ln.weight"]
+    if config.layer_norm_type is None:
+        keys += [f"{idx + 1}.mlp.ln.bias"]
     if config.mlp_type is None:
-        keys += [f"{idx + 1}.mlp.c_fc.weight", f"{idx + 1}.mlp.c_proj.weight"]
+        keys += [
+            f"{idx + 1}.mlp.c_fc.weight",
+            f"{idx + 1}.mlp.c_proj.weight",
+            f"{idx + 1}.mlp.c_fc.bias",
+            f"{idx + 1}.mlp.c_proj.bias",
+        ]
     elif config.mlp_type == "llama":
         keys += [
             f"{idx + 1}.mlp.gate_proj.weight",
@@ -454,6 +469,8 @@ def real_model_tblock_param_keys(config: model_api.ReaLModelConfig, idx: int) ->
         raise NotImplementedError()
     if idx == config.n_layers - 1:
         keys += [f"{idx + 1}.ln_f.weight"]
+        if config.layer_norm_type is None:
+            keys += [f"{idx + 1}.ln_f.bias"]
     return keys
 
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+import functools
 # Instantiate all registered HuggingFace models.
 import importlib
 import os
@@ -36,29 +37,46 @@ for x in os.listdir(hf_impl_path.absolute()):
         continue
     importlib.import_module(f"reallm.api.from_hf.{x.strip('.py')}")
 
+_HF_REGISTRIES = {}
+
+
+def _load_from_hf(model: ReaLModel, registry_name, load_dir: str, init_critic_from_actor: bool):
+    r = _HF_REGISTRIES[registry_name]
+    r.load(model, load_dir, init_critic_from_actor)
+
+
+def _save_to_hf(model: ReaLModel,registry_name,
+                
+                tokenizer,
+                save_dir: str,
+                epoch=None,
+                epoch_step=None,
+                global_step=None):
+    r = _HF_REGISTRIES[registry_name]
+    r.save(model, tokenizer, save_dir, epoch, epoch_step, global_step)
+
+
+def _config_from_hf(registry_name, hf_config=None, model_path=None, is_critic=False):
+    r = _HF_REGISTRIES[registry_name]
+    return r.config_from_hf(hf_config, model_path, is_critic)
+
+
+def _config_to_hf(registry_name, config):
+    r = _HF_REGISTRIES[registry_name]
+    return r.config_to_hf(config)
+
+
 for name, helpers in HF_MODEL_FAMILY_REGISTRY.items():
-    r = HFModelRegistry(**helpers)
+    _HF_REGISTRIES[name] = r = HFModelRegistry(**helpers)
 
-    def _load_from_hf(model: ReaLModel, load_dir: str, init_critic_from_actor: bool):
-        r.load(model, load_dir, init_critic_from_actor)
+    _load_from_hf_ = functools.partialmethod(_load_from_hf, name)
+    setattr(ReaLModel, f"from_{name}", _load_from_hf_)
 
-    def _save_to_hf(model: ReaLModel,
-                    tokenizer,
-                    save_dir: str,
-                    epoch=None,
-                    epoch_step=None,
-                    global_step=None):
-        r.save(model, tokenizer, save_dir, epoch, epoch_step, global_step)
+    _save_to_hf_ = functools.partialmethod(_save_to_hf, name)
+    setattr(ReaLModel, f"to_{name}", _save_to_hf_)
 
-    @staticmethod
-    def _config_from_hf(hf_config=None, model_path=None, is_critic=False):
-        return r.config_from_hf(hf_config, model_path, is_critic)
+    _config_from_hf_ = functools.partial(_config_from_hf, name)
+    setattr(ReaLModel, f"config_from_{name}", staticmethod(_config_from_hf_))
 
-    @staticmethod
-    def _config_to_hf(config):
-        return r.config_to_hf(config)
-
-    setattr(ReaLModel, f"from_{name}", _load_from_hf)
-    setattr(ReaLModel, f"to_{name}", _save_to_hf)
-    setattr(ReaLModel, f"config_from_{name}", _config_from_hf)
-    setattr(ReaLModel, f"config_to_{name}", _config_to_hf)
+    _config_to_hf_ = functools.partial(_config_to_hf, name)
+    setattr(ReaLModel, f"config_to_{name}", staticmethod(_config_to_hf_))

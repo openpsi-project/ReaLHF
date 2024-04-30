@@ -15,27 +15,33 @@ logger = logging.getLogger("tests.test_saveload")
 
 
 def _shrink_mconfig(mconfig: ReaLModelConfig):
-    mconfig.hidden_dim = 128
+    mconfig.hidden_dim = 256
     mconfig.head_dim = 32
-    mconfig.n_kv_heads = 1
+    mconfig.n_kv_heads = 8
     mconfig.intermediate_dim = 512
-    mconfig.n_layers = 4
+    mconfig.n_layers = 8
     return mconfig
 
 
-def _save_then_load(model_family_name: str, is_critic: bool):
+def _save_then_load(model_family_name: str, is_critic: bool, pp_dp_mp: Tuple):
     # NOTE: import here to avoid initializing CUDA context in the main process
     from reallm.impl.model.nn.real_llm_api import ReaLModel
 
-    os.environ["REAL_SAVE_MAX_SHARD_SIZE_BYTE"] = str(int(1e6))
+    # os.environ["REAL_SAVE_MAX_SHARD_SIZE_BYTE"] = str(int(1e6))
 
     model_name = "saveload_test"
-    init_global_constants(2, 2, 2, model_name="saveload_test")
+    num_pp, num_dp, num_mp = pp_dp_mp
+    init_global_constants(num_dp=num_dp, num_mp=num_mp, num_pp=num_pp, model_name="saveload_test")
     assert dist.get_world_size() == 8, dist.get_world_size()
     save_path = "/tmp/ReaL-saveload-test"
+    save_path2 = "/tmp/ReaL-saveload-test2"
     if dist.get_rank() == 0:
-        shutil.rmtree(save_path)
+        if os.path.exists(save_path):
+            shutil.rmtree(save_path)
+        if os.path.exists(save_path2):
+            shutil.rmtree(save_path2)
         os.makedirs(save_path, exist_ok=True)
+        os.makedirs(save_path2, exist_ok=True)
     dist.barrier()
     with constants.model_scope(model_name):
         key = ModelFamily(model_family_name, 0, is_critic)
@@ -72,16 +78,16 @@ def _save_then_load(model_family_name: str, is_critic: bool):
         dist.barrier()
 
         # save again, check size
-        getattr(model, f"to_{model_family_name}")(tokenizer, f"{save_path}_2")
+        getattr(model, f"to_{model_family_name}")(tokenizer, save_path2)
         dist.barrier()
         file_size2 = 0
-        for fn in os.listdir(f"{save_path}_2"):
+        for fn in os.listdir(save_path2):
             if fn.endswith(".bin"):
-                file_size2 += os.path.getsize(os.path.join(save_path, fn))
+                file_size2 += os.path.getsize(os.path.join(save_path2, fn))
         assert file_size2 == file_size, (file_size, file_size2)
 
 
-def test_save_then_load(model_family_name: str, is_critic: bool):
+def test_save_then_load(model_family_name: str, is_critic: bool, pp_dp_mp: Tuple):
     expr_name = "saveload_test"
     trial_name = "test"
     clear_name_resolve(expr_name=expr_name, trial_name=trial_name)
@@ -92,11 +98,15 @@ def test_save_then_load(model_family_name: str, is_critic: bool):
         trial_name=trial_name,
         model_family_name=model_family_name,
         is_critic=is_critic,
+        pp_dp_mp=pp_dp_mp,
     )
     test_impl.launch()
 
 
 if __name__ == "__main__":
-    for model_family_name in ["llama"]:
-        test_save_then_load(model_family_name, True)
-        test_save_then_load(model_family_name, False)
+    for i, pp_dp_mp in enumerate([(2, 4, 1), (4, 1, 2), (8, 1, 1), (1, 8, 1)]):
+        print(">" * 10 + f" testing with pp_dp_mp={pp_dp_mp} " + "<" * 10)
+        for model_family_name in ["starcoder"]:
+            test_save_then_load(model_family_name, True, pp_dp_mp)
+            if i == 0:
+                test_save_then_load(model_family_name, False, pp_dp_mp)
