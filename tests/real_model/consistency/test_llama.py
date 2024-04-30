@@ -149,18 +149,6 @@ class LlamaReaLModelForwardTest(unittest.TestCase):
             for max_prompt_len, with_mask in itertools.product(max_prompt_len_c, with_mask_c):
                 self._generate(max_prompt_len, with_mask)
 
-    @unittest.skip("skip because it is slow")
-    def testDumpLoad(self):
-        os.makedirs("/tmp/_real_model_test/llama/", exist_ok=True)
-        ReaLModel.dump_to_llama(
-            self.hf_like_model.config,
-            self.hf_like_model.state_dict(),
-            "/tmp/_real_model_test/llama/",
-            self.hf_path,
-        )
-
-        self.llama.load_state_dict(load_from_disk("/tmp/_real_model_test/llama/"))
-
 
 if __name__ == "__main__":
     # unittest.main(defaultTest="LlamaReaLModelForwardTest.testDumpLoad")

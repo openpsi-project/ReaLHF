@@ -45,8 +45,8 @@ def _load_from_hf(model: ReaLModel, registry_name, load_dir: str, init_critic_fr
     r.load(model, load_dir, init_critic_from_actor)
 
 
-def _save_to_hf(model: ReaLModel,registry_name,
-                
+def _save_to_hf(model: ReaLModel,
+                registry_name,
                 tokenizer,
                 save_dir: str,
                 epoch=None,

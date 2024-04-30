@@ -1,10 +1,10 @@
 from typing import *
 
+import torch
 import transformers
 
 from reallm.api.core.model_api import ReaLModelConfig, register_hf_family, register_hf_path
 from reallm.base.constants import use_te_impl
-import torch
 
 
 def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig) -> ReaLModelConfig:
@@ -80,8 +80,8 @@ def state_dict_from_starcoder(state_dict, config):
             w = new_state_dict[f"{i + 1}.attn.c_attn.linear.{k}"]
             assert w.shape[0] == qdim + kvdim * 2
             new_state_dict[f"{i + 1}.attn.c_attn.q_attn.{k}"] = w[:qdim]
-            new_state_dict[f"{i + 1}.attn.c_attn.k_attn.{k}"] = w[qdim : qdim + kvdim]
-            new_state_dict[f"{i + 1}.attn.c_attn.v_attn.{k}"] = w[qdim + kvdim :]
+            new_state_dict[f"{i + 1}.attn.c_attn.k_attn.{k}"] = w[qdim:qdim + kvdim]
+            new_state_dict[f"{i + 1}.attn.c_attn.v_attn.{k}"] = w[qdim + kvdim:]
             new_state_dict.pop(f"{i + 1}.attn.c_attn.linear.{k}")
     return new_state_dict
 
