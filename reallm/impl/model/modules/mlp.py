@@ -43,7 +43,6 @@ class LayerNormQKVLinear(nn.Module):
         # parallelism
         model_parallel:
         bool = False,  # We set this as an option for replacing this module with layers in transformer engine
-        sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device
         dtype: Optional[torch.dtype] = None,
@@ -51,6 +50,7 @@ class LayerNormQKVLinear(nn.Module):
         layer_index=None,
     ):
         super().__init__()
+        sequence_parallel = constants.sequence_parallel()
         if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
             logger.warning(
                 "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
@@ -99,7 +99,6 @@ class LayerNormQKVLinear(nn.Module):
                 head_dim * n_q_heads,
                 bias=use_attention_bias,
                 async_tensor_model_parallel_allreduce=not sequence_parallel,
-                sequence_parallel=sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
@@ -111,7 +110,6 @@ class LayerNormQKVLinear(nn.Module):
                     head_dim * n_kv_heads,
                     bias=use_attention_bias,
                     async_tensor_model_parallel_allreduce=not sequence_parallel,
-                    sequence_parallel=sequence_parallel,
                     gradient_accumulation_fusion=gradient_accumulation_fusion,
                     dtype=dtype,
                     device=device,
@@ -121,7 +119,6 @@ class LayerNormQKVLinear(nn.Module):
                     head_dim * n_kv_heads,
                     bias=use_attention_bias,
                     async_tensor_model_parallel_allreduce=not sequence_parallel,
-                    sequence_parallel=sequence_parallel,
                     gradient_accumulation_fusion=gradient_accumulation_fusion,
                     dtype=dtype,
                     device=device,
@@ -186,7 +183,7 @@ class LayerNormQKVLinear(nn.Module):
         else:
             _gradient_accumulation_fusion = self.q_attn.gradient_accumulation_fusion
             _async_grad_allreduce = self.q_attn.async_tensor_model_parallel_allreduce
-            _sequence_parallel = self.q_attn.sequence_parallel
+            _sequence_parallel = constants.sequence_parallel()
             _is_w_parallel = [
                 True,
                 isinstance(self.k_attn, ColumnParallelLinear),
@@ -227,13 +224,13 @@ class LayerNormMLP(nn.Module):
         # parallelism
         model_parallel:
         bool = False,  # We set this as an option for replacing this module with layers in transformer engine
-        sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
+        sequence_parallel = constants.sequence_parallel()
         if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
             logger.warning(
                 "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
@@ -253,7 +250,6 @@ class LayerNormMLP(nn.Module):
                 hidden_dim,
                 intermediate_dim,
                 async_tensor_model_parallel_allreduce=not sequence_parallel,
-                sequence_parallel=sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
@@ -261,7 +257,6 @@ class LayerNormMLP(nn.Module):
             self.c_proj = RowParallelLinear(
                 intermediate_dim,
                 hidden_dim,
-                sequence_parallel=sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
@@ -288,13 +283,13 @@ class LlamaLayerNormMLP(nn.Module):
         # parallelism
         model_parallel:
         bool = False,  # We set this as an option for replacing this module with layers in transformer engine
-        sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
+        sequence_parallel = constants.sequence_parallel()
         if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
             logger.warning(
                 "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
@@ -336,7 +331,6 @@ class LlamaLayerNormMLP(nn.Module):
                 self.hidden_size,
                 self.intermediate_size,
                 async_tensor_model_parallel_allreduce=not sequence_parallel,
-                sequence_parallel=sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 bias=False,
                 dtype=dtype,
@@ -346,7 +340,6 @@ class LlamaLayerNormMLP(nn.Module):
                 self.hidden_size,
                 self.intermediate_size,
                 async_tensor_model_parallel_allreduce=not sequence_parallel,
-                sequence_parallel=sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 bias=False,
                 dtype=dtype,
@@ -355,7 +348,6 @@ class LlamaLayerNormMLP(nn.Module):
             self.down_proj = RowParallelLinear(
                 self.intermediate_size,
                 self.hidden_size,
-                sequence_parallel=sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 bias=False,
                 dtype=dtype,
@@ -370,7 +362,7 @@ class LlamaLayerNormMLP(nn.Module):
         else:
             _gradient_accumulation_fusion = self.gate_proj.gradient_accumulation_fusion
             _async_grad_allreduce = self.gate_proj.async_tensor_model_parallel_allreduce
-            _sequence_parallel = self.gate_proj.sequence_parallel
+            _sequence_parallel = constants.sequence_parallel()
             _is_w_parallel = [True, True]
             gate, upproj = merged_linear_with_grad_accumulation_and_async_allreduce(
                 x,
@@ -424,7 +416,7 @@ if constants.use_te_impl():
             return te.module.rmsnorm.RMSNorm(
                 hidden_size=hidden_size,
                 eps=eps,
-                sequence_parallel=False,  # FIXME: does this have any nagative effect?
+                sequence_parallel=constants.sequence_parallel(),
                 params_dtype=dtype,
                 device=device,
             )
@@ -450,7 +442,6 @@ if constants.use_te_impl():
         # parallelism
         model_parallel:
         bool = False,  # We set this as an option for replacing this module with layers in transformer engine
-        sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # dtype and device
         dtype: Optional[torch.dtype] = None,
@@ -461,7 +452,7 @@ if constants.use_te_impl():
             hidden_size=hidden_dim,
             ffn_hidden_size=intermediate_dim,
             eps=layer_norm_epsilon,
-            sequence_parallel=sequence_parallel,
+            sequence_parallel=constants.sequence_parallel(),
             return_bias=False,
             tp_group=constants.model_parallel_group(),
             tp_size=constants.model_parallel_world_size(),

@@ -136,9 +136,6 @@ class PipeTransferData(TensorDataclassToTupleInterface):
     max_seqlen: int = None
     store_kv_cache: bool = False
 
-    # Only used for debugging
-    attention_mask: torch.Tensor = None
-
     def encode(self):
         return 0
 
@@ -166,8 +163,8 @@ class PipeCacheData(TensorDataclassToTupleInterface):
     """
 
     # Only cached in the first stage.
-    input_ids: torch.Tensor = None
-    position_ids: torch.Tensor = None
+    packed_input_ids: torch.Tensor = None
+    packed_position_ids: torch.Tensor = None
     # Cached in each transformer layer.
     k_cache: torch.Tensor = None
     v_cache: torch.Tensor = None

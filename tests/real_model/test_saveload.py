@@ -106,7 +106,6 @@ def test_save_then_load(model_family_name: str, is_critic: bool, pp_dp_mp: Tuple
 if __name__ == "__main__":
     for i, pp_dp_mp in enumerate([(2, 4, 1), (4, 1, 2), (8, 1, 1), (1, 8, 1)]):
         print(">" * 10 + f" testing with pp_dp_mp={pp_dp_mp} " + "<" * 10)
-        for model_family_name in ["starcoder"]:
+        for model_family_name in ["starcoder", "llama"]:
             test_save_then_load(model_family_name, True, pp_dp_mp)
-            if i == 0:
-                test_save_then_load(model_family_name, False, pp_dp_mp)
+            test_save_then_load(model_family_name, False, pp_dp_mp)

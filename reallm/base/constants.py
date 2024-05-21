@@ -63,7 +63,7 @@ _trial_name = None
 
 _grids: Dict["ModelName", "ParallelGrid"] = {}
 _pgroups: Dict["ModelName",
-               Any] = {}  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
+               Any] = ({})  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
 _rank_mapping: Dict["ModelName", Dict["ModelShardID", int]] = {}
 _global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
 _max_seqlen: int = None
@@ -143,7 +143,6 @@ def set_rank_mapping(
 
 
 ################# attribute functions #################
-# FIXME: move sequence parallel and gradien accumulation fusion here
 def use_te_impl() -> bool:
     try:
         import transformer_engine.pytorch as te
@@ -152,6 +151,11 @@ def use_te_impl() -> bool:
     except ImportError:
         TE_ENABLED = False
     return TE_ENABLED and os.getenv("REAL_LLM_USE_TE") == "1"
+
+
+def sequence_parallel() -> bool:
+    # FIXME:
+    return model_parallel_world_size() > 1 and False
 
 
 def dataset_max_seqlen() -> int:

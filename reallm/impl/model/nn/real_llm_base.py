@@ -54,7 +54,6 @@ class ReaLModelBlock(nn.Module):
             rotary_scaling=config.rotary_scaling,
             rotary_scaling_type=config.rotary_scaling_type,
             model_parallel=constants.model_parallel_world_size() > 1,
-            sequence_parallel=config.sequence_parallel,
             gradient_accumulation_fusion=config.gradient_accumulation_fusion,
             dtype=dtype,
             device=device,
@@ -67,7 +66,6 @@ class ReaLModelBlock(nn.Module):
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
                 model_parallel=constants.model_parallel_world_size() > 1,
-                sequence_parallel=config.sequence_parallel,
                 gradient_accumulation_fusion=config.gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
@@ -79,7 +77,6 @@ class ReaLModelBlock(nn.Module):
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
                 model_parallel=constants.model_parallel_world_size() > 1,
-                sequence_parallel=config.sequence_parallel,
                 gradient_accumulation_fusion=config.gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
@@ -214,7 +211,6 @@ class VocabPositionEmbedding(nn.Module):
     ):
         super().__init__()
         self.n_positions = config.n_positions
-        self.sequence_parallel = config.sequence_parallel
 
         model_parallel = constants.model_parallel_world_size() > 1
         if model_parallel:
@@ -232,88 +228,37 @@ class VocabPositionEmbedding(nn.Module):
 
         self.self_attention_mask = torch.tril(
             torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device))
-        self.fixed_abs_position_ids = config.fixed_abs_position_ids
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
-        # Initial sanity check.
-        with_cache = y.cache_seqlens is not None
-        if with_cache and len(y.input_ids.shape) == 2:
-            assert y.input_ids.shape[1] == 1
-        elif with_cache and len(y.input_ids.shape) == 1:
-            if x.cu_seqlens is None:
-                y.input_ids = y.input_ids.unsqueeze(-1)
-        packed = len(y.input_ids.shape) == 1
-        if packed and ((x.cu_seqlens is None) or (x.max_seqlen is None)):
-            raise ValueError("cu_seqlens and max_seqlen must be both provided for packed input.")
-
         # Set position ids.
-        if not y.position_ids is None:
-            raise ValueError("In our use cases, position_ids must be None.")
-        if not packed and y.position_ids is None:
-            # input_ids is given
-            batch_size, input_length = y.input_ids.shape
-            device = y.input_ids.device
-            y.position_ids = torch.arange(input_length, dtype=torch.long, device=device)
-            if y.cache_seqlens is not None:  # during generation
-                y.position_ids = y.position_ids + y.cache_seqlens.unsqueeze(1)
-            else:
-                y.position_ids = y.position_ids.repeat(batch_size, 1)
-        elif y.position_ids is None:
-            # packed_input_ids is given
-            y.position_ids = compute_varlen_position_indices(total_seqlen=y.input_ids.shape[0],
-                                                             cu_seqlens=x.cu_seqlens,
-                                                             seqlen_offsets=y.cache_seqlens)
-            # lengths = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
-            # if y.cache_seqlens is None:
-            #     y.position_ids = torch.cat(
-            #         [torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) for l in lengths])
-            #     assert (y.position_ids < x.max_seqlen).all() and y.position_ids.max() == x.max_seqlen - 1
-            # else:
-            #     y.position_ids = torch.cat([
-            #         torch.arange(int(l), dtype=torch.int32, device=y.input_ids.device) + cache_len
-            #         for l, cache_len in zip(lengths, y.cache_seqlens)
-            #     ])
-            if x.max_seqlen > self.n_positions:
-                raise ValueError(f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions}).")
-            assert y.position_ids.shape == y.input_ids.shape, (
-                y.position_ids.shape,
-                y.input_ids.shape,
-                x.cu_seqlens,
-            )
+        # if y.packed_position_ids is not None:
+        #     raise ValueError("In our use cases, position_ids must be None.")
+        y.packed_position_ids = compute_varlen_position_indices(
+            total_seqlen=y.packed_input_ids.shape[0],
+            cu_seqlens=x.cu_seqlens,
+            seqlen_offsets=y.cache_seqlens,
+        )
+        if x.max_seqlen > self.n_positions:
+            raise ValueError(f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions}).")
+        assert y.packed_position_ids.shape == y.packed_input_ids.shape, (
+            y.packed_position_ids.shape,
+            y.packed_input_ids.shape,
+            x.cu_seqlens,
+        )
 
-        if x.attention_mask is not None:
-            # For debugging only.
-            attention_mask = x.attention_mask
-            if self.fixed_abs_position_ids:
-                y.position_ids = torch.arange(y.input_ids.shape[-1],
-                                              dtype=torch.long,
-                                              device=y.input_ids.device).unsqueeze(0)
-            else:
-                y.position_ids = attention_mask.long().cumsum(-1) - 1
-                y.position_ids.masked_fill_(attention_mask == 0, 1)
-            seqlen = y.input_ids.shape[-1]
-            self_attention_mask = self.self_attention_mask[None, :seqlen, :seqlen]
-            self_attention_mask = self_attention_mask * attention_mask.view(batch_size, 1, -1).to(
-                dtype=torch.bool, device=self_attention_mask.device)
-            x.attention_mask = self_attention_mask.unsqueeze(1)
-
-        x.pp_output = self._forward(y.input_ids, y.position_ids)
+        x.pp_output = self._forward(y.packed_input_ids, y.packed_position_ids)
         return x
-
-    def sequence_parallel_enable(self, mode: bool):
-        self.sequence_parallel = mode
 
     def _forward(self, input_ids: torch.LongTensor, position_ids: torch.LongTensor) -> torch.Tensor:
         inputs_embeds = self.wte(input_ids)
         if self.apply_abs_pos_embed:
             inputs_embeds = inputs_embeds + self.wpe(position_ids)
-        if self.sequence_parallel:
+        if constants.sequence_parallel():
             inputs_embeds = tensor_parallel.scatter_to_sequence_parallel_region(inputs_embeds)
             # `scatter_to_sequence_parallel_region` returns a view, which prevents
             # the original tensor from being garbage collected. Clone to facilitate GC.
             # Has a small runtime cost (~0.5%).
-            # if self.config.clone_scatter_output_in_embedding:
-            #     embeddings = embeddings.clone()
+            inputs_embeds = inputs_embeds.clone()
             # with tensor_parallel.get_cuda_rng_tracker().fork():
             x = self.embed_drop(inputs_embeds)
         else:
@@ -351,7 +296,6 @@ class SequenceParallelActorHead(ColumnParallelLinear):
             self.weight,
             parallel_output=True,
             async_tensor_model_parallel_allreduce=self.async_tensor_model_parallel_allreduce,
-            sequence_parallel=self.sequence_parallel,
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             bias=self.bias,
         )
@@ -365,7 +309,6 @@ class SequenceParallelActorHead(ColumnParallelLinear):
             self.weight,
             parallel_output=True,
             async_tensor_model_parallel_allreduce=self.async_tensor_model_parallel_allreduce,
-            sequence_parallel=self.sequence_parallel,
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             bias=self.bias,
         )

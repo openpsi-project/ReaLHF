@@ -42,18 +42,8 @@ class ReaLModelConfig:
     rotary_interleaved: bool = False
     rotary_scaling: Optional[float] = None
     rotary_scaling_type: Optional[str] = None
-    # parallelism optimization
-    sequence_parallel: bool = False
-    gradient_accumulation_fusion: bool = False
 
     is_critic: bool = False
-
-    # only used for debugging, True for GPT2
-    fixed_abs_position_ids: bool = False
-
-    # remained for compatibility, not used any more
-    ckpt_attn: bool = False
-    ckpt_mlp: bool = False
 
 
 def load_hf_tokenizer(model_name_or_path: str,

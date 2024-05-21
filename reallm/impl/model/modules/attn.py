@@ -47,7 +47,6 @@ class CausalSelfAttentionLayer(nn.Module):
         rotary_scaling_type: Optional[str] = None,
         # parallel settings
         model_parallel: bool = False,
-        sequence_parallel: bool = False,
         gradient_accumulation_fusion: bool = False,
         # device and dtype
         dtype: Optional[torch.dtype] = None,
@@ -64,7 +63,6 @@ class CausalSelfAttentionLayer(nn.Module):
             n_q_heads=n_q_heads,
             n_kv_heads=n_kv_heads,
             model_parallel=model_parallel,
-            sequence_parallel=sequence_parallel,
             gradient_accumulation_fusion=gradient_accumulation_fusion,
             layer_norm_epsilon=layer_norm_epsilon,
             layer_norm_type=layer_norm_type,
@@ -79,7 +77,6 @@ class CausalSelfAttentionLayer(nn.Module):
                 hidden_dim,
                 hidden_dim,
                 bias=use_attention_bias,
-                sequence_parallel=sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,

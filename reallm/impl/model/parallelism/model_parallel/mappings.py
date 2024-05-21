@@ -2,7 +2,7 @@
 
 import torch
 
-from reallm.base.constants import *
+from reallm.base import constants
 
 from .utils import split_tensor_along_last_dim
 
@@ -11,11 +11,11 @@ def _reduce(input_):
     """All-reduce the input tensor across model parallel group."""
 
     # Bypass the function if we are using only 1 GPU.
-    if model_parallel_world_size() == 1:
+    if constants.model_parallel_world_size() == 1:
         return input_
 
     # All-reduce.
-    torch.distributed.all_reduce(input_, group=model_parallel_group())
+    torch.distributed.all_reduce(input_, group=constants.model_parallel_group())
 
     return input_
 
@@ -24,7 +24,7 @@ def _split_along_last_dim(input_):
     """Split the tensor along its last dimension and keep the
     corresponding slice."""
 
-    world_size = model_parallel_world_size()
+    world_size = constants.model_parallel_world_size()
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
         return input_
@@ -33,7 +33,7 @@ def _split_along_last_dim(input_):
     input_list = split_tensor_along_last_dim(input_, world_size)
 
     # Note: torch.split does not create contiguous tensors by default.
-    rank = model_parallel_rank()
+    rank = constants.model_parallel_rank()
     output = input_list[rank].contiguous()
 
     return output
@@ -43,7 +43,7 @@ def _split_along_first_dim(input_):
     """Split the tensor along its first dimension and keep the
     corresponding slice."""
 
-    world_size = model_parallel_world_size()
+    world_size = constants.model_parallel_world_size()
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
         return input_
@@ -53,7 +53,7 @@ def _split_along_first_dim(input_):
     assert dim_size % world_size == 0, \
         "First dimension of the tensor should be divisible by tensor parallel size"
     local_dim_size = dim_size // world_size
-    rank = model_parallel_rank()
+    rank = constants.model_parallel_rank()
     dim_offset = rank * local_dim_size
 
     output = input_[dim_offset:dim_offset + local_dim_size].contiguous()
@@ -64,18 +64,18 @@ def _split_along_first_dim(input_):
 def _gather_along_last_dim(input_):
     """Gather tensors and concatinate along the last dimension."""
 
-    world_size = model_parallel_world_size()
+    world_size = constants.model_parallel_world_size()
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
         return input_
 
     # Size and dimension.
     last_dim = input_.dim() - 1
-    rank = model_parallel_rank()
+    rank = constants.model_parallel_rank()
 
     tensor_list = [torch.empty_like(input_) for _ in range(world_size)]
     tensor_list[rank] = input_
-    torch.distributed.all_gather(tensor_list, input_, group=model_parallel_group())
+    torch.distributed.all_gather(tensor_list, input_, group=constants.model_parallel_group())
 
     # Note: torch.cat already creates a contiguous tensor.
     output = torch.cat(tensor_list, dim=last_dim).contiguous()
@@ -86,7 +86,7 @@ def _gather_along_last_dim(input_):
 def _gather_along_first_dim(input_):
     """Gather tensors and concatinate along the first dimension."""
 
-    world_size = model_parallel_world_size()
+    world_size = constants.model_parallel_world_size()
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
         return input_
@@ -95,14 +95,14 @@ def _gather_along_first_dim(input_):
     dim_size[0] = dim_size[0] * world_size
 
     output = torch.empty(dim_size, dtype=input_.dtype, device=torch.cuda.current_device())
-    torch.distributed._all_gather_base(output, input_.contiguous(), group=model_parallel_group())
+    torch.distributed._all_gather_base(output, input_.contiguous(), group=constants.model_parallel_group())
 
     return output
 
 
 def _reduce_scatter_along_first_dim(input_):
     """Reduce-scatter the input tensor across model parallel group."""
-    world_size = model_parallel_world_size()
+    world_size = constants.model_parallel_world_size()
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
         return input_
@@ -114,7 +114,9 @@ def _reduce_scatter_along_first_dim(input_):
     dim_size[0] = dim_size[0] // world_size
 
     output = torch.empty(dim_size, dtype=input_.dtype, device=torch.cuda.current_device())
-    torch.distributed._reduce_scatter_base(output, input_.contiguous(), group=model_parallel_group())
+    torch.distributed._reduce_scatter_base(output,
+                                           input_.contiguous(),
+                                           group=constants.model_parallel_group())
     return output
 
 
