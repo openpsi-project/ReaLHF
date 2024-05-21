@@ -8,13 +8,11 @@ import subprocess
 import numpy as np
 import transformers
 
-from reallm.api.core.config import MODEL_FAMILY_TO_PATH
 from reallm.api.core.dfg import *
+from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, MODEL_FAMILY_TO_PATH
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
 from reallm.api.quickstart.device_mesh import *
-from reallm.api.quickstart.model import (ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig,
-                                         REAL_MODEL_CONFIG_CONVERTER)
 from reallm.base.topology import PipeModelDataParallelTopology
 from reallm.profiler.search import (data_pipe_device_mapping, full_model_device_mapping,
                                     model_pipe_device_mapping, optimal_device_mapping,
@@ -233,7 +231,8 @@ def auto_device_mapping(
                 for rpc in self._internal_exp.rpcs:
                     path = MODEL_FAMILY_TO_PATH[rpc.model_type]
                     hf_config = transformers.AutoConfig.from_pretrained(os.path.join(path, "config.json"))
-                    config = REAL_MODEL_CONFIG_CONVERTER[rpc.model_type._class](hf_config)
+                    config = HF_MODEL_FAMILY_REGISTRY[rpc.model_type._class]["config_from_hf_converter"](
+                        hf_config)
                     if rpc.model_name not in model_configs:
                         model_configs[rpc.model_name] = config
                     else:
@@ -285,12 +284,10 @@ def auto_device_mapping(
                         "real_model",
                         args=dict(
                             model_path=path,
-                            from_type="hf_as_critic" if rpc.model_type.is_critic else "hf_as_actor",
+                            is_critic=rpc.model_type.is_critic,
+                            init_critic_from_actor=True,  # FIXME:
                             dtype="fp16",
-                            hf_model_type=rpc.model_type._class,
-                            tokenizer_path=path,
-                            sequence_parallel=m.topo.get_dim("model") > 1,
-                            gradient_accumulation_fusion=False,
+                            hf_model_family=rpc.model_type._class,
                         ),
                     )
                 src_rpc: ModelRPC = [rpc for rpc in self._rpcs if rpc.is_src][0]

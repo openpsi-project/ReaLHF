@@ -3,9 +3,8 @@ import dataclasses
 import json
 import os
 
-import transformers
-
-from reallm.api.core.config import Model, ModelWrapper, SUPPORTED_MODELS
+from reallm.api.core.config import Model, ModelWrapper
+from reallm.api.core.model_api import SUPPORTED_MODELS
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Quickstart Model Config")
@@ -156,14 +155,11 @@ class ModelTrainEvalConfig:
 
 
 def get_real_model_config(
-    from_type: str,
     model_path: str,
-    hf_model_type: str,
-    tokenizer_path: str,
+    hf_model_family: str,
+    is_critic: bool,
+    init_critic_from_actor: bool,
     dtype: Optional[str] = None,
-    # model parallelism optimization
-    sequence_parallel: bool = False,
-    gradient_accumulation_fusion: bool = False,
     # LoRA config
     lora: Optional[LoRAConfig] = None,
     is_sft_lora: bool = False,
@@ -172,45 +168,15 @@ def get_real_model_config(
     rew_lora_path: Optional[str] = None,
 ) -> Model:
     """Make a configuration to build model.
-
-    Possible values of `from_type`:
-        > hf_as_actor: build actor (decoder-only LLM) from huggingface models
-        > hf_as_critic: build critic (transformer that outputs values instead of logits) from huggingface models
-        > actor_as_critic: build critic from actor, replace the head with a new one, whether using pipeline depends on `use_pipe`
-        > random_actor: build a randomly initialized actor, whether using pipeline depends on `use_pipe`
-        > random_critic build a randomly initialized critic, whether using pipeline depends on `use_pipe`
-        > self: build a actor/critic from itself, whether using pipeline depends on `use_pipe`
-            Note that it may not be built successfully if `use_pipe` is not consistent with the saved checkpoint
     """
-    if gradient_accumulation_fusion:
-        raise RuntimeError("gradient_accumulation_fusion is not supported yet")
-
-    if os.path.exists(os.path.join(model_path, "real_model_config.json")):
-        # This is a saved model from a previous run
-        with open(os.path.join(model_path, "real_model_config.json"), "r") as f:
-            original_is_critic = json.load(f)["is_critic"]
-        # correct from_type if necessary
-        if from_type == "hf_as_critic":
-            from_type = "self" if original_is_critic else "actor_as_critic"
-        if from_type == "hf_as_actor":
-            from_type = "self"
-    else:
-        # This is a checkpoint from HuggingFace.
-        if from_type == "actor_as_critic":
-            from_type = "hf_as_critic"
-        if from_type == "self":
-            from_type = "hf_as_actor"
-
     model = Model(
         "real_model",
         args=dict(
             model_path=model_path,
-            from_type=from_type,
+            is_critic=is_critic,
+            init_critic_from_actor=init_critic_from_actor,
             dtype=dtype,
-            hf_model_type=hf_model_type,
-            tokenizer_path=tokenizer_path,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
+            hf_model_family=hf_model_family,
         ),
     )
     if is_sft_lora:

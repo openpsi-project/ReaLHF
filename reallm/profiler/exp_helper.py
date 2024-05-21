@@ -7,11 +7,10 @@ import pprint
 
 import numpy as np
 
-from reallm.api.core.config import MODEL_FAMILY_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
+from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH, ReaLModelConfig
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
-from reallm.impl.model.nn.real_llm_base import ReaLModelConfig
 from reallm.profiler.device_mesh import DeviceMesh, make_device_mesh_from_name, ModelParallelStrategy
 from reallm.profiler.enumerate import build_graph, enumerate_rpc_executions
 from reallm.profiler.estimate import (comm_stats, estimate_model_size, estimate_rpc_memory, estimate_rpc_time,

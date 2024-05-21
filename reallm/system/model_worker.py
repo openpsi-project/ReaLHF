@@ -25,6 +25,9 @@ from reallm.impl.model.nn.real_llm_parallel import pipeline_repartition_strategy
 from reallm.system import request_reply_stream, worker_base
 import reallm.api.core.dfg as dfg
 import reallm.api.core.system_api as system_api
+import reallm.impl.model.comm.data_transfer as data_transfer_comm
+import reallm.impl.model.comm.global_comm as global_comm
+import reallm.impl.model.comm.param_realloc as param_realloc_comm
 
 # NOTE: Register all implemented datasets and models.
 import reallm.api.core.data_api as data_api  # isort:skip
@@ -254,17 +257,25 @@ class ModelWorker(worker_base.Worker):
             idx=self.__worker_index,
         )
 
-        self.__pg_info = gpu_utils.setup_ddp(
+        self.__pg_info = global_comm.setup_global_comm(
             expr_name=self.__experiment_name,
             trial_name=self.__trial_name,
             worker_index=self.__worker_index,
             model_topos=self.config.model_topos,
             msid2mwid=self.config.msid2mwid,
-            param_realloc_pairs=self.config.sync_param_pairs,
+        )
+
+        self.__data_transfer_info = data_transfer_comm.setup_data_transfer(
+            model_topos=self.config.model_topos,
+            msid2mwid=self.config.msid2mwid,
             data_transfer_pairs=self.config.data_transfer_pairs,
         )
 
-        constants.set_experiment_trial_names(self.__experiment_name, self.__trial_name)
+        self.__param_realloc_info = param_realloc_comm.setup_param_realloc(
+            model_topos=self.config.model_topos,
+            msid2mwid=self.config.msid2mwid,
+            param_realloc_pairs=self.config.sync_param_pairs,
+        )
 
         # logger.info(f"SetUp Information - Model worker index {self.__worker_index} located at "
         #             f"{socket.gethostname()} GPU {self.__pg_info.local_gpu_id}.")
@@ -442,7 +453,7 @@ class ModelWorker(worker_base.Worker):
                 from_topo=from_topo,
                 to_topo=to_topo,
                 to_model_config=to_model_config,
-                pg_info=self.__pg_info,
+                pg_info=self.__param_realloc_info,
             )
             if from_model_name in self.__models:
                 self.__model_is_handle[from_model_name] = True
@@ -513,7 +524,8 @@ class ModelWorker(worker_base.Worker):
             ############## initialization ##############
             elif request.handle_name == "initialize":
                 assert not self.__model_is_handle[request.handler.model_name]
-                constants.set_max_seqlen(data.max_seqlen)  # used by cuda graph buffer for generation
+                constants.set_max_seqlen(handler_model_name,
+                                         data.max_seqlen)  # used by cuda graph buffer for generation
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
                 self.__backend_initialized[request.handler.model_name] = True
                 # print(f"after initialize model {request.handler.model_name} module type {type(self._model.module)}")
@@ -673,15 +685,15 @@ class ModelWorker(worker_base.Worker):
                     continue
                 if target_dp_rank == dp_j:
                     # receiver
-                    group_key = gpu_utils.DataTransferPair(
+                    group_key = data_transfer_comm.DataTransferPair(
                         src=producer_name,
                         src_dp_rank=dp_i,
                         dst=target,
                         dst_dp_rank=dp_j,
                     )
-                    bcast_src = self.__pg_info.data_transfer_src_ranks[group_key]
-                    group = self.__pg_info.data_transfer_groups[group_key]
-                    dst_ranks = self.__pg_info.data_transfer_dst_ranks[group_key]
+                    bcast_src = self.__data_transfer_info.data_transfer_src_ranks[group_key]
+                    group = self.__data_transfer_info.data_transfer_groups[group_key]
+                    dst_ranks = self.__data_transfer_info.data_transfer_dst_ranks[group_key]
 
                     buf_indices = [global_buffer_indices[_i] for _i in comm_slots]
                     seqlens = [global_seqlens[_i] for _i in comm_slots]
@@ -729,15 +741,15 @@ class ModelWorker(worker_base.Worker):
 
                 if producer_dp_rank == dp_i and producer_is_dp_head:
                     # sender
-                    group_key = gpu_utils.DataTransferPair(
+                    group_key = data_transfer_comm.DataTransferPair(
                         src=producer_name,
                         src_dp_rank=dp_i,
                         dst=target,
                         dst_dp_rank=dp_j,
                     )
-                    bcast_src = self.__pg_info.data_transfer_src_ranks[group_key]
-                    group = self.__pg_info.data_transfer_groups[group_key]
-                    dst_ranks = self.__pg_info.data_transfer_dst_ranks[group_key]
+                    bcast_src = self.__data_transfer_info.data_transfer_src_ranks[group_key]
+                    group = self.__data_transfer_info.data_transfer_groups[group_key]
+                    dst_ranks = self.__data_transfer_info.data_transfer_dst_ranks[group_key]
 
                     buf_indices = [global_buffer_indices[_i] for _i in comm_slots]
                     all_sent_dst_ranks = [

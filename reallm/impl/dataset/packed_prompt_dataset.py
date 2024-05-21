@@ -136,7 +136,7 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
     def __iter__(self):
         for indices in self.__batch_indices:
             seqlens = [self.prompt_lengths[idx] for idx in indices]
-            assert all(x == seqlens[0] for x in seqlens), seqlens
+            # assert all(x == seqlens[0] for x in seqlens), seqlens
             prompts = [self.prompts[idx] for idx in indices]
             total_seqlen = sum(seqlens)
             assert total_seqlen <= self.n_tokens_per_batch, (total_seqlen, self.n_tokens_per_batch)

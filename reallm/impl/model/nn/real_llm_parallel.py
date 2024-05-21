@@ -179,7 +179,7 @@ def get_real_model_param_shape(k: str, config: model_api.ReaLModelConfig, mp_siz
     elif ".ln." in k or ".ln_f." in k:
         return (config.hidden_dim,)
     elif k == f"{config.n_layers + 1}.weight":  # output head
-        if config.is_critic and config.sequence_parallel:
+        if config.is_critic and constants.sequence_parallel():
             return (1, config.hidden_dim)
         elif not config.is_critic and mp_size > 1:
             assert config.vocab_size % mp_size == 0

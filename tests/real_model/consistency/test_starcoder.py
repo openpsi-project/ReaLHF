@@ -72,21 +72,24 @@ class ReaLModelStarCoderCPUTest(unittest.TestCase):
 
         # no mask
         x = PipeTransferData()
-        ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(config.n_layers + 1)]
+        ys = [PipeCacheData(packed_input_ids=input_ids)
+              ] + [PipeCacheData() for _ in range(config.n_layers + 1)]
         logits = model(x, ys).pp_output
         sc_logits = starcoder(input_ids=input_ids).logits
         assert torch.allclose(logits, sc_logits, atol=2e-5), ((logits - sc_logits)).abs().max()
 
         # right pad
         x = PipeTransferData(attention_mask=rightpad_attention_mask)
-        ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(config.n_layers + 1)]
+        ys = [PipeCacheData(packed_input_ids=input_ids)
+              ] + [PipeCacheData() for _ in range(config.n_layers + 1)]
         logits = model(x, ys).pp_output
         sc_logits = starcoder(input_ids=input_ids, attention_mask=rightpad_attention_mask).logits
         assert torch.allclose(logits, sc_logits, atol=2e-5), ((logits - sc_logits)).abs().max()
 
         # left pad
         x = PipeTransferData(attention_mask=leftpad_attention_mask)
-        ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(config.n_layers + 1)]
+        ys = [PipeCacheData(packed_input_ids=input_ids)
+              ] + [PipeCacheData() for _ in range(config.n_layers + 1)]
         logits = model(x, ys).pp_output
         sc_logits = starcoder(input_ids=input_ids, attention_mask=leftpad_attention_mask).logits
         assert torch.allclose(logits, sc_logits, atol=2e-5), ((logits - sc_logits)).abs().max()
@@ -127,7 +130,7 @@ class ReaLModelStarCoderCPUTest(unittest.TestCase):
         ).long()
 
         x = PipeTransferData(attention_mask=vam)
-        ys = [PipeCacheData(input_ids=vg_input_ids)
+        ys = [PipeCacheData(packed_input_ids=vg_input_ids)
               ] + [PipeCacheData() for _ in range(self.model.config.n_layers + 1)]
         vglogits = self.model(x, ys).pp_output
         vglogprob = gather_shifted_log_probs(vglogits, vg_input_ids)
@@ -200,7 +203,8 @@ class ReaLModelStarCoderTest(unittest.TestCase):
                                   device=device)
 
         x = PipeTransferData()
-        ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(config.n_layers + 1)]
+        ys = [PipeCacheData(packed_input_ids=input_ids)
+              ] + [PipeCacheData() for _ in range(config.n_layers + 1)]
         with torch.no_grad():
             logits = model(x, ys).pp_output
             sc_logits = starcoder(input_ids=input_ids).logits
@@ -236,7 +240,7 @@ class ReaLModelStarCoderTest(unittest.TestCase):
                 sc_logits[cu_seqlens[i]:cu_seqlens[i + 1]] = sc_output[i, :input_len[i]]
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        ys = [PipeCacheData(input_ids=packed_input_ids)
+        ys = [PipeCacheData(packed_input_ids=packed_input_ids)
               ] + [PipeCacheData() for _ in range(config.n_layers + 1)]
         with torch.no_grad():
             logits = model(x, ys).pp_output

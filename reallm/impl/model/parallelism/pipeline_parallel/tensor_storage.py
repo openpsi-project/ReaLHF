@@ -19,7 +19,7 @@ def print_data_shapes(name, rank, mbid, x, ys):
         logger.debug(f"shapes: x.pp_input {get_shape(x.pp_input)}, x.pp_output {get_shape(x.pp_output)},"
                      f" x.cu_seqlens {get_shape(x.cu_seqlens)}")
         for i, y in enumerate(ys):
-            logger.debug(f"shapes: ys[{i}].input_ids {get_shape(y.input_ids)}, "
+            logger.debug(f"shapes: ys[{i}].input_ids {get_shape(y.packed_input_ids)}, "
                          f"ys[{i}].k_cache {get_shape(y.k_cache)}, ys[{i}].v_cache {get_shape(y.v_cache)}, "
                          f"ys[{i}].cache_seqlens {get_shape(y.cache_seqlens)}")
 

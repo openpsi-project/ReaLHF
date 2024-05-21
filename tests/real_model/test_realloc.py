@@ -19,7 +19,7 @@ import torch.distributed as dist
 import tqdm
 import transformers
 
-from reallm.api.core.config import MODEL_FAMILY_TO_PATH, ModelFamily, ModelName, ModelShardID
+from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH, ModelFamily, ModelName, ModelShardID
 from reallm.api.core.system_api import ModelName, ModelShardID
 from reallm.api.quickstart.model import REAL_MODEL_CONFIG_CONVERTER
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark

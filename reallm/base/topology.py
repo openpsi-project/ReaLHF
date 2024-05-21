@@ -272,18 +272,6 @@ def _prime_factors(N):
     return primes
 
 
-class PipeDataParallelTopology(ProcessTopology):
-    """A topology specialization for hybrid data and pipeline parallelism.
-
-    Uses data parallelism on the last dimension to encourage gradient
-    reductions to use high-bandwidth intra-node links and lower-volume
-    pipeline communications to use low-bandwidth inter-node links.
-    """
-
-    def __init__(self, num_pp, num_dp):
-        super().__init__(axes=["pipe", "data"], dims=[num_pp, num_dp])
-
-
 class PipeModelDataParallelTopology(ProcessTopology):
     """A topology for hybrid pipeline, model, and data parallelism."""
 

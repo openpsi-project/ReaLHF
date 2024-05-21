@@ -137,7 +137,6 @@ class CausalSelfAttentionLayer(nn.Module):
         k_cache: Optional[torch.Tensor] = None,
         v_cache: Optional[torch.Tensor] = None,
         cache_seqlens: Optional[Union[int, torch.Tensor]] = None,
-        attention_mask: Optional[torch.BoolTensor] = None,  # only used for debugging
         max_seqlen: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # input shape: [bs, seq, hidden_dim]
@@ -196,7 +195,7 @@ class CausalSelfAttentionLayer(nn.Module):
                 dropout_p=self.applied_attn_pdrop,
                 softmax_scale=scale_factor,
                 upcast_unscale=unscale,
-                attention_mask=attention_mask,
+                attention_mask=None,
             )
         elif k_cache is not None and len(q.shape) == 4:
             # k_cache/v_cache shape: [bs, max_seq, n_kv_heads, head_dim]

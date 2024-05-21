@@ -44,20 +44,6 @@ except ModuleNotFoundError:
 logger = logging.getLogger("ReaLModel Interface")
 
 
-@contextlib.contextmanager
-def _disable_sequence_parallel_of_module(l: nn.Module):
-    _states = []
-    for _, m in l.named_modules():
-        if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
-            _states.append(m.sequence_parallel)
-            m.sequence_parallel_enable(False)
-    yield
-    for _, m in l.named_modules():
-        if isinstance(m, (RowParallelLinear, ColumnParallelLinear, VocabPositionEmbedding)):
-            m.sequence_parallel_enable(_states.pop(0))
-    assert len(_states) == 0
-
-
 class ReaLModel(nn.Module):
 
     def __init__(
@@ -85,7 +71,6 @@ class ReaLModel(nn.Module):
         self.num_stages = constants.pipe_parallel_world_size()
 
         self.layers = nn.ModuleList()
-        self.sequence_parallel = config.sequence_parallel
 
         self._instantiated = False
         self._instantiation_hooks = []
@@ -179,7 +164,7 @@ class ReaLModel(nn.Module):
     def _build_output_head(self, config: model_api.ReaLModelConfig) -> nn.Module:
         dtype = self.dtype
         device = self.device
-        if config.is_critic and config.sequence_parallel:
+        if config.is_critic and constants.sequence_parallel():
             l = SequenceParallelCriticHead(
                 config.hidden_dim,
                 1,
@@ -192,8 +177,7 @@ class ReaLModel(nn.Module):
                 config.hidden_dim,
                 config.vocab_size,
                 bias=False,
-                sequence_parallel=config.sequence_parallel,
-                async_tensor_model_parallel_allreduce=not config.sequence_parallel,
+                async_tensor_model_parallel_allreduce=not constants.sequence_parallel(),
                 gradient_accumulation_fusion=config.gradient_accumulation_fusion,
                 device=device,
                 dtype=dtype,
@@ -225,13 +209,6 @@ class ReaLModel(nn.Module):
             if isinstance(l, ReaLModelBlock):
                 l.ckpt_attn, l.ckpt_mlp, l.ckpt_full = _states.pop(0)
 
-    @contextlib.contextmanager
-    def sequence_parallel_disable(self):
-        x = self.sequence_parallel
-        self.sequence_parallel = False
-        yield
-        self.sequence_parallel = x
-
     def __overlapped_load_forward(self, x: PipeTransferData,
                                   ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
         assert len(ys) == self.num_layers
@@ -260,11 +237,7 @@ class ReaLModel(nn.Module):
         for layer_idx, y, l, e in zip(range(self.layer_idx_start, self.layer_idx_end), ys, self.layers,
                                       events):
             torch.cuda.default_stream().wait_event(e)
-            if not self.sequence_parallel:
-                with _disable_sequence_parallel_of_module(l):
-                    x = l(x, y)
-            else:
-                x = l(x, y)
+            x = l(x, y)
             x.pp_input = x.pp_output
         self._offloaded = False
         x.pp_input = raw_pp_input
@@ -276,11 +249,7 @@ class ReaLModel(nn.Module):
         assert len(ys) == len(layers)
         raw_pp_input = x.pp_input
         for i, (layer, y) in enumerate(zip(layers, ys)):
-            if not self.sequence_parallel:
-                with _disable_sequence_parallel_of_module(layer):
-                    x = layer(x, y)  # This will set pp_output.
-            else:
-                x = layer(x, y)
+            x = layer(x, y)
             x.pp_input = x.pp_output
         # Finally, pp_input is the input of this pipeline stage (maybe across several layers),
         # pp_output is the output of this pipeline stage.
@@ -298,31 +267,31 @@ class ReaLModel(nn.Module):
         # Copy input tensor to a pinned buffer.
         mp_size = constants.model_parallel_world_size()
         batch_length = None
-        if ys[0].input_ids is not None:
-            batch_length = ys[0].input_ids.shape[0]
+        if ys[0].packed_input_ids is not None:
+            batch_length = ys[0].packed_input_ids.shape[0]
         if x.pp_input is not None:
             batch_length = x.pp_input.shape[0]
         assert batch_length is not None
         padded_batch_length = (batch_length + mp_size - 1) // mp_size * mp_size
         pad_size = padded_batch_length - batch_length
 
-        if self.sequence_parallel and pad_size > 0 and ys[0].input_ids is not None:
+        if constants.sequence_parallel() and pad_size > 0 and ys[0].packed_input_ids is not None:
             _cu_seqlens = x.cu_seqlens
             _max_seqlen = x.max_seqlen
-            _input_ids = ys[0].input_ids
+            _input_ids = ys[0].packed_input_ids
             _pp_input = x.pp_input
 
             x.cu_seqlens = torch.nn.functional.pad(x.cu_seqlens, (0, 1), value=padded_batch_length)
             x.max_seqlen = max(x.max_seqlen, padded_batch_length - batch_length)
-            if ys[0].input_ids is not None:
+            if ys[0].packed_input_ids is not None:
                 input_ids_buf = constants.get_global_memory_buffer().get_tensor(
                     (padded_batch_length,),
                     dtype=torch.long,
                     name="real_model_input_ids",
                     force_zero=True,
                 )
-                input_ids_buf[:batch_length] = ys[0].input_ids
-                ys[0].input_ids = input_ids_buf
+                input_ids_buf[:batch_length] = ys[0].packed_input_ids
+                ys[0].packed_input_ids = input_ids_buf
 
             if x.pp_input is not None:
                 pp_input_buf = constants.get_global_memory_buffer().get_tensor(
@@ -343,11 +312,11 @@ class ReaLModel(nn.Module):
                 x, ys = self.__overlapped_load_forward(x, ys)
 
         # Resume from padding.
-        if self.sequence_parallel and pad_size > 0 and ys[0].input_ids is not None:
+        if constants.sequence_parallel() and pad_size > 0 and ys[0].packed_input_ids is not None:
             x.pp_output = x.pp_output[:-pad_size]
 
             x.pp_input = _pp_input
-            ys[0].input_ids = _input_ids
+            ys[0].packed_input_ids = _input_ids
             x.cu_seqlens = _cu_seqlens
             x.max_seqlen = _max_seqlen
 
@@ -647,11 +616,12 @@ def forward_helper(
         batch_size, seqlen = input_ids.shape[:2]
     if packed_input_ids is not None:
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        ys = [PipeCacheData(input_ids=packed_input_ids)
+        ys = [PipeCacheData(packed_input_ids=packed_input_ids)
               ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
     else:
         x = PipeTransferData()
-        ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+        ys = [PipeCacheData(packed_input_ids=input_ids)
+              ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
     scores = ReaLModel.forward(self, x, ys)[0].pp_output
     if build_packed:
         scores = pad_input(scores, indices, batch_size, seqlen)
@@ -668,12 +638,10 @@ def make_real_model(
     name: ModelName,
     device: torch.device,
     model_path: str,
-    from_type: str,
+    is_critic: bool,
+    init_critic_from_actor: bool,
     dtype: Optional[str] = None,
-    hf_model_type: Optional[str] = None,
-    tokenizer_path: Optional[str] = None,
-    sequence_parallel: bool = False,
-    gradient_accumulation_fusion: bool = False,
+    hf_model_family: Optional[str] = None,
 ) -> model_api.Model:
     if dtype == "fp16" or dtype == None:
         dtype = torch.float16
@@ -684,74 +652,14 @@ def make_real_model(
     else:
         raise NotImplementedError(f"Unsupported dtype {dtype}")
 
-    tokenizer = None
-    if from_type == "hf_as_critic":
-        # Convert a HuggingFace model into ReaLModel.
-        m = getattr(ReaLModel, f"from_{hf_model_type}")(
-            model_path=model_path,
-            dtype=dtype,
-            device=device,
-            is_critic=True,
-            init_from_scratch=False,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-        )
-        tokenizer = model_api.load_hf_tokenizer(model_path)
-    elif from_type == "hf_as_actor":
-        # Convert a HuggingFace model into ReaLModel.
-        m = getattr(ReaLModel, f"from_{hf_model_type}")(
-            model_path=model_path,
-            dtype=dtype,
-            device=device,
-            is_critic=False,
-            init_from_scratch=False,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-        )
-        tokenizer = model_api.load_hf_tokenizer(model_path)
-    elif from_type == "actor_as_critic":
-        # initialize a critic from actor
-        with open(os.path.join(model_path, "real_model_config.json"), "r") as f:
-            config = model_api.ReaLModelConfig(**json.load(f))
-        config.is_critic = True
-        config.sequence_parallel = sequence_parallel
-        config.gradient_accumulation_fusion = gradient_accumulation_fusion
-        m = ReaLModel(config=config, dtype=dtype, device=device)
-        m.load_from_saved_real_model(model_path, init_critic_from_actor=True)
-    elif from_type == "random_actor":
-        # randomly initialize a actor
-        m = getattr(ReaLModel, f"from_{hf_model_type}")(
-            model_path=tokenizer_path,
-            dtype=dtype,
-            device=device,
-            is_critic=False,
-            init_from_scratch=True,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-        )
-    elif from_type == "random_critic":
-        # randomly initialize a critic
-        m = getattr(ReaLModel, f"from_{hf_model_type}")(
-            model_path=tokenizer_path,
-            dtype=dtype,
-            device=device,
-            is_critic=True,
-            init_from_scratch=True,
-            sequence_parallel=sequence_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
-        )
-    else:
-        # actor loads from saved actor or critic loads from saved critic
-        assert from_type == "self"
-        with open(os.path.join(model_path, "real_model_config.json"), "r") as f:
-            config = model_api.ReaLModelConfig(**json.load(f))
-        config.sequence_parallel = sequence_parallel
-        config.gradient_accumulation_fusion = gradient_accumulation_fusion
-        m = ReaLModel(config=config, dtype=dtype, device=device)
-        m.load_from_saved_real_model(model_path, init_critic_from_actor=False)
-
-    if tokenizer is None:
-        tokenizer = model_api.load_hf_tokenizer(tokenizer_path)
+    tokenizer = model_api.load_hf_tokenizer(model_path)
+    mconfig = getattr(ReaLModel, f"config_from_{hf_model_family}")(
+        model_path=model_path,
+        is_critic=is_critic,
+    )
+    m = ReaLModel(mconfig, dtype=dtype, device=device)
+    m._instantiation_hooks.append(lambda: getattr(m, f"from_{hf_model_family}")
+                                  (load_dir=model_path, init_critic_from_actor=init_critic_from_actor))
 
     if constants.pipe_parallel_world_size() == 1:
         m = add_helper_functions(m)

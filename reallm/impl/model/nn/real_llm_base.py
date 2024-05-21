@@ -118,7 +118,6 @@ class ReaLModelBlock(nn.Module):
         v_cache = y.v_cache
         cache_seqlens = y.cache_seqlens
         max_seqlen = x.max_seqlen
-        attention_mask = x.attention_mask
         if self.ckpt_full:
             pp_output, k, v = torch.utils.checkpoint.checkpoint(
                 self._forward,
@@ -128,7 +127,6 @@ class ReaLModelBlock(nn.Module):
                 v_cache,
                 cache_seqlens,
                 max_seqlen,
-                attention_mask,
                 False,
                 False,
                 use_reentrant=True,
@@ -141,7 +139,6 @@ class ReaLModelBlock(nn.Module):
                 v_cache,
                 cache_seqlens,
                 max_seqlen,
-                attention_mask,
                 ckpt_attn=self.ckpt_attn,
                 ckpt_mlp=self.ckpt_mlp,
             )
@@ -164,7 +161,6 @@ class ReaLModelBlock(nn.Module):
         v_cache: Optional[torch.Tensor],
         cache_seqlens: Optional[torch.Tensor],
         max_seqlen: int,
-        attention_mask: Optional[torch.Tensor],
         ckpt_attn: Optional[bool] = False,
         ckpt_mlp: Optional[bool] = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -177,7 +173,6 @@ class ReaLModelBlock(nn.Module):
                 k_cache,
                 v_cache,
                 cache_seqlens,
-                attention_mask,
                 max_seqlen,
                 use_reentrant=True,
             )
@@ -189,7 +184,6 @@ class ReaLModelBlock(nn.Module):
                 k_cache=k_cache,
                 v_cache=v_cache,
                 cache_seqlens=cache_seqlens,
-                attention_mask=attention_mask,
             )
         h = h + attn_out
         if ckpt_mlp:

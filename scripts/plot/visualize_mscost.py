@@ -12,8 +12,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from reallm.api.core.config import MODEL_FAMILY_TO_PATH, ModelFamily, ModelName
-from reallm.api.core.model_api import REAL_MODEL_CONFIG_CONVERTER
+from reallm.api.core.model_api import (MODEL_FAMILY_TO_PATH, ModelFamily, ModelName,
+                                       REAL_MODEL_CONFIG_CONVERTER)
 from tests.misc.est_mscost_v2 import compute_cost
 from tests.utils import get_llama7b_real_config
 import reallm.base.topology as topology

@@ -175,7 +175,7 @@ class ReaLModelCPUGPUAccordanceTest(unittest.TestCase):
                                           seq.ne(self.tokenizer.eos_token_id))
         packed_input_ids, pad_indices, cu_seqlens, max_seq_len = unpad_input(seq, seq_attn_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens.cuda(), max_seqlen=max_seq_len)
-        ys = [PipeCacheData(input_ids=packed_input_ids.cuda())
+        ys = [PipeCacheData(packed_input_ids=packed_input_ids.cuda())
               ] + [PipeCacheData() for _ in range(self.model.config.n_layers + 1)]
         inf_logits = self.model(x, ys).pp_output.float().cpu()
         inf_logits = pad_input(inf_logits, pad_indices, seq.shape[0], seq.shape[1])

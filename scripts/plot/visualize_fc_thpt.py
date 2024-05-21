@@ -14,8 +14,8 @@ import scipy.stats
 import seaborn as sns
 import transformers
 
-from reallm.api.core.config import MODEL_FAMILY_TO_PATH, ModelFamily, ModelName
-from reallm.api.core.model_api import REAL_MODEL_CONFIG_CONVERTER
+from reallm.api.core.model_api import (MODEL_FAMILY_TO_PATH, ModelFamily, ModelName,
+                                       REAL_MODEL_CONFIG_CONVERTER)
 from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
                                  calculate_llama_train_flops, CUDAKernelTime)
 

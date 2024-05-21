@@ -66,7 +66,7 @@ _pgroups: Dict["ModelName",
                Any] = ({})  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
 _rank_mapping: Dict["ModelName", Dict["ModelShardID", int]] = {}
 _global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
-_max_seqlen: int = None
+_max_seqlens: Dict["ModelName", int] = dict()
 
 # used only in scripts and tests
 _fake_mp_world_size = None
@@ -95,11 +95,11 @@ def model_scope_disabled():
 
 
 ################# setter functions #################
-def set_max_seqlen(max_seqlen: int):
-    global _max_seqlen
-    if _max_seqlen is not None:
+def set_max_seqlen(model_name: "ModelName", max_seqlen: int):
+    global _max_seqlens
+    if model_name in _max_seqlens:
         raise RuntimeError("Global constant `max_seqlen` is already set.")
-    _max_seqlen = max_seqlen
+    _max_seqlens[model_name] = max_seqlen
 
 
 def set_experiment_trial_names(expr_name: str, trial_name: str):
@@ -159,10 +159,10 @@ def sequence_parallel() -> bool:
 
 
 def dataset_max_seqlen() -> int:
-    global _max_seqlen
-    if _max_seqlen is None:
-        raise RuntimeError("Global constant `max_seqlen` is accessed before set.")
-    return _max_seqlen
+    global _max_seqlens, _model_name
+    if _model_name is None or _model_name not in _max_seqlens:
+        raise RuntimeError("Global constant `max_seqlen` is accessed before set or model_name is None.")
+    return _max_seqlens[_model_name]
 
 
 def has_model_name(name: str) -> bool:

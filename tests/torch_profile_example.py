@@ -22,7 +22,7 @@ import torch
 import torch.distributed
 import torch.profiler
 
-from reallm.api.core.config import MODEL_FAMILY_TO_PATH, ModelFamily
+from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH, ModelFamily
 from tests.utils import *
 import reallm.api.core.system_api as config_package
 import reallm.base.constants as constants
@@ -92,18 +92,15 @@ def make_model(device):
     # from_type = "self" if NUM_PP == 1 else "empty_actor"
     # if NUM_MP == NUM_PP == 1:
     #     from_type = "random_actor"
-    from_type = "hf_as_actor"
 
     model_config = config_package.Model(
         "real_model",
         args=dict(
-            model_path=MODEL_PARALLEL_PATH,
-            from_type=from_type,
+            model_path=MODEL_FAMILY_TO_PATH,
+            is_critic=False,
+            init_critic_from_actor=False,  # FIXME:
             dtype="bf16" if USE_BF16 else "fp16",
-            hf_model_type=MODEL_TYPE,
-            tokenizer_path=MODEL_PARALLEL_PATH,
-            sequence_parallel=USE_SEQ_PARALLEL,
-            gradient_accumulation_fusion=False,
+            hf_model_family=MODEL_TYPE,
         ),
     )
 

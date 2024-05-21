@@ -20,7 +20,7 @@ import torch
 import torch.distributed
 
 from reallm.api.core.config import ModelName
-from reallm.api.quickstart.model import ReaLModelConfig
+from reallm.api.core.model_api import ReaLModelConfig
 from reallm.base import datapack, dataparallel, logging, namedarray, numpy_utils, timeutil, topology
 from reallm.base.asyncio_utils import (raise_asyncio_exception, setup_run_until_complete,
                                        teardown_run_util_complete)

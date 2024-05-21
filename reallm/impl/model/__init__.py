@@ -42,7 +42,7 @@ _HF_REGISTRIES = {}
 
 def _load_from_hf(model: ReaLModel, registry_name, load_dir: str, init_critic_from_actor: bool):
     r = _HF_REGISTRIES[registry_name]
-    r.load(model, load_dir, init_critic_from_actor)
+    return r.load(model, load_dir, init_critic_from_actor)
 
 
 def _save_to_hf(model: ReaLModel,

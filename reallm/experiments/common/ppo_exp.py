@@ -178,7 +178,6 @@ class PPOConfig(Experiment):
                 hf_model_type=cfg.type,
                 tokenizer_path=cfg.base_model_path,
                 dtype="bf16" if cfg.enable_bf16 else "fp16",
-                sequence_parallel=cfg.parallel.use_sequence_parallel,
                 lora=cfg.lora,
             )
 
@@ -216,7 +215,6 @@ class PPOConfig(Experiment):
                     offload_param=cfg.offload,
                     enable_bf16=cfg.enable_bf16,
                     enable_fp16=cfg.enable_fp16,
-                    sequence_parallel=cfg.parallel.use_sequence_parallel,
                     enable_async_p2p_communication=cfg.enable_async_p2p,
                 ),
             )
@@ -233,7 +231,6 @@ class PPOConfig(Experiment):
                     offload=cfg.offload,
                     enable_bf16=cfg.enable_bf16,
                     engine_type="pipe" if cfg.parallel.pipeline_parallel_size > 1 else "deepspeed",
-                    sequence_parallel=cfg.parallel.use_sequence_parallel,
                 ),
             )
 

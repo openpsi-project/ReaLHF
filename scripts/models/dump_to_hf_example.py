@@ -3,8 +3,8 @@ import os
 
 import transformers
 
+from reallm.api.core.model_api import ReaLModelConfig
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_base import ReaLModelConfig
 
 
 def main():

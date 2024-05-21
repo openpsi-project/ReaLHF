@@ -2,8 +2,8 @@ from typing import List
 import argparse
 import math
 
-from reallm.api.core.config import MODEL_FAMILY_TO_PATH
 from reallm.api.core.dfg import ModelRPC
+from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH
 from reallm.api.core.system_api import _LLM_ENVVARS
 from reallm.profiler.experiments import *
 from reallm.profiler.utils import find_factors

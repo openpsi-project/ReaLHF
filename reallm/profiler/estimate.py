@@ -12,11 +12,10 @@ import json
 import os
 import pprint
 
-from reallm.api.core.config import MODEL_FAMILY_TO_PATH
 from reallm.api.core.dfg import ModelInterfaceType
+from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH, ReaLModelConfig
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_base import ReaLModelConfig
 from reallm.profiler.device_mesh import *
 from reallm.profiler.experiments import ProfileExperiment
 from reallm.profiler.rpc import CommStats

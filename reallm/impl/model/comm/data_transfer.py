@@ -27,14 +27,10 @@ class DataTransferInfo:
     data_transfer_dst_ranks: Dict[DataTransferPair, List[int]]
 
 
-def setup_ddp(
-        worker_index: int,
-        model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
-        msid2mwid: Optional[Dict[system_api.ModelShardID, int]] = None,
-        param_realloc_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
-        data_transfer_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
-        world_size: Optional[int] = None,  # for testing only
-        global_rank: Optional[int] = None,  # for testing only
+def setup_data_transfer(
+    model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
+    msid2mwid: Optional[Dict[system_api.ModelShardID, int]] = None,
+    data_transfer_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
 ) -> DataTransferInfo:
 
     mw_dp_ranks: Dict[Tuple[ModelName, int], List[int]] = {}

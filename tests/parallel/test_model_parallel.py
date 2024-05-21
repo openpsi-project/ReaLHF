@@ -8,7 +8,7 @@ import torch.distributed
 import torch.multiprocessing as mp
 
 from reallm.api.core import dfg, model_api, system_api
-from reallm.api.core.config import MODEL_FAMILY_TO_PATH, ModelFamily
+from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH, ModelFamily
 from reallm.base.monitor import get_tracer
 from tests.utils import *
 import reallm.base.constants as constants
@@ -80,13 +80,11 @@ def make_model(device):
     model_config = system_api.Model(
         "real_model",
         args=dict(
-            model_path=MODEL_PARALLEL_PATH,
-            from_type=from_type,
+            model_path=MODEL_FAMILY_TO_PATH,
+            is_critic=False,
+            init_critic_from_actor=False,  # FIXME:
             dtype="bf16" if USE_BF16 else "fp16",
-            hf_model_type=MODEL_TYPE,
-            tokenizer_path=MODEL_PARALLEL_PATH,
-            sequence_parallel=USE_SEQ_PARALLEL,
-            gradient_accumulation_fusion=False,
+            hf_model_family=MODEL_TYPE,
         ),
     )
 

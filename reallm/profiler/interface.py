@@ -122,10 +122,9 @@ class ProfileInterface(model_api.ModelInterface):
         else:
             if hasattr(module, "module"):
                 module = module.module
-            with module.sequence_parallel_disable():
-                res = module(packed_input_ids=data["packed_input_ids"],
-                             cu_seqlens=cu_seqlens,
-                             max_seqlen=max_seqlen)
+            res = module(packed_input_ids=data["packed_input_ids"],
+                         cu_seqlens=cu_seqlens,
+                         max_seqlen=max_seqlen)
             logits = res
 
         return dict(logits=logits)
@@ -162,14 +161,13 @@ class ProfileInterface(model_api.ModelInterface):
             # unwrap deepspeed engine here
             if hasattr(module, "module"):
                 module = module.module
-            with module.sequence_parallel_disable():
-                gen_res = module.generate(
-                    tokenizer=model.tokenizer,
-                    packed_input_ids=packed_prompts,
-                    cu_seqlens=cu_seqlens,
-                    max_seqlen=int(max(prompt_lengths)),
-                    gconfig=gconfig,
-                )
+            gen_res = module.generate(
+                tokenizer=model.tokenizer,
+                packed_input_ids=packed_prompts,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=int(max(prompt_lengths)),
+                gconfig=gconfig,
+            )
             gen_tokens = gen_res.sequences
             logprobs = gen_res.scores
             logits_mask = gen_res.logits_mask

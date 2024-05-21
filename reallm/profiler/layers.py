@@ -161,7 +161,7 @@ class ProfileLayers:
         packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=int(max_seqlen), store_kv_cache=True)
         ys = [PipeCacheData() for _ in range(self.num_layers)]
-        ys[0].input_ids = packed_input_ids
+        ys[0].packed_input_ids = packed_input_ids
 
         for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             st = time.monotonic_ns()
@@ -202,8 +202,8 @@ class ProfileLayers:
 
         # fwd_gen_1
         new_tokens = torch.randint(0, self.config.vocab_size, (bs, 1), dtype=torch.long, device=self.device)
-        ys[0].input_ids = new_tokens
-        ys[0].position_ids = None
+        ys[0].packed_input_ids = new_tokens
+        ys[0].packed_position_ids = None
         for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             st = time.monotonic_ns()
             x = layer.module(x, y)
@@ -220,7 +220,7 @@ class ProfileLayers:
         packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=False)
         ys = [PipeCacheData() for _ in range(self.num_layers)]
-        ys[0].input_ids = packed_input_ids
+        ys[0].packed_input_ids = packed_input_ids
 
         for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             # fwd

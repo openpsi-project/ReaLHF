@@ -45,6 +45,8 @@ class ReaLModelConfig:
 
     is_critic: bool = False
 
+    gradient_accumulation_fusion: bool = False
+
 
 def load_hf_tokenizer(model_name_or_path: str,
                       fast_tokenizer=True,

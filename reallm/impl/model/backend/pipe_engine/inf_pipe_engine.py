@@ -211,7 +211,7 @@ class InferencePipelineEngine:
                                  max_seqlen=int(max_seqlen),
                                  store_kv_cache=store_kv_cache)
             if self.is_first_stage():
-                ys = [PipeCacheData(input_ids=packed_input_ids)
+                ys = [PipeCacheData(packed_input_ids=packed_input_ids)
                       ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
             else:
                 ys = [PipeCacheData() for _ in range(self.num_layers)]
@@ -359,8 +359,7 @@ class InferencePipelineEngine:
         sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
                                            stages=self.num_stages,
                                            stage_id=self.stage_id)
-        with self.module.sequence_parallel_disable():
-            self._exec_schedule(sched)
+        self._exec_schedule(sched)
 
         logits = None
         if self.is_last_stage():
@@ -453,7 +452,7 @@ class InferencePipelineEngine:
         def terminate_condition():
             return all([self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)])
 
-        with self.module.gradient_checkpointing_disable(), self.module.sequence_parallel_disable():
+        with self.module.gradient_checkpointing_disable():
             self._exec_schedule(sched, terminate_condition)
         r = self._maybe_gather_generate_outputs()
         self._post_generate()
@@ -552,10 +551,10 @@ class InferencePipelineEngine:
             if self._generate_mode and self.is_first_stage():
                 x = self.tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
                 ys = self.tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
-                ys[0].input_ids = (
+                ys[0].packed_input_ids = (
                     buf  # .unsqueeze(-1) # sequence parallel forward only accept one dim input_ids
                 )
-                ys[0].position_ids = None
+                ys[0].packed_position_ids = None
             else:
                 others = self.tensor_buffer.get("pipe_transfer_infos", micro_batch_id, remove=False)
                 x = PipeTransferData(pp_input=buf, **others)
@@ -577,8 +576,8 @@ class InferencePipelineEngine:
         #         assert self._gd_graph_bs >= bs, (self._gd_graph_bs, bs)
         #         assert self._gd_graph_seqlen >= kvcache_seqlen, (self._gd_graph_seqlen, kvcache_seqlen)
         #         first_y = ys[1] if self.is_first_stage() else ys[0]
-        #         if ys[0].input_ids is not None:
-        #             self._gd_input_buffers["input_ids"][:bs].copy_(ys[0].input_ids, non_blocking=True)
+        #         if ys[0].packed_input_ids is not None:
+        #             self._gd_input_buffers["input_ids"][:bs].copy_(ys[0].packed_input_ids, non_blocking=True)
         #         if x.pp_input is not None:
         #             self._gd_input_buffers["hidden_states"][:bs].copy_(x.pp_input, non_blocking=True)
         #         self._gd_input_buffers["position_ids"][:bs].copy_(first_y.cache_seqlens.unsqueeze(-1),

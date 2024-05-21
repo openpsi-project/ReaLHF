@@ -107,6 +107,7 @@ class HFModelRegistry:
             logger.info(
                 f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
                 f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s")
+        return model
 
     def save(
         self,

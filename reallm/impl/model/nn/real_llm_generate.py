@@ -304,7 +304,7 @@ def generate(
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True)
         # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(input_ids=packed_input_ids)
+        ys = [PipeCacheData(packed_input_ids=packed_input_ids)
               ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
         # Model forward will set k/v cache in PipeCacheData.
         with model.gradient_checkpointing_disable():
@@ -389,7 +389,7 @@ def generate(
     # )
 
     # The main loop.
-    with model.gradient_checkpointing_disable(), model.sequence_parallel_disable():
+    with model.gradient_checkpointing_disable():
         while not terminate:
             # the next round of inference
             # input_buffers["input_ids"][:bs].copy_(next_tokens.unsqueeze(-1), non_blocking=True)
@@ -401,8 +401,10 @@ def generate(
             # cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
 
             # the next round of inference
-            ys[0].input_ids = next_tokens.unsqueeze(-1)  # [bs, 1], seqlen=1
-            ys[0].position_ids = None
+            ys[0].packed_input_ids = next_tokens
+            ys[0].packed_position_ids = None
+            x.cu_seqlens = torch.arange(bs + 1, dtype=torch.int32, device=torch.cuda.current_device())
+            x.max_seqlen = 1
             # K/v cache will be changed in-place with flash attention.
             logits = model(x, ys)[0].pp_output.squeeze(dim=1)
             cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
@@ -450,7 +452,7 @@ def vanilla_packed_generate(
         packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
         # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(input_ids=packed_input_ids)
+        ys = [PipeCacheData(packed_input_ids=packed_input_ids)
               ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
         # Model forward will set k/v cache in PipeCacheData.
         logits = model(x, ys).pp_output
@@ -507,7 +509,8 @@ def vanilla_cpu_generate(
     while not terminate:
         x = PipeTransferData(attention_mask=attention_mask)
         # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(input_ids=input_ids)] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
+        ys = [PipeCacheData(packed_input_ids=input_ids)
+              ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
         # Model forward will set k/v cache in PipeCacheData.
         logits = model(x, ys).pp_output[:, -1, :]
         # Next, we will generate the next token after prompts.
@@ -615,8 +618,8 @@ class InflightBatchingGenerator:
         self.output_logits_mask = [[] for _ in range(batch_size)]
 
     def _get_non_eos_logits(self) -> torch.FloatTensor:
-        self.ys[0].position_ids = None
-        self.ys[0].input_ids = self.input_buf[:, :1]
+        self.ys[0].packed_position_ids = None
+        self.ys[0].packed_input_ids = self.input_buf[:, :1]
         logits = self.model(PipeTransferData(), self.ys).pp_output.squeeze(dim=1)
 
         self.cache_seqlens += 1
@@ -687,8 +690,8 @@ class InflightBatchingGenerator:
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0), value=0).int()
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        self.ys[0].position_ids = None
-        self.ys[0].input_ids = packed_input_ids
+        self.ys[0].packed_position_ids = None
+        self.ys[0].packed_input_ids = packed_input_ids
         logits = self.model(x, self.ys).pp_output
         logits = index_first_axis(logits, (cu_seqlens[1:] - 1).long())
 

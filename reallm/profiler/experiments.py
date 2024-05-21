@@ -4,8 +4,8 @@ import functools
 
 import numpy as np
 
-from reallm.api.core.config import MODEL_FAMILY_TO_PATH
 from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
+from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.device_mesh import make_train_backend_config, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
@@ -284,12 +284,10 @@ class ProfileExperiment(Experiment):
             "real_model",
             args=dict(
                 model_path=MODEL_FAMILY_TO_PATH[rpc.model_type],
-                from_type="hf_as_actor",
+                is_critic=False,
+                init_critic_from_actor=False,  # FIXME:
                 dtype="fp16",
-                hf_model_type=rpc.model_type._class,
-                tokenizer_path=MODEL_FAMILY_TO_PATH[rpc.model_type],
-                sequence_parallel=m.topo.get_dim("model") > 1,
-                gradient_accumulation_fusion=False,
+                hf_model_family=rpc.model_type._class,
             ),
         )
         interface = rpc.interface_impl
