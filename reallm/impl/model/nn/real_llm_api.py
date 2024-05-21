@@ -614,18 +614,13 @@ def forward_helper(
         build_packed = True
         packed_input_ids, indices, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
         batch_size, seqlen = input_ids.shape[:2]
-    if packed_input_ids is not None:
-        x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-        ys = [PipeCacheData(packed_input_ids=packed_input_ids)
-              ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
-    else:
-        x = PipeTransferData()
-        ys = [PipeCacheData(packed_input_ids=input_ids)
-              ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
+    x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+    ys = [PipeCacheData(packed_input_ids=packed_input_ids)
+          ] + [PipeCacheData() for _ in range(self.config.n_layers + 1)]
     scores = ReaLModel.forward(self, x, ys)[0].pp_output
     if build_packed:
         scores = pad_input(scores, indices, batch_size, seqlen)
-    return scores
+    return DuckModelOutput(logits=scores)
 
 
 def add_helper_functions(m: ReaLModel):

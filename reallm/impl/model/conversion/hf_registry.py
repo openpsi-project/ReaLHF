@@ -184,7 +184,7 @@ class HFModelRegistry:
 
         # Save tokenizer and huggingface model config.
         if pp_rank == 0 and dp_rank == 0 and mp_rank == 0:
-            hf_config.to_json_file(os.path.join(save_dir, "config.json"))
+            hf_config.save_pretrained(save_dir)
             tokenizer.save_pretrained(save_dir)
 
         # Dump parameters to disk.

@@ -36,6 +36,7 @@ def to_starcoder_config(config: ReaLModelConfig) -> transformers.GPTBigCodeConfi
         attn_pdrop=config.attn_pdrop,
         layer_norm_epsilon=config.layer_norm_epsilon,
         multi_query=(config.n_kv_heads == 1),
+        activation_function="gelu",
     )
 
 

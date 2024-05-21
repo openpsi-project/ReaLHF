@@ -192,10 +192,11 @@ class CausalSelfAttentionLayer(nn.Module):
                 k,
                 v,
                 causal=True,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
                 dropout_p=self.applied_attn_pdrop,
                 softmax_scale=scale_factor,
                 upcast_unscale=unscale,
-                attention_mask=None,
             )
         elif k_cache is not None and len(q.shape) == 4:
             # k_cache/v_cache shape: [bs, max_seq, n_kv_heads, head_dim]

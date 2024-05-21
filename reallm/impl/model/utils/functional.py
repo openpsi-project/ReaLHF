@@ -7,6 +7,10 @@ import transformers
 
 from reallm.base import constants, logging
 
+try:
+    from flash_attn.bert_padding import pad_input, unpad_input
+except ModuleNotFoundError:
+    pass
 logger = logging.getLogger("Modeling Functional Utils")
 
 
@@ -37,11 +41,11 @@ def masked_softmax(x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor
 
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
-    bs, slen, n_kv_heads, head_dim = x.shape
+    total_seqlen, n_kv_heads, head_dim = x.shape
     if n_rep == 1:
         return x
-    return (x[:, :, :, None, :].expand(bs, slen, n_kv_heads, n_rep,
-                                       head_dim).reshape(bs, slen, n_kv_heads * n_rep, head_dim))
+    return (x[:, :, None, :].expand(total_seqlen, n_kv_heads, n_rep,
+                                    head_dim).reshape(total_seqlen, n_kv_heads * n_rep, head_dim))
 
 
 def mask_eos_token(
@@ -282,10 +286,11 @@ def torch_attn_func(
     k: torch.Tensor,
     v: torch.Tensor,
     causal: bool,
+    cu_seqlens: torch.IntTensor,
+    max_seqlen: int,
     dropout_p: float,
     softmax_scale: float,
     upcast_unscale: float = 1.0,
-    attention_mask: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """PyTorch implementation of the attention function with a flash-attn-like reallm.api.
 
@@ -294,57 +299,61 @@ def torch_attn_func(
     We call this function with float32 and CPU to get the "ground truth" output.
 
     Args:
-        q (torch.Tensor): Shape [bs, seqlen, #q, head_dim].
-        k (torch.Tensor): Shape [bs, seqlen, #kv, head_dim].
-        v (torch.Tensor): Shape [bs, seqlen, #kv, head_dim].
+        q (torch.Tensor): Shape [total_seqlen, #q, head_dim].
+        k (torch.Tensor): Shape [total_seqlen, #kv, head_dim].
+        v (torch.Tensor): Shape [total_seqlen, #kv, head_dim].
         causal (bool): .
         dropout_p (float): .
         softmax_scale (float): .
         upcast_unscale (float, optional): Scale factor when upcastin attention scores.
             Defaults to 1.0.
-        attention_mask (Optional[torch.Tensor], optional): Huggingface-like attention mask.
-            Shape [*, seqlen, seqlen]. Will override the `causal` argument.
-            Only used for debugging. Defaults to None.
 
     Returns:
         torch.Tensor: Attention score. Shape [bs, seqlen, #q, head_dim].
     """
+    nq = q.shape[-2]
+    nkv = k.shape[-2]
     n_rep = q.shape[-2] // k.shape[-2]
-    bsz, seqlen = q.shape[:2]
+    bsz = cu_seqlens.shape[0] - 1
     # repeat k/v heads if n_kv_heads < n_heads
     k = repeat_kv(k, n_rep)  # (bs, seqlen, nq, head_dim)
     v = repeat_kv(v, n_rep)  # (bs, seqlen, nq, head_dim)
+
+    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+    attention_mask = torch.arange(max_seqlen, dtype=torch.long,
+                                  device="cpu").unsqueeze(0) < input_lens.unsqueeze(1)
+    _, _pad_indices, _, _ = unpad_input(attention_mask, attention_mask)
+
+    q = pad_input(q, _pad_indices, bsz, max_seqlen)
+    k = pad_input(k, _pad_indices, bsz, max_seqlen)
+    v = pad_input(v, _pad_indices, bsz, max_seqlen)
 
     q = q.transpose(1, 2)  # (bs, nq, seqlen, head_dim)
     k = k.transpose(1, 2)
     v = v.transpose(1, 2)
     scores = torch.matmul(q, k.transpose(2, 3)) * softmax_scale
-    if attention_mask is not None:
-        assert str(attention_mask.device) == "cpu"
-        mask_softmax = True
-        mask = attention_mask
-    elif causal:
-        mask_softmax = True
-        mask = torch.tril(torch.ones(seqlen, seqlen, device=q.device, dtype=torch.bool))
-    else:
-        mask_softmax = False
-    if mask_softmax:
-        scores = upcast_masked_softmax(
-            scores,
-            mask,
-            mask_value=torch.full([],
-                                  torch.finfo(torch.float32).min,
-                                  device=scores.device,
-                                  dtype=torch.float32),
-            scale=upcast_unscale,
-            softmax_dtype=torch.float32,
-        )
-    else:
-        scores = upcast_softmax(scores, scale=upcast_unscale, softmax_dtype=torch.float32)
+
+    mask = attention_mask.unsqueeze(1).unsqueeze(1).repeat(1, nq, max_seqlen, 1)  # [bs, nq, seqlen, seqlen]
+    if causal:
+        causal_mask = torch.tril(torch.ones(max_seqlen, max_seqlen, device=q.device, dtype=torch.bool))
+        mask = mask & causal_mask
+
+    # if mask_softmax:
+    scores = upcast_masked_softmax(
+        scores,
+        mask,
+        mask_value=torch.full([], torch.finfo(torch.float32).min, device=scores.device, dtype=torch.float32),
+        scale=upcast_unscale,
+        softmax_dtype=torch.float32,
+    )
+    # else:
+    #     scores = upcast_softmax(scores, scale=upcast_unscale, softmax_dtype=torch.float32)
     scores = torch.nn.functional.dropout(scores, p=dropout_p)
     scores = scores.to(q.dtype)
     output = torch.matmul(scores, v)  # (bs, nq, seqlen, head_dim)
     output = output.transpose(1, 2).contiguous()
+
+    output = unpad_input(output, attention_mask)[0]
     return output
 
 
