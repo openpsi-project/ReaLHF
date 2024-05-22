@@ -47,6 +47,7 @@ _HF_REGISTRIES = {}
 
 def _load_from_hf(model: ReaLModel, registry_name, load_dir: str, init_critic_from_actor: bool):
     r = _HF_REGISTRIES[registry_name]
+    setattr(model, "save_to_hf", functools.partial(_save_to_hf, model, registry_name))
     return r.load(model, load_dir, init_critic_from_actor)
 
 

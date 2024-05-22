@@ -18,19 +18,19 @@ class PromptAnswerDatasetConfig:
     is set to 4, then the number of sequences in each batch should be at least 4.
 
     Args:
+        train_path (str): Path to the training dataset.
+        valid_path (str): Path to the evaluation dataset.
         max_seqlen (str): Maximum sequence length (prompt + answer).
             Sequences longer than this will be truncated.
         train_tokens_per_batch (int): Number of tokens in each batch during training.
         valid_tokens_per_batch (int): Number of tokens in each batch during evaluation.
-        train_path (str): Path to the training dataset.
-        valid_path (str): Path to the evaluation dataset.
     """
 
+    train_path: str = ""
+    valid_path: str = ""
     max_seqlen: int = 1024
     train_tokens_per_batch: int = 8192
     valid_tokens_per_batch: int = 8192
-    train_path: str = "/lustre/fw/datasets/imdb/rl/sft_pos-train.jsonl"
-    valid_path: str = "/lustre/fw/datasets/imdb/rl/sft_pos-valid.jsonl"
 
 
 @dataclasses.dataclass

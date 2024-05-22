@@ -316,7 +316,8 @@ class ModelWorker(worker_base.Worker):
                 self.__dataset = datasets[0]
             else:
                 self.__dataset = torch.utils.data.ConcatDataset(datasets)
-            self.__max_seqlen = max(d.max_seqlen for d in datasets)
+            # FIXME:
+            self.__max_seqlen = 1024
             self.__dataloader = data_api.make_dataloader(self.config.dataloader, self.__dataset)
             self.__data_generator = enumerate([])
 
@@ -379,7 +380,7 @@ class ModelWorker(worker_base.Worker):
                         eval_dataset = torch.utils.data.ConcatDataset(eval_datasets)
                     else:
                         eval_dataset = eval_datasets[0]
-                    eval_dataloader = data_api.make_dataloader(self.config.eval_dataloader, eval_dataset)
+                    eval_dataloader = data_api.make_dataloader(s.eval_dataloader, eval_dataset)
                 else:
                     eval_dataloader = None
                 self.__eval_dataloaders[s.id.model_name] = eval_dataloader

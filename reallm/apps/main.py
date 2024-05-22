@@ -99,7 +99,7 @@ def main_start(args):
         "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
         "WANDB_MODE": args.wandb_mode,
         "REAL_MODE": args.mode.upper(),
-        "REAL_TRACE": "1" if args.trace else "0",
+        "REAL_TRACE": os.getenv("REAL_TRACE", "0"),
         "IS_REMOTE": "1",
     }
     os.environ["IS_REMOTE"] = "1"
@@ -183,11 +183,11 @@ def main_start(args):
                 use_ray_cluster=(args.mode == "ray"),
             )
 
-    timeout = None if not args.trace else TRACE_TIMEOUT  # run 5 mins to collect trace
+    timeout = None if os.getenv("REAL_TRACE", "0") == "0" else TRACE_TIMEOUT  # run 5 mins to collect trace
     try:
         sched.wait(timeout=timeout)
     except (KeyboardInterrupt, sched_client.JobException, TimeoutError) as e:
-        if args.trace and isinstance(e, TimeoutError):
+        if os.getenv("REAL_TRACE", "0") != "0" and isinstance(e, TimeoutError):
             s = "#" * 30 + "  Trace complete. Killing all processes...  " + "#" * 30
             logger.info("\n" + "#" * len(s) + "\n" + s + "\n" + "#" * len(s))
         sched.stop_all()
@@ -251,11 +251,6 @@ def main():
         "--remote_reset",
         action="store_true",
         help="If True, reset name resolve repo remotely in computation nodes. Otherwise reset locally.",
-    )
-    subparser.add_argument(
-        "--trace",
-        action="store_true",
-        help="Whether to use VizTracer to trace the execution time of each line of python code.",
     )
     subparser.set_defaults(ignore_worker_error=False)
     subparser.set_defaults(func=main_start)

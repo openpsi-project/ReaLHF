@@ -173,7 +173,6 @@ def deepspeed_initialize(
         config_class = DeepSpeedConfig(config, mpu)
         engine_cls = DeepSpeedPipelineEngine
         engine = engine_cls(
-            sequence_parallel=sequence_parallel,
             enable_async_p2p_communication=enable_async_p2p_communication,
             enable_async_instruction=enable_async_instruction,
             model=model,
@@ -199,7 +198,7 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     lr_scheduler_type: str = "cosine"
     warmup_steps_proportion: float = 0.0
     min_lr_ratio: float = 0.0  # will be used for linear and cosine schedule
-    gradient_checkpointing: bool = False
+    gradient_checkpointing: bool = False  # FIXME:
     offload_param: bool = False
     offload_optimizer_state: bool = False
     enable_fp16: bool = True
@@ -217,7 +216,7 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     engine_type: str = "deepspeed"
     # parallelism args
     sequence_parallel: bool = False
-    enable_async_p2p_communication: bool = False
+    enable_async_p2p_communication: bool = False  # FIXME:
     enable_async_instruction: bool = False
     instruction_sync: bool = False
     # selective gradient ckpt, only effective when gradient_checkpointing is True

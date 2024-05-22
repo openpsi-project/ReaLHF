@@ -164,6 +164,7 @@ class ModelWorker:
                 f"ModelWorker cannot have multiple shards of the same model name: {model_names}.")
 
 
+# FIXME:
 # For profiling only
 @dataclasses.dataclass
 class ProfileWorker:

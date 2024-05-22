@@ -32,7 +32,6 @@ class _MainStartArgs:
     image_name: Optional[str] = None
     ignore_worker_error: bool = False
     remote_reset: bool = False
-    trace: bool = False
 
 
 def kind_reminder(config_name, logger, args):
@@ -41,23 +40,23 @@ def kind_reminder(config_name, logger, args):
     logger.info(
         f"Model checkpoints will be saved to {os.path.join(MODEL_SAVE_ROOT, args.experiment_name, args.trial_name)}"
     )
-    for k, v in args.items():
-        if hasattr(v, "parallel") and (v.parallel.pipeline_parallel_size > 1
-                                       or v.parallel.model_parallel_size > 1):
-            logger.warning(f"Detected model named '{k}' enables pipeline parallel or model parallel. "
-                           "Please ensure that (1) there are enough GPUs for your experiment "
-                           "and (2) the model checkpoint has been converted into "
-                           "shards using scripts/transform_to_pipe_ckpt.py.")
-        if hasattr(v, "parallel") and v.base_model_path is None:
-            logger.warning(
-                f"Detected `base_model_path` of model named '{k}' is not specified. Using `path` as `base_model_path`."
-            )
-            v.base_model_path = v.path
-        if hasattr(v, "parallel") and v.tokenizer_path is None:
-            logger.warning(
-                f"Detected `tokenizer_path` of model named '{k}' is not specified. Using `base_model_path` as `tokenizer_path`."
-            )
-            v.tokenizer_path = v.base_model_path
+    # for k, v in args.items():
+    #     if hasattr(v, "parallel") and (v.parallel.pipeline_parallel_size > 1
+    #                                    or v.parallel.model_parallel_size > 1):
+    #         logger.warning(f"Detected model named '{k}' enables pipeline parallel or model parallel. "
+    #                        "Please ensure that (1) there are enough GPUs for your experiment "
+    #                        "and (2) the model checkpoint has been converted into "
+    #                        "shards using scripts/transform_to_pipe_ckpt.py.")
+    #     if hasattr(v, "parallel") and v.base_model_path is None:
+    #         logger.warning(
+    #             f"Detected `base_model_path` of model named '{k}' is not specified. Using `path` as `base_model_path`."
+    #         )
+    #         v.base_model_path = v.path
+    #     if hasattr(v, "parallel") and v.tokenizer_path is None:
+    #         logger.warning(
+    #             f"Detected `tokenizer_path` of model named '{k}' is not specified. Using `base_model_path` as `tokenizer_path`."
+    #         )
+    #         v.tokenizer_path = v.base_model_path
 
     slurm_available = (int(
         subprocess.run(
@@ -89,7 +88,7 @@ def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
             args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
         else:
             trial_name = args.trial_name
-        from apps.main import main_start, main_stop
+        from reallm.apps.main import main_start, main_stop
 
         mode = kind_reminder(config_name, logger, args)
 
@@ -101,9 +100,9 @@ def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
         system_api.register_experiment(exp_name, exp_fn)
 
         try:
-            main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
+            main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
         except Exception as e:
-            main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True, trace=args.trace))
+            main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
             logger.warning("Exception occurred. Stopping all workers.")
             raise e
 
@@ -118,7 +117,7 @@ run_ppo = build_quickstart_entry_point("ppo", PPOConfig)
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="distributed_llm")
+    parser = argparse.ArgumentParser(prog="ReaL Quickstart")
     subparsers = parser.add_subparsers(dest="cmd", help="sub-command help")
     subparsers.required = True
 
@@ -145,26 +144,20 @@ def main():
         print(f"Experiment name not manually set. Default to {experiment_name}.")
         sys.argv += [f"experiment_name={experiment_name}"]
 
-    if "--multirun" not in sys.argv and "hydra.mode=MULTIRUN" not in sys.argv and "-m" not in sys.argv:
-        # non-multirun mode, add trial_name and hydra run dir
-        if any("trial_name=" in x for x in sys.argv):
-            trial_name = next(x for x in sys.argv if "trial_name=" in x).split("=")[1]
-        else:
-            trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
-            sys.argv += [f"trial_name={trial_name}"]
-        if "_" in trial_name:
-            raise RuntimeError("trial_name should not contain `_`.")
-        sys.argv += [
-            f"hydra.run.dir={cluster_spec.fileroot}/logs/{getpass.getuser()}/"
-            f"{experiment_name}/{trial_name}/hydra-outputs/"
-        ]
+    if "--multirun" in sys.argv or "hydra.mode=MULTIRUN" in sys.argv or "-m" in sys.argv:
+        raise NotImplementedError("Hydra multi-run is not supported.")
+    # non-multirun mode, add trial_name and hydra run dir
+    if any("trial_name=" in x for x in sys.argv):
+        trial_name = next(x for x in sys.argv if "trial_name=" in x).split("=")[1]
     else:
-        # Multi-run mode, add hydra sweep dir. Trial names will be automatically generated.
-        sys.argv += [
-            f"hydra.sweep.dir={cluster_spec.fileroot}/logs/{getpass.getuser()}/"
-            f"{experiment_name}/hydra-sweep-outputs/"
-            f"{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
-        ]
+        trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+        sys.argv += [f"trial_name={trial_name}"]
+    if "_" in trial_name:
+        raise RuntimeError("trial_name should not contain `_`.")
+    sys.argv += [
+        f"hydra.run.dir={cluster_spec.fileroot}/logs/{getpass.getuser()}/"
+        f"{experiment_name}/{trial_name}/hydra-outputs/"
+    ]
 
     sys.argv.pop(1)
     args.func()

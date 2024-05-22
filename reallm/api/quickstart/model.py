@@ -117,7 +117,6 @@ class ModelTrainEvalConfig:
         parallel (ParallelismConfig): Parallelism configuration.
         zero_stage (int): Stage of DeepSpeed ZeRO optimization. Should be one of 0, 1, 2, 3.
         optimizer (OptimizerConfig): Optimizer configuration.
-        enable_async_p2p (bool): Whether to use async p2p, only effective when using pipeline parallelism.
     """
 
     type: str = dataclasses.field(
@@ -138,7 +137,6 @@ class ModelTrainEvalConfig:
         default=2,
     )
     optimizer: Optional[OptimizerConfig] = dataclasses.field(default_factory=OptimizerConfig)
-    enable_async_p2p: bool = False
 
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:

@@ -22,8 +22,11 @@ import torch.distributed
 from reallm.api.core.config import ModelName
 from reallm.api.core.model_api import ReaLModelConfig
 from reallm.base import datapack, dataparallel, logging, namedarray, numpy_utils, timeutil, topology
-from reallm.base.asyncio_utils import (raise_asyncio_exception, setup_run_until_complete,
-                                       teardown_run_util_complete)
+from reallm.base.asyncio_utils import (
+    raise_asyncio_exception,
+    setup_run_until_complete,
+    teardown_run_util_complete,
+)
 from reallm.base.cluster import spec as cluster_spec
 from reallm.base.constants import MODEL_SAVE_ROOT
 from reallm.system.buffer import AsyncIOSequenceBuffer
@@ -40,11 +43,15 @@ blogger = logging.getLogger("benchmark")
 
 
 def _get_n_seqs_from_batch_sample(sample: namedarray.NamedArray) -> int:
-    assert ("input_lens" in sample.keys() or "cu_seqlens" in sample.keys()
-            or "prompt_cu_seqlens" in sample.keys() or "prompt_lens" in sample.keys()), (
-                list(sample.keys()),
-                sample,
-            )
+    assert (
+        "input_lens" in sample.keys()
+        or "cu_seqlens" in sample.keys()
+        or "prompt_cu_seqlens" in sample.keys()
+        or "prompt_lens" in sample.keys()
+    ), (
+        list(sample.keys()),
+        sample,
+    )
     if "input_lens" in sample.keys():
         return len(sample["input_lens"])
     elif "cu_seqlens" in sample.keys():
@@ -61,10 +68,20 @@ def _get_n_seqs_from_batch_sample(sample: namedarray.NamedArray) -> int:
 class ExperimentComplete(Exception):
 
     def __init__(self, message):
-        disclaimer = (colorama.Fore.GREEN + "\033[1m" +
-                      "<This is not an error. It is just a way to stop the experiment.> ")
-        super().__init__(disclaimer + colorama.Style.RESET_ALL + colorama.Fore.YELLOW +
-                         colorama.Style.BRIGHT + "\033[1m" + message + colorama.Style.RESET_ALL)
+        disclaimer = (
+            colorama.Fore.GREEN
+            + "\033[1m"
+            + "<This is not an error. It is just a way to stop the experiment.> "
+        )
+        super().__init__(
+            disclaimer
+            + colorama.Style.RESET_ALL
+            + colorama.Fore.YELLOW
+            + colorama.Style.BRIGHT
+            + "\033[1m"
+            + message
+            + colorama.Style.RESET_ALL
+        )
 
 
 def request_all(
@@ -74,28 +91,33 @@ def request_all(
     datas: List[namedarray.NamedArray],
     verbose: bool = True,
 ):
-    """Send request of `handle_type` to multiple streams. len(streams)==len(datas)"""
     requests = [
         request_reply_stream.Payload(
             handler=handler,
             handle_name=handle_type,
             data=data,
-        ) for handler, data in zip(handlers, datas)
+        )
+        for handler, data in zip(handlers, datas)
     ]
     if verbose:
         blogger.debug(f"master worker #request_all# *end* time ${time.time_ns()}$")
     tik = time.perf_counter()
+
+    # A protocol to ensure that any model worker execute jobs in the same order.
     [stream.post(r) for r in requests]
     [stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id])) for p in requests]
     [
         stream.post(
-            request_reply_stream.Payload(handler=r.handler, handle_name="ack", request_id=r.ack_reply_id))
+            request_reply_stream.Payload(handler=r.handler, handle_name="ack", request_id=r.ack_reply_id)
+        )
         for r in requests
     ]
     t = time.perf_counter() - tik
+
     if verbose:
-        blogger.debug(f'Request "{handle_type}" time in total: '
-                      f"{t:.4f}s, {t / len(requests):.4f}s per request")
+        blogger.debug(
+            f'Request "{handle_type}" time in total: ' f"{t:.4f}s, {t / len(requests):.4f}s per request"
+        )
     return [r.request_id for r in requests]
 
 
@@ -124,8 +146,8 @@ async def gather_all_replies(
 ) -> List:
     """Collect responses from multiple streams. Blocking method."""
     responses = await asyncio.gather(
-        *
-        [_awaitable_response(stream, pattern=create_exact_match_pattern([req_id])) for req_id in request_ids])
+        *[_awaitable_response(stream, pattern=create_exact_match_pattern([req_id])) for req_id in request_ids]
+    )
     if verbose:
         blogger.debug(f"master worker #gather_all_replies# *end* time ${time.time_ns()}$")
     return responses
@@ -138,8 +160,9 @@ async def group_rpc_blocked(
     datas: List[namedarray.NamedArray],
     verbose: bool = True,
 ) -> List[namedarray.NamedArray]:
-    payloads = await gather_all_replies(stream,
-                                        request_all(stream, handlers, handle_type, datas, verbose=verbose))
+    payloads = await gather_all_replies(
+        stream, request_all(stream, handlers, handle_type, datas, verbose=verbose)
+    )
     return [p.data for p in payloads]
 
 
@@ -161,9 +184,9 @@ def split_packed_batch_into_seqs(
     partitions = [(i, i + 1) for i in range(input_lens.shape[0])]
     sample["input_lens"] = input_lens
     sample.register_metadata(seqlens=input_lens.cpu().numpy().tolist())
-    res = dataparallel.PackedParallelDataBroker.scatter_to(sample,
-                                                           n_dp=len(input_lens),
-                                                           partitions=partitions)
+    res = dataparallel.PackedParallelDataBroker.scatter_to(
+        sample, n_dp=len(input_lens), partitions=partitions
+    )
     if not return_seqlens:
         return res
     else:
@@ -207,16 +230,17 @@ def _request_parameter_sync(
         "to_model_config": to_model_config,
     }
     payloads = [
-        request_reply_stream.Payload(handler=h,
-                                     handle_name="empty",
-                                     pre_hooks=["param_realloc"],
-                                     pre_hook_data=[ps_data]) for h in handlers
+        request_reply_stream.Payload(
+            handler=h, handle_name="empty", pre_hooks=["param_realloc"], pre_hook_data=[ps_data]
+        )
+        for h in handlers
     ]
     request_ids = [stream.post(p) for p in payloads]
     [stream.poll(pattern=create_exact_match_pattern([p.syn_reply_id]), block=True) for p in payloads]
     [
         stream.post(
-            request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id))
+            request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id)
+        )
         for p in payloads
     ]
     [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in request_ids]
@@ -418,13 +442,16 @@ async def scatter_tensor_to_mws(
     )
     req_ids = [stream.post(p) for h, p in payloads.items() if h in handlers]
     other_req_ids = [stream.post(p) for h, p in payloads.items() if h not in handlers]
-    await asyncio.gather(*[
-        _awaitable_response(stream, pattern=create_exact_match_pattern([p.syn_reply_id]))
-        for p in payloads.values()
-    ])
+    await asyncio.gather(
+        *[
+            _awaitable_response(stream, pattern=create_exact_match_pattern([p.syn_reply_id]))
+            for p in payloads.values()
+        ]
+    )
     [
         stream.post(
-            request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id))
+            request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id)
+        )
         for p in payloads.values()
     ]
     return req_ids, other_req_ids
@@ -475,8 +502,10 @@ async def model_rpc_request_func(
 
         # The following two lines are used to ensure staleness=0, but it may be unnecessary when enabling the stream engine.
         # NOTE: max-min-flow-tokens is not used here because the number of tokens can change (e.g. after generate)
-        while data_amount_seqs >= (ctrl.model_traversal[rpc.model_name.role] + 1) * rpc.max_min_flow_seqs:
-            await asyncio.sleep(0.1)
+        # FIXME: RPCs that do not give max/min seqs will have issues.
+        if not rpc.is_dst_of_model_role:
+            while data_amount_seqs >= (ctrl.model_traversal[rpc.model_name.role] + 1) * rpc.max_min_flow_seqs:
+                await asyncio.sleep(0.1)
 
         sample = await buffer.get_batch_for_rpc(rpc)
 
@@ -507,9 +536,9 @@ async def model_rpc_request_func(
             min_n_seqs_per_dp = len(sample.seqlens) // dp_size
         else:
             min_n_seqs_per_dp = 1
-        partitions = datapack.min_abs_diff_partition(np.array(sample.seqlens, dtype=np.int32),
-                                                     dp_size,
-                                                     min_size=min_n_seqs_per_dp)
+        partitions = datapack.min_abs_diff_partition(
+            np.array(sample.seqlens, dtype=np.int32), dp_size, min_size=min_n_seqs_per_dp
+        )
         target_mapping = {i: list(range(v[0], v[1])) for i, v in enumerate(partitions)}
 
         # Set data owner of produced data by this RPC, such that downstream RPCs can know
@@ -578,14 +607,16 @@ async def model_rpc_reply_func(
         req_ids, other_req_ids, tik = await request_queue.get()
 
         # empty requests with parameter synchronization hooks may be issued
-        await asyncio.gather(*[
-            _awaitable_response(stream, pattern=create_exact_match_pattern([req_id]))
-            for req_id in other_req_ids
-        ])
+        await asyncio.gather(
+            *[
+                _awaitable_response(stream, pattern=create_exact_match_pattern([req_id]))
+                for req_id in other_req_ids
+            ]
+        )
 
         responses = await asyncio.gather(
-            *
-            [_awaitable_response(stream, pattern=create_exact_match_pattern([req_id])) for req_id in req_ids])
+            *[_awaitable_response(stream, pattern=create_exact_match_pattern([req_id])) for req_id in req_ids]
+        )
         # logger.info(f"rpc {rpc.name} received responses {req_ids}")
 
         responses: List[request_reply_stream.Payload] = [responses[i] for i in dp_head_indices]
@@ -655,12 +686,14 @@ async def load_data_func(
             n_seqs = [_get_n_seqs_from_batch_sample(d) for d in datas]
             sample = dataparallel.ParallelDataBroker.gather_from([namedarray.from_dict(x) for x in datas])
             xs, seqlens = split_packed_batch_into_seqs(sample, return_seqlens=True)
-            buffer_indices = await buffer.put_batch([(list(x.keys()), seqlen)
-                                                     for x, seqlen in zip(xs, seqlens)])
+            buffer_indices = await buffer.put_batch(
+                [(list(x.keys()), seqlen) for x, seqlen in zip(xs, seqlens)]
+            )
             assert len(buffer_indices) == sum(n_seqs)
 
             for dp_i, (st, ed) in enumerate(
-                    zip([0] + list(itertools.accumulate(n_seqs)), itertools.accumulate(n_seqs))):
+                zip([0] + list(itertools.accumulate(n_seqs)), itertools.accumulate(n_seqs))
+            ):
                 for buf_idx in buffer_indices[st:ed]:
                     for k in sample.keys():
                         data_owner[(buf_idx, k)] = (src_rpc_model_name, dp_i)
@@ -680,19 +713,21 @@ async def load_data_func(
             buffer.lock.notify(buffer.n_rpcs)
 
         blogger.info(
-            f"Filling data finished. Time consumption: {time.perf_counter() - fetch_data_start:.3f}s.")
+            f"Filling data finished. Time consumption: {time.perf_counter() - fetch_data_start:.3f}s."
+        )
 
 
 async def model_eval_thread_func(
-    stream: List[request_reply_stream.NameResolvingRequstClient],
+    stream: request_reply_stream.NameResolvingRequstClient,
     handlers: List[config_pkg.ModelShardID],
     eval_queue: asyncio.Queue,
     stop_ctl: asyncio.Event,
 ):
     while not stop_ctl.is_set():
         epoch, epoch_step = await eval_queue.get()
-        eval_stats = dataparallel.ParallelDataBroker.gather_from(await group_rpc_blocked(
-            stream, handlers, "evaluate", [None for _ in handlers]))
+        eval_stats = dataparallel.ParallelDataBroker.gather_from(
+            await group_rpc_blocked(stream, handlers, "evaluate", [None for _ in handlers])
+        )
         logger.info(f"Evaluation results at epoch {epoch + 1} step {epoch_step + 1}: {eval_stats}")
 
 
@@ -705,7 +740,11 @@ async def model_save_thread_func(
 ):
     while not stop_ctl.is_set():
         epoch, epoch_step = await save_queue.get()
-        model_save_dirs = [os.path.join(model_save_root, s.model_name) for s in handlers]
+
+        # Only save replica ID 0.
+        handlers = list(filter(lambda s: s.model_name.replica_id == 0, handlers))
+
+        model_save_dirs = [os.path.join(model_save_root, s.model_name.role) for s in handlers]
         await group_rpc_blocked(stream, handlers, "save", model_save_dirs)
         logger.info(f"Save models at epoch {epoch + 1} step {epoch_step + 1}.")
 
@@ -724,9 +763,11 @@ class MasterWorker(worker_base.Worker):
             _dp_size = self.__model_topos[rpc.model_name].get_dim("data")
             _pp_size = self.__model_topos[rpc.model_name].get_dim("pipe")
             if rpc.min_n_seqs < _dp_size * _pp_size:
-                logger.warning(f"The batch size of RPC `{rpc.name}` in terms of #seqs is smaller than "
-                               f"dp_size * pp_size ({_dp_size}*{_pp_size}). Forcely enlarge the batch size "
-                               f"to {_dp_size * _pp_size} (dp_size * pp_size). (original: {rpc.min_n_seqs})")
+                logger.warning(
+                    f"The batch size of RPC `{rpc.name}` in terms of #seqs is smaller than "
+                    f"dp_size * pp_size ({_dp_size}*{_pp_size}). Forcely enlarge the batch size "
+                    f"to {_dp_size * _pp_size} (dp_size * pp_size). (original: {rpc.min_n_seqs})"
+                )
                 rpc.min_n_seqs_per_dp = 1
                 rpc.min_n_seqs = _dp_size * _pp_size
 
@@ -760,7 +801,7 @@ class MasterWorker(worker_base.Worker):
         os.makedirs(self.MODEL_SAVE_ROOT, exist_ok=True)
 
         self.__initialized = False
-        self._epoch = -1
+        self._epoch = 0
         self._epoch_step = self._global_step = 0
 
         # for benchmark
@@ -780,9 +821,10 @@ class MasterWorker(worker_base.Worker):
         for i in range(src_rpc_dp_size):
             rank = src_rpc_topo.get_rank(data=i, pipe=src_rpc_pp_size - 1, model=0)
             handler_routing[f"__data{i}__"] = self.config.msid2mwid[
-                config_pkg.ModelShardID.from_parallelism_rank(model_name=src_rpc.model_name,
-                                                              topo=src_rpc_topo,
-                                                              parallelism_rank=rank)]
+                config_pkg.ModelShardID.from_parallelism_rank(
+                    model_name=src_rpc.model_name, topo=src_rpc_topo, parallelism_rank=rank
+                )
+            ]
         self.__stream = request_reply_stream.make_master_stream(
             self.config.worker_info,
             n_subscribers=self.config.n_model_workers,
@@ -798,10 +840,11 @@ class MasterWorker(worker_base.Worker):
         self.__stream.post(p)
         self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
         self.__stream.post(
-            request_reply_stream.Payload(handler="__data0__", handle_name="ack", request_id=p.ack_reply_id))
-        ft_spec: model_api.FinetuneSpec = self.__stream.poll(block=True,
-                                                             pattern=create_exact_match_pattern(
-                                                                 [p.request_id])).data
+            request_reply_stream.Payload(handler="__data0__", handle_name="ack", request_id=p.ack_reply_id)
+        )
+        ft_spec: model_api.FinetuneSpec = self.__stream.poll(
+            block=True, pattern=create_exact_match_pattern([p.request_id])
+        ).data
         ft_spec.total_train_epochs = self.config.exp_ctrl.total_train_epochs
         ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
 
@@ -844,10 +887,11 @@ class MasterWorker(worker_base.Worker):
             self.__stream.post(p)
             self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
             self.__stream.post(
-                request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id))
-            self.__model_configs[model_name] = self.__stream.poll(pattern=create_exact_match_pattern(
-                [p.request_id]),
-                                                                  block=True).data
+                request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id)
+            )
+            self.__model_configs[model_name] = self.__stream.poll(
+                pattern=create_exact_match_pattern([p.request_id]), block=True
+            ).data
 
         _param_senders = [v[0] for v in self.config.sync_param_pairs]
         _param_recevers = [v[1] for v in self.config.sync_param_pairs]
@@ -877,7 +921,8 @@ class MasterWorker(worker_base.Worker):
                     handlers=_handlers,
                     handle_type="initialize",
                     datas=model_ft_specs,
-                ))
+                )
+            )
             event_loop.run_until_complete(asyncio.gather(_task))[0]
 
             if model_name.replica_id > 0:
@@ -901,11 +946,9 @@ class MasterWorker(worker_base.Worker):
             eval_queue=asyncio.Queue(1),
             save_queue=asyncio.Queue(1),
             model_traversal={
-                model_name: 0
-                for model_name in set(r.model_name.role for r in self.__model_rpcs)
+                model_name: 0 for model_name in set(r.model_name.role for r in self.__model_rpcs)
             },
-            can_do_rpc={rpc.name: asyncio.Semaphore(rpc.max_concurrent_calls)
-                        for rpc in self.__model_rpcs},
+            can_do_rpc={rpc.name: asyncio.Semaphore(rpc.max_concurrent_calls) for rpc in self.__model_rpcs},
             request_queues={
                 rpc.name: [asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)]
                 for rpc in self.__model_rpcs
@@ -945,7 +988,8 @@ class MasterWorker(worker_base.Worker):
                     model_topos=self.__model_topos,
                     model_configs=self.__model_configs,
                     ctrl=self.__rpc_ctrl,
-                ))
+                )
+            )
             reply_tasks = []
             for j in range(rpc.max_concurrent_calls):
                 _reply_task = event_loop.create_task(
@@ -956,7 +1000,8 @@ class MasterWorker(worker_base.Worker):
                         buffer=self.__seqbuffer,
                         model_topos=self.__model_topos,
                         ctrl=self.__rpc_ctrl,
-                    ))
+                    )
+                )
                 reply_tasks.append(_reply_task)
             coroutine_tasks += [request_task] + reply_tasks
 
@@ -969,14 +1014,16 @@ class MasterWorker(worker_base.Worker):
                 stream=self.__stream,
                 fetch_ctl=self.__rpc_ctrl.fetch_data_queue,
                 stop_ctl=self.__rpc_ctrl.stop,
-            ))
+            )
+        )
         eval_task = event_loop.create_task(
             model_eval_thread_func(
                 stream=self.__stream,
                 handlers=self.__all_model_handlers,
                 eval_queue=self.__rpc_ctrl.eval_queue,
                 stop_ctl=self.__rpc_ctrl.stop,
-            ))
+            )
+        )
         save_task = event_loop.create_task(
             model_save_thread_func(
                 stream=self.__stream,
@@ -984,7 +1031,8 @@ class MasterWorker(worker_base.Worker):
                 model_save_root=self.MODEL_SAVE_ROOT,
                 save_queue=self.__rpc_ctrl.save_queue,
                 stop_ctl=self.__rpc_ctrl.stop,
-            ))
+            )
+        )
         coroutine_tasks += [load_data_task, eval_task, save_task]
 
         # self.__event_loop = event_loop
@@ -1004,26 +1052,6 @@ class MasterWorker(worker_base.Worker):
     def _poll(self):
         if not self.__initialized:
             self.__lazy_init()
-
-        try:
-            self.__fetch_master_ctl.get_nowait()
-            is_new_epoch = True
-        except asyncio.QueueEmpty:
-            is_new_epoch = False
-
-        should_eval = self.__eval_ctl.check(epochs=int(is_new_epoch), steps=1)
-        should_save = self.__save_ctl.check(epochs=int(is_new_epoch), steps=1)
-
-        if should_eval:
-            self.__rpc_ctrl.eval_queue.put_nowait((self._epoch, self._epoch_step))
-        if should_save:
-            self.__rpc_ctrl.save_queue.put_nowait((self._epoch, self._epoch_step))
-
-        if is_new_epoch:
-            self._epoch += 1
-            self._epoch_step = 0
-            if self._epoch >= self.__total_train_epochs:
-                self.experiment_complete_exit(f"Training completes! Yeah!!!")
 
         # Main execution steps. The graph runs under-the-hood in RPC & stream threads.
         # Wait for the finish of the tranverse of the execution graph.
@@ -1052,6 +1080,26 @@ class MasterWorker(worker_base.Worker):
                 raise_asyncio_exception(self.__asyncio_ctx)
         logger.info("Execution finished!")
 
+        try:
+            self.__fetch_master_ctl.get_nowait()
+            is_new_epoch = True
+        except asyncio.QueueEmpty:
+            is_new_epoch = False
+
+        should_eval = self.__eval_ctl.check(epochs=int(is_new_epoch), steps=1)
+        should_save = self.__save_ctl.check(epochs=int(is_new_epoch), steps=1)
+
+        if should_eval:
+            self.__rpc_ctrl.eval_queue.put_nowait((self._epoch, self._epoch_step))
+        if should_save:
+            self.__rpc_ctrl.save_queue.put_nowait((self._epoch, self._epoch_step))
+
+        if is_new_epoch:
+            self._epoch += 1
+            self._epoch_step = 0
+            if self._epoch > self.__total_train_epochs:
+                self.experiment_complete_exit(f"Training completes! Yeah!!!")
+
         self._epoch_step += 1
         self._global_step += 1
 
@@ -1062,14 +1110,17 @@ class MasterWorker(worker_base.Worker):
 
         # calculate flops
         #########################################
-        from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
-                                         calculate_llama_train_flops)
+        from reallm.base.monitor import (
+            caculuate_llama_forward_flops,
+            calculate_llama_gen_flops,
+            calculate_llama_train_flops,
+        )
 
         flops = 0
         for train_bs, train_seqlens, real_config in zip(
-                self.__rpc_ctrl.data_amount.train_bs,
-                self.__rpc_ctrl.data_amount.train_seqlens,
-                self.__rpc_ctrl.data_amount.train_configs,
+            self.__rpc_ctrl.data_amount.train_bs,
+            self.__rpc_ctrl.data_amount.train_seqlens,
+            self.__rpc_ctrl.data_amount.train_configs,
         ):
             flops += calculate_llama_train_flops(
                 checkpoint_activations_factor=4,
@@ -1081,9 +1132,9 @@ class MasterWorker(worker_base.Worker):
                 vocab_size=real_config.vocab_size,
             )
         for inf_bs, inf_seqlens, real_config in zip(
-                self.__rpc_ctrl.data_amount.inf_bs,
-                self.__rpc_ctrl.data_amount.inf_seqlens,
-                self.__rpc_ctrl.data_amount.inf_configs,
+            self.__rpc_ctrl.data_amount.inf_bs,
+            self.__rpc_ctrl.data_amount.inf_seqlens,
+            self.__rpc_ctrl.data_amount.inf_configs,
         ):
             flops += caculuate_llama_forward_flops(
                 batch_size=inf_bs,
@@ -1094,10 +1145,10 @@ class MasterWorker(worker_base.Worker):
                 vocab_size=real_config.vocab_size,
             )
         for gen_bs, prompt_lens, gen_len, real_config in zip(
-                self.__rpc_ctrl.data_amount.gen_bs,
-                self.__rpc_ctrl.data_amount.prompt_lens,
-                self.__rpc_ctrl.data_amount.gen_len,
-                self.__rpc_ctrl.data_amount.gen_configs,
+            self.__rpc_ctrl.data_amount.gen_bs,
+            self.__rpc_ctrl.data_amount.prompt_lens,
+            self.__rpc_ctrl.data_amount.gen_len,
+            self.__rpc_ctrl.data_amount.gen_configs,
         ):
             flops += calculate_llama_gen_flops(
                 batch_size=gen_bs,
@@ -1109,14 +1160,14 @@ class MasterWorker(worker_base.Worker):
                 vocab_size=real_config.vocab_size,
             )
         self.__rpc_ctrl.data_amount.clear()
-        tflops_per_gpu = flops / (e2e_time * (10**12))
-        tflops = flops / (e2e_time * self.config.n_model_workers * (10**12))
+        tflops = flops / (e2e_time * (10**12))
+        tflops_per_gpu = flops / (e2e_time * self.config.n_model_workers * (10**12))
         #########################################
 
         logger.info(
-            f"Epoch {self._epoch + 1}/{self.config.exp_ctrl.total_train_epochs} "
-            f"step {self._epoch_step + 1} "
-            f"(global step {self._global_step + 1}) finishes. "
+            f"Epoch {self._epoch}/{self.config.exp_ctrl.total_train_epochs} "
+            f"step {self._epoch_step} "
+            f"(global step {self._global_step}) finishes. "
             f"#End to end# execution time: *{e2e_time:.3f}*s. "
             f"Total time consumption: {total_time_consumption:.3f}s. TFLOP/s per GPU: {tflops_per_gpu:.2f}, total TFLOP/s: {tflops:.2f}."
             # f"Estimated remaining time of this epoch: {self._buffer_size_tokens / buffer_size_decre_per_step * time_per_step:.3f}s."

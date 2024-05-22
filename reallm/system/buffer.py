@@ -289,7 +289,8 @@ class AsyncIOSequenceBuffer:
             if len(token_intervals) < 1:
                 raise RuntimeError(
                     "No valid token intervals found. Please set a smaller min_n_tokens and a larger max_n_tokens. "
-                    f"Current values min_n_tokens={rpc.min_n_tokens}, max_n_tokens={rpc.max_n_tokens}.")
+                    f"Current values min_n_tokens={rpc.min_n_tokens}, max_n_tokens={rpc.max_n_tokens}. "
+                    f"Current sequence lengths in buffer: {seqlens} (total {sum(seqlens)}).")
             token_start, token_end = token_intervals[0], token_intervals[-1]
 
             n_seqs_cumsum = np.arange(1, len(ready_indices) + 1)
