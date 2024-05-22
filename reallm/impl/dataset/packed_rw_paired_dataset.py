@@ -179,14 +179,11 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
             group_neg_answers = [self.neg_answer_tokens[i]['input_ids'] for i in indices]
             pos_answers = list(itertools.chain.from_iterable(group_pos_answers))
             neg_answers = list(itertools.chain.from_iterable(group_neg_answers))
-            pair_seqlens = [len(x) for x in itertools.chain.from_iterable(zip(pos_answers, neg_answers))]
             seqlens = [len(x) + len(y) for x, y in zip(pos_answers, neg_answers)]
+            pos_seqlens = [len(x) for x in pos_answers]
             group_sizes = [self.group_sizes[i] for i in indices]
 
             # sanity checks
-            for j, s in enumerate(seqlens):
-                assert s == pair_seqlens[2 * j] + pair_seqlens[2 * j + 1], (s, pair_seqlens[2 * j] +
-                                                                            pair_seqlens[2 * j + 1])
             for pa, na, g in zip(group_pos_answers, group_neg_answers, group_sizes):
                 assert len(pa) == len(na) == g, (len(pa), len(na), g)
             total_seqlen = sum(seqlens)
@@ -204,13 +201,12 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
 
             assert len(seqlens) >= self.min_seq_pairs_per_batch
             assert prompt_lens.shape[0] == len(seqlens), (prompt_lens.shape[0], len(seqlens), len(indices))
-            assert packed_input_ids.shape[0] == sum(pair_seqlens) == sum(seqlens), (packed_input_ids.shape[0],
-                                                                                    sum(pair_seqlens),
+            assert packed_input_ids.shape[0] == sum(seqlens), (packed_input_ids.shape[0],
                                                                                     sum(seqlens))
             yield dict(
                 packed_input_ids=packed_input_ids,
                 input_lens=torch.tensor(seqlens, dtype=torch.int32),
-                pair_input_lens=torch.tensor(pair_seqlens, dtype=torch.int32),
+                pos_input_lens=torch.tensor(pos_seqlens, dtype=torch.int32),
                 group_factor=group_factor,
                 prompt_lens=prompt_lens,
             )
@@ -269,14 +265,13 @@ else:
         for x in dataloader:
             datas = PackedParallelDataBroker.scatter_to(from_dict(x), n_dp)
             for data in datas:
-                assert len(
-                    data['pair_input_lens']) == len(data['input_lens']) * 2 == len(data['group_factor']) * 2
-                assert data['packed_input_ids'].shape[0] == sum(data['pair_input_lens']) == sum(
-                    data['input_lens']), (data['packed_input_ids'].shape[0], sum(data['pair_input_lens']),
+                assert data['packed_input_ids'].shape[0]  == sum(
+                    data['input_lens']), (data['packed_input_ids'].shape[0], 
                                           sum(data['input_lens']))
                 offset = 0
                 for i in range(len(data['input_lens'])):
-                    len1, len2 = data['pair_input_lens'][2 * i], data['pair_input_lens'][2 * i + 1]
+                    len1 = data['pos_input_lens'][i]
+                    len2 = data['input_lens'][i] - len1
                     a = data['packed_input_ids'][offset:offset + len1]
                     b = data['packed_input_ids'][offset + len1:offset + len1 + len2]
                     assert have_common_prefix_at_least(a, b, 8), (a, b)
