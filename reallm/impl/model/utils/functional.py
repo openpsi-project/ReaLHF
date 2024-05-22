@@ -286,8 +286,10 @@ def torch_attn_func(
     k: torch.Tensor,
     v: torch.Tensor,
     causal: bool,
-    cu_seqlens: torch.IntTensor,
-    max_seqlen: int,
+    cu_seqlens_q: torch.IntTensor,
+    max_seqlen_q: int,
+    cu_seqlens_k: torch.IntTensor,
+    max_seqlen_k: int,
     dropout_p: float,
     softmax_scale: float,
     upcast_unscale: float = 1.0,
@@ -314,28 +316,36 @@ def torch_attn_func(
     nq = q.shape[-2]
     nkv = k.shape[-2]
     n_rep = q.shape[-2] // k.shape[-2]
-    bsz = cu_seqlens.shape[0] - 1
+    bsz = cu_seqlens_q.shape[0] - 1
     # repeat k/v heads if n_kv_heads < n_heads
-    k = repeat_kv(k, n_rep)  # (bs, seqlen, nq, head_dim)
-    v = repeat_kv(v, n_rep)  # (bs, seqlen, nq, head_dim)
+    k = repeat_kv(k, n_rep)  # (total_seqlen, nq, head_dim)
+    v = repeat_kv(v, n_rep)  # (total_seqlen, nq, head_dim)
 
-    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-    attention_mask = torch.arange(max_seqlen, dtype=torch.long,
-                                  device="cpu").unsqueeze(0) < input_lens.unsqueeze(1)
-    _, _pad_indices, _, _ = unpad_input(attention_mask, attention_mask)
+    input_lens_k = cu_seqlens_k[1:] - cu_seqlens_k[:-1]
+    attention_mask_k = torch.arange(max_seqlen_k, dtype=torch.long,
+                                    device="cpu").unsqueeze(0) < input_lens_k.unsqueeze(1)
+    _, _pad_indices_k, _, _ = unpad_input(attention_mask_k, attention_mask_k)
 
-    q = pad_input(q, _pad_indices, bsz, max_seqlen)
-    k = pad_input(k, _pad_indices, bsz, max_seqlen)
-    v = pad_input(v, _pad_indices, bsz, max_seqlen)
+    input_lens_q = cu_seqlens_q[1:] - cu_seqlens_q[:-1]
+    attention_mask_q = torch.arange(max_seqlen_q, dtype=torch.long,
+                                    device="cpu").unsqueeze(0) < input_lens_q.unsqueeze(1)
+    _, _pad_indices_q, _, _ = unpad_input(attention_mask_q, attention_mask_q)
+
+    q = pad_input(q, _pad_indices_q, bsz, max_seqlen_q)
+    k = pad_input(k, _pad_indices_k, bsz, max_seqlen_k)
+    v = pad_input(v, _pad_indices_k, bsz, max_seqlen_k)
 
     q = q.transpose(1, 2)  # (bs, nq, seqlen, head_dim)
     k = k.transpose(1, 2)
     v = v.transpose(1, 2)
     scores = torch.matmul(q, k.transpose(2, 3)) * softmax_scale
 
-    mask = attention_mask.unsqueeze(1).unsqueeze(1).repeat(1, nq, max_seqlen, 1)  # [bs, nq, seqlen, seqlen]
+    mask = attention_mask_k.unsqueeze(1).unsqueeze(1).repeat(1, nq, max_seqlen_q,
+                                                             1)  # [bs, nq, seqlen, seqlen]
     if causal:
-        causal_mask = torch.tril(torch.ones(max_seqlen, max_seqlen, device=q.device, dtype=torch.bool))
+        _ms = max(max_seqlen_q, max_seqlen_k)
+        causal_mask = torch.tril(torch.ones(_ms, _ms, device=q.device, dtype=torch.bool))[-max_seqlen_q:,
+                                                                                          -max_seqlen_k:]
         mask = mask & causal_mask
 
     # if mask_softmax:
@@ -353,7 +363,7 @@ def torch_attn_func(
     output = torch.matmul(scores, v)  # (bs, nq, seqlen, head_dim)
     output = output.transpose(1, 2).contiguous()
 
-    output = unpad_input(output, attention_mask)[0]
+    output = unpad_input(output, attention_mask_q)[0]
     return output
 
 

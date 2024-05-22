@@ -210,76 +210,15 @@ def genstep(
 def generate(
     model: "ReaLModel",
     tokenizer: transformers.PreTrainedTokenizerFast,
-    input_ids: Optional[torch.Tensor] = None,
-    attention_mask: Optional[torch.Tensor] = None,
     packed_input_ids: Optional[torch.LongTensor] = None,
     cu_seqlens: Optional[torch.LongTensor] = None,
     max_seqlen: Optional[int] = None,
-    k_caches: Optional[List[torch.Tensor]] = None,
-    v_caches: Optional[List[torch.Tensor]] = None,
-    cache_seqlens: Optional[torch.Tensor] = None,
     gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData], Optional[torch.Tensor]]:
     """Generete a sequence with a ReaLModel.
-
-    Args:
-        model (ReaLModel): .
-        tokenizer (transformers.PreTrainedTokenizerFast): .
-        input_ids (torch.Tensor): Prompts, may be padded. Shape [bs, seqlen].
-        attention_mask (Optional[torch.Tensor], optional): The same as huggingface.
-            Shape [bs, seqlen]. If None, generate attention mask according to
-            pad_token_id and eos_token_id. Defaults to None.
-        k_caches (Optional[List[torch.Tensor]], optional): List of k_caches.
-            Length equals to the number of transformer layers.
-            Each tensor in the list has shape [bs, max_seqlen, #kv, head_dim].
-            Used for resuming a previous generation state.
-            If None, generate from scratch. Defaults to None.
-        v_caches (Optional[List[torch.Tensor]], optional): List of v_caches.
-            Length equals to the number of transformer layers.
-            Each tensor in the list has shape [bs, max_seqlen, #kv, head_dim].
-            Used for resuming a previous generation state.
-            If None, generate from scratch. Defaults to None.
-        cache_seqlens (Optional[torch.Tensor], optional): Shape [bs].
-            Used for resuming a previous generation state. Defaults to None.
-        gconfig (GenerationConfig, optional): .
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
-        The tuple of
-            gen_tokens: Generated tokens. Shape [bs * num_samples, #new_tokens].
-            log_probs: Log probabilities of generated tokens. Shape [bs * num_samples, #new_tokens].
-            mask: The mask of logits. None if no mask otherwise a tensor of
-                shape [bs * num_samples, #new_tokens, vocab_size].
-                1 if the logits is valid else 0, e.g., should be used as
-                `logits.masked_fill_(mask.logical_not(), -1e10)`.
-            ys: List of PipeCacheData. Length equals to the number of transformer layers.
-                Can be saved for continuing generation.
-            prompt_logits: Output logits of prompts. None if k/v caches are passed in.
-                Shape [#tot_prompt_tokens * num_samples].
     """
-    if (k_caches is None) != (v_caches is None) or (k_caches is None) != (cache_seqlens is None):
-        raise ValueError("k_cache, v_cache, cache_seqlens must be all None or all not None")
-    if input_ids is not None:
-        if attention_mask is None:
-            attention_mask = torch.ones_like(input_ids)
-        if gconfig.num_samples > 1 and k_caches is None:
-            input_ids = input_ids.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
-            attention_mask = attention_mask.unsqueeze(1).repeat(1, gconfig.num_samples, 1).flatten(end_dim=1)
-        elif k_caches is not None:
-            for k_cache, v_cache in zip(k_caches, v_caches):
-                assert (k_cache.shape[0] == v_cache.shape[0] == input_ids.shape[0] == attention_mask.shape[0]
-                        == cache_seqlens.shape[0])
-        bs = input_ids.shape[0]
-    else:
-        assert attention_mask is None
-        assert packed_input_ids is not None
-        assert cu_seqlens is not None
-        assert gconfig.num_samples == 1, "packed_input_ids input is not supported for num_samples > 1"
-        assert (k_caches is None
-                and v_caches is None), "Continuing generation with packed_input_ids is not supported."
-        bs = cu_seqlens.shape[0] - 1
-
-    device = torch.cuda.current_device()
+    bs = cu_seqlens.shape[0] - 1
+    device = model.device
     mconfig: model_api.ReaLModelConfig = model.config
 
     terminate = False
@@ -292,92 +231,75 @@ def generate(
 
     prompt_logits = None
     # Prepare inputs for generation iterations
-    if k_caches is None:
-        # Generate from scratch.
-        # Input_ids may have different lengths, we should first pack them into a large batch
-        # to use varlen flash attention, then record kv caches for the following inferences.
-        if input_ids is not None:
-            packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
-        else:
-            max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
-        input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
 
-        x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True)
-        # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(packed_input_ids=packed_input_ids)
-              ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
-        # Model forward will set k/v cache in PipeCacheData.
-        with model.gradient_checkpointing_disable():
-            prompt_logits = model(x, ys)[0].pp_output
-        logits = prompt_logits[cu_seqlens[1:] - 1]
-        cache_seqlens = input_lens.clone().to(dtype=torch.int32)
-        for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
-            assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
-            # fix of a flash attention bug
-            kvcache_seqlen = max(
-                constants.dataset_max_seqlen() + gconfig.max_new_tokens,
-                mconfig.hidden_dim // mconfig.head_dim + 10,
-            )
-            # TODO: since pytorch all-reduce has bug during capturing and vllm all-reduce does not support >8 GPUs,
-            # we defer the implementation of CUDAGraph generation in the future
+    # Input_ids may have different lengths, we should first pack them into a large batch
+    # to use varlen flash attention, then record kv caches for the following inferences.
+    max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
+    if constants.dataset_max_seqlen() < max_seqlen:
+        raise RuntimeError(f"Input sequence length {max_seqlen} is larger than the maximum sequence length "
+                           f"supported by the model {constants.dataset_max_seqlen()}.")
+    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+    x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True)
+    # one embedding layer, n_layers transformer block, one output layer
+    ys = [PipeCacheData(packed_input_ids=packed_input_ids)
+          ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
+    # Model forward will set k/v cache in PipeCacheData.
+    with model.gradient_checkpointing_disable():
+        prompt_logits = model(x, ys)[0].pp_output
+    logits = prompt_logits[cu_seqlens[1:] - 1]
+    cache_seqlens = input_lens.clone().to(dtype=torch.int32)
+    for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
+        assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
+        # fix of a flash attention bug
+        kvcache_seqlen = max(
+            constants.dataset_max_seqlen() + gconfig.max_new_tokens,
+            mconfig.hidden_dim // mconfig.head_dim + 10,
+        )
+        # TODO: since pytorch all-reduce has bug during capturing and vllm all-reduce does not support >8 GPUs,
+        # we defer the implementation of CUDAGraph generation in the future
 
-            # global _DECODING_CUDA_GRAPH
-            # if _DECODING_CUDA_GRAPH is not None:
-            #     global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
-            #     global _DECODING_CUDA_GRAPH_INPUT_BUFFER
-            #     if not (_DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= kvcache_seqlen):
-            #         raise RuntimeError(
-            #             f"CUDAGraph batch size {_DECODING_CUDA_GRAPH_BS} or seqlen {_DECODING_CUDA_GRAPH_SEQLEN} "
-            #             f"is smaller than the data batch size {bs} or seqlen {kvcache_seqlen}. "
-            #             "Have you correctly set the `max_seqlen` constant and set a `min_n_seqs_per_dp` in RPC config?"
-            #         )
-            #     k_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["k_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
-            #     v_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["v_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
-            # else:
-            k_cache = torch.zeros(
-                (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-                dtype=y.k_cache.dtype,
-                device=y.k_cache.device,
-            )
-            v_cache = torch.zeros(
-                (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-                dtype=y.v_cache.dtype,
-                device=y.v_cache.device,
-            )
-            indices = (torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
-                                    dtype=torch.long)[None, :] < input_lens[:, None])
-            k_cache[indices] = y.k_cache
-            v_cache[indices] = y.v_cache
-            y.k_cache = k_cache
-            y.v_cache = v_cache
-            y.cache_seqlens = cache_seqlens
-        x = PipeTransferData(store_kv_cache=True)
-        ys[0].cache_seqlens = cache_seqlens
-        # Next, we will generate the next token after prompts.
-        # cache_seqlens is exactly the lengths of prompts.
-        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
-        gen_token_ph.append(next_tokens)
-        gen_logprob_ph.append(logprob)
-        gen_logits_mask_ph.append(logits_mask)
-        generated_idx += 1
-    else:
-        # Resume from a previous generation state.
-        if input_ids.shape[1] != 1:
-            raise ValueError("prompt_padded_len must be 1 when resuming from a previous generation state.")
-        max_seqlen = gconfig.max_new_tokens + int(max(cache_seqlens)) + 1
-        for i in range(len(k_caches)):
-            pad = (0, 0, 0, 0, 0, max_seqlen - k_caches[i].shape[1])
-            if k_caches[i].shape[1] < max_seqlen:
-                k_caches[i] = nn.functional.pad(k_caches[i], pad)
-            if v_caches[i].shape[1] < max_seqlen:
-                v_caches[i] = nn.functional.pad(v_caches[i], pad)
-        x = PipeTransferData(store_kv_cache=torch.tensor(1))
-        ys = ([PipeCacheData(cache_seqlens=cache_seqlens)] + [
-            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=cache_seqlens)
-            for k, v in zip(k_caches, v_caches)
-        ] + [PipeCacheData()])
-        next_tokens = input_ids[:, -1]
+        # global _DECODING_CUDA_GRAPH
+        # if _DECODING_CUDA_GRAPH is not None:
+        #     global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
+        #     global _DECODING_CUDA_GRAPH_INPUT_BUFFER
+        #     if not (_DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= kvcache_seqlen):
+        #         raise RuntimeError(
+        #             f"CUDAGraph batch size {_DECODING_CUDA_GRAPH_BS} or seqlen {_DECODING_CUDA_GRAPH_SEQLEN} "
+        #             f"is smaller than the data batch size {bs} or seqlen {kvcache_seqlen}. "
+        #             "Have you correctly set the `max_seqlen` constant and set a `min_n_seqs_per_dp` in RPC config?"
+        #         )
+        #     k_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["k_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
+        #     v_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["v_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
+        # else:
+        k_cache = torch.zeros(
+            (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+            dtype=y.k_cache.dtype,
+            device=y.k_cache.device,
+        )
+        v_cache = torch.zeros(
+            (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+            dtype=y.v_cache.dtype,
+            device=y.v_cache.device,
+        )
+        indices = (torch.arange(kvcache_seqlen, device=device, dtype=torch.long)[None, :] < input_lens[:,
+                                                                                                       None])
+        k_cache[indices] = y.k_cache
+        v_cache[indices] = y.v_cache
+        y.k_cache = k_cache
+        y.v_cache = v_cache
+        y.cache_seqlens = cache_seqlens
+    x = PipeTransferData(store_kv_cache=True)
+    ys[0].cache_seqlens = cache_seqlens
+
+    # Next, we will generate the next token after prompts.
+    # cache_seqlens is exactly the lengths of prompts.
+    # We perform a genstep outside the loop due to a historical reason.
+    next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
+        logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+    gen_token_ph.append(next_tokens)
+    gen_logprob_ph.append(logprob)
+    gen_logits_mask_ph.append(logits_mask)
+    generated_idx += 1
 
     # graph, input_buffers, output_buffers = get_decoding_cuda_graph(
     #     model,
@@ -403,7 +325,7 @@ def generate(
             # the next round of inference
             ys[0].packed_input_ids = next_tokens
             ys[0].packed_position_ids = None
-            x.cu_seqlens = torch.arange(bs + 1, dtype=torch.int32, device=torch.cuda.current_device())
+            x.cu_seqlens = torch.arange(bs + 1, dtype=torch.int32, device=device)
             x.max_seqlen = 1
             # K/v cache will be changed in-place with flash attention.
             logits = model(x, ys)[0].pp_output.squeeze(dim=1)

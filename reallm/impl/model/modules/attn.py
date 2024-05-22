@@ -13,8 +13,7 @@ from .mlp import LayerNormQKVLinear
 from .rotary import RotaryEmbedding
 
 try:
-    from flash_attn import (flash_attn_func, flash_attn_varlen_func, flash_attn_varlen_func_with_kvcache,
-                            flash_attn_with_kvcache)
+    from flash_attn import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache
 except ModuleNotFoundError:
     pass
 import reallm.base.logging as logging
@@ -158,9 +157,12 @@ class CausalSelfAttentionLayer(nn.Module):
 
         q, k, v = self.c_attn(hidden_states)
 
-        if self.apply_rotary and k_cache is None:
+        if self.apply_rotary and (k_cache is None or str(q.device) == "cpu"):
             # otherwise, we input rotary cos/sin directly into flash_attn_with_kvcache
-            self.rotary_emb._update_cos_sin_cache(max_seqlen, q.device, q.dtype)
+            rotary_cache_len = max_seqlen
+            if k_cache is not None and str(q.device) == "cpu":
+                rotary_cache_len = k_cache.shape[1]
+            self.rotary_emb._update_cos_sin_cache(rotary_cache_len, q.device, q.dtype)
             rotary_indices = compute_varlen_position_indices(q.shape[0], cu_seqlens)
             qk = apply_rotary_varlen(
                 torch.cat([q, k], dim=-2),
@@ -169,6 +171,7 @@ class CausalSelfAttentionLayer(nn.Module):
                 cu_seqlens=cu_seqlens,
                 interleaved=self.rotary_emb.interleaved,
                 rotary_indices=rotary_indices,
+                seqlen_offsets=cache_seqlens,
             )
             # HACK: RotaryEmbedding used flash-attention's triton kernel internally, but it will
             # cause an illegal memory access error when batch size is large. Use pytorch implementation instead.
@@ -186,27 +189,40 @@ class CausalSelfAttentionLayer(nn.Module):
             rotary_cos = rotary_sin = None
 
         if str(q.device) == "cpu":
+            cu_seqlens_k = cu_seqlens
+            max_seqlen_k = max_seqlen
+            if k_cache is not None:
+                new_k, new_v = [], []
+                for i, cache_len in enumerate(cache_seqlens):
+                    k_cache[i, cache_len] = k[cu_seqlens[i]:cu_seqlens[i + 1]]
+                    new_k.append(k_cache[i, :cache_len + 1])
+                    v_cache[i, cache_len] = v[cu_seqlens[i]:cu_seqlens[i + 1]]
+                    new_v.append(v_cache[i, :cache_len + 1])
+                k = torch.cat(new_k, dim=0)
+                v = torch.cat(new_v, dim=0)
+                cu_seqlens_k = torch.nn.functional.pad((cache_seqlens + 1).cumsum(0), (1, 0))
+                max_seqlen_k = max(cache_seqlens) + 1
             # Use vanilla pytorch attention, for debugging.
             hidden_states = torch_attn_func(
                 q,
                 k,
                 v,
                 causal=True,
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
+                cu_seqlens_q=cu_seqlens,
+                max_seqlen_q=max_seqlen,
+                cu_seqlens_k=cu_seqlens_k,
+                max_seqlen_k=max_seqlen_k,
                 dropout_p=self.applied_attn_pdrop,
                 softmax_scale=scale_factor,
                 upcast_unscale=unscale,
             )
-        elif k_cache is not None and len(q.shape) == 4:
+        elif k_cache is not None:
             # k_cache/v_cache shape: [bs, max_seq, n_kv_heads, head_dim]
             if cache_seqlens is None:
                 raise RuntimeError("cache_seqlens must be provided if kv_cache is not None.")
-            if not (q.shape[1] == k.shape[1] == v.shape[1] == 1):
-                raise RuntimeError(
-                    "Can only generate one token at a time, "
-                    f"while seqence length (q={q.shape[1]}, k={k.shape[1]}, v={v.shape[1]}) is larger than 1."
-                )
+            q = q.unsqueeze(1)
+            k = k.unsqueeze(1)
+            v = v.unsqueeze(1)
             # k_cache and v_cache will be modified in-place.
             hidden_states = flash_attn_with_kvcache(
                 q,
@@ -221,23 +237,7 @@ class CausalSelfAttentionLayer(nn.Module):
                 rotary_sin=rotary_sin,
                 rotary_interleaved=self.rotary_interleaved,
             )
-        elif k_cache is not None and len(q.shape) == 3:
-            hidden_states = flash_attn_varlen_func_with_kvcache(
-                q=q,
-                cu_seqlens_q=cu_seqlens,
-                max_seqlen_q=max_seqlen,
-                k_cache=k_cache,
-                v_cache=v_cache,
-                cache_seqlens=cache_seqlens,
-                k=k,
-                v=v,
-                cu_seqlens_k=cu_seqlens,
-                softmax_scale=scale_factor,
-                causal=True,
-                rotary_cos=rotary_cos,
-                rotary_sin=rotary_sin,
-                rotary_interleaved=self.rotary_interleaved,
-            )
+            hidden_states = hidden_states.squeeze(1)
         elif cu_seqlens is not None:
             assert max_seqlen is not None
             assert len(q.shape) == 3
@@ -254,14 +254,7 @@ class CausalSelfAttentionLayer(nn.Module):
                 causal=True,
             )
         else:
-            hidden_states = flash_attn_func(
-                q,
-                k,
-                v,
-                dropout_p=self.applied_attn_pdrop,
-                softmax_scale=scale_factor,
-                causal=True,
-            )
+            raise NotImplementedError("Don't know which attention implementation to use.")
         hidden_states = self.c_proj(hidden_states.flatten(start_dim=-2))
         hidden_states = self.resid_dropout(hidden_states)
         return hidden_states, k, v

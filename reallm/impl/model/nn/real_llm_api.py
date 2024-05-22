@@ -573,24 +573,21 @@ def generate_helper(
         packed_input_ids: Optional[torch.Tensor] = None,
         cu_seqlens: Optional[torch.Tensor] = None,
         max_seqlen: Optional[int] = None,
-        k_caches: Optional[List[torch.Tensor]] = None,
-        v_caches: Optional[List[torch.Tensor]] = None,
-        cache_seqlens: Optional[torch.Tensor] = None,
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
 ) -> DuckGenerationOutput:
+    assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)
+    if attention_mask is None and input_ids is not None:
+        attention_mask = torch.ones_like(input_ids)
+    if packed_input_ids is None and attention_mask is not None:
+        packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
     current_forward = self.forward
     self.forward = functools.partial(ReaLModel.forward, self)
     seq, scores, mask, _, _ = generate(
         model=self,
         tokenizer=tokenizer,
-        input_ids=input_ids,
-        attention_mask=attention_mask,
         packed_input_ids=packed_input_ids,
         cu_seqlens=cu_seqlens,
         max_seqlen=max_seqlen,
-        k_caches=k_caches,
-        v_caches=v_caches,
-        cache_seqlens=cache_seqlens,
         gconfig=gconfig,
     )
     self.forward = current_forward
