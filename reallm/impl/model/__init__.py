@@ -1,8 +1,4 @@
-from pathlib import Path
 import functools
-# Instantiate all registered HuggingFace models.
-import importlib
-import os
 
 import torch
 
@@ -20,6 +16,7 @@ import reallm.impl.model.nn.real_llm_api
 import reallm.impl.model.nn.real_llm_base
 import reallm.impl.model.nn.real_llm_generate
 import reallm.impl.model.nn.real_llm_parallel
+import reallm.api.from_hf
 
 if torch.cuda.is_available():
     torch._C._jit_set_profiling_executor(True)
@@ -30,17 +27,6 @@ if torch.cuda.is_available():
     torch._C._jit_set_nvfuser_enabled(True)
     torch._C._debug_set_autodiff_subgraph_inlining(False)
 
-# Import all existing HuggingFace model registries.
-hf_impl_path = Path(os.path.dirname(__file__)).parent.parent / "api" / "from_hf"
-for x in os.listdir(hf_impl_path.absolute()):
-    if not x.endswith(".py"):
-        continue
-    if "starcoder" in x.strip('.py'):
-        # HACK: StarCoder seems to have a bug with transformers v0.39.1:
-        # load_state_dict does not work on this model,
-        # and the weights are not changed after loading. Skip this model temporarily.
-        continue
-    importlib.import_module(f"reallm.api.from_hf.{x.strip('.py')}")
 
 _HF_REGISTRIES = {}
 

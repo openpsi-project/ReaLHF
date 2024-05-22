@@ -1164,6 +1164,7 @@ class MasterWorker(worker_base.Worker):
         tflops_per_gpu = flops / (e2e_time * self.config.n_model_workers * (10**12))
         #########################################
 
+        # TODO: add time estimation
         logger.info(
             f"Epoch {self._epoch}/{self.config.exp_ctrl.total_train_epochs} "
             f"step {self._epoch_step} "

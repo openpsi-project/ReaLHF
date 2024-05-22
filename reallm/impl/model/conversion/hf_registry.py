@@ -118,6 +118,7 @@ class HFModelRegistry:
         epoch_step: Optional[int] = None,
         global_step: Optional[int] = None,
     ):
+        # FIXME: check epoch and step
         tik = time.perf_counter()
 
         subfolder = ""

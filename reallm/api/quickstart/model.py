@@ -3,7 +3,7 @@ import dataclasses
 import json
 import os
 
-from reallm.api.core.config import Model, ModelWrapper
+from reallm.api.core.config import Model, ModelWrapper, ModelFamily
 from reallm.api.core.model_api import SUPPORTED_MODELS
 import reallm.base.logging as logging
 
@@ -119,13 +119,7 @@ class ModelTrainEvalConfig:
         optimizer (OptimizerConfig): Optimizer configuration.
     """
 
-    type: str = dataclasses.field(
-        metadata={"choices": SUPPORTED_MODELS},
-        default="llama",
-    )
-    path: Optional[str] = None
-    base_model_path: Optional[str] = None
-    tokenizer_path: Optional[str] = None
+    type: ModelFamily = dataclasses.field(default=ModelFamily("llama", 7, False))
     lora: Optional[LoRAConfig] = None
     gradient_checkpointing: bool = False
     enable_fp16: bool = True

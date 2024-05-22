@@ -170,10 +170,11 @@ class InferencePipelineEngine:
             cu_seqlens (torch.Tensor): cu_seqlens of shape [batch_size]
         """
         if input_lens_for_partition is not None:
-            pair_input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+            bs = input_lens_for_partition.shape[0]
+            group_input_lens = (cu_seqlens[1:] - cu_seqlens[:-1]).view(bs, -1)
             data = NamedArray(
                 packed_input_ids=packed_input_ids,
-                pair_input_lens=pair_input_lens,
+                group_input_lens=group_input_lens,
                 input_lens=input_lens_for_partition,
             )
             n_seqs = input_lens_for_partition.shape[0]
@@ -191,7 +192,7 @@ class InferencePipelineEngine:
             splitted = [
                 NamedArray(
                     packed_input_ids=x["packed_input_ids"],
-                    cu_seqlens=torch.nn.functional.pad(x["pair_input_lens"].cumsum(0), (1, 0)),
+                    cu_seqlens=torch.nn.functional.pad(x["group_input_lens"].view(-1).cumsum(0), (1, 0)),
                 ) for x in splitted
             ]
         if self._compute_loss:

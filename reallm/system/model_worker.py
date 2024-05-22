@@ -95,7 +95,7 @@ def split_packed_batch_into_seqs(
 
 
 def _get_shape_from_key_and_seqlen(k: str, seqlen: int):
-    if k in ["input_lens", "prompt_lens", "seq_no_eos_mask", "rewards", "reward_score", "group_factor"]:
+    if k in ["input_lens", "prompt_lens", "seq_no_eos_mask", "rewards", "reward_score", "group_factor", "pos_input_lens"]:
         shape = (1,)
     elif k in ["cu_seqlens", "prompt_cu_seqlens"]:
         shape = (2,)
@@ -135,7 +135,7 @@ def _get_dtype_from_key(k: str):
             "values",
     ]:
         dtype = torch.float16
-    elif k in ["input_lens", "prompt_lens", "cu_seqlens", "prompt_cu_seqlens"]:
+    elif k in ["input_lens", "prompt_lens", "cu_seqlens", "prompt_cu_seqlens", "pos_input_lens"]:
         dtype = torch.int32
     elif k in ["packed_seq", "packed_input_ids", "packed_prompts"]:
         dtype = torch.int64
@@ -720,6 +720,7 @@ class ModelWorker(worker_base.Worker):
                                 assert len(shape) == 1, shape
                                 total_len += shape[0]
                             dtype = _get_dtype_from_key(k)
+                            # TODO: Using global memory buffer may possibly cause OOM.
                             buf = constants.get_global_memory_buffer().get_tensor((total_len,),
                                                                                   dtype,
                                                                                   name="data_transfer")

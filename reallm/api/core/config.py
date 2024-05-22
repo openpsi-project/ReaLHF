@@ -49,7 +49,10 @@ class ModelFamily:
     is_critic: bool
 
     def __repr__(self):
-        return f"{self._class}-{self.size}"
+        s = f"{self._class}-{self.size}"
+        if self.is_critic:
+            s += "-critic"
+        return s
 
 
 @dataclasses.dataclass
