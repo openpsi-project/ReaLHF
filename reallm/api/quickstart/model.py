@@ -120,7 +120,7 @@ class ModelTrainEvalConfig:
     """
 
     type: ModelFamily = dataclasses.field(default=ModelFamily("llama", 7, False))
-    path: str=  ""
+    path: str = ""
     lora: Optional[LoRAConfig] = None
     gradient_checkpointing: bool = False
     enable_fp16: bool = True

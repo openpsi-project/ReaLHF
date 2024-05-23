@@ -243,4 +243,3 @@ def register_hf_family(
         tblock_param_names=tblock_param_names,
         head_param_names=head_param_names,
     )
-
