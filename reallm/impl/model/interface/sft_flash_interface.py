@@ -7,6 +7,7 @@ import tqdm
 
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from reallm.impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
 from reallm.impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
@@ -50,6 +51,8 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
 
         module.train()
 
+        seqlens_cpu = data.metadata["seqlens"]
+
         if isinstance(module, DeepSpeedPipelineEngine):
             loss_fn_kwargs = dict(
                 prompt_mask=prompt_mask,
@@ -57,6 +60,7 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
                 cu_seqlens[:-1],  # this is used to partition other loss_fn_kwargs into microbatches
             )
             loss, _ = module.train_batch(
+                seqlens_cpu=seqlens_cpu,
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
                 loss_fn=compute_packed_sft_loss,
@@ -64,7 +68,8 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
                 **loss_fn_kwargs,
             )
         else:
-            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
+                            max_seqlen=max_seqlen).logits
             loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
             module.backward(loss)
             module.step()
@@ -80,7 +85,11 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
         return res
 
     def save(self, model: model_api.Model, save_dir: str):
-        model.module.save(save_dir,
+        module = model.module
+        if not isinstance(module, ReaLModel):
+            module = module.module
+        module.save_to_hf(tokenizer=model.tokenizer,
+                          save_dir=save_dir,
                           epoch=model.version.epoch,
                           epoch_step=model.version.epoch_step,
                           global_step=model.version.global_step)
@@ -100,21 +109,23 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
             cu_seqlens: torch.Tensor = data["cu_seqlens"].int()
             prompt_mask: torch.BoolTensor = data["prompt_mask"]  # shape [tot_seqlen]
             max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+            seqlens_cpu = (cu_seqlens[1:] - cu_seqlens[:-1]).cpu().numpy().tolist()
 
             if isinstance(module, DeepSpeedPipelineEngine):
                 loss_fn_kwargs = dict(
                     prompt_mask=prompt_mask,
                     input_lens=cu_seqlens[1:] - cu_seqlens[:-1],
                 )
-                loss, _ = module.eval_batch(packed_input_ids,
-                                            cu_seqlens,
+                loss, _ = module.eval_batch(seqlens_cpu=seqlens_cpu,
+                                            packed_input_ids=packed_input_ids,
+                                            cu_seqlens=cu_seqlens,
                                             loss_fn=compute_packed_sft_loss,
                                             num_micro_batches=constants.pipe_parallel_world_size(),
                                             **loss_fn_kwargs)
             else:
                 logits = module(packed_input_ids=packed_input_ids,
                                 cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen)
+                                max_seqlen=max_seqlen).logits
                 loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
 
             if loss is not None:
@@ -141,15 +152,18 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
         cu_seqlens: torch.Tensor = data["cu_seqlens"]
         max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
+        seqlens_cpu = data.metadata["seqlens"]
 
         if isinstance(module, DeepSpeedPipelineEngine):
-            logits = module.forward(packed_input_ids=packed_input_ids,
-                                    cu_seqlens=cu_seqlens,
-                                    num_micro_batches=constants.pipe_parallel_world_size())
+            logits = module.forward(
+                seqlens_cpu=seqlens_cpu,
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+            )
         else:
             logits = model.module(packed_input_ids=packed_input_ids,
                                   cu_seqlens=cu_seqlens,
-                                  max_seqlen=max_seqlen)
+                                  max_seqlen=max_seqlen).logits
         return dict(logits=logits)
 
     # for testing only
@@ -170,11 +184,11 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
 
         if isinstance(module, DeepSpeedPipelineEngine):
             res = module.generate(
+                seqlens_cpu=data.metadata["seqlens"],
                 tokenizer=model.tokenizer,
                 packed_input_ids=data['packed_input_ids'],
                 cu_seqlens=data['cu_seqlens'],
                 gconfig=gconfig,
-                num_micro_batches=constants.pipe_parallel_world_size(),
             )
             if res is None:
                 return dict()
@@ -185,6 +199,7 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
                 tokenizer=model.tokenizer,
                 packed_input_ids=data['packed_input_ids'],
                 cu_seqlens=data['cu_seqlens'],
+                max_seqlen=max(data['cu_seqlens'][1:] - data['cu_seqlens'][:-1]),
                 gconfig=gconfig,
             )
             gen_tokens = res.sequences
