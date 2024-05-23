@@ -19,7 +19,7 @@ def enumerate_rpc_executions(rpc: ModelRPC, device_mesh: DeviceMesh, num_gen_tok
         ps = find_parallel_strategies(sub_device_mesh)
         for p in ps:
             bs = rpc.min_n_seqs
-            seq_len = rpc.max_n_tokens // bs
+            seq_len = rpc.max_n_tokens // bs  #FIXME:
             min_bs = 2 * p.num_dp * p.num_pp * n_ppo_minibatches\
                 if rpc.interface_type == ModelInterfaceType.TRAIN_STEP else p.num_dp * p.num_pp
             if min_bs > bs:

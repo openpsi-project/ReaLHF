@@ -51,6 +51,10 @@ class ModelRPC:
     interface_type: ModelInterfaceType
     interface_impl: ModelInterface
 
+    # batch sizes
+    min_n_seqs: int
+    max_n_seqs: int
+
     input_data: List[str] = dataclasses.field(default_factory=lambda: [])
     input_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
     output_data: List[str] = dataclasses.field(default_factory=lambda: [])
@@ -60,12 +64,6 @@ class ModelRPC:
     min_n_seqs_per_dp: int = 1
     balanced_dp: bool = False
 
-    # batch sizes
-    min_n_seqs: int = 1
-    max_n_seqs: int = 1024
-    min_n_tokens: int = 1
-    max_n_tokens: int = 655360
-
     max_concurrent_calls: int = 1
 
     # hooks
@@ -74,7 +72,6 @@ class ModelRPC:
 
     # The followings will be automatically filled.
     max_min_flow_seqs: int = 1
-    max_min_flow_tokens: int = 1
 
     parents: List[str] = dataclasses.field(default_factory=lambda: [])
     children: List[str] = dataclasses.field(default_factory=lambda: [])
@@ -91,13 +88,12 @@ class ModelRPC:
         if isinstance(self.model_name, str):
             self.model_name = ModelName(self.model_name, 0)
         assert isinstance(self.model_name, ModelName)
-        if self.min_n_seqs > self.max_n_seqs or self.min_n_tokens > self.max_n_tokens:
-            raise RuntimeError("Invalid min/max n_seqs/n_tokens.")
-        if self.is_src and self.max_n_seqs > 1e4 and self.max_n_tokens > 1e8:
+        if self.min_n_seqs > self.max_n_seqs:
+            raise RuntimeError("Invalid min/max n_seqs.")
+        if self.is_src and self.max_n_seqs > 1e4:
             raise RuntimeError(
                 "The maximum batch size of the source node in the dataflow graph is too large. "
-                f"The maximum number of sequences is {self.max_n_seqs} > budget {int(1e4)} and "
-                f"the maximum number of tokens is {self.max_n_tokens} > budget {int(1e8)}. "
+                f"The maximum number of sequences is {self.max_n_seqs} > budget {int(1e4)}. "
                 "Please set a smaller value.")
         if "@" in self.model_name.role or "@" in self.interface_type.value:
             raise ValueError(
@@ -205,8 +201,6 @@ def build_graph(rpcs: List[ModelRPC], verbose: bool = False) -> Tuple[List[Model
 
     for rpc in rpcs:
         rpc.max_min_flow_seqs = max([r.min_n_seqs for r in rpcs if r.model_name.role == rpc.model_name.role])
-        rpc.max_min_flow_tokens = max(
-            [r.min_n_tokens for r in rpcs if r.model_name.role == rpc.model_name.role])
         rpc.data_producers = data_producers
         rpc.data2required_rpc_names = data2required_rpc_names
 

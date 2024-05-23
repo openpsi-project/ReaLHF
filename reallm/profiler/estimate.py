@@ -351,7 +351,7 @@ def estimate_rpc_time(rpc: ModelRPC,
 
     if bs == None or seq_len == None:
         bs = rpc.min_n_seqs
-        seq_len = rpc.max_n_tokens // bs
+        seq_len = rpc.max_n_tokens // bs  #FIXME:
     # ps = ModelParallelStrategy.from_config(rpc_alloc.train_eval_config.parallel)
     p = (rpc.interface_type == ModelInterfaceType.GENERATE)
     inst_cost = estimate_instruction_cost(layer_stats_path,

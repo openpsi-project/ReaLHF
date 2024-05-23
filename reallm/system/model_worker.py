@@ -95,10 +95,20 @@ def split_packed_batch_into_seqs(
 
 
 def _get_shape_from_key_and_seqlen(k: str, seqlen: int):
-    if k in ["input_lens", "prompt_lens", "seq_no_eos_mask", "rewards", "reward_score", "group_factor", "pos_input_lens"]:
+    if k in [
+            "input_lens",
+            "prompt_lens",
+            "seq_no_eos_mask",
+            "rewards",
+            "reward_score",
+            "group_factor",
+            "pos_input_lens",
+    ]:
         shape = (1,)
     elif k in ["cu_seqlens", "prompt_cu_seqlens"]:
         shape = (2,)
+    elif k in ['seqlogp']:
+        shape = (1, 2)
     elif k in ["packed_seq", "prompt_mask", "packed_input_ids", "values", "packed_prompts"]:
         shape = (seqlen,)
     elif k in [
@@ -139,7 +149,7 @@ def _get_dtype_from_key(k: str):
         dtype = torch.int32
     elif k in ["packed_seq", "packed_input_ids", "packed_prompts"]:
         dtype = torch.int64
-    elif k in ["rewards", "packed_logprobs", "group_factor"]:
+    elif k in ["rewards", "packed_logprobs", "group_factor", "seqlogp"]:
         dtype = torch.float32
     else:
         raise NotImplementedError(f"Unknown key {k} in packed data.")
@@ -717,21 +727,19 @@ class ModelWorker(worker_base.Worker):
                             total_len = 0
                             for seqlen in seqlens:
                                 shape = _get_shape_from_key_and_seqlen(k, seqlen)
-                                assert len(shape) == 1, shape
-                                total_len += shape[0]
+                                total_len += int(np.prod(shape))
                             dtype = _get_dtype_from_key(k)
                             # TODO: Using global memory buffer may possibly cause OOM.
                             buf = constants.get_global_memory_buffer().get_tensor((total_len,),
                                                                                   dtype,
                                                                                   name="data_transfer")
                             dist.broadcast(buf, src=bcast_src, group=group)
-                            vs = buf.clone()
+                            vs = buf.clone().view(-1, *shape[1:])
                             for buf_idx in buf_indices:
                                 self.__data_received_worker_indices[buf_idx][k].union(dst_ranks)
                     offset = 0
                     for seqlen, buf_idx in zip(seqlens, buf_indices):
                         shape = _get_shape_from_key_and_seqlen(k, seqlen)
-                        assert len(shape) == 1, shape
                         v = vs[offset:offset + shape[0]]
                         offset += shape[0]
                         data[k].append(v)

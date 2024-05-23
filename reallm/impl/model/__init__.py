@@ -5,6 +5,7 @@ import torch
 from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY
 from reallm.impl.model.conversion.hf_registry import HFModelRegistry
 from reallm.impl.model.nn.real_llm_api import ReaLModel
+import reallm.api.from_hf
 # FIXME: automatic import
 import reallm.impl.model.backend.deepspeed
 import reallm.impl.model.backend.pipe_inf
@@ -16,7 +17,6 @@ import reallm.impl.model.nn.real_llm_api
 import reallm.impl.model.nn.real_llm_base
 import reallm.impl.model.nn.real_llm_generate
 import reallm.impl.model.nn.real_llm_parallel
-import reallm.api.from_hf
 
 if torch.cuda.is_available():
     torch._C._jit_set_profiling_executor(True)
@@ -26,7 +26,6 @@ if torch.cuda.is_available():
     torch._C._jit_set_texpr_fuser_enabled(False)
     torch._C._jit_set_nvfuser_enabled(True)
     torch._C._debug_set_autodiff_subgraph_inlining(False)
-
 
 _HF_REGISTRIES = {}
 

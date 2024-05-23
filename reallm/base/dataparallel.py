@@ -35,15 +35,13 @@ class ParallelDataBroker:
                 input_lens = torch.cat([x["prompt_lens"] for x in src], dim=0)
             elif "prompt_cu_seqlens" in src[0]:
                 input_lens = torch.cat(
-                    [x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1] for x in src], dim=0
-                )
+                    [x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1] for x in src], dim=0)
             res = namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
             if "cu_seqlens" in src[0] and len(src[0]["cu_seqlens"].shape) == 1:
                 res["cu_seqlens"] = torch.cat([input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)])
             elif "prompt_cu_seqlens" in src[0] and len(src[0]["prompt_cu_seqlens"].shape) == 1:
                 res["prompt_cu_seqlens"] = torch.cat(
-                    [input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)]
-                )
+                    [input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)])
             return res
         else:
             raise NotImplementedError(f"Don't know how to gather data of type {[type(x) for x in src]}.")
@@ -92,11 +90,9 @@ class PackedParallelDataBroker(ParallelDataBroker):
                 else:
                     raw_input_lens = src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1]
             else:
-                raise RuntimeError(
-                    "input_lens/cu_seqlens/prompt_lens/prompt_cu_seqlens "
-                    "must be in the return data when using packed data broker. "
-                    f"Current keys: {list(src.keys())}."
-                )
+                raise RuntimeError("input_lens/cu_seqlens/prompt_lens/prompt_cu_seqlens "
+                                   "must be in the return data when using packed data broker. "
+                                   f"Current keys: {list(src.keys())}.")
         else:
             raw_input_lens = src["input_lens"]
         assert src.metadata.get("seqlens", None) is not None
@@ -105,10 +101,8 @@ class PackedParallelDataBroker(ParallelDataBroker):
             assert isinstance(seqlens_cpu, list)
             seqlens_cpu = np.array(seqlens_cpu, dtype=np.int64)
         else:
-            logger.warning(
-                "seqlens not found in metadata. Using input_lens to calculate partitions. "
-                "This will create an unnecessary host-device synchronization point."
-            )
+            logger.warning("seqlens not found in metadata. Using input_lens to calculate partitions. "
+                           "This will create an unnecessary host-device synchronization point.")
             seqlens_cpu = raw_input_lens.cpu().numpy().astype(np.int64)
 
         if partitions is None:
@@ -136,52 +130,53 @@ class PackedParallelDataBroker(ParallelDataBroker):
                 # so we must enumerate each possible key and deal with them separately, etc.
                 if v is None:
                     sp[k] = None
+                elif k in ["prompt_cu_seqlens", "cu_seqlens"]:
+                    continue
                 elif k in [
-                    "prompt_lens",
-                    "input_lens",
-                    "seq_no_eos_mask",
-                    "rewards",
-                    "reward_score",
-                    "group_factor",
-                    "prompt_lens",
-                    "pos_input_lens",
-                    "group_input_lens",
+                        "prompt_lens",
+                        "input_lens",
+                        "seq_no_eos_mask",
+                        "rewards",
+                        "reward_score",
+                        "group_factor",
+                        "prompt_lens",
+                        "pos_input_lens",
+                        "group_input_lens",
+                        "seqlogp",
                 ]:
                     start, end = partitions[i]
                     sp[k] = v[start:end]
                 elif k in [
-                    "packed_seq",
-                    "packed_logits_mask",
-                    "prompt_mask",
-                    "packed_input_ids",
-                    "values",
-                    "logits_mask",
-                    "packed_prompts",
+                        "packed_seq",
+                        "packed_logits_mask",
+                        "prompt_mask",
+                        "packed_input_ids",
+                        "values",
+                        "logits_mask",
+                        "packed_prompts",
                 ]:
-                    sp[k] = v[offsets[i] : offsets[i] + batch_seqlens[i]]
+                    sp[k] = v[offsets[i]:offsets[i] + batch_seqlens[i]]
                 elif k in [
-                    "packed_logprobs",
-                    "packed_ref_logprobs",
-                    "old_logp",
-                    "ref_logp",
-                    "advantages",
-                    "ppo_loss_mask",
-                    "kl_rewards",
-                    "returns",
+                        "packed_logprobs",
+                        "packed_ref_logprobs",
+                        "old_logp",
+                        "ref_logp",
+                        "advantages",
+                        "ppo_loss_mask",
+                        "kl_rewards",
+                        "returns",
                 ]:
-                    sp[k] = v[short1offsets[i] : short1offsets[i] + short1batch_seqlens[i]]
+                    sp[k] = v[short1offsets[i]:short1offsets[i] + short1batch_seqlens[i]]
                 elif not torch.is_tensor(src[k]):
                     # for constant, preserve value for each splitted instance
                     sp[k] = src[k]
                 else:
-                    raise RuntimeError(
-                        f"Unknown key {k} in packed data. We don't know how to split it. "
-                        f"Check base/dataparallel.py for implemented keys."
-                    )
-        if "input_lens" in src.keys() and "cu_seqlens" in src.keys():
-            for x in splitted_data:
-                x["cu_seqlens"] = torch.nn.functional.pad(x["input_lens"].cumsum(dim=0), (1, 0))
-        if "prompt_lens" in src.keys() and "prompt_cu_seqlens" in src.keys():
+                    raise RuntimeError(f"Unknown key {k} in packed data. We don't know how to split it. "
+                                       f"Check base/dataparallel.py for implemented keys.")
+        if "cu_seqlens" in src.keys():
+            for x, slens in zip(splitted_data, input_lens):
+                x["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0))
+        if "prompt_cu_seqlens" in src.keys():
             for x in splitted_data:
                 x["prompt_cu_seqlens"] = torch.nn.functional.pad(x["prompt_lens"].cumsum(dim=0), (1, 0))
         splitted_data = [namedarray.from_dict(dict(x)) for x in splitted_data]

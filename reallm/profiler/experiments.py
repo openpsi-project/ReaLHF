@@ -51,7 +51,6 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
             balanced_dp=True,
             min_n_seqs=bs,
             max_n_seqs=bs,
-            max_n_tokens=bs * prompt_seqlen,
         ),
         ModelRPC(
             model_name="reward",
@@ -64,7 +63,6 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
             output_key_remap={"scores": "rewards"},
             min_n_seqs=bs,
             max_n_seqs=bs,
-            max_n_tokens=bs * train_seqlen,
         ),
         ModelRPC(
             model_name="ref",
@@ -79,7 +77,6 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
             output_key_remap={"logprobs": "packed_ref_logprobs"},
             min_n_seqs=bs,
             max_n_seqs=bs,
-            max_n_tokens=bs * train_seqlen,
         ),
         ModelRPC(
             model_name="critic",
@@ -91,7 +88,6 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
             output_key_remap={"scores": "values"},
             min_n_seqs=bs,
             max_n_seqs=bs,
-            max_n_tokens=bs * train_seqlen,
         ),
         ModelRPC(
             model_name="actor",
@@ -112,7 +108,6 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
             min_n_seqs_per_dp=4,
             min_n_seqs=bs,
             max_n_seqs=bs,
-            max_n_tokens=bs * train_seqlen,
         ),
         ModelRPC(
             model_name="critic",
@@ -134,7 +129,6 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
             min_n_seqs=bs,
             max_n_seqs=bs,
             balanced_dp=True,
-            max_n_tokens=bs * train_seqlen,
         ),
     ]
 
@@ -180,7 +174,6 @@ class ProfileExperiment(Experiment):
             interface_impl=self.interface,
             min_n_seqs=256,
             max_n_seqs=256,
-            max_n_tokens=256 * 256,
         )
 
         inf = ModelRPC(
@@ -190,7 +183,6 @@ class ProfileExperiment(Experiment):
             interface_impl=self.interface,
             min_n_seqs=256,
             max_n_seqs=256,
-            max_n_tokens=256 * 256,
         )
 
         train = ModelRPC(
@@ -200,7 +192,6 @@ class ProfileExperiment(Experiment):
             interface_impl=self.interface,
             min_n_seqs=256,
             max_n_seqs=256,
-            max_n_tokens=256 * 256,
         )
         return [rollout, inf, train]
 

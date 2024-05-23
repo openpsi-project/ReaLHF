@@ -23,7 +23,7 @@ class PromptAnswerDatasetConfig:
         max_seqlen (str): Maximum sequence length (prompt + answer).
             Sequences longer than this will be truncated.
         train_tokens_per_batch (int): Number of tokens in each batch during training.
-        valid_tokens_per_batch (int): Number of tokens in each batch during evaluation.
+        valid_tokens_per_batch (int): Number of tokens in each batch during validation.
     """
 
     train_path: str = ""
@@ -65,12 +65,12 @@ class PairedComparisonDatasetConfig:
         valid_path (str): Path to the evaluation dataset.
     """
 
+    train_path: str = ""
+    valid_path: str = ""
     max_pairs_per_prompt: int = 2
     max_seqlen: int = 1024
     train_tokens_per_batch: int = 32768
     valid_tokens_per_batch: int = 32768
-    train_path: str = "/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl"
-    valid_path: str = "/lustre/fw/datasets/imdb/rl/rm_paired-valid.jsonl"
 
 
 @dataclasses.dataclass

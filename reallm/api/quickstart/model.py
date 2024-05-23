@@ -3,7 +3,7 @@ import dataclasses
 import json
 import os
 
-from reallm.api.core.config import Model, ModelWrapper, ModelFamily
+from reallm.api.core.config import Model, ModelFamily, ModelWrapper
 from reallm.api.core.model_api import SUPPORTED_MODELS
 import reallm.base.logging as logging
 
