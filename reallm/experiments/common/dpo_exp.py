@@ -4,7 +4,6 @@ import functools
 from omegaconf import MISSING
 
 from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
-from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
@@ -59,8 +58,8 @@ class DPOConfig(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        actor_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.actor.type)]
-        ref_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.ref.type)]
+        actor_path = self.actor.path
+        ref_path = self.ref.path
 
         dataset = Dataset(
             "packed_rw_pair",

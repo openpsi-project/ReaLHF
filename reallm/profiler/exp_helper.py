@@ -8,7 +8,7 @@ import pprint
 import numpy as np
 
 from reallm.api.core.dfg import ModelInterfaceType, ModelName, ModelRPC, OffloadHook, SyncParamHook
-from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH, ReaLModelConfig
+from reallm.api.core.model_api import ReaLModelConfig
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
 from reallm.profiler.device_mesh import DeviceMesh, make_device_mesh_from_name, ModelParallelStrategy

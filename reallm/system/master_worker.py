@@ -986,7 +986,7 @@ class MasterWorker(worker_base.Worker):
         save_task = event_loop.create_task(
             model_save_thread_func(
                 stream=self.__stream,
-                handlers=self.__dp0_model_handlers,
+                handlers=self.__all_model_handlers,
                 model_save_root=self.MODEL_SAVE_ROOT,
                 save_queue=self.__rpc_ctrl.save_queue,
                 stop_ctl=self.__rpc_ctrl.stop,

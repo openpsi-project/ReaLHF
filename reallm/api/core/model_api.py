@@ -215,7 +215,6 @@ def make_backend(cfg: system_api.ModelBackend) -> ModelBackend:
 register_backend("null", NullBackend)
 
 SUPPORTED_MODELS = []
-MODEL_FAMILY_TO_PATH: Dict[ModelFamily, str] = {}
 HF_MODEL_FAMILY_REGISTRY = {}
 
 
@@ -245,7 +244,3 @@ def register_hf_family(
         head_param_names=head_param_names,
     )
 
-
-def register_hf_path(name: str, size: int, path: str):
-    MODEL_FAMILY_TO_PATH[ModelFamily(name, size, False)] = path
-    MODEL_FAMILY_TO_PATH[ModelFamily(name, size, True)] = path

@@ -152,6 +152,3 @@ register_hf_family(
     tblock_param_names=starcoder_tblock_param_name,
     head_param_names=starcoder_output_head_names,
 )
-
-register_hf_path("starcoder", 0, "/lustre/public/pretrained_model_weights/testOnly/starcoder-4l/")
-register_hf_path("starcoder", 16, "/lustre/public/pretrained_model_weights/starcoder-16bit/")

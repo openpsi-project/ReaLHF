@@ -128,7 +128,7 @@ class HFModelRegistry:
         # We will gather parameters across the model parallel group,
         # and save parameters to separate shards across the pipeline parallel group.
 
-        # To decrease the size of each saved file, we also split the file
+        # To decrease the size of each saved file, we split the file
         # of each pipeline stage into smaller shards.
         approx_param_size = sum(v.numel() * v.element_size() for v in model.state_dict().values()) * mp_size
 

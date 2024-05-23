@@ -6,7 +6,6 @@ import random
 from omegaconf import MISSING
 
 from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC
-from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
@@ -53,7 +52,7 @@ class RWConfig(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.model.type)]
+        model_path = self.model.path
 
         dataset = Dataset(
             "packed_rw_pair",
@@ -150,8 +149,8 @@ class RWConfig(Experiment):
             model_type=self.model.type,
             input_data=["packed_input_ids", "input_lens", "group_factor", "pos_input_lens"],
             log_return_value=True,
-            min_n_seqs=self.dataset.train_tokens_per_batch,
-            max_n_seqs=self.dataset.train_tokens_per_batch,
+            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
         )
 
         exp_ctrl = ExperimentSaveEvalControl(
