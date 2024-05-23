@@ -253,7 +253,7 @@ class PPOConfig(Experiment):
         )
 
         actor_interface = ModelInterface(
-            "flash_actor",
+            "ppo_actor",
             args={
                 **copy.deepcopy(ppo_kwargs),
                 "generation_config": generation_kwargs,
@@ -266,11 +266,11 @@ class PPOConfig(Experiment):
         ref_interface.args["enable_save"] = False
 
         critic_interface = ModelInterface(
-            "flash_critic",
+            "ppo_critic",
             args=copy.deepcopy(ppo_kwargs),
         )
         rw_interface = ModelInterface(
-            "flash_paired_rw",
+            "paired_rw",
             args=dict(
                 enable_save=False,
                 output_scaling=self.ppo.reward_output_scaling,

@@ -103,7 +103,7 @@ class RWConfig(Experiment):
             lora=self.model.lora,
         )
 
-        interface = ModelInterface("flash_paired_rw")
+        interface = ModelInterface("paired_rw")
 
         # NOTE: The dims of the parallelism grid is [pipline, data, model]
         # i.e., model parallelism is scheduled as close as possible in a single node.

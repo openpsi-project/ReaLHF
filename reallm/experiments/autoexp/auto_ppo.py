@@ -108,7 +108,7 @@ def register_auto_ppo_experiment(actor_size: int,
                 temperature=self.ppo.temperature,
             )
             actor_interface = ModelInterface(
-                "flash_actor",
+                "ppo_actor",
                 args={
                     **copy.deepcopy(ppo_kwargs),
                     "generation_config": generation_kwargs,
@@ -121,11 +121,11 @@ def register_auto_ppo_experiment(actor_size: int,
             ref_interface.args["enable_save"] = False
 
             critic_interface = ModelInterface(
-                "flash_critic",
+                "ppo_critic",
                 args=copy.deepcopy(ppo_kwargs),
             )
             rw_interface = ModelInterface(
-                "flash_paired_rw",
+                "paired_rw",
                 args=dict(
                     enable_save=False,
                     output_scaling=self.ppo.reward_output_scaling,

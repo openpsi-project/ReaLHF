@@ -116,8 +116,8 @@ class DPOConfig(Experiment):
             lora=self.actor.lora,
         )
 
-        interface = ModelInterface("flash_dpo", args=dict(beta=self.beta, enable_save=True))
-        ref_interface = ModelInterface("flash_dpo", args=dict(beta=self.beta, enable_save=False))
+        interface = ModelInterface("dpo", args=dict(beta=self.beta, enable_save=True))
+        ref_interface = ModelInterface("dpo", args=dict(beta=self.beta, enable_save=False))
 
         actor_topo = PipeModelDataParallelTopology(
             self.actor.parallel.pipeline_parallel_size,

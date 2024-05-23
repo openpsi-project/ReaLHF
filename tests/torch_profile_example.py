@@ -82,7 +82,7 @@ def make_interface():
     import reallm.api.core.dfg
     import reallm.api.core.model_api as model_api
     import reallm.profiler.interface
-    return model_api.make_interface(api.core.dfg.ModelInterface(type_="flash_sft", args=dict()))
+    return model_api.make_interface(api.core.dfg.ModelInterface(type_="sft", args=dict()))
 
 
 def make_model(device):

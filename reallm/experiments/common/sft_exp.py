@@ -93,7 +93,7 @@ class SFTConfig(Experiment):
             lora=self.model.lora,
         )
 
-        interface = ModelInterface("flash_sft")
+        interface = ModelInterface("sft")
 
         # NOTE: The dims of the parallelism grid is [pipline, data, model]
         # i.e., model parallelism is scheduled as close as possible in a single node.

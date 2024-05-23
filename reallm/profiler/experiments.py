@@ -17,18 +17,18 @@ def ppo_rpcs_example(actor_size, critic_size, bs, seqlen):
     prompt_seqlen = 128
     train_seqlen = prompt_seqlen + seqlen
     actor_interface = ModelInterface(
-        "flash_actor",
+        "ppo_actor",
         args={},
     )
     ref_interface = copy.deepcopy(actor_interface)
     ref_interface.args["enable_save"] = False
 
     critic_interface = ModelInterface(
-        "flash_critic",
+        "ppo_critic",
         args={},
     )
     rw_interface = ModelInterface(
-        "flash_paired_rw",
+        "paired_rw",
         args=dict(enable_save=False,),
     )
     actor_model_class = "llama" if actor_size != 34 else "codellama"

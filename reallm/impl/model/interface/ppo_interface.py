@@ -101,7 +101,7 @@ def _ppo_actor_loss_from_model_outputs(
 
 
 @dataclasses.dataclass
-class PackedActorInterface(model_api.ModelInterface):
+class PPOActorInterface(model_api.ModelInterface):
     n_minibatches: int = 4
 
     generation_config: Optional[Dict] = None
@@ -535,7 +535,7 @@ def _ppo_critic_loss_from_model_outputs(
 
 
 @dataclasses.dataclass
-class PackedCriticInterface(model_api.ModelInterface):
+class PPOCriticInterface(model_api.ModelInterface):
     n_minibatches: int = 4
     enable_save: bool = True
     kl_ctl: float = 0.1
@@ -770,5 +770,5 @@ class PackedCriticInterface(model_api.ModelInterface):
         return dict(train_stats)
 
 
-model_api.register_interface("flash_actor", PackedActorInterface)
-model_api.register_interface("flash_critic", PackedCriticInterface)
+model_api.register_interface("ppo_actor", PPOActorInterface)
+model_api.register_interface("ppo_critic", PPOCriticInterface)

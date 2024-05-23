@@ -38,7 +38,7 @@ def _paired_rw_loss_from_model_outputs(
 
 
 @dataclasses.dataclass
-class PackedPairedRewardInterface(model_api.ModelInterface):
+class PairedRewardInterface(model_api.ModelInterface):
     enable_save: bool = True
 
     output_scaling: float = 1.0
@@ -214,4 +214,4 @@ class PackedPairedRewardInterface(model_api.ModelInterface):
         return dict()
 
 
-model_api.register_interface("flash_paired_rw", PackedPairedRewardInterface)
+model_api.register_interface("paired_rw", PairedRewardInterface)

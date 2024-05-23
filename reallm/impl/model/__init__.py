@@ -9,10 +9,10 @@ import reallm.api.from_hf
 # FIXME: automatic import
 import reallm.impl.model.backend.deepspeed
 import reallm.impl.model.backend.pipe_inf
-import reallm.impl.model.interface.dpo_flash_interface
-import reallm.impl.model.interface.ppo_flash_interface
-import reallm.impl.model.interface.rw_flash_interface
-import reallm.impl.model.interface.sft_flash_interface
+import reallm.impl.model.interface.dpo_interface
+import reallm.impl.model.interface.ppo_interface
+import reallm.impl.model.interface.rw_interface
+import reallm.impl.model.interface.sft_interface
 import reallm.impl.model.nn.real_llm_api
 import reallm.impl.model.nn.real_llm_base
 import reallm.impl.model.nn.real_llm_generate

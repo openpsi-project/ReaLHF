@@ -39,7 +39,7 @@ def compute_packed_sft_loss(
     return loss, {"loss": loss.detach()}
 
 
-class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
+class SFTInterface(model_api.ModelInterface):
 
     def train_step(self, model: model_api.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -213,4 +213,4 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
         )
 
 
-model_api.register_interface("flash_sft", PackedSupervisedFinetuningInterface)
+model_api.register_interface("sft", SFTInterface)
