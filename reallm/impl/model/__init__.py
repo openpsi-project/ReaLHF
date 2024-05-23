@@ -1,25 +1,22 @@
-from pathlib import Path
 import functools
-import importlib
 import os
+import re
 
 import torch
 
 from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY
+from reallm.base.importing import import_module
 from reallm.impl.model.conversion.hf_registry import HFModelRegistry
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 # Import all HuggingFace model implementations.
 import reallm.api.from_hf
 
 # Import all model implementations.
-impl_model = Path(os.path.dirname(__file__))
-for subdir in ["backend", "interface", "nn"]:
-    for x in os.listdir((impl_model / subdir).absolute()):
-        if not x.endswith(".py"):
-            continue
-        if "__init__" in x:
-            continue
-        importlib.import_module(f"reallm.impl.model.{subdir}.{x[:-3]}")
+_p = re.compile(r'^(?!.*__init__).*\.py$')
+_filepath = os.path.dirname(__file__)
+import_module(os.path.join(_filepath, "backend"), _p)
+import_module(os.path.join(_filepath, "interface"), _p)
+import_module(os.path.join(_filepath, "nn"), _p)
 
 # Set PyTorch JIT options, following Megatron-LM.
 if torch.cuda.is_available():
