@@ -49,7 +49,7 @@ def register_auto_ppo_experiment(actor_size: int,
     assert n_nodes <= 16, f"n_node_multiplier {n_node_multiplier}, n_nodes {n_nodes}"
 
     if n_nodes == 1:
-        nodelist = "QH-com08"
+        nodelist = "QH-com49"
     elif n_nodes == 2:
         nodelist = "QH-com[27-28]"
     elif n_nodes == 4:
@@ -140,7 +140,7 @@ def register_auto_ppo_experiment(actor_size: int,
                     model_type=ModelFamily(actor_model_class, actor_size, is_critic=False),
                     interface_type=ModelInterfaceType.GENERATE,
                     interface_impl=actor_interface,
-                    input_data=["packed_prompts", "prompt_cu_seqlens"],
+                    input_data=["packed_prompts", "prompt_lens"],
                     output_data=[
                         "seq_no_eos_mask",
                         "packed_seq",

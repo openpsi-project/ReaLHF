@@ -45,20 +45,19 @@ def main_worker(args):
 
     # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
     # profiler.import_profiler_registers()
-    import system
-
     import reallm.experiments
     import reallm.impl.dataset
     import reallm.impl.model
     import reallm.profiler.experiments
     # import reallm.profiler.worker
     import reallm.profiler.interface
+    import reallm.system
 
     logger.info(f"Run {args.worker_type} worker with args: %s", args)
     assert not args.experiment_name.startswith(
         "/"), f'Invalid experiment_name "{args.experiment_name}" starts with "/"'
     if args.wprocs_per_jobstep == 1:
-        system.run_worker(
+        reallm.system.run_worker(
             worker_type=args.worker_type,
             experiment_name=args.experiment_name,
             trial_name=args.trial_name,
@@ -75,7 +74,7 @@ def main_worker(args):
                 worker_name=f"{args.worker_type}/{wid}",
                 worker_server_type="zmq",
             )
-            p = multiprocessing.Process(target=system.run_worker, kwargs=worker_args)
+            p = multiprocessing.Process(target=reallm.system.run_worker, kwargs=worker_args)
             p.name = f"{args.worker_type}/{wid}"
             p.start()
             workers.append(p)

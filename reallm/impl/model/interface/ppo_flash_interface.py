@@ -179,8 +179,11 @@ class PackedActorInterface(model_api.ModelInterface):
         module.eval()
 
         data = recursive_apply(data, lambda x: x.to(model.device))
+        prompt_lens = data["prompt_lens"]
         packed_prompts = data["packed_prompts"]
-        cu_seqlens = data["prompt_cu_seqlens"]
+        cu_seqlens = torch.cat(
+            [torch.tensor([0], dtype=torch.int32, device=model.device),
+             torch.cumsum(prompt_lens, dim=0)])
 
         prompt_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
         bs = prompt_lengths.shape[0]
@@ -304,7 +307,7 @@ class PackedActorInterface(model_api.ModelInterface):
             if hasattr(module, "module"):
                 module = module.module
             res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            logits = res
+            logits = res.logits
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             packed_logits_mask = data["packed_logits_mask"]
@@ -444,7 +447,7 @@ class PackedActorInterface(model_api.ModelInterface):
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=cu_seqlens,
                     max_seqlen=max_seqlen,
-                )
+                ).logits
                 loss, stats = _ppo_actor_loss_from_model_outputs(
                     logits=output,
                     packed_input_ids=data["packed_seq"],
@@ -614,7 +617,7 @@ class PackedCriticInterface(model_api.ModelInterface):
                 module = module.module
             scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
                                                cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen)
+                                               max_seqlen=max_seqlen).logits
         scores = scores.squeeze(-1)
         return from_dict(dict(scores=scores))
 
@@ -732,7 +735,7 @@ class PackedCriticInterface(model_api.ModelInterface):
                 max_seqlen = int(max(input_lens))
                 new_values: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
                                                        cu_seqlens=data["cu_seqlens"],
-                                                       max_seqlen=max_seqlen).float()
+                                                       max_seqlen=max_seqlen).logits.float()
 
                 loss, stats = _ppo_critic_loss_from_model_outputs(
                     new_values=new_values,

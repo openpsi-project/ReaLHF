@@ -147,7 +147,8 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
 
             yield dict(
                 packed_prompts=packed_input_ids,
-                prompt_cu_seqlens=cu_seqlens,
+                # prompt_cu_seqlens=cu_seqlens,
+                prompt_lens=seqlens,
             )
         self._shuffle()
         assert all(seq <= self.n_tokens_per_batch for seq in self.prompt_lengths)

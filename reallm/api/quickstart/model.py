@@ -121,6 +121,7 @@ class ModelTrainEvalConfig:
     gradient_checkpointing: bool = False
     enable_fp16: bool = True
     enable_bf16: bool = False
+    enable_async_p2p: bool = False
     offload: bool = False
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
     zero_stage: int = dataclasses.field(

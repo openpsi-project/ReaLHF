@@ -22,9 +22,9 @@ def load_worker(worker_type: str) -> Type:
 
 def worker_type_to_module(worker_type: str):
     if worker_type != "profile_worker":
-        return "system." + worker_type
+        return "reallm.system." + worker_type
     else:
-        return "profiler.worker"
+        return "reallm.profiler.worker"
 
 
 def worker_type_to_class_name(worker_type: str):
@@ -41,7 +41,7 @@ def run_worker(worker_type, experiment_name, trial_name, worker_name, worker_ser
         worker_server_type: string, either 'zmq' or 'ray'.
     """
     worker_class = load_worker(worker_type)
-    make_server_fn = getattr(importlib.import_module("system.worker_control"), "make_server")
+    make_server_fn = getattr(importlib.import_module("reallm.system.worker_control"), "make_server")
     server = make_server_fn(type_=worker_server_type,
                             experiment_name=experiment_name,
                             trial_name=trial_name,
@@ -56,9 +56,9 @@ def run_worker(worker_type, experiment_name, trial_name, worker_name, worker_ser
 
 
 def make_controller(type_, experiment_name, trial_name):
-    module = importlib.import_module("system.controller")
+    module = importlib.import_module("reallm.system.controller")
     if type_ == 'zmq':
-        control_module = importlib.import_module("system.worker_control")
+        control_module = importlib.import_module("reallm.system.worker_control")
         panel = getattr(control_module, 'make_control')('zmq', experiment_name, trial_name)
         return getattr(module, "Controller")(experiment_name, trial_name, panel)
     elif type_ == 'ray':

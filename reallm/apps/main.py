@@ -95,9 +95,13 @@ def main_start(args):
     expr_name = args.experiment_name
     constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
+    file_path = os.path.abspath(__file__)
+    reallm_path = os.path.dirname(os.path.dirname(file_path))
+    repo_path = os.path.dirname(reallm_path)
+
     base_environs = {
-        "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
-        "REAL_PACKAGE_PATH": os.path.dirname(os.path.dirname(__file__)),
+        "PYTHONPATH": repo_path,
+        "REAL_PACKAGE_PATH": repo_path,
         "WANDB_MODE": args.wandb_mode,
         "REAL_MODE": args.mode.upper(),
         "REAL_TRACE": os.getenv("REAL_TRACE", "0"),

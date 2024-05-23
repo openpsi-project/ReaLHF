@@ -139,7 +139,6 @@ class PackedParallelDataBroker(ParallelDataBroker):
                         "rewards",
                         "reward_score",
                         "group_factor",
-                        "prompt_lens",
                         "pos_input_lens",
                         "group_input_lens",
                         "seqlogp",

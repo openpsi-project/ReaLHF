@@ -4,6 +4,7 @@ from omegaconf import MISSING
 
 from reallm.api.core.dfg import (ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC, OffloadHook,
                                  SyncParamHook)
+from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig
@@ -171,22 +172,41 @@ class PPOConfig(Experiment):
             temperature=self.ppo.temperature,
         )
 
-        def _make_model_config(cfg: ModelTrainEvalConfig, from_type: str):
-            return get_real_model_config(
-                from_type=from_type,
-                model_path=cfg.path,
-                hf_model_type=cfg.type,
-                tokenizer_path=cfg.base_model_path,
-                dtype="bf16" if cfg.enable_bf16 else "fp16",
-                lora=cfg.lora,
-            )
+        actor_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.actor.type)]
+        ref_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.ref.type)]
+        critic_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.critic.type)]
+        rew_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.rew.type)]
 
-        actor_model = _make_model_config(self.actor, "self")
-        ref_model = _make_model_config(self.ref, "self")
-        critic_type = "self" if not self.ppo.actor_as_critic else "actor_as_critic"
-        # critic_type = "random_critic"
-        critic_model = _make_model_config(self.critic, critic_type)
-        rw_model = _make_model_config(self.rew, critic_type)
+        actor_model = get_real_model_config(
+            model_path=actor_path,
+            hf_model_family=self.actor.type._class,
+            is_critic=False,
+            init_critic_from_actor=False,
+            dtype="bf16" if self.actor.enable_bf16 else "fp16",
+            lora=self.actor.lora,
+        )
+        ref_model = get_real_model_config(
+            model_path=ref_path,
+            hf_model_family=self.ref.type._class,
+            is_critic=False,
+            init_critic_from_actor=False,
+            dtype="bf16" if self.actor.enable_bf16 else "fp16",
+        )
+        critic_model = get_real_model_config(
+            model_path=critic_path,
+            hf_model_family=self.critic.type._class,
+            is_critic=True,
+            init_critic_from_actor=True,
+            dtype="bf16" if self.actor.enable_bf16 else "fp16",
+            lora=self.critic.lora,
+        )
+        rw_model = get_real_model_config(
+            model_path=rew_path,
+            hf_model_family=self.critic.type._class,
+            is_critic=True,
+            init_critic_from_actor=True,
+            dtype="bf16" if self.actor.enable_bf16 else "fp16",
+        )
 
         def _make_train_backend_config(cfg: ModelTrainEvalConfig):
             if cfg.parallel.pipeline_parallel_size > 1:
