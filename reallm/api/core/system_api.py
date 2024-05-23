@@ -296,6 +296,11 @@ class ExperimentConfig:
                     data_transfer_pairs.append((self.model_rpcs[j].model_name, self.model_rpcs[i].model_name))
                     # print(f"model_rpc j name {self.model_rpcs[j].name} i name {self.model_rpcs[i].name} "
                     #        "data transfer pair append {(self.model_rpcs[j].model_name, self.model_rpcs[i].model_name)} ")
+        src_rpcs = [rpc for rpc in self.model_rpcs if rpc.is_src]
+        data_src_rpc = src_rpcs[0]
+        for r in src_rpcs[1:]:
+            if (data_src_rpc.model_name, r.model_name) not in data_transfer_pairs:
+                data_transfer_pairs.append((data_src_rpc.model_name, r.model_name))
         data_transfer_pairs += [(mn, mn) for mn in model_names]
 
         sync_param_pairs: List[Tuple[ModelName, ModelName]] = []

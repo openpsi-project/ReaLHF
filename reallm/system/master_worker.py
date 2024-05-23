@@ -270,7 +270,7 @@ class RPCCorountineControl:
     ## Per-coroutine resources ##
     # Used for counting the number of concurrent calls.
     can_do_rpc: Dict[str, asyncio.Semaphore]
-    model_traversal: Dict[str, int]
+    rpc_traversal: Dict[str, int]
     # for synchronizing req ids between req and reply coroutines
     request_queues: Dict[str, List[asyncio.Queue]]
 
@@ -471,16 +471,15 @@ async def model_rpc_request_func(
     request_queues = ctrl.request_queues[rpc.name]
 
     response_coroutine_idx = 0
-    data_amount_seqs = data_amount_tokens = 0
+
+    this_rpc_consumed_seqs = 0
     while not ctrl.stop.is_set():
         await can_do_rpc.acquire()
 
-        # The following two lines are used to ensure staleness=0, but it may be unnecessary when enabling the stream engine.
-        # NOTE: max-min-flow-tokens is not used here because the number of tokens can change (e.g. after generate)
-        # FIXME: RPCs that do not give max/min seqs will have issues.
-        if not rpc.is_dst_of_model_role:
-            while data_amount_seqs >= (ctrl.model_traversal[rpc.model_name.role] + 1) * rpc.max_min_flow_seqs:
-                await asyncio.sleep(0.1)
+        # Ensure that parent RPCs will not be over-consumed.
+        while any(this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.max_n_seqs
+                  for c in rpc.children_rpcs):
+            await asyncio.sleep(0.1)
 
         sample = await buffer.get_batch_for_rpc(rpc)
 
@@ -501,8 +500,7 @@ async def model_rpc_request_func(
             ctrl.data_amount.inf_bs.append(len(sample.seqlens))
             ctrl.data_amount.inf_seqlens.append(sample.seqlens)
 
-        data_amount_seqs += len(sample.seqlens)
-        data_amount_tokens += sum(sample.seqlens)
+        this_rpc_consumed_seqs += len(sample.seqlens)
 
         # logger.info(f"Model rpc {rpc.name} requesting.")
         dp_size = topo.get_dim("data")
@@ -610,8 +608,7 @@ async def model_rpc_reply_func(
 
         can_do_rpc.release()
 
-        if rpc.is_dst_of_model_role:
-            ctrl.model_traversal[rpc.model_name.role] += 1
+        ctrl.rpc_traversal[rpc.name] += 1
 
         if rpc.is_dst:
             await ctrl.train_count.put(1)
@@ -908,10 +905,8 @@ class MasterWorker(worker_base.Worker):
             fetch_data_queue=asyncio.Queue(1),
             eval_queue=asyncio.Queue(1),
             save_queue=asyncio.Queue(1),
-            model_traversal={
-                model_name: 0
-                for model_name in set(r.model_name.role for r in self.__model_rpcs)
-            },
+            rpc_traversal={rpc.name: 0
+                           for rpc in self.__model_rpcs},
             can_do_rpc={rpc.name: asyncio.Semaphore(rpc.max_concurrent_calls)
                         for rpc in self.__model_rpcs},
             request_queues={
@@ -934,7 +929,7 @@ class MasterWorker(worker_base.Worker):
 
         logger.info(f"Creating asyncio coroutines...")
 
-        src_rpc = [rpc for rpc in self.config.model_rpcs][0]
+        src_rpc = [rpc for rpc in self.config.model_rpcs if rpc.is_src][0]
         src_rpc_model_name = src_rpc.model_name
         src_rpc_dp_size = self.config.model_topos[src_rpc.model_name].get_dim("data")
 

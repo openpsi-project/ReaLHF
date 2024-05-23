@@ -11,6 +11,32 @@ import reallm.base.logging as logging
 logger = logging.getLogger("buffer")
 
 
+def _extract_intervals(arr):
+    if len(arr) == 0:
+        return []
+
+    # Initialize the list to hold the intervals
+    intervals = []
+
+    # Start of the first interval
+    start = arr[0]
+
+    for i in range(1, len(arr)):
+        # Check if the current element is not contiguous with the previous one
+        if arr[i] != arr[i - 1] + 1:
+            # End of the current interval
+            end = arr[i - 1]
+            # Add the interval as a tuple
+            intervals.append((start, end + 1))
+            # Start a new interval
+            start = arr[i]
+
+    # Add the last interval
+    intervals.append((start, arr[-1] + 1))
+
+    return intervals
+
+
 class BufferFull(Exception):
     pass
 
@@ -190,7 +216,8 @@ class AsyncIOSequenceBuffer:
         async with self._lock:
             self._assert_valid_indicator()
             n = len(samples)
-            indices = np.where(self._is_empty)[0][:n]
+            indices = np.where(self._is_empty)[0]
+            indices = np.arange(*_extract_intervals(indices)[-1])[:n]
             if len(indices) < n:
                 raise BufferFull("Please set a larger buffer size")
             self._is_empty[indices] = False
@@ -257,9 +284,6 @@ class AsyncIOSequenceBuffer:
                                        & ~self._completed_rpc[:, rpc_idx])[0]
             if len(ready_indices) < rpc.min_n_seqs:
                 return False
-            seqlens = self.__buffer._get_seqlen(ready_indices)
-            if seqlens.sum() < rpc.min_n_tokens:
-                return False
             return True
 
         async with self._lock:
@@ -268,9 +292,8 @@ class AsyncIOSequenceBuffer:
                 ready_indices = np.nonzero((self._is_idle | self._is_being_read)
                                            & self._ready_for_rpcs[:, rpc_idx]
                                            & ~self._completed_rpc[:, rpc_idx])[0]
-                seqlens = self.__buffer._get_seqlen(ready_indices)
                 # *2 because we want to fetch new data as long as the *next* RPC does not have enough data.
-                if len(ready_indices) < rpc.min_n_seqs * 2 or seqlens.sum() < rpc.min_n_tokens * 2:
+                if len(ready_indices) < rpc.min_n_seqs * 2:
                     self._request_load_data()
 
             while not _can_do_rpc():
@@ -283,29 +306,10 @@ class AsyncIOSequenceBuffer:
                                        & ~self._completed_rpc[:, rpc_idx])[0]
             seqlens = self.__buffer._get_seqlen(ready_indices)
 
-            token_cumsum = np.cumsum(seqlens, axis=0)
-            token_valid_mask = (token_cumsum >= rpc.min_n_tokens) & (token_cumsum <= rpc.max_n_tokens)
-            token_intervals = token_valid_mask.nonzero()[0]
-            if len(token_intervals) < 1:
-                raise RuntimeError(
-                    "No valid token intervals found. Please set a smaller min_n_tokens and a larger max_n_tokens. "
-                    f"Current values min_n_tokens={rpc.min_n_tokens}, max_n_tokens={rpc.max_n_tokens}. "
-                    f"Current sequence lengths in buffer: {seqlens} (total {sum(seqlens)}).")
-            token_start, token_end = token_intervals[0], token_intervals[-1]
-
-            n_seqs_cumsum = np.arange(1, len(ready_indices) + 1)
-            n_seqs_valid_mask = (n_seqs_cumsum >= rpc.min_n_seqs) & (n_seqs_cumsum <= rpc.max_n_seqs)
-            n_seqs_intervals = n_seqs_valid_mask.nonzero()[0]
-            n_seqs_start, n_seqs_end = n_seqs_intervals[0], n_seqs_intervals[-1]
-
-            if token_start > n_seqs_end or token_end < n_seqs_start:
-                raise RuntimeError("Tokens and n_seqs interval are not overlapped. "
-                                   f"Please set proper batch sizes in RPC {rpc.name}.")
-
-            indices = ready_indices[:min(token_end, n_seqs_end) + 1]
-            seqlens = seqlens[:min(token_end, n_seqs_end) + 1]
-            assert rpc.min_n_tokens <= seqlens.sum() <= rpc.max_n_tokens
-            assert rpc.min_n_seqs <= len(indices) <= rpc.max_n_seqs
+            indices = ready_indices[:rpc.max_n_seqs]
+            seqlens = seqlens[:rpc.max_n_seqs]
+            assert rpc.min_n_seqs <= len(indices) <= rpc.max_n_seqs, (rpc.min_n_seqs, len(indices),
+                                                                      rpc.max_n_seqs)
 
             self._is_idle[indices] = False
             self._is_being_read[indices] = True

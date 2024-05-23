@@ -130,6 +130,8 @@ class PackedParallelDataBroker(ParallelDataBroker):
                 # so we must enumerate each possible key and deal with them separately, etc.
                 if v is None:
                     sp[k] = None
+                elif k in ["prompt_cu_seqlens", "cu_seqlens"]:
+                    continue
                 elif k in [
                         "prompt_lens",
                         "input_lens",
@@ -140,6 +142,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
                         "prompt_lens",
                         "pos_input_lens",
                         "group_input_lens",
+                        "seqlogp",
                 ]:
                     start, end = partitions[i]
                     sp[k] = v[start:end]
@@ -170,10 +173,10 @@ class PackedParallelDataBroker(ParallelDataBroker):
                 else:
                     raise RuntimeError(f"Unknown key {k} in packed data. We don't know how to split it. "
                                        f"Check base/dataparallel.py for implemented keys.")
-        if "input_lens" in src.keys() and "cu_seqlens" in src.keys():
-            for x in splitted_data:
-                x["cu_seqlens"] = torch.nn.functional.pad(x["input_lens"].cumsum(dim=0), (1, 0))
-        if "prompt_lens" in src.keys() and "prompt_cu_seqlens" in src.keys():
+        if "cu_seqlens" in src.keys():
+            for x, slens in zip(splitted_data, input_lens):
+                x["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0))
+        if "prompt_cu_seqlens" in src.keys():
             for x in splitted_data:
                 x["prompt_cu_seqlens"] = torch.nn.functional.pad(x["prompt_lens"].cumsum(dim=0), (1, 0))
         splitted_data = [namedarray.from_dict(dict(x)) for x in splitted_data]

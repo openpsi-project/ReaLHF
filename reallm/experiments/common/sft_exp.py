@@ -3,6 +3,7 @@ import dataclasses
 from omegaconf import MISSING
 
 from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
+from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptAnswerDatasetConfig
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
@@ -11,11 +12,8 @@ from reallm.base.topology import PipeModelDataParallelTopology
 
 @dataclasses.dataclass
 class SFTConfig(Experiment):
-    _configuration_name: str = "Supervised-Finetuning"
-
     experiment_name: str = MISSING
     trial_name: str = MISSING
-    trace: bool = False
     seed: int = 1
     total_train_epochs: int = 1
     save_freq_steps: Optional[int] = 50
@@ -24,24 +22,14 @@ class SFTConfig(Experiment):
     dataset: PromptAnswerDatasetConfig = dataclasses.field(default_factory=PromptAnswerDatasetConfig)
 
     def __post_init__(self):
-        if self.model.type == "gpt2" and self.dataset.max_seqlen > 1024:
-            raise ValueError("GPT2 only supports max seqlen of 1024")
-
         self.world_size = (self.model.parallel.pipeline_parallel_size *
                            self.model.parallel.data_parallel_size * self.model.parallel.model_parallel_size)
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
-            data_worker=TasksGroup(
-                count=1,
-                scheduling=Scheduling.data_worker_default(
-                    cpu=2,
-                    mem=10000,
-                ),
-            ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
+                scheduling=Scheduling.master_worker_default(cpu=1, mem=20000),
             ),
             model_worker=TasksGroup(
                 count=self.world_size,
@@ -55,7 +43,7 @@ class SFTConfig(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = self.model.path
+        model_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.model.type)]
 
         dataset = Dataset(
             "packed_prompt_answer",
@@ -67,14 +55,6 @@ class SFTConfig(Experiment):
             ),
         )
         dataloader = eval_dataloader = DataLoader("iterable_dataset_loader")
-        data_worker = [
-            DataWorker(
-                tokenizer_name_or_path=self.model.path,
-                datasets=[dataset],
-                dataloader=dataloader,
-                seed=self.seed,
-            )
-        ]
 
         eval_dataset = copy.deepcopy(dataset)
         eval_dataset.args["dataset_path"] = self.dataset.valid_path
@@ -93,10 +73,9 @@ class SFTConfig(Experiment):
                 lr_scheduler_type=self.model.optimizer.lr_scheduler_type,
                 warmup_steps_proportion=self.model.optimizer.warmup_steps_proportion,
                 min_lr_ratio=self.model.optimizer.min_lr_ratio,
-                zero_stage=self.model.optimizer.zero_stage if self.model.parallel.pipeline_parallel_size == 1
-                else min(self.model.optimizer.zero_stage, 1),
+                zero_stage=(self.model.zero_stage if self.model.parallel.pipeline_parallel_size == 1 else min(
+                    self.model.zero_stage, 1)),
                 gradient_checkpointing=self.model.gradient_checkpointing,
-                num_pipeline_stages=self.model.parallel.pipeline_parallel_size,
                 engine_type="pipe" if self.model.parallel.pipeline_parallel_size > 1 else "deepspeed",
                 offload_optimizer_state=self.model.optimizer.offload,
                 enable_bf16=self.model.enable_bf16,
@@ -106,14 +85,11 @@ class SFTConfig(Experiment):
         )
 
         model = get_real_model_config(
-            from_type="hf_as_actor",
             model_path=model_path,
-            hf_model_type=self.model.type,
-            tokenizer_path=model_path,
-            use_pipe=(self.model.parallel.pipeline_parallel_size > 1),
+            hf_model_family=self.model.type._class,
+            is_critic=False,
+            init_critic_from_actor=False,
             dtype="bf16" if self.model.enable_bf16 else "fp16",
-            sequence_parallel=self.model.parallel.use_sequence_parallel,
-            partition_method=self.model.parallel.partition_method,
             lora=self.model.lora,
         )
 
@@ -135,38 +111,48 @@ class SFTConfig(Experiment):
             coord = topo.get_coord(i)
             mw = ModelWorker(
                 seed=self.seed,
-                model=model,
-                backend=backend,
-                interface=interface,
-                model_name="default",
-                topo=topo,
-                dp_rank=coord.data,
-                pp_rank=coord.pipe,
-                mp_rank=coord.model,
-                eval_datasets=[dataset],
-                eval_dataloader=eval_dataloader,
+                shards=[
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            ModelName("default", 0),
+                            dp_rank=coord.data,
+                            pp_rank=coord.pipe,
+                            mp_rank=coord.model,
+                            topo=topo,
+                        ),
+                        model=model,
+                        backend=backend,
+                        eval_datasets=[eval_dataset],
+                        eval_dataloader=eval_dataloader,
+                    )
+                ],
+                tokenizer_name_or_path=model_path,
+                datasets=[dataset],
+                dataloader=dataloader,
                 cuda_cache_cleanliness=False,
                 cuda_cache_clear_freq=1,
             )
             model_worker.append(mw)
 
         sft = ModelRPC(
-            model_name="default",
+            model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
-            model_type=ModelFamily("llama", 7, False),
+            model_type=self.model.type,
             input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
             log_return_value=True,
-            min_n_tokens=100000,
-            max_n_tokens=131072,
+            min_n_seqs=self.dataset.train_tokens_per_batch,
+            max_n_seqs=self.dataset.train_tokens_per_batch,
         )
 
-        cfg = ExperimentConfig(
+        exp_ctrl = ExperimentSaveEvalControl(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=self.save_freq_steps,
             eval_frequency_epochs=self.eval_freq_epochs,
+        )
+        cfg = ExperimentConfig(
+            exp_ctrl=exp_ctrl,
             model_rpcs=[sft],
-            data_worker=data_worker,
             model_worker=model_worker,
         )
         return cfg

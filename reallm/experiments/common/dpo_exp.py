@@ -4,6 +4,7 @@ import functools
 from omegaconf import MISSING
 
 from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
+from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
@@ -17,7 +18,6 @@ logger = logging.getLogger("DPO Experiment")
 class DPOConfig(Experiment):
     experiment_name: str = MISSING
     trial_name: str = MISSING
-    trace: bool = False
     seed: int = 1
     total_train_epochs: int = 1
     save_freq_steps: Optional[int] = 20
@@ -29,33 +29,26 @@ class DPOConfig(Experiment):
     beta: float = 0.1
 
     def __post_init__(self):
-        if self.is_sft_lora and (self.sft_lora_path is None or self.actor.type is None):
-            raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
-        if self.actor.base_model_path != self.ref.base_model_path:
-            raise ValueError("actor and ref must use the same base model.")
-        if self.dataset.valid_path is not None:
-            logger.warning(
-                "DPO does not support validation because we can't compute reference logps during training.")
+        assert not self.is_sft_lora and self.sft_lora_path is None, "LoRA is not supported for now."
         self.n_actors = int(self.actor.parallel.pipeline_parallel_size *
                             self.actor.parallel.data_parallel_size * self.actor.parallel.model_parallel_size)
         self.n_refs = int(self.ref.parallel.pipeline_parallel_size * self.ref.parallel.data_parallel_size *
                           self.ref.parallel.model_parallel_size)
+        if self.n_actors != self.n_refs:
+            raise ValueError(
+                "Currelty, we restrict that the number of actors and references should be the same.")
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
-            data_worker=TasksGroup(
-                count=1,
-                scheduling=Scheduling.data_worker_default(
-                    cpu=2,
-                    mem=10000,
-                ),
-            ),
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=4, mem=20000),
+                scheduling=Scheduling.master_worker_default(
+                    cpu=4,
+                    mem=20000,
+                ),
             ),
             model_worker=TasksGroup(
-                count=self.n_actors + self.n_refs,
+                count=self.n_actors,
                 scheduling=Scheduling.model_worker_default(
                     cpu=4,
                     gpu=1,
@@ -66,6 +59,9 @@ class DPOConfig(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
+        actor_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.actor.type)]
+        ref_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.ref.type)]
+
         dataset = Dataset(
             "packed_rw_pair",
             args=dict(
@@ -76,14 +72,6 @@ class DPOConfig(Experiment):
             ),
         )
         dataloader = DataLoader("iterable_dataset_loader")
-        data_worker = [
-            DataWorker(
-                tokenizer_name_or_path=self.actor.base_model_path,
-                datasets=[dataset],
-                dataloader=dataloader,
-                seed=self.seed,
-            )
-        ]
 
         train_backend = ModelBackend(
             "ds_train",
@@ -98,10 +86,9 @@ class DPOConfig(Experiment):
                 lr_scheduler_type=self.actor.optimizer.lr_scheduler_type,
                 warmup_steps_proportion=self.actor.optimizer.warmup_steps_proportion,
                 min_lr_ratio=self.actor.optimizer.min_lr_ratio,
-                zero_stage=self.actor.optimizer.zero_stage if self.actor.parallel.pipeline_parallel_size == 1
-                else min(self.actor.optimizer.zero_stage, 1),
+                zero_stage=(self.actor.zero_stage if self.actor.parallel.pipeline_parallel_size == 1 else min(
+                    self.actor.zero_stage, 1)),
                 gradient_checkpointing=self.actor.gradient_checkpointing,
-                num_pipeline_stages=self.actor.parallel.pipeline_parallel_size,
                 engine_type="pipe" if self.actor.parallel.pipeline_parallel_size > 1 else "deepspeed",
                 offload_optimizer_state=self.actor.optimizer.offload,
                 enable_bf16=self.actor.enable_bf16,
@@ -109,38 +96,23 @@ class DPOConfig(Experiment):
                 sequence_parallel=self.actor.parallel.use_sequence_parallel,
             ),
         )
-        inf_backend = ModelBackend(
-            "ds_inference",
-            args=dict(
-                enable_fp16=(not self.ref.enable_bf16),
-                zero_stage=3 if self.ref.offload else 0,
-                offload=self.ref.offload,
-                enable_bf16=self.ref.enable_bf16,
-                engine_type="pipe" if self.ref.parallel.pipeline_parallel_size > 1 else "deepspeed",
-                sequence_parallel=self.ref.parallel.use_sequence_parallel,
-            ),
-        )
+        inf_backend = ModelBackend("pipe_inference" if self.ref.parallel.pipeline_parallel_size >
+                                   1 else "null")
 
         # We should merge pipeline model weights for the reference model to load.
         ref_model = get_real_model_config(
-            from_type="self",
-            model_path=self.ref.path,
-            hf_model_type=self.ref.type,
-            tokenizer_path=self.ref.base_model_path,
-            use_pipe=self.ref.parallel.pipeline_parallel_size > 1,
+            model_path=ref_path,
+            hf_model_family=self.ref.type._class,
+            is_critic=False,
+            init_critic_from_actor=False,
             dtype="bf16" if self.ref.enable_bf16 else "fp16",
-            sequence_parallel=self.ref.parallel.use_sequence_parallel,
-            partition_method=self.ref.parallel.partition_method,
         )
         model = get_real_model_config(
-            from_type="self",
-            model_path=self.actor.path,
-            hf_model_type=self.actor.type,
-            tokenizer_path=self.actor.base_model_path,
-            use_pipe=self.actor.parallel.pipeline_parallel_size > 1,
+            model_path=actor_path,
+            hf_model_family=self.actor.type._class,
+            is_critic=False,
+            init_critic_from_actor=False,
             dtype="bf16" if self.actor.enable_bf16 else "fp16",
-            sequence_parallel=self.actor.parallel.use_sequence_parallel,
-            partition_method=self.actor.parallel.partition_method,
             lora=self.actor.lora,
         )
 
@@ -158,64 +130,78 @@ class DPOConfig(Experiment):
             self.ref.parallel.data_parallel_size,
         )
         model_worker = []
+        # By default, we place one reference model and one actor model on each GPU.
         for i in range(self.n_actors):
-            coord = actor_topo.get_coord(i)
+            actor_coord = actor_topo.get_coord(i)
+            ref_coord = ref_topo.get_coord(i)
             mw = ModelWorker(
                 seed=self.seed,
-                model=model,
-                backend=train_backend,
-                interface=interface,
-                model_name="actor",
-                topo=actor_topo,
-                dp_rank=coord.data,
-                pp_rank=coord.pipe,
-                mp_rank=coord.model,
-                cuda_cache_cleanliness=True,
-                cuda_cache_clear_freq=1,
-            )
-            model_worker.append(mw)
-        for i in range(self.n_refs):
-            coord = ref_topo.get_coord(i)
-            mw = ModelWorker(
-                seed=self.seed,
-                model=ref_model,
-                backend=inf_backend,
-                interface=ref_interface,
-                model_name="ref",
-                topo=ref_topo,
-                dp_rank=coord.data,
-                pp_rank=coord.pipe,
-                mp_rank=coord.model,
+                shards=[
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            ModelName("actor", 0),
+                            dp_rank=actor_coord.data,
+                            pp_rank=actor_coord.pipe,
+                            mp_rank=actor_coord.model,
+                            topo=actor_topo,
+                        ),
+                        model=model,
+                        backend=train_backend,
+                    ),
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            ModelName("ref", 0),
+                            dp_rank=ref_coord.data,
+                            pp_rank=ref_coord.pipe,
+                            mp_rank=ref_coord.model,
+                            topo=ref_topo,
+                        ),
+                        model=ref_model,
+                        backend=inf_backend,
+                    ),
+                ],
+                tokenizer_name_or_path=actor_path,
+                datasets=[dataset],
+                dataloader=dataloader,
                 cuda_cache_cleanliness=True,
                 cuda_cache_clear_freq=1,
             )
             model_worker.append(mw)
 
         ref_inf = ModelRPC(
-            model_name="ref",
+            model_name=ModelName("ref", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=ref_interface,
-            model_type=ModelFamily("llama", 7, False),
-            input_data=["packed_input_ids", "input_lens", "pair_input_lens", "prompt_lens"],
+            model_type=self.ref.type,
+            input_data=["packed_input_ids", "input_lens", "pos_input_lens", "prompt_lens"],
             output_data=["seqlogp"],
-            output_key_remap={"seqlogp": "pair_ref_seqlogp"},
+            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
         )
         dpo = ModelRPC(
-            model_name="actor",
+            model_name=ModelName("actor", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
-            model_type=ModelFamily("llama", 7, False),
+            model_type=self.actor.type,
             input_data=[
-                "packed_input_ids", "input_lens", "pair_input_lens", "pair_ref_seqlogp", "prompt_lens"
+                "packed_input_ids",
+                "input_lens",
+                "pos_input_lens",
+                "seqlogp",
+                "prompt_lens",
             ],
             log_return_value=True,
+            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
         )
 
-        cfg = ExperimentConfig(
+        exp_ctrl = ExperimentSaveEvalControl(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=self.save_freq_steps,
+        )
+        cfg = ExperimentConfig(
+            exp_ctrl=exp_ctrl,
             model_rpcs=[dpo, ref_inf],
-            data_worker=data_worker,
             model_worker=model_worker,
         )
         return cfg
