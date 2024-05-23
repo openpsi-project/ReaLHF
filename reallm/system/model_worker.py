@@ -95,7 +95,10 @@ def split_packed_batch_into_seqs(
 
 
 def _get_shape_from_key_and_seqlen(k: str, seqlen: int):
-    if k in ["input_lens", "prompt_lens", "seq_no_eos_mask", "rewards", "reward_score", "group_factor", "pos_input_lens"]:
+    if k in [
+            "input_lens", "prompt_lens", "seq_no_eos_mask", "rewards", "reward_score", "group_factor",
+            "pos_input_lens"
+    ]:
         shape = (1,)
     elif k in ["cu_seqlens", "prompt_cu_seqlens"]:
         shape = (2,)

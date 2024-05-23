@@ -201,8 +201,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
 
             assert len(seqlens) >= self.min_seq_pairs_per_batch
             assert prompt_lens.shape[0] == len(seqlens), (prompt_lens.shape[0], len(seqlens), len(indices))
-            assert packed_input_ids.shape[0] == sum(seqlens), (packed_input_ids.shape[0],
-                                                                                    sum(seqlens))
+            assert packed_input_ids.shape[0] == sum(seqlens), (packed_input_ids.shape[0], sum(seqlens))
             yield dict(
                 packed_input_ids=packed_input_ids,
                 input_lens=torch.tensor(seqlens, dtype=torch.int32),
@@ -265,9 +264,8 @@ else:
         for x in dataloader:
             datas = PackedParallelDataBroker.scatter_to(from_dict(x), n_dp)
             for data in datas:
-                assert data['packed_input_ids'].shape[0]  == sum(
-                    data['input_lens']), (data['packed_input_ids'].shape[0], 
-                                          sum(data['input_lens']))
+                assert data['packed_input_ids'].shape[0] == sum(
+                    data['input_lens']), (data['packed_input_ids'].shape[0], sum(data['input_lens']))
                 offset = 0
                 for i in range(len(data['input_lens'])):
                     len1 = data['pos_input_lens'][i]
