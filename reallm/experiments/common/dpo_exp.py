@@ -176,6 +176,7 @@ class DPOConfig(Experiment):
             output_data=["seqlogp"],
             min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
             max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            post_hooks=[dfg.OffloadHook()],
         )
         dpo = ModelRPC(
             model_name=ModelName("actor", 0),
