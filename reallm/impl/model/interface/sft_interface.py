@@ -88,11 +88,10 @@ class SFTInterface(model_api.ModelInterface):
         module = model.module
         if not isinstance(module, ReaLModel):
             module = module.module
-        module.save_to_hf(tokenizer=model.tokenizer,
-                          save_dir=save_dir,
-                          epoch=model.version.epoch,
-                          epoch_step=model.version.epoch_step,
-                          global_step=model.version.global_step)
+        module.save_to_hf(
+            tokenizer=model.tokenizer,
+            save_dir=save_dir,
+        )
 
     @torch.inference_mode()
     def evaluate(self, model_: model_api.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:

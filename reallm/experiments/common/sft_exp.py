@@ -141,8 +141,8 @@ class SFTConfig(Experiment):
             model_type=self.model.type,
             input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
             log_return_value=True,
-            min_n_seqs=self.dataset.train_tokens_per_batch,
-            max_n_seqs=self.dataset.train_tokens_per_batch,
+            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
         )
 
         exp_ctrl = ExperimentSaveEvalControl(

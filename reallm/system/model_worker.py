@@ -775,6 +775,7 @@ class ModelWorker(worker_base.Worker):
                                 self.__device)
                         vs = torch.cat([self.__data_owner_storage[buf_idx][k] for buf_idx in buf_indices],
                                        dim=0)
+                        assert vs.dtype == _get_dtype_from_key(k), (k, _get_dtype_from_key(k), vs.dtype)
                         dist.broadcast(vs, src=bcast_src, group=group)
                         for buf_idx in buf_indices:
                             self.__data_sent_worker_indices[buf_idx][k].union(dst_ranks)

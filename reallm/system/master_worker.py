@@ -705,14 +705,17 @@ async def model_save_thread_func(
     stop_ctl: asyncio.Event,
 ):
     while not stop_ctl.is_set():
-        epoch, epoch_step = await save_queue.get()
+        epoch, epoch_step, global_step = await save_queue.get()
 
         # Only save replica ID 0.
         handlers = list(filter(lambda s: s.model_name.replica_id == 0, handlers))
 
-        model_save_dirs = [os.path.join(model_save_root, s.model_name.role) for s in handlers]
+        model_save_dirs = [
+            os.path.join(model_save_root, s.model_name.role,
+                         f"epoch{epoch}epochstep{epoch_step}globalstep{global_step}") for s in handlers
+        ]
         await group_rpc_blocked(stream, handlers, "save", model_save_dirs)
-        logger.info(f"Save models at epoch {epoch + 1} step {epoch_step + 1}.")
+        logger.info(f"Save models at epoch {epoch} step {epoch_step}.")
 
 
 class MasterWorker(worker_base.Worker):
@@ -1044,19 +1047,21 @@ class MasterWorker(worker_base.Worker):
         should_eval = self.__eval_ctl.check(epochs=int(is_new_epoch), steps=1)
         should_save = self.__save_ctl.check(epochs=int(is_new_epoch), steps=1)
 
-        if should_eval:
-            self.__rpc_ctrl.eval_queue.put_nowait((self._epoch, self._epoch_step))
-        if should_save:
-            self.__rpc_ctrl.save_queue.put_nowait((self._epoch, self._epoch_step))
-
         if is_new_epoch:
             self._epoch += 1
             self._epoch_step = 0
-            if self._epoch > self.__total_train_epochs:
-                self.experiment_complete_exit(f"Training completes! Yeah!!!")
 
         self._epoch_step += 1
         self._global_step += 1
+
+        if should_eval:
+            self.__rpc_ctrl.eval_queue.put_nowait((self._epoch, self._epoch_step))
+        if should_save:
+            self.__rpc_ctrl.save_queue.put_nowait((self._epoch, self._epoch_step, self._global_step))
+
+        if is_new_epoch:
+            if self._epoch > self.__total_train_epochs:
+                self.experiment_complete_exit(f"Training completes! Yeah!!!")
 
         total_time_consumption = time.perf_counter() - self._train_start_time
         time_per_step = total_time_consumption / (self._global_step + 1)

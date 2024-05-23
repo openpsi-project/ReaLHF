@@ -175,10 +175,10 @@ class PackedParallelDataBroker(ParallelDataBroker):
                                        f"Check base/dataparallel.py for implemented keys.")
         if "cu_seqlens" in src.keys():
             for x, slens in zip(splitted_data, input_lens):
-                x["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0))
+                x["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
         if "prompt_cu_seqlens" in src.keys():
             for x in splitted_data:
-                x["prompt_cu_seqlens"] = torch.nn.functional.pad(x["prompt_lens"].cumsum(dim=0), (1, 0))
+                x["prompt_cu_seqlens"] = torch.nn.functional.pad(x["prompt_lens"].cumsum(dim=0), (1, 0)).int()
         splitted_data = [namedarray.from_dict(dict(x)) for x in splitted_data]
         for x in splitted_data:
             x.register_metadata(**src.metadata)

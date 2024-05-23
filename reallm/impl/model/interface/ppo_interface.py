@@ -165,12 +165,7 @@ class PPOActorInterface(model_api.ModelInterface):
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
-        model.module.save(
-            save_dir,
-            epoch=model.version.epoch,
-            epoch_step=model.version.epoch_step,
-            global_step=model.version.global_step,
-        )
+        model.module.save(save_dir,)
 
     @torch.no_grad()
     def generate(self, model: model_api.Model, data: NamedArray) -> NamedArray:
@@ -583,12 +578,7 @@ class PPOCriticInterface(model_api.ModelInterface):
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
-        model.module.save(
-            save_dir,
-            epoch=model.version.epoch,
-            epoch_step=model.version.epoch_step,
-            global_step=model.version.global_step,
-        )
+        model.module.save(save_dir,)
 
     @torch.no_grad()
     def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:

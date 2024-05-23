@@ -114,21 +114,8 @@ class HFModelRegistry:
         model: ReaLModel,
         tokenizer: transformers.PreTrainedTokenizer,
         save_dir: str,
-        epoch: Optional[int] = None,
-        epoch_step: Optional[int] = None,
-        global_step: Optional[int] = None,
     ):
-        # FIXME: check epoch and step
         tik = time.perf_counter()
-
-        subfolder = ""
-        if epoch is not None:
-            subfolder += f"epoch{epoch}"
-        if epoch_step is not None:
-            subfolder += f"epochstep{epoch_step}"
-        if global_step is not None:
-            subfolder += f"globalstep{global_step}"
-        save_dir = os.path.join(save_dir, subfolder)
         os.makedirs(save_dir, exist_ok=True)
 
         dp_rank = constants.data_parallel_rank()

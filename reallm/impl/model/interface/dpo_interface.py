@@ -165,9 +165,6 @@ class DPOInterface(model_api.ModelInterface):
         module.save_to_hf(
             tokenizer=model.tokenizer,
             save_dir=save_dir,
-            epoch=model.version.epoch,
-            epoch_step=model.version.epoch_step,
-            global_step=model.version.global_step,
         )
 
 
