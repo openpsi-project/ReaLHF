@@ -1,23 +1,27 @@
+from pathlib import Path
 import functools
+import importlib
+import os
 
 import torch
 
 from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY
 from reallm.impl.model.conversion.hf_registry import HFModelRegistry
 from reallm.impl.model.nn.real_llm_api import ReaLModel
+# Import all HuggingFace model implementations.
 import reallm.api.from_hf
-# FIXME: automatic import
-import reallm.impl.model.backend.deepspeed
-import reallm.impl.model.backend.pipe_inf
-import reallm.impl.model.interface.dpo_interface
-import reallm.impl.model.interface.ppo_interface
-import reallm.impl.model.interface.rw_interface
-import reallm.impl.model.interface.sft_interface
-import reallm.impl.model.nn.real_llm_api
-import reallm.impl.model.nn.real_llm_base
-import reallm.impl.model.nn.real_llm_generate
-import reallm.impl.model.nn.real_llm_parallel
 
+# Import all model implementations.
+impl_model = Path(os.path.dirname(__file__))
+for subdir in ["backend", "interface", "nn"]:
+    for x in os.listdir((impl_model / subdir).absolute()):
+        if not x.endswith(".py"):
+            continue
+        if "__init__" in x:
+            continue
+        importlib.import_module(f"reallm.impl.model.{subdir}.{x[:-3]}")
+
+# Set PyTorch JIT options, following Megatron-LM.
 if torch.cuda.is_available():
     torch._C._jit_set_profiling_executor(True)
     torch._C._jit_set_profiling_mode(True)
@@ -27,6 +31,7 @@ if torch.cuda.is_available():
     torch._C._jit_set_nvfuser_enabled(True)
     torch._C._debug_set_autodiff_subgraph_inlining(False)
 
+# Add HuggingFace hooks to ReaLModel.
 _HF_REGISTRIES = {}
 
 
