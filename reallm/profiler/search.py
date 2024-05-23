@@ -10,7 +10,12 @@ from reallm.api.core.dfg import ModelInterfaceType, ModelName, ModelRPC, Offload
 from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH, ReaLModelConfig
 from reallm.api.quickstart.device_mesh import ClusterDeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig, OptimizerConfig, ParallelismConfig
-import reallm._C.mdm_search as mdm_search
+
+try:
+    import reallm._C.mdm_search as mdm_search
+except ModuleNotFoundError:
+    pass
+
 import reallm.api.core.system_api as config_package
 import reallm.base.constants as constants
 
@@ -431,88 +436,109 @@ def test_model_device_mapping(
 
     rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
 
-    actor_train.pre_hooks.append(SyncParamHook(source=ModelName("actor", 0)))
-    actor_train.model_name = ModelName("actor", 1)
-    actor_train.post_hooks.append(SyncParamHook(target=ModelName("actor", 0)))
-    rew_inf.post_hooks.append(OffloadHook())
-    ref_inf.post_hooks.append(OffloadHook())
+    assert n_nodes == 1
+    # actor_train.pre_hooks.append(SyncParamHook(source=ModelName("actor", 0)))
+    # actor_train.model_name = ModelName("actor", 1)
+    # actor_train.post_hooks.append(SyncParamHook(target=ModelName("actor", 0)))
 
-    mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]] * n_nodes)
+    # critic_train.pre_hooks.append(SyncParamHook(source=ModelName("critic", 0)))
+    # critic_train.model_name = ModelName("critic", 1)
+    # critic_train.post_hooks.append(SyncParamHook(target=ModelName("critic", 0)))
+    # rew_inf.post_hooks.append(OffloadHook())
+    # ref_inf.post_hooks.append(OffloadHook())
 
-    parallel_config = ParallelismConfig(model_parallel_size=8,
-                                        pipeline_parallel_size=n_nodes,
-                                        data_parallel_size=1,
-                                        use_sequence_parallel=True)
+    # mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]] * n_nodes)
+    # rollout_mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]] * 2 + [[0, 0, 0, 0, 0, 0, 0, 0]] * 2)
+    rollout_mapping = np.array([[1, 1, 0, 0, 0, 0, 0, 0]])
+    rollout_config = ParallelismConfig(model_parallel_size=1,
+                                       pipeline_parallel_size=1,
+                                       data_parallel_size=2,
+                                       use_sequence_parallel=False)
 
-    rollout_config = ParallelismConfig(model_parallel_size=2,
-                                       data_parallel_size=8,
-                                       pipeline_parallel_size=n_nodes // 2)
+    actor_train_mapping = np.array([[1, 1, 0, 0, 0, 0, 0, 0]])
+    actor_train_config = ParallelismConfig(model_parallel_size=1,
+                                           pipeline_parallel_size=1,
+                                           data_parallel_size=2,
+                                           use_sequence_parallel=False)
+
+    critic_train_mapping = np.array([[1, 1, 0, 0, 0, 0, 0, 0]])
+    critic_train_config = ParallelismConfig(model_parallel_size=1,
+                                            pipeline_parallel_size=1,
+                                            data_parallel_size=2,
+                                            use_sequence_parallel=False)
+
+    critic_inf_mapping = np.array([[1, 1, 0, 0, 0, 0, 0, 0]])
+    critic_inf_config = ParallelismConfig(model_parallel_size=1,
+                                          pipeline_parallel_size=1,
+                                          data_parallel_size=2,
+                                          use_sequence_parallel=False)
+
+    rew_inf_mapping = np.array([[1, 1, 0, 0, 0, 0, 0, 0]])
+    rew_inf_config = ParallelismConfig(model_parallel_size=1,
+                                       pipeline_parallel_size=1,
+                                       data_parallel_size=2,
+                                       use_sequence_parallel=False)
+
+    ref_inf_mapping = np.array([[1, 1, 0, 0, 0, 0, 0, 0]])
+    ref_inf_config = ParallelismConfig(model_parallel_size=1,
+                                       pipeline_parallel_size=1,
+                                       data_parallel_size=2,
+                                       use_sequence_parallel=False)
 
     return {
         rollout.name: RPCAllocation(
             rpc=rollout,
-            mapping=mapping,
+            mapping=rollout_mapping,
             train_eval_config=ModelTrainEvalConfig(
-                type="llama",
-                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                type=rollout.model_type,
                 gradient_checkpointing=True,
                 parallel=rollout_config,
+                optimizer=OptimizerConfig(type="adam", offload=False),
             ),
         ),
         rew_inf.name: RPCAllocation(
             rpc=rew_inf,
-            mapping=mapping,
+            mapping=rew_inf_mapping,
             train_eval_config=ModelTrainEvalConfig(
-                type="llama",
-                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
-                parallel=parallel_config,
+                type=rew_inf.model_type,
+                parallel=rew_inf_config,
             ),
         ),
         ref_inf.name: RPCAllocation(
             rpc=ref_inf,
-            mapping=mapping,
+            mapping=ref_inf_mapping,
             train_eval_config=ModelTrainEvalConfig(
-                type="llama",
-                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
-                parallel=parallel_config,
+                type=ref_inf.model_type,
+                parallel=ref_inf_config,
             ),
         ),
         critic_inf.name: RPCAllocation(
             rpc=critic_inf,
-            mapping=mapping,
+            mapping=critic_inf_mapping,
             train_eval_config=ModelTrainEvalConfig(
-                type="llama",
-                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                type=critic_inf.model_type,
                 gradient_checkpointing=True,
-                parallel=parallel_config,
+                parallel=critic_inf_config,
                 optimizer=OptimizerConfig(type="adam", offload=False),
             ),
         ),
         critic_train.name: RPCAllocation(
             rpc=critic_train,
-            mapping=mapping,
+            mapping=critic_train_mapping,
             train_eval_config=ModelTrainEvalConfig(
-                type="llama",
-                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                type=critic_train.model_type,
                 gradient_checkpointing=True,
-                parallel=parallel_config,
+                parallel=critic_train_config,
                 optimizer=OptimizerConfig(type="adam", offload=False),
             ),
         ),
         actor_train.name: RPCAllocation(
             rpc=actor_train,
-            mapping=mapping,
+            mapping=actor_train_mapping,
             train_eval_config=ModelTrainEvalConfig(
-                type="llama",
-                path=MODEL_FAMILY_TO_PATH[rollout.model_type],
-                base_model_path=MODEL_FAMILY_TO_PATH[rollout.model_type],
+                type=actor_train.model_type,
                 gradient_checkpointing=True,
-                parallel=parallel_config,
+                parallel=actor_train_config,
                 optimizer=OptimizerConfig(type="adam", offload=False),
             ),
         ),

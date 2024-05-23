@@ -105,10 +105,7 @@ class ModelTrainEvalConfig:
     If you find that the model of your interest is not supported, please reach out @fuwei for help.
 
     Args:
-        type (str): Model type. Please check SUPPORTED_MODELS.
-        path (str): Model checkpoint path, the directory instead of the file.
-        base_model_path (str): HuggingFace model checkpoint path. Used for loading tokenizer and HuggingFace config.
-        tokenizer_path (str): Tokenizer path.
+        type (ModelFamily): Model type. Please check SUPPORTED_MODELS.
         lora (bool): Whether to use LoRA.
         gradient_checkpointing (bool): Whether to use gradient checkpointing of MLP inside each block.
         enable_fp16 (bool): Whether to use fp16.

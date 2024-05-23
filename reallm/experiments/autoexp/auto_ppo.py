@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 import copy
 import dataclasses
 import functools
@@ -22,10 +22,12 @@ def register_auto_ppo_experiment(actor_size: int,
                                  train_bs: int,
                                  seqlen: int,
                                  mode: str,
-                                 n_node_multiplier: int = 1):
-    assert actor_size in [7, 13, 34, 70] and critic_size in [7, 13, 34, 70]
+                                 n_node_multiplier: int = 1,
+                                 expr_name: Optional[str] = None):
+    assert actor_size in [0, 7, 13, 34, 70] and critic_size in [0, 7, 13, 34, 70]
     if (actor_size == 7 and critic_size == 7)\
-        or (critic_size == 7 and actor_size == 7):
+        or (critic_size == 7 and actor_size == 7)\
+        or actor_size == 0 or critic_size == 0:
         n_nodes = 1
     elif (actor_size == 13 and critic_size == 7)\
         or (critic_size == 13 and actor_size == 7):
@@ -47,7 +49,7 @@ def register_auto_ppo_experiment(actor_size: int,
     assert n_nodes <= 16, f"n_node_multiplier {n_node_multiplier}, n_nodes {n_nodes}"
 
     if n_nodes == 1:
-        nodelist = "QH-com28"
+        nodelist = "QH-com08"
     elif n_nodes == 2:
         nodelist = "QH-com[27-28]"
     elif n_nodes == 4:
@@ -239,14 +241,17 @@ def register_auto_ppo_experiment(actor_size: int,
 
     short_mode = mode[0]
     n_node_multiplier_str = f"nx{n_node_multiplier}" if n_node_multiplier > 1 else ""
-    if critic_size == 7:
-        register_experiment(
-            f"sosp-a{actor_size}s{seqlen}g{gen_bs}t{train_bs}"
-            f"{n_node_multiplier_str}-{short_mode}", AutoPPOExperiment)
+    if expr_name is None:
+        if critic_size == 7:
+            register_experiment(
+                f"sosp-a{actor_size}s{seqlen}g{gen_bs}t{train_bs}"
+                f"{n_node_multiplier_str}-{short_mode}", AutoPPOExperiment)
+        else:
+            register_experiment(
+                f"sosp-a{actor_size}c{critic_size}s{seqlen}g{gen_bs}t{train_bs}"
+                f"{n_node_multiplier_str}-{short_mode}", AutoPPOExperiment)
     else:
-        register_experiment(
-            f"sosp-a{actor_size}c{critic_size}s{seqlen}g{gen_bs}t{train_bs}"
-            f"{n_node_multiplier_str}-{short_mode}", AutoPPOExperiment)
+        register_experiment(expr_name, AutoPPOExperiment)
 
 
 import itertools
@@ -272,3 +277,6 @@ for gen_bs in [128, 256, 512, 1024, 2048, 4096]:
                                          seqlen,
                                          mode,
                                          n_node_multiplier=2)
+
+# test experiments
+register_auto_ppo_experiment(0, 0, 128, 128, 128, "test", expr_name="minimal-ppo-test")

@@ -219,7 +219,7 @@ for name in [
     )
 
 # yapf: disable
-register_hf_path("llama", 0, "/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/")
+register_hf_path("llama", 0, "/lustre/public/pretrained_model_weights/testOnly/llama-2-4l/")
 register_hf_path("llama", 7, "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/")
 register_hf_path("llama", 13, "/lustre/public/pretrained_model_weights/Llama-2-13b-hf/")
 register_hf_path("llama", 70, "/lustre/public/pretrained_model_weights/Llama-2-70b-hf/")

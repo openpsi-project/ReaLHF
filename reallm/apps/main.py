@@ -97,6 +97,7 @@ def main_start(args):
 
     base_environs = {
         "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
+        "REAL_PACKAGE_PATH": os.path.dirname(os.path.dirname(__file__)),
         "WANDB_MODE": args.wandb_mode,
         "REAL_MODE": args.mode.upper(),
         "REAL_TRACE": os.getenv("REAL_TRACE", "0"),

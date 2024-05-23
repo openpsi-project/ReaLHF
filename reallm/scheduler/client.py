@@ -108,24 +108,29 @@ class SchedulerClient:
 
 def remote_worker_cmd(expr_name, trial_name, debug, worker_type):
     # requires information in scheduler package
-    return f"python3 {'' if debug else '-O'} -m apps.remote worker -w {worker_type} " \
-           f"-e {expr_name} -f {trial_name} -i {{jobstep_id}} -g {{n_jobsteps}} -r {{worker_submission_index}} " \
-           f"-p {{wprocs_per_jobstep}} -j {{wprocs_in_job}} -o {{wproc_offset}}"
+    return (
+        f"pip3 install -e $REAL_PACKAGE_PATH; python3 {'' if debug else '-O'} "
+        f"-m reallm.apps.remote worker -w {worker_type} "
+        f"-e {expr_name} -f {trial_name} -i {{jobstep_id}} -g {{n_jobsteps}} -r {{worker_submission_index}} "
+        f"-p {{wprocs_per_jobstep}} -j {{wprocs_in_job}} -o {{wproc_offset}}")
 
 
 def setup_cmd(expr_name, trial_name, debug):
-    return f"python3 {'' if debug else '-O'} -m apps.remote reset_name_resolve -e {expr_name} -f {trial_name}"
+    return (f"pip3 install -e $REAL_PACKAGE_PATH; python3 {'' if debug else '-O'} "
+            f"-m reallm.apps.remote reset_name_resolve -e {expr_name} -f {trial_name}")
 
 
 def control_cmd(expr_name, trial_name, debug, ignore_worker_error, controller_type):
-    return (f"python3 {'' if debug else '-O'} -m apps.remote controller -e {expr_name} -f {trial_name} "
+    return (f"pip3 install -e $REAL_PACKAGE_PATH; python3 {'' if debug else '-O'} "
+            f"-m reallm.apps.remote controller -e {expr_name} -f {trial_name} "
             f"--{'ignore_worker_error' if ignore_worker_error else 'raise_worker_error'} "
             f"--type {controller_type}")
 
 
 def ray_cluster_cmd(expr_name, trial_name, worker_type):
     flags = [f"-e {expr_name}", f"-f {trial_name}", f"-w {worker_type}"]
-    return (f"python3 -m apps.remote ray -i {{index}} -g {{count}} {' '.join(flags)}")
+    return (f"pip3 install -e $REAL_PACKAGE_PATH; python3 -m apps.remote "
+            f"ray -i {{index}} -g {{count}} {' '.join(flags)}")
 
 
 def make(mode, expr_name, trial_name, **kwargs) -> SchedulerClient:

@@ -131,28 +131,14 @@ def scheduling_config_from_allocations(
         ),
         model_worker=[],
     )
-    # print(node2models)
-    # for st, ed in node2models:
-    #     if nodelist is not None and hostnames is not None:
-    #         _this_nodelist = ",".join(hostnames[st:ed + 1])
-    #     else:
-    #         _this_nodelist = None
-    #     node_count = ed - st + 1
-    #     sched.model_worker.append(
-    #         TasksGroup(
-    #             count=node_count * device_mesh.n_gpus_per_node,
-    #             scheduling=Scheduling.model_worker_default(
-    #                 cpu=4,
-    #                 gpu=1,
-    #                 gpu_type="tesla",
-    #                 mem=100000,
-    #                 nodelist=_this_nodelist,
-    #             ),
-    #         ),)
-    #     print(_this_nodelist)
+
+    total_mapping = np.sum([m.mapping for m in allocations.values()], axis=0) != 0
+    total_n_gpus = np.sum(total_mapping)
+
     sched.model_worker.append(
         TasksGroup(
-            count=device_mesh.n_nodes * device_mesh.n_gpus_per_node,
+            count=device_mesh.n_nodes * device_mesh.n_gpus_per_node \
+                  if total_n_gpus >= 8 else total_n_gpus,
             scheduling=Scheduling.model_worker_default(
                 cpu=4,
                 gpu=1,
@@ -175,8 +161,16 @@ def mw_config_from_allocations(
 ) -> List[ModelWorker]:
     mw_configs = []
     shard_counter = defaultdict(lambda: 0)
+
+    total_mapping = np.sum([m.mapping for m in allocations.values()], axis=0) != 0
+    total_n_gpus = np.sum(total_mapping)
+
+    if total_n_gpus < 8:
+        assert device_mesh.n_nodes == 1
+    n_gpus_per_node = device_mesh.n_gpus_per_node if total_n_gpus >= 8 else total_n_gpus
+
     for i in range(device_mesh.n_nodes):
-        for j in range(device_mesh.n_gpus_per_node):
+        for j in range(n_gpus_per_node):
             mw = ModelWorker(
                 seed=seed,
                 shards=[],
@@ -262,8 +256,6 @@ def auto_device_mapping(
                     num_gen_tokens=self._internal_exp.ppo.max_new_tokens,
                     n_ppo_minibatches=self._internal_exp.ppo.ppo_n_minibatches,
                 )
-                # import pprint
-                # pprint.pprint(self._allocations)
                 self._rpcs = [a.rpc for a in self._allocations.values()]
 
             def scheduling_setup(self):
@@ -318,7 +310,7 @@ def auto_device_mapping(
 
                 return ExperimentConfig(
                     exp_ctrl=getattr(
-                        self._internal_exp.exp_ctrl,
+                        self._internal_exp,
                         "exp_ctrl",
                         ExperimentSaveEvalControl(benchmark_steps=20),
                     ),
