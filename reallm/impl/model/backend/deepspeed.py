@@ -134,9 +134,6 @@ def deepspeed_initialize(
     model_parameters: Optional[torch.nn.Module] = None,
     lr_scheduler: Optional[Union[torch.optim.lr_scheduler._LRScheduler, DeepSpeedSchedulerCallable]] = None,
     mpu=None,
-    enable_async_p2p_communication: Optional[bool] = False,
-    enable_async_instruction: Optional[bool] = False,
-    instruction_sync: Optional[bool] = False,
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
     if mpu is None:
@@ -172,8 +169,6 @@ def deepspeed_initialize(
         config_class = DeepSpeedConfig(config, mpu)
         engine_cls = DeepSpeedPipelineEngine
         engine = engine_cls(
-            enable_async_p2p_communication=enable_async_p2p_communication,
-            enable_async_instruction=enable_async_instruction,
             model=model,
             args=None,
             config=config,
@@ -182,7 +177,6 @@ def deepspeed_initialize(
             optimizer=optimizer,
             lr_scheduler=lr_scheduler,
             dist_init_required=False,
-            instruction_sync=instruction_sync,
         )
         logger.info(f"Deepspeed Pipeline Engine initialze finished.")
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
@@ -212,14 +206,6 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     # addtional deepspeed args
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
     engine_type: str = "deepspeed"
-    # parallelism args
-    enable_async_p2p_communication: bool = False  # FIXME:
-    enable_async_instruction: bool = False
-    instruction_sync: bool = False
-    # stream pipe engine require model configs
-    max_seq_len: int = 512
-    max_new_tokens: int = 512
-    max_mb_size: int = 32
 
     def __post_init__(self):
         if self.engine_type == "pipe":
@@ -309,9 +295,6 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
             config=ds_config,
             lr_scheduler=lr_scheduler,
             engine_type=self.engine_type,
-            enable_async_p2p_communication=self.enable_async_p2p_communication,
-            enable_async_instruction=self.enable_async_instruction,
-            instruction_sync=self.instruction_sync,
         )
 
         if self.engine_type == "pipe":

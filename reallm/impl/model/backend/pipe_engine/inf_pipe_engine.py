@@ -43,8 +43,6 @@ class InferencePipelineEngine:
     def __init__(
         self,
         module: ReaLModel,
-        enable_async_p2p_communication=False,
-        enable_async_instruction=False,
     ):
 
         self.module: ReaLModel = module
@@ -109,8 +107,7 @@ class InferencePipelineEngine:
 
         self._gd_graph = None
 
-        self._async_p2p = enable_async_p2p_communication
-        self._async_instruction = enable_async_instruction and self._async_p2p
+        self._async_p2p = False
 
         # self._post_init_logging()
 

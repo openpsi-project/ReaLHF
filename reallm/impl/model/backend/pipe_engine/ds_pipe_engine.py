@@ -45,9 +45,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
 
     def __init__(
         self,
-        enable_async_p2p_communication=False,
-        enable_async_instruction=False,
-        instruction_sync=False,
         *super_args,
         **super_kwargs,
     ):
@@ -132,9 +129,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self._sa_prompt_graph_size = self._sa_decoding_graph_size = -1
         self._ra_prompt_graph_size = self._ra_decoding_graph_size = -1
 
-        self._async_p2p = enable_async_p2p_communication
-        self._async_instruction = enable_async_instruction and self._async_p2p
-        self._instruction_sync = instruction_sync
+        self._async_p2p = False
 
         self._post_init_logging()
 

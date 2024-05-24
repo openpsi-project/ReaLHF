@@ -31,7 +31,7 @@ class ClusterDeviceMesh:
     mem: Union[int, float]
 
 
-def make_train_backend_config(cfg: ModelTrainEvalConfig, instruction_sync: bool = False):
+def make_train_backend_config(cfg: ModelTrainEvalConfig):
     if cfg.parallel.pipeline_parallel_size > 1:
         engine_type = "pipe"
     else:
@@ -58,8 +58,6 @@ def make_train_backend_config(cfg: ModelTrainEvalConfig, instruction_sync: bool 
             enable_bf16=cfg.enable_bf16,
             enable_fp16=cfg.enable_fp16,
             sequence_parallel=cfg.parallel.use_sequence_parallel,
-            enable_async_p2p_communication=cfg.enable_async_p2p,
-            instruction_sync=instruction_sync,
         ),
     )
 

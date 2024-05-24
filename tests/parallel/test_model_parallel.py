@@ -53,7 +53,6 @@ def make_backend():
         enable_fp16=not USE_BF16,
         enable_bf16=USE_BF16,
         sequence_parallel=USE_SEQ_PARALLEL,
-        enable_async_p2p_communication=ASYNC_P2P,
     )
     return model_api.make_backend(system_api.ModelBackend(
         type_="ds_train",
