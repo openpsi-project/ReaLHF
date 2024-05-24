@@ -129,7 +129,7 @@ class SFTConfig(Experiment):
                 datasets=[dataset],
                 dataloader=dataloader,
                 cuda_cache_cleanliness=False,
-                cuda_cache_clear_freq=1,
+                cuda_cache_clear_freq=10,
             )
             model_worker.append(mw)
 
