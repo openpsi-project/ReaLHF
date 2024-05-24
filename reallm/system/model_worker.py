@@ -471,9 +471,6 @@ class ModelWorker(worker_base.Worker):
                 self.__model_is_handle[to_model_name] = False
             blogger.debug(f"param_realloc CPU time: {time.perf_counter() - tik:.4f}s")
             # profiler.__exit__(None, None, None)
-            # profiler.export_chrome_trace(
-            #     f"/lustre/aigc/llm/logs/fw/sosp-profile/paramsync_{from_model_name}-{to_model_name}@{self.__worker_index}.json"
-            # )
         elif hook == "offload":
             with cuda_tmarked("offload", CUDATimeMarkType.mem_layout):
                 tik = time.perf_counter()

@@ -84,7 +84,7 @@ class QHClusterSpec(ClusterSpec):
 
     def node_type_from_node_name(self, node_name: str) -> str:
         assert 'QH-com' in node_name
-        return 'a800'
+        return 'a100'
 
     def gpu_type_from_node_name(self, node_name: str) -> str:
         return 'tesla'
@@ -98,27 +98,6 @@ class QHClusterSpec(ClusterSpec):
         return "/lustre:/lustre,/dev/infiniband:/dev/infiniband,/sys/class/infiniband_verbs:/sys/class/infiniband_verbs"
 
 
-class YLClusterSpec(ClusterSpec):
-
-    @property
-    def name(self):
-        return 'yl'
-
-    def node_type_from_node_name(self, node_name: str) -> str:
-        assert 'YL-com' in node_name
-        return 'a800'
-
-    def gpu_type_from_node_name(self, node_name: str) -> str:
-        return 'tesla'
-
-    @property
-    def fileroot(self) -> str:
-        return "/data/aigc/llm"
-
-    @property
-    def default_mount(self) -> str:
-        return "/data:/data"
-
 
 hostname = socket.gethostname()
 if not (hostname.startswith("YL-ctrl0") or hostname.startswith("QH-ctrl0") or hostname.startswith("YL-com")
@@ -127,9 +106,7 @@ if not (hostname.startswith("YL-ctrl0") or hostname.startswith("QH-ctrl0") or ho
                        "Please properly implement methods of `ClusterSpec` in base/cluster.py.")
 
 spec = None
-if hostname.startswith("YL-ctrl0") or hostname.startswith("YL-com"):
-    spec = YLClusterSpec()
-elif hostname.startswith("QH-ctrl0") or hostname.startswith("QH-com"):
+if hostname.startswith("QH-ctrl0") or hostname.startswith("QH-com"):
     spec = QHClusterSpec()
 else:
     spec = QizhiClusterSpec()
@@ -142,7 +119,7 @@ def node_name_is_node_type(node_name: str, node_type: Optional[Union[List[str], 
         node_type = [node_type]
     nt_condition = []
     for nt in node_type:
-        if nt not in ['g1', 'g2', 'g8', 'a100', 'a800']:
+        if nt not in ['g1', 'g2', 'g8', 'a100']:
             raise ValueError(f"Unknown node type {nt}.")
         else:
             cond = spec.node_type_from_node_name(node_name) == nt

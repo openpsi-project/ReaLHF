@@ -92,7 +92,7 @@ class PromptOnlyDatasetConfig:
         path (str): Path to the dataset.
     """
 
-    path: str = "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl"
+    path: str = ""
     max_prompt_len: int = 256
     n_tokens_per_batch: int = 65536
     batch_size: int = 256

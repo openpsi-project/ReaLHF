@@ -104,6 +104,7 @@ python3 -m reallm.apps.quickstart ppo experiment_name=quickstart-ppo-debug trial
     rew.path=$RW_MODEL_PATH \
     rew.parallel.data_parallel_size=1 \
     rew.parallel.pipeline_parallel_size=2 \
+    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
     dataset.max_prompt_len=256 \
     dataset.n_tokens_per_batch=8192 \
     ppo.max_new_tokens=256 \
