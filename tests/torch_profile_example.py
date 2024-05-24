@@ -63,7 +63,6 @@ def make_backend():
         warmup_steps_proportion=0.0,
         min_lr_ratio=0.0,
         zero_stage=1,
-        gradient_checkpointing=USE_GRADIENT_CHECKPOINTING,
         engine_type=engine_type,
         offload_optimizer_state=OFFLOAD_OPTIMIZER_STATE,
         offload_param=OFFLOAD_PARAM,

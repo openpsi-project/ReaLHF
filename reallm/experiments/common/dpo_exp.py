@@ -87,7 +87,6 @@ class DPOConfig(Experiment):
                 min_lr_ratio=self.actor.optimizer.min_lr_ratio,
                 zero_stage=(self.actor.zero_stage if self.actor.parallel.pipeline_parallel_size == 1 else min(
                     self.actor.zero_stage, 1)),
-                gradient_checkpointing=self.actor.gradient_checkpointing,
                 engine_type="pipe" if self.actor.parallel.pipeline_parallel_size > 1 else "deepspeed",
                 offload_optimizer_state=self.actor.optimizer.offload,
                 enable_bf16=self.actor.enable_bf16,
@@ -122,12 +121,14 @@ class DPOConfig(Experiment):
             self.actor.parallel.model_parallel_size,
             self.actor.parallel.data_parallel_size,
             self.actor.parallel.use_sequence_parallel,
+            gradient_checkpointing=self.actor.gradient_checkpointing,
         )
         ref_topo = PipeModelDataParallelTopology(
             self.ref.parallel.pipeline_parallel_size,
             self.ref.parallel.model_parallel_size,
             self.ref.parallel.data_parallel_size,
             self.ref.parallel.use_sequence_parallel,
+            gradient_checkpointing=False,
         )
         model_worker = []
         # By default, we place one reference model and one actor model on each GPU.

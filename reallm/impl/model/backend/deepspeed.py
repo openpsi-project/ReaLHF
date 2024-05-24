@@ -197,7 +197,6 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     lr_scheduler_type: str = "cosine"
     warmup_steps_proportion: float = 0.0
     min_lr_ratio: float = 0.0  # will be used for linear and cosine schedule
-    gradient_checkpointing: bool = False  # FIXME:
     offload_param: bool = False
     offload_optimizer_state: bool = False
     enable_fp16: bool = True
@@ -217,9 +216,6 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     enable_async_p2p_communication: bool = False  # FIXME:
     enable_async_instruction: bool = False
     instruction_sync: bool = False
-    # selective gradient ckpt, only effective when gradient_checkpointing is True
-    ckpt_attn: bool = False  # checkpoint attn only
-    ckpt_mlp: bool = False  # checkpoint mlp only
     # stream pipe engine require model configs
     max_seq_len: int = 512
     max_new_tokens: int = 512
@@ -306,10 +302,6 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
             min_lr_ratio=self.min_lr_ratio,
         )
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-
-        if self.gradient_checkpointing:
-            if hasattr(module, "gradient_checkpointing_enable"):
-                module.gradient_checkpointing_enable(self.ckpt_attn, self.ckpt_mlp)
 
         module, *_ = deepspeed_initialize(
             model=module,

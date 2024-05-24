@@ -326,8 +326,6 @@ class ModelWorker(worker_base.Worker):
                 self.__dataset = datasets[0]
             else:
                 self.__dataset = torch.utils.data.ConcatDataset(datasets)
-            # FIXME:
-            self.__max_seqlen = 1024
             self.__dataloader = data_api.make_dataloader(self.config.dataloader, self.__dataset)
             self.__data_generator = enumerate([])
 
@@ -535,8 +533,6 @@ class ModelWorker(worker_base.Worker):
             ############## initialization ##############
             elif request.handle_name == "initialize":
                 assert not self.__model_is_handle[request.handler.model_name]
-                constants.set_max_seqlen(handler_model_name,
-                                         data.max_seqlen)  # used by cuda graph buffer for generation
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
                 self.__backend_initialized[request.handler.model_name] = True
                 # print(f"after initialize model {request.handler.model_name} module type {type(self._model.module)}")
@@ -576,7 +572,7 @@ class ModelWorker(worker_base.Worker):
                     total_train_steps=-1,  # place-holder, to be filled by master worker
                     steps_per_epoch=len(self.__dataloader),
                     batch_size_per_device=batch_size,
-                    max_seqlen=self.__max_seqlen,
+                    max_seqlen=None,  # FIXME: do we need this field?
                 )
             elif request.handle_name == "clear_data_cache":
                 with cuda_tmarked("clear_data_cache", CUDATimeMarkType.misc):

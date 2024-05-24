@@ -193,23 +193,6 @@ class ReaLModel(nn.Module):
             )
         return l
 
-    def gradient_checkpointing_enable(self, attn: Optional[bool] = False, mlp: Optional[bool] = False):
-        for l in self.layers:
-            if isinstance(l, ReaLModelBlock):
-                l.gradient_checkpointing_enable(attn, mlp)
-
-    @contextlib.contextmanager
-    def gradient_checkpointing_disable(self):
-        _states = []
-        for l in self.layers:
-            if isinstance(l, ReaLModelBlock):
-                _states.append((l.ckpt_attn, l.ckpt_mlp, l.ckpt_full))
-                l.gradient_checkpointing_disable()
-        yield
-        for l in self.layers:
-            if isinstance(l, ReaLModelBlock):
-                l.ckpt_attn, l.ckpt_mlp, l.ckpt_full = _states.pop(0)
-
     def __overlapped_load_forward(self, x: PipeTransferData,
                                   ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
         assert len(ys) == self.num_layers

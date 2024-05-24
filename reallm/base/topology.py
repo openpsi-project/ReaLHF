@@ -275,10 +275,18 @@ def _prime_factors(N):
 class PipeModelDataParallelTopology(ProcessTopology):
     """A topology for hybrid pipeline, model, and data parallelism."""
 
-    def __init__(self, num_pp: int, num_mp: int, num_dp: int, sequence_parallel: bool):
+    def __init__(self,
+                 num_pp: int,
+                 num_mp: int,
+                 num_dp: int,
+                 sequence_parallel: bool,
+                 gradient_checkpointing: bool,
+                 max_prompt_len: Optional[int] = None):
         super().__init__(axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp])
 
         self.sequence_parallel = sequence_parallel
+        self.gradient_checkpointing = gradient_checkpointing
+        self.max_prompt_len = max_prompt_len
 
 
 class ParallelGrid:

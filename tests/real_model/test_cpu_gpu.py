@@ -98,7 +98,6 @@ def test_consistency(model_family_names: List[str]):
 
             # NOTE: this test will not always pass, so we run multiple trials
             n_trials = 10
-            constants.set_max_seqlen(model_name, max_seqlen)
             gconfig = GenerationConfig(min_new_tokens=max_seqlen, max_new_tokens=max_seqlen, greedy=True)
             for i in range(n_trials):
                 input_ids = torch.randint(0, mconfig.vocab_size, (bs, max_seqlen), dtype=torch.long)

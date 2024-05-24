@@ -453,8 +453,7 @@ class InferencePipelineEngine:
         def terminate_condition():
             return all([self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)])
 
-        with self.module.gradient_checkpointing_disable():
-            self._exec_schedule(sched, terminate_condition)
+        self._exec_schedule(sched, terminate_condition)
         r = self._maybe_gather_generate_outputs()
         self._post_generate()
         return r
@@ -567,7 +566,7 @@ class InferencePipelineEngine:
         # we defer the implementation of CUDAGraph generation in the future
         # if self._generate_mode and self.tensor_buffer.get("kv_cache_reserved", micro_batch_id):
         #     kvcache_seqlen = max(
-        #         constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
+        #         constants.max_prompt_len() + self.current_gconfig.max_new_tokens,
         #         self.hidden_dim // self.head_dim + 10,
         #     )
         #     with torch.no_grad():
@@ -630,7 +629,7 @@ class InferencePipelineEngine:
         for y, layer_idx, bk_idx in zip(ys, layer_indices, gd_input_buffer_kv_cache_indices):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(
-                constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
+                constants.max_prompt_len() + self.current_gconfig.max_new_tokens,
                 self.hidden_dim // self.head_dim + 10,
             )
             if (self._gd_graph is not None and self._gd_graph_bs >= bs

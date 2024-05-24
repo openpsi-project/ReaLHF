@@ -13,12 +13,18 @@ import reallm.base.logging as logging
 logger = logging.getLogger("PPO exp", "colored")
 
 
-def get_topo(parallel: ParallelismConfig) -> PipeModelDataParallelTopology:
+def get_topo(
+    parallel: ParallelismConfig,
+    gradient_checkpointing: bool,
+    max_prompt_len: Optional[int] = None,
+) -> PipeModelDataParallelTopology:
     return PipeModelDataParallelTopology(
         num_mp=parallel.model_parallel_size,
         num_pp=parallel.pipeline_parallel_size,
         num_dp=parallel.data_parallel_size,
         sequence_parallel=parallel.use_sequence_parallel,
+        gradient_checkpointing=gradient_checkpointing,
+        max_prompt_len=max_prompt_len,
     )
 
 
@@ -211,7 +217,6 @@ class PPOConfig(Experiment):
                     min_lr_ratio=cfg.optimizer.min_lr_ratio,
                     zero_stage=(cfg.zero_stage if parallel.pipeline_parallel_size == 1 else min(
                         cfg.zero_stage, 1)),
-                    gradient_checkpointing=cfg.gradient_checkpointing,
                     engine_type=engine_type,
                     offload_optimizer_state=cfg.optimizer.offload,
                     offload_param=cfg.offload,
@@ -267,12 +272,12 @@ class PPOConfig(Experiment):
             ),
         )
 
-        gen_topo = get_topo(self.actor_gen_parallel)
-        actor_train_topo = get_topo(self.actor.parallel)
-        critic_train_topo = get_topo(self.critic.parallel)
-        critic_inf_topo = get_topo(self.critic_inf_parallel)
-        ref_topo = get_topo(self.ref.parallel)
-        rw_topo = get_topo(self.rew.parallel)
+        gen_topo = get_topo(self.actor_gen_parallel, False, self.dataset.max_prompt_len)
+        actor_train_topo = get_topo(self.actor.parallel, self.actor.gradient_checkpointing)
+        critic_train_topo = get_topo(self.critic.parallel, self.critic.gradient_checkpointing)
+        critic_inf_topo = get_topo(self.critic_inf_parallel, False)
+        ref_topo = get_topo(self.ref.parallel, False)
+        rw_topo = get_topo(self.rew.parallel, False)
 
         model_worker = []
         for i in range(self.world_size):

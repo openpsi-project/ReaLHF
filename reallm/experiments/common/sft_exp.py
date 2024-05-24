@@ -74,7 +74,6 @@ class SFTConfig(Experiment):
                 min_lr_ratio=self.model.optimizer.min_lr_ratio,
                 zero_stage=(self.model.zero_stage if self.model.parallel.pipeline_parallel_size == 1 else min(
                     self.model.zero_stage, 1)),
-                gradient_checkpointing=self.model.gradient_checkpointing,
                 engine_type="pipe" if self.model.parallel.pipeline_parallel_size > 1 else "deepspeed",
                 offload_optimizer_state=self.model.optimizer.offload,
                 enable_bf16=self.model.enable_bf16,
@@ -103,6 +102,7 @@ class SFTConfig(Experiment):
             self.model.parallel.model_parallel_size,
             self.model.parallel.data_parallel_size,
             self.model.parallel.use_sequence_parallel,
+            gradient_checkpointing=self.model.gradient_checkpointing,
         )
 
         model_worker = []
