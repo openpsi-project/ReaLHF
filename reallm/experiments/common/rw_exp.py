@@ -89,7 +89,6 @@ class RWConfig(Experiment):
                 offload_optimizer_state=self.model.optimizer.offload,
                 enable_bf16=self.model.enable_bf16,
                 enable_fp16=self.model.enable_fp16,
-                sequence_parallel=self.model.parallel.use_sequence_parallel,
             ),
         )
 
@@ -113,6 +112,7 @@ class RWConfig(Experiment):
             self.model.parallel.pipeline_parallel_size,
             self.model.parallel.model_parallel_size,
             self.model.parallel.data_parallel_size,
+            self.model.parallel.use_sequence_parallel,
         )
         model_worker = []
         for i in range(self.world_size):

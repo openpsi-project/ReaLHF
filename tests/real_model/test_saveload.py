@@ -7,7 +7,7 @@ import torch.distributed as dist
 import transformers
 
 from reallm.api.core.config import ModelFamily
-from reallm.api.core.model_api import ReaLModelConfig
+from reallm.api.core.model_api import ReaLModelConfig, HF_MODEL_FAMILY_REGISTRY
 from reallm.base import constants, logging
 from tests.utils import clear_name_resolve, init_global_constants, LocalMultiProcessTest
 
@@ -15,15 +15,15 @@ logger = logging.getLogger("tests.test_saveload")
 
 
 def _shrink_mconfig(mconfig: ReaLModelConfig):
-    mconfig.hidden_dim = 4096
-    mconfig.head_dim = 128
-    mconfig.n_kv_heads = 32
-    mconfig.intermediate_dim = 11008
-    mconfig.n_layers = 32
+    mconfig.hidden_dim = 128
+    mconfig.head_dim = 8
+    mconfig.n_kv_heads = 1
+    mconfig.intermediate_dim = 256
+    mconfig.n_layers = 8
     return mconfig
 
 
-def _save_then_load(model_family_name: str, is_critic: bool, pp_dp_mp: Tuple, tokenizer_path: str):
+def _save_then_load(model_family_name: str, is_critic: bool, init_critic_from_actor: bool,pp_dp_mp: Tuple, tokenizer_path: str):
     # NOTE: import here to avoid initializing CUDA context in the main process
     from reallm.impl.model.nn.real_llm_api import ReaLModel
 
@@ -49,11 +49,15 @@ def _save_then_load(model_family_name: str, is_critic: bool, pp_dp_mp: Tuple, to
         hf_config = transformers.AutoConfig.from_pretrained(hf_path)
         mconfig: ReaLModelConfig = getattr(ReaLModel, f"config_from_{model_family_name}")(hf_config)
         mconfig = _shrink_mconfig(mconfig)
+        mconfig.is_critic = is_critic
 
         # initialize model
-        model = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
+        model = ReaLModel(mconfig, dtype=torch.float32, device="cuda")
         model.instantiate()
         dist.barrier()
+        for k, v in model.state_dict().items():
+            dist.all_reduce(v, group=constants.data_parallel_group())
+        sd1 = model.state_dict()
 
         # save
         getattr(model, f"to_{model_family_name}")(tokenizer, save_path)
@@ -64,12 +68,24 @@ def _save_then_load(model_family_name: str, is_critic: bool, pp_dp_mp: Tuple, to
                 file_size += os.path.getsize(os.path.join(save_path, fn))
 
         # load
-        getattr(model, f"from_{model_family_name}")(save_path, is_critic)
+        model = ReaLModel(mconfig, dtype=torch.float32, device="cuda")
+        model._instantiation_hooks.append(lambda: getattr(model, f"from_{model_family_name}")(save_path, init_critic_from_actor))
+        model.instantiate()
         dist.barrier()
+        sd2 = model.state_dict()
+        for k, v in sd2.items():
+            if init_critic_from_actor and k == f"{mconfig.n_layers + 1}.weight":
+                continue
+            assert torch.allclose(v, sd1[k]), k
 
         # load hf
-        hf_model = transformers.AutoModelForCausalLM.from_pretrained(save_path)
-        dist.barrier()
+        if not is_critic:
+            hf_model = transformers.AutoModelForCausalLM.from_pretrained(save_path)
+            dist.barrier()
+            if constants.model_parallel_world_size() == 1:
+                sd3 = HF_MODEL_FAMILY_REGISTRY[model_family_name]['sd_from_hf_converter'](hf_model.state_dict(), mconfig)
+                for k, v in sd1.items():
+                    assert torch.allclose(v.cpu(), sd3[k]), k
 
         # save again, check size
         getattr(model, f"to_{model_family_name}")(tokenizer, save_path2)
@@ -81,7 +97,7 @@ def _save_then_load(model_family_name: str, is_critic: bool, pp_dp_mp: Tuple, to
         assert file_size2 == file_size, (file_size, file_size2)
 
 
-def test_save_then_load(model_family_name: str, is_critic: bool, pp_dp_mp: Tuple, tokenizer_path: str):
+def test_save_then_load(model_family_name: str, is_critic: bool, init_critic_from_actor: bool, pp_dp_mp: Tuple, tokenizer_path: str):
     expr_name = "saveload_test"
     trial_name = "test"
     clear_name_resolve(expr_name=expr_name, trial_name=trial_name)
@@ -92,6 +108,7 @@ def test_save_then_load(model_family_name: str, is_critic: bool, pp_dp_mp: Tuple
         trial_name=trial_name,
         model_family_name=model_family_name,
         is_critic=is_critic,
+        init_critic_from_actor=init_critic_from_actor,
         pp_dp_mp=pp_dp_mp,
         tokenizer_path=tokenizer_path,
     )
@@ -99,11 +116,12 @@ def test_save_then_load(model_family_name: str, is_critic: bool, pp_dp_mp: Tuple
 
 
 if __name__ == "__main__":
-    for i, pp_dp_mp in enumerate([(2, 2, 2)]):
+    for i, pp_dp_mp in enumerate([(4, 2, 1)]):
         print(">" * 10 + f" testing with pp_dp_mp={pp_dp_mp} " + "<" * 10)
         for model_family_name, path in [("llama", "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/")]:
-            test_save_then_load(model_family_name, True, pp_dp_mp, path)
-            test_save_then_load(model_family_name, False, pp_dp_mp, path)
+            test_save_then_load(model_family_name, False, False, pp_dp_mp, path)
+            test_save_then_load(model_family_name, False, True, pp_dp_mp, path)
+            test_save_then_load(model_family_name, True, True, pp_dp_mp, path)
     # for i, pp_dp_mp in enumerate([(2, 4, 1), (4, 1, 2), (8, 1, 1), (1, 8, 1)]):
     #     print(">" * 10 + f" testing with pp_dp_mp={pp_dp_mp} " + "<" * 10)
     #     for model_family_name in ["starcoder", "llama"]:

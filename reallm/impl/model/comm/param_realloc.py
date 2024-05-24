@@ -291,6 +291,7 @@ def _split_intervals(intervals, K):
 def param_size_from_keys(
     config: model_api.ReaLModelConfig,
     src_mp_size: int,
+    sequence_parallel: bool,
     sd_keys: List[str],
     src2dst_tp_size: int,
     src2dst_tp_rank: int,
@@ -299,7 +300,7 @@ def param_size_from_keys(
     for k in sd_keys:
         new_shape = mp_partition_key(
             k,
-            get_real_model_param_shape(k, config, src_mp_size),
+            get_real_model_param_shape(k, config, src_mp_size, sequence_parallel),
             src2dst_tp_rank,
             src2dst_tp_size,
             config,

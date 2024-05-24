@@ -39,6 +39,8 @@ class PipelineError(Exception):
 
 
 class DeepSpeedPipelineEngine(DeepSpeedEngine):
+    # TODO: support pp_size=1, such that interfaces can have consistent function calls.
+    # TODO: merge this class with pipeline inference engine.
     """A training engine hybrid pipeline, data, and model parallel training."""
 
     def __init__(
@@ -85,7 +87,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         self.dp_id = self.grid.get_data_parallel_id()
 
         # num_micro_batches is configurable, default value: num_stages * 2
-        self.default_num_micro_batches = self.num_stages * 2
+        self.default_train_mbs = self.num_stages * 2
+        self.default_inf_mbs = self.num_stages
         self.num_layers = self.module.num_layers  # number of leyers in current pipeline stage
 
         # PipelineEngine needs to handle data loading specially due to only the first
@@ -165,7 +168,8 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         unique_params = params_tensor[1]
 
         if self.global_rank == 0:
-            logger.info(f"CONFIG: default_num_micro_batches={self.default_num_micro_batches} "
+            logger.info(f"CONFIG: default_train_mbs={self.default_train_mbs} "
+                        f"default_inf_mbs={self.default_inf_mbs} "
                         f"num_layers(this stage)={self.num_layers} "
                         f"pp_size={self.num_stages} "
                         f"dp_size={self.grid.get_data_parallel_world_size()} "
@@ -438,7 +442,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         input_lens_for_partition: Optional[torch.Tensor] = None,
         num_micro_batches: Optional[int] = None,
     ):
-        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
+        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_inf_mbs
         self._set_forward_states()
         # forward one step and return packed logits
         self._prepare_input(seqlens_cpu,
@@ -477,7 +481,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         num_micro_batches: Optional[int] = None,
         **loss_fn_kwargs,
     ):
-        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
+        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_inf_mbs
         self._set_eval_batch_states()
         self._prepare_input(seqlens_cpu,
                             packed_input_ids,
@@ -533,7 +537,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         if not torch._C.is_grad_enabled():
             raise RuntimeError(f"train_batch() requires gradients enabled. Use eval_batch() instead.")
 
-        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
+        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_train_mbs
         self._set_train_batch_states()
         self._prepare_input(seqlens_cpu,
                             packed_input_ids,
@@ -630,7 +634,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
         num_micro_batches: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
-        self.num_micro_batches = (num_micro_batches if num_micro_batches else self.default_num_micro_batches)
+        self.num_micro_batches = (num_micro_batches if num_micro_batches else self.default_inf_mbs)
         self._set_generate_states()
         self._prepare_input(seqlens_cpu, packed_input_ids, cu_seqlens)
         # for elegant generation termination

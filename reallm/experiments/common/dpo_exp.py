@@ -92,7 +92,6 @@ class DPOConfig(Experiment):
                 offload_optimizer_state=self.actor.optimizer.offload,
                 enable_bf16=self.actor.enable_bf16,
                 enable_fp16=self.actor.enable_fp16,
-                sequence_parallel=self.actor.parallel.use_sequence_parallel,
             ),
         )
         inf_backend = ModelBackend("pipe_inference" if self.ref.parallel.pipeline_parallel_size >
@@ -122,11 +121,13 @@ class DPOConfig(Experiment):
             self.actor.parallel.pipeline_parallel_size,
             self.actor.parallel.model_parallel_size,
             self.actor.parallel.data_parallel_size,
+            self.actor.parallel.use_sequence_parallel,
         )
         ref_topo = PipeModelDataParallelTopology(
             self.ref.parallel.pipeline_parallel_size,
             self.ref.parallel.model_parallel_size,
             self.ref.parallel.data_parallel_size,
+            self.ref.parallel.use_sequence_parallel,
         )
         model_worker = []
         # By default, we place one reference model and one actor model on each GPU.

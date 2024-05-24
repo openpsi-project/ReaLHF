@@ -73,7 +73,7 @@ class InferencePipelineEngine:
         self.dp_id = self.grid.get_data_parallel_id()
 
         # num_micro_batches is configurable, default value: num_stages * 2
-        self.default_num_micro_batches = self.num_stages * 2
+        self.default_num_micro_batches = self.num_stages
         self.num_layers = self.module.num_layers  # number of leyers in current pipeline stage
 
         # PipelineEngine needs to handle data loading specially due to only the first

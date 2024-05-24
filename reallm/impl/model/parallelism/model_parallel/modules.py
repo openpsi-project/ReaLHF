@@ -228,7 +228,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
             dim_size = list(input.size())
             dim_size[0] = dim_size[0] * world_size
 
-            all_gather_buffer = constants.get_global_memory_buffe().get_tensor(dim_size, input.dtype, "mpu")
+            all_gather_buffer = constants.get_global_memory_buffer().get_tensor(dim_size, input.dtype, "mpu")
             torch.distributed._all_gather_base(all_gather_buffer,
                                                input,
                                                group=constants.model_parallel_group())
@@ -252,7 +252,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
             dim_size = list(input.size())
             dim_size[0] = dim_size[0] * world_size
 
-            all_gather_buffer = constants.get_global_memory_buffe().get_tensor(dim_size, input.dtype, "mpu")
+            all_gather_buffer = constants.get_global_memory_buffer().get_tensor(dim_size, input.dtype, "mpu")
             handle = torch.distributed._all_gather_base(all_gather_buffer,
                                                         input,
                                                         group=constants.model_parallel_group(),
@@ -461,7 +461,7 @@ class MergedLinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Funct
             dim_size = list(input.size())
             dim_size[0] = dim_size[0] * world_size
 
-            all_gather_buffer = constants.get_global_memory_buffe().get_tensor(dim_size, input.dtype, "mpu")
+            all_gather_buffer = constants.get_global_memory_buffer().get_tensor(dim_size, input.dtype, "mpu")
             torch.distributed._all_gather_base(all_gather_buffer,
                                                input,
                                                group=constants.model_parallel_group())
@@ -491,7 +491,7 @@ class MergedLinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Funct
             dim_size = list(input.size())
             dim_size[0] = dim_size[0] * world_size
 
-            all_gather_buffer = constants.get_global_memory_buffe().get_tensor(dim_size, input.dtype, "mpu")
+            all_gather_buffer = constants.get_global_memory_buffer().get_tensor(dim_size, input.dtype, "mpu")
             handle = torch.distributed._all_gather_base(all_gather_buffer,
                                                         input,
                                                         group=constants.model_parallel_group(),

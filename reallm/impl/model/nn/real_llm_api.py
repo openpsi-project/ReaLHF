@@ -82,6 +82,7 @@ class ReaLModel(nn.Module):
             list(range(self.layer_idx_start, self.layer_idx_end)),
             self.config,
             constants.model_parallel_world_size(),
+            constants.sequence_parallel(),
         )
         self.contiguous_param = None
 

@@ -66,7 +66,7 @@ _pgroups: Dict["ModelName",
                Any] = ({})  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
 _rank_mapping: Dict["ModelName", Dict["ModelShardID", int]] = {}
 _global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
-_max_seqlens: Dict["ModelName", int] = dict()
+_max_seqlens: Dict["ModelName", int] = dict()  # FIXME: move to parallel grid
 
 # used only in scripts and tests
 _fake_mp_world_size = None
@@ -154,8 +154,7 @@ def use_te_impl() -> bool:
 
 
 def sequence_parallel() -> bool:
-    # FIXME:
-    return model_parallel_world_size() > 1 and False
+    return grid().topology().sequence_parallel
 
 
 def dataset_max_seqlen() -> int:

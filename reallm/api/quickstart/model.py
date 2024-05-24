@@ -4,7 +4,6 @@ import json
 import os
 
 from reallm.api.core.config import Model, ModelFamily, ModelWrapper
-from reallm.api.core.model_api import SUPPORTED_MODELS
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Quickstart Model Config")
@@ -34,7 +33,6 @@ class ParallelismConfig:
         if self.use_sequence_parallel and self.model_parallel_size <= 1:
             logger.warning("Sequence parallelism requires model parallelism.")
             self.use_sequence_parallel = False
-
 
 @dataclasses.dataclass
 class LoRAConfig:

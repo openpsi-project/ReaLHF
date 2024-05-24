@@ -122,6 +122,7 @@ def build_param_spec(
     layer_indices: List[int],
     config: model_api.ReaLModelConfig,
     mp_size: int,
+    sequence_parallel: bool,
 ) -> Tuple[Dict[str, ContiguousParamSpec], int]:
     if len(layer_indices) == 0:
         return {}, 0
@@ -137,7 +138,7 @@ def build_param_spec(
             sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
 
         for k in sd_keys:
-            shape = get_real_model_param_shape(k, config, mp_size)
+            shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
             param_spec[k] = ContiguousParamSpec(param_size, param_size + int(np.prod(shape)), shape)
             param_size += int(np.prod(shape))
     return param_spec, param_size
@@ -148,6 +149,7 @@ def param_intervals_from_keys(
     config: model_api.ReaLModelConfig,
     param_spec: Dict[str, ContiguousParamSpec],
     mp_size: int,
+    sequence_parallel: bool,
     sd_keys: List[str],
     portion_size: int,
     portion_rank: int,
@@ -172,7 +174,7 @@ def param_intervals_from_keys(
         ) not in _FLAT_PARAM_INDICES_CACHE:
             zero_start_intervals = mp_partition_key(
                 k,
-                get_real_model_param_shape(k, config, mp_size),
+                get_real_model_param_shape(k, config, mp_size, sequence_parallel),
                 portion_rank,
                 portion_size,
                 config,
