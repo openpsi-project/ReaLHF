@@ -34,6 +34,7 @@ class ParallelismConfig:
             logger.warning("Sequence parallelism requires model parallelism.")
             self.use_sequence_parallel = False
 
+
 @dataclasses.dataclass
 class LoRAConfig:
     """LoRA configuration.

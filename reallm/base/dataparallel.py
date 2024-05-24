@@ -177,8 +177,12 @@ class PackedParallelDataBroker(ParallelDataBroker):
             for x, slens in zip(splitted_data, input_lens):
                 x["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
         if "prompt_cu_seqlens" in src.keys():
-            for x in splitted_data:
-                x["prompt_cu_seqlens"] = torch.nn.functional.pad(x["prompt_lens"].cumsum(dim=0), (1, 0)).int()
+            raw_prompt_lens = src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1]
+            all_prompt_lens: List[torch.IntTensor] = [
+                raw_prompt_lens[start:end].int() for start, end in partitions
+            ]
+            for x, pslens in zip(splitted_data, all_prompt_lens):
+                x["prompt_cu_seqlens"] = torch.nn.functional.pad(pslens.cumsum(dim=0), (1, 0)).int()
         splitted_data = [namedarray.from_dict(dict(x)) for x in splitted_data]
         for x in splitted_data:
             x.register_metadata(**src.metadata)

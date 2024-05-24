@@ -630,6 +630,8 @@ async def load_data_func(
     fetch_ctl: asyncio.Queue,
     stop_ctl: asyncio.Event,
 ):
+    # FIXME: estimate average tokens per batch
+    # FIXME: change dataset to plain dataset and do dynamic batching here
     while not stop_ctl.is_set():
         await fetch_ctl.get()
         # fetch data from dataloader to fill the sequence buffer

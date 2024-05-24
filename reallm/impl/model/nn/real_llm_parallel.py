@@ -169,7 +169,8 @@ def mp_partition_real_model_state_dict(
         return new_state_dict
 
 
-def get_real_model_param_shape(k: str, config: model_api.ReaLModelConfig, mp_size: int, sequence_parallel: bool) -> Tuple:
+def get_real_model_param_shape(k: str, config: model_api.ReaLModelConfig, mp_size: int,
+                               sequence_parallel: bool) -> Tuple:
     if "wte.weight" in k:
         assert config.vocab_size % mp_size == 0
         return (config.vocab_size // mp_size, config.hidden_dim)

@@ -390,7 +390,7 @@ class InferencePipelineEngine:
             cache_seqlens = ys[0].cache_seqlens
 
         self._gd_input_buffers = dict(
-            input_ids=torch.ones(max_batch_size, 1, dtype=torch.long, device=self.device),
+            input_ids=torch.ones(max_batch_size, dtype=torch.long, device=self.device),
             position_ids=cache_seqlens.clone().long()[:, None],
             k_caches=[y.k_cache for y in ys],
             v_caches=[y.v_cache for y in ys],
@@ -817,7 +817,7 @@ class InferencePipelineEngine:
         #     if not ft:
         #         batch_length = self.tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
         #         batch_length = batch_length
-        #         act_shape = (batch_length, 1, self.hidden_dim)
+        #         act_shape = (batch_length, self.hidden_dim)
         #     length = int(np.prod(act_shape))
         #     if (ft and length > self._ra_prompt_graph_size) or (not ft
         #                                                         and length > self._ra_decoding_graph_size):
@@ -840,7 +840,7 @@ class InferencePipelineEngine:
                 buf = torch.empty(act_shape, dtype=self.dtype, device=self.device, requires_grad=False)
             else:
                 batch_length = self.tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
-                act_shape = (batch_length, 1, self.hidden_dim)
+                act_shape = (batch_length, self.hidden_dim)
                 buf = torch.empty(act_shape, dtype=self.dtype, device=self.device, requires_grad=False)
 
         recv_handle = p2p.recv(buf, self.prev_stage, async_op=self._async_p2p)
@@ -863,7 +863,7 @@ class InferencePipelineEngine:
     def _capture_send_next_token(self, batch_length):
         self._sn_graph_size = batch_length
         self._sn_input_buffer = dict(
-            next_tokens=torch.empty((batch_length, 1), dtype=torch.long, device=self.device),
+            next_tokens=torch.empty((batch_length,), dtype=torch.long, device=self.device),
             terminate=torch.empty((), dtype=torch.bool, device=self.device),
         )
 
@@ -889,7 +889,7 @@ class InferencePipelineEngine:
         #         with torch.no_grad():
         #             self._capture_send_next_token(next_tokens_to_send.shape[0])
         #     self._sn_input_buffer['next_tokens'][:next_tokens_to_send.
-        #                                          shape[0]] = next_tokens_to_send.unsqueeze(-1)
+        #                                          shape[0]] = next_tokens_to_send
         #     self._sn_input_buffer['terminate'].copy_(self.tensor_buffer.get("terminate", micro_batch_id))
         #     self._sn_graph.replay()
         #     self.tensor_buffer.put("first_token", micro_batch_id, False)
@@ -909,7 +909,7 @@ class InferencePipelineEngine:
     def _capture_recv_next_token(self, batch_length):
         self._rn_graph_size = batch_length
         self._rn_output_buffer = dict(
-            next_tokens=torch.empty((batch_length, 1), dtype=torch.long, device=self.device),
+            next_tokens=torch.empty((batch_length,), dtype=torch.long, device=self.device),
             terminate=torch.empty((), dtype=torch.bool, device=self.device),
         )
 
@@ -946,13 +946,17 @@ class InferencePipelineEngine:
         #     self.tensor_buffer.put("terminate", micro_batch_id, terminate)
         #     return False, None
 
-        recv_buf = torch.empty((batch_length, 1), dtype=torch.long, device=self.device)
+        recv_buf = torch.empty((batch_length,), dtype=torch.long, device=self.device)
         handle = p2p.recv(recv_buf, self.prev_stage, async_op=self._async_p2p)
         if self._async_p2p:
             self.tensor_buffer.put("recv_next_tokens_handle", micro_batch_id, handle)
         self.tensor_buffer.put("recv_next_tokens_buf", micro_batch_id, recv_buf)
 
-        x = PipeTransferData(store_kv_cache=True)
+        x = PipeTransferData(
+            store_kv_cache=True,
+            cu_seqlens=torch.arange(batch_length + 1, dtype=torch.int32, device=self.device),
+            max_seqlen=1,
+        )
         self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
 
         if self._async_p2p:

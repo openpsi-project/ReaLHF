@@ -6,11 +6,24 @@ from reallm.api.core.dfg import (ModelFamily, ModelInterface, ModelInterfaceType
                                  SyncParamHook)
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
-from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig
+from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, ParallelismConfig
 from reallm.base.topology import PipeModelDataParallelTopology
 import reallm.base.logging as logging
 
 logger = logging.getLogger("PPO exp", "colored")
+
+
+def get_topo(parallel: ParallelismConfig) -> PipeModelDataParallelTopology:
+    return PipeModelDataParallelTopology(
+        num_mp=parallel.model_parallel_size,
+        num_pp=parallel.pipeline_parallel_size,
+        num_dp=parallel.data_parallel_size,
+        sequence_parallel=parallel.use_sequence_parallel,
+    )
+
+
+def get_world_size(parallel: ParallelismConfig) -> int:
+    return parallel.model_parallel_size * parallel.pipeline_parallel_size * parallel.data_parallel_size
 
 
 @dataclasses.dataclass
@@ -43,7 +56,6 @@ class PPOHyperparameters:
         value_norm_type (str): Type of value normalization. Either exponential moving average or moving average.
         value_norm_beta (float): Exponential decay factor in exponential moving average.
         value_norm_eps (float): Epsilon factor in the denominator of exponential moving average.
-        actor_as_critic (bool): Whether to use actor as critic for critic and reward models.
     """
 
     max_new_tokens: int = 256
@@ -68,14 +80,12 @@ class PPOHyperparameters:
     value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
-    actor_as_critic: bool = False
 
 
 @dataclasses.dataclass
 class PPOConfig(Experiment):
     experiment_name: str = MISSING
     trial_name: str = MISSING
-    trace: bool = False
     seed: int = 1
     total_train_epochs: int = 1
     save_freq_steps: Optional[int] = 20
@@ -90,30 +100,41 @@ class PPOConfig(Experiment):
     critic: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
     ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
     rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
+
+    actor_gen_parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    critic_inf_parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
+
     ppo: PPOHyperparameters = dataclasses.field(default_factory=PPOHyperparameters)
 
-    actor_per_device_generate_batch_size: int = 1
-    actor_per_device_train_batch_size: int = 1
+    global_train_bs: int = 512
+    global_gen_bs: int = 512
 
     def __post_init__(self):
-        if self.is_sft_lora and (self.sft_lora_path is None or self.actor.type is None):
-            raise ValueError("sft_lora_path and base_model_type must be specified when is_sft_lora is True.")
-        if self.is_rew_lora and (self.rew_lora_path is None or self.rew.type is None
-                                 or self.rew_head_path is None):
-            raise ValueError(
-                "rew_lora_path, rew_base_model_type and rew_head_path must be specified when is_rw_lora is True."
-            )
+        if self.is_sft_lora or self.sft_lora_path is not None:
+            raise NotImplementedError("SFT LoRA is not supported yet.")
+        if self.is_rew_lora or self.rew_lora_path is not None:
+            raise NotImplementedError("Rew LoRA is not supported yet.")
 
-        self.n_actors = int(self.actor.parallel.pipeline_parallel_size *
-                            self.actor.parallel.model_parallel_size * self.actor.parallel.data_parallel_size)
-        self.n_critics = int(self.critic.parallel.pipeline_parallel_size *
-                             self.critic.parallel.model_parallel_size *
-                             self.critic.parallel.data_parallel_size)
-        self.n_rewards = int(self.rew.parallel.pipeline_parallel_size *
-                             self.rew.parallel.model_parallel_size * self.rew.parallel.data_parallel_size)
-        self.n_refs = int(self.ref.parallel.pipeline_parallel_size * self.ref.parallel.model_parallel_size *
-                          self.ref.parallel.data_parallel_size)
+        self.world_size = get_world_size(self.actor_gen_parallel)
+
+        self.critic_train_ws = get_world_size(self.critic.parallel)
+        self.actor_train_ws = get_world_size(self.actor.parallel)
+        train_ws = self.actor_train_ws + self.critic_train_ws
+
+        self.ref_inf_ws = get_world_size(self.ref.parallel)
+        self.rew_inf_ws = get_world_size(self.rew.parallel)
+        self.critic_inf_ws = get_world_size(self.critic_inf_parallel)
+        inf_ws = self.ref_inf_ws + self.rew_inf_ws + self.critic_inf_ws
+
+        if (self.world_size != train_ws) or (self.world_size != inf_ws):
+            raise ValueError(
+                "World size of generate, inference, and training must be the same. "
+                "This is the restriction of this heuristic PPO execution plan. "
+                f"Current world sizes are: (actor_train={self.actor_train_ws}, critic_train={self.critic_train_ws}, "
+                f"ref_inf={self.ref_inf_ws}, rew_inf={self.rew_inf_ws}, critic_inf={self.critic_inf_ws}, "
+                f"actor_gen={self.world_size}).")
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -121,35 +142,18 @@ class PPOConfig(Experiment):
                 count=1,
                 scheduling=Scheduling.master_worker_default(
                     cpu=4,
-                    mem=100000,
-                    gpu=1,
-                    gpu_type="tesla",
-                    nodelist="QH-com[13-14]",
+                    mem=20000,
                 ),
             ),
-            model_worker=[
-                #### another strategy used for testing
-                TasksGroup(
-                    count=self.n_actors,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type="tesla",
-                        mem=100000,
-                        nodelist="QH-com[13-14]",
-                    ),
+            model_worker=TasksGroup(
+                count=self.world_size,
+                scheduling=Scheduling.model_worker_default(
+                    cpu=4,
+                    gpu=1,
+                    gpu_type="tesla",
+                    mem=100000,
                 ),
-                TasksGroup(
-                    count=self.n_critics,
-                    scheduling=Scheduling.model_worker_default(
-                        cpu=4,
-                        gpu=1,
-                        gpu_type="tesla",
-                        mem=100000,
-                        nodelist="QH-com[13-14]",
-                    ),
-                ),
-            ],
+            ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
@@ -171,25 +175,24 @@ class PPOConfig(Experiment):
             temperature=self.ppo.temperature,
         )
 
-        def _make_model_config(cfg: ModelTrainEvalConfig, from_type: str):
+        def _make_model_config(cfg: ModelTrainEvalConfig):
             return get_real_model_config(
-                from_type=from_type,
                 model_path=cfg.path,
-                hf_model_type=cfg.type,
-                tokenizer_path=cfg.base_model_path,
+                hf_model_family=cfg.type._class,
+                is_critic=cfg.type.is_critic,
+                init_critic_from_actor=False,
                 dtype="bf16" if cfg.enable_bf16 else "fp16",
                 lora=cfg.lora,
             )
 
-        actor_model = _make_model_config(self.actor, "self")
-        ref_model = _make_model_config(self.ref, "self")
-        critic_type = "self" if not self.ppo.actor_as_critic else "actor_as_critic"
-        # critic_type = "random_critic"
-        critic_model = _make_model_config(self.critic, critic_type)
-        rw_model = _make_model_config(self.rew, critic_type)
+        actor_model = _make_model_config(self.actor)
+        ref_model = _make_model_config(self.ref)
+        critic_model = _make_model_config(self.critic)
+        rw_model = _make_model_config(self.rew)
 
         def _make_train_backend_config(cfg: ModelTrainEvalConfig):
-            if cfg.parallel.pipeline_parallel_size > 1:
+            parallel = cfg.parallel
+            if parallel.pipeline_parallel_size > 1:
                 engine_type = "pipe"
             else:
                 engine_type = "deepspeed"
@@ -206,36 +209,22 @@ class PPOConfig(Experiment):
                     lr_scheduler_type=cfg.optimizer.lr_scheduler_type,
                     warmup_steps_proportion=cfg.optimizer.warmup_steps_proportion,
                     min_lr_ratio=cfg.optimizer.min_lr_ratio,
-                    zero_stage=(cfg.zero_stage if cfg.parallel.pipeline_parallel_size == 1 else min(
+                    zero_stage=(cfg.zero_stage if parallel.pipeline_parallel_size == 1 else min(
                         cfg.zero_stage, 1)),
                     gradient_checkpointing=cfg.gradient_checkpointing,
-                    num_pipeline_stages=cfg.parallel.pipeline_parallel_size,
                     engine_type=engine_type,
                     offload_optimizer_state=cfg.optimizer.offload,
                     offload_param=cfg.offload,
                     enable_bf16=cfg.enable_bf16,
                     enable_fp16=cfg.enable_fp16,
-                    enable_async_p2p_communication=cfg.enable_async_p2p,
                 ),
             )
 
         actor_backend = _make_train_backend_config(self.actor)
         critic_backend = _make_train_backend_config(self.critic)
 
-        def make_inf_backend(cfg: ModelTrainEvalConfig):
-            return ModelBackend(
-                "ds_inference",
-                args=dict(
-                    enable_fp16=(not cfg.enable_bf16),
-                    zero_stage=3 if cfg.offload else 0,
-                    offload=cfg.offload,
-                    enable_bf16=cfg.enable_bf16,
-                    engine_type="pipe" if cfg.parallel.pipeline_parallel_size > 1 else "deepspeed",
-                ),
-            )
-
-        ref_backend = make_inf_backend(self.ref)
-        rw_backend = make_inf_backend(self.rew)
+        inf_backend = ModelBackend("pipe_inference" if self.ref.parallel.pipeline_parallel_size >
+                                   1 else "null")
 
         ppo_kwargs = dict(
             n_minibatches=self.ppo.ppo_n_minibatches,
@@ -278,98 +267,117 @@ class PPOConfig(Experiment):
             ),
         )
 
-        actor_topo = PipeModelDataParallelTopology(
-            num_pp=self.actor.parallel.pipeline_parallel_size,
-            num_mp=self.actor.parallel.model_parallel_size,
-            num_dp=self.actor.parallel.data_parallel_size,
-        )
-        critic_topo = PipeModelDataParallelTopology(
-            num_pp=self.critic.parallel.pipeline_parallel_size,
-            num_mp=self.critic.parallel.model_parallel_size,
-            num_dp=self.critic.parallel.data_parallel_size,
-        )
-        ref_topo = PipeModelDataParallelTopology(
-            num_pp=self.ref.parallel.pipeline_parallel_size,
-            num_mp=self.ref.parallel.model_parallel_size,
-            num_dp=self.ref.parallel.data_parallel_size,
-        )
-        rw_topo = PipeModelDataParallelTopology(
-            num_pp=self.rew.parallel.pipeline_parallel_size,
-            num_mp=self.rew.parallel.model_parallel_size,
-            num_dp=self.rew.parallel.data_parallel_size,
-        )
+        gen_topo = get_topo(self.actor_gen_parallel)
+        actor_train_topo = get_topo(self.actor.parallel)
+        critic_train_topo = get_topo(self.critic.parallel)
+        critic_inf_topo = get_topo(self.critic_inf_parallel)
+        ref_topo = get_topo(self.ref.parallel)
+        rw_topo = get_topo(self.rew.parallel)
 
-        # Another random strategy for testing
-        model_worker = [
-            ModelWorker(
-                seed=self.seed,
-                shards=[
+        model_worker = []
+        for i in range(self.world_size):
+            shards = []
+            shards += [
+                StandaloneModelShard(
+                    id=ModelShardID(
+                        model_name=ModelName("actor", 0),
+                        topo=gen_topo,
+                        dp_rank=gen_topo.get_coord(i).data,
+                        pp_rank=gen_topo.get_coord(i).pipe,
+                        mp_rank=gen_topo.get_coord(i).model,
+                    ),
+                    model=actor_model,
+                    backend=inf_backend,
+                ),
+            ]
+            if i < self.actor_train_ws:
+                shards += [
                     StandaloneModelShard(
                         id=ModelShardID(
-                            model_name="actor",
-                            topo=actor_topo,
-                            dp_rank=actor_topo.get_coord(i).data,
-                            pp_rank=actor_topo.get_coord(i).pipe,
-                            mp_rank=actor_topo.get_coord(i).model,
+                            model_name=ModelName("actor", 1),
+                            topo=actor_train_topo,
+                            dp_rank=actor_train_topo.get_coord(i).data,
+                            pp_rank=actor_train_topo.get_coord(i).pipe,
+                            mp_rank=actor_train_topo.get_coord(i).model,
                         ),
                         model=actor_model,
                         backend=actor_backend,
                     ),
-                ],
-                tokenizer_name_or_path=self.actor.base_model_path,
-                datasets=[dataset],
-                dataloader=DataLoader("iterable_dataset_loader"),
-                cuda_cache_cleanliness=True,
-            ) for i in range(self.n_actors)
-        ] + [
-            ModelWorker(
-                seed=self.seed,
-                shards=[
+                ]
+            else:
+                offset = self.actor_train_ws
+                shards += [
                     StandaloneModelShard(
                         id=ModelShardID(
-                            model_name="critic",
-                            topo=critic_topo,
-                            dp_rank=critic_topo.get_coord(i).data,
-                            pp_rank=critic_topo.get_coord(i).pipe,
-                            mp_rank=critic_topo.get_coord(i).model,
+                            model_name=ModelName("critic", 1),
+                            topo=critic_train_topo,
+                            dp_rank=critic_train_topo.get_coord(i - offset).data,
+                            pp_rank=critic_train_topo.get_coord(i - offset).pipe,
+                            mp_rank=critic_train_topo.get_coord(i - offset).model,
                         ),
                         model=critic_model,
                         backend=critic_backend,
                     ),
+                ]
+            if i < self.rew_inf_ws:
+                shards += [
                     StandaloneModelShard(
                         id=ModelShardID(
-                            model_name="reward",
+                            model_name=ModelName("reward", 0),
                             topo=rw_topo,
                             dp_rank=rw_topo.get_coord(i).data,
                             pp_rank=rw_topo.get_coord(i).pipe,
                             mp_rank=rw_topo.get_coord(i).model,
                         ),
                         model=rw_model,
-                        backend=rw_backend,
+                        backend=inf_backend,
                     ),
+                ]
+            elif i < self.rew_inf_ws + self.critic_inf_ws:
+                offset = self.rew_inf_ws
+                shards += [
                     StandaloneModelShard(
                         id=ModelShardID(
-                            model_name="ref",
+                            model_name=ModelName("critic", 0),
+                            topo=critic_inf_topo,
+                            dp_rank=critic_inf_topo.get_coord(i - offset).data,
+                            pp_rank=critic_inf_topo.get_coord(i - offset).pipe,
+                            mp_rank=critic_inf_topo.get_coord(i - offset).model,
+                        ),
+                        model=critic_model,
+                        backend=inf_backend,
+                    ),
+                ]
+            else:
+                offset = self.rew_inf_ws + self.critic_inf_ws
+                shards += [
+                    StandaloneModelShard(
+                        id=ModelShardID(
+                            model_name=ModelName("ref", 0),
                             topo=ref_topo,
-                            dp_rank=ref_topo.get_coord(i).data,
-                            pp_rank=ref_topo.get_coord(i).pipe,
-                            mp_rank=ref_topo.get_coord(i).model,
+                            dp_rank=ref_topo.get_coord(i - offset).data,
+                            pp_rank=ref_topo.get_coord(i - offset).pipe,
+                            mp_rank=ref_topo.get_coord(i - offset).model,
                         ),
                         model=ref_model,
-                        backend=ref_backend,
+                        backend=inf_backend,
                     ),
-                ],
+                ]
+            mw = ModelWorker(
+                seed=self.seed,
+                shards=shards,
+                tokenizer_name_or_path=self.actor.path,
+                datasets=[dataset],
+                dataloader=DataLoader("iterable_dataset_loader"),
                 cuda_cache_cleanliness=True,
-            ) for i in range(self.n_critics)
-        ]
-
-        global_train_bs = self.actor_per_device_train_batch_size * self.n_actors
-        global_gen_bs = self.actor_per_device_generate_batch_size * self.n_actors
+                cuda_cache_clear_freq=10,
+            )
+            model_worker.append(mw)
 
         rollout = ModelRPC(
-            model_name="actor",
+            model_name=ModelName("actor", 0),
             interface_type=ModelInterfaceType.GENERATE,
-            model_type=ModelFamily("llama", 7, False),
+            model_type=self.actor.type,
             interface_impl=actor_interface,
             input_data=["packed_prompts", "prompt_cu_seqlens"],
             output_data=[
@@ -380,25 +388,28 @@ class PPOConfig(Experiment):
                 "prompt_mask",
             ],
             balanced_dp=True,
-            # pre_hooks=[SyncParamHook(target="ref", interval=1)],  # NOTE: just for testing
-            # post_hooks=[OffloadHook()],  # NOTE: just for testing
+            min_n_seqs=self.global_gen_bs,
+            max_n_seqs=self.global_gen_bs,
         )
 
         inf_reward = ModelRPC(
-            model_name="reward",
+            model_name=ModelName("reward", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
-            model_type=ModelFamily("llama", 7, True),
+            model_type=self.rew.type,
             input_data=["packed_seq", "cu_seqlens"],
             input_key_remap={"packed_seq": "packed_input_ids"},
             output_data=["scores"],
             output_key_remap={"scores": "rewards"},
+            post_hooks=[OffloadHook()],
+            min_n_seqs=self.global_gen_bs,
+            max_n_seqs=self.global_gen_bs,
         )
 
         inf_ref_logits = ModelRPC(
-            model_name="ref",
+            model_name=ModelName("ref", 0),
             interface_type=ModelInterfaceType.INFERENCE,
-            model_type=ModelFamily("llama", 7, False),
+            model_type=self.ref.type,
             interface_impl=ref_interface,
             input_data=[
                 "packed_seq",
@@ -406,22 +417,27 @@ class PPOConfig(Experiment):
             ],
             output_data=["logprobs"],
             output_key_remap={"logprobs": "packed_ref_logprobs"},
+            post_hooks=[OffloadHook()],
+            min_n_seqs=self.global_gen_bs,
+            max_n_seqs=self.global_gen_bs,
         )
 
         inf_values = ModelRPC(
-            model_name="critic",
+            model_name=ModelName("critic", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=critic_interface,
-            model_type=ModelFamily("llama", 7, True),
+            model_type=self.critic.type,
             input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
             output_data=["scores"],
             output_key_remap={"scores": "values"},
+            min_n_seqs=self.global_gen_bs,
+            max_n_seqs=self.global_gen_bs,
         )
 
         train_actor = ModelRPC(
-            model_name="actor",
+            model_name=ModelName("actor", 1),
             interface_type=ModelInterfaceType.TRAIN_STEP,
-            model_type=ModelFamily("llama", 7, False),
+            model_type=self.actor.type,
             interface_impl=actor_interface,
             input_data=[
                 "packed_seq",
@@ -434,11 +450,14 @@ class PPOConfig(Experiment):
                 "seq_no_eos_mask",
             ],
             log_return_value=True,
-            # post_hooks=[SyncParamHook(target="ref", interval=4)],  # NOTE: just for testing
+            pre_hooks=[SyncParamHook(source=ModelName("actor", 0))],
+            post_hooks=[SyncParamHook(target=ModelName("actor", 0))],
+            min_n_seqs=self.global_train_bs,
+            max_n_seqs=self.global_train_bs,
         )
 
         train_critic = ModelRPC(
-            model_name="critic",
+            model_name=ModelName("critic", 1),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=critic_interface,
             model_type=ModelFamily("llama", 7, True),
@@ -453,34 +472,26 @@ class PPOConfig(Experiment):
                 "seq_no_eos_mask",
             ],
             log_return_value=True,
+            pre_hooks=[SyncParamHook(source=ModelName("critic", 0))],
+            post_hooks=[SyncParamHook(target=ModelName("critic", 0))],
+            min_n_seqs=self.global_train_bs,
+            max_n_seqs=self.global_train_bs,
         )
 
-        if self.actor.parallel.pipeline_parallel_size > 1:
-            pp_nmbs = self.actor.parallel.pipeline_parallel_size * 2
+        if actor_train_topo.get_dim("pipe") > 1:
+            pp_nmbs = actor_train_topo.get_dim("pipe") * 2
             train_actor.min_n_seqs_per_dp = self.ppo.ppo_n_minibatches * pp_nmbs
         else:
             train_actor.min_n_seqs_per_dp = self.ppo.ppo_n_minibatches
-        train_actor.min_n_seqs = global_train_bs
-        train_actor.max_n_seqs = global_train_bs
 
-        train_critic.min_n_seqs = global_train_bs
-        train_critic.max_n_seqs = global_train_bs
+        rollout.min_n_seqs_per_dp = self.global_gen_bs // gen_topo.get_dim("data")
 
-        rollout.min_n_seqs = global_gen_bs
-        rollout.max_n_seqs = global_gen_bs
-        rollout.min_n_seqs_per_dp = global_gen_bs // actor_topo.get_dim("data")
-
-        inf_ref_logits.min_n_seqs = global_gen_bs
-        inf_ref_logits.max_n_seqs = global_gen_bs
-
-        inf_reward.min_n_seqs = global_gen_bs
-        inf_reward.max_n_seqs = global_gen_bs
-
-        inf_values.min_n_seqs = global_gen_bs
-        inf_values.max_n_seqs = global_gen_bs
-
+        exp_ctrl = ExperimentSaveEvalControl(
+            total_train_epochs=self.total_train_epochs,
+            save_frequency_steps=self.save_freq_steps,
+        )
         return ExperimentConfig(
-            exp_ctrl=ExperimentSaveEvalControl(total_train_epochs=self.total_train_epochs),
+            exp_ctrl=exp_ctrl,
             model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
             model_worker=model_worker,
         )

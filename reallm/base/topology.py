@@ -277,7 +277,7 @@ class PipeModelDataParallelTopology(ProcessTopology):
 
     def __init__(self, num_pp: int, num_mp: int, num_dp: int, sequence_parallel: bool):
         super().__init__(axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp])
-        
+
         self.sequence_parallel = sequence_parallel
 
 

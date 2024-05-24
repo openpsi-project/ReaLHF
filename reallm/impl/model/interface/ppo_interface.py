@@ -48,14 +48,11 @@ def _ppo_actor_loss_from_model_outputs(
     returns loss and logging stats.
     """
     if logits_mask is not None:
-        logits.masked_fill_(logits_mask.logical_not_(),
-                            torch.finfo(logits.dtype).min)  # inplace operation for logits mask
-    # new_logp = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids).float()
-
-    # new_logp = new_logp * ppo_loss_mask
+        # inplace operation for logits mask
+        logits.masked_fill_(logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
 
     assert ppo_loss_mask is not None
-    loss = ppo_functional.memory_efficient_ppo_loss_fn(
+    (loss, importance_weight, clip_ratio, approx_kl) = ppo_functional.memory_efficient_ppo_loss_fn(
         logits=logits,
         cu_seqlens=cu_seqlens,
         packed_input_ids=packed_input_ids,
@@ -65,37 +62,32 @@ def _ppo_actor_loss_from_model_outputs(
         eps_clip=eps_clip,
     )
     loss = torch.where(ppo_loss_mask, loss, 0.0).sum() / ppo_loss_mask.count_nonzero()
-    loss = loss * 0.0
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
     torch.distributed.all_reduce(mean_ref_kl)
     mean_ref_kl = mean_ref_kl / torch.distributed.get_world_size(constants.data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
-    # importance_weight = loss_stat["importance_weight"]
-    # clip_ratio = loss_stat["clip_ratio"]
-    # if early_stop_imp_ratio is not None and importance_weight > early_stop_imp_ratio:
-    #     logger.warning(f"Current importance ratio {importance_weight.item():.4f} is larger "
-    #                    f"than early stop threshold {early_stop_imp_ratio}. Abandon this minibatch.")
-    #     loss = loss * 0.0
-
-    # approx_kl = ((old_logp - new_logp).detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
+    if early_stop_imp_ratio is not None and importance_weight > early_stop_imp_ratio:
+        logger.warning(f"Current importance ratio {importance_weight.item():.4f} is larger "
+                       f"than early stop threshold {early_stop_imp_ratio}. Abandon this minibatch.")
+        loss = loss * 0.0
 
     stats = dict(
-        # ppo_approx_kl=approx_kl,
-        # cur_kl_ctl=torch.tensor(kl_adapter.value).to(approx_kl),
+        ppo_approx_kl=approx_kl,
+        cur_kl_ctl=torch.tensor(kl_adapter.value).to(approx_kl),
         actor_loss=loss.detach(),
-        # actor_clip_ratio=clip_ratio,
-        # importance_weight=importance_weight,
+        actor_clip_ratio=clip_ratio,
+        importance_weight=importance_weight,
     )
 
     if logits_mask is not None:
         stats["ignoring_logits_ratio"] = logits_mask.half().mean()  # inversed logits mask
 
-    # if (early_stop_kl is not None and approx_kl > early_stop_kl):
-    #     logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
-    #                    f"than early stop threshold {early_stop_kl}. Abort actor update.")
-    #     loss = loss * 0.0
+    if (early_stop_kl is not None and approx_kl > early_stop_kl):
+        logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
+                       f"than early stop threshold {early_stop_kl}. Abort actor update.")
+        loss = loss * 0.0
 
     return loss, stats
 
@@ -131,10 +123,6 @@ class PPOActorInterface(model_api.ModelInterface):
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
 
-    pipe_gen_n_mbs: Optional[int] = None
-    pipe_inf_n_mbs: Optional[int] = None
-    pipe_train_n_mbs: Optional[int] = None
-
     def __post_init__(self):
         super().__post_init__()
         if self.adaptive_kl_ctl:
@@ -155,17 +143,16 @@ class PPOActorInterface(model_api.ModelInterface):
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
 
-        if self.pipe_gen_n_mbs is None:
-            self.pipe_gen_n_mbs = constants.pipe_parallel_world_size()
-        if self.pipe_inf_n_mbs is None:
-            self.pipe_inf_n_mbs = constants.pipe_parallel_world_size()
-        if self.pipe_train_n_mbs is None:
-            self.pipe_train_n_mbs = constants.pipe_parallel_world_size() * 2
-
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
-        model.module.save(save_dir,)
+        module = model.module
+        if not isinstance(module, ReaLModel):
+            module = module.module
+        module.save_to_hf(
+            tokenizer=model.tokenizer,
+            save_dir=save_dir,
+        )
 
     @torch.no_grad()
     def generate(self, model: model_api.Model, data: NamedArray) -> NamedArray:
@@ -190,7 +177,6 @@ class PPOActorInterface(model_api.ModelInterface):
                 packed_input_ids=packed_prompts,
                 cu_seqlens=cu_seqlens,
                 gconfig=GenerationConfig(**self.generation_config),
-                num_micro_batches=self.pipe_gen_n_mbs,
             )
             if res is None:
                 return None
@@ -290,7 +276,6 @@ class PPOActorInterface(model_api.ModelInterface):
                 seqlens_cpu=data.metadata["seqlens"],
                 packed_input_ids=data["packed_seq"],
                 cu_seqlens=cu_seqlens,
-                num_micro_batches=self.pipe_inf_n_mbs,
             )
             if res is None:
                 return None
@@ -299,7 +284,7 @@ class PPOActorInterface(model_api.ModelInterface):
             if hasattr(module, "module"):
                 module = module.module
             res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
-            logits = res
+            logits = res.logits
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             packed_logits_mask = data["packed_logits_mask"]
@@ -400,7 +385,9 @@ class PPOActorInterface(model_api.ModelInterface):
             ))
 
         data_.register_metadata(seqlens=batch_seqlens)
-        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=self.pipe_train_n_mbs)
+        datas = PackedParallelDataBroker.scatter_to(data_,
+                                                    self.n_minibatches,
+                                                    min_size=constants.pipe_parallel_world_size() * 2)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
@@ -430,7 +417,6 @@ class PPOActorInterface(model_api.ModelInterface):
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=data["cu_seqlens"],
                     loss_fn=_ppo_actor_loss_from_model_outputs,
-                    num_micro_batches=self.pipe_train_n_mbs,
                     **loss_fn_kwargs,
                 )
             else:
@@ -441,7 +427,7 @@ class PPOActorInterface(model_api.ModelInterface):
                     max_seqlen=max_seqlen,
                 )
                 loss, stats = _ppo_actor_loss_from_model_outputs(
-                    logits=output,
+                    logits=output.logits,
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=cu_seqlens,
                     old_logp=data["old_logp"],
@@ -519,8 +505,6 @@ def _ppo_critic_loss_from_model_outputs(
     else:
         denormalized_values = new_values
 
-    loss = loss * 0.0
-
     return loss, dict(
         value_loss=loss.detach(),
         value_clip_ratio=clip_ratio,
@@ -547,9 +531,6 @@ class PPOCriticInterface(model_api.ModelInterface):
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
 
-    pipe_train_n_mbs: Optional[int] = None
-    pipe_inf_n_mbs: Optional[int] = None
-
     def __post_init__(self):
         super().__post_init__()
         if self.adaptive_kl_ctl:
@@ -570,15 +551,16 @@ class PPOCriticInterface(model_api.ModelInterface):
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
 
-        if self.pipe_train_n_mbs is None:
-            self.pipe_train_n_mbs = constants.pipe_parallel_world_size() * 2
-        if self.pipe_inf_n_mbs is None:
-            self.pipe_inf_n_mbs = constants.pipe_parallel_world_size()
-
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
-        model.module.save(save_dir,)
+        module = model.module
+        if not isinstance(module, ReaLModel):
+            module = module.module
+        module.save_to_hf(
+            tokenizer=model.tokenizer,
+            save_dir=save_dir,
+        )
 
     @torch.no_grad()
     def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
@@ -595,7 +577,6 @@ class PPOCriticInterface(model_api.ModelInterface):
                 seqlens_cpu=data.metadata["seqlens"],
                 packed_input_ids=data["packed_seq"],
                 cu_seqlens=cu_seqlens,
-                num_micro_batches=self.pipe_inf_n_mbs,
             )
             if scores is None:
                 return None
@@ -604,7 +585,7 @@ class PPOCriticInterface(model_api.ModelInterface):
                 module = module.module
             scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
                                                cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen)
+                                               max_seqlen=max_seqlen).logits
         scores = scores.squeeze(-1)
         return from_dict(dict(scores=scores))
 
@@ -687,7 +668,9 @@ class PPOCriticInterface(model_api.ModelInterface):
             ))
 
         data_.register_metadata(seqlens=batch_seqlens)
-        datas = PackedParallelDataBroker.scatter_to(data_, self.n_minibatches, min_size=self.pipe_train_n_mbs)
+        datas = PackedParallelDataBroker.scatter_to(data_,
+                                                    self.n_minibatches,
+                                                    min_size=constants.pipe_parallel_world_size() * 2)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
@@ -715,14 +698,13 @@ class PPOCriticInterface(model_api.ModelInterface):
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=data["cu_seqlens"],
                     loss_fn=_ppo_critic_loss_from_model_outputs,
-                    num_micro_batches=self.pipe_train_n_mbs,
                     **loss_kwargs,
                 )
             else:
                 max_seqlen = int(max(input_lens))
                 new_values: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
                                                        cu_seqlens=data["cu_seqlens"],
-                                                       max_seqlen=max_seqlen).float()
+                                                       max_seqlen=max_seqlen).logits.float()
 
                 loss, stats = _ppo_critic_loss_from_model_outputs(
                     new_values=new_values,

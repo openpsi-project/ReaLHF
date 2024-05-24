@@ -421,8 +421,12 @@ class ReaLModel(nn.Module):
                     for v in l.parameters():
                         v.data = torch.tensor((), dtype=self.dtype, device=self.device)
                     to_layers_handle_dict[_to_layer_idx] = l
-        to_param_spec, to_param_size = build_param_spec(to_layer_indices, to_model_config,
-                                                        to_topo.get_dim("model"))
+        to_param_spec, to_param_size = build_param_spec(
+            to_layer_indices,
+            to_model_config,
+            to_topo.get_dim("model"),
+            to_topo.sequence_parallel,
+        )
         if len(to_layer_indices) > 0:
             to_layer_idx_start = min(to_layer_indices)
             to_layer_idx_end = max(to_layer_indices) + 1
@@ -482,7 +486,7 @@ class ReaLModel(nn.Module):
             rtgt.to_layer_start_idx,
         )
 
-        # Allocate send and receive tensors in advance to reduce overhead.
+        # Allocate tensors in advance to reduce overhead.
         recv_buf_specs = []
         send_buf_specs = []
         comm_volume = torch.zeros((), dtype=torch.long, device="cuda")
