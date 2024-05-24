@@ -590,12 +590,13 @@ class ModelWorker(worker_base.Worker):
                             del self.__data_sent_worker_indices[buf_idx]
                         if buf_idx in self.__data_received_worker_indices:
                             del self.__data_received_worker_indices[buf_idx]
-                    st = time.monotonic()
-                    gc.collect()
-                    torch.cuda.empty_cache()
-                    gc.collect()
-                    et = time.monotonic()
-                    blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
+                    if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
+                        st = time.monotonic()
+                        gc.collect()
+                        torch.cuda.empty_cache()
+                        gc.collect()
+                        et = time.monotonic()
+                        blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
                 dump_tmark_db(self.__worker_index)
             ############## computation function calls ##############
             elif request.handle_name == "inference":
@@ -924,15 +925,6 @@ class ModelWorker(worker_base.Worker):
         r = self.__maybe_post_responses()
 
         if r.batch_count > 0:
-            if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
-                # following huggingface trl # ALWAYS COST 0.3+ SEC
-                st = time.monotonic()
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
-                et = time.monotonic()
-                blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
-
             # tik = time.perf_counter()
             # blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
             #     ",".join(self.model_names),
