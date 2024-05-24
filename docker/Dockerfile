@@ -15,12 +15,21 @@ RUN apt install -y libpgm-dev net-tools \
 RUN pip3 install -U pip
 # RUN pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
+# Install the latest NCCL
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb
+RUN dpkg -i cuda-keyring_1.0-1_all.deb
+RUN apt-get update
+RUN apt install libnccl2=2.20.5-1+cuda12.2 libnccl-dev=2.20.5-1+cuda12.2
+
+# build pytorch with the latest NCCL version
+ENV NCCL_INCLUDE_DIR="/usr/include/" NCCL_LIB_DIR="/usr/lib/" USE_SYSTEM_NCCL=1
+
 # build pytorch from source, such that we can use MPI backend
 RUN apt-get update && apt-get -y install ninja-build
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 ENV _GLIBCXX_USE_CXX11_ABI=1
 ENV TORCH_CUDA_ARCH_LIST="8.0;9.0"
-ENV pip3 uninstall -y torch
+RUN pip3 uninstall -y torch
 WORKDIR /tmp
 RUN git clone --depth 1 --branch v2.1.0 https://github.com/pytorch/pytorch
 WORKDIR /tmp/pytorch
@@ -47,7 +56,7 @@ ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 ENV NVTE_WITH_USERBUFFERS=1
 ENV NVTE_FRAMEWORK=pytorch
 ENV MPI_HOME=/usr/local/mpi
-ENV MAX_JOBS=32
+ENV MAX_JOBS=64
 
 # install transformer engine
 # note that we should in stall transformer_engine before flash attention,
@@ -67,6 +76,11 @@ RUN pip3 install /tmp/cugae-0.1.0-cp310-cp310-linux_x86_64.whl
 WORKDIR /app
 RUN rm -rf /tmp/TransformerEngine /tmp/flash_attn-2.3.6-cp310-cp310-linux_x86_64.whl /tmp/cugae-0.1.0-cp310-cp310-linux_x86_64.whl /tmp/pytorch
 
+COPY dist/dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl /dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl
+RUN pip3 install /dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl && rm /dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl
+
+COPY dist/dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl /tmp/dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl
+RUN pip3 install /tmp/dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl && rm /tmp/dllm_cuda-0.0.0-cp310-cp310-linux_x86_64.whl
 # install zmq with pgm
 # COPY ./zeromq-4.3.4.tar.gz /
 # WORKDIR /

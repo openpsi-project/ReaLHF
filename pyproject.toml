@@ -1,20 +1,60 @@
+[build-system]
+requires = ["setuptools>=61.0", "packaging", "torch"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reallm"
+description = "ReaL: Efficient RLHF Training of Large Language Models with Parameter Reallocation"
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["version"]
+authors = [
+    { name = "Zhiyu Mei", email = "meizy20@mails.tsinghua.edu.cn" },
+    { name = "Wei Fu", email = "fuwth17@gmail.com" },
+]
+maintainers = [
+    { name = "Zhiyu Mei", email = "meizy20@mails.tsinghua.edu.cn" },
+    { name = "Wei Fu", email = "fuwth17@gmail.com" },
+]
+keywords = ["large language models (LLMs)", "RLHF", "distributed training"]
+dependencies = [
+    "torch",
+    "flash-attn",
+    "transformers",
+    "deepspeed",
+    "hydra-core",
+    "pyzmq",
+]
+classifiers = [
+    #   3 - Alpha
+    #   4 - Beta
+    #   5 - Production/Stable
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: GPU :: NVIDIA CUDA :: 12 :: 12.2",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/garrett4wade/distributed_llm"
+Issues = "https://github.com/garrett4wade/distributed_llm/issues"
+Documentation = "https://github.com/garrett4wade/distributed_llm/docs"
+Repository = "https://github.com/garrett4wade/distributed_llm"
+# Changelog = "https://github.com/garrett4wade/distributed_llm/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["."]                    # ["."] by default
+# include = ["csrc/*", "reallm/*"] # ["*"] by default
+# exclude = ["tests", "docker"]    # empty by default
+# namespaces = false               # true by default
+
 [tool.isort]
 from_first = true
 force_alphabetical_sort_within_sections = true
 lexicographical = true
 src_paths = ["."]
 line_length = 110
-known_local_folder = [
-    'api',
-    'apps',
-    'base',
-    'impl',
-    'experiments',
-    'scheduler',
-    'system',
-    'tests',
-]
-skip = ["thirdparty"]
 
 [tool.yapf]
 based_on_style = "pep8"
@@ -26,5 +66,7 @@ blank_line_before_nested_class_or_def = true
 space_between_ending_comma_and_closing_bracket = false
 allow_split_before_dict_value = false
 
-[tool.yapfignore]
-ignore_patterns = ["thirdparty/*"]
+[tool.pytest.ini_options]
+pythonpath = [
+  "."
+]

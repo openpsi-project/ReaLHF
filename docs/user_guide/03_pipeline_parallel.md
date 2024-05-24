@@ -1,9 +1,9 @@
 # Pipeline Parallel
-Pipeline parallel in the system follows the implementation of DeepSpeed [PipelineEngine](https://github.com/microsoft/DeepSpeed/blob/master/deepspeed/runtime/pipe/engine.py), supports GPipe and 1F1B style pipeline parallel training and generating. We only support pipeline parallel for FlashMQAT models.
+Pipeline parallel in the system follows the implementation of DeepSpeed [PipelineEngine](https://github.com/microsoft/DeepSpeed/blob/master/deepspeed/runtime/pipe/engine.py), supports GPipe and 1F1B style pipeline parallel training and generating. We only support pipeline parallel for ReaLModel models.
 
 
 ## Preparing Checkpoints
-Before running pipeline parallel experiments, you must transform your huggingface-style model checkpoints into sharded pipeline parallel checkpoints with [this script](../../scripts/transform_to_pipe_ckpt.py). This script automatically partitions model checkpoints into several files. One file can only contains parameters from **one pipeline stage**. Parameters from the same stage can be further splitted into smaller shards to reduce memory usage when loading models (which can be done by setting `NUM_SHARDS`>1 in the script). **NOTE: When running experiments, you should match your num_pipeline_stages setting with your pipeline checkpoint files. If you need to change num_pipeline_stages, please rerun the script for new pipeline checkpoint files!** 
+Before running pipeline parallel reallm.experiments, you must transform your huggingface-style model checkpoints into sharded pipeline parallel checkpoints with [this script](../../scripts/transform_to_pipe_ckpt.py). This script automatically partitions model checkpoints into several files. One file can only contains parameters from **one pipeline stage**. Parameters from the same stage can be further splitted into smaller shards to reduce memory usage when loading models (which can be done by setting `NUM_SHARDS`>1 in the script). **NOTE: When running reallm.experiments, you should match your num_pipeline_stages setting with your pipeline checkpoint files. If you need to change num_pipeline_stages, please rerun the script for new pipeline checkpoint files!** 
 
 
 ## [DeepSpeedPipelineEngine](../../impl/model/backend/pipe_engine/ds_pipe_engine.py)

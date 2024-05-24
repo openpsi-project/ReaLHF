@@ -8,14 +8,14 @@ Datasets used in this system are subclasses of `torch.utils.data.Dataset`. Besid
 
 To implement a new dataset, uses should
 1. define a class by inheriting `torch.utils.data.Dataset`;
-2. implement the `__init__` function, with `util: api.data.DatasetUtility` as the first argument, and arbitrarily many other arguments;
+2. implement the `__init__` function, with `util: data_api.DatasetUtility` as the first argument, and arbitrarily many other arguments;
 3. implement the `__len__` function and the `__getitem__` methods just like ordinary PyTorch dataset implementations (or `__len__` and `__iter__` for iterable datasets);
-4. register the dataset by calling `api.data.register_dataset("my_cool_dataset", MyDataset)`.
+4. register the dataset by calling `data_api.register_dataset("my_cool_dataset", MyDataset)`.
 
 In configuration, users can define `api.config.Dataset` like this
 
 ```python
-dataset_cfg = api.config.Dataset(type_="my_cool_dataset",
+dataset_cfg = reallm.api.config.Dataset(type_="my_cool_dataset",
                                  args=dict(**other_arguments))
 ```
 
@@ -29,14 +29,14 @@ In `api/data.py`, we have defined several default dataloaders. To implement and 
 def RLHFDataLoader(dataset, max_token_len, *args, **kwargs):
     collator = DataCollatorRLHF(max_token_len)
     return torch.utils.data.DataLoader(dataset, *args, collate_fn=collator, **kwargs)
-api.data.register_dataset("excel_prompt", ExcelPromptDataset)
+data_api.register_dataset("excel_prompt", ExcelPromptDataset)
 ```
 
 where we overwrite the arguments of `torch.utils.data.DataLoader` with a customized data collator.
 
 In configuration, users can define `api.config.DataLoader` like
 ```python
-dataloader = api.config.DataLoader(
+dataloader = reallm.api.config.DataLoader(
     'excel_propmt',
     args=dict(
         max_token_len=max_prompt_len,

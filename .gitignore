@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 trace_result/
+profile_result/
 
 slurm_outs
 _data

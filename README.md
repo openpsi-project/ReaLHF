@@ -1,5 +1,13 @@
 # A Distributed System for LLM RLHF
 
+## Installation
+
+Under the git repository, run:
+
+```bash
+python3 -m build -n
+```
+
 ## Quickstart
 
 The following command is used to run an SFT experiment:
@@ -37,14 +45,14 @@ python3 -m scripts.transform_to_pipe_ckpt --model_dir /lustre/public/pretrained_
 Then, pass the `output_dir` to `model.path` in quickstart command and set `model.parallel.pipeline_parallel_size` to be the number of stages you partitioned.
 Run the command and take off!
 
-Quickstart experiments will run slurm jobs by default. When slurm is not available, it will launch subprocesses locally (e.g. in a `srun` bash container).
+Quickstart reallm.experiments will run slurm jobs by default. When slurm is not available, it will launch subprocesses locally (e.g. in a `srun` bash container).
 
-The scheduling configuration is not changable in quickstart experiments. Users cannot specify nodelist/exclude and the number of GPUs used by each model.
-Please consider launching customized experiments if you must do so.
+The scheduling configuration is not changable in quickstart reallm.experiments. Users cannot specify nodelist/exclude and the number of GPUs used by each model.
+Please consider launching customized reallm.experiments if you must do so.
 
 ## Launch Customized Experiments
 
-We provide another way to launch customized experiments via `python3 -m apps.main start` for advanced users and developers.
+We provide another way to launch customized reallm.experiments via `python3 -m apps.main start` for advanced users and developers.
 An example is the system benchmark [here](https://github.com/garrett4wade/distributed_llm/blob/main/experiments/benchmark/system/rlhf_benchmark.py#L182), which can be launched via
 
 ```python
@@ -55,7 +63,7 @@ where `-f` specifies a trial name to distinguish different runs of the same expe
 
 Experiments are basically the composition of model, dataset, parallelism, and scheduling configurations. We implement each experiment configuration as a `Experiment` class.
 These classes are registered via `register_experiment` and registered ones can be launched by `python3 -m apps.main start -e ${registered_exp_name}`.
-Quickstart also internally launches registered experiments, but these experiments are dynamically registered and configurable via the command line.
+Quickstart also internally launches registered reallm.experiments, but these reallm.experiments are dynamically registered and configurable via the command line.
 
 `experiment_name` and the registered class have static one-to-one relationship. In other words,
 it sets an alias for a special combination of dataset, model, and hyper-parameters, which is especially useful when we need to freeze hyper-parameters for the sake of reproducibility,
