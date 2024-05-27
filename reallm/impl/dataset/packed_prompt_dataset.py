@@ -14,33 +14,6 @@ import reallm.base.namedarray as namedarray
 logger = logging.getLogger("Packed Prompt Dataset")
 
 
-def split_packed_batch_into_seqs(
-    sample: namedarray.NamedArray,
-    input_lens: Optional[torch.Tensor] = None,
-    return_seqlens: bool = False,
-) -> List[namedarray.NamedArray]:
-    if input_lens is None:
-        if "input_lens" in sample:
-            input_lens = sample["input_lens"]
-        elif "prompt_lens" in sample:
-            input_lens = sample["prompt_lens"]
-        elif "cu_seqlens" in sample:
-            input_lens = sample["cu_seqlens"][1:] - sample["cu_seqlens"][:-1]
-        elif "prompt_cu_seqlens" in sample:
-            input_lens = sample["prompt_cu_seqlens"][1:] - sample["prompt_cu_seqlens"][:-1]
-
-    partitions = [(i, i + 1) for i in range(input_lens.shape[0])]
-    sample["input_lens"] = input_lens
-    sample.register_metadata(seqlens=input_lens.cpu().numpy().tolist())
-    res = dataparallel.PackedParallelDataBroker.scatter_to(sample,
-                                                           n_dp=len(input_lens),
-                                                           partitions=partitions)
-    if not return_seqlens:
-        return res
-    else:
-        return res, input_lens
-
-
 class PackedPromptDataset(torch.utils.data.IterableDataset):
 
     def __init__(
@@ -176,8 +149,7 @@ class PackedPromptDataset(torch.utils.data.IterableDataset):
 
             yield dict(
                 packed_prompts=packed_input_ids,
-                # prompt_cu_seqlens=cu_seqlens,
-                prompt_lens=seqlens,
+                prompt_cu_seqlens=cu_seqlens,
             )
         self._shuffle()
         assert all(seq <= self.n_tokens_per_batch for seq in self.prompt_lengths)
@@ -238,18 +210,4 @@ else:
             # for data in datas:
             #     PackedParallelDataBroker.scatter_to(data, n_pp)
             print(x)
-            print(len(x["prompt_lens"]), x["packed_prompts"].shape)
-            # print(hash(x["packed_prompts"]))
-            # import hashlib
-            # hash_val = int(hashlib.md5(x["packed_prompts"].numpy().tobytes()).hexdigest(), 16)
-            # print(hash_val)
-            a = split_packed_batch_into_seqs(namedarray.from_dict(x))
-            print(len(a))
-            print(a[0])
-            print(hash(a[0]))
-            # for aa in a:
-            # print(aa)
-            # hash_sum += hash(aa) % 1000
-            # print(hash(aa))
-            break
         # print(f"hash sum of iter {i}: {hash_sum}")

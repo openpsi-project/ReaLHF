@@ -161,12 +161,8 @@ class PPOActorInterface(model_api.ModelInterface):
         module.eval()
 
         data = recursive_apply(data, lambda x: x.to(model.device))
-        prompt_lens = data["prompt_lens"]
         packed_prompts = data["packed_prompts"]
-        # print(f"packed prompts data hash {hash(packed_prompts)}")
-        cu_seqlens = torch.cat(
-            [torch.tensor([0], dtype=torch.int32, device=model.device),
-             torch.cumsum(prompt_lens, dim=0)])
+        cu_seqlens = data["prompt_cu_seqlens"]
 
         prompt_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
         bs = prompt_lengths.shape[0]
@@ -429,7 +425,7 @@ class PPOActorInterface(model_api.ModelInterface):
                     packed_input_ids=data["packed_seq"],
                     cu_seqlens=cu_seqlens,
                     max_seqlen=max_seqlen,
-                ).logits
+                )
                 loss, stats = _ppo_actor_loss_from_model_outputs(
                     logits=output.logits,
                     packed_input_ids=data["packed_seq"],
