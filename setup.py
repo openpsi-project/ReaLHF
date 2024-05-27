@@ -171,6 +171,7 @@ if _is_cuda():
         with contextlib.suppress(ValueError):
             torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
 
+os.makedirs(os.path.join(ROOT_DIR, "reallm", "_C"), exist_ok=True)
 if _is_cuda():
     cr_extension = CUDAExtension(
         name="reallm._C.custom_all_reduce",

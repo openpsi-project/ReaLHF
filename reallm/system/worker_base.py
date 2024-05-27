@@ -549,8 +549,12 @@ class Worker:
         self.__running = False
         self.__set_status(WorkerServerStatus.PAUSED)
 
+    def _exit_hook(self, exit_type: str):
+        logger.warning(f"Exit with {exit_type}, hook not implemented, pass.")
+
     def exit(self):
         self.logger.info("Exiting worker")
+        self._exit_hook("SIGINT")
         import torch.distributed as dist
         if dist.is_initialized():
             dist.destroy_process_group()
@@ -559,6 +563,7 @@ class Worker:
 
     def interrupt(self):
         self.logger.info("Worker interrupted by remote control.")
+        self._exit_hook("SIGINT")
         self.__set_status(WorkerServerStatus.INTERRUPTED)
         raise WorkerException(worker_name="worker",
                               worker_status=WorkerServerStatus.INTERRUPTED,
@@ -614,6 +619,7 @@ class Worker:
             if isinstance(e, WorkerException):
                 raise e
             self.__set_status(WorkerServerStatus.ERROR)
+            self._exit_hook("Exception")
             raise e
 
     def __host_key(self, key: str):

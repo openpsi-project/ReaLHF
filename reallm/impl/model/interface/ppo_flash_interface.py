@@ -165,8 +165,12 @@ class PackedActorInterface(model_api.ModelInterface):
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
-        model.module.save(
-            save_dir,
+        module = model.module
+        if not isinstance(module, ReaLModel):
+            module = module.module
+        module.save_to_hf(
+            tokenizer=model.tokenizer,
+            save_dir=save_dir,
             epoch=model.version.epoch,
             epoch_step=model.version.epoch_step,
             global_step=model.version.global_step,
@@ -181,6 +185,7 @@ class PackedActorInterface(model_api.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
         prompt_lens = data["prompt_lens"]
         packed_prompts = data["packed_prompts"]
+        # print(f"packed prompts data hash {hash(packed_prompts)}")
         cu_seqlens = torch.cat(
             [torch.tensor([0], dtype=torch.int32, device=model.device),
              torch.cumsum(prompt_lens, dim=0)])
@@ -586,8 +591,12 @@ class PackedCriticInterface(model_api.ModelInterface):
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
-        model.module.save(
-            save_dir,
+        module = model.module
+        if not isinstance(module, ReaLModel):
+            module = module.module
+        module.save_to_hf(
+            tokenizer=model.tokenizer,
+            save_dir=save_dir,
             epoch=model.version.epoch,
             epoch_step=model.version.epoch_step,
             global_step=model.version.global_step,

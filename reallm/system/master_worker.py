@@ -25,13 +25,14 @@ from reallm.base import datapack, dataparallel, logging, namedarray, numpy_utils
 from reallm.base.asyncio_utils import (raise_asyncio_exception, setup_run_until_complete,
                                        teardown_run_util_complete)
 from reallm.base.cluster import spec as cluster_spec
-from reallm.base.constants import MODEL_SAVE_ROOT
+from reallm.base.constants import MODEL_SAVE_ROOT, RECOVER_ROOT
 from reallm.system.buffer import AsyncIOSequenceBuffer
 import reallm.api.core.config as config_api
 import reallm.api.core.data_api as data_api
 import reallm.api.core.dfg as dfg
 import reallm.api.core.model_api as model_api
 import reallm.api.core.system_api as config_pkg
+import reallm.base.recover as recover
 import reallm.system.request_reply_stream as request_reply_stream
 import reallm.system.worker_base as worker_base
 
@@ -146,9 +147,10 @@ async def group_rpc_blocked(
 
 
 def split_packed_batch_into_seqs(
-    sample: namedarray.NamedArray,
-    input_lens: Optional[torch.Tensor] = None,
-    return_seqlens: bool = False,
+        sample: namedarray.NamedArray,
+        input_lens: Optional[torch.Tensor] = None,
+        return_seqlens: bool = False,
+        return_hash: bool = False,  # for recover
 ) -> List[namedarray.NamedArray]:
     if input_lens is None:
         if "input_lens" in sample:
@@ -166,10 +168,15 @@ def split_packed_batch_into_seqs(
     res = dataparallel.PackedParallelDataBroker.scatter_to(sample,
                                                            n_dp=len(input_lens),
                                                            partitions=partitions)
+
     if not return_seqlens:
         return res
     else:
-        return res, input_lens
+        if not return_hash:
+            return res, input_lens
+        else:
+            # HACK
+            return res, input_lens, [hash(x) for x in res]
 
 
 def _request_parameter_sync(
@@ -275,6 +282,9 @@ class RPCCorountineControl:
     request_queues: Dict[str, List[asyncio.Queue]]
 
     training_buffer_indices: Set[int] = dataclasses.field(default_factory=set)
+    used_hash_vals_this_epoch: Set[int] = dataclasses.field(default_factory=set)
+    is_recover_epoch: bool = False
+    hash_vals_to_ignore_in_recover: Set[int] = dataclasses.field(default_factory=set)
     data_amount: InterfaceDataAmount = dataclasses.field(default_factory=InterfaceDataAmount)
 
 
@@ -484,6 +494,7 @@ async def model_rpc_request_func(
         sample = await buffer.get_batch_for_rpc(rpc)
 
         if rpc.is_src:
+            ctrl.used_hash_vals_this_epoch = ctrl.used_hash_vals_this_epoch.union(sample.hash_vals)
             ctrl.training_buffer_indices = ctrl.training_buffer_indices.union(sample.indices)
 
         if rpc.interface_type == dfg.ModelInterfaceType.GENERATE:
@@ -627,15 +638,15 @@ async def load_data_func(
     buffer: AsyncIOSequenceBuffer,
     data_owner: Dict[Tuple[int, str], Tuple[str, int]],
     stream: request_reply_stream.NameResolvingRequstClient,
-    fetch_ctl: asyncio.Queue,
-    stop_ctl: asyncio.Event,
+    ctrl: RPCCorountineControl,
 ):
-    while not stop_ctl.is_set():
-        await fetch_ctl.get()
+    while not ctrl.stop.is_set():
+        await ctrl.fetch_data_queue.get()
         # fetch data from dataloader to fill the sequence buffer
         blogger.info(f"Filling data into the buffer in a new epoch.")
         fetch_data_start = time.perf_counter()
         cur_epoch = latest_epoch = None
+        counter = 0
         while cur_epoch is None or cur_epoch == latest_epoch:
             data_batches: List[data_api.DataBatch] = await group_rpc_blocked(
                 stream,
@@ -644,6 +655,9 @@ async def load_data_func(
                 datas=[None for _ in range(src_rpc_dp_size)],
                 verbose=False,
             )
+            # blogger.info("*"*20)
+            # for db in data_batches:
+            #     blogger.info(f"{db}")
 
             # Update counters. All starting from 0.
             if cur_epoch is None:
@@ -651,19 +665,60 @@ async def load_data_func(
             else:
                 latest_epoch = data_batches[0].epoch
 
+            if cur_epoch != latest_epoch:
+                ctrl.is_recover_epoch = False
+
             # Merge fetched data. We assume fetched data is a flattened dict.
             datas = [x.data for x in data_batches]
-            n_seqs = [_get_n_seqs_from_batch_sample(d) for d in datas]
-            sample = dataparallel.ParallelDataBroker.gather_from([namedarray.from_dict(x) for x in datas])
-            xs, seqlens = split_packed_batch_into_seqs(sample, return_seqlens=True)
-            buffer_indices = await buffer.put_batch([(list(x.keys()), seqlen)
-                                                     for x, seqlen in zip(xs, seqlens)])
+            named_array_datas = [namedarray.from_dict(d) for d in datas]
+            total_batch = []
+            n_seqs = []
+            # sample_keys = named_array_datas[0].keys()
+            for sample in named_array_datas:
+                xs, seqlens, hash_vals = split_packed_batch_into_seqs(sample,
+                                                                      return_seqlens=True,
+                                                                      return_hash=True)
+                batch = [(list(x.keys()), seqlen, hash_val)
+                         for x, seqlen, hash_val in zip(xs, seqlens, hash_vals)]
+                if ctrl.is_recover_epoch:
+                    blogger.info(f"before filter {len(batch)}")
+                    batch = list(filter(lambda x: x[2] not in ctrl.hash_vals_to_ignore_in_recover, batch))
+                    blogger.info(f"after filter {len(batch)}")
+                n_seqs.append(len(batch))
+                total_batch.extend(batch)
+                assert len(xs) == len(seqlens) == len(
+                    hash_vals), f"{len(xs)}, {len(seqlens)}, {len(hash_vals)}"
+                # assert sample_keys == sample.keys()
+                logger.info(str(list(sample.keys())))
+
+            gathered_sample = dataparallel.ParallelDataBroker.gather_from(
+                [namedarray.from_dict(x) for x in datas])
+            logger.info(f"gathered sample keys {list(gathered_sample.keys())}")
+
+            # n_seqs = [_get_n_seqs_from_batch_sample(d) for d in datas]
+            # xs, seqlens, hash_vals = split_packed_batch_into_seqs(
+            #     sample, return_seqlens=True, return_hash=True) # list, tensor, list
+            # assert len(xs) == len(seqlens) == len(hash_vals), f"{len(xs)}, {len(seqlens)}, {len(hash_vals)}"
+
+            # blogger.info(f"loaded num {len(hash_vals)}")
+
+            # batch = [(list(x.keys()), seqlen, hash_val)
+            #     for x, seqlen, hash_val in zip(xs, seqlens, hash_vals)]
+            # if ctrl.is_recover_epoch:
+            #     blogger.info(f"before filter {len(batch)}")
+            #     batch = list(filter(lambda x: x[2] not in ctrl.hash_vals_to_ignore_in_recover, batch))
+            #     blogger.info(f"after filter {len(batch)}")
+            # logger.info(f"recovered data hashes {[x[2] for x in batch]}")
+            # record hash values of sequence batches for recovery
+
+            buffer_indices = await buffer.put_batch(total_batch)
+            blogger.info(f"buffer indices {len(buffer_indices)} n_seqs {sum(n_seqs)} {n_seqs}")
             assert len(buffer_indices) == sum(n_seqs)
 
             for dp_i, (st, ed) in enumerate(
                     zip([0] + list(itertools.accumulate(n_seqs)), itertools.accumulate(n_seqs))):
                 for buf_idx in buffer_indices[st:ed]:
-                    for k in sample.keys():
+                    for k in gathered_sample.keys():
                         data_owner[(buf_idx, k)] = (src_rpc_model_name, dp_i)
 
             await group_rpc_blocked(
@@ -717,6 +772,7 @@ async def model_save_thread_func(
 
 class MasterWorker(worker_base.Worker):
     os.makedirs(MODEL_SAVE_ROOT, exist_ok=True)
+    os.makedirs(RECOVER_ROOT, exist_ok=True)
 
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
@@ -764,9 +820,26 @@ class MasterWorker(worker_base.Worker):
         )
         os.makedirs(self.MODEL_SAVE_ROOT, exist_ok=True)
 
+        self.__recover_run = os.environ.get("RECOVER_RUN", "0") == "1"
+        self.__recover_info = recover.load_recover_info() if self.__recover_run else None
+        self.__this_step_info = recover.StepInfo(
+            epoch=0,
+            epoch_step=0,
+            global_step=0,
+        )
+        self.__last_step_info = None
+        self.__recover_first_epoch_done = False
+
         self.__initialized = False
         self._epoch = 0
-        self._epoch_step = self._global_step = 0
+        self._epoch_step = self._global_step = self._start_global_step = 0
+
+        if self.__recover_run:
+            self._epoch = self.__recover_info.recover_start.epoch
+            self._epoch_step = self.__recover_info.recover_start.epoch_step
+            self._start_global_step = self._global_step = self.__recover_info.recover_start.global_step
+            logger.info(f"Recovering from previous run: "
+                        f"{(self._epoch, self._epoch_step, self._global_step)}")
 
         # for benchmark
         self.e2e_time_history = []
@@ -809,6 +882,8 @@ class MasterWorker(worker_base.Worker):
                                                                  [p.request_id])).data
         ft_spec.total_train_epochs = self.config.exp_ctrl.total_train_epochs
         ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
+
+        logger.info(f"master_worker finetune spec: {ft_spec}")
 
         batch_size = ft_spec.batch_size_per_device
         # logger.info(
@@ -913,7 +988,10 @@ class MasterWorker(worker_base.Worker):
                 rpc.name: [asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)]
                 for rpc in self.__model_rpcs
             },
-        )
+            is_recover_epoch=self.__recover_run)
+        if self.__recover_run:
+            self.__rpc_ctrl.hash_vals_to_ignore_in_recover = self.__recover_info.hash_vals_to_ignore
+            self.__rpc_ctrl.used_hash_vals_this_epoch = self.__recover_info.hash_vals_to_ignore
 
         self.__fetch_master_ctl = asyncio.Queue(1)
 
@@ -970,8 +1048,7 @@ class MasterWorker(worker_base.Worker):
                 data_owner=self.__data_owner,
                 buffer=self.__seqbuffer,
                 stream=self.__stream,
-                fetch_ctl=self.__rpc_ctrl.fetch_data_queue,
-                stop_ctl=self.__rpc_ctrl.stop,
+                ctrl=self.__rpc_ctrl,
             ))
         eval_task = event_loop.create_task(
             model_eval_thread_func(
@@ -1008,6 +1085,12 @@ class MasterWorker(worker_base.Worker):
         if not self.__initialized:
             self.__lazy_init()
 
+        # if self.__recover_run and self.__recover_info.error_history is not None:
+        #     if self.__this_step_info in self.__recover_info.error_history:
+        #         # skip error step
+        #         self.__increment_step()
+        #         return worker_base.PollResult(sample_count=0, batch_count=0)
+
         # Main execution steps. The graph runs under-the-hood in RPC & stream threads.
         # Wait for the finish of the tranverse of the execution graph.
         execution_start = time.perf_counter()
@@ -1033,31 +1116,9 @@ class MasterWorker(worker_base.Worker):
                 pass
             except:
                 raise_asyncio_exception(self.__asyncio_ctx)
+
         logger.info("Execution finished!")
-
-        try:
-            self.__fetch_master_ctl.get_nowait()
-            is_new_epoch = True
-        except asyncio.QueueEmpty:
-            is_new_epoch = False
-
-        should_eval = self.__eval_ctl.check(epochs=int(is_new_epoch), steps=1)
-        should_save = self.__save_ctl.check(epochs=int(is_new_epoch), steps=1)
-
-        if should_eval:
-            self.__rpc_ctrl.eval_queue.put_nowait((self._epoch, self._epoch_step))
-        if should_save:
-            self.__rpc_ctrl.save_queue.put_nowait((self._epoch, self._epoch_step))
-
-        if is_new_epoch:
-            self._epoch += 1
-            self._epoch_step = 0
-            if self._epoch > self.__total_train_epochs:
-                self.experiment_complete_exit(f"Training completes! Yeah!!!")
-
-        self._epoch_step += 1
-        self._global_step += 1
-
+        self.__increment_step()
         total_time_consumption = time.perf_counter() - self._train_start_time
         time_per_step = total_time_consumption / (self._global_step + 1)
         e2e_time = time.perf_counter() - execution_start
@@ -1150,10 +1211,75 @@ class MasterWorker(worker_base.Worker):
 
         return worker_base.PollResult(sample_count=1, batch_count=1)
 
+    def __increment_step(self):
+        try:
+            self.__fetch_master_ctl.get_nowait()
+            is_new_epoch = True
+        except asyncio.QueueEmpty:
+            is_new_epoch = False
+
+        if is_new_epoch:
+            # do not update epoch counter when recover for the first step
+            if self.__recover_run and not self.__recover_first_epoch_done:
+                self.__recover_first_epoch_done = True
+            else:
+                self._epoch += 1
+
+                self.__rpc_ctrl.used_hash_vals_this_epoch = set()
+                self._epoch_step = 0
+                if self._epoch > self.__total_train_epochs:
+                    self.experiment_complete_exit(f"Training completes! Yeah!!!")
+
+        self._epoch_step += 1
+        self._global_step += 1
+
+        should_eval = self.__eval_ctl.check(epochs=int(is_new_epoch), steps=1)
+        should_save = self.__save_ctl.check(epochs=int(is_new_epoch), steps=1)
+
+        if should_eval:
+            self.__rpc_ctrl.eval_queue.put_nowait((self._epoch, self._epoch_step))
+        if should_save:
+            self.__rpc_ctrl.save_queue.put_nowait((self._epoch, self._epoch_step))
+
+        self.__last_step_info = self.__this_step_info
+        self.__this_step_info = recover.StepInfo(
+            epoch=self._epoch,
+            epoch_step=self._epoch_step,
+            global_step=self._global_step,
+        )
+
     def experiment_complete_exit(self, msg: str):
         self.__rpc_ctrl.stop.set()
         self.__asyncio_ctx.loop.stop()
         try:
             teardown_run_util_complete(self.__asyncio_ctx)
         except RuntimeError as e:
-            raise ExperimentComplete(msg) from e
+            logger.info(colorama.Style.RESET_ALL + colorama.Fore.YELLOW + colorama.Style.BRIGHT + "\033[1m" +
+                        msg + colorama.Style.RESET_ALL)
+            exit(0)
+            # raise ExperimentComplete(msg) from e
+
+    def _exit_hook(self, exit_type: str):
+        logger.info(f"Master worker exits with {exit_type}.")
+        if os.environ["SAVE_RECOVER_STATES"] == "0":
+            return
+        # save step info for recover
+        if self.__recover_run:
+            error_history = self.__recover_info.error_history + [self.__this_step_info]
+        else:
+            error_history = [self.__this_step_info]
+
+        recover_info = recover.RecoverInfo(
+            # recover_start=self.__last_step_info,
+            recover_start=self.__this_step_info,
+            last_step_info=self.__last_step_info,
+            error_history=error_history,
+            hash_vals_to_ignore=self.__rpc_ctrl.used_hash_vals_this_epoch,
+        )
+        import pprint
+        logger.info("dumped recover info to file")
+        pprint.pprint(recover_info.recover_start)
+        pprint.pprint(recover_info.last_step_info)
+        pprint.pprint(recover_info.error_history)
+        pprint.pprint(len(recover_info.hash_vals_to_ignore))
+        recover.dump_recover_info(recover_info)

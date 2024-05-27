@@ -7,9 +7,38 @@ import torch.utils.data
 
 from reallm.api.core import data_api
 from reallm.base.datapack import ffd_with_result_unsorted, min_abs_diff_partition
+import reallm.base.dataparallel as dataparallel
 import reallm.base.logging as logging
+import reallm.base.namedarray as namedarray
 
 logger = logging.getLogger("Packed Prompt Dataset")
+
+
+def split_packed_batch_into_seqs(
+    sample: namedarray.NamedArray,
+    input_lens: Optional[torch.Tensor] = None,
+    return_seqlens: bool = False,
+) -> List[namedarray.NamedArray]:
+    if input_lens is None:
+        if "input_lens" in sample:
+            input_lens = sample["input_lens"]
+        elif "prompt_lens" in sample:
+            input_lens = sample["prompt_lens"]
+        elif "cu_seqlens" in sample:
+            input_lens = sample["cu_seqlens"][1:] - sample["cu_seqlens"][:-1]
+        elif "prompt_cu_seqlens" in sample:
+            input_lens = sample["prompt_cu_seqlens"][1:] - sample["prompt_cu_seqlens"][:-1]
+
+    partitions = [(i, i + 1) for i in range(input_lens.shape[0])]
+    sample["input_lens"] = input_lens
+    sample.register_metadata(seqlens=input_lens.cpu().numpy().tolist())
+    res = dataparallel.PackedParallelDataBroker.scatter_to(sample,
+                                                           n_dp=len(input_lens),
+                                                           partitions=partitions)
+    if not return_seqlens:
+        return res
+    else:
+        return res, input_lens
 
 
 class PackedPromptDataset(torch.utils.data.IterableDataset):
@@ -185,24 +214,42 @@ else:
     tokenizer = transformers.AutoTokenizer.from_pretrained("/lustre/fw/pretrained/gpt2-large")
     ddp_rank = 0
     world_size = 1
-    seed = 1
+    seed = 5
 
     util = data_api.DatasetUtility(tokenizer=tokenizer, ddp_rank=ddp_rank, world_size=world_size, seed=seed)
 
-    n_dp = 8
-    n_pp = 4
+    n_dp = 2
+    n_pp = 1
     dataset = PackedPromptDataset(
         util,
-        max_length=512,
-        min_seqs_per_batch=n_dp * n_pp,
-        n_tokens_per_batch=1024,
-        dataset_path="/lustre/fw/datasets/imdb/rl/rw_prompt-all.jsonl",
+        max_length=128,
+        # min_seqs_per_batch=n_dp * n_pp,
+        n_tokens_per_batch=128 * 128,
+        dataset_path="/lustre/meizy/data/antropic-hh/ppo_prompt_only_short.jsonl",
     )
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=None)
-    for _ in range(10):
+
+    num_iter = 1
+    for i in range(1):
+        hash_sum = 0
         print("dataset iteration")
         for x in dataloader:
             # datas, sizes = PackedParallelDataBroker.scatter_to(from_dict(x), n_dp, return_sizes=True)
             # for data in datas:
             #     PackedParallelDataBroker.scatter_to(data, n_pp)
-            continue
+            print(x)
+            print(len(x["prompt_lens"]), x["packed_prompts"].shape)
+            # print(hash(x["packed_prompts"]))
+            # import hashlib
+            # hash_val = int(hashlib.md5(x["packed_prompts"].numpy().tobytes()).hexdigest(), 16)
+            # print(hash_val)
+            a = split_packed_batch_into_seqs(namedarray.from_dict(x))
+            print(len(a))
+            print(a[0])
+            print(hash(a[0]))
+            # for aa in a:
+            # print(aa)
+            # hash_sum += hash(aa) % 1000
+            # print(hash(aa))
+            break
+        # print(f"hash sum of iter {i}: {hash_sum}")

@@ -44,6 +44,7 @@ class GlobalMemoryBuffer:
 # constants in experiment instance scope
 MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
 LOG_ROOT = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}"
+RECOVER_ROOT = f"{cluster_spec.fileroot}/recover/{getpass.getuser()}"
 
 SLURM_LOCK_FILE_NAME = f"{cluster_spec.fileroot}/logs/slurm_scheduler.lock"
 

@@ -50,6 +50,7 @@ class _ReplayEntry:
     # just as we implemented in base/dataparallel.py
     keys: List[str]
     seqlen: int
+    hash_val: int
 
 
 # def _get_seqlen_from_sample(sample: namedarray.NamedArray) -> int:
@@ -86,6 +87,7 @@ class _TensorDictSequenceBuffer:
 
         # Some states of the storage. Read/Write applied to them should be locked.
         self.__seqlens = np.zeros(max_size, dtype=np.int32)
+        self.__hash_vals = np.zeros(max_size, dtype=np.int64)
         self.__has_keys = np.zeros((max_size, len(keys)), dtype=bool)
 
         self.__keys = keys
@@ -97,6 +99,12 @@ class _TensorDictSequenceBuffer:
     def _get_seqlen(self, indices: int) -> np.ndarray:
         return self.__seqlens[indices]
 
+    def _update_hash_vals(self, indices: int):
+        self.__hash_vals[indices] = [self.__storage[idx].hash_val for idx in indices]
+
+    def _get_hash_vals(self, indices: int) -> np.ndarray:
+        return self.__hash_vals[indices]
+
     def _update_has_keys(self, indices: List[int]):
         for idx in indices:
             self.__has_keys[idx] = [k in self.__storage[idx].keys for k in self.__keys]
@@ -104,17 +112,16 @@ class _TensorDictSequenceBuffer:
     def _get_has_keys(self, indices):
         return self.__has_keys[indices, :]
 
-    def put_batch(self, indices: List[int], xs: List[Tuple[List[str], int]]):
+    def put_batch(self, indices: List[int], xs: List[Tuple[List[str], int, int]]):
         assert len(indices) == len(xs)
         # Can be parallelized.
         for idx, x in zip(indices, xs):
-            keys, seqlen = x
-            self.__storage[idx] = _ReplayEntry(
-                reuses_left=self.__reuses,
-                receive_time=time.time(),
-                keys=keys,
-                seqlen=seqlen,
-            )
+            keys, seqlen, hash_val = x
+            self.__storage[idx] = _ReplayEntry(reuses_left=self.__reuses,
+                                               receive_time=time.time(),
+                                               keys=keys,
+                                               seqlen=seqlen,
+                                               hash_val=hash_val)
 
     def amend_batch(self, indices: List[int], new_datas: List[Tuple[List[str], int]]):
         assert len(indices) == len(new_datas)
@@ -150,6 +157,7 @@ class _TensorDictSequenceBuffer:
 class SequenceSample:
     indices: List[int]
     seqlens: List[int]
+    hash_vals: List[int]
 
 
 class AsyncIOSequenceBuffer:
@@ -212,7 +220,7 @@ class AsyncIOSequenceBuffer:
         assert (self._is_empty[:, None] * self._ready_for_rpcs).sum() == 0
         assert (self._is_empty[:, None] * self._completed_rpc).sum() == 0
 
-    async def put_batch(self, samples: List[Tuple[List[str], int]]):
+    async def put_batch(self, samples: List[Tuple[List[str], int, int]]):
         async with self._lock:
             self._assert_valid_indicator()
             n = len(samples)
@@ -228,6 +236,7 @@ class AsyncIOSequenceBuffer:
         async with self._lock:
             self.__buffer._update_has_keys(indices)
             self.__buffer._update_seqlen(indices)
+            self.__buffer._update_hash_vals(indices)
 
             has_keys = self.__buffer._get_has_keys(indices)  # [bs, #keys]
             rpc_key_mask = self._rpc_key_mask  # [#keys, #rpcs]
@@ -305,9 +314,12 @@ class AsyncIOSequenceBuffer:
                                        & self._ready_for_rpcs[:, rpc_idx]
                                        & ~self._completed_rpc[:, rpc_idx])[0]
             seqlens = self.__buffer._get_seqlen(ready_indices)
+            hash_vals = self.__buffer._get_hash_vals(ready_indices)
 
             indices = ready_indices[:rpc.max_n_seqs]
             seqlens = seqlens[:rpc.max_n_seqs]
+            hash_vals = hash_vals[:rpc.max_n_seqs]
+
             assert rpc.min_n_seqs <= len(indices) <= rpc.max_n_seqs, (rpc.min_n_seqs, len(indices),
                                                                       rpc.max_n_seqs)
 
@@ -340,4 +352,4 @@ class AsyncIOSequenceBuffer:
 
             if self._is_idle[indices].any():
                 self._lock.notify(len(self._rpc_names))
-        return SequenceSample(indices=indices, seqlens=seqlens)
+        return SequenceSample(indices=indices, seqlens=seqlens, hash_vals=hash_vals)

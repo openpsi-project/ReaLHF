@@ -4,6 +4,7 @@ import getpass
 import os
 import re
 
+from reallm.scheduler.client import JobException, JobState
 import reallm.api.core.system_api as config_package
 import reallm.base.constants as constants
 import reallm.base.logging as logging
@@ -85,7 +86,7 @@ def _submit_workers(
     return scheduled_jobs
 
 
-def main_start(args):
+def main_start(args, recover_count: int = 0):
     if args.mode == "ray" and args.image_name is None:
         raise ValueError("--image_name must be specified when using ray cluster. "
                          "This is becuase ray cluster requires all workers to have "
@@ -93,12 +94,15 @@ def main_start(args):
 
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
-    constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
+    if recover_count == 0:
+        constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
     file_path = os.path.abspath(__file__)
     reallm_path = os.path.dirname(os.path.dirname(file_path))
     repo_path = os.path.dirname(reallm_path)
 
+    is_recover_run = (args.recover_mode == "auto" and recover_count > 0) or args.recover_mode == "resume"
+    save_recover_states = args.recover_mode != "disabled"
     base_environs = {
         "PYTHONPATH": repo_path,
         "REAL_PACKAGE_PATH": repo_path,
@@ -106,6 +110,9 @@ def main_start(args):
         "REAL_MODE": args.mode.upper(),
         "REAL_TRACE": os.getenv("REAL_TRACE", "0"),
         "IS_REMOTE": "1",
+        # identify whether this run is automatically recovering the last failed run
+        "RECOVER_RUN": "1" if is_recover_run else "0",
+        "SAVE_RECOVER_STATES": "1" if save_recover_states else "0"
     }
     os.environ["IS_REMOTE"] = "1"
 
@@ -190,13 +197,26 @@ def main_start(args):
 
     timeout = None if os.getenv("REAL_TRACE", "0") == "0" else TRACE_TIMEOUT  # run 5 mins to collect trace
     try:
-        sched.wait(timeout=timeout)
-    except (KeyboardInterrupt, sched_client.JobException, TimeoutError) as e:
+        sched.wait(check_status=(JobState.CANCELLED, JobState.FAILED, JobState.NOT_FOUND, JobState.COMPLETED),
+                   remove_status=(),
+                   timeout=timeout)
+    except (KeyboardInterrupt, JobException, TimeoutError) as e:
         if os.getenv("REAL_TRACE", "0") != "0" and isinstance(e, TimeoutError):
             s = "#" * 30 + "  Trace complete. Killing all processes...  " + "#" * 30
             logger.info("\n" + "#" * len(s) + "\n" + s + "\n" + "#" * len(s))
-        sched.stop_all()
-        raise e
+
+        recover_states = [JobState.CANCELLED, JobState.FAILED, JobState.NOT_FOUND]
+        reason = e.reason if isinstance(e, JobException) else None
+        recover_this = args.recover_mode == "auto" and recover_count < args.recover_retries
+        recover_this = recover_this and reason in recover_states
+
+        sched.stop_all("SIGINT" if recover_this else "SIGKILL")
+        if recover_this:
+            logger.warning(f"Recovering from error {e}. Recover count: {recover_count+1}, "
+                           f"total recover count {args.recover_retries}")
+            main_start(args, recover_count=recover_count + 1)
+        else:
+            raise e
 
 
 def main_stop(args):
@@ -257,6 +277,21 @@ def main():
         action="store_true",
         help="If True, reset name resolve repo remotely in computation nodes. Otherwise reset locally.",
     )
+    subparser.add_argument("--recover_mode",
+                           required=False,
+                           default="disabled",
+                           choices=["disabled", "auto", "save", "resume"],
+                           help="Recover mode, 'auto': automatically recover the last failed run; "
+                           "'save': save recover states if any error occurs; "
+                           "'resume': resume from saved recover states and save states if fail again; "
+                           "'disabled': do nothing when error occurs. ")
+    subparser.add_argument(
+        "--recover_retries",
+        type=int,
+        required=False,
+        default=1,
+        help="Total number of trials for the system to recover automatically when a worker fails. "
+        "Only effective when recover_mode is 'auto'.")
     subparser.set_defaults(ignore_worker_error=False)
     subparser.set_defaults(func=main_start)
 

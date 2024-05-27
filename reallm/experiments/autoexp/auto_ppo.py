@@ -66,10 +66,12 @@ def register_auto_ppo_experiment(actor_size: int,
     @dataclasses.dataclass
     class AutoPPOExperiment:
         seed: int = 1
-        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=functools.partial(
-            ExperimentSaveEvalControl,
-            benchmark_steps=10,
-        ),)
+        exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(
+            default_factory=functools.partial(
+                ExperimentSaveEvalControl,
+                total_train_epochs=1,
+                # benchmark_steps=10,
+            ),)
         ppo: PPOHyperparameters = dataclasses.field(default_factory=functools.partial(
             PPOHyperparameters,
             max_new_tokens=seqlen,
@@ -80,9 +82,10 @@ def register_auto_ppo_experiment(actor_size: int,
         def dataset(self) -> DatasetType:
             return PromptOnlyDatasetConfig(
                 max_prompt_len=128,
-                n_tokens_per_batch=1048576,
-                path="/lustre/fw/datasets/antropic-hh/ppo_prompt_only.jsonl",
+                n_tokens_per_batch=128 * 128,
+                # path="/lustre/fw/datasets/antropic-hh/ppo_prompt_only.jsonl",
                 # path="/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl",
+                path="/lustre/meizy/data/antropic-hh/ppo_prompt_only_short.jsonl",
             )
 
         @property

@@ -5,6 +5,7 @@ import itertools
 import multiprocessing as mp
 import os
 import queue
+import shutil
 import socket
 import time
 import uuid
@@ -25,6 +26,7 @@ from reallm.impl.model.nn.real_llm_parallel import pipeline_repartition_strategy
 from reallm.system import request_reply_stream, worker_base
 import reallm.api.core.dfg as dfg
 import reallm.api.core.system_api as system_api
+import reallm.base.recover as recover
 import reallm.impl.model.comm.data_transfer as data_transfer_comm
 import reallm.impl.model.comm.global_comm as global_comm
 import reallm.impl.model.comm.param_realloc as param_realloc_comm
@@ -193,6 +195,14 @@ class ModelWorker(worker_base.Worker):
         # log info
         self.__total_time = 0.01
 
+        self.__recover_run = os.environ.get("RECOVER_RUN", "0") == "1"
+        self.__recover_info = recover.load_recover_info() if self.__recover_run else None
+        self.__recover_states_root = os.path.join(constants.RECOVER_ROOT, self.__experiment_name,
+                                                  self.__trial_name)
+        self.__epoch_since_recover = 0
+        self.__recover_first_epoch_done = False
+        os.makedirs(self.__recover_states_root, exist_ok=True)
+
         return r
 
     @property
@@ -331,8 +341,15 @@ class ModelWorker(worker_base.Worker):
             self.__dataloader = data_api.make_dataloader(self.config.dataloader, self.__dataset)
             self.__data_generator = enumerate([])
 
-            self.__dataset_epoch = -1
-            self.__dataset_global_step = self.__dataset_epoch_step = 0
+            self.__dataset_epoch = 0
+            # keep step counter consistent with model version
+            self.__dataset_epoch_step = self.__dataset_global_step = 0
+
+            if self.__recover_run:
+                self.__dataset_epoch = self.__recover_info.recover_start.epoch - 1  # match master worker epoch counter
+                self.__dataset_epoch_step = self.__recover_info.recover_start.epoch_step
+                self.__dataset_global_step = self.__recover_info.recover_start.global_step
+
             self.__dict_sample = None
 
             self.__fetched_data = None
@@ -352,9 +369,20 @@ class ModelWorker(worker_base.Worker):
             with constants.model_scope(s.id.model_name):
                 self.__backend_initialized[s.id.model_name] = False
                 tik = time.perf_counter()
+                if self.__recover_run and s.id.model_name.role not in ["ref", "reward"]:
+                    # HACK: ref and reward models are not saved
+                    subdirs = os.listdir(self.__recover_states_root)
+                    assert len(subdirs) <= 1  # only one recover ckpt in directory
+                    if len(subdirs) == 1:
+                        model_path = os.path.join(self.__recover_states_root, "ckpt", s.id.model_name.role,
+                                                  subdirs[0])
+                        s.model.args["model_path"] = model_path
+                        s.model.args["init_critic_from_actor"] = False
+
                 self.__models[s.id.model_name] = model = model_api.make_model(s.model,
                                                                               name=s.id.model_name,
                                                                               device=self.__device)
+
                 if self._dp_rank == 0:
                     self.logger.info(
                         f"Model {s.id.model_name} initialized in {time.perf_counter() - tik:.4f}s.")
@@ -429,6 +457,10 @@ class ModelWorker(worker_base.Worker):
                 self.__dataset_epoch_step, self.__dict_sample = next(self.__data_generator)
             except StopIteration:
                 self.__dataset_epoch += 1
+                if self.__recover_run:
+                    self.__epoch_since_recover += 1
+                    if self.__epoch_since_recover > 1:
+                        self.__recover_first_epoch_done = True
                 self.__data_generator = enumerate(self.__dataloader)
                 self.__dataset_epoch_step, self.__dict_sample = next(self.__data_generator)
 
@@ -553,6 +585,10 @@ class ModelWorker(worker_base.Worker):
                     global_step=self.__dataset_global_step,
                 )
                 self.__fetched_data = split_packed_batch_into_seqs(namedarray.from_dict(self.__dict_sample))
+                if not self.__recover_first_epoch_done and self.__recover_run:
+                    self.__fetched_data = list(
+                        filter(lambda x: hash(x) not in self.__recover_info.hash_vals_to_ignore,
+                               self.__fetched_data))
                 self.__dict_sample = None
                 self.__dataset_global_step += 1
             elif request.handle_name == "store":
@@ -578,6 +614,7 @@ class ModelWorker(worker_base.Worker):
                     batch_size_per_device=batch_size,
                     max_seqlen=self.__max_seqlen,
                 )
+                logger.info(f"Training finetune spec: {res}")
             elif request.handle_name == "clear_data_cache":
                 with cuda_tmarked("clear_data_cache", CUDATimeMarkType.misc):
                     buf_indices = request.data
@@ -771,8 +808,11 @@ class ModelWorker(worker_base.Worker):
                         pass
                     else:
                         for buf_idx in buf_indices:
-                            self.__data_owner_storage[buf_idx][k] = self.__data_owner_storage[buf_idx][k].to(
-                                self.__device)
+                            try:
+                                self.__data_owner_storage[buf_idx][k] = self.__data_owner_storage[buf_idx][
+                                    k].to(self.__device)
+                            except KeyError:
+                                raise KeyError(f"buf_idx {buf_idx} key {k} not in storage")
                         vs = torch.cat([self.__data_owner_storage[buf_idx][k] for buf_idx in buf_indices],
                                        dim=0)
                         dist.broadcast(vs, src=bcast_src, group=group)
@@ -953,7 +993,36 @@ class ModelWorker(worker_base.Worker):
 
         t = time.monotonic() - st
         self.__total_time += t
+
         # blogger.debug(
         #     f"Model worker #{','.join(self.model_names)}# poll time: {t:.4f}s, engine poll time {pt:.4f}s, percent {pt/t:.4f}"
         # )
         return r
+
+    def _exit_hook(self, exit_type: str):
+        logger.info(f"Model worker {self.__worker_index} exit with {exit_type}.")
+        if os.environ["SAVE_RECOVER_STATES"] == "0":
+            return
+        # store model and dataset states for recover
+        if self.__dist_env_resolved:
+            for model_name, model in self.__models.items():
+                if model_name.replica_id != 0:
+                    continue
+                with constants.model_scope(model_name):
+                    if self._dp_rank != 0:
+                        continue
+                    ckpt_save_dir = os.path.join(self.__recover_states_root, "ckpt", model_name.role)
+                    # only one ckpt directory will exist in ckpt_save_dir
+                    os.makedirs(ckpt_save_dir, exist_ok=True)
+                    shutil.rmtree(ckpt_save_dir, ignore_errors=True)
+                    logger.info(f"saving model {model_name} ckpt for recover at {ckpt_save_dir}. "
+                                f"epoch {model.version.epoch}, epoch_step {model.version.epoch_step}, "
+                                f"global step {model.version.global_step}")
+                    if self.__has_dataset:
+                        logger.info(f"Dataset info: "
+                                    f"dataset epoch {self.__dataset_epoch}, "
+                                    f"dataset epoch step {self.__dataset_epoch_step}, "
+                                    f"dataset global step {self.__dataset_global_step}.")
+                    if not (model.version.global_step == 0):
+                        self._interface.save(model, ckpt_save_dir)
+                        logger.info(f"saving done.")
