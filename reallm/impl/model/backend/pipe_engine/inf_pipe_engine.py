@@ -43,8 +43,6 @@ class InferencePipelineEngine:
     def __init__(
         self,
         module: ReaLModel,
-        enable_async_p2p_communication=False,
-        enable_async_instruction=False,
     ):
 
         self.module: ReaLModel = module
@@ -73,7 +71,7 @@ class InferencePipelineEngine:
         self.dp_id = self.grid.get_data_parallel_id()
 
         # num_micro_batches is configurable, default value: num_stages * 2
-        self.default_num_micro_batches = self.num_stages * 2
+        self.default_num_micro_batches = self.num_stages
         self.num_layers = self.module.num_layers  # number of leyers in current pipeline stage
 
         # PipelineEngine needs to handle data loading specially due to only the first
@@ -109,8 +107,7 @@ class InferencePipelineEngine:
 
         self._gd_graph = None
 
-        self._async_p2p = enable_async_p2p_communication
-        self._async_instruction = enable_async_instruction and self._async_p2p
+        self._async_p2p = False
 
         # self._post_init_logging()
 
@@ -390,7 +387,7 @@ class InferencePipelineEngine:
             cache_seqlens = ys[0].cache_seqlens
 
         self._gd_input_buffers = dict(
-            input_ids=torch.ones(max_batch_size, 1, dtype=torch.long, device=self.device),
+            input_ids=torch.ones(max_batch_size, dtype=torch.long, device=self.device),
             position_ids=cache_seqlens.clone().long()[:, None],
             k_caches=[y.k_cache for y in ys],
             v_caches=[y.v_cache for y in ys],
@@ -453,8 +450,7 @@ class InferencePipelineEngine:
         def terminate_condition():
             return all([self.tensor_buffer.get("terminate", mbid) for mbid in range(self.num_micro_batches)])
 
-        with self.module.gradient_checkpointing_disable():
-            self._exec_schedule(sched, terminate_condition)
+        self._exec_schedule(sched, terminate_condition)
         r = self._maybe_gather_generate_outputs()
         self._post_generate()
         return r
@@ -567,7 +563,7 @@ class InferencePipelineEngine:
         # we defer the implementation of CUDAGraph generation in the future
         # if self._generate_mode and self.tensor_buffer.get("kv_cache_reserved", micro_batch_id):
         #     kvcache_seqlen = max(
-        #         constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
+        #         constants.max_prompt_len() + self.current_gconfig.max_new_tokens,
         #         self.hidden_dim // self.head_dim + 10,
         #     )
         #     with torch.no_grad():
@@ -630,7 +626,7 @@ class InferencePipelineEngine:
         for y, layer_idx, bk_idx in zip(ys, layer_indices, gd_input_buffer_kv_cache_indices):
             assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
             kvcache_seqlen = max(
-                constants.dataset_max_seqlen() + self.current_gconfig.max_new_tokens,
+                constants.max_prompt_len() + self.current_gconfig.max_new_tokens,
                 self.hidden_dim // self.head_dim + 10,
             )
             if (self._gd_graph is not None and self._gd_graph_bs >= bs
@@ -817,7 +813,7 @@ class InferencePipelineEngine:
         #     if not ft:
         #         batch_length = self.tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
         #         batch_length = batch_length
-        #         act_shape = (batch_length, 1, self.hidden_dim)
+        #         act_shape = (batch_length, self.hidden_dim)
         #     length = int(np.prod(act_shape))
         #     if (ft and length > self._ra_prompt_graph_size) or (not ft
         #                                                         and length > self._ra_decoding_graph_size):
@@ -840,7 +836,7 @@ class InferencePipelineEngine:
                 buf = torch.empty(act_shape, dtype=self.dtype, device=self.device, requires_grad=False)
             else:
                 batch_length = self.tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
-                act_shape = (batch_length, 1, self.hidden_dim)
+                act_shape = (batch_length, self.hidden_dim)
                 buf = torch.empty(act_shape, dtype=self.dtype, device=self.device, requires_grad=False)
 
         recv_handle = p2p.recv(buf, self.prev_stage, async_op=self._async_p2p)
@@ -863,7 +859,7 @@ class InferencePipelineEngine:
     def _capture_send_next_token(self, batch_length):
         self._sn_graph_size = batch_length
         self._sn_input_buffer = dict(
-            next_tokens=torch.empty((batch_length, 1), dtype=torch.long, device=self.device),
+            next_tokens=torch.empty((batch_length,), dtype=torch.long, device=self.device),
             terminate=torch.empty((), dtype=torch.bool, device=self.device),
         )
 
@@ -889,7 +885,7 @@ class InferencePipelineEngine:
         #         with torch.no_grad():
         #             self._capture_send_next_token(next_tokens_to_send.shape[0])
         #     self._sn_input_buffer['next_tokens'][:next_tokens_to_send.
-        #                                          shape[0]] = next_tokens_to_send.unsqueeze(-1)
+        #                                          shape[0]] = next_tokens_to_send
         #     self._sn_input_buffer['terminate'].copy_(self.tensor_buffer.get("terminate", micro_batch_id))
         #     self._sn_graph.replay()
         #     self.tensor_buffer.put("first_token", micro_batch_id, False)
@@ -909,7 +905,7 @@ class InferencePipelineEngine:
     def _capture_recv_next_token(self, batch_length):
         self._rn_graph_size = batch_length
         self._rn_output_buffer = dict(
-            next_tokens=torch.empty((batch_length, 1), dtype=torch.long, device=self.device),
+            next_tokens=torch.empty((batch_length,), dtype=torch.long, device=self.device),
             terminate=torch.empty((), dtype=torch.bool, device=self.device),
         )
 
@@ -946,13 +942,17 @@ class InferencePipelineEngine:
         #     self.tensor_buffer.put("terminate", micro_batch_id, terminate)
         #     return False, None
 
-        recv_buf = torch.empty((batch_length, 1), dtype=torch.long, device=self.device)
+        recv_buf = torch.empty((batch_length,), dtype=torch.long, device=self.device)
         handle = p2p.recv(recv_buf, self.prev_stage, async_op=self._async_p2p)
         if self._async_p2p:
             self.tensor_buffer.put("recv_next_tokens_handle", micro_batch_id, handle)
         self.tensor_buffer.put("recv_next_tokens_buf", micro_batch_id, recv_buf)
 
-        x = PipeTransferData(store_kv_cache=True)
+        x = PipeTransferData(
+            store_kv_cache=True,
+            cu_seqlens=torch.arange(batch_length + 1, dtype=torch.int32, device=self.device),
+            max_seqlen=1,
+        )
         self.tensor_buffer.put("batch_input_x", micro_batch_id, x)
 
         if self._async_p2p:

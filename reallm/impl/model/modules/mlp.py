@@ -433,7 +433,6 @@ if constants.use_te_impl():
     from transformer_engine.pytorch.module.layernorm_mlp import LayerNormMLP as _TELayerNormMLP
 
     # The same signature as LlamaLayerNormMLP
-    # FIXME: add sequence parallel disable wrapper
     def LlamaLayerNormMLP(
         hidden_dim: int,
         intermediate_dim: int,

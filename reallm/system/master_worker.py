@@ -640,6 +640,8 @@ async def load_data_func(
     stream: request_reply_stream.NameResolvingRequstClient,
     ctrl: RPCCorountineControl,
 ):
+    # FIXME: estimate average tokens per batch
+    # FIXME: change dataset to plain dataset and do dynamic batching here
     while not ctrl.stop.is_set():
         await ctrl.fetch_data_queue.get()
         # fetch data from dataloader to fill the sequence buffer
@@ -695,22 +697,6 @@ async def load_data_func(
                 [namedarray.from_dict(x) for x in datas])
             logger.info(f"gathered sample keys {list(gathered_sample.keys())}")
 
-            # n_seqs = [_get_n_seqs_from_batch_sample(d) for d in datas]
-            # xs, seqlens, hash_vals = split_packed_batch_into_seqs(
-            #     sample, return_seqlens=True, return_hash=True) # list, tensor, list
-            # assert len(xs) == len(seqlens) == len(hash_vals), f"{len(xs)}, {len(seqlens)}, {len(hash_vals)}"
-
-            # blogger.info(f"loaded num {len(hash_vals)}")
-
-            # batch = [(list(x.keys()), seqlen, hash_val)
-            #     for x, seqlen, hash_val in zip(xs, seqlens, hash_vals)]
-            # if ctrl.is_recover_epoch:
-            #     blogger.info(f"before filter {len(batch)}")
-            #     batch = list(filter(lambda x: x[2] not in ctrl.hash_vals_to_ignore_in_recover, batch))
-            #     blogger.info(f"after filter {len(batch)}")
-            # logger.info(f"recovered data hashes {[x[2] for x in batch]}")
-            # record hash values of sequence batches for recovery
-
             buffer_indices = await buffer.put_batch(total_batch)
             blogger.info(f"buffer indices {len(buffer_indices)} n_seqs {sum(n_seqs)} {n_seqs}")
             assert len(buffer_indices) == sum(n_seqs)
@@ -760,14 +746,17 @@ async def model_save_thread_func(
     stop_ctl: asyncio.Event,
 ):
     while not stop_ctl.is_set():
-        epoch, epoch_step = await save_queue.get()
+        epoch, epoch_step, global_step = await save_queue.get()
 
         # Only save replica ID 0.
         handlers = list(filter(lambda s: s.model_name.replica_id == 0, handlers))
 
-        model_save_dirs = [os.path.join(model_save_root, s.model_name.role) for s in handlers]
+        model_save_dirs = [
+            os.path.join(model_save_root, s.model_name.role,
+                         f"epoch{epoch}epochstep{epoch_step}globalstep{global_step}") for s in handlers
+        ]
         await group_rpc_blocked(stream, handlers, "save", model_save_dirs)
-        logger.info(f"Save models at epoch {epoch + 1} step {epoch_step + 1}.")
+        logger.info(f"Save models at epoch {epoch} step {epoch_step}.")
 
 
 class MasterWorker(worker_base.Worker):
@@ -1060,7 +1049,7 @@ class MasterWorker(worker_base.Worker):
         save_task = event_loop.create_task(
             model_save_thread_func(
                 stream=self.__stream,
-                handlers=self.__dp0_model_handlers,
+                handlers=self.__all_model_handlers,
                 model_save_root=self.MODEL_SAVE_ROOT,
                 save_queue=self.__rpc_ctrl.save_queue,
                 stop_ctl=self.__rpc_ctrl.stop,

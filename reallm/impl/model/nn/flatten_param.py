@@ -7,6 +7,7 @@ import torch
 from reallm.api.core import model_api
 from reallm.api.core.config import ModelName
 from reallm.base import logging
+import reallm._C.interval_op_cuda as interval_op_cuda
 
 from .real_llm_base import (OutputHead, real_model_embed_param_count, real_model_embedding_param_keys,
                             real_model_head_param_count, real_model_head_param_keys,
@@ -60,23 +61,18 @@ def slice_intervals(
         return tensor[intervals_cpu[0][0]:intervals_cpu[0][1]]
     elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
         return torch.cat([tensor[start:end] for start, end in intervals_cpu])
-    try:
-        import reallm._C.interval_op_cuda as interval_op_cuda
 
-        interval_sizes = intervals[:, 1] - intervals[:, 0]
-        offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
-        assert tensor.dtype == torch.half
-        return interval_op_cuda.slice_intervals_cuda_half(
-            tensor,
-            intervals,
-            interval_sizes,
-            offsets,
-            max_interval_size,
-            output_size,
-        )
-    except ModuleNotFoundError:
-        logger.warning("interval_op_cuda not found, falling back to PyTorch implementation.")
-        return torch.cat([tensor[start:end] for start, end in intervals_cpu])
+    interval_sizes = intervals[:, 1] - intervals[:, 0]
+    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+    assert tensor.dtype == torch.half
+    return interval_op_cuda.slice_intervals_cuda_half(
+        tensor,
+        intervals,
+        interval_sizes,
+        offsets,
+        max_interval_size,
+        output_size,
+    )
 
 
 def set_intervals(
@@ -94,34 +90,24 @@ def set_intervals(
             offset += j - i
         assert offset == src.shape[0]
         return
-    try:
-        import reallm._C.interval_op_cuda as interval_op_cuda
-
-        interval_sizes = intervals[:, 1] - intervals[:, 0]
-        offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
-        interval_op_cuda.set_intervals_cuda_half(
-            src,
-            dst,
-            intervals,
-            interval_sizes,
-            offsets,
-            max_interval_size,
-        )
-        return
-    except ModuleNotFoundError:
-        logger.warning("interval_op_cuda not found, falling back to PyTorch implementation.")
-        offset = 0
-        for i, j in intervals_cpu:
-            dst[i:j] = src[offset:offset + j - i]
-            offset += j - i
-        assert offset == src.shape[0]
-        return
+    interval_sizes = intervals[:, 1] - intervals[:, 0]
+    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+    interval_op_cuda.set_intervals_cuda_half(
+        src,
+        dst,
+        intervals,
+        interval_sizes,
+        offsets,
+        max_interval_size,
+    )
+    return
 
 
 def build_param_spec(
     layer_indices: List[int],
     config: model_api.ReaLModelConfig,
     mp_size: int,
+    sequence_parallel: bool,
 ) -> Tuple[Dict[str, ContiguousParamSpec], int]:
     if len(layer_indices) == 0:
         return {}, 0
@@ -137,7 +123,7 @@ def build_param_spec(
             sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
 
         for k in sd_keys:
-            shape = get_real_model_param_shape(k, config, mp_size)
+            shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
             param_spec[k] = ContiguousParamSpec(param_size, param_size + int(np.prod(shape)), shape)
             param_size += int(np.prod(shape))
     return param_spec, param_size
@@ -148,6 +134,7 @@ def param_intervals_from_keys(
     config: model_api.ReaLModelConfig,
     param_spec: Dict[str, ContiguousParamSpec],
     mp_size: int,
+    sequence_parallel: bool,
     sd_keys: List[str],
     portion_size: int,
     portion_rank: int,
@@ -172,7 +159,7 @@ def param_intervals_from_keys(
         ) not in _FLAT_PARAM_INDICES_CACHE:
             zero_start_intervals = mp_partition_key(
                 k,
-                get_real_model_param_shape(k, config, mp_size),
+                get_real_model_param_shape(k, config, mp_size, sequence_parallel),
                 portion_rank,
                 portion_size,
                 config,

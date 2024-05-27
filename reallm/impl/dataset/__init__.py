@@ -1,6 +1,9 @@
-import reallm.impl.dataset.packed_prompt_answer_dataset
-import reallm.impl.dataset.packed_prompt_dataset
-import reallm.impl.dataset.packed_rw_paired_dataset
-import reallm.impl.dataset.prompt_dataset
-import reallm.impl.dataset.rw_gtlabel_dataset
-import reallm.impl.dataset.rw_paired_dataset
+import os
+import re
+
+from reallm.base.importing import import_module
+
+# Import all dataset implementations.
+_p = re.compile(r'^(?!.*__init__).*\.py$')
+_filepath = os.path.dirname(__file__)
+import_module(_filepath, _p)

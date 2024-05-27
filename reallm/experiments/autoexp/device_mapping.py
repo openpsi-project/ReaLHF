@@ -9,7 +9,7 @@ import numpy as np
 import transformers
 
 from reallm.api.core.dfg import *
-from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, MODEL_FAMILY_TO_PATH
+from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
 from reallm.api.quickstart.device_mesh import *

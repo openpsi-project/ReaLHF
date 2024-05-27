@@ -215,8 +215,6 @@ def _derive_reparallelize_comm_plan(
                 "is_critic",
                 "sequence_parallel",
                 "gradient_accumulation_fusion",
-                "ckpt_attn",
-                "ckpt_mlp",
         ] and v != getattr(from_model_config, k):
             raise ValueError(
                 f"Can't load a checkpoint with different config (key `{k}`, "

@@ -4,7 +4,6 @@ import json
 import os
 
 from reallm.api.core.config import Model, ModelFamily, ModelWrapper
-from reallm.api.core.model_api import SUPPORTED_MODELS
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Quickstart Model Config")
@@ -117,6 +116,7 @@ class ModelTrainEvalConfig:
     """
 
     type: ModelFamily = dataclasses.field(default=ModelFamily("llama", 7, False))
+    path: str = ""
     lora: Optional[LoRAConfig] = None
     gradient_checkpointing: bool = False
     enable_fp16: bool = True

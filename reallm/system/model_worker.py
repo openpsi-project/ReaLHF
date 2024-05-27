@@ -336,8 +336,6 @@ class ModelWorker(worker_base.Worker):
                 self.__dataset = datasets[0]
             else:
                 self.__dataset = torch.utils.data.ConcatDataset(datasets)
-            # FIXME:
-            self.__max_seqlen = 1024
             self.__dataloader = data_api.make_dataloader(self.config.dataloader, self.__dataset)
             self.__data_generator = enumerate([])
 
@@ -567,8 +565,6 @@ class ModelWorker(worker_base.Worker):
             ############## initialization ##############
             elif request.handle_name == "initialize":
                 assert not self.__model_is_handle[request.handler.model_name]
-                constants.set_max_seqlen(handler_model_name,
-                                         data.max_seqlen)  # used by cuda graph buffer for generation
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
                 self.__backend_initialized[request.handler.model_name] = True
                 # print(f"after initialize model {request.handler.model_name} module type {type(self._model.module)}")
@@ -612,7 +608,7 @@ class ModelWorker(worker_base.Worker):
                     total_train_steps=-1,  # place-holder, to be filled by master worker
                     steps_per_epoch=len(self.__dataloader),
                     batch_size_per_device=batch_size,
-                    max_seqlen=self.__max_seqlen,
+                    max_seqlen=None,  # FIXME: do we need this field?
                 )
                 logger.info(f"Training finetune spec: {res}")
             elif request.handle_name == "clear_data_cache":
@@ -627,12 +623,13 @@ class ModelWorker(worker_base.Worker):
                             del self.__data_sent_worker_indices[buf_idx]
                         if buf_idx in self.__data_received_worker_indices:
                             del self.__data_received_worker_indices[buf_idx]
-                    st = time.monotonic()
-                    gc.collect()
-                    torch.cuda.empty_cache()
-                    gc.collect()
-                    et = time.monotonic()
-                    blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
+                    if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
+                        st = time.monotonic()
+                        gc.collect()
+                        torch.cuda.empty_cache()
+                        gc.collect()
+                        et = time.monotonic()
+                        blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
                 dump_tmark_db(self.__worker_index)
             ############## computation function calls ##############
             elif request.handle_name == "inference":
@@ -815,6 +812,7 @@ class ModelWorker(worker_base.Worker):
                                 raise KeyError(f"buf_idx {buf_idx} key {k} not in storage")
                         vs = torch.cat([self.__data_owner_storage[buf_idx][k] for buf_idx in buf_indices],
                                        dim=0)
+                        assert vs.dtype == _get_dtype_from_key(k), (k, _get_dtype_from_key(k), vs.dtype)
                         dist.broadcast(vs, src=bcast_src, group=group)
                         for buf_idx in buf_indices:
                             self.__data_sent_worker_indices[buf_idx][k].union(dst_ranks)
@@ -963,15 +961,6 @@ class ModelWorker(worker_base.Worker):
         r = self.__maybe_post_responses()
 
         if r.batch_count > 0:
-            if self.config.cuda_cache_cleanliness and self.__clear_cache_frequency.check():
-                # following huggingface trl # ALWAYS COST 0.3+ SEC
-                st = time.monotonic()
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
-                et = time.monotonic()
-                blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
-
             # tik = time.perf_counter()
             # blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
             #     ",".join(self.model_names),

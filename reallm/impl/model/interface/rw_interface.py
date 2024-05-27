@@ -38,7 +38,7 @@ def _paired_rw_loss_from_model_outputs(
 
 
 @dataclasses.dataclass
-class PackedPairedRewardInterface(model_api.ModelInterface):
+class PairedRewardInterface(model_api.ModelInterface):
     enable_save: bool = True
 
     output_scaling: float = 1.0
@@ -148,11 +148,10 @@ class PackedPairedRewardInterface(model_api.ModelInterface):
         module = model.module
         if not isinstance(module, ReaLModel):
             module = module.module
-        module.save_to_hf(tokenizer=model.tokenizer,
-                          save_dir=save_dir,
-                          epoch=model.version.epoch,
-                          epoch_step=model.version.epoch_step,
-                          global_step=model.version.global_step)
+        module.save_to_hf(
+            tokenizer=model.tokenizer,
+            save_dir=save_dir,
+        )
 
     @torch.no_grad()
     def evaluate(self, model_: model_api.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
@@ -214,4 +213,4 @@ class PackedPairedRewardInterface(model_api.ModelInterface):
         return dict()
 
 
-model_api.register_interface("flash_paired_rw", PackedPairedRewardInterface)
+model_api.register_interface("paired_rw", PairedRewardInterface)

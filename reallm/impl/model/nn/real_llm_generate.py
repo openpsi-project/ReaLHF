@@ -235,24 +235,23 @@ def generate(
     # Input_ids may have different lengths, we should first pack them into a large batch
     # to use varlen flash attention, then record kv caches for the following inferences.
     max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
-    if constants.dataset_max_seqlen() < max_seqlen:
+    if constants.max_prompt_len() < max_seqlen:
         raise RuntimeError(f"Input sequence length {max_seqlen} is larger than the maximum sequence length "
-                           f"supported by the model {constants.dataset_max_seqlen()}.")
+                           f"supported by the model {constants.max_prompt_len()}.")
     input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
     x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True)
     # one embedding layer, n_layers transformer block, one output layer
     ys = [PipeCacheData(packed_input_ids=packed_input_ids)
           ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
     # Model forward will set k/v cache in PipeCacheData.
-    with model.gradient_checkpointing_disable():
-        prompt_logits = model(x, ys)[0].pp_output
+    prompt_logits = model(x, ys)[0].pp_output
     logits = prompt_logits[cu_seqlens[1:] - 1]
     cache_seqlens = input_lens.clone().to(dtype=torch.int32)
     for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
         assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
         # fix of a flash attention bug
         kvcache_seqlen = max(
-            constants.dataset_max_seqlen() + gconfig.max_new_tokens,
+            constants.max_prompt_len() + gconfig.max_new_tokens,
             mconfig.hidden_dim // mconfig.head_dim + 10,
         )
         # TODO: since pytorch all-reduce has bug during capturing and vllm all-reduce does not support >8 GPUs,
@@ -311,32 +310,31 @@ def generate(
     # )
 
     # The main loop.
-    with model.gradient_checkpointing_disable():
-        while not terminate:
-            # the next round of inference
-            # input_buffers["input_ids"][:bs].copy_(next_tokens.unsqueeze(-1), non_blocking=True)
-            # input_buffers["position_ids"][:bs].copy_(cache_seqlens.unsqueeze(-1), non_blocking=True)
-            # input_buffers["cache_seqlens"][:bs].copy_(cache_seqlens, non_blocking=True)
-            # # # K/v cache will be changed in-place with flash attention.
-            # graph.replay()
-            # logits = output_buffers["logits"][:bs].squeeze(1)
-            # cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
+    while not terminate:
+        # the next round of inference
+        # input_buffers["input_ids"][:bs].copy_(next_tokens.unsqueeze(-1), non_blocking=True)
+        # input_buffers["position_ids"][:bs].copy_(cache_seqlens.unsqueeze(-1), non_blocking=True)
+        # input_buffers["cache_seqlens"][:bs].copy_(cache_seqlens, non_blocking=True)
+        # # # K/v cache will be changed in-place with flash attention.
+        # graph.replay()
+        # logits = output_buffers["logits"][:bs].squeeze(1)
+        # cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
 
-            # the next round of inference
-            ys[0].packed_input_ids = next_tokens
-            ys[0].packed_position_ids = None
-            x.cu_seqlens = torch.arange(bs + 1, dtype=torch.int32, device=device)
-            x.max_seqlen = 1
-            # K/v cache will be changed in-place with flash attention.
-            logits = model(x, ys)[0].pp_output.squeeze(dim=1)
-            cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
+        # the next round of inference
+        ys[0].packed_input_ids = next_tokens
+        ys[0].packed_position_ids = None
+        x.cu_seqlens = torch.arange(bs + 1, dtype=torch.int32, device=device)
+        x.max_seqlen = 1
+        # K/v cache will be changed in-place with flash attention.
+        logits = model(x, ys)[0].pp_output.squeeze(dim=1)
+        cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
 
-            next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-                logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
-            gen_token_ph.append(next_tokens)
-            gen_logprob_ph.append(logprob)
-            gen_logits_mask_ph.append(logits_mask)
-            generated_idx += 1
+        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+        gen_token_ph.append(next_tokens)
+        gen_logprob_ph.append(logprob)
+        gen_logits_mask_ph.append(logits_mask)
+        generated_idx += 1
 
     gen_tokens = torch.stack(gen_token_ph, -1)
     log_probs = torch.stack(gen_logprob_ph, -1)

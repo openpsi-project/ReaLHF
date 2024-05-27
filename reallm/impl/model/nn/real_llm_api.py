@@ -82,6 +82,7 @@ class ReaLModel(nn.Module):
             list(range(self.layer_idx_start, self.layer_idx_end)),
             self.config,
             constants.model_parallel_world_size(),
+            constants.sequence_parallel(),
         )
         self.contiguous_param = None
 
@@ -191,23 +192,6 @@ class ReaLModel(nn.Module):
                 dtype=dtype,
             )
         return l
-
-    def gradient_checkpointing_enable(self, attn: Optional[bool] = False, mlp: Optional[bool] = False):
-        for l in self.layers:
-            if isinstance(l, ReaLModelBlock):
-                l.gradient_checkpointing_enable(attn, mlp)
-
-    @contextlib.contextmanager
-    def gradient_checkpointing_disable(self):
-        _states = []
-        for l in self.layers:
-            if isinstance(l, ReaLModelBlock):
-                _states.append((l.ckpt_attn, l.ckpt_mlp, l.ckpt_full))
-                l.gradient_checkpointing_disable()
-        yield
-        for l in self.layers:
-            if isinstance(l, ReaLModelBlock):
-                l.ckpt_attn, l.ckpt_mlp, l.ckpt_full = _states.pop(0)
 
     def __overlapped_load_forward(self, x: PipeTransferData,
                                   ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
@@ -420,8 +404,12 @@ class ReaLModel(nn.Module):
                     for v in l.parameters():
                         v.data = torch.tensor((), dtype=self.dtype, device=self.device)
                     to_layers_handle_dict[_to_layer_idx] = l
-        to_param_spec, to_param_size = build_param_spec(to_layer_indices, to_model_config,
-                                                        to_topo.get_dim("model"))
+        to_param_spec, to_param_size = build_param_spec(
+            to_layer_indices,
+            to_model_config,
+            to_topo.get_dim("model"),
+            to_topo.sequence_parallel,
+        )
         if len(to_layer_indices) > 0:
             to_layer_idx_start = min(to_layer_indices)
             to_layer_idx_end = max(to_layer_indices) + 1
@@ -481,7 +469,7 @@ class ReaLModel(nn.Module):
             rtgt.to_layer_start_idx,
         )
 
-        # Allocate send and receive tensors in advance to reduce overhead.
+        # Allocate tensors in advance to reduce overhead.
         recv_buf_specs = []
         send_buf_specs = []
         comm_volume = torch.zeros((), dtype=torch.long, device="cuda")

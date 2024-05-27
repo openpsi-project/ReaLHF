@@ -134,10 +134,6 @@ def deepspeed_initialize(
     model_parameters: Optional[torch.nn.Module] = None,
     lr_scheduler: Optional[Union[torch.optim.lr_scheduler._LRScheduler, DeepSpeedSchedulerCallable]] = None,
     mpu=None,
-    sequence_parallel: Optional[bool] = False,
-    enable_async_p2p_communication: Optional[bool] = False,
-    enable_async_instruction: Optional[bool] = False,
-    instruction_sync: Optional[bool] = False,
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
     if mpu is None:
@@ -173,8 +169,6 @@ def deepspeed_initialize(
         config_class = DeepSpeedConfig(config, mpu)
         engine_cls = DeepSpeedPipelineEngine
         engine = engine_cls(
-            enable_async_p2p_communication=enable_async_p2p_communication,
-            enable_async_instruction=enable_async_instruction,
             model=model,
             args=None,
             config=config,
@@ -183,7 +177,6 @@ def deepspeed_initialize(
             optimizer=optimizer,
             lr_scheduler=lr_scheduler,
             dist_init_required=False,
-            instruction_sync=instruction_sync,
         )
         logger.info(f"Deepspeed Pipeline Engine initialze finished.")
         return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
@@ -198,7 +191,6 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     lr_scheduler_type: str = "cosine"
     warmup_steps_proportion: float = 0.0
     min_lr_ratio: float = 0.0  # will be used for linear and cosine schedule
-    gradient_checkpointing: bool = False  # FIXME:
     offload_param: bool = False
     offload_optimizer_state: bool = False
     enable_fp16: bool = True
@@ -214,24 +206,8 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     # addtional deepspeed args
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
     engine_type: str = "deepspeed"
-    # parallelism args
-    sequence_parallel: bool = False
-    enable_async_p2p_communication: bool = False  # FIXME:
-    enable_async_instruction: bool = False
-    instruction_sync: bool = False
-    # selective gradient ckpt, only effective when gradient_checkpointing is True
-    ckpt_attn: bool = False  # checkpoint attn only
-    ckpt_mlp: bool = False  # checkpoint mlp only
-    # stream pipe engine require model configs
-    max_seq_len: int = 512
-    max_new_tokens: int = 512
-    max_mb_size: int = 32
 
     def __post_init__(self):
-        if constants.model_parallel_world_size() == 1 and self.sequence_parallel:
-            logger.warning("Sequence parallel only works with tensor model parallelism, but currently "
-                           f"model_parallel_world_size = {constants.model_parallel_world_size()}. ")
-            self.sequence_parallel = False
         if self.engine_type == "pipe":
             assert self.zero_stage < 2
             assert self.enable_hybrid_engine is False
@@ -313,20 +289,12 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
         )
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-        if self.gradient_checkpointing:
-            if hasattr(module, "gradient_checkpointing_enable"):
-                module.gradient_checkpointing_enable(self.ckpt_attn, self.ckpt_mlp)
-
         module, *_ = deepspeed_initialize(
             model=module,
             optimizer=optimizer,
             config=ds_config,
             lr_scheduler=lr_scheduler,
             engine_type=self.engine_type,
-            sequence_parallel=self.sequence_parallel,
-            enable_async_p2p_communication=self.enable_async_p2p_communication,
-            enable_async_instruction=self.enable_async_instruction,
-            instruction_sync=self.instruction_sync,
         )
 
         if self.engine_type == "pipe":
@@ -339,44 +307,4 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
         return model
 
 
-@dataclasses.dataclass
-class DeepspeedInferenceBackend(model_api.ModelBackend):
-    offload: bool = False
-    zero_stage: int = 0
-    enable_fp16: bool = True
-    enable_bf16: bool = False
-    additional_ds_config: Dict = dataclasses.field(default_factory=dict)
-    # pipeline inference
-    engine_type: str = "deepspeed"
-    sequence_parallel: bool = False
-    enable_async_p2p_communication: bool = False
-
-    def __post_init__(self):
-        if constants.model_parallel_world_size() == 1 and self.sequence_parallel:
-            logger.warning("Sequence parallel only works with tensor model parallelism, but currently "
-                           f"model_parallel_world_size = {constants.model_parallel_world_size()}. ")
-            self.sequence_parallel = False
-
-    def _initialize(self, model: model_api.Model, spec: model_api.FinetuneSpec):
-        deepspeed.init_distributed(auto_mpi_discovery=False)
-        module = model.module
-        ds_config = get_eval_ds_config(
-            offload=self.offload,
-            stage=self.zero_stage,
-            enable_bf16=self.enable_bf16,
-            enable_fp16=self.enable_fp16,
-            **self.additional_ds_config,
-        )
-        module, *_ = deepspeed_initialize(
-            model=module,
-            config=ds_config,
-            engine_type=self.engine_type,
-            sequence_parallel=self.sequence_parallel,
-            enable_async_p2p_communication=self.enable_async_p2p_communication,
-        )
-        model.module = module
-        return model
-
-
 model_api.register_backend("ds_train", DeepspeedTrainBackend)
-model_api.register_backend("ds_inference", DeepspeedInferenceBackend)

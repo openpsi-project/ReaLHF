@@ -114,21 +114,8 @@ class HFModelRegistry:
         model: ReaLModel,
         tokenizer: transformers.PreTrainedTokenizer,
         save_dir: str,
-        epoch: Optional[int] = None,
-        epoch_step: Optional[int] = None,
-        global_step: Optional[int] = None,
     ):
-        # FIXME: check epoch and step
         tik = time.perf_counter()
-
-        subfolder = ""
-        if epoch is not None:
-            subfolder += f"epoch{epoch}"
-        if epoch_step is not None:
-            subfolder += f"epochstep{epoch_step}"
-        if global_step is not None:
-            subfolder += f"globalstep{global_step}"
-        save_dir = os.path.join(save_dir, subfolder)
         os.makedirs(save_dir, exist_ok=True)
 
         dp_rank = constants.data_parallel_rank()
@@ -141,7 +128,7 @@ class HFModelRegistry:
         # We will gather parameters across the model parallel group,
         # and save parameters to separate shards across the pipeline parallel group.
 
-        # To decrease the size of each saved file, we also split the file
+        # To decrease the size of each saved file, we split the file
         # of each pipeline stage into smaller shards.
         approx_param_size = sum(v.numel() * v.element_size() for v in model.state_dict().values()) * mp_size
 

@@ -94,23 +94,6 @@ class ReaLModelBlock(nn.Module):
                 device=device,
             )
 
-        self.ckpt_attn = False
-        self.ckpt_mlp = False
-        self.ckpt_full = False
-
-    def gradient_checkpointing_enable(self, attn: bool = False, mlp: bool = False):
-        """Called by backend"""
-        if attn or mlp:
-            self.ckpt_attn = attn
-            self.ckpt_mlp = mlp
-        else:
-            self.ckpt_full = True
-
-    def gradient_checkpointing_disable(self):
-        self.ckpt_attn = False
-        self.ckpt_mlp = False
-        self.ckpt_full = False
-
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         pp_input = x.pp_input
         cu_seqlens = x.cu_seqlens
@@ -118,7 +101,7 @@ class ReaLModelBlock(nn.Module):
         v_cache = y.v_cache
         cache_seqlens = y.cache_seqlens
         max_seqlen = x.max_seqlen
-        if self.ckpt_full:
+        if constants.gradient_checkpointing():
             pp_output, k, v = torch.utils.checkpoint.checkpoint(
                 self._forward,
                 pp_input,
@@ -127,8 +110,6 @@ class ReaLModelBlock(nn.Module):
                 v_cache,
                 cache_seqlens,
                 max_seqlen,
-                False,
-                False,
                 use_reentrant=True,
             )
         else:
@@ -139,8 +120,6 @@ class ReaLModelBlock(nn.Module):
                 v_cache,
                 cache_seqlens,
                 max_seqlen,
-                ckpt_attn=self.ckpt_attn,
-                ckpt_mlp=self.ckpt_mlp,
             )
 
         x.pp_output = pp_output
@@ -161,35 +140,18 @@ class ReaLModelBlock(nn.Module):
         v_cache: Optional[torch.Tensor],
         cache_seqlens: Optional[torch.Tensor],
         max_seqlen: int,
-        ckpt_attn: Optional[bool] = False,
-        ckpt_mlp: Optional[bool] = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         h = pp_input
-        if ckpt_attn:
-            attn_out, k, v = torch.utils.checkpoint.checkpoint(
-                self.attn,
-                h,
-                cu_seqlens,
-                k_cache,
-                v_cache,
-                cache_seqlens,
-                max_seqlen,
-                use_reentrant=True,
-            )
-        else:
-            attn_out, k, v = self.attn(
-                hidden_states=h,
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-                k_cache=k_cache,
-                v_cache=v_cache,
-                cache_seqlens=cache_seqlens,
-            )
+        attn_out, k, v = self.attn(
+            hidden_states=h,
+            cu_seqlens=cu_seqlens,
+            max_seqlen=max_seqlen,
+            k_cache=k_cache,
+            v_cache=v_cache,
+            cache_seqlens=cache_seqlens,
+        )
         h = h + attn_out
-        if ckpt_mlp:
-            h = torch.utils.checkpoint.checkpoint(self.mlp, h, use_reentrant=True) + h
-        else:
-            h = self.mlp(h) + h
+        h = self.mlp(h) + h
         if self.output_layernorm:
             h = self.ln_f(h)
         return h, k, v

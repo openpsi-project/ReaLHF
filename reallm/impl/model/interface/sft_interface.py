@@ -39,7 +39,7 @@ def compute_packed_sft_loss(
     return loss, {"loss": loss.detach()}
 
 
-class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
+class SFTInterface(model_api.ModelInterface):
 
     def train_step(self, model: model_api.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -88,11 +88,10 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
         module = model.module
         if not isinstance(module, ReaLModel):
             module = module.module
-        module.save_to_hf(tokenizer=model.tokenizer,
-                          save_dir=save_dir,
-                          epoch=model.version.epoch,
-                          epoch_step=model.version.epoch_step,
-                          global_step=model.version.global_step)
+        module.save_to_hf(
+            tokenizer=model.tokenizer,
+            save_dir=save_dir,
+        )
 
     @torch.inference_mode()
     def evaluate(self, model_: model_api.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
@@ -213,4 +212,4 @@ class PackedSupervisedFinetuningInterface(model_api.ModelInterface):
         )
 
 
-model_api.register_interface("flash_sft", PackedSupervisedFinetuningInterface)
+model_api.register_interface("sft", SFTInterface)

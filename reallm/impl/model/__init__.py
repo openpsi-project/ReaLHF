@@ -1,23 +1,24 @@
 import functools
+import os
+import re
 
 import torch
 
 from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY
+from reallm.base.importing import import_module
 from reallm.impl.model.conversion.hf_registry import HFModelRegistry
 from reallm.impl.model.nn.real_llm_api import ReaLModel
+# Import all HuggingFace model implementations.
 import reallm.api.from_hf
-# FIXME: automatic import
-import reallm.impl.model.backend.deepspeed
-import reallm.impl.model.backend.pipe_inf
-import reallm.impl.model.interface.dpo_flash_interface
-import reallm.impl.model.interface.ppo_flash_interface
-import reallm.impl.model.interface.rw_flash_interface
-import reallm.impl.model.interface.sft_flash_interface
-import reallm.impl.model.nn.real_llm_api
-import reallm.impl.model.nn.real_llm_base
-import reallm.impl.model.nn.real_llm_generate
-import reallm.impl.model.nn.real_llm_parallel
 
+# Import all model implementations.
+_p = re.compile(r'^(?!.*__init__).*\.py$')
+_filepath = os.path.dirname(__file__)
+import_module(os.path.join(_filepath, "backend"), _p)
+import_module(os.path.join(_filepath, "interface"), _p)
+import_module(os.path.join(_filepath, "nn"), _p)
+
+# Set PyTorch JIT options, following Megatron-LM.
 if torch.cuda.is_available():
     torch._C._jit_set_profiling_executor(True)
     torch._C._jit_set_profiling_mode(True)
@@ -27,6 +28,7 @@ if torch.cuda.is_available():
     torch._C._jit_set_nvfuser_enabled(True)
     torch._C._debug_set_autodiff_subgraph_inlining(False)
 
+# Add HuggingFace hooks to ReaLModel.
 _HF_REGISTRIES = {}
 
 
@@ -36,15 +38,9 @@ def _load_from_hf(model: ReaLModel, registry_name, load_dir: str, init_critic_fr
     return r.load(model, load_dir, init_critic_from_actor)
 
 
-def _save_to_hf(model: ReaLModel,
-                registry_name,
-                tokenizer,
-                save_dir: str,
-                epoch=None,
-                epoch_step=None,
-                global_step=None):
+def _save_to_hf(model: ReaLModel, registry_name, tokenizer, save_dir: str):
     r = _HF_REGISTRIES[registry_name]
-    r.save(model, tokenizer, save_dir, epoch, epoch_step, global_step)
+    r.save(model, tokenizer, save_dir)
 
 
 def _config_from_hf(registry_name, hf_config=None, model_path=None, is_critic=False):

@@ -166,7 +166,6 @@ class ProfileWorker(worker_base.Worker):
                                                        self.__pg_info.global_rank, self.__pg_info.world_size)
 
         with constants.model_scope(self.model_name):
-            constants.set_max_seqlen(self.model_name, max(self.seq_len_list))
             self.__interface = model_api.make_interface(self.interface_config)
             self.__backend = model_api.make_backend(self.backend_config)
 

@@ -4,7 +4,6 @@ import functools
 from omegaconf import MISSING
 
 from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
-from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
@@ -59,8 +58,8 @@ class DPOConfig(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        actor_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.actor.type)]
-        ref_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.ref.type)]
+        actor_path = self.actor.path
+        ref_path = self.ref.path
 
         dataset = Dataset(
             "packed_rw_pair",
@@ -88,12 +87,10 @@ class DPOConfig(Experiment):
                 min_lr_ratio=self.actor.optimizer.min_lr_ratio,
                 zero_stage=(self.actor.zero_stage if self.actor.parallel.pipeline_parallel_size == 1 else min(
                     self.actor.zero_stage, 1)),
-                gradient_checkpointing=self.actor.gradient_checkpointing,
                 engine_type="pipe" if self.actor.parallel.pipeline_parallel_size > 1 else "deepspeed",
                 offload_optimizer_state=self.actor.optimizer.offload,
                 enable_bf16=self.actor.enable_bf16,
                 enable_fp16=self.actor.enable_fp16,
-                sequence_parallel=self.actor.parallel.use_sequence_parallel,
             ),
         )
         inf_backend = ModelBackend("pipe_inference" if self.ref.parallel.pipeline_parallel_size >
@@ -116,18 +113,22 @@ class DPOConfig(Experiment):
             lora=self.actor.lora,
         )
 
-        interface = ModelInterface("flash_dpo", args=dict(beta=self.beta, enable_save=True))
-        ref_interface = ModelInterface("flash_dpo", args=dict(beta=self.beta, enable_save=False))
+        interface = ModelInterface("dpo", args=dict(beta=self.beta, enable_save=True))
+        ref_interface = ModelInterface("dpo", args=dict(beta=self.beta, enable_save=False))
 
         actor_topo = PipeModelDataParallelTopology(
             self.actor.parallel.pipeline_parallel_size,
             self.actor.parallel.model_parallel_size,
             self.actor.parallel.data_parallel_size,
+            self.actor.parallel.use_sequence_parallel,
+            gradient_checkpointing=self.actor.gradient_checkpointing,
         )
         ref_topo = PipeModelDataParallelTopology(
             self.ref.parallel.pipeline_parallel_size,
             self.ref.parallel.model_parallel_size,
             self.ref.parallel.data_parallel_size,
+            self.ref.parallel.use_sequence_parallel,
+            gradient_checkpointing=False,
         )
         model_worker = []
         # By default, we place one reference model and one actor model on each GPU.
@@ -164,7 +165,7 @@ class DPOConfig(Experiment):
                 datasets=[dataset],
                 dataloader=dataloader,
                 cuda_cache_cleanliness=True,
-                cuda_cache_clear_freq=1,
+                cuda_cache_clear_freq=10,
             )
             model_worker.append(mw)
 
@@ -177,6 +178,7 @@ class DPOConfig(Experiment):
             output_data=["seqlogp"],
             min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
             max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            post_hooks=[dfg.OffloadHook()],
         )
         dpo = ModelRPC(
             model_name=ModelName("actor", 0),

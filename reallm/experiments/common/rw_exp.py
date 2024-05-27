@@ -6,7 +6,6 @@ import random
 from omegaconf import MISSING
 
 from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC
-from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
@@ -53,7 +52,7 @@ class RWConfig(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
-        model_path = MODEL_FAMILY_TO_PATH[ModelFamily(**self.model.type)]
+        model_path = self.model.path
 
         dataset = Dataset(
             "packed_rw_pair",
@@ -85,12 +84,10 @@ class RWConfig(Experiment):
                 min_lr_ratio=self.model.optimizer.min_lr_ratio,
                 zero_stage=(self.model.zero_stage if self.model.parallel.pipeline_parallel_size == 1 else min(
                     self.model.zero_stage, 1)),
-                gradient_checkpointing=self.model.gradient_checkpointing,
                 engine_type="pipe" if self.model.parallel.pipeline_parallel_size > 1 else "deepspeed",
                 offload_optimizer_state=self.model.optimizer.offload,
                 enable_bf16=self.model.enable_bf16,
                 enable_fp16=self.model.enable_fp16,
-                sequence_parallel=self.model.parallel.use_sequence_parallel,
             ),
         )
 
@@ -103,7 +100,7 @@ class RWConfig(Experiment):
             lora=self.model.lora,
         )
 
-        interface = ModelInterface("flash_paired_rw")
+        interface = ModelInterface("paired_rw")
 
         # NOTE: The dims of the parallelism grid is [pipline, data, model]
         # i.e., model parallelism is scheduled as close as possible in a single node.
@@ -114,6 +111,8 @@ class RWConfig(Experiment):
             self.model.parallel.pipeline_parallel_size,
             self.model.parallel.model_parallel_size,
             self.model.parallel.data_parallel_size,
+            self.model.parallel.use_sequence_parallel,
+            gradient_checkpointing=self.model.gradient_checkpointing,
         )
         model_worker = []
         for i in range(self.world_size):
@@ -139,7 +138,7 @@ class RWConfig(Experiment):
                 datasets=[dataset],
                 dataloader=dataloader,
                 cuda_cache_cleanliness=True,
-                cuda_cache_clear_freq=1,
+                cuda_cache_clear_freq=10,
             )
             model_worker.append(mw)
 
@@ -150,8 +149,8 @@ class RWConfig(Experiment):
             model_type=self.model.type,
             input_data=["packed_input_ids", "input_lens", "group_factor", "pos_input_lens"],
             log_return_value=True,
-            min_n_seqs=self.dataset.train_tokens_per_batch,
-            max_n_seqs=self.dataset.train_tokens_per_batch,
+            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
         )
 
         exp_ctrl = ExperimentSaveEvalControl(

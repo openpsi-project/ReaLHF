@@ -67,7 +67,6 @@ _pgroups: Dict["ModelName",
                Any] = ({})  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
 _rank_mapping: Dict["ModelName", Dict["ModelShardID", int]] = {}
 _global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
-_max_seqlens: Dict["ModelName", int] = dict()
 
 # used only in scripts and tests
 _fake_mp_world_size = None
@@ -96,13 +95,6 @@ def model_scope_disabled():
 
 
 ################# setter functions #################
-def set_max_seqlen(model_name: "ModelName", max_seqlen: int):
-    global _max_seqlens
-    if model_name in _max_seqlens:
-        raise RuntimeError("Global constant `max_seqlen` is already set.")
-    _max_seqlens[model_name] = max_seqlen
-
-
 def set_experiment_trial_names(expr_name: str, trial_name: str):
     global _experiment_name, _trial_name
     if _experiment_name is not None or _trial_name is not None:
@@ -155,15 +147,15 @@ def use_te_impl() -> bool:
 
 
 def sequence_parallel() -> bool:
-    # FIXME:
-    return model_parallel_world_size() > 1 and False
+    return grid().topology().sequence_parallel
 
 
-def dataset_max_seqlen() -> int:
-    global _max_seqlens, _model_name
-    if _model_name is None or _model_name not in _max_seqlens:
-        raise RuntimeError("Global constant `max_seqlen` is accessed before set or model_name is None.")
-    return _max_seqlens[_model_name]
+def max_prompt_len() -> int:
+    return grid().topology().max_prompt_len
+
+
+def gradient_checkpointing() -> bool:
+    return grid().topology().gradient_checkpointing
 
 
 def has_model_name(name: str) -> bool:

@@ -291,6 +291,7 @@ def _split_intervals(intervals, K):
 def param_size_from_keys(
     config: model_api.ReaLModelConfig,
     src_mp_size: int,
+    sequence_parallel: bool,
     sd_keys: List[str],
     src2dst_tp_size: int,
     src2dst_tp_rank: int,
@@ -299,7 +300,7 @@ def param_size_from_keys(
     for k in sd_keys:
         new_shape = mp_partition_key(
             k,
-            get_real_model_param_shape(k, config, src_mp_size),
+            get_real_model_param_shape(k, config, src_mp_size, sequence_parallel),
             src2dst_tp_rank,
             src2dst_tp_size,
             config,
@@ -327,8 +328,6 @@ def _derive_reparallelize_comm_plan(
                 "is_critic",
                 "sequence_parallel",
                 "gradient_accumulation_fusion",
-                "ckpt_attn",
-                "ckpt_mlp",
         ] and v != getattr(from_model_config, k):
             raise ValueError(
                 f"Can't load a checkpoint with different config (key `{k}`, "
@@ -357,13 +356,21 @@ def _derive_reparallelize_comm_plan(
     if constants.has_model_name(from_model_name):
         with constants.model_scope(from_model_name):
             from_layer_indices = from_layer_mapping[constants.pipe_parallel_rank()]
-            from_model_param_specs, _ = build_param_spec(from_layer_indices, from_model_config,
-                                                         from_topo.get_dim("model"))
+            from_model_param_specs, _ = build_param_spec(
+                from_layer_indices,
+                from_model_config,
+                from_topo.get_dim("model"),
+                from_topo.sequence_parallel,
+            )
     if constants.has_model_name(to_model_name):
         with constants.model_scope(to_model_name):
             to_layer_indices = to_layer_mapping[constants.pipe_parallel_rank()]
-            to_model_param_specs, _ = build_param_spec(to_layer_indices, to_model_config,
-                                                       to_topo.get_dim("model"))
+            to_model_param_specs, _ = build_param_spec(
+                to_layer_indices,
+                to_model_config,
+                to_topo.get_dim("model"),
+                to_topo.sequence_parallel,
+            )
 
     comm_plan = []
 
@@ -416,6 +423,7 @@ def _derive_reparallelize_comm_plan(
                                 sd_keys=param_keys,
                                 portion_size=max(dst_mp_size // src_mp_size, 1),
                                 portion_rank=sender_mp_portion_id,
+                                sequence_parallel=from_topo.sequence_parallel,
                             )
                             if len(param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
                                 param_intervals_cpu = _split_intervals(param_intervals_cpu,
@@ -435,6 +443,7 @@ def _derive_reparallelize_comm_plan(
                                 sd_keys=param_keys,
                                 portion_size=max(src_mp_size // dst_mp_size, 1),
                                 portion_rank=receiver_mp_portion_id,
+                                sequence_parallel=to_topo.sequence_parallel,
                             )
                             if len(receiver_param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
                                 receiver_param_intervals_cpu = _split_intervals(
@@ -452,6 +461,7 @@ def _derive_reparallelize_comm_plan(
                             sd_keys=param_keys,
                             src2dst_tp_size=max(dst_mp_size // src_mp_size, 1),
                             src2dst_tp_rank=sender_mp_portion_id,
+                            sequence_parallel=from_topo.sequence_parallel,
                         )
 
                     for dst_rank in dst_ranks:
