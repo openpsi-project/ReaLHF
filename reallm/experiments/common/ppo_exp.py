@@ -4,7 +4,6 @@ from omegaconf import MISSING
 
 from reallm.api.core.dfg import (ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC, OffloadHook,
                                  SyncParamHook)
-from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, ParallelismConfig

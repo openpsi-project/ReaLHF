@@ -32,6 +32,8 @@ class _MainStartArgs:
     image_name: Optional[str] = None
     ignore_worker_error: bool = False
     remote_reset: bool = False
+    recover_mode: Optional[str] = "disabled"
+    recover_retries: Optional[int] = 1
 
 
 def kind_reminder(config_name, logger, args):
