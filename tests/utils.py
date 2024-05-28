@@ -96,11 +96,24 @@ class StandaloneTestingProcess(mp.Process):
             raise e
 
 
-def init_global_constants(num_dp, num_mp, num_pp, topo=None, model_name=None, msid2mwid=None):
+def init_global_constants(num_dp,
+                          num_mp,
+                          num_pp,
+                          sequence_parallel,
+                          gradient_checkpointing,
+                          topo=None,
+                          model_name=None,
+                          msid2mwid=None,
+                          max_prompt_len=None):
     model_name = model_name if model_name is not None else MODEL_NAME
 
     if topo is None:
-        topo = PipeModelDataParallelTopology(num_dp=num_dp, num_mp=num_mp, num_pp=num_pp)
+        topo = PipeModelDataParallelTopology(num_dp=num_dp,
+                                             num_mp=num_mp,
+                                             num_pp=num_pp,
+                                             sequence_parallel=sequence_parallel,
+                                             gradient_checkpointing=gradient_checkpointing,
+                                             max_prompt_len=max_prompt_len)
         ws = num_dp * num_mp * num_pp
     else:
         ws = topo.world_size()

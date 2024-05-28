@@ -10,14 +10,17 @@ import torch.nn.functional as F
 import transformers
 
 from reallm.api.core.config import ModelFamily
-from reallm.api.core.model_api import (HF_MODEL_FAMILY_REGISTRY, load_hf_tokenizer, MODEL_FAMILY_TO_PATH,
-                                       ReaLModelConfig)
+from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, load_hf_tokenizer, ReaLModelConfig
 from reallm.base import constants, logging
 from reallm.impl.model.nn.real_llm_api import add_helper_functions
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
 from tests.utils import clear_name_resolve, init_global_constants, LocalMultiProcessTest
 
 logger = logging.getLogger("tests.test_saveload")
+
+MODEL_FAMILY_TO_PATH = {
+    ModelFamily("llama", 0, is_critic=False): "/lustre/public/pretrained_model_weights/testOnly/llama-2-16l",
+}
 
 
 def _shrink_mconfig(mconfig: ReaLModelConfig):
@@ -40,7 +43,7 @@ def test_consistency(model_family_names: List[str]):
 
     deepspeed.init_distributed()
     model_name = "consistency_test"
-    init_global_constants(1, 1, 1, model_name=model_name)
+    init_global_constants(1, 1, 1, False, False, model_name=model_name, max_prompt_len=128)
     assert dist.get_world_size() == 1, dist.get_world_size()
     save_path = "/tmp/ReaL-consistency-test"
     if os.path.exists(save_path):
