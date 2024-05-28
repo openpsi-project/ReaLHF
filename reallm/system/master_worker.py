@@ -691,14 +691,12 @@ async def load_data_func(
                 assert len(xs) == len(seqlens) == len(
                     hash_vals), f"{len(xs)}, {len(seqlens)}, {len(hash_vals)}"
                 # assert sample_keys == sample.keys()
-                logger.info(str(list(sample.keys())))
 
             gathered_sample = dataparallel.ParallelDataBroker.gather_from(
                 [namedarray.from_dict(x) for x in datas])
-            logger.info(f"gathered sample keys {list(gathered_sample.keys())}")
 
             buffer_indices = await buffer.put_batch(total_batch)
-            blogger.info(f"buffer indices {len(buffer_indices)} n_seqs {sum(n_seqs)} {n_seqs}")
+            # blogger.info(f"buffer indices {len(buffer_indices)} n_seqs {sum(n_seqs)} {n_seqs}")
             assert len(buffer_indices) == sum(n_seqs)
 
             for dp_i, (st, ed) in enumerate(
@@ -1107,9 +1105,10 @@ class MasterWorker(worker_base.Worker):
                 raise_asyncio_exception(self.__asyncio_ctx)
 
         logger.info("Execution finished!")
+
         self.__increment_step()
         total_time_consumption = time.perf_counter() - self._train_start_time
-        time_per_step = total_time_consumption / (self._global_step + 1)
+        time_per_step = total_time_consumption / (self._global_step - self._start_global_step + 1)
         e2e_time = time.perf_counter() - execution_start
         self.e2e_time_history.append(e2e_time)
 
@@ -1216,8 +1215,6 @@ class MasterWorker(worker_base.Worker):
 
                 self.__rpc_ctrl.used_hash_vals_this_epoch = set()
                 self._epoch_step = 0
-                if self._epoch > self.__total_train_epochs:
-                    self.experiment_complete_exit(f"Training completes! Yeah!!!")
 
         self._epoch_step += 1
         self._global_step += 1
@@ -1228,7 +1225,10 @@ class MasterWorker(worker_base.Worker):
         if should_eval:
             self.__rpc_ctrl.eval_queue.put_nowait((self._epoch, self._epoch_step))
         if should_save:
-            self.__rpc_ctrl.save_queue.put_nowait((self._epoch, self._epoch_step))
+            self.__rpc_ctrl.save_queue.put_nowait((self._epoch, self._epoch_step, self._global_step))
+
+        if is_new_epoch and self._epoch > self.__total_train_epochs:
+            self.experiment_complete_exit(f"Training completes! Yeah!!!")
 
         self.__last_step_info = self.__this_step_info
         self.__this_step_info = recover.StepInfo(

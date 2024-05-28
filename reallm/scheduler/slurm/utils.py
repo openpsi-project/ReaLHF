@@ -350,6 +350,9 @@ class SlurmLaunchInfo:
         if self.hostfile:
             srun_env["SLURM_HOSTFILE"] = self.hostfile_path
         # Setup step command.
+        # add current directory into container mounts to ensure editable mode for reallm package
+        container_mounts = f"{os.environ.get('REAL_PACKAGE_PATH', '$PWD')}:/distributed_llm,"\
+            + self.container_mounts
         srun_flags = [
             f"--ntasks={ntasks}",
             f"--cpus-per-task={cpu}",
@@ -359,7 +362,7 @@ class SlurmLaunchInfo:
             if self.env_vars else "",
             f"--multi-prog" if self.multiprog else "",
             f"--container-image={self.container_image}",
-            f"--container-mounts={self.container_mounts}",
+            f"--container-mounts={container_mounts}",
             f"--container-mount-home",
         ]
 

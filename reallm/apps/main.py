@@ -115,6 +115,7 @@ def main_start(args, recover_count: int = 0):
         "SAVE_RECOVER_STATES": "1" if save_recover_states else "0"
     }
     os.environ["IS_REMOTE"] = "1"
+    os.environ["REAL_PACKAGE_PATH"] = repo_path
 
     experiment = config_package.make_experiment(args.experiment_name)
     sched = sched_client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)

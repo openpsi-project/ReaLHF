@@ -1,4 +1,4 @@
-# python3 -m reallm.apps.quickstart sft experiment_name=quickstart-sft-debug trial_name=20240523 \
+# python3 -m reallm.apps.quickstart sft experiment_name=quickstart-sft-debug trial_name=20240528 \
 #     total_train_epochs=8 \
 #     save_freq_steps=50 eval_freq_epochs=1 \
 #     model.type._class=llama \
@@ -18,7 +18,7 @@
 #     dataset.train_tokens_per_batch=262144 \
 #     dataset.valid_tokens_per_batch=262144
 
-# python3 -m reallm.apps.quickstart rw experiment_name=quickstart-rw-debug trial_name=20240523 \
+# python3 -m reallm.apps.quickstart rw experiment_name=quickstart-rw-debug trial_name=20240528 \
 #     total_train_epochs=2 \
 #     save_freq_steps=20 eval_freq_epochs=1 \
 #     model.type._class=llama \
@@ -37,7 +37,7 @@
 #     dataset.train_tokens_per_batch=131072 \
 #     dataset.valid_tokens_per_batch=131072
 
-# python3 -m reallm.apps.quickstart dpo experiment_name=quickstart-dpo-debug trial_name=20240523 \
+# python3 -m reallm.apps.quickstart dpo experiment_name=quickstart-dpo-debug trial_name=20240528 \
 #     total_train_epochs=2 \
 #     save_freq_steps=5 \
 #     actor.type._class=llama \
@@ -65,7 +65,7 @@
 
 SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240523/default/epoch7epochstep6globalstep100/
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240523/default/epoch1epochstep80globalstep80/
-python3 -m reallm.apps.quickstart ppo experiment_name=quickstart-ppo-debug trial_name=20240523 \
+python3 -m reallm.apps.quickstart ppo experiment_name=remote-quickstart-ppo-debug trial_name=20240528-0 \
     save_freq_steps=null \
     global_train_bs=256 \
     global_gen_bs=256 \
