@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import transformers
 
-from reallm.base.dataparallel import PackedParallelDataBroker
+from reallm.api.core import data_api
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, time_mark
 from reallm.base.namedarray import NamedArray
 from reallm.base.topology import ParallelGrid
@@ -228,10 +228,10 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         data.register_metadata(seqlens=seqlens_cpu)
         n_mbs = self.num_micro_batches
         assert n_seqs >= n_mbs
-        splitted, partitions = PackedParallelDataBroker.scatter_to(data,
-                                                                   n_mbs,
-                                                                   min_size=n_seqs // n_mbs,
-                                                                   return_partitions=True)
+        splitted, partitions = data_api.split_sequences(data,
+                                                        n_mbs,
+                                                        min_size=n_seqs // n_mbs,
+                                                        return_partitions=True)
         batch_seqlens = [seqlens_cpu[start:end] for start, end in partitions]
         if input_lens_for_partition is not None:
             splitted = [
@@ -291,9 +291,9 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
     def _prepare_loss_input(self, seqlens_cpu, n_seqs: int, **loss_kwargs):
         data = NamedArray(**loss_kwargs)
         data.register_metadata(seqlens=seqlens_cpu)
-        splitted = PackedParallelDataBroker.scatter_to(data,
-                                                       self.num_micro_batches,
-                                                       min_size=n_seqs // self.num_micro_batches)
+        splitted = data_api.split_sequences(data,
+                                            self.num_micro_batches,
+                                            min_size=n_seqs // self.num_micro_batches)
         for mbid, x in enumerate(splitted):
             self.tensor_buffer.put("loss_inputs", mbid, x)
 

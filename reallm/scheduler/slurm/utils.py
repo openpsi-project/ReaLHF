@@ -677,8 +677,7 @@ def allocate_resources(infos: List[SlurmLaunchInfo],
 def show_tesla():
     all_rres = get_all_node_resources()
     hostname = socket.gethostname()
-    for k in available_hostnames(
-            node_type=["a100"]):
+    for k in available_hostnames(node_type=["a100"]):
         print(k, all_rres[k])
 
 

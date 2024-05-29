@@ -6,11 +6,8 @@ import torch.distributed as dist
 import transformers
 
 from reallm.base import constants, logging
+from reallm.impl.model.utils.padding import pad_input, unpad_input
 
-try:
-    from flash_attn.bert_padding import pad_input, unpad_input
-except ModuleNotFoundError:
-    pass
 logger = logging.getLogger("Modeling Functional Utils")
 
 

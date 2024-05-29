@@ -9,8 +9,6 @@ import queue
 import socket
 import time
 
-from deepspeed.accelerator import get_accelerator
-from flash_attn.bert_padding import unpad_input
 import colorama
 import deepspeed
 import numpy as np

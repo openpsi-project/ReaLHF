@@ -210,7 +210,7 @@ def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
 
 
 def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
-    from flash_attn.bert_padding import unpad_input
+    from reallm.impl.model.utils.padding import unpad_input
 
     if dp_rank == None:
         assert num_dp == None
@@ -230,8 +230,9 @@ def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
 
 
 def random_sample(bs, seq_len, vocab_size):
-    from flash_attn.bert_padding import unpad_input
     import torch
+
+    from reallm.impl.model.utils.padding import unpad_input
 
     input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)

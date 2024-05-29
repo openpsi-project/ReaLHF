@@ -243,13 +243,43 @@ def min_abs_diff_partition(arr: Union[np.ndarray, List], k: int, min_size: int =
     return partitions
 
 
+# @numba.njit
+def reorder_to_balanced_batches(
+    seqlens: np.ndarray,
+    n_seqs_per_batch: int,
+) -> Tuple[np.ndarray, int]:
+    max_bins = (len(seqlens) + n_seqs_per_batch - 1) // n_seqs_per_batch
+
+    bins = [[] for _ in range(max_bins)]
+    bin_sizes = np.zeros(max_bins, dtype=np.int32)
+    bin_seqlens = np.zeros(max_bins, dtype=np.int32)
+    for i in seqlens.argsort()[::-1]:
+        idx = np.where(bin_sizes + 1 <= n_seqs_per_batch, bin_seqlens, np.iinfo(np.int32).max).argmin()
+        bins[idx].append(i)
+        bin_sizes[idx] += 1
+        bin_seqlens[idx] += seqlens[i]
+
+    assert np.all(bin_sizes <= n_seqs_per_batch), (bin_sizes, n_seqs_per_batch)
+    max_diff = 0
+    for i in range(max_bins):
+        for j in range(i + 1, max_bins):
+            max_diff = max(max_diff, abs(bin_seqlens[i] - bin_seqlens[j]))
+
+    reordered_indices = []
+    for i in bin_seqlens.argsort()[::-1]:
+        reordered_indices.extend(bins[i])
+    return np.array(reordered_indices), max_diff
+
+
 if __name__ == "__main__":
     import time
     for i in range(100):
         st = time.monotonic()
-        nums = np.random.randint(1, 4000, size=(1000,))
-        k = np.random.randint(2, 20)
-        min_size = np.random.randint(1, len(nums) // k)
-        res = min_abs_diff_partition(nums, k, min_size)
-        assert all(y - x >= min_size for x, y in res)
-        print(res, time.monotonic() - st)
+        nums = np.random.randint(128, 150, size=(10000,))
+        # k = np.random.randint(2, 20)
+        # min_size = np.random.randint(1, len(nums) // k)
+        # res = min_abs_diff_partition(nums, k, min_size)
+        # assert all(y - x >= min_size for x, y in res)
+        n_seqs_per_batch = 256
+        res, max_diff = reorder_to_balanced_batches(nums, n_seqs_per_batch)
+        print(max_diff, res, time.monotonic() - st)

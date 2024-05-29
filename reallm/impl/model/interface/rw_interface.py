@@ -89,7 +89,9 @@ class PairedRewardInterface(model_api.ModelInterface):
         #     )
         #####################################################
 
-        return from_dict(dict(scores=chosen_end_scores))
+        res = from_dict(dict(scores=chosen_end_scores))
+        res.register_metadata(**data.metadata)
+        return res
 
     def train_step(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))

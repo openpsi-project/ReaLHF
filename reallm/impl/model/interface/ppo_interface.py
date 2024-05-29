@@ -8,7 +8,7 @@ from deepspeed import DeepSpeedEngine
 import torch
 import torch.distributed
 
-from reallm.base.dataparallel import PackedParallelDataBroker
+from reallm.api.core import data_api
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
@@ -16,15 +16,11 @@ from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
+from reallm.impl.model.utils.padding import unpad_input
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.impl.model.utils.ppo_functional as ppo_functional
-
-try:
-    from flash_attn.bert_padding import unpad_input
-except ModuleNotFoundError:
-    pass
 
 logger = logging.getLogger("PackedPPOInterface")
 
@@ -162,9 +158,11 @@ class PPOActorInterface(model_api.ModelInterface):
 
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_prompts = data["packed_prompts"]
-        cu_seqlens = data["prompt_cu_seqlens"]
+        prompt_lengths = torch.tensor(data.metadata["seqlens"],
+                                      dtype=torch.int32,
+                                      device=packed_prompts.device)
+        cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
 
-        prompt_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
         bs = prompt_lengths.shape[0]
 
         # logger.info(f"packed_prompts shape {packed_prompts.shape}, bs {bs}")
@@ -259,7 +257,10 @@ class PPOActorInterface(model_api.ModelInterface):
             packed_logits_mask=packed_logits_mask.bool() if packed_logits_mask is not None else None,
             prompt_mask=prompt_mask,
         )
-        return from_dict(res)
+        res = from_dict(res)
+        seqlens = seq_lengths.cpu().numpy().tolist()
+        res.register_metadata(seqlens=seqlens)
+        return res
 
     @torch.no_grad()
     def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
@@ -296,7 +297,9 @@ class PPOActorInterface(model_api.ModelInterface):
             logits.masked_fill_(packed_logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
         # FIXME: the following line will OOM
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
-        return from_dict(dict(logprobs=logprobs))
+        res = from_dict(dict(logprobs=logprobs))
+        res.register_metadata(seqlens=data.metadata["seqlens"])
+        return res
 
     def train_step(self, model: model_api.Model, data_: NamedArray) -> Dict:
         module = model.module
@@ -385,9 +388,9 @@ class PPOActorInterface(model_api.ModelInterface):
             ))
 
         data_.register_metadata(seqlens=batch_seqlens)
-        datas = PackedParallelDataBroker.scatter_to(data_,
-                                                    self.n_minibatches,
-                                                    min_size=constants.pipe_parallel_world_size() * 2)
+        datas = data_api.split_sequences(data_,
+                                         self.n_minibatches,
+                                         min_size=constants.pipe_parallel_world_size() * 2)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
@@ -587,7 +590,9 @@ class PPOCriticInterface(model_api.ModelInterface):
                                                cu_seqlens=cu_seqlens,
                                                max_seqlen=max_seqlen).logits
         scores = scores.squeeze(-1)
-        return from_dict(dict(scores=scores))
+        res = from_dict(dict(scores=scores))
+        res.register_metadata(seqlens=data.metadata["seqlens"])
+        return res
 
     def train_step(self, model: model_api.Model, data_: NamedArray) -> Dict:
         module = model.module
@@ -668,9 +673,9 @@ class PPOCriticInterface(model_api.ModelInterface):
             ))
 
         data_.register_metadata(seqlens=batch_seqlens)
-        datas = PackedParallelDataBroker.scatter_to(data_,
-                                                    self.n_minibatches,
-                                                    min_size=constants.pipe_parallel_world_size() * 2)
+        datas = data_api.split_sequences(data_,
+                                         self.n_minibatches,
+                                         min_size=constants.pipe_parallel_world_size() * 2)
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0

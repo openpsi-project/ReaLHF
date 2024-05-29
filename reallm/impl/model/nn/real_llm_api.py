@@ -28,6 +28,7 @@ from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallel
                                                                   RowParallelLinear)
 from reallm.impl.model.utils.data import (DuckGenerationOutput, DuckModelOutput, PipeCacheData,
                                           PipeTransferData)
+from reallm.impl.model.utils.padding import pad_input, unpad_input
 
 from .flatten_param import build_param_spec, map_param_to_contigous_memory, recursive_getattr
 from .real_llm_base import (OutputHead, real_model_embed_param_count, real_model_head_param_count,
@@ -35,11 +36,6 @@ from .real_llm_base import (OutputHead, real_model_embed_param_count, real_model
                             SequenceParallelCriticHead, VocabPositionEmbedding)
 from .real_llm_generate import generate, GenerationConfig
 from .real_llm_parallel import partition_pipeline_layers
-
-try:
-    from flash_attn.bert_padding import pad_input, unpad_input
-except ModuleNotFoundError:
-    pass
 
 logger = logging.getLogger("ReaLModel Interface")
 

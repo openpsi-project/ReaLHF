@@ -98,7 +98,6 @@ class QHClusterSpec(ClusterSpec):
         return "/lustre:/lustre,/dev/infiniband:/dev/infiniband,/sys/class/infiniband_verbs:/sys/class/infiniband_verbs"
 
 
-
 hostname = socket.gethostname()
 if not (hostname.startswith("YL-ctrl0") or hostname.startswith("QH-ctrl0") or hostname.startswith("YL-com")
         or hostname.startswith("QH-com") or hostname.startswith("frl") or hostname.startswith("ctrl0")):

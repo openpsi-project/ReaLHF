@@ -141,7 +141,7 @@ class ModelWorker:
     # dataset, for source model workers
     tokenizer_name_or_path: Optional[str] = None
     datasets: Optional[List[Union[str, Dataset]]] = None
-    dataloader: Union[str, DataLoader] = "default"
+    dataloader: Union[str, DataLoader] = "packed"
     use_dataset_cache: bool = False
     dataset_cahce_root: str = DATASET_CACHE_PATH
     # cuda & cudnn config

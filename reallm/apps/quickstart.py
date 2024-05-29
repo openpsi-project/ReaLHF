@@ -94,6 +94,7 @@ def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
 
         exp_fn = functools.partial(exp_cls, **args)
 
+        # FIXME: use uuid to avoid name conflict
         os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
         with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
             pickle.dump((exp_name, exp_fn), f)

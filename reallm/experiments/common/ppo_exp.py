@@ -164,11 +164,11 @@ class PPOConfig(Experiment):
 
     def initial_setup(self) -> ExperimentConfig:
         dataset = Dataset(
-            "packed_prompt",
+            "prompt",
             args=dict(
                 dataset_path=self.dataset.path,
-                n_tokens_per_batch=self.dataset.n_tokens_per_batch,
                 max_length=self.dataset.max_prompt_len,
+                pad_to_max_length=self.dataset.pad_to_max_length,
             ),
         )
 
@@ -373,7 +373,6 @@ class PPOConfig(Experiment):
                 shards=shards,
                 tokenizer_name_or_path=self.actor.path,
                 datasets=[dataset],
-                dataloader=DataLoader("iterable_dataset_loader"),
                 cuda_cache_cleanliness=True,
                 cuda_cache_clear_freq=10,
             )
@@ -384,7 +383,7 @@ class PPOConfig(Experiment):
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             interface_impl=actor_interface,
-            input_data=["packed_prompts", "prompt_cu_seqlens"],
+            input_data=["packed_prompts"],
             output_data=[
                 "seq_no_eos_mask",
                 "packed_seq",

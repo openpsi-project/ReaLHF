@@ -17,7 +17,6 @@ import torch
 import torch.nn as nn
 import transformers
 
-from reallm.base.dataparallel import PackedParallelDataBroker
 from reallm.base.monitor import time_mark
 from reallm.base.namedarray import NamedArray
 from reallm.base.topology import ParallelGrid
@@ -25,6 +24,7 @@ from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig, genstep
 from reallm.impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
+import reallm.api.core.data_api as data_api
 import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.impl.model.backend.pipe_engine.static_schedule as schedule
@@ -180,10 +180,10 @@ class InferencePipelineEngine:
             n_seqs = cu_seqlens.shape[0] - 1
         data.register_metadata(seqlens=seqlens_cpu)
         n_mbs = self.num_micro_batches
-        splitted, partitions = PackedParallelDataBroker.scatter_to(data,
-                                                                   n_mbs,
-                                                                   min_size=n_seqs // n_mbs,
-                                                                   return_partitions=True)
+        splitted, partitions = data_api.split_sequences(data,
+                                                        n_mbs,
+                                                        min_size=n_seqs // n_mbs,
+                                                        return_partitions=True)
         batch_seqlens = [seqlens_cpu[start:end] for start, end in partitions]
         if input_lens_for_partition is not None:
             splitted = [

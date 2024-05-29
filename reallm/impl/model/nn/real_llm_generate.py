@@ -16,11 +16,7 @@ from reallm.base import constants, logging
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import mask_eos_token
 from reallm.impl.model.utils.logits_warper import top_k_top_p_logits
-
-try:
-    from flash_attn.bert_padding import index_first_axis, unpad_input
-except ModuleNotFoundError:
-    pass
+from reallm.impl.model.utils.padding import index_first_axis, unpad_input
 
 if TYPE_CHECKING:
     from .real_llm_api import ReaLModel

@@ -6,7 +6,6 @@ import json
 import os
 import time
 
-from flash_attn.bert_padding import unpad_input
 import torch
 import torch.distributed as dist
 import transformers
@@ -17,6 +16,7 @@ from reallm.impl.model.nn.real_llm_base import (OutputHead, ReaLModelBlock, ReaL
                                                 SequenceParallelActorHead, SequenceParallelCriticHead,
                                                 VocabPositionEmbedding)
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
+from reallm.impl.model.utils.padding import unpad_input
 import reallm.api.core.model_api as model_api
 import reallm.api.core.system_api as config_package
 import reallm.base.cluster

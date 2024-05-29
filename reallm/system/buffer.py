@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import *
 import asyncio
+import copy
 import time
 
 import numpy as np
@@ -46,29 +47,9 @@ class _ReplayEntry:
     reuses_left: int
     receive_time: float
     # We don't save data explicitly, but store metadata.
-    # We can know shape and dtype from seqlen and key,
-    # just as we implemented in base/dataparallel.py
+    # We can know shape and dtype from seqlen and key.
     keys: List[str]
     seqlen: int
-
-
-# def _get_seqlen_from_sample(sample: namedarray.NamedArray) -> int:
-#     assert ("input_lens" in sample.keys() or "cu_seqlens" in sample.keys()
-#             or "prompt_cu_seqlens" in sample.keys() or "prompt_lens" in sample.keys()), (
-#                 list(sample.keys()),
-#                 sample,
-#             )
-#     if "input_lens" in sample.keys():
-#         return sample["input_lens"].item()
-#     elif "cu_seqlens" in sample.keys():
-#         return int(sample["cu_seqlens"][1] - 1)
-#     # NOTE: The order matters. We should first try to get the length of the generated text rather than prompts.
-#     elif "prompt_lens" in sample.keys():
-#         return sample["prompt_lens"].item()
-#     elif "prompt_cu_seqlens" in sample.keys():
-#         return int(sample["prompt_cu_seqlens"][1] - 1)
-#     else:
-#         return None
 
 
 class _TensorDictSequenceBuffer:
@@ -112,7 +93,7 @@ class _TensorDictSequenceBuffer:
             self.__storage[idx] = _ReplayEntry(
                 reuses_left=self.__reuses,
                 receive_time=time.time(),
-                keys=keys,
+                keys=copy.deepcopy(keys),
                 seqlen=seqlen,
             )
 

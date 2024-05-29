@@ -3,13 +3,10 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 import asyncio
 import copy
 import dataclasses
-import gc
 import getpass
 import itertools
 import os
 import re
-import sys
-import threading
 import time
 import uuid
 
@@ -21,7 +18,7 @@ import torch.distributed
 
 from reallm.api.core.config import ModelName
 from reallm.api.core.model_api import ReaLModelConfig
-from reallm.base import datapack, dataparallel, logging, namedarray, numpy_utils, timeutil, topology
+from reallm.base import datapack, logging, namedarray, timeutil, topology
 from reallm.base.asyncio_utils import (raise_asyncio_exception, setup_run_until_complete,
                                        teardown_run_util_complete)
 from reallm.base.cluster import spec as cluster_spec
@@ -37,25 +34,6 @@ import reallm.system.worker_base as worker_base
 
 logger = logging.getLogger("master worker", "system")
 blogger = logging.getLogger("benchmark")
-
-
-def _get_n_seqs_from_batch_sample(sample: namedarray.NamedArray) -> int:
-    assert ("input_lens" in sample.keys() or "cu_seqlens" in sample.keys()
-            or "prompt_cu_seqlens" in sample.keys() or "prompt_lens" in sample.keys()), (
-                list(sample.keys()),
-                sample,
-            )
-    if "input_lens" in sample.keys():
-        return len(sample["input_lens"])
-    elif "cu_seqlens" in sample.keys():
-        return len(sample["cu_seqlens"]) - 1
-    # NOTE: The order matters. We should first try to get the length of the generated text rather than prompts.
-    elif "prompt_lens" in sample.keys():
-        return len(sample["prompt_lens"])
-    elif "prompt_cu_seqlens" in sample.keys():
-        return len(sample["prompt_cu_seqlens"]) - 1
-    else:
-        raise NotImplementedError(f"Unknown seqlens keys: {list(sample.keys())}.")
 
 
 class ExperimentComplete(Exception):
@@ -143,33 +121,6 @@ async def group_rpc_blocked(
     payloads = await gather_all_replies(stream,
                                         request_all(stream, handlers, handle_type, datas, verbose=verbose))
     return [p.data for p in payloads]
-
-
-def split_packed_batch_into_seqs(
-    sample: namedarray.NamedArray,
-    input_lens: Optional[torch.Tensor] = None,
-    return_seqlens: bool = False,
-) -> List[namedarray.NamedArray]:
-    if input_lens is None:
-        if "input_lens" in sample:
-            input_lens = sample["input_lens"]
-        elif "prompt_lens" in sample:
-            input_lens = sample["prompt_lens"]
-        elif "cu_seqlens" in sample:
-            input_lens = sample["cu_seqlens"][1:] - sample["cu_seqlens"][:-1]
-        elif "prompt_cu_seqlens" in sample:
-            input_lens = sample["prompt_cu_seqlens"][1:] - sample["prompt_cu_seqlens"][:-1]
-
-    partitions = [(i, i + 1) for i in range(input_lens.shape[0])]
-    sample["input_lens"] = input_lens
-    sample.register_metadata(seqlens=input_lens.cpu().numpy().tolist())
-    res = dataparallel.PackedParallelDataBroker.scatter_to(sample,
-                                                           n_dp=len(input_lens),
-                                                           partitions=partitions)
-    if not return_seqlens:
-        return res
-    else:
-        return res, input_lens
 
 
 def _request_parameter_sync(
@@ -601,7 +552,7 @@ async def model_rpc_reply_func(
                 else:
                     res.append(k)
         else:
-            res = dataparallel.PackedParallelDataBroker.gather_from([response.data for response in responses])
+            res = _gather_stat([response.data for response in responses])
 
         if rpc.log_return_value:
             logger.info(f"RPC name {rpc.name} returns {res}")
@@ -622,6 +573,7 @@ async def model_rpc_reply_func(
 
 
 async def load_data_func(
+    src_rpc: dfg.ModelRPC,
     src_rpc_dp_size: int,
     src_rpc_model_name: str,
     buffer: AsyncIOSequenceBuffer,
@@ -631,15 +583,17 @@ async def load_data_func(
     stop_ctl: asyncio.Event,
 ):
     # FIXME: estimate average tokens per batch
-    # FIXME: change dataset to plain dataset and do dynamic batching here
     while not stop_ctl.is_set():
         await fetch_ctl.get()
         # fetch data from dataloader to fill the sequence buffer
         blogger.info(f"Filling data into the buffer in a new epoch.")
         fetch_data_start = time.perf_counter()
+
+        loaded_data_batches = []
+
         cur_epoch = latest_epoch = None
         while cur_epoch is None or cur_epoch == latest_epoch:
-            data_batches: List[data_api.DataBatch] = await group_rpc_blocked(
+            data_batches: List[data_api.DataBatchMeta] = await group_rpc_blocked(
                 stream,
                 handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
                 handle_type="fetch",
@@ -653,37 +607,63 @@ async def load_data_func(
             else:
                 latest_epoch = data_batches[0].epoch
 
-            # Merge fetched data. We assume fetched data is a flattened dict.
-            datas = [x.data for x in data_batches]
-            n_seqs = [_get_n_seqs_from_batch_sample(d) for d in datas]
-            sample = dataparallel.ParallelDataBroker.gather_from([namedarray.from_dict(x) for x in datas])
-            xs, seqlens = split_packed_batch_into_seqs(sample, return_seqlens=True)
-            buffer_indices = await buffer.put_batch([(list(x.keys()), seqlen)
-                                                     for x, seqlen in zip(xs, seqlens)])
-            assert len(buffer_indices) == sum(n_seqs)
+            loaded_data_batches += data_batches
 
-            for dp_i, (st, ed) in enumerate(
-                    zip([0] + list(itertools.accumulate(n_seqs)), itertools.accumulate(n_seqs))):
-                for buf_idx in buffer_indices[st:ed]:
-                    for k in sample.keys():
-                        data_owner[(buf_idx, k)] = (src_rpc_model_name, dp_i)
+        # PyTorch dataloader will shuffle data for us.
+        all_data = []
+        for x in loaded_data_batches:
+            all_data += data_api.unpack_data_batch(x)
 
-            await group_rpc_blocked(
-                stream,
-                handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
-                handle_type="store",
-                datas=[
-                    buffer_indices[st:ed]
-                    for st, ed in zip([0] + list(itertools.accumulate(n_seqs)), itertools.accumulate(n_seqs))
-                ],
-                verbose=False,
-            )
+        dp_data_batches = [0 for _ in range(src_rpc_dp_size)]
+        for x in all_data:
+            dp_data_batches[x.dp_rank] += 1
+
+        assert all(len(x.seqlens) == 1 for x in all_data)
+        seqlens = np.array([x.seqlens[0] for x in all_data], dtype=np.int32)
+        reorder_indices, _ = datapack.reorder_to_balanced_batches(seqlens, src_rpc.max_n_seqs)
+        recover_indices = np.argsort(reorder_indices)
+        all_data: List[data_api.DataBatchMeta] = [all_data[i] for i in reorder_indices]
+
+        keys = all_data[0].keys
+        buffer_indices = await buffer.put_batch([(keys, x.seqlens[0]) for x in all_data])
+
+        all_data = [all_data[i] for i in recover_indices]
+        buffer_indices = [buffer_indices[i] for i in recover_indices]
+        assert len(buffer_indices) == len(all_data)
+
+        for k in keys:
+            for buf_idx, x in zip(buffer_indices, all_data):
+                data_owner[(buf_idx, k)] = (src_rpc_model_name, x.dp_rank)
+
+        store_buffer_indices = [[] for _ in range(src_rpc_dp_size)]
+        for buf_idx, x in zip(buffer_indices, all_data):
+            store_buffer_indices[x.dp_rank].append(buf_idx)
+
+        for x, y in zip(store_buffer_indices, dp_data_batches):
+            assert len(x) == y, (len(x), y)
+
+        await group_rpc_blocked(
+            stream,
+            handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
+            handle_type="store",
+            datas=store_buffer_indices,
+            verbose=False,
+        )
 
         async with buffer.lock:
             buffer.lock.notify(buffer.n_rpcs)
 
         blogger.info(
             f"Filling data finished. Time consumption: {time.perf_counter() - fetch_data_start:.3f}s.")
+
+
+def _gather_stat(src: List[Dict]) -> Dict:
+    cnt, stats = {}, {}
+    for reply in src:
+        for k, v in reply.items():
+            cnt[k] = cnt.get(k, 0) + 1
+            stats[k] = stats.get(k, 0) + v
+    return {k: v / cnt for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())}
 
 
 async def model_eval_thread_func(
@@ -694,8 +674,8 @@ async def model_eval_thread_func(
 ):
     while not stop_ctl.is_set():
         epoch, epoch_step = await eval_queue.get()
-        eval_stats = dataparallel.ParallelDataBroker.gather_from(await group_rpc_blocked(
-            stream, handlers, "evaluate", [None for _ in handlers]))
+        eval_stats = _gather_stat(await group_rpc_blocked(stream, handlers, "evaluate",
+                                                          [None for _ in handlers]))
         logger.info(f"Evaluation results at epoch {epoch + 1} step {epoch_step + 1}: {eval_stats}")
 
 
@@ -970,6 +950,7 @@ class MasterWorker(worker_base.Worker):
 
         load_data_task = event_loop.create_task(
             load_data_func(
+                src_rpc=src_rpc,
                 src_rpc_dp_size=src_rpc_dp_size,
                 src_rpc_model_name=src_rpc_model_name,
                 data_owner=self.__data_owner,
