@@ -979,7 +979,7 @@ class ModelWorker(worker_base.Worker):
         t = time.monotonic() - st
         self.__total_time += t
 
-        if self.__total_time > 120 and self.__recover_run is False and self.__worker_index == 0:
+        if self.__total_time > 40 and self.__recover_run is False and self.__worker_index == 0:
             raise RuntimeError(f"Model worker {self.__worker_index} mock unexpected error")
 
         # blogger.debug(
@@ -987,9 +987,8 @@ class ModelWorker(worker_base.Worker):
         # )
         return r
 
-    def _exit_hook(self, exit_type: str):
-        logger.info(f"Model worker {self.__worker_index} exit with {exit_type}.")
-        if os.environ["SAVE_RECOVER_STATES"] == "0":
+    def __recover_save(self):
+        if os.environ.get("SAVE_RECOVER_STATES", "0") == "0":
             return
         # store model and dataset states for recover
         if self.__dist_env_resolved:
@@ -997,8 +996,6 @@ class ModelWorker(worker_base.Worker):
                 if model_name.replica_id != 0 or model_name.role in ["ref", "reward"]:
                     continue
                 with constants.model_scope(model_name):
-                    if self._dp_rank != 0:
-                        continue
                     ckpt_save_dir = os.path.join(self.__recover_states_root, "ckpt", model_name.role)
                     # only one ckpt directory will exist in ckpt_save_dir
                     os.makedirs(ckpt_save_dir, exist_ok=True)
@@ -1013,3 +1010,18 @@ class ModelWorker(worker_base.Worker):
                                     f"dataset global step {self.__dataset_global_step}.")
                     self._interface.save(model, ckpt_save_dir)
                     logger.info(f"saving done.")
+
+    def _exit_hook(self, exit_status: worker_base.WorkerServerStatus):
+        logger.info(f"Model worker {self.__worker_index} exit with status {exit_status}.")
+        if exit_status == worker_base.WorkerServerStatus.ERROR:
+            try:
+                sleep_time = 600
+                current_sleep_time = 0
+                while current_sleep_time < sleep_time:
+                    logger.info(f"ERROR exit, waited {current_sleep_time} s for interruption ...")
+                    time.sleep(10)
+                    current_sleep_time += 10
+            except KeyboardInterrupt:
+                logger.info("Received SIGINT, starting recover save")
+
+        self.__recover_save()

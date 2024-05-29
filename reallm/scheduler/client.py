@@ -73,7 +73,7 @@ class SchedulerClient:
         """
         raise NotImplementedError()
 
-    def stop_all(self):
+    def stop_all(self, signal=None):
         """Stops the whole job.
         """
         raise NotImplementedError()

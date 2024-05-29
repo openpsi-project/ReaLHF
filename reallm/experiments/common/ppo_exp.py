@@ -92,10 +92,8 @@ class PPOHyperparameters:
 class PPOConfig(Experiment):
     experiment_name: str = MISSING
     trial_name: str = MISSING
-    recover_mode: Literal["disabled", "auto", "save", "resume"] = "disabled"
+    recover_mode: str = "disabled"
     recover_retries: int = 1
-    allocation_mode: Literal["manual", "search", "heuristic", "pipe_data", "pipe_tensor"] = "manual"
-    n_nodes: Optional[int] = None
 
     seed: int = 1
     total_train_epochs: int = 1

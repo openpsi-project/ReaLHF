@@ -54,11 +54,18 @@ def teardown_run_util_complete(ctx: AsyncRunUntilCompleteContext):
         raise RuntimeError("Event loop stopped before Future completed.")
 
 
-def raise_asyncio_exception(ctx: AsyncRunUntilCompleteContext):
+def raise_asyncio_exception(ctx: AsyncRunUntilCompleteContext, raise_error: bool = True):
     if ctx.new_task and ctx.future.done() and not ctx.future.cancelled():
         # The coroutine raised a BaseException. Consume the exception
         # to not log a warning, the caller doesn't have access to the
         # local task.
         ctx.future.exception()
-    teardown_run_util_complete(ctx)
-    raise
+
+    try:
+        teardown_run_util_complete(ctx)
+    except RuntimeError as e:
+        if raise_error:
+            raise e
+
+    if raise_error:
+        raise

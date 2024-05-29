@@ -204,6 +204,7 @@ class HFModelRegistry:
             for i, shard in enumerate(shards[s:s + n_shards_per_gpu]):
                 shard_idx = shard_offset + i + s
                 torch.save(shard, os.path.join(save_dir, output_fn.format(shard=shard_idx + 1)))
+                logger.info("Saving shard %d" % (shard_idx + 1))
 
             for i, shard in enumerate(shards):
                 shard_idx = shard_offset + i

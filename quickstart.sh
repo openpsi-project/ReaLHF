@@ -66,6 +66,7 @@
 SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240523/default/epoch7epochstep6globalstep100/
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240523/default/epoch1epochstep80globalstep80/
 python3 -m reallm.apps.quickstart ppo experiment_name=remote-quickstart-ppo-debug trial_name=20240528-0 \
+    recover_mode=auto \
     save_freq_steps=null \
     global_train_bs=256 \
     global_gen_bs=256 \

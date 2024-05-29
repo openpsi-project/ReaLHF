@@ -1101,6 +1101,9 @@ class MasterWorker(worker_base.Worker):
             except asyncio.exceptions.InvalidStateError:
                 # Catch the exception when future.result() is not ready.
                 pass
+            except KeyboardInterrupt as e:
+                raise_asyncio_exception(self.__asyncio_ctx, raise_error=False)
+                raise e
             except:
                 raise_asyncio_exception(self.__asyncio_ctx)
 
@@ -1248,8 +1251,7 @@ class MasterWorker(worker_base.Worker):
             exit(0)
             # raise ExperimentComplete(msg) from e
 
-    def _exit_hook(self, exit_type: str):
-        logger.info(f"Master worker exits with {exit_type}.")
+    def __recover_save(self):
         if os.environ["SAVE_RECOVER_STATES"] == "0":
             return
         # save step info for recover
@@ -1272,3 +1274,18 @@ class MasterWorker(worker_base.Worker):
         pprint.pprint(recover_info.error_history)
         pprint.pprint(len(recover_info.hash_vals_to_ignore))
         recover.dump_recover_info(recover_info)
+
+    def _exit_hook(self, exit_status: worker_base.WorkerServerStatus):
+        logger.info(f"Master worker exits with {exit_status}.")
+        if exit_status == worker_base.WorkerServerStatus.ERROR:
+            try:
+                sleep_time = 600
+                current_sleep_time = 0
+                while current_sleep_time < sleep_time:
+                    logger.info(f"ERROR exit, waited {current_sleep_time} s for interruption ...")
+                    time.sleep(10)
+                    current_sleep_time += 10
+            except KeyboardInterrupt:
+                logger.info("Received SIGINT, starting recover save")
+
+        self.__recover_save()
