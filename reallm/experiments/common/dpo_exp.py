@@ -17,6 +17,9 @@ logger = logging.getLogger("DPO Experiment")
 class DPOConfig(Experiment):
     experiment_name: str = MISSING
     trial_name: str = MISSING
+    recover_mode: str = "disabled"
+    recover_retries: int = 1
+
     seed: int = 1
     total_train_epochs: int = 1
     save_freq_steps: Optional[int] = 20

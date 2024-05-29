@@ -53,7 +53,10 @@ TRITON_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/triton"
 DATASET_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/datasets"
 TORCH_EXTENSIONS_DIR = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/extensions"
 
-QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/quickstart.pkl"
+
+def quickstart_expr_cache_path(expr_name, trial_name):
+    return f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/quickstart/{expr_name}_{trial_name}.pkl"
+
 
 # _model_name will be changed in the model_scope context manager
 _model_name: "ModelName" = None

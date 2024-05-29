@@ -11,7 +11,7 @@ import torch
 multiprocessing.set_start_method("spawn", force=True)
 
 from reallm.base import constants, gpu_utils, logging, name_resolve, names
-from reallm.base.constants import QUICKSTART_EXPR_CACHE_PATH
+from reallm.base.constants import quickstart_expr_cache_path
 
 RAY_HEAD_WAIT_TIME = 500
 logger = logging.getLogger("Main-Workers")
@@ -116,10 +116,15 @@ def main_controller(args):
 
     constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
-    if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
-        with open(QUICKSTART_EXPR_CACHE_PATH, "rb") as f:
+    expr_name = args.experiment_name
+    trial_name = args.trial_name
+    expr_cache_path = quickstart_expr_cache_path(expr_name, trial_name)
+    save_recover_states = os.environ.get("SAVE_RECOVER_STATES", "0") == "1"
+    if os.path.exists(expr_cache_path):
+        with open(expr_cache_path, "rb") as f:
             system_api.register_experiment(*pickle.load(f))
-        os.system(f"rm -rf {QUICKSTART_EXPR_CACHE_PATH}")
+        if not save_recover_states:
+            os.system(f"rm -rf {expr_cache_path}")
     logger.info("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
     if args.type == "ray":

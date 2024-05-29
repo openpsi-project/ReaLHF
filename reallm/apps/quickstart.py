@@ -14,7 +14,7 @@ from omegaconf import MISSING, OmegaConf
 import hydra
 
 from reallm.base.cluster import spec as cluster_spec
-from reallm.base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
+from reallm.base.constants import LOG_ROOT, MODEL_SAVE_ROOT, quickstart_expr_cache_path
 from reallm.experiments.common import DPOConfig, PPOConfig, RWConfig, SFTConfig
 import reallm.api.core.system_api as system_api
 
@@ -96,13 +96,19 @@ def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
 
         exp_fn = functools.partial(exp_cls, **args)
 
-        os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
-        with open(QUICKSTART_EXPR_CACHE_PATH, "wb") as f:
+        os.makedirs(os.path.dirname(quickstart_expr_cache_path(exp_name, trial_name)), exist_ok=True)
+        with open(quickstart_expr_cache_path(exp_name, trial_name), "wb") as f:
             pickle.dump((exp_name, exp_fn), f)
         system_api.register_experiment(exp_name, exp_fn)
 
         try:
-            main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+            main_start(
+                _MainStartArgs(exp_name,
+                               trial_name,
+                               mode,
+                               recover_mode=args.recover_mode,
+                               recover_retries=args.recover_retries,
+                               debug=True))
         except Exception as e:
             main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
             logger.warning("Exception occurred. Stopping all workers.")

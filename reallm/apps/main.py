@@ -211,6 +211,8 @@ def main_start(args, recover_count: int = 0):
         recover_this = args.recover_mode == "auto" and recover_count < args.recover_retries
         recover_this = recover_this and reason in recover_states
 
+        # FIXME: in recover mode, this will interrupt saving exit
+        #        hook of the error worker as well, fix this by modifying stop_all method!
         sched.stop_all("SIGINT" if recover_this else "SIGKILL")
         if recover_this:
             logger.warning(f"Recovering from error {e}. Recover count: {recover_count+1}, "

@@ -369,13 +369,9 @@ class ModelWorker(worker_base.Worker):
                 tik = time.perf_counter()
                 if self.__recover_run and s.id.model_name.role not in ["ref", "reward"]:
                     # HACK: ref and reward models are not saved
-                    subdirs = os.listdir(self.__recover_states_root)
-                    assert len(subdirs) <= 1  # only one recover ckpt in directory
-                    if len(subdirs) == 1:
-                        model_path = os.path.join(self.__recover_states_root, "ckpt", s.id.model_name.role,
-                                                  subdirs[0])
-                        s.model.args["model_path"] = model_path
-                        s.model.args["init_critic_from_actor"] = False
+                    model_path = os.path.join(self.__recover_states_root, "ckpt", s.id.model_name.role)
+                    s.model.args["model_path"] = model_path
+                    s.model.args["init_critic_from_actor"] = False
 
                 self.__models[s.id.model_name] = model = model_api.make_model(s.model,
                                                                               name=s.id.model_name,
@@ -983,6 +979,9 @@ class ModelWorker(worker_base.Worker):
         t = time.monotonic() - st
         self.__total_time += t
 
+        if self.__total_time > 120 and self.__recover_run is False and self.__worker_index == 0:
+            raise RuntimeError(f"Model worker {self.__worker_index} mock unexpected error")
+
         # blogger.debug(
         #     f"Model worker #{','.join(self.model_names)}# poll time: {t:.4f}s, engine poll time {pt:.4f}s, percent {pt/t:.4f}"
         # )
@@ -995,7 +994,7 @@ class ModelWorker(worker_base.Worker):
         # store model and dataset states for recover
         if self.__dist_env_resolved:
             for model_name, model in self.__models.items():
-                if model_name.replica_id != 0:
+                if model_name.replica_id != 0 or model_name.role in ["ref", "reward"]:
                     continue
                 with constants.model_scope(model_name):
                     if self._dp_rank != 0:
@@ -1012,6 +1011,5 @@ class ModelWorker(worker_base.Worker):
                                     f"dataset epoch {self.__dataset_epoch}, "
                                     f"dataset epoch step {self.__dataset_epoch_step}, "
                                     f"dataset global step {self.__dataset_global_step}.")
-                    if not (model.version.global_step == 0):
-                        self._interface.save(model, ckpt_save_dir)
-                        logger.info(f"saving done.")
+                    self._interface.save(model, ckpt_save_dir)
+                    logger.info(f"saving done.")
