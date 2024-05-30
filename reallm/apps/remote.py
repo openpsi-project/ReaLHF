@@ -125,9 +125,12 @@ def main_controller(args):
     constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
     if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
-        with open(QUICKSTART_EXPR_CACHE_PATH, "rb") as f:
-            system_api.register_experiment(*pickle.load(f))
-        os.system(f"rm -rf {QUICKSTART_EXPR_CACHE_PATH}")
+        for exp_cache in os.listdir(QUICKSTART_EXPR_CACHE_PATH):
+            if exp_cache == f"{args.experiment_name}_{args.trial_name}.pkl":
+                exp_cache_file = os.path.join(QUICKSTART_EXPR_CACHE_PATH, exp_cache)
+                with open(exp_cache_file, "rb") as f:
+                    system_api.register_experiment(*pickle.load(f))
+                os.system(f"rm -rf {exp_cache_file}")
     logger.debug("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
     if args.type == "ray":
