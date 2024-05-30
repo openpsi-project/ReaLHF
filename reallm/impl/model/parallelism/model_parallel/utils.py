@@ -211,3 +211,31 @@ class VocabUtility:
         per_partition_vocab_size = divide(global_vocab_size, world_size)
         return VocabUtility.vocab_range_from_per_partition_vocab_size(per_partition_vocab_size, rank,
                                                                       world_size)
+
+
+def assert_viewless_tensor(tensor, extra_msg=None):
+    """Assert that a tensor is not a view (i.e., its '._base' field is
+    not set)."""
+    if isinstance(tensor, list):
+        [assert_viewless_tensor(t) for t in tensor]
+        return tensor
+    if not isinstance(tensor, torch.Tensor):
+        return tensor
+    assert tensor._base is None, ("Ensure tensor._base is None before setting tensor.data or storing "
+                                  "tensor to memory buffer. Otherwise, a memory leak will occur (and "
+                                  "likely accumulate over iterations). %s") % extra_msg
+    return tensor
+
+
+def safely_set_viewless_tensor_data(tensor, new_data_tensor):
+    """Safely set tensor's '.data' field.
+
+    Check first that the tensor is viewless (i.e., '._base' not set). If not,
+    raise an exception.
+    """
+    assert_viewless_tensor(
+        tensor,
+        extra_msg="FYI, tensor._base has shape %s, and new_data_tensor has shape %s." %
+        ("--" if tensor._base is None else tensor._base.shape, new_data_tensor.shape),
+    )
+    tensor.data = new_data_tensor

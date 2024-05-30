@@ -8,10 +8,6 @@ import torch
 import torch.utils.data
 import tqdm
 
-from reallm.api.core import data_api, model_api
-from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
-from reallm.impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
-from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
                                                 gather_packed_shifted_log_probs)
 from reallm.profiler.engine import ProfileEngine

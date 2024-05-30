@@ -26,18 +26,28 @@ from reallm.impl.model.comm.param_realloc import (_derive_reparallelize_comm_pla
 from reallm.impl.model.nn.flatten_param import set_intervals, slice_intervals
 from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
                                                                   RowParallelLinear)
-from reallm.impl.model.utils.data import (DuckGenerationOutput, DuckModelOutput, PipeCacheData,
-                                          PipeTransferData)
 from reallm.impl.model.utils.padding import pad_input, unpad_input
 
 from .flatten_param import build_param_spec, map_param_to_contigous_memory, recursive_getattr
-from .real_llm_base import (OutputHead, real_model_embed_param_count, real_model_head_param_count,
-                            real_model_tblock_param_count, ReaLModelBlock, SequenceParallelActorHead,
-                            SequenceParallelCriticHead, VocabPositionEmbedding)
+from .real_llm_base import (OutputHead, PipeCacheData, PipeTransferData, real_model_embed_param_count,
+                            real_model_head_param_count, real_model_tblock_param_count, ReaLModelBlock,
+                            SequenceParallelActorHead, SequenceParallelCriticHead, VocabPositionEmbedding)
 from .real_llm_generate import generate, GenerationConfig
 from .real_llm_parallel import partition_pipeline_layers
 
 logger = logging.getLogger("ReaLModel Interface")
+
+
+@dataclasses.dataclass
+class DuckModelOutput:
+    logits: Optional[Union[List[torch.Tensor], torch.Tensor]] = None
+
+
+@dataclasses.dataclass
+class DuckGenerationOutput:
+    sequences: torch.Tensor
+    scores: Optional[torch.Tensor] = None
+    logits_mask: Optional[torch.Tensor] = None
 
 
 class ReaLModel(nn.Module):

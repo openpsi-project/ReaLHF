@@ -13,7 +13,7 @@ import transformers
 from reallm.api.core import model_api
 # import reallm.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
 from reallm.base import constants, logging
-from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
+from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import mask_eos_token
 from reallm.impl.model.utils.logits_warper import top_k_top_p_logits
 from reallm.impl.model.utils.padding import index_first_axis, unpad_input

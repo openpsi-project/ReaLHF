@@ -217,6 +217,7 @@ class RPCCorountineControl:
     train_count: asyncio.Queue
     # for loading data, save and eval model
     fetch_data_queue: asyncio.Queue
+    data_spec_queue: asyncio.Queue
     eval_queue: asyncio.Queue
     save_queue: asyncio.Queue
 
@@ -585,8 +586,8 @@ async def load_data_func(
     stream: request_reply_stream.NameResolvingRequstClient,
     fetch_ctl: asyncio.Queue,
     stop_ctl: asyncio.Event,
+    data_spec_ctl: asyncio.Queue,
 ):
-    # FIXME: estimate average tokens per batch
     while not stop_ctl.is_set():
         await fetch_ctl.get()
         # fetch data from dataloader to fill the sequence buffer
@@ -616,12 +617,20 @@ async def load_data_func(
         for x in loaded_data_batches:
             all_data += data_api.unpack_data_batch(x)
 
+        steps_per_epoch = len(all_data) // src_rpc.max_n_seqs
+        avg_tokens_per_batch = sum(x.seqlens[0] for x in all_data) / steps_per_epoch
+        logger.info(f"Training epoch {cur_epoch + 1} approximately has {steps_per_epoch} steps. "
+                    f"Each batch has {avg_tokens_per_batch:.2f} tokens in average.")
+        await data_spec_ctl.put((steps_per_epoch, avg_tokens_per_batch))
+
         dp_data_batches = [0 for _ in range(src_rpc_dp_size)]
         for x in all_data:
             dp_data_batches[x.dp_rank] += 1
 
         assert all(len(x.seqlens) == 1 for x in all_data)
         seqlens = np.array([x.seqlens[0] for x in all_data], dtype=np.int32)
+
+        # NOTE: The reordered indices prioritize longer sequences for detecting OOM errors early.
         reorder_indices, _ = datapack.reorder_to_balanced_batches(seqlens, src_rpc.max_n_seqs)
         recover_indices = np.argsort(reorder_indices)
         all_data: List[data_api.DataBatchMeta] = [all_data[i] for i in reorder_indices]
@@ -895,6 +904,7 @@ class MasterWorker(worker_base.Worker):
             stop=asyncio.Event(),
             train_count=asyncio.Queue(maxsize=len(self.__rpc_dsts)),
             fetch_data_queue=asyncio.Queue(1),
+            data_spec_queue=asyncio.Queue(1),
             eval_queue=asyncio.Queue(1),
             save_queue=asyncio.Queue(1),
             rpc_traversal={rpc.name: 0
@@ -965,6 +975,7 @@ class MasterWorker(worker_base.Worker):
                 stream=self.__stream,
                 fetch_ctl=self.__rpc_ctrl.fetch_data_queue,
                 stop_ctl=self.__rpc_ctrl.stop,
+                data_spec_ctl=self.__rpc_ctrl.data_spec_queue,
             ))
         eval_task = event_loop.create_task(
             model_eval_thread_func(
@@ -996,6 +1007,9 @@ class MasterWorker(worker_base.Worker):
         self._train_start_time = time.perf_counter()
 
         self.__clear_data_cache_reqids = None
+
+        self.__cur_steps_per_epoch = None
+        self.__cur_avg_tokens_per_batch = None
 
     def _poll(self):
         if not self.__initialized:
@@ -1033,6 +1047,12 @@ class MasterWorker(worker_base.Worker):
             is_new_epoch = True
         except asyncio.QueueEmpty:
             is_new_epoch = False
+
+        try:
+            (self.__cur_steps_per_epoch,
+             self.__cur_avg_tokens_per_batch) = (self.__rpc_ctrl.data_spec_queue.get_nowait())
+        except asyncio.QueueEmpty:
+            pass
 
         should_eval = self.__eval_ctl.check(epochs=int(is_new_epoch), steps=1)
         should_save = self.__save_ctl.check(epochs=int(is_new_epoch), steps=1)
@@ -1111,15 +1131,26 @@ class MasterWorker(worker_base.Worker):
         tflops_per_gpu = flops / (e2e_time * self.config.n_model_workers * (10**12))
         #########################################
 
-        # TODO: add time estimation
-        logger.info(
-            f"Epoch {self._epoch}/{self.config.exp_ctrl.total_train_epochs} "
-            f"step {self._epoch_step} "
-            f"(global step {self._global_step}) finishes. "
-            f"#End to end# execution time: *{e2e_time:.3f}*s. "
-            f"Total time consumption: {total_time_consumption:.3f}s. TFLOP/s per GPU: {tflops_per_gpu:.2f}, total TFLOP/s: {tflops:.2f}."
-            # f"Estimated remaining time of this epoch: {self._buffer_size_tokens / buffer_size_decre_per_step * time_per_step:.3f}s."
-        )
+        # Logging.
+        s = f"Epoch {self._epoch}/{self.config.exp_ctrl.total_train_epochs} "
+        if self.__cur_steps_per_epoch is not None:
+            s += f"step {self._epoch_step}/{self.__cur_steps_per_epoch} "
+        else:
+            s += f"step {self._epoch_step} "
+        s += f"(global step {self._global_step}) finishes. "
+        if self.__cur_avg_tokens_per_batch is not None:
+            s += f"Average #tokens per batch is {self.__cur_avg_tokens_per_batch:.0f}. "
+        s += f"#End to end# execution time: *{e2e_time:.3f}*s. "
+        s += f"Total time consumption: {total_time_consumption:.3f}s. "
+        if self.__cur_steps_per_epoch is not None and len(self.e2e_time_history) > 2:
+            remaining_steps = self.__cur_steps_per_epoch - self._epoch_step
+            remaining_epochs = self.__total_train_epochs - self._epoch
+            avg_t = np.mean(self.e2e_time_history[2:])
+            remain_t = avg_t * remaining_steps
+            remain_t += avg_t * self.__cur_steps_per_epoch * remaining_epochs
+            s += f"Estimated remaining time: {remain_t:.3f}s. "
+        s += f"TFLOP/s per GPU: {tflops_per_gpu:.2f}, total TFLOP/s: {tflops:.2f}."
+        logger.info(s)
 
         if (self.__benchmark_steps is not None and self._global_step >= self.__benchmark_steps):
             logger.info(

@@ -13,8 +13,9 @@ from torch.cuda import device as device_ctx_manager
 from torch.utils.checkpoint import detach_variable
 import torch
 
-from reallm.impl.model.utils.tensor import (gather_split_1d_tensor, safely_set_viewless_tensor_data,
-                                            split_tensor_into_1d_equal_chunks)
+from reallm.impl.model.parallelism.model_parallel.utils import (gather_split_1d_tensor,
+                                                                safely_set_viewless_tensor_data,
+                                                                split_tensor_into_1d_equal_chunks)
 import reallm.base.constants as constants
 
 # Default name for the model parallel rng tracker.

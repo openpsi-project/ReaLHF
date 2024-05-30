@@ -23,10 +23,10 @@ from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, time
 from reallm.base.namedarray import NamedArray
 from reallm.base.topology import ParallelGrid
 from reallm.impl.model.nn.real_llm_api import ReaLModel
+from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig, genstep
 from reallm.impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
-from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
-from reallm.impl.model.utils.tensor import pad_sequence_parallel_input
+from reallm.impl.model.utils.padding import pad_sequence_parallel_input
 import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.impl.model.backend.pipe_engine.static_schedule as schedule
