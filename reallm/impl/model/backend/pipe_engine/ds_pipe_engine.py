@@ -198,6 +198,7 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
         """
         return self._force_grad_boundary
 
+    # FIXME: remove seqlens_cpu here
     def _prepare_input(
         self,
         seqlens_cpu: List[int],
@@ -1434,8 +1435,6 @@ class DeepSpeedPipelineEngine(DeepSpeedEngine):
                     )
                     self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
                     self._exec_instr(*cmd.args)
-                    if self._instruction_sync:
-                        torch.cuda.synchronize()
                     time_mark(name=f"{cmd_type_string}_end",
                               identifier=str(self.global_rank),
                               step=self.sched_count)

@@ -60,7 +60,7 @@ def _ppo_actor_loss_from_model_outputs(
     loss = torch.where(ppo_loss_mask, loss, 0.0).sum() / ppo_loss_mask.count_nonzero()
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
-    torch.distributed.all_reduce(mean_ref_kl)
+    torch.distributed.all_reduce(mean_ref_kl, group=constants.data_parallel_group())
     mean_ref_kl = mean_ref_kl / torch.distributed.get_world_size(constants.data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 
@@ -497,7 +497,7 @@ def _ppo_critic_loss_from_model_outputs(
     )
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
-    torch.distributed.all_reduce(mean_ref_kl)
+    torch.distributed.all_reduce(mean_ref_kl, group=constants.data_parallel_group())
     mean_ref_kl = mean_ref_kl / torch.distributed.get_world_size(constants.data_parallel_group())
     kl_adapter.update(mean_ref_kl, n_steps=cu_seqlens.shape[0] - 1)
 

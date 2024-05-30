@@ -181,13 +181,27 @@ def PackedDataLoader(dataset, *args, **kwargs):
         dataset,
         *args,
         collate_fn=gather_sequences,
+        # NOTE: This is not the actual batch size for training.
+        # Just a proper size to load data to workers.
         batch_size=512,
         shuffle=True,
         **kwargs,
     )
 
+def PackedEvalDataLoader(dataset, *args, **kwargs):
+    # TODO: fix seeding
+    return torch.utils.data.DataLoader(
+        dataset,
+        *args,
+        collate_fn=gather_sequences,
+        batch_size=128,
+        shuffle=False,
+        **kwargs,
+    )
+
 
 register_dataloader("packed", PackedDataLoader)
+register_dataloader("packed_eval", PackedEvalDataLoader)
 
 
 def split_sequences(
@@ -198,6 +212,7 @@ def split_sequences(
     min_size: int = 1,
     return_partitions=False,
 ) -> List[namedarray.NamedArray]:
+    # FIXME: remove cu_seqlens here
     if src.metadata.get("seqlens", None) is None:
         raise ValueError("seqlens must be in the metadata of the input namedarray.")
 

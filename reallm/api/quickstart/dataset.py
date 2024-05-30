@@ -25,7 +25,7 @@ class PromptAnswerDatasetConfig:
         train_tokens_per_batch (int): Number of tokens in each batch during training.
         valid_tokens_per_batch (int): Number of tokens in each batch during validation.
     """
-
+    # FIXME: replace n_tokens_per_batch with #seqs
     train_path: str = ""
     valid_path: str = ""
     max_seqlen: int = 1024

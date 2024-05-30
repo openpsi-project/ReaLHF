@@ -8,12 +8,9 @@ import tqdm
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
-from reallm.impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
-from reallm.impl.model.utils.functional import (build_leave_one_indices, build_shift_one_indices,
+from reallm.impl.model.nn.real_llm_generate import GenerationConfig
+from reallm.impl.model.utils.functional import (build_shift_one_indices,
                                                 gather_packed_shifted_log_probs)
-from reallm.impl.model.utils.padding import unpad_input
-import reallm.api.core.data_api as data_api
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
 
@@ -39,14 +36,14 @@ class SFTInterface(model_api.ModelInterface):
     def train_step(self, model: model_api.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_input_ids: torch.Tensor = data['packed_input_ids']  # shape [tot_seqlen]
-        cu_seqlens: torch.Tensor = data['cu_seqlens']
         prompt_mask: torch.BoolTensor = data['prompt_mask']  # shape [tot_seqlen]
         module: deepspeed.DeepSpeedEngine = model.module
-        max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
         module.train()
 
         seqlens_cpu = data.metadata["seqlens"]
+        max_seqlen = max(seqlens_cpu)
+        cu_seqlens = torch.nn.functional.pad(torch.tensor(seqlens_cpu, dtype=torch.int32, device=model.device).cumsum(0), (1,0))
 
         if isinstance(module, DeepSpeedPipelineEngine):
             loss_fn_kwargs = dict(
@@ -98,12 +95,14 @@ class SFTInterface(model_api.ModelInterface):
         n_seqs = 0
 
         for step, data in enumerate(tqdm.tqdm(eval_dataloader)):
-            data = recursive_apply(from_dict(data), lambda x: x.to(device))
+            seqlens_cpu = data.metadata["seqlens"]
+
+            data = recursive_apply(data, lambda x: x.to(device))
             packed_input_ids: torch.Tensor = data["packed_input_ids"]  # shape [tot_seqlen]
-            cu_seqlens: torch.Tensor = data["cu_seqlens"].int()
             prompt_mask: torch.BoolTensor = data["prompt_mask"]  # shape [tot_seqlen]
-            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
-            seqlens_cpu = (cu_seqlens[1:] - cu_seqlens[:-1]).cpu().numpy().tolist()
+
+            max_seqlen = max(seqlens_cpu)
+            cu_seqlens = torch.nn.functional.pad(torch.tensor(seqlens_cpu, dtype=torch.int32, device=model_.device).cumsum(0), (1,0))
 
             if isinstance(module, DeepSpeedPipelineEngine):
                 loss_fn_kwargs = dict(
@@ -134,6 +133,7 @@ class SFTInterface(model_api.ModelInterface):
             except OverflowError:
                 perplexity = float("inf")
             return dict(ppl=perplexity)
+        print(111111111111)
         return res
 
     @torch.no_grad()
@@ -158,7 +158,9 @@ class SFTInterface(model_api.ModelInterface):
             logits = model.module(packed_input_ids=packed_input_ids,
                                   cu_seqlens=cu_seqlens,
                                   max_seqlen=max_seqlen).logits
-        return dict(logits=logits)
+        x = from_dict(dict(logits=logits))
+        x.register_metadata(**data.medata)
+        return x
 
     # for testing only
     @torch.no_grad()
@@ -208,3 +210,4 @@ class SFTInterface(model_api.ModelInterface):
 
 
 model_api.register_interface("sft", SFTInterface)
+

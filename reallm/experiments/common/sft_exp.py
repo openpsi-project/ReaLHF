@@ -45,19 +45,15 @@ class SFTConfig(Experiment):
         model_path = self.model.path
 
         dataset = Dataset(
-            "packed_prompt_answer",
+            "prompt_answer",
             args=dict(
-                n_tokens_per_batch=self.dataset.train_tokens_per_batch,
-                min_seqs_per_batch=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
                 max_length=self.dataset.max_seqlen,
                 dataset_path=self.dataset.train_path,
             ),
         )
-        dataloader = eval_dataloader = DataLoader("iterable_dataset_loader")
 
         eval_dataset = copy.deepcopy(dataset)
         eval_dataset.args["dataset_path"] = self.dataset.valid_path
-        eval_dataset.args["n_tokens_per_batch"] = self.dataset.valid_tokens_per_batch
 
         backend = ModelBackend(
             "ds_train",
@@ -122,12 +118,10 @@ class SFTConfig(Experiment):
                         model=model,
                         backend=backend,
                         eval_datasets=[eval_dataset],
-                        eval_dataloader=eval_dataloader,
                     )
                 ],
                 tokenizer_name_or_path=model_path,
                 datasets=[dataset],
-                dataloader=dataloader,
                 cuda_cache_cleanliness=False,
                 cuda_cache_clear_freq=10,
             )
@@ -138,7 +132,7 @@ class SFTConfig(Experiment):
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
             model_type=self.model.type,
-            input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
+            input_data=["packed_input_ids", "prompt_mask"],
             log_return_value=True,
             min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
             max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,

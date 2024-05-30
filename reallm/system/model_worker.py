@@ -496,8 +496,6 @@ class ModelWorker(worker_base.Worker):
             elif request.handle_name == "fetch":
                 fetched_data = data_api.split_sequences(self.__cur_sample)
                 seqlens = [x.metadata['seqlens'][0] for x in fetched_data]
-                assert seqlens == [x['packed_prompts'].shape[0] for x in fetched_data
-                                   ], (seqlens, [x['packed_prompts'].shape[0] for x in fetched_data])
                 res = data_api.DataBatchMeta(
                     dp_rank=self._dp_rank,
                     seqlens=seqlens,
