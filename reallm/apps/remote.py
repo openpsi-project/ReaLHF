@@ -32,7 +32,7 @@ def main_worker(args):
                            args.wprocs_in_job + args.wproc_offset)
 
     group_name = f"{args.worker_type}-{args.worker_submission_index}"
-    logger.info(f"{args.worker_type} group id {args.jobstep_id}, "
+    logger.debug(f"{args.worker_type} group id {args.jobstep_id}, "
                 f"worker index {worker_index_start}:{worker_index_end}")
 
     # Isolate within the same slurm job, among different jobsteps.
@@ -41,7 +41,7 @@ def main_worker(args):
     gpu_utils.isolate_cuda_device(group_name, args.jobstep_id, args.n_jobsteps, args.experiment_name,
                                   args.trial_name)
     if os.environ.get("CUDA_VISIBLE_DEVICES", None):
-        logger.info("CUDA_VISIBLE_DEVICES: %s", os.environ["CUDA_VISIBLE_DEVICES"])
+        logger.debug("CUDA_VISIBLE_DEVICES: %s", os.environ["CUDA_VISIBLE_DEVICES"])
 
     # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
     # profiler.import_profiler_registers()
@@ -54,7 +54,7 @@ def main_worker(args):
     # import reallm.profiler.worker
     import reallm.profiler.interface
 
-    logger.info(f"Run {args.worker_type} worker with args: %s", args)
+    logger.debug(f"Run {args.worker_type} worker with args: %s", args)
     assert not args.experiment_name.startswith(
         "/"), f'Invalid experiment_name "{args.experiment_name}" starts with "/"'
     if args.wprocs_per_jobstep == 1:
