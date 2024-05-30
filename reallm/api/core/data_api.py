@@ -24,6 +24,7 @@ class DataBatchMeta:
     keys: List[str]
     seqlens: List[int]
     epoch: int
+    is_final_batch: bool
 
 
 @dataclasses.dataclass
@@ -41,7 +42,7 @@ class DatasetUtility:
 
 
 def unpack_data_batch(x: DataBatchMeta) -> List[DataBatchMeta]:
-    return [DataBatchMeta(x.dp_rank, x.keys, [seqlen], x.epoch) for seqlen in x.seqlens]
+    return [DataBatchMeta(x.dp_rank, x.keys, [seqlen], x.epoch, False) for seqlen in x.seqlens]
 
 
 def get_shuffle_indices(seed: int, size: int):

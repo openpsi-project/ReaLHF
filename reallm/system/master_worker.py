@@ -595,8 +595,8 @@ async def load_data_func(
 
         loaded_data_batches = []
 
-        cur_epoch = latest_epoch = None
-        while cur_epoch is None or cur_epoch == latest_epoch:
+        is_final_batch = False
+        while not is_final_batch:
             data_batches: List[data_api.DataBatchMeta] = await group_rpc_blocked(
                 stream,
                 handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
@@ -604,14 +604,12 @@ async def load_data_func(
                 datas=[None for _ in range(src_rpc_dp_size)],
                 verbose=False,
             )
-
-            # Update counters. All starting from 0.
-            if cur_epoch is None:
-                cur_epoch = latest_epoch = data_batches[0].epoch
-            else:
-                latest_epoch = data_batches[0].epoch
+            cur_epoch = data_batches[0].epoch
 
             loaded_data_batches += data_batches
+
+            is_final_batch = data_batches[0].is_final_batch
+            assert all(is_final_batch == x.is_final_batch for x in data_batches)
 
         # PyTorch dataloader will shuffle data for us.
         all_data = []

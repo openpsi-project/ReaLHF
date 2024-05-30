@@ -308,11 +308,13 @@ class ModelWorker(worker_base.Worker):
             else:
                 self.__dataset = torch.utils.data.ConcatDataset(datasets)
             self.__dataloader = data_api.make_dataloader(self.config.dataloader, self.__dataset)
-            self.__data_generator = iter([])
+            self.__data_generator = enumerate(self.__dataloader)
+            self.__dataset_length = len(self.__dataloader)
+            self.__dataset_batch_counter = None
 
             self.__dataset_epoch = -1
             self.__cur_sample = None
-            self.__fetched_samples = []
+            self.__fetched_sample_cache = []
 
         self.__models: Dict[ModelName, model_api.Model] = dict()
         self.__model_is_handle: Dict[ModelName, bool] = dict()
@@ -403,11 +405,11 @@ class ModelWorker(worker_base.Worker):
     def __prefetch_from_dataset(self):
         if self.__cur_sample is None:
             try:
-                self.__cur_sample = next(self.__data_generator)
+                self.__dataset_batch_counter, self.__cur_sample = next(self.__data_generator)
             except StopIteration:
                 self.__dataset_epoch += 1
-                self.__data_generator = iter(self.__dataloader)
-                self.__cur_sample = next(self.__data_generator)
+                self.__data_generator = enumerate(self.__dataloader)
+                self.__dataset_batch_counter, self.__cur_sample = next(self.__data_generator)
 
     def __handle_one_rpc_hook(self, hook: str, hook_data: Any):
         if hook == "data_transfer":
@@ -523,20 +525,21 @@ class ModelWorker(worker_base.Worker):
                     seqlens=seqlens,
                     keys=list(self.__cur_sample.keys()),
                     epoch=self.__dataset_epoch,
+                    is_final_batch=(self.__dataset_batch_counter == self.__dataset_length - 1),
                 )
-                self.__fetched_samples += fetched_data
+                self.__fetched_sample_cache += fetched_data
                 self.__cur_sample = None
             elif request.handle_name == "store":
                 buffer_indices = request.data
-                assert len(buffer_indices) == len(self.__fetched_samples), (
+                assert len(buffer_indices) == len(self.__fetched_sample_cache), (
                     len(buffer_indices),
-                    len(self.__fetched_samples),
+                    len(self.__fetched_sample_cache),
                 )
-                for buf_idx, x in zip(buffer_indices, self.__fetched_samples):
+                for buf_idx, x in zip(buffer_indices, self.__fetched_sample_cache):
                     for k, v in x.items():
                         assert v.device == torch.device("cpu")
                         self.__data_owner_storage[buf_idx][k] = v
-                self.__fetched_samples.clear()
+                self.__fetched_sample_cache.clear()
                 res = None
             elif request.handle_name == "spec":
                 # if self.__dataloader.batch_size is not None:
