@@ -177,13 +177,12 @@ def make_dataloader(cfg: Union[str, system_api.DataLoader],
 
 
 def PackedDataLoader(dataset, *args, **kwargs):
-    # TODO: fix seeding
     return torch.utils.data.DataLoader(
         dataset,
         *args,
         collate_fn=gather_sequences,
-        # NOTE: This is not the actual batch size for training.
-        # Just a proper size to load data to workers.
+        # NOTE: This is *NOT* the actual batch size for training.
+        # It is just a proper size to load data to workers.
         batch_size=512,
         shuffle=True,
         **kwargs,
@@ -191,12 +190,10 @@ def PackedDataLoader(dataset, *args, **kwargs):
 
 
 def PackedEvalDataLoader(dataset, *args, **kwargs):
-    # TODO: fix seeding
     return torch.utils.data.DataLoader(
         dataset,
         *args,
         collate_fn=gather_sequences,
-        batch_size=128,
         shuffle=False,
         **kwargs,
     )

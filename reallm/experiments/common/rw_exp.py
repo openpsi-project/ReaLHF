@@ -65,6 +65,7 @@ class RWConfig(Experiment):
 
         eval_dataset = copy.deepcopy(dataset)
         eval_dataset.args["dataset_path"] = self.dataset.valid_path
+        eval_dataloader = DataLoader("packed_eval", args=dict(batch_size=self.dataset.valid_bs_n_seqs))
 
         backend = ModelBackend(
             "ds_train",
@@ -128,6 +129,7 @@ class RWConfig(Experiment):
                         model=model,
                         backend=backend,
                         eval_datasets=[eval_dataset],
+                        eval_dataloader=eval_dataloader,
                     )
                 ],
                 tokenizer_name_or_path=model_path,
@@ -144,8 +146,8 @@ class RWConfig(Experiment):
             model_type=self.model.type,
             input_data=["packed_input_ids", "group_factor", "pos_input_lens"],
             log_return_value=True,
-            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
-            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         exp_ctrl = ExperimentSaveEvalControl(

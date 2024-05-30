@@ -177,8 +177,8 @@ class DPOConfig(Experiment):
                 "prompt_lens",
             ],
             output_data=["seqlogp"],
-            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
-            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
             post_hooks=[dfg.OffloadHook()],
         )
         dpo = ModelRPC(
@@ -193,8 +193,8 @@ class DPOConfig(Experiment):
                 "prompt_lens",
             ],
             log_return_value=True,
-            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
-            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         exp_ctrl = ExperimentSaveEvalControl(

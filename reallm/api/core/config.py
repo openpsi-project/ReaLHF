@@ -108,4 +108,4 @@ class StandaloneModelShard:
     backend: ModelBackend
     # evaluation
     eval_datasets: Optional[List[Dataset]] = None
-    eval_dataloader: Optional[DataLoader] = "packed_eval"
+    eval_dataloader: Optional[DataLoader] = DataLoader("packed_eval", args=dict(batch_size=128))

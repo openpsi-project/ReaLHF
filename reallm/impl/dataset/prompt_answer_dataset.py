@@ -24,7 +24,7 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
 
         Args:
             util (api.data.DatasetUtility): .
-            max_length (Optional[int], optional): The maximum length of each sequence in the batch. Defaults to n_tokens_per_batch.
+            max_length (Optional[int], optional): The maximum length of each sequence in the batch.
             dataset_path (Optional[str], optional): Path to the dataset json/jsonl file.
                 The json/jsonl file should be a list of dictionary. Each element in the list should have
                 a key "prompt" and a key "answer". Defaults to None.
