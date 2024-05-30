@@ -47,13 +47,16 @@ class NamedArrayEncodingMethod(bytes, enum.Enum):
             +++ if the amount of data is huge (say, multi-agent envs), use COMPRESS_EXPECT_POLICY_STATE.
             +++ otherwise, use PICKLE or PICKLE_DICT.
     """
+
     PICKLE_DICT = b"0001"  # Convert NamedArray to dict, then pickle.
     PICKLE = b"0002"  # Directly pickle.
     RAW_BYTES = b"0003"  # Send raw bytes of flattened numpy arrays.
     RAW_COMPRESS = b"0004"  # Send compressed bytes of flattened numpy arrays.
     COMPRESS_PICKLE = b"0005"  # Convert numpy array to compressed bytes, then pickle.
     PICKLE_COMPRESS = b"0006"  # Pickle, then compress pickled bytes.
-    OBS_COMPRESS = b"0007"  # Convert flattened numpy array to bytes and only compress observation.
+    OBS_COMPRESS = (
+        b"0007"  # Convert flattened numpy array to bytes and only compress observation.
+    )
     COMPRESS_EXCEPT_POLICY_STATE = b"0008"  # Compress all bytes except for policy states, which are basically random numbers.
     TENSOR_COMPRESS = b"0009"  # Turn certain tensors into sparse tensors, then pickle. Turn other tensors into numpy arrays then compress.
 
@@ -64,13 +67,13 @@ logger = logging.getLogger("NamedArray")
 def _namedarray_op(op):
 
     def fn(self, value):
-        if not (isinstance(value, NamedArray) and  # Check for matching structure.
-                getattr(value, "_fields", None) == self._fields):
+        if not (isinstance(value, NamedArray)  # Check for matching structure.
+                and getattr(value, "_fields", None) == self._fields):
             if not isinstance(value, NamedArray):
                 # Repeat value for each but respect any None.
                 value = tuple(None if s is None else value for s in self)
             else:
-                raise ValueError('namedarray - set an item with a different data structure')
+                raise ValueError("namedarray - set an item with a different data structure")
         try:
             xs = {}
             for j, ((k, s), v) in enumerate(zip(self.items(), value)):
@@ -91,13 +94,13 @@ def _namedarray_op(op):
 def _namedarray_iop(iop):
 
     def fn(self, value):
-        if not (isinstance(value, NamedArray) and  # Check for matching structure.
-                getattr(value, "_fields", None) == self._fields):
+        if not (isinstance(value, NamedArray)  # Check for matching structure.
+                and getattr(value, "_fields", None) == self._fields):
             if not isinstance(value, NamedArray):
                 # Repeat value for each but respect any None.
                 value = {k: None if s is None else value for k, s in self.items()}
             else:
-                raise ValueError('namedarray - set an item with a different data structure')
+                raise ValueError("namedarray - set an item with a different data structure")
         try:
             for j, (k, v) in enumerate(zip(self.keys(), value.values())):
                 if self[k] is not None and v is not None:
@@ -134,13 +137,13 @@ def _numpy_dtype_to_str(dtype):
 
 def dumps(namedarray_obj, method="pickle_dict"):
     """Serialize a NamedArray object to bytes.
-    
+
     Args:
         namedarray_obj (NamedArray): The NamedArray object to be serialized.
         method (str): The serialization method.
     """
 
-    if 'compress' in method:
+    if "compress" in method:
         try:
             import blosc
         except ModuleNotFoundError:
@@ -156,8 +159,11 @@ def dumps(namedarray_obj, method="pickle_dict"):
         chunk_size = 2**30
         num_chunks = len(buf) // chunk_size + 1
         chunks = [
-            blosc.compress(buf[i * chunk_size:(i + 1) * chunk_size], typesize=typesize, cname=cname)
-            for i in range(num_chunks)
+            blosc.compress(
+                buf[i * chunk_size:(i + 1) * chunk_size],
+                typesize=typesize,
+                cname=cname,
+            ) for i in range(num_chunks)
         ]
         # logger.info(f"Compress {len(buf)} bytes to {sum([len(chunk) for chunk in chunks])} bytes, num_chunks = {num_chunks}")
         return num_chunks, chunks
@@ -166,14 +172,14 @@ def dumps(namedarray_obj, method="pickle_dict"):
         flattened_entries = flatten(x)
         flattened_bytes = []
         for k, v in flattened_entries:
-            k_ = k.encode('ascii')
-            dtype_ = v_ = shape_ = b''
+            k_ = k.encode("ascii")
+            dtype_ = v_ = shape_ = b""
             if v is not None:
-                dtype_ = _numpy_dtype_to_str(v.dtype).encode('ascii')
+                dtype_ = _numpy_dtype_to_str(v.dtype).encode("ascii")
                 v_ = v.tobytes()
-                shape_ = str(tuple(v.shape)).encode('ascii')
+                shape_ = str(tuple(v.shape)).encode("ascii")
                 if compress and compress_condition(k):
-                    v_ = blosc.compress(v_, typesize=4, cname='lz4')
+                    v_ = blosc.compress(v_, typesize=4, cname="lz4")
             flattened_bytes.append((k_, dtype_, shape_, v_))
         return list(itertools.chain.from_iterable(flattened_bytes))
 
@@ -182,8 +188,8 @@ def dumps(namedarray_obj, method="pickle_dict"):
         flattened_entries = flatten(x)
         flattened_bytes = []
         for k, v in flattened_entries:
-            k_ = k.encode('ascii')
-            dtype_ = v_ = shape_ = b''
+            k_ = k.encode("ascii")
+            dtype_ = v_ = shape_ = b""
             if k in sparse_tensor_fields:
                 t1 = time.monotonic()
                 assert v is not None, f"Sparse tensor field {k} cannot be None."
@@ -195,10 +201,10 @@ def dumps(namedarray_obj, method="pickle_dict"):
                 logger.info(f"dump sparse tensor {k} time {time.monotonic() - t1:4f}, v shape {vshape}")
             elif v is not None:
                 v = v.cpu().numpy()
-                dtype_ = _numpy_dtype_to_str(v.dtype).encode('ascii')
+                dtype_ = _numpy_dtype_to_str(v.dtype).encode("ascii")
                 v_ = v.tobytes()
-                shape_ = str(tuple(v.shape)).encode('ascii')
-                v_ = blosc.compress(v_, typesize=4, cname='lz4')
+                shape_ = str(tuple(v.shape)).encode("ascii")
+                v_ = blosc.compress(v_, typesize=4, cname="lz4")
             flattened_bytes.append((k_, dtype_, shape_, v_))
         # logger.info(f"dump namedarray time {time.monotonic() - t0:4f}")
         return list(itertools.chain.from_iterable(flattened_bytes))
@@ -209,19 +215,22 @@ def dumps(namedarray_obj, method="pickle_dict"):
             pickle.dumps((namedarray_obj.__class__.__name__, namedarray_obj.to_dict())),
         ]
     elif method == "pickle":
-        bytes_list = [NamedArrayEncodingMethod.PICKLE.value, pickle.dumps(namedarray_obj)]
-    elif method == 'raw_bytes':
+        bytes_list = [
+            NamedArrayEncodingMethod.PICKLE.value,
+            pickle.dumps(namedarray_obj),
+        ]
+    elif method == "raw_bytes":
         bytes_list = [NamedArrayEncodingMethod.RAW_BYTES.value] + _namedarray_to_bytes_list(
             namedarray_obj, False, lambda x: False)
-    elif method == 'raw_compress':
+    elif method == "raw_compress":
         bytes_list = [NamedArrayEncodingMethod.RAW_COMPRESS.value] + _namedarray_to_bytes_list(
             namedarray_obj, True, lambda x: True)
-    elif method == 'compress_pickle':
+    elif method == "compress_pickle":
         bytes_list = [
             NamedArrayEncodingMethod.COMPRESS_PICKLE.value,
-            pickle.dumps(_namedarray_to_bytes_list(namedarray_obj, True, lambda x: True))
+            pickle.dumps(_namedarray_to_bytes_list(namedarray_obj, True, lambda x: True)),
         ]
-    elif method == 'pickle_compress':
+    elif method == "pickle_compress":
         # bytes_list = [
         #     NamedArrayEncodingMethod.PICKLE_COMPRESS.value,
         #     blosc.compress(pickle.dumps(namedarray_obj), typesize=4, cname='lz4')
@@ -230,12 +239,12 @@ def dumps(namedarray_obj, method="pickle_dict"):
         buf = pickle.dumps(namedarray_obj)
         num_chunks, chunks = compress_large(buf)
         bytes_list += chunks
-    elif method == 'obs_compress':
+    elif method == "obs_compress":
         bytes_list = [NamedArrayEncodingMethod.OBS_COMPRESS.value] + _namedarray_to_bytes_list(
-            namedarray_obj, True, lambda x: ('obs' in x))
-    elif method == 'compress_except_policy_state':
+            namedarray_obj, True, lambda x: ("obs" in x))
+    elif method == "compress_except_policy_state":
         bytes_list = [NamedArrayEncodingMethod.COMPRESS_EXCEPT_POLICY_STATE.value
-                      ] + _namedarray_to_bytes_list(namedarray_obj, True, lambda x: ('policy_state' not in x))
+                      ] + _namedarray_to_bytes_list(namedarray_obj, True, lambda x: ("policy_state" not in x))
 
     elif method == "tensor_compress":
         bytes_list = [NamedArrayEncodingMethod.TENSOR_COMPRESS.value
@@ -249,7 +258,7 @@ def dumps(namedarray_obj, method="pickle_dict"):
 
 def loads(b):
     # safe import
-    if b[0] in [b'0004', b'0004', b'0005', b'0006', b'0007', b'0008', b'0009']:
+    if b[0] in [b"0004", b"0004", b"0005", b"0006", b"0007", b"0008", b"0009"]:
         try:
             import blosc
         except ModuleNotFoundError:
@@ -262,13 +271,13 @@ def loads(b):
     def _parse_namedarray_from_bytes_list(xs, compressed: bool, compress_condition: Callable[[str], int]):
         flattened = []
         for i in range(len(xs) // 4):
-            k = xs[4 * i].decode('ascii')
-            if xs[4 * i + 1] != b'':
+            k = xs[4 * i].decode("ascii")
+            if xs[4 * i + 1] != b"":
                 buf = xs[4 * i + 3]
                 if compressed and compress_condition(k):
                     buf = blosc.decompress(buf)
                 v = np.frombuffer(buf, dtype=np.dtype(
-                    xs[4 * i + 1].decode('ascii'))).reshape(*ast.literal_eval(xs[4 * i + 2].decode('ascii')))
+                    xs[4 * i + 1].decode("ascii"))).reshape(*ast.literal_eval(xs[4 * i + 2].decode("ascii")))
             else:
                 v = None
             flattened.append((k, v))
@@ -278,16 +287,16 @@ def loads(b):
         t0 = time.monotonic()
         flattened = []
         for i in range(len(xs) // 4):
-            k = xs[4 * i].decode('ascii')
-            if xs[4 * i + 3] == b'':
+            k = xs[4 * i].decode("ascii")
+            if xs[4 * i + 3] == b"":
                 # None
                 v = None
-            elif xs[4 * i + 1] == b'':
+            elif xs[4 * i + 1] == b"":
                 t1 = time.monotonic()
                 # sparse tensor
                 v = pickle.loads(xs[4 * i + 3])
-                assert torch.is_tensor(
-                    v) and v.is_sparse, f"Field {k} is not a sparse tensor, but is serialized as one."
+                assert (torch.is_tensor(v)
+                        and v.is_sparse), f"Field {k} is not a sparse tensor, but is serialized as one."
                 logger.info(f"Sparse tensor {k} size {sparse_tensor_size(v)} bytes")
                 v = v.to_dense()
                 logger.info(f"Dense tensor {k} size {dense_tensor_size(v)} bytes")
@@ -297,7 +306,7 @@ def loads(b):
                 buf = xs[4 * i + 3]
                 buf = blosc.decompress(buf)
                 v = np.frombuffer(buf, dtype=np.dtype(
-                    xs[4 * i + 1].decode('ascii'))).reshape(*ast.literal_eval(xs[4 * i + 2].decode('ascii')))
+                    xs[4 * i + 1].decode("ascii"))).reshape(*ast.literal_eval(xs[4 * i + 2].decode("ascii")))
                 v = torch.from_numpy(v)
             flattened.append((k, v))
         # logger.info(f"load namedarray time {time.monotonic() - t0:4f}")
@@ -317,12 +326,12 @@ def loads(b):
     elif b[0] == NamedArrayEncodingMethod.PICKLE_COMPRESS.value:
         # namedarray_obj = pickle.loads(blosc.decompress(b[1]))
         chunks = b[1:-1]
-        buf = b''.join([blosc.decompress(chunk) for chunk in chunks])
+        buf = b"".join([blosc.decompress(chunk) for chunk in chunks])
         namedarray_obj = pickle.loads(buf)
     elif b[0] == NamedArrayEncodingMethod.OBS_COMPRESS.value:
-        namedarray_obj = _parse_namedarray_from_bytes_list(b[1:-1], True, lambda x: ('obs' in x))
+        namedarray_obj = _parse_namedarray_from_bytes_list(b[1:-1], True, lambda x: ("obs" in x))
     elif b[0] == NamedArrayEncodingMethod.COMPRESS_EXCEPT_POLICY_STATE.value:
-        namedarray_obj = _parse_namedarray_from_bytes_list(b[1:-1], True, lambda x: ('policy_state' not in x))
+        namedarray_obj = _parse_namedarray_from_bytes_list(b[1:-1], True, lambda x: ("policy_state" not in x))
     elif b[0] == NamedArrayEncodingMethod.TENSOR_COMPRESS.value:
         namedarray_obj = _parse_tensor_namedarray_from_bytes_list(b[1:-1])
     else:
@@ -389,6 +398,7 @@ class NamedArray:
     >>> foo(**p)
     [5 2] [5 4]
     """
+
     _reserved_slots = ["_NamedArray__metadata", "_fields"]
 
     def __init__(self, **kwargs):
@@ -428,9 +438,9 @@ class NamedArray:
 
     def __setattr__(self, loc, value):
         """Set attributes in a `NamedArray` object.
-        
+
         Unknown fields cannot be created.
-            
+
         Args:
             loc (str): attribute name to be set.
         """
@@ -487,13 +497,13 @@ class NamedArray:
             self._fields.append(loc)
             setattr(self, loc, value)
         else:
-            if not (isinstance(value, NamedArray) and  # Check for matching structure.
-                    getattr(value, "_fields", None) == self._fields):
+            if not (isinstance(value, NamedArray)  # Check for matching structure.
+                    and getattr(value, "_fields", None) == self._fields):
                 if not isinstance(value, NamedArray):
                     # Repeat value for each but respect any None.
                     value = tuple(None if s is None else value for s in self)
                 else:
-                    raise ValueError('namedarray - set an item with a different data structure')
+                    raise ValueError("namedarray - set an item with a different data structure")
             try:
                 for j, (s, v) in enumerate(zip(self, value)):
                     if s is not None and v is not None:
@@ -515,13 +525,13 @@ class NamedArray:
         return key in self._fields
 
     def __getstate__(self):
-        return {'__metadata': dict(**self.metadata), **{k: v for k, v in self.items()}}
+        return {"__metadata": dict(**self.metadata), **{k: v for k, v in self.items()}}
 
     def __setstate__(self, state):
-        self.__init__(**{k: v for k, v in state.items() if k != '__metadata'})
-        if state['__metadata'] is not None:
+        self.__init__(**{k: v for k, v in state.items() if k != "__metadata"})
+        if state["__metadata"] is not None:
             self.clear_metadata()
-            self.register_metadata(**state['__metadata'])
+            self.register_metadata(**state["__metadata"])
 
     def values(self):
         for v in self:
@@ -549,8 +559,7 @@ class NamedArray:
             raise IndexError(f"No entry has shape on dim={dim}.")
 
     def unique_of(self, field, exclude_values=(None,)):
-        """Get the unique value of a field
-        """
+        """Get the unique value of a field"""
         unique_values = np.unique(self[field])
         unique_values = unique_values[np.in1d(unique_values, exclude_values, invert=True)]
         if len(unique_values) != 1:
@@ -645,14 +654,14 @@ class NamedArray:
         result.register_metadata(**metadata)
         return result
 
-    __add__ = _namedarray_op('+')
-    __sub__ = _namedarray_op('-')
-    __mul__ = _namedarray_op('*')
-    __truediv__ = _namedarray_op('/')
-    __iadd__ = _namedarray_iop('+=')
-    __isub__ = _namedarray_iop('-=')
-    __imul__ = _namedarray_iop('*=')
-    __itruediv__ = _namedarray_iop('/=')
+    __add__ = _namedarray_op("+")
+    __sub__ = _namedarray_op("-")
+    __mul__ = _namedarray_op("*")
+    __truediv__ = _namedarray_op("/")
+    __iadd__ = _namedarray_iop("+=")
+    __isub__ = _namedarray_iop("-=")
+    __imul__ = _namedarray_iop("*=")
+    __itruediv__ = _namedarray_iop("/=")
     __repr__ = __str__
 
 
@@ -695,8 +704,8 @@ def array_like(x, value=0):
         if isinstance(x, np.ndarray):
             data = np.zeros_like(x)
         else:
-            assert isinstance(x, torch.Tensor), ('Currently, namedarray only supports'
-                                                 f' torch.Tensor and numpy.array (input is {type(x)})')
+            assert isinstance(x, torch.Tensor), ("Currently, namedarray only supports"
+                                                 f" torch.Tensor and numpy.array (input is {type(x)})")
             data = torch.zeros_like(x)
         if value != 0:
             data[:] = value
@@ -767,7 +776,7 @@ def recursive_apply(x, fn):
             except Exception as e:
                 err_msg = f"`recursive_apply` fails at an entry named `{k}`"
                 if isinstance(v, NamedArray):
-                    err_msg += ", which is a `NamedArray`. Backtrace to the above level."
+                    err_msg += (", which is a `NamedArray`. Backtrace to the above level.")
                 else:
                     err_msg += f" ({v.dtype}, {tuple(v.shape)})."
                 raise RuntimeError(err_msg) from e
@@ -798,11 +807,11 @@ def from_flattened(flattened_entries):
     idx = 0
     while idx < len(keys):
         k, v = keys[idx], values[idx]
-        if '.' not in k:
+        if "." not in k:
             entries[k] = v
             idx += 1
         else:
-            prefix = k.split('.')[0]
+            prefix = k.split(".")[0]
             span_end = idx + 1
             while span_end < len(keys) and keys[span_end].startswith(f"{prefix}."):
                 span_end += 1
@@ -813,7 +822,7 @@ def from_flattened(flattened_entries):
 
 
 def merge(xs: List[NamedArray]):
-    """ merge named arrays with different field into one, identical fields 
+    """merge named arrays with different field into one, identical fields
     will be overwritten by the last one in the list
     """
     mixed_dict = {}
@@ -823,6 +832,6 @@ def merge(xs: List[NamedArray]):
 
 
 def split(x: NamedArray, n):
-    """ split a named array into n parts along dim 0 """
+    """split a named array into n parts along dim 0"""
     sz = x.length(0) // n
     return [x[sz * i:sz * (i + 1)] for i in range(n - 1)] + [x[sz * (n - 1):]]

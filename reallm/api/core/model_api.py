@@ -192,7 +192,7 @@ def make_model_wrapper(cfg: system_api.ModelWrapper) -> Callable[[Model], Model]
 
 
 def make_model(cfg: system_api.Model, name: ModelName, device: Union[str, torch.device]) -> Model:
-    logger.info(f"making model {cfg.type_} on {device}")
+    logger.debug(f"making model {cfg.type_} on {device}")
     model_cls = ALL_MODEL_CLASSES[cfg.type_]
     model = model_cls(**cfg.args, name=name, device=device)
     assert isinstance(model, Model)

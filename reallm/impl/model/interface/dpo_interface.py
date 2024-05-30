@@ -36,7 +36,11 @@ def _dpo_loss_from_model_outputs(
         offset += input_lens[2 * i] - 1
         logprob_sum.append(logprobs[offset + prompt_lens[i] - 1:offset + input_lens[2 * i + 1] - 1].sum())
         offset += input_lens[2 * i + 1] - 1
-    assert offset == sum(input_lens) - input_lens.shape[0], (offset, sum(input_lens), input_lens.shape)
+    assert offset == sum(input_lens) - input_lens.shape[0], (
+        offset,
+        sum(input_lens),
+        input_lens.shape,
+    )
 
     pi_seqlogp = torch.stack(logprob_sum)
 
@@ -98,7 +102,11 @@ class DPOInterface(model_api.ModelInterface):
             offset += input_lens[2 * i] - 1
             logprob_sum.append(logprobs[offset + prompt_lens[i] - 1:offset + input_lens[2 * i + 1] - 1].sum())
             offset += input_lens[2 * i + 1] - 1
-        assert offset == sum(input_lens) - input_lens.shape[0], (offset, sum(input_lens), input_lens.shape)
+        assert offset == sum(input_lens) - input_lens.shape[0], (
+            offset,
+            sum(input_lens),
+            input_lens.shape,
+        )
 
         return from_dict(dict(seqlogp=torch.stack(logprob_sum).view(n_pairs, -1)))
 
@@ -131,9 +139,11 @@ class DPOInterface(model_api.ModelInterface):
                 **loss_fn_kwargs,
             )
         else:
-            logits: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits
+            logits: torch.FloatTensor = module(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ).logits
 
             loss, stats = _dpo_loss_from_model_outputs(
                 logits=logits,

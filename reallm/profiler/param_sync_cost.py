@@ -152,8 +152,10 @@ def _create_param_realloc_groups(
                 # This is not the optimal solution for intra-node communication
                 # because there may exist a source rank that is also dst rank,
                 # but we forcely select the first source rank on each node here.
-                assignment = _assign_src_to_dsts(_group_mwids_by_node(_src_ranks),
-                                                 _group_mwids_by_node(_all_dst_ranks))
+                assignment = _assign_src_to_dsts(
+                    _group_mwids_by_node(_src_ranks),
+                    _group_mwids_by_node(_all_dst_ranks),
+                )
                 _idle_src_ranks = [r for r in _src_ranks if r not in assignment]
                 for _src_rank in _idle_src_ranks:
                     dp_i, mp_i = (
@@ -415,7 +417,11 @@ def main():
         inaccurate_cnt = total_cnt = 0
         for ff in f.readlines():
             data = json.loads(ff)
-            from_pp_mp_dp = (data["from_pp_size"], data["from_mp_size"], data["from_dp_size"])
+            from_pp_mp_dp = (
+                data["from_pp_size"],
+                data["from_mp_size"],
+                data["from_dp_size"],
+            )
             to_pp_mp_dp = (data["to_pp_size"], data["to_mp_size"], data["to_dp_size"])
             world_size = data["world_size"]
             profile_res = data["mem_shift_time_ns"] / 1e9
@@ -478,6 +484,7 @@ def dump_table(n_nodes, model_size, res_queue, rank=0, parallel=1):
         # time.sleep(10)
 
     import tqdm
+
     res = {}
     device_mesh_sizes = [4] + [8 * i for i in range(1, n_nodes + 1)]
     space = list(itertools.product(device_mesh_sizes, device_mesh_sizes))
@@ -488,7 +495,10 @@ def dump_table(n_nodes, model_size, res_queue, rank=0, parallel=1):
         all_configs = list(itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)))
         all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
         all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
-        all_configs = list(filter(lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8], all_configs))
+        all_configs = list(filter(
+            lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8],
+            all_configs,
+        ))
         all_configs = list(filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs))
         all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
         for config_id, (from_pp_mp_dp, to_pp_mp_dp) in tqdm.tqdm(enumerate(all_configs)):
@@ -525,8 +535,11 @@ def dump_table(n_nodes, model_size, res_queue, rank=0, parallel=1):
     if res_queue is not None:
         # res_queue.put(res)
         import pickle
-        with open(f"profile_result/param_realloc_cost_table_parallel-{model_size}-{rank}-{parallel}.pkl",
-                  "wb") as f:
+
+        with open(
+                f"profile_result/param_realloc_cost_table_parallel-{model_size}-{rank}-{parallel}.pkl",
+                "wb",
+        ) as f:
             pickle.dump(res, f)
         print(f"dumped table with {len(res)} entries to {model_size}-{rank}-{parallel}.")
     else:
@@ -549,6 +562,7 @@ def get_table():
 
     print(f"dumping table with {len(r)} entries.")
     import pickle
+
     with open("profile_result/param_realloc_cost_table.pkl", "wb") as f:
         pickle.dump(r, f)
     return r
@@ -590,6 +604,7 @@ def get_table_parallel(parallel=4):
 def merge_parallel_table():
     import os
     import pickle
+
     r = {}
     for path in os.listdir("profile_result"):
         if path.endswith(".pkl") and path.startswith("param_realloc_cost_table_parallel"):

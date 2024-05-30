@@ -7,7 +7,7 @@ from reallm.api.core.model_api import ReaLModelConfig, register_hf_family, regis
 from reallm.base.constants import use_te_impl
 
 
-def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig) -> ReaLModelConfig:
+def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig,) -> ReaLModelConfig:
     return ReaLModelConfig(
         n_layers=starcoder_config.n_layer,
         n_kv_heads=1,
@@ -50,17 +50,17 @@ def _starcoder_key_mapping_fn(config: ReaLModelConfig) -> Dict[str, str]:
         "lm_head.weight": f"{config.n_layers+1}.weight",
     }
     for i in range(config.n_layers):
-        key_mappings[f"transformer.h.{i}.ln_1.weight"] = f"{i + 1}.attn.c_attn.ln.weight"
+        key_mappings[f"transformer.h.{i}.ln_1.weight"] = (f"{i + 1}.attn.c_attn.ln.weight")
         key_mappings[f"transformer.h.{i}.ln_1.bias"] = f"{i + 1}.attn.c_attn.ln.bias"
-        key_mappings[f"transformer.h.{i}.attn.c_attn.weight"] = f"{i + 1}.attn.c_attn.linear.weight"
-        key_mappings[f"transformer.h.{i}.attn.c_attn.bias"] = f"{i + 1}.attn.c_attn.linear.bias"
-        key_mappings[f"transformer.h.{i}.attn.c_proj.weight"] = f"{i + 1}.attn.c_proj.weight"
-        key_mappings[f"transformer.h.{i}.attn.c_proj.bias"] = f"{i + 1}.attn.c_proj.bias"
+        key_mappings[f"transformer.h.{i}.attn.c_attn.weight"] = (f"{i + 1}.attn.c_attn.linear.weight")
+        key_mappings[f"transformer.h.{i}.attn.c_attn.bias"] = (f"{i + 1}.attn.c_attn.linear.bias")
+        key_mappings[f"transformer.h.{i}.attn.c_proj.weight"] = (f"{i + 1}.attn.c_proj.weight")
+        key_mappings[f"transformer.h.{i}.attn.c_proj.bias"] = (f"{i + 1}.attn.c_proj.bias")
         key_mappings[f"transformer.h.{i}.ln_2.weight"] = f"{i + 1}.mlp.ln.weight"
         key_mappings[f"transformer.h.{i}.ln_2.bias"] = f"{i + 1}.mlp.ln.bias"
         key_mappings[f"transformer.h.{i}.mlp.c_fc.weight"] = f"{i + 1}.mlp.c_fc.weight"
         key_mappings[f"transformer.h.{i}.mlp.c_fc.bias"] = f"{i + 1}.mlp.c_fc.bias"
-        key_mappings[f"transformer.h.{i}.mlp.c_proj.weight"] = f"{i + 1}.mlp.c_proj.weight"
+        key_mappings[f"transformer.h.{i}.mlp.c_proj.weight"] = (f"{i + 1}.mlp.c_proj.weight")
         key_mappings[f"transformer.h.{i}.mlp.c_proj.bias"] = f"{i + 1}.mlp.c_proj.bias"
     return key_mappings
 
@@ -91,7 +91,7 @@ def state_dict_to_starcoder(state_dict, config):
     # merge qkv weight and bias
     qdim = config.hidden_dim
     kvdim = config.head_dim * config.n_kv_heads
-    layer_indices = list(set(int(k.split('.')[0]) for k in state_dict.keys()))
+    layer_indices = list(set(int(k.split(".")[0]) for k in state_dict.keys()))
     for k in ["weight", "bias"]:
         for i in layer_indices:
             if i == 0 or i == config.n_layers + 1:

@@ -102,8 +102,10 @@ class _TensorDictSequenceBuffer:
         # Can be parallelized.
         for idx, new_data in zip(indices, new_datas):
             new_keys, new_seqlen = new_data
-            assert len(set(new_keys).intersection(self.__storage[idx].keys)) == 0, (new_keys,
-                                                                                    self.__storage[idx].keys)
+            assert len(set(new_keys).intersection(self.__storage[idx].keys)) == 0, (
+                new_keys,
+                self.__storage[idx].keys,
+            )
             self.__storage[idx].keys += new_keys
             self.__storage[idx].seqlen = new_seqlen
 
@@ -167,7 +169,9 @@ class AsyncIOSequenceBuffer:
         self._rpc_data_keys = rpc_data_keys = list(set().union(*[rpc.input_data for rpc in rpcs]))
         # We can efficiently compute whether an RPC is ready using this mask
         self._rpc_key_mask = np.stack(
-            [np.array([k in rpc.input_data for k in rpc_data_keys], dtype=bool) for rpc in rpcs], axis=1)
+            [np.array([k in rpc.input_data for k in rpc_data_keys], dtype=bool) for rpc in rpcs],
+            axis=1,
+        )
         self._rpc_names = [rpc.name for rpc in rpcs]
 
         # The internal buffer implementation.
@@ -289,8 +293,11 @@ class AsyncIOSequenceBuffer:
 
             indices = ready_indices[:rpc.max_n_seqs]
             seqlens = seqlens[:rpc.max_n_seqs]
-            assert rpc.min_n_seqs <= len(indices) <= rpc.max_n_seqs, (rpc.min_n_seqs, len(indices),
-                                                                      rpc.max_n_seqs)
+            assert rpc.min_n_seqs <= len(indices) <= rpc.max_n_seqs, (
+                rpc.min_n_seqs,
+                len(indices),
+                rpc.max_n_seqs,
+            )
 
             self._is_idle[indices] = False
             self._is_being_read[indices] = True

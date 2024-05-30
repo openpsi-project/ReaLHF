@@ -183,7 +183,7 @@ def main_start(args):
                 use_ray_cluster=(args.mode == "ray"),
             )
 
-    timeout = None if os.getenv("REAL_TRACE", "0") == "0" else TRACE_TIMEOUT  # run 5 mins to collect trace
+    timeout = (None if os.getenv("REAL_TRACE", "0") == "0" else TRACE_TIMEOUT)  # run 5 mins to collect trace
     try:
         sched.wait(timeout=timeout)
     except (KeyboardInterrupt, sched_client.JobException, TimeoutError) as e:
@@ -222,7 +222,13 @@ def main():
     subparsers.required = True
 
     subparser = subparsers.add_parser("start", help="starts an experiment")
-    subparser.add_argument("--experiment_name", "-e", type=str, required=True, help="name of the experiment")
+    subparser.add_argument(
+        "--experiment_name",
+        "-e",
+        type=str,
+        required=True,
+        help="name of the experiment",
+    )
     subparser.add_argument(
         "--trial_name",
         "-f",
@@ -232,10 +238,12 @@ def main():
     )
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
-    subparser.add_argument("--wandb_mode",
-                           type=str,
-                           default="disabled",
-                           choices=["online", "offline", "disabled"])
+    subparser.add_argument(
+        "--wandb_mode",
+        type=str,
+        default="disabled",
+        choices=["online", "offline", "disabled"],
+    )
     subparser.add_argument(
         "--image_name",
         type=str,
@@ -244,9 +252,11 @@ def main():
         help="if specified, all workers will use this image. Useful in CI/CD pipeline.",
     )
     subparser.add_argument("--ignore_worker_error", action="store_true")
-    subparser.add_argument("--debug",
-                           action="store_true",
-                           help="If True, activate all assertions in the code.")
+    subparser.add_argument(
+        "--debug",
+        action="store_true",
+        help="If True, activate all assertions in the code.",
+    )
     subparser.add_argument(
         "--remote_reset",
         action="store_true",
@@ -256,7 +266,13 @@ def main():
     subparser.set_defaults(func=main_start)
 
     subparser = subparsers.add_parser("stop", help="stops an experiment. only slurm experiment is supported.")
-    subparser.add_argument("--experiment_name", "-e", type=str, required=True, help="name of the experiment")
+    subparser.add_argument(
+        "--experiment_name",
+        "-e",
+        type=str,
+        required=True,
+        help="name of the experiment",
+    )
     subparser.add_argument("--trial_name", "-f", type=str, required=True, help="name of the trial")
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.set_defaults(func=main_stop)

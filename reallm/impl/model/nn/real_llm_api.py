@@ -255,7 +255,7 @@ class ReaLModel(nn.Module):
         padded_batch_length = (batch_length + mp_size - 1) // mp_size * mp_size
         pad_size = padded_batch_length - batch_length
 
-        if constants.sequence_parallel() and pad_size > 0 and ys[0].packed_input_ids is not None:
+        if (constants.sequence_parallel() and pad_size > 0 and ys[0].packed_input_ids is not None):
             _cu_seqlens = x.cu_seqlens
             _max_seqlen = x.max_seqlen
             _input_ids = ys[0].packed_input_ids
@@ -292,7 +292,7 @@ class ReaLModel(nn.Module):
                 x, ys = self.__overlapped_load_forward(x, ys)
 
         # Resume from padding.
-        if constants.sequence_parallel() and pad_size > 0 and ys[0].packed_input_ids is not None:
+        if (constants.sequence_parallel() and pad_size > 0 and ys[0].packed_input_ids is not None):
             x.pp_output = x.pp_output[:-pad_size]
 
             x.pp_input = _pp_input
@@ -470,7 +470,7 @@ class ReaLModel(nn.Module):
         send_buf_specs = []
         comm_volume = torch.zeros((), dtype=torch.long, device="cuda")
         for step in rtgt.comm_plan:
-            if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
+            if (isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank()):
                 if step.rank == step.src:
                     buf = slice_intervals(
                         self.contiguous_param,
@@ -492,7 +492,7 @@ class ReaLModel(nn.Module):
                         max_interval_size=step.receiver_max_interval_size,
                     ))
 
-            if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
+            if (isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank()):
                 if step.group is not None:
                     buf = slice_intervals(
                         self.contiguous_param,
@@ -508,7 +508,7 @@ class ReaLModel(nn.Module):
                         layer_idx = int(layer_idx)
                         dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
                         recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
-                                          k).data = (dummy_tensor)
+                                          k).data = dummy_tensor
 
         # Run boradcast!
         streams = [torch.cuda.Stream() for step in rtgt.comm_plan]
@@ -516,7 +516,8 @@ class ReaLModel(nn.Module):
         recv_events = []
         for step, s in zip(rtgt.comm_plan, streams):
             with torch.cuda.stream(s):
-                if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
+                if (isinstance(step, ReparallelizeReceiverStep)
+                        and step.rank == torch.distributed.get_rank()):
                     e = torch.cuda.Event()
                     if step.rank != step.src:
                         buf = recv_buf_specs[recv_buf_cnt]["src"]
@@ -525,7 +526,7 @@ class ReaLModel(nn.Module):
                     recv_events.append(e)
                     recv_buf_cnt += 1
 
-                if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
+                if (isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank()):
                     if step.group is not None:
                         buf = send_buf_specs.pop(0)
                         torch.distributed.broadcast(buf, src=step.rank, group=step.group)

@@ -58,7 +58,11 @@ def compute_rlhf_pflops(
         hf_config = transformers.AutoConfig.from_pretrained(path)
         mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
         mconfigs[name] = mconfig
-    assert (prompt_len + gen_len) * batch_size == 2**17, (batch_size, prompt_len, gen_len)
+    assert (prompt_len + gen_len) * batch_size == 2**17, (
+        batch_size,
+        prompt_len,
+        gen_len,
+    )
     flops = 0
     flops += calculate_llama_gen_flops(
         batch_size,
@@ -105,7 +109,11 @@ def compute_rlhf_gen_pflops(
         hf_config = transformers.AutoConfig.from_pretrained(path)
         mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
         mconfigs[name] = mconfig
-    assert (prompt_len + gen_len) * batch_size == 2**17, (batch_size, prompt_len, gen_len)
+    assert (prompt_len + gen_len) * batch_size == 2**17, (
+        batch_size,
+        prompt_len,
+        gen_len,
+    )
     return (calculate_llama_gen_flops(
         batch_size,
         [prompt_len] * batch_size,
@@ -516,7 +524,10 @@ def main():
 
         ax.set_xticklabels(ax.get_xticklabels(), rotation=0, fontsize=11)
 
-    fig.suptitle("RLHF Iteration Wall-Time Breakdown for Different Actor/Crtic Sizes", fontsize=16)
+    fig.suptitle(
+        "RLHF Iteration Wall-Time Breakdown for Different Actor/Crtic Sizes",
+        fontsize=16,
+    )
 
     _keys = [
         "n_gpus",

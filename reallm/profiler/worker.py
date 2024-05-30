@@ -84,8 +84,12 @@ class ProfileWorker(worker_base.Worker):
 
         # Reveal DDP identity of this worker to world.
         # NOTE: We include master worker in the process group, so the global rank is model_worker_index + 1
-        gpu_utils.reveal_ddp_identity_single_model(self.__experiment_name, self.__trial_name, self.model_name,
-                                                   self.__worker_index)
+        gpu_utils.reveal_ddp_identity_single_model(
+            self.__experiment_name,
+            self.__trial_name,
+            self.model_name,
+            self.__worker_index,
+        )
         self.__ddp_env_resolved = False
 
         r = self.config.worker_info
@@ -160,8 +164,13 @@ class ProfileWorker(worker_base.Worker):
         self.__gpu_util_mp.start()
 
         if self.profile_communication:
-            self.__profile_comm = ProfileCommunication("comm", self.__device, self.__pg_info.local_gpu_id,
-                                                       self.__pg_info.global_rank, self.__pg_info.world_size)
+            self.__profile_comm = ProfileCommunication(
+                "comm",
+                self.__device,
+                self.__pg_info.local_gpu_id,
+                self.__pg_info.global_rank,
+                self.__pg_info.world_size,
+            )
 
         with constants.model_scope(self.model_name):
             self.__interface = model_api.make_interface(self.interface_config)
@@ -218,18 +227,27 @@ class ProfileWorker(worker_base.Worker):
 
             def trace_handler(p: torch.profiler._KinetoProfile):
                 import pickle
+
                 kernel_time = CUDAKernelTime.from_profiler(p)
                 with open(
-                        os.path.join(constants.LOG_ROOT, self.__experiment_name, self.__trial_name,
-                                     f"kernel_time{self.__worker_index}.pkl"), 'wb') as f:
+                        os.path.join(
+                            constants.LOG_ROOT,
+                            self.__experiment_name,
+                            self.__trial_name,
+                            f"kernel_time{self.__worker_index}.pkl",
+                        ),
+                        "wb",
+                ) as f:
                     pickle.dump(kernel_time, f)
 
             st = time.monotonic()
             for _ in range(self.profile_rounds):
                 rt = time.monotonic()
                 torch.cuda.synchronize()
-                with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA],
-                                            on_trace_ready=trace_handler) as p:
+                with torch.profiler.profile(
+                        activities=[torch.profiler.ProfilerActivity.CUDA],
+                        on_trace_ready=trace_handler,
+                ) as p:
                     func(self.__model, data, gen_tokens=seq_len - 128)
                 dist.barrier()
                 torch.cuda.synchronize()
@@ -263,8 +281,13 @@ class ProfileWorker(worker_base.Worker):
                         r = self.__run_model_function_call(rpc, bs, seq_len)
 
                     # dump stats
-                    with open(os.path.join(self.dump_root, f"rpc_profile_stats_{self.__worker_index}.json"),
-                              "w") as f:
+                    with open(
+                            os.path.join(
+                                self.dump_root,
+                                f"rpc_profile_stats_{self.__worker_index}.json",
+                            ),
+                            "w",
+                    ) as f:
                         json.dump(self.stats, f)
 
                 if r.batch_count > 0:

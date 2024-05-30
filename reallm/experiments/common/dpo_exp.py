@@ -28,7 +28,7 @@ class DPOConfig(Experiment):
     beta: float = 0.1
 
     def __post_init__(self):
-        assert not self.is_sft_lora and self.sft_lora_path is None, "LoRA is not supported for now."
+        assert (not self.is_sft_lora and self.sft_lora_path is None), "LoRA is not supported for now."
         self.n_actors = int(self.actor.parallel.pipeline_parallel_size *
                             self.actor.parallel.data_parallel_size * self.actor.parallel.model_parallel_size)
         self.n_refs = int(self.ref.parallel.pipeline_parallel_size * self.ref.parallel.data_parallel_size *
@@ -87,7 +87,7 @@ class DPOConfig(Experiment):
                 min_lr_ratio=self.actor.optimizer.min_lr_ratio,
                 zero_stage=(self.actor.zero_stage if self.actor.parallel.pipeline_parallel_size == 1 else min(
                     self.actor.zero_stage, 1)),
-                engine_type="pipe" if self.actor.parallel.pipeline_parallel_size > 1 else "deepspeed",
+                engine_type=("pipe" if self.actor.parallel.pipeline_parallel_size > 1 else "deepspeed"),
                 offload_optimizer_state=self.actor.optimizer.offload,
                 enable_bf16=self.actor.enable_bf16,
                 enable_fp16=self.actor.enable_fp16,
@@ -174,7 +174,12 @@ class DPOConfig(Experiment):
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=ref_interface,
             model_type=self.ref.type,
-            input_data=["packed_input_ids", "input_lens", "pos_input_lens", "prompt_lens"],
+            input_data=[
+                "packed_input_ids",
+                "input_lens",
+                "pos_input_lens",
+                "prompt_lens",
+            ],
             output_data=["seqlogp"],
             min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
             max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,

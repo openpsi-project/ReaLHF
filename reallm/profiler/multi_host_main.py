@@ -15,9 +15,7 @@ import reallm.system as system
 logger = logging.getLogger("main", "system")
 
 CONTROLLER_TIME_LIMIT = None
-TRACE_TIMEOUT = (
-    500  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
-)
+TRACE_TIMEOUT = 500  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
 
 
 def _submit_workers(

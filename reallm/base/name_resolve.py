@@ -187,7 +187,7 @@ class MemoryNameRecordRepository(NameRecordRepository):
             print(f"NameResolve: clear_subtree {name_root}")
         name_root = name_root.rstrip("/")
         for name in list(self.__store):
-            if name_root == "/" or name == name_root or name.startswith(name_root + "/"):
+            if (name_root == "/" or name == name_root or name.startswith(name_root + "/")):
                 del self.__store[name]
 
     def get(self, name):
@@ -204,7 +204,7 @@ class MemoryNameRecordRepository(NameRecordRepository):
         name_root = name_root.rstrip("/")
         rs = []
         for name, value in self.__store.items():
-            if name_root == "/" or name == name_root or name.startswith(name_root + "/"):
+            if (name_root == "/" or name == name_root or name.startswith(name_root + "/")):
                 rs.append(value)
         return rs
 
@@ -353,7 +353,7 @@ class RedisNameRecordRepository(NameRecordRepository):
 
         with self.__lock:
             keepalive_ttl = int(keepalive_ttl * 1000)
-            assert keepalive_ttl > 0, f"keepalive_ttl in milliseconds must >0: {keepalive_ttl}"
+            assert (keepalive_ttl > 0), f"keepalive_ttl in milliseconds must >0: {keepalive_ttl}"
             if self.__redis.set(name, value, px=keepalive_ttl, nx=not replace) is None:
                 raise NameEntryExistsError(f"Cannot set Redis key: K={name} V={value}")
 
@@ -428,7 +428,11 @@ class RedisNameRecordRepository(NameRecordRepository):
                     if entry.keeper is not None and entry.keeper.check():
                         r = self.__redis.set(name, entry.value, px=entry.keepalive_ttl)
                         if r is None:
-                            logger.error("Failed touching Redis key: K=%s V=%s", name, entry.value)
+                            logger.error(
+                                "Failed touching Redis key: K=%s V=%s",
+                                name,
+                                entry.value,
+                            )
 
     def __find_subtree_locked(self, name_root):
         pattern = name_root + "*"

@@ -28,7 +28,7 @@ class ParallelismConfig:
     use_sequence_parallel: bool = False
 
     def __post_init__(self):
-        if self.pipeline_parallel_size < 1 or self.data_parallel_size < 1 or self.model_parallel_size < 1:
+        if (self.pipeline_parallel_size < 1 or self.data_parallel_size < 1 or self.model_parallel_size < 1):
             raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
         if self.use_sequence_parallel and self.model_parallel_size <= 1:
             logger.warning("Sequence parallelism requires model parallelism.")
@@ -159,8 +159,7 @@ def get_real_model_config(
     is_rew_lora: bool = False,
     rew_lora_path: Optional[str] = None,
 ) -> Model:
-    """Make a configuration to build model.
-    """
+    """Make a configuration to build model."""
     model = Model(
         "real_model",
         args=dict(

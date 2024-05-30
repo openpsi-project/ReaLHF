@@ -50,9 +50,10 @@ class ControllerExitStatus(enum.Enum):
 class Controller:
 
     def __init__(self, experiment_name, trial_name, panel: worker_base.WorkerControlPanel):
-        assert "_" not in experiment_name, f"_ not allowed in experiment_name (args: -e) " \
-                                           f"{experiment_name}, use '-' instead."
-        assert "_" not in trial_name, f"_ not allowed in trial_name (args: -f) {trial_name}, use '-' instead."
+        assert "_" not in experiment_name, (f"_ not allowed in experiment_name (args: -e) "
+                                            f"{experiment_name}, use '-' instead.")
+        assert ("_"
+                not in trial_name), f"_ not allowed in trial_name (args: -f) {trial_name}, use '-' instead."
         self.experiment_name = experiment_name
         self.trial_name = trial_name
 
@@ -62,8 +63,7 @@ class Controller:
         self.json_config_file_path = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}/{self.experiment_name}_{self.trial_name}"
 
     def reconnect(self):
-        """Automatically reconnect to workers. And list all jobs to scheduler.
-        """
+        """Automatically reconnect to workers. And list all jobs to scheduler."""
         self.__control.auto_connect()
 
     def start(self, experiment: system_api.Experiment, ignore_worker_error=False):
@@ -88,33 +88,41 @@ class Controller:
         workers_configs = [(k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES]
 
         for name, config, schedule in workers_configs:
-            count = sum([s.count for s in schedule]) if isinstance(schedule, list) else schedule.count
+            count = (sum([s.count for s in schedule]) if isinstance(schedule, list) else schedule.count)
             if len(config) != count:
                 logger.error("Scheduling and config mismatch, interrupting all workers.")
                 self.interrupt()
                 raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
             logger.info(f"Configuration has {len(config)} {name}.")
 
-        name_resolve.add(names.trial_registry(self.experiment_name, self.trial_name),
-                         value=datetime.now().strftime("%Y%m%d"),
-                         delete_on_exit=False,
-                         replace=True)
-        name_resolve.add(names.worker_status(experiment_name=self.experiment_name,
-                                             trial_name=self.trial_name,
-                                             worker_name="ctl"),
-                         value="READY",
-                         delete_on_exit=True)
+        name_resolve.add(
+            names.trial_registry(self.experiment_name, self.trial_name),
+            value=datetime.now().strftime("%Y%m%d"),
+            delete_on_exit=False,
+            replace=True,
+        )
+        name_resolve.add(
+            names.worker_status(
+                experiment_name=self.experiment_name,
+                trial_name=self.trial_name,
+                worker_name="ctl",
+            ),
+            value="READY",
+            delete_on_exit=True,
+        )
 
         while True:
             try:
                 logger.info("Connecting to workers...")
-                self.__control.connect([
-                    self.__control.name(name, i) for name, cfgs, _ in workers_configs
-                    for i in range(len(cfgs))
-                ],
-                                       progress=True,
-                                       timeout=CONNECTION_RETRY_AFTER_SECONDS,
-                                       raises_timeout_error=True)
+                self.__control.connect(
+                    [
+                        self.__control.name(name, i) for name, cfgs, _ in workers_configs
+                        for i in range(len(cfgs))
+                    ],
+                    progress=True,
+                    timeout=CONNECTION_RETRY_AFTER_SECONDS,
+                    raises_timeout_error=True,
+                )
                 break
 
             except TimeoutError:
@@ -124,9 +132,11 @@ class Controller:
                 raise e
 
         name_resolve.delete(
-            names.worker_status(experiment_name=self.experiment_name,
-                                trial_name=self.trial_name,
-                                worker_name="ctl"))
+            names.worker_status(
+                experiment_name=self.experiment_name,
+                trial_name=self.trial_name,
+                worker_name="ctl",
+            ))
 
         # Configure workers.
         try:
@@ -136,7 +146,8 @@ class Controller:
                     "configure",
                     worker_names=[self.__control.name(name, i) for i in range(len(cfgs))],
                     worker_kwargs=[dict(config=cfg) for cfg in cfgs],
-                    progress=True)
+                    progress=True,
+                )
         except Exception as e:
             logger.error(f"Configuring Failed: {e}. Exiting Workers.")
             logger.error(traceback.format_exc())
@@ -147,7 +158,11 @@ class Controller:
         self.__control.group_request("start")
         logger.info("Started.")
         try:
-            self.wait(timeout=None, check_status=check_worker_status, remove_status=remove_worker_status)
+            self.wait(
+                timeout=None,
+                check_status=check_worker_status,
+                remove_status=remove_worker_status,
+            )
         except worker_base.WorkerException as e:
             logger.error(e)
             self.interrupt(wait_timeout=30)
@@ -155,7 +170,12 @@ class Controller:
             logger.info("Interrupted.")
             self.interrupt(wait_timeout=30)
 
-    def wait(self, timeout: Optional[int], check_status: Tuple[Wss, ...], remove_status: Tuple[Wss, ...]):
+    def wait(
+        self,
+        timeout: Optional[int],
+        check_status: Tuple[Wss, ...],
+        remove_status: Tuple[Wss, ...],
+    ):
         deadline = None if timeout is None else time.time() + timeout
         left = set(self.__control.worker_names)
         num_jobs_left = len(left)
@@ -197,14 +217,15 @@ class Controller:
         raise NotImplementedError()
 
     def interrupt(self, wait_timeout=120):
-        """Interrupt the experiment.
-        """
+        """Interrupt the experiment."""
         logger.info("Interrupting experiment")
         self.__control.group_request("interrupt", wait_response=False)
         try:
-            self.wait(timeout=wait_timeout,
-                      check_status=(),
-                      remove_status=(Wss.ERROR, Wss.LOST, Wss.COMPLETED, Wss.INTERRUPTED))
+            self.wait(
+                timeout=wait_timeout,
+                check_status=(),
+                remove_status=(Wss.ERROR, Wss.LOST, Wss.COMPLETED, Wss.INTERRUPTED),
+            )
         except TimeoutError:
             raise RuntimeError(f"Fail to interrupt workers, timeout={wait_timeout}.")
 
@@ -212,7 +233,7 @@ class Controller:
 def run_ray_worker(worker_type, idx, experiment_name, trial_name, comm: Tuple[rq.Queue, rq.Queue]):
     worker_name = f"{worker_type}/{idx}"
     server = worker_control.make_server(
-        'ray',
+        "ray",
         worker_name=worker_name,
         experiment_name=experiment_name,
         trial_name=trial_name,
@@ -229,7 +250,7 @@ def run_ray_worker(worker_type, idx, experiment_name, trial_name, comm: Tuple[rq
 
 class RayController:
     """A controller that uses Ray to manage workers.
-    
+
     It uses the basic Controller to configure workers.
     Besides, it launchs all remote workers using Ray,
     instead of submitting them to the scheduelr.
@@ -306,23 +327,29 @@ class RayController:
             ray.init()
         else:
             for name, config, schedule in workers_configs:
-                count = sum([s.count for s in schedule]) if isinstance(schedule, list) else schedule.count
+                count = (sum([s.count for s in schedule]) if isinstance(schedule, list) else schedule.count)
                 if len(config) != count:
                     logger.error("Scheduling and config mismatch, interrupting all workers.")
                     raise IndexError(f"Configuration has {len(config)} {name}, {count} scheduled.")
                 for idx in range(count):
                     try:
-                        name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
-                                                            f"{name}/{idx}"),
-                                          timeout=300)
+                        name_resolve.wait(
+                            names.ray_cluster(
+                                self.__experiment_name,
+                                self.__trial_name,
+                                f"{name}/{idx}",
+                            ),
+                            timeout=300,
+                        )
                     except TimeoutError:
                         raise RuntimeError(f"Timeout waiting for Ray cluster node {name}/{idx} to start.")
             logger.info("Ray cluster started.")
 
             try:
-                ray_head_addr = name_resolve.wait(names.ray_cluster(self.__experiment_name, self.__trial_name,
-                                                                    "address"),
-                                                  timeout=300)
+                ray_head_addr = name_resolve.wait(
+                    names.ray_cluster(self.__experiment_name, self.__trial_name, "address"),
+                    timeout=300,
+                )
             except TimeoutError:
                 raise RuntimeError("Timeout waiting for ray cluster head address.")
             ray.init(address=ray_head_addr)

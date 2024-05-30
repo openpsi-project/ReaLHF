@@ -12,6 +12,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=8 --module \
 ```
 
 """
+
 import os
 import time
 
@@ -92,7 +93,13 @@ def main(rank: int = None, world_size: int = None):
     for _ in range(5):
         if sequence_parallel:
             assert batch_size % NUM_MP == 0
-            x = torch.randn(batch_size // NUM_MP, hidden_dim, dtype=dtype, device=device, requires_grad=True)
+            x = torch.randn(
+                batch_size // NUM_MP,
+                hidden_dim,
+                dtype=dtype,
+                device=device,
+                requires_grad=True,
+            )
         else:
             x = torch.randn(batch_size, hidden_dim, dtype=dtype, device=device, requires_grad=False)
             torch.distributed.all_reduce(x)
@@ -168,9 +175,9 @@ def main(rank: int = None, world_size: int = None):
             (grad_x1 - grad_x2).abs().max(),
         )
         if q_attn.bias is not None:
-            assert torch.allclose(grad_qb1, grad_qb2, atol=2e-2), (grad_qb1 - grad_qb2).abs().max()
+            assert torch.allclose(grad_qb1, grad_qb2, atol=2e-2), ((grad_qb1 - grad_qb2).abs().max())
         if kv_attn.bias is not None:
-            assert torch.allclose(grad_kvb1, grad_kvb2, atol=2e-2), (grad_kvb1 - grad_kvb2).abs().max()
+            assert torch.allclose(grad_kvb1, grad_kvb2, atol=2e-2), ((grad_kvb1 - grad_kvb2).abs().max())
     if torch.distributed.get_rank() == 0:
         print("success")
 

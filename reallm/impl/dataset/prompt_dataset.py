@@ -8,7 +8,7 @@ import torch.utils.data
 from reallm.api.core import data_api
 from reallm.base import logging, namedarray
 
-logger = logging.getLogger("Packed Prompt Dataset")
+logger = logging.getLogger("Prompt Dataset")
 
 
 class PromptDataset(torch.utils.data.Dataset):

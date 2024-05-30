@@ -81,7 +81,13 @@ class WorkerServer:
         client.request('foo', x=42, y='str') # foo(x=42, y='str') will be called on the server side.
     """
 
-    def __init__(self, worker_name, experiment_name, trial_name, task_queue: WorkerServerTaskQueue):
+    def __init__(
+        self,
+        worker_name,
+        experiment_name,
+        trial_name,
+        task_queue: WorkerServerTaskQueue,
+    ):
         """Specifies the name of the worker that WorkerControlPanel can used to find and manage.
         Args:
             worker_name: Typically "<worker_type>/<worker_index>".
@@ -176,12 +182,14 @@ class WorkerControlPanelRequester:
         def result(self, timeout=None):
             raise NotImplementedError()
 
-    def async_request(self,
-                      worker_name: str,
-                      address: str,
-                      command: str,
-                      wait_for_response: bool = True,
-                      **kwargs) -> Future:
+    def async_request(
+        self,
+        worker_name: str,
+        address: str,
+        command: str,
+        wait_for_response: bool = True,
+        **kwargs,
+    ) -> Future:
         raise NotImplementedError()
 
 
@@ -279,9 +287,10 @@ class WorkerControlPanel:
                 if timeout is not None:
                     timeout = max(0, deadline - time.monotonic())
                 self.__logger.info(f"Connecting to worker {name}, timeout {timeout}")
-                server_address = name_resolve.wait(names.worker(self.__experiment_name, self.__trial_name,
-                                                                name),
-                                                   timeout=timeout)
+                server_address = name_resolve.wait(
+                    names.worker(self.__experiment_name, self.__trial_name, name),
+                    timeout=timeout,
+                )
                 self.__logger.info(f"Connecting to worker {name} done")
             except TimeoutError as e:
                 if raises_timeout_error:
@@ -495,15 +504,22 @@ class Worker:
         self.__worker_info = r
         self.__worker_type = r.worker_type
         self.__worker_index = r.worker_index
-        self.logger = logging.getLogger(r.worker_type + "-worker", 'colored')
+        self.logger = logging.getLogger(r.worker_type + "-worker", "colored")
         if r.host_key is not None:
             self.__host_key(
-                names.worker_key(experiment_name=r.experiment_name, trial_name=r.trial_name, key=r.host_key))
+                names.worker_key(
+                    experiment_name=r.experiment_name,
+                    trial_name=r.trial_name,
+                    key=r.host_key,
+                ))
         if r.watch_keys is not None:
             keys = [r.watch_keys] if isinstance(r.watch_keys, str) else r.watch_keys
             self.__watch_keys([
-                names.worker_key(experiment_name=r.experiment_name, trial_name=r.trial_name, key=k)
-                for k in keys
+                names.worker_key(
+                    experiment_name=r.experiment_name,
+                    trial_name=r.trial_name,
+                    key=k,
+                ) for k in keys
             ])
 
         self._tracer_output_file = os.path.join(
@@ -552,6 +568,7 @@ class Worker:
     def exit(self):
         self.logger.info("Exiting worker")
         import torch.distributed as dist
+
         if dist.is_initialized():
             dist.destroy_process_group()
         self.__set_status(WorkerServerStatus.COMPLETED)
@@ -560,9 +577,11 @@ class Worker:
     def interrupt(self):
         self.logger.info("Worker interrupted by remote control.")
         self.__set_status(WorkerServerStatus.INTERRUPTED)
-        raise WorkerException(worker_name="worker",
-                              worker_status=WorkerServerStatus.INTERRUPTED,
-                              scenario="running")
+        raise WorkerException(
+            worker_name="worker",
+            worker_status=WorkerServerStatus.INTERRUPTED,
+            scenario="running",
+        )
 
     @property
     def tracer(self):
@@ -599,7 +618,7 @@ class Worker:
                     pass
                 else:
                     now = time.monotonic_ns()
-                    if self.__last_update_ns is not None:  # Update new stats with 10 seconds frequency.
+                    if (self.__last_update_ns is not None):  # Update new stats with 10 seconds frequency.
                         if (now - self.__last_update_ns) / 1e9 >= 10:
                             duration = (time.monotonic_ns() - self._start_time_ns) / 1e9
                             self.__last_update_ns = now
@@ -630,12 +649,14 @@ class MappingThread:
     A mapping thread gets from up_stream_queue, process data, and puts to down_stream_queue.
     """
 
-    def __init__(self,
-                 map_fn,
-                 interrupt_flag,
-                 upstream_queue,
-                 downstream_queue: queue.Queue = None,
-                 cuda_device=None):
+    def __init__(
+        self,
+        map_fn,
+        interrupt_flag,
+        upstream_queue,
+        downstream_queue: queue.Queue = None,
+        cuda_device=None,
+    ):
         """Init method of MappingThread for Policy Workers.
 
         Args:

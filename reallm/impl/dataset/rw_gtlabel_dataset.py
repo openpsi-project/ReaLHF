@@ -18,7 +18,7 @@ class RewardModelingGTLabelDataset(torch.utils.data.Dataset):
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
     ):
         """Dataset used for reward modeling. Each sample consists of a prompt, several answers, and corresponding labels.
-        
+
         Basically a dataset for binary classification. Labels are lists of 0 (incorrect) or 1 (correct).
 
         Args:
@@ -39,10 +39,10 @@ class RewardModelingGTLabelDataset(torch.utils.data.Dataset):
 
         if dataset_path is not None:
             if dataset_path.endswith(".jsonl"):
-                with open(dataset_path, 'r') as f:
+                with open(dataset_path, "r") as f:
                     data = [json.loads(ff) for ff in f]
             elif dataset_path.endswith(".json"):
-                with open(dataset_path, 'r') as f:
+                with open(dataset_path, "r") as f:
                     data = json.load(f)
             else:
                 raise NotImplementedError(f"Unkown dataset extension: {dataset_path}")
@@ -55,9 +55,9 @@ class RewardModelingGTLabelDataset(torch.utils.data.Dataset):
         subset_indices = shuffle_indices[ddp_rank * datasize_per_rank:(ddp_rank + 1) * datasize_per_rank]
         data: List[Dict[str, str]] = [data[i] for i in subset_indices]
 
-        self.prompts = [x['prompt'] for x in data]
-        answers = [[x['prompt'] + c + tokenizer.eos_token for c in x['answers']] for x in data]
-        self.labels = labels = [x['labels'] for x in data]
+        self.prompts = [x["prompt"] for x in data]
+        answers = [[x["prompt"] + c + tokenizer.eos_token for c in x["answers"]] for x in data]
+        self.labels = labels = [x["labels"] for x in data]
 
         for a, b in zip(answers, labels):
             if len(a) != len(b):
@@ -67,11 +67,13 @@ class RewardModelingGTLabelDataset(torch.utils.data.Dataset):
 
         group_sizes = [len(x) for x in labels]
 
-        _answer_tokens = tokenizer(list(itertools.chain.from_iterable(answers)),
-                                   max_length=max_seq_len,
-                                   padding="max_length",
-                                   truncation=True,
-                                   return_tensors="pt")
+        _answer_tokens = tokenizer(
+            list(itertools.chain.from_iterable(answers)),
+            max_length=max_seq_len,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
         answer_tokens = []
         offset = 0
         for g in group_sizes:

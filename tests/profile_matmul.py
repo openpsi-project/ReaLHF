@@ -1,4 +1,5 @@
 """Profile peak TFLOPS on matrix multiplications."""
+
 import time
 
 import cupy as cp
@@ -65,5 +66,14 @@ ks = [4096]
 ms = [4096]
 
 for n, k, m in itertools.product(ns, ks, ms):
-    for init_method in ["nans", "full", "zeros", "ones", "randn", "uniform", "uniform+", "ones+randn"]:
+    for init_method in [
+            "nans",
+            "full",
+            "zeros",
+            "ones",
+            "randn",
+            "uniform",
+            "uniform+",
+            "ones+randn",
+    ]:
         benchmark(n, k, m, "float16", init_method)

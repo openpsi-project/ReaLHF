@@ -46,10 +46,10 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
 
         if dataset_path is not None:
             if dataset_path.endswith(".jsonl"):
-                with open(dataset_path, 'r') as f:
+                with open(dataset_path, "r") as f:
                     data = [json.loads(ff) for ff in f]
             elif dataset_path.endswith(".json"):
-                with open(dataset_path, 'r') as f:
+                with open(dataset_path, "r") as f:
                     data = json.load(f)
             else:
                 raise NotImplementedError(f"Unkown dataset extension: {dataset_path}")
@@ -60,25 +60,25 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
         shuffle_indices = data_api.get_shuffle_indices(util.seed, len(data))
         data = [data[i] for i in shuffle_indices]
         for x in data:
-            for pa, na in zip(x['pos_answers'], x['neg_answers']):
-                if pa.startswith(x['prompt']) or na.startswith(x['prompt']):
+            for pa, na in zip(x["pos_answers"], x["neg_answers"]):
+                if pa.startswith(x["prompt"]) or na.startswith(x["prompt"]):
                     raise ValueError("Answers should not start with prompt.")
 
-        prompts = [x['prompt'] for x in data]
+        prompts = [x["prompt"] for x in data]
         if max_pairs_per_prompt is not None:
             pos_answers = [[
-                x['prompt'] + c + tokenizer.eos_token
-                for c in (self.rng.choice(x['pos_answers'], max_pairs_per_prompt, replace=False)
-                          if max_pairs_per_prompt < len(x['pos_answers']) else x['pos_answers'])
+                x["prompt"] + c + tokenizer.eos_token
+                for c in (self.rng.choice(x["pos_answers"], max_pairs_per_prompt, replace=False)
+                          if max_pairs_per_prompt < len(x["pos_answers"]) else x["pos_answers"])
             ] for x in data]
             neg_answers = [[
-                x['prompt'] + c + tokenizer.eos_token
-                for c in (self.rng.choice(x['neg_answers'], max_pairs_per_prompt, replace=False)
-                          if max_pairs_per_prompt < len(x['neg_answers']) else x['neg_answers'])
+                x["prompt"] + c + tokenizer.eos_token
+                for c in (self.rng.choice(x["neg_answers"], max_pairs_per_prompt, replace=False)
+                          if max_pairs_per_prompt < len(x["neg_answers"]) else x["neg_answers"])
             ] for x in data]
         else:
-            pos_answers = [[x['prompt'] + c + tokenizer.eos_token for c in x['pos_answers']] for x in data]
-            neg_answers = [[x['prompt'] + c + tokenizer.eos_token for c in x['neg_answers']] for x in data]
+            pos_answers = [[x["prompt"] + c + tokenizer.eos_token for c in x["pos_answers"]] for x in data]
+            neg_answers = [[x["prompt"] + c + tokenizer.eos_token for c in x["neg_answers"]] for x in data]
 
         for a, b in zip(pos_answers, neg_answers):
             if len(a) != len(b):
@@ -96,7 +96,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
             padding=False,
             truncation=True,
         )
-        prompt_lens = _prompt_tokens['length']
+        prompt_lens = _prompt_tokens["length"]
 
         _answer_tokens = tokenizer(
             list(itertools.chain.from_iterable(pos_answers + neg_answers)),
@@ -119,7 +119,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
             offset += g
 
         group_token_lengths = [
-            sum(x['length']) + sum(y['length']) for x, y in zip(pos_answer_tokens, neg_answer_tokens)
+            sum(x["length"]) + sum(y["length"]) for x, y in zip(pos_answer_tokens, neg_answer_tokens)
         ]
 
         start, end = min_abs_diff_partition(group_token_lengths, util.world_size)[util.ddp_rank]
@@ -129,7 +129,7 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
         self.prompt_lens = prompt_lens[start:end]
         self.group_sizes = group_sizes[start:end]
         self.group_posneg_seqlens = [
-            sum(x['length']) + sum(y['length'])
+            sum(x["length"]) + sum(y["length"])
             for x, y in zip(self.pos_answer_tokens, self.neg_answer_tokens)
         ]
 
@@ -142,8 +142,10 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.group_posneg_seqlens),
                                                         self.n_tokens_per_batch)
         self.__batch_indices = list(
-            filter(lambda x: sum([self.group_sizes[j] for j in x]) >= self.min_seq_pairs_per_batch,
-                   self.__batch_indices))
+            filter(
+                lambda x: sum([self.group_sizes[j] for j in x]) >= self.min_seq_pairs_per_batch,
+                self.__batch_indices,
+            ))
         tokens_in_batches = sum(
             [sum([self.group_posneg_seqlens[j] for j in x]) for x in self.__batch_indices])
         tokens_in_dataset = sum(self.group_posneg_seqlens)
@@ -161,7 +163,9 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
 
     def _shuffle(self):
         shuffle_indices = data_api.get_shuffle_indices(
-            self.util.seed + self.shuffle_cnt * 7 + self.util.ddp_rank * 3, len(self.group_posneg_seqlens))
+            self.util.seed + self.shuffle_cnt * 7 + self.util.ddp_rank * 3,
+            len(self.group_posneg_seqlens),
+        )
         self.pos_answer_tokens = [self.pos_answer_tokens[i] for i in shuffle_indices]
         self.neg_answer_tokens = [self.neg_answer_tokens[i] for i in shuffle_indices]
         self.group_posneg_seqlens = [self.group_posneg_seqlens[i] for i in shuffle_indices]
@@ -175,8 +179,8 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
     def __iter__(self):
         for indices in self.__batch_indices:
             prompt_lens = [self.prompt_lens[i] for i in indices]
-            group_pos_answers = [self.pos_answer_tokens[i]['input_ids'] for i in indices]
-            group_neg_answers = [self.neg_answer_tokens[i]['input_ids'] for i in indices]
+            group_pos_answers = [self.pos_answer_tokens[i]["input_ids"] for i in indices]
+            group_neg_answers = [self.neg_answer_tokens[i]["input_ids"] for i in indices]
             pos_answers = list(itertools.chain.from_iterable(group_pos_answers))
             neg_answers = list(itertools.chain.from_iterable(group_neg_answers))
             seqlens = [len(x) + len(y) for x, y in zip(pos_answers, neg_answers)]
@@ -187,21 +191,34 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
             for pa, na, g in zip(group_pos_answers, group_neg_answers, group_sizes):
                 assert len(pa) == len(na) == g, (len(pa), len(na), g)
             total_seqlen = sum(seqlens)
-            assert total_seqlen <= self.n_tokens_per_batch, (total_seqlen, self.n_tokens_per_batch)
+            assert total_seqlen <= self.n_tokens_per_batch, (
+                total_seqlen,
+                self.n_tokens_per_batch,
+            )
 
             packed_input_ids = torch.cat(
                 [torch.tensor(p) for p in itertools.chain.from_iterable(zip(pos_answers, neg_answers))])
-            group_factor = torch.tensor(list(
-                itertools.chain.from_iterable([[1 / g for _ in range(g)] for g in group_sizes])),
-                                        dtype=torch.float32)
-            prompt_lens = torch.tensor(list(
-                itertools.chain.from_iterable([[x for _ in range(g)]
-                                               for x, g in zip(prompt_lens, group_sizes)])),
-                                       dtype=torch.int32)
+            group_factor = torch.tensor(
+                list(itertools.chain.from_iterable([[1 / g for _ in range(g)] for g in group_sizes])),
+                dtype=torch.float32,
+            )
+            prompt_lens = torch.tensor(
+                list(
+                    itertools.chain.from_iterable([[x for _ in range(g)]
+                                                   for x, g in zip(prompt_lens, group_sizes)])),
+                dtype=torch.int32,
+            )
 
             assert len(seqlens) >= self.min_seq_pairs_per_batch
-            assert prompt_lens.shape[0] == len(seqlens), (prompt_lens.shape[0], len(seqlens), len(indices))
-            assert packed_input_ids.shape[0] == sum(seqlens), (packed_input_ids.shape[0], sum(seqlens))
+            assert prompt_lens.shape[0] == len(seqlens), (
+                prompt_lens.shape[0],
+                len(seqlens),
+                len(indices),
+            )
+            assert packed_input_ids.shape[0] == sum(seqlens), (
+                packed_input_ids.shape[0],
+                sum(seqlens),
+            )
             yield dict(
                 packed_input_ids=packed_input_ids,
                 input_lens=torch.tensor(seqlens, dtype=torch.int32),
@@ -213,8 +230,10 @@ class RewardModelingPackedPairedDataset(torch.utils.data.IterableDataset):
         self.__batch_indices = ffd_with_result_unsorted(np.array(self.group_posneg_seqlens),
                                                         self.n_tokens_per_batch)
         self.__batch_indices = list(
-            filter(lambda x: sum([self.group_sizes[j] for j in x]) >= self.min_seq_pairs_per_batch,
-                   self.__batch_indices))
+            filter(
+                lambda x: sum([self.group_sizes[j] for j in x]) >= self.min_seq_pairs_per_batch,
+                self.__batch_indices,
+            ))
         tokens_in_batches = sum(
             [sum([self.group_posneg_seqlens[j] for j in x]) for x in self.__batch_indices])
         tokens_in_dataset = sum(self.group_posneg_seqlens)
@@ -236,7 +255,7 @@ if __name__ != "__main__":
 else:
     import transformers
 
-    from reallm.base.dataparallel import PackedParallelDataBroker
+    from reallm.base.dataparallel import ParallelDataBroker
     from reallm.base.namedarray import from_dict
 
     def have_common_prefix_at_least(a, b, n):
@@ -262,16 +281,18 @@ else:
     for _ in range(10):
         print("dataset iteration")
         for x in dataloader:
-            datas = PackedParallelDataBroker.scatter_to(from_dict(x), n_dp)
+            datas = ParallelDataBroker.scatter_to(from_dict(x), n_dp)
             for data in datas:
-                assert data['packed_input_ids'].shape[0] == sum(
-                    data['input_lens']), (data['packed_input_ids'].shape[0], sum(data['input_lens']))
+                assert data["packed_input_ids"].shape[0] == sum(data["input_lens"]), (
+                    data["packed_input_ids"].shape[0],
+                    sum(data["input_lens"]),
+                )
                 offset = 0
-                for i in range(len(data['input_lens'])):
-                    len1 = data['pos_input_lens'][i]
-                    len2 = data['input_lens'][i] - len1
-                    a = data['packed_input_ids'][offset:offset + len1]
-                    b = data['packed_input_ids'][offset + len1:offset + len1 + len2]
+                for i in range(len(data["input_lens"])):
+                    len1 = data["pos_input_lens"][i]
+                    len2 = data["input_lens"][i] - len1
+                    a = data["packed_input_ids"][offset:offset + len1]
+                    b = data["packed_input_ids"][offset + len1:offset + len1 + len2]
                     assert have_common_prefix_at_least(a, b, 8), (a, b)
                     offset += len1 + len2
             continue

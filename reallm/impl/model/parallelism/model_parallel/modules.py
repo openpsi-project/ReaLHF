@@ -78,9 +78,12 @@ class ParallelEmbedding(torch.nn.Module):
         self._weight = None
         self.tensor_model_parallel_size = constants.model_parallel_world_size()
         # Divide the weight matrix along the vocaburaly dimension.
-        self.vocab_start_index, self.vocab_end_index = VocabUtility.vocab_range_from_global_vocab_size(
-            self.num_embeddings, constants.model_parallel_rank(), self.tensor_model_parallel_size)
-        self.num_embeddings_per_partition = self.vocab_end_index - self.vocab_start_index
+        self.vocab_start_index, self.vocab_end_index = (VocabUtility.vocab_range_from_global_vocab_size(
+            self.num_embeddings,
+            constants.model_parallel_rank(),
+            self.tensor_model_parallel_size,
+        ))
+        self.num_embeddings_per_partition = (self.vocab_end_index - self.vocab_start_index)
 
         logger.debug(
             f"ParallelEmbedding: num_embeddings={num_embeddings}, per_partition={self.num_embeddings_per_partition}, embedding_dim={embedding_dim},"
@@ -88,7 +91,12 @@ class ParallelEmbedding(torch.nn.Module):
         )
         # Allocate weights and initialize.
         self.weight = Parameter(
-            torch.empty(self.num_embeddings_per_partition, self.embedding_dim, device=device, dtype=dtype))
+            torch.empty(
+                self.num_embeddings_per_partition,
+                self.embedding_dim,
+                device=device,
+                dtype=dtype,
+            ))
         if perform_initialization:
             _initialize_affine_weight_gpu(self.weight, init_method, partition_dim=0, stride=1)
 
@@ -253,10 +261,12 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
             dim_size[0] = dim_size[0] * world_size
 
             all_gather_buffer = constants.get_global_memory_buffer().get_tensor(dim_size, input.dtype, "mpu")
-            handle = torch.distributed._all_gather_base(all_gather_buffer,
-                                                        input,
-                                                        group=constants.model_parallel_group(),
-                                                        async_op=True)
+            handle = torch.distributed._all_gather_base(
+                all_gather_buffer,
+                input,
+                group=constants.model_parallel_group(),
+                async_op=True,
+            )
 
             # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
             # gather is scheduled before the input gradient computation
@@ -288,15 +298,19 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
         if ctx.sequence_parallel:
             assert not ctx.async_grad_allreduce
             dim_size = list(input.size())
-            sub_grad_input = torch.empty(dim_size,
-                                         dtype=input.dtype,
-                                         device=torch.cuda.current_device(),
-                                         requires_grad=False)
+            sub_grad_input = torch.empty(
+                dim_size,
+                dtype=input.dtype,
+                device=torch.cuda.current_device(),
+                requires_grad=False,
+            )
             # reduce_scatter
-            handle = torch.distributed._reduce_scatter_base(sub_grad_input,
-                                                            grad_input,
-                                                            group=constants.model_parallel_group(),
-                                                            async_op=True)
+            handle = torch.distributed._reduce_scatter_base(
+                sub_grad_input,
+                grad_input,
+                group=constants.model_parallel_group(),
+                async_op=True,
+            )
             # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
             # reduce scatter is scheduled before the weight gradient computation
 
@@ -439,8 +453,15 @@ class MergedLinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Funct
 
     @staticmethod
     @custom_fwd
-    def forward(ctx, input, gradient_accumulation_fusion, async_grad_allreduce, sequence_parallel,
-                is_w_parallel, *wbs):
+    def forward(
+        ctx,
+        input,
+        gradient_accumulation_fusion,
+        async_grad_allreduce,
+        sequence_parallel,
+        is_w_parallel,
+        *wbs,
+    ):
         # disable sequence parallel for now for it requires a global buffer
         assert len(wbs) % 2 == 0
         weights = wbs[::2]
@@ -492,10 +513,12 @@ class MergedLinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Funct
             dim_size[0] = dim_size[0] * world_size
 
             all_gather_buffer = constants.get_global_memory_buffer().get_tensor(dim_size, input.dtype, "mpu")
-            handle = torch.distributed._all_gather_base(all_gather_buffer,
-                                                        input,
-                                                        group=constants.model_parallel_group(),
-                                                        async_op=True)
+            handle = torch.distributed._all_gather_base(
+                all_gather_buffer,
+                input,
+                group=constants.model_parallel_group(),
+                async_op=True,
+            )
 
             # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
             # gather is scheduled before the input gradient computation
@@ -530,15 +553,19 @@ class MergedLinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Funct
         if ctx.sequence_parallel:
             assert not ctx.async_grad_allreduce
             dim_size = list(input.size())
-            sub_grad_input = torch.empty(dim_size,
-                                         dtype=input.dtype,
-                                         device=torch.cuda.current_device(),
-                                         requires_grad=False)
+            sub_grad_input = torch.empty(
+                dim_size,
+                dtype=input.dtype,
+                device=torch.cuda.current_device(),
+                requires_grad=False,
+            )
             # reduce_scatter
-            handle = torch.distributed._reduce_scatter_base(sub_grad_input,
-                                                            grad_input,
-                                                            group=constants.model_parallel_group(),
-                                                            async_op=True)
+            handle = torch.distributed._reduce_scatter_base(
+                sub_grad_input,
+                grad_input,
+                group=constants.model_parallel_group(),
+                async_op=True,
+            )
             # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
             # reduce scatter is scheduled before the weight gradient computation
 
@@ -584,12 +611,26 @@ class MergedLinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Funct
 
         if ctx.sequence_parallel:
             handle.wait()
-            return sub_grad_input, None, None, None, None, *list(itertools.chain.from_iterable(zip(gws, gbs)))
+            return (
+                sub_grad_input,
+                None,
+                None,
+                None,
+                None,
+                *list(itertools.chain.from_iterable(zip(gws, gbs))),
+            )
 
         if ctx.async_grad_allreduce:
             handle.wait()
 
-        return grad_input, None, None, None, None, *list(itertools.chain.from_iterable(zip(gws, gbs)))
+        return (
+            grad_input,
+            None,
+            None,
+            None,
+            None,
+            *list(itertools.chain.from_iterable(zip(gws, gbs))),
+        )
 
 
 def merged_linear_with_grad_accumulation_and_async_allreduce(
@@ -696,7 +737,12 @@ class ColumnParallelLinear(torch.nn.Module):
         #     f"ColumnLinear: input_size={input_size}, output_size={output_size}, output_size_per_partition={self.output_size_per_partition}"
         # )
         self.weight = Parameter(
-            torch.empty(self.output_size_per_partition, self.input_size, device=device, dtype=dtype))
+            torch.empty(
+                self.output_size_per_partition,
+                self.input_size,
+                device=device,
+                dtype=dtype,
+            ))
         if perform_initialization:
             _initialize_affine_weight_gpu(self.weight, init_method, partition_dim=0, stride=stride)
 
@@ -709,7 +755,8 @@ class ColumnParallelLinear(torch.nn.Module):
         else:
             self.register_parameter("bias", None)
 
-        self.async_tensor_model_parallel_allreduce = async_tensor_model_parallel_allreduce and world_size > 1
+        self.async_tensor_model_parallel_allreduce = (async_tensor_model_parallel_allreduce
+                                                      and world_size > 1)
 
         if gradient_accumulation_fusion:
             if not _grad_accum_fusion_available:
@@ -834,7 +881,12 @@ class RowParallelLinear(torch.nn.Module):
         # we allocate the transpose.
         # Initialize weight.
         self.weight = Parameter(
-            torch.empty(self.output_size, self.input_size_per_partition, device=device, dtype=dtype))
+            torch.empty(
+                self.output_size,
+                self.input_size_per_partition,
+                device=device,
+                dtype=dtype,
+            ))
         if perform_initialization:
             _initialize_affine_weight_gpu(self.weight, init_method, partition_dim=1, stride=stride)
         if bias:
@@ -929,9 +981,11 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
     def forward(ctx, vocab_parallel_logits, target, label_smoothing=0.0):
         # Maximum value along vocab dimension across all GPUs.
         logits_max = torch.max(vocab_parallel_logits, dim=-1)[0]
-        torch.distributed.all_reduce(logits_max,
-                                     op=torch.distributed.ReduceOp.MAX,
-                                     group=constants.model_parallel_group())
+        torch.distributed.all_reduce(
+            logits_max,
+            op=torch.distributed.ReduceOp.MAX,
+            group=constants.model_parallel_group(),
+        )
         # Subtract the maximum value.
         vocab_parallel_logits = vocab_parallel_logits - logits_max.unsqueeze(dim=-1)
 

@@ -165,11 +165,13 @@ def clear_name_resolve(expr_name=None, trial_name=None):
     name_resolve.clear_subtree(names.trial_root(experiment_name=expr_name, trial_name=trial_name))
 
 
-def make_finetune_spec(bs_per_device,
-                       total_train_epochs=1,
-                       total_train_steps=10,
-                       steps_per_epoch=10,
-                       max_seq_len=1024):
+def make_finetune_spec(
+    bs_per_device,
+    total_train_epochs=1,
+    total_train_steps=10,
+    steps_per_epoch=10,
+    max_seq_len=1024,
+):
     import reallm.api.core.model_api as model_api
 
     finetune_spec = model_api.FinetuneSpec(
@@ -285,7 +287,10 @@ def get_pytorch_profiler(save_fn: str):
         p.export_chrome_trace(save_fn)
 
     return torch.profiler.profile(
-        activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
         record_shapes=True,
         profile_memory=True,
         with_stack=True,

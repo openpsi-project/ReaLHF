@@ -29,7 +29,7 @@ def get_topo(
 
 
 def get_world_size(parallel: ParallelismConfig) -> int:
-    return parallel.model_parallel_size * parallel.pipeline_parallel_size * parallel.data_parallel_size
+    return (parallel.model_parallel_size * parallel.pipeline_parallel_size * parallel.data_parallel_size)
 
 
 @dataclasses.dataclass
@@ -496,6 +496,13 @@ class PPOConfig(Experiment):
         )
         return ExperimentConfig(
             exp_ctrl=exp_ctrl,
-            model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
+            model_rpcs=[
+                rollout,
+                inf_ref_logits,
+                inf_reward,
+                inf_values,
+                train_actor,
+                train_critic,
+            ],
             model_worker=model_worker,
         )

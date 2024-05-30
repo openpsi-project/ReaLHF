@@ -34,14 +34,30 @@ def optimal_device_mapping(
     top_k: int = 10,
 ) -> Dict[str, RPCAllocation]:
     from_file = os.environ["IS_REMOTE"] == "1"
-    dump_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
-                            "device_mapping.pkl")
-    log_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
-                           "device_mapping")
-    rs_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
-                          "raw_search_result")
-    rpc_exe_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
-                               "rpc_exe_info")
+    dump_dir = os.path.join(
+        constants.LOG_ROOT,
+        constants.experiment_name(),
+        constants.trial_name(),
+        "device_mapping.pkl",
+    )
+    log_dir = os.path.join(
+        constants.LOG_ROOT,
+        constants.experiment_name(),
+        constants.trial_name(),
+        "device_mapping",
+    )
+    rs_dir = os.path.join(
+        constants.LOG_ROOT,
+        constants.experiment_name(),
+        constants.trial_name(),
+        "raw_search_result",
+    )
+    rpc_exe_dir = os.path.join(
+        constants.LOG_ROOT,
+        constants.experiment_name(),
+        constants.trial_name(),
+        "rpc_exe_info",
+    )
 
     if from_file:
         with open(dump_dir, "rb") as f:
@@ -66,11 +82,13 @@ def optimal_device_mapping(
 
     search_device_mesh = make_device_mesh_from_name(nodelist)
 
-    rpc_exe_list = make_rpc_exe_list(model_rpcs,
-                                     search_device_mesh,
-                                     num_gen_tokens=num_gen_tokens,
-                                     n_ppo_minibatches=n_ppo_minibatches,
-                                     log_dir=rpc_exe_dir)
+    rpc_exe_list = make_rpc_exe_list(
+        model_rpcs,
+        search_device_mesh,
+        num_gen_tokens=num_gen_tokens,
+        n_ppo_minibatches=n_ppo_minibatches,
+        log_dir=rpc_exe_dir,
+    )
     rpc_list = make_rpc_list(model_rpcs, if_print=False)
     graph = build_graph(model_rpcs, 5, 1, if_print=False)
     cost_table = pickle.load(open("profile_result/param_realloc_cost_table_parallel.pkl", "rb"))
@@ -96,16 +114,25 @@ def optimal_device_mapping(
     if not from_file:
         with open(rs_dir, "w") as f:
             import pprint
+
             pprint.pprint(rs, stream=f)
     r = rs[-1]
     # print(r)
 
     # hack, only suitable for configs in reallm.experiments/autoexp/auto_ppo.py
     rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
-    rollout_topo = (r[rollout.name]["device_mesh"], r[rollout.name]["num_pp"], r[rollout.name]["num_dp"],
-                    r[rollout.name]["num_mp"])
-    actor_train_topo = (r[actor_train.name]["device_mesh"], r[actor_train.name]["num_pp"],
-                        r[actor_train.name]["num_dp"], r[actor_train.name]["num_mp"])
+    rollout_topo = (
+        r[rollout.name]["device_mesh"],
+        r[rollout.name]["num_pp"],
+        r[rollout.name]["num_dp"],
+        r[rollout.name]["num_mp"],
+    )
+    actor_train_topo = (
+        r[actor_train.name]["device_mesh"],
+        r[actor_train.name]["num_pp"],
+        r[actor_train.name]["num_dp"],
+        r[actor_train.name]["num_mp"],
+    )
     old_name = actor_train.name
     optim_model_name = []
     if rollout_topo != actor_train_topo:
@@ -117,10 +144,18 @@ def optimal_device_mapping(
         actor_train.model_name = ModelName("actor", 0)
         rollout.model_name = ModelName("actor", 0)
 
-    critic_inf_topo = (r[critic_inf.name]["device_mesh"], r[critic_inf.name]["num_pp"],
-                       r[critic_inf.name]["num_dp"], r[critic_inf.name]["num_mp"])
-    critic_train_topo = (r[critic_train.name]["device_mesh"], r[critic_train.name]["num_pp"],
-                         r[critic_train.name]["num_dp"], r[critic_train.name]["num_mp"])
+    critic_inf_topo = (
+        r[critic_inf.name]["device_mesh"],
+        r[critic_inf.name]["num_pp"],
+        r[critic_inf.name]["num_dp"],
+        r[critic_inf.name]["num_mp"],
+    )
+    critic_train_topo = (
+        r[critic_train.name]["device_mesh"],
+        r[critic_train.name]["num_pp"],
+        r[critic_train.name]["num_dp"],
+        r[critic_train.name]["num_mp"],
+    )
     old_name = critic_train.name
     if critic_inf_topo != critic_train_topo:
         critic_train.pre_hooks.append(SyncParamHook(source=ModelName("critic", 0)))
@@ -183,25 +218,30 @@ def optimal_device_mapping(
             pickle.dump(rpc_alloc_dict, f)
         with open(log_dir, "w") as f:
             import pprint
+
             pprint.pprint(rpc_alloc_dict, stream=f)
 
     return rpc_alloc_dict
 
 
-def make_rpc_exe_list(rpcs: List[ModelRPC],
-                      device_mesh: DeviceMesh,
-                      num_gen_tokens: int,
-                      n_ppo_minibatches: int,
-                      if_print: bool = False,
-                      log_dir: Optional[str] = None) -> List[RPCExecution]:
+def make_rpc_exe_list(
+    rpcs: List[ModelRPC],
+    device_mesh: DeviceMesh,
+    num_gen_tokens: int,
+    n_ppo_minibatches: int,
+    if_print: bool = False,
+    log_dir: Optional[str] = None,
+) -> List[RPCExecution]:
     rpc_exe_list = []
     log_flag = False
     for rpc in rpcs:
         # real_model_config = load_model_config(rpc)
-        feasible = enumerate_rpc_executions(rpc,
-                                            device_mesh,
-                                            num_gen_tokens=num_gen_tokens,
-                                            n_ppo_minibatches=n_ppo_minibatches)
+        feasible = enumerate_rpc_executions(
+            rpc,
+            device_mesh,
+            num_gen_tokens=num_gen_tokens,
+            n_ppo_minibatches=n_ppo_minibatches,
+        )
         rpc_exe_list.extend(feasible)
 
         if log_dir is not None:
@@ -259,15 +299,21 @@ def make_rpc_list(rpcs: List[ModelRPC], if_print: bool = False) -> List[RPC]:
     return rpc_list
 
 
-def dump_search_settings(rpcs: List[ModelRPC], device_mesh: DeviceMesh, num_gen_tokens: int,
-                         n_ppo_minibatches: int):
+def dump_search_settings(
+    rpcs: List[ModelRPC],
+    device_mesh: DeviceMesh,
+    num_gen_tokens: int,
+    n_ppo_minibatches: int,
+):
     dump_dir = "/home/meizy/model_device_mapping_search/test_case/"
-    rpc_exe_list = make_rpc_exe_list(rpcs,
-                                     device_mesh,
-                                     num_gen_tokens=num_gen_tokens,
-                                     n_ppo_minibatches=n_ppo_minibatches,
-                                     log_dir=dump_dir + "rpc_exe_list.txt",
-                                     if_print=True)
+    rpc_exe_list = make_rpc_exe_list(
+        rpcs,
+        device_mesh,
+        num_gen_tokens=num_gen_tokens,
+        n_ppo_minibatches=n_ppo_minibatches,
+        log_dir=dump_dir + "rpc_exe_list.txt",
+        if_print=True,
+    )
     rpc_list = make_rpc_list(rpcs, if_print=True)
     graph = build_graph(rpcs, 5, 1, if_print=True)
     comm_stats_ = comm_stats(if_print=True)
@@ -325,20 +371,26 @@ def handpicked_model_device_mapping(
     mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]] * n_nodes)
 
     if mode == "model_pipe":
-        parallel_config = ParallelismConfig(model_parallel_size=8,
-                                            pipeline_parallel_size=n_nodes,
-                                            data_parallel_size=1,
-                                            use_sequence_parallel=True)
+        parallel_config = ParallelismConfig(
+            model_parallel_size=8,
+            pipeline_parallel_size=n_nodes,
+            data_parallel_size=1,
+            use_sequence_parallel=True,
+        )
     elif mode == "data_pipe":
-        parallel_config = ParallelismConfig(model_parallel_size=1,
-                                            pipeline_parallel_size=n_nodes,
-                                            data_parallel_size=8,
-                                            use_sequence_parallel=True)
+        parallel_config = ParallelismConfig(
+            model_parallel_size=1,
+            pipeline_parallel_size=n_nodes,
+            data_parallel_size=8,
+            use_sequence_parallel=True,
+        )
     elif mode == "full_model":
-        parallel_config = ParallelismConfig(model_parallel_size=8 * n_nodes,
-                                            pipeline_parallel_size=1,
-                                            data_parallel_size=1,
-                                            use_sequence_parallel=True)
+        parallel_config = ParallelismConfig(
+            model_parallel_size=8 * n_nodes,
+            pipeline_parallel_size=1,
+            data_parallel_size=1,
+            use_sequence_parallel=True,
+        )
 
     return {
         rollout.name: RPCAllocation(
@@ -439,10 +491,12 @@ def test_model_device_mapping(
 
     mapping = np.array([[1, 1, 1, 1, 1, 1, 1, 1]] * n_nodes)
 
-    parallel_config = ParallelismConfig(model_parallel_size=8,
-                                        pipeline_parallel_size=n_nodes,
-                                        data_parallel_size=1,
-                                        use_sequence_parallel=True)
+    parallel_config = ParallelismConfig(
+        model_parallel_size=8,
+        pipeline_parallel_size=n_nodes,
+        data_parallel_size=1,
+        use_sequence_parallel=True,
+    )
 
     rollout_config = ParallelismConfig(model_parallel_size=2,
                                        data_parallel_size=8,
@@ -554,20 +608,30 @@ def profile_search(rank):
             print(exp_name, nodelist)
             device_mesh = make_device_mesh_from_name(nodelist)
 
-            rpc_exe_list = make_rpc_exe_list(rpcs,
-                                             device_mesh,
-                                             num_gen_tokens=seqlen,
-                                             n_ppo_minibatches=4,
-                                             log_dir=None,
-                                             if_print=False)
+            rpc_exe_list = make_rpc_exe_list(
+                rpcs,
+                device_mesh,
+                num_gen_tokens=seqlen,
+                n_ppo_minibatches=4,
+                log_dir=None,
+                if_print=False,
+            )
             rpc_list = make_rpc_list(rpcs, if_print=False)
             graph = build_graph(rpcs, 5, 1, if_print=False)
             cost_table = pickle.load(open("profile_result/param_realloc_cost_table_parallel.pkl", "rb"))
             model_size_dict = make_model_size_dict(rpcs, if_print=False)
 
-            rs = mdm_search.mcmc_search_time_profile(rpc_list, rpc_exe_list, graph, cost_table,
-                                                     model_size_dict, 0.0001, time_limit)
+            rs = mdm_search.mcmc_search_time_profile(
+                rpc_list,
+                rpc_exe_list,
+                graph,
+                cost_table,
+                model_size_dict,
+                0.0001,
+                time_limit,
+            )
             import pprint
+
             pprint.pprint(rs)
 
             with open(dump_dir, "wb") as f:

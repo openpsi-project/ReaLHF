@@ -160,10 +160,12 @@ def _request_parameter_sync(
         "to_model_config": to_model_config,
     }
     payloads = [
-        request_reply_stream.Payload(handler=h,
-                                     handle_name="empty",
-                                     pre_hooks=["param_realloc"],
-                                     pre_hook_data=[ps_data]) for h in handlers
+        request_reply_stream.Payload(
+            handler=h,
+            handle_name="empty",
+            pre_hooks=["param_realloc"],
+            pre_hook_data=[ps_data],
+        ) for h in handlers
     ]
     request_ids = [stream.post(p) for p in payloads]
     [stream.poll(pattern=create_exact_match_pattern([p.syn_reply_id]), block=True) for p in payloads]
@@ -460,9 +462,11 @@ async def model_rpc_request_func(
             min_n_seqs_per_dp = len(sample.seqlens) // dp_size
         else:
             min_n_seqs_per_dp = 1
-        partitions = datapack.min_abs_diff_partition(np.array(sample.seqlens, dtype=np.int32),
-                                                     dp_size,
-                                                     min_size=min_n_seqs_per_dp)
+        partitions = datapack.min_abs_diff_partition(
+            np.array(sample.seqlens, dtype=np.int32),
+            dp_size,
+            min_size=min_n_seqs_per_dp,
+        )
         target_mapping = {i: list(range(v[0], v[1])) for i, v in enumerate(partitions)}
 
         # Set data owner of produced data by this RPC, such that downstream RPCs can know
@@ -544,7 +548,7 @@ async def model_rpc_reply_func(
         responses: List[request_reply_stream.Payload] = [responses[i] for i in dp_head_indices]
         recv_tik = time.perf_counter()
 
-        if isinstance(responses[-1].data, dict) and responses[-1].data.get("seqlens") is not None:
+        if (isinstance(responses[-1].data, dict) and responses[-1].data.get("seqlens") is not None):
             res = []
             for k in responses[0].data["keys"]:
                 if k in rpc.output_key_remap:
@@ -693,8 +697,11 @@ async def model_save_thread_func(
         handlers = list(filter(lambda s: s.model_name.replica_id == 0, handlers))
 
         model_save_dirs = [
-            os.path.join(model_save_root, s.model_name.role,
-                         f"epoch{epoch}epochstep{epoch_step}globalstep{global_step}") for s in handlers
+            os.path.join(
+                model_save_root,
+                s.model_name.role,
+                f"epoch{epoch}epochstep{epoch_step}globalstep{global_step}",
+            ) for s in handlers
         ]
         await group_rpc_blocked(stream, handlers, "save", model_save_dirs)
         logger.info(f"Save models at epoch {epoch} step {epoch_step}.")
@@ -706,7 +713,7 @@ class MasterWorker(worker_base.Worker):
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
 
-        self.__model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = config.model_topos
+        self.__model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = (config.model_topos)
 
         # Build execution graph and initialize concurrency utilities.
         self.__model_rpcs, _ = dfg.build_graph(config.model_rpcs)
@@ -770,9 +777,11 @@ class MasterWorker(worker_base.Worker):
         for i in range(src_rpc_dp_size):
             rank = src_rpc_topo.get_rank(data=i, pipe=src_rpc_pp_size - 1, model=0)
             handler_routing[f"__data{i}__"] = self.config.msid2mwid[
-                config_pkg.ModelShardID.from_parallelism_rank(model_name=src_rpc.model_name,
-                                                              topo=src_rpc_topo,
-                                                              parallelism_rank=rank)]
+                config_pkg.ModelShardID.from_parallelism_rank(
+                    model_name=src_rpc.model_name,
+                    topo=src_rpc_topo,
+                    parallelism_rank=rank,
+                )]
         self.__stream = request_reply_stream.make_master_stream(
             self.config.worker_info,
             n_subscribers=self.config.n_model_workers,
@@ -1114,7 +1123,7 @@ class MasterWorker(worker_base.Worker):
             # f"Estimated remaining time of this epoch: {self._buffer_size_tokens / buffer_size_decre_per_step * time_per_step:.3f}s."
         )
 
-        if self.__benchmark_steps is not None and self._global_step >= self.__benchmark_steps:
+        if (self.__benchmark_steps is not None and self._global_step >= self.__benchmark_steps):
             logger.info(
                 f"Finished benchmark {self.__benchmark_steps}. Total time consumption {total_time_consumption:.3f}"
             )

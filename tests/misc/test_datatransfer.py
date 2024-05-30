@@ -88,9 +88,11 @@ def worker(idx: int):
                 if idx == source:
                     recv_buf[comm_slots] = tensor_storage[comm_slots]
                 else:
-                    dist.broadcast(recv_buf[comm_slots],
-                                   src=group_sources[(dp_i, dp_j)],
-                                   group=groups[(dp_i, dp_j)])
+                    dist.broadcast(
+                        recv_buf[comm_slots],
+                        src=group_sources[(dp_i, dp_j)],
+                        group=groups[(dp_i, dp_j)],
+                    )
     dist.barrier()
 
     dist.barrier()
@@ -108,9 +110,11 @@ def worker(idx: int):
                 if idx == source:
                     recv_buf[comm_slots] = tensor_storage[comm_slots]
                 else:
-                    dist.broadcast(recv_buf[comm_slots],
-                                   src=group_sources[(dp_i, dp_j)],
-                                   group=groups[(dp_i, dp_j)])
+                    dist.broadcast(
+                        recv_buf[comm_slots],
+                        src=group_sources[(dp_i, dp_j)],
+                        group=groups[(dp_i, dp_j)],
+                    )
 
     print(f"rank {idx} took {time.time() - tik} seconds")
     for dp_i, s_ranks in enumerate(sender_ranks):

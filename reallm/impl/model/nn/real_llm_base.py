@@ -183,7 +183,11 @@ class VocabPositionEmbedding(nn.Module):
         self.embed_drop = nn.Dropout(config.embd_pdrop)
 
         self.self_attention_mask = torch.tril(
-            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device))
+            torch.ones(
+                (config.n_positions, config.n_positions),
+                dtype=torch.bool,
+                device=device,
+            ))
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         # Set position ids.
@@ -300,7 +304,7 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
         raise NotImplementedError()
 
     # layernorm qkv linear
-    count += ln_count + config.head_dim * (nq + config.n_kv_heads * 2) * config.hidden_dim
+    count += (ln_count + config.head_dim * (nq + config.n_kv_heads * 2) * config.hidden_dim)
     if config.use_attention_bias:
         count += config.head_dim * (nq + config.n_kv_heads * 2)
 

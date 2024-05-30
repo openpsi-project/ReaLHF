@@ -72,7 +72,7 @@ class InferencePipelineEngine:
 
         # num_micro_batches is configurable, default value: num_stages * 2
         self.default_num_micro_batches = self.num_stages
-        self.num_layers = self.module.num_layers  # number of leyers in current pipeline stage
+        self.num_layers = (self.module.num_layers)  # number of leyers in current pipeline stage
 
         # PipelineEngine needs to handle data loading specially due to only the first
         # and last stages loading inputs/labels. We construct a sampler that uses
@@ -205,9 +205,11 @@ class InferencePipelineEngine:
             packed_input_ids = input.packed_input_ids
 
             # sequence parallel input padding
-            x = PipeTransferData(cu_seqlens=cu_seqlens.int(),
-                                 max_seqlen=int(max_seqlen),
-                                 store_kv_cache=store_kv_cache)
+            x = PipeTransferData(
+                cu_seqlens=cu_seqlens.int(),
+                max_seqlen=int(max_seqlen),
+                store_kv_cache=store_kv_cache,
+            )
             if self.is_first_stage():
                 ys = [PipeCacheData(packed_input_ids=packed_input_ids)
                       ] + [PipeCacheData() for _ in range(self.num_layers - 1)]
@@ -251,8 +253,11 @@ class InferencePipelineEngine:
             self.tensor_buffer.put("terminate", mbid, torch.tensor(0, dtype=torch.bool, device=self.device))
             self.tensor_buffer.put("generated_idx", mbid, 0)
             batch_length = self.tensor_buffer.get("batch_lengths", mbid)
-            self.tensor_buffer.put("unfinished_sequences", mbid,
-                                   torch.ones(batch_length, dtype=torch.long, device=self.device))
+            self.tensor_buffer.put(
+                "unfinished_sequences",
+                mbid,
+                torch.ones(batch_length, dtype=torch.long, device=self.device),
+            )
             self.tensor_buffer.put("gen_token_ph", mbid, [])
             self.tensor_buffer.put("gen_logprob_ph", mbid, [])
             self.tensor_buffer.put("gen_logits_mask_ph", mbid, [])
@@ -346,17 +351,21 @@ class InferencePipelineEngine:
         input_lens_for_partition: Optional[torch.Tensor] = None,
         num_micro_batches: Optional[int] = None,
     ):
-        self.num_micro_batches = num_micro_batches if num_micro_batches else self.default_num_micro_batches
+        self.num_micro_batches = (num_micro_batches if num_micro_batches else self.default_num_micro_batches)
         self._set_forward_states()
         # forward one step and return packed logits
-        self._prepare_input(seqlens_cpu,
-                            packed_input_ids,
-                            cu_seqlens,
-                            input_lens_for_partition=input_lens_for_partition)
+        self._prepare_input(
+            seqlens_cpu,
+            packed_input_ids,
+            cu_seqlens,
+            input_lens_for_partition=input_lens_for_partition,
+        )
         self._pre_forward()
-        sched = schedule.InferenceSchedule(micro_batches=self.num_micro_batches,
-                                           stages=self.num_stages,
-                                           stage_id=self.stage_id)
+        sched = schedule.InferenceSchedule(
+            micro_batches=self.num_micro_batches,
+            stages=self.num_stages,
+            stage_id=self.stage_id,
+        )
         self._exec_schedule(sched)
 
         logits = None
@@ -480,7 +489,7 @@ class InferencePipelineEngine:
             all_gen_tokens.append(gen_tokens)
             all_log_probs.append(log_probs)
             all_logits_mask.append(logits_mask)
-            if torch.is_tensor(gen_tokens) and torch.is_tensor(log_probs) and torch.is_tensor(logits_mask):
+            if (torch.is_tensor(gen_tokens) and torch.is_tensor(log_probs) and torch.is_tensor(logits_mask)):
                 vocab_size = logits_mask.shape[-1]
                 logger.debug(
                     f"generation on microbatch {mbid}: {gen_tokens.shape} {log_probs.shape} {logits_mask.shape}"
@@ -504,11 +513,17 @@ class InferencePipelineEngine:
                 )
                 # hack for log_probs and logits_mask, check if correct
                 all_log_probs[i] = torch.cat(
-                    [all_log_probs[i], torch.zeros(pad_shape, device=self.device)], dim=1)
+                    [all_log_probs[i], torch.zeros(pad_shape, device=self.device)],
+                    dim=1,
+                )
                 if all_logits_mask[i] is not None:
                     all_logits_mask[i] = torch.cat(
-                        [all_logits_mask[i],
-                         torch.ones((*pad_shape, vocab_size), device=self.device)], dim=1)
+                        [
+                            all_logits_mask[i],
+                            torch.ones((*pad_shape, vocab_size), device=self.device),
+                        ],
+                        dim=1,
+                    )
 
         gen_tokens = torch.cat(all_gen_tokens, dim=0)
         log_probs = torch.cat(all_log_probs, dim=0)
@@ -531,10 +546,12 @@ class InferencePipelineEngine:
                                          micro_batch_id,
                                          remove=True,
                                          raise_error=False)
-            handle = self.tensor_buffer.get("recv_next_tokens_handle",
-                                            micro_batch_id,
-                                            remove=True,
-                                            raise_error=False)
+            handle = self.tensor_buffer.get(
+                "recv_next_tokens_handle",
+                micro_batch_id,
+                remove=True,
+                raise_error=False,
+            )
         else:
             buf = self.tensor_buffer.get("recv_act_buf", micro_batch_id, remove=True, raise_error=False)
             handle = self.tensor_buffer.get("recv_act_handle", micro_batch_id, remove=True, raise_error=False)
@@ -624,7 +641,7 @@ class InferencePipelineEngine:
 
         bs = input_lens.shape[0]
         for y, layer_idx, bk_idx in zip(ys, layer_indices, gd_input_buffer_kv_cache_indices):
-            assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
+            assert (y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None)
             kvcache_seqlen = max(
                 constants.max_prompt_len() + self.current_gconfig.max_new_tokens,
                 self.hidden_dim // self.head_dim + 10,
@@ -661,8 +678,13 @@ class InferencePipelineEngine:
         self.tensor_buffer.put("kv_cache_reserved", mbid, True)
         return True  # if generating first token, return logits to pass to genstep
 
-    def __maybe_increase_cache_seqlens(self, x: PipeTransferData, ys: List[PipeCacheData], mbid: int,
-                                       is_first_step: bool):
+    def __maybe_increase_cache_seqlens(
+        self,
+        x: PipeTransferData,
+        ys: List[PipeCacheData],
+        mbid: int,
+        is_first_step: bool,
+    ):
         if not self._generate_mode:
             return
         if is_first_step:  # Do not increase cache seqlens for the first token step
@@ -673,7 +695,13 @@ class InferencePipelineEngine:
         for y in ys:
             y.cache_seqlens += 1
 
-    def __maybe_genstep(self, x: PipeTransferData, ys: List[PipeCacheData], mbid: int, is_first_step: bool):
+    def __maybe_genstep(
+        self,
+        x: PipeTransferData,
+        ys: List[PipeCacheData],
+        mbid: int,
+        is_first_step: bool,
+    ):
         if not (self._generate_mode and self.is_last_stage()):
             return False
 
@@ -686,7 +714,12 @@ class InferencePipelineEngine:
         generated_idx = self.tensor_buffer.get("generated_idx", mbid)
 
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, self.tokenizer, unfinished_sequences, generated_idx, self.current_gconfig)
+            logits,
+            self.tokenizer,
+            unfinished_sequences,
+            generated_idx,
+            self.current_gconfig,
+        )
 
         if isinstance(terminate, bool):
             terminate = torch.tensor(terminate, device=self.device, dtype=torch.bool)
@@ -877,8 +910,8 @@ class InferencePipelineEngine:
 
     def _exec_send_next_tokens(self, stage_id: int, micro_batch_id: int, step_id: int):
         """When generating, send next tokens from the last stage to the first stage."""
-        assert self._generate_mode, "_exec_send_next_tokens() should be only executed in generate mode."
-        assert self.is_last_stage(), "_exec_send_next_tokens() should be only executed on the last stage"
+        assert (self._generate_mode), "_exec_send_next_tokens() should be only executed in generate mode."
+        assert (self.is_last_stage()), "_exec_send_next_tokens() should be only executed on the last stage"
         next_tokens_to_send = self.tensor_buffer.get("next_tokens_to_send", micro_batch_id, remove=True)
         # if type(self) == DeepSpeedPipelineEngine and self._generate_mode:
         #     if not hasattr(self, "_sn_graph") or next_tokens_to_send.shape[0] > self._sn_graph_size:
@@ -925,8 +958,8 @@ class InferencePipelineEngine:
         """When generating, recv next tokens from the last stage on the first stage
         Construct next forward input
         """
-        assert self._generate_mode, "_exec_recv_next_tokens() should be only executed in generate mode."
-        assert self.is_first_stage(), "_exec_recv_next_tokens() should be only executed on the first stage"
+        assert (self._generate_mode), "_exec_recv_next_tokens() should be only executed in generate mode."
+        assert (self.is_first_stage()), "_exec_recv_next_tokens() should be only executed on the first stage"
         # recv_buf = p2p.recv_tensor_meta(self.prev_stage)
         batch_length = self.tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
         # if type(self) == DeepSpeedPipelineEngine and self._generate_mode:
@@ -1014,7 +1047,7 @@ class InferencePipelineEngine:
                             and type(cmd) != schedule.RecvActivation):
                         # logger.info(f"rank {self.global_rank} skip cmd: {cmd}")
                         continue
-                    elif not self.is_last_stage() and type(cmd) != schedule.SendActivation:
+                    elif (not self.is_last_stage() and type(cmd) != schedule.SendActivation):
                         # logger.info(f"rank {self.global_rank} skip cmd: {cmd}")
                         continue
 
@@ -1028,9 +1061,11 @@ class InferencePipelineEngine:
                     )
                     self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
                     self._exec_instr(*cmd.args)
-                    time_mark(name=f"{cmd_type_string}_end",
-                              identifier=str(self.global_rank),
-                              step=self.sched_count)
+                    time_mark(
+                        name=f"{cmd_type_string}_end",
+                        identifier=str(self.global_rank),
+                        step=self.sched_count,
+                    )
                 except Exception as e:
                     logger.error(f"Rank {self.global_rank} step {self.step_count}, Exception in cmd {cmd}")
                     raise e

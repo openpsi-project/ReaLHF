@@ -26,8 +26,10 @@ def main():
     fig_type = args.fig_type
     all_time_marks: List[List[TimeMarkEntry]] = []
     for i in tqdm.tqdm(range(8), desc="loading time marks"):
-        with open(f"/lustre/aigc/llm/logs/fw/sosp-a0s896g64t64-{fig_type}/test20240405/time_marks{i}.pkl",
-                  "rb") as f:
+        with open(
+                f"/lustre/aigc/llm/logs/fw/sosp-a0s896g64t64-{fig_type}/test20240405/time_marks{i}.pkl",
+                "rb",
+        ) as f:
             time_marks: List[TimeMarkEntry] = pickle.load(f)
         all_time_marks.append(time_marks)
 
@@ -49,7 +51,15 @@ def main():
     ] for time_marks in all_time_marks]
 
     all_types = [
-        "actor", "misc_compute", "critic", "misc", "ref", "memory_layout", "reward", "comm", "optim_step"
+        "actor",
+        "misc_compute",
+        "critic",
+        "misc",
+        "ref",
+        "memory_layout",
+        "reward",
+        "comm",
+        "optim_step",
     ]
     all_types_labeled = [False for _ in all_types]
 
@@ -95,19 +105,23 @@ def main():
             long_durations = [d for d in durations if d >= 0.1]
             short_starts = [s for s, d in zip(starts, durations) if d < 0.1]
             long_starts = [s for s, d in zip(starts, durations) if d >= 0.1]
-            ax.barh(gpu_idx,
-                    short_durations,
-                    left=short_starts,
-                    color=color,
-                    linewidth=0.0,
-                    edgecolor="black")
-            ax.barh(gpu_idx,
-                    long_durations,
-                    left=long_starts,
-                    color=color,
-                    label=label,
-                    linewidth=0.5,
-                    edgecolor="black")
+            ax.barh(
+                gpu_idx,
+                short_durations,
+                left=short_starts,
+                color=color,
+                linewidth=0.0,
+                edgecolor="black",
+            )
+            ax.barh(
+                gpu_idx,
+                long_durations,
+                left=long_starts,
+                color=color,
+                label=label,
+                linewidth=0.5,
+                edgecolor="black",
+            )
         y_ticks.append(gpu_idx)
         y_ticklabels.append(f"GPU {gpu_idx}")
 

@@ -61,7 +61,7 @@ class ProfileEngine(DeepSpeedPipelineEngine):
             for cmd in step_cmds:
                 if type(cmd) not in self._INSTRUCTION_MAP:
                     raise RuntimeError(
-                        f'{self.__class__.__name__} does not understand instruction {repr(cmd)}')
+                        f"{self.__class__.__name__} does not understand instruction {repr(cmd)}")
 
                 # Equivalent to: self._exec_forward_pass(buffer_id=0)
                 try:

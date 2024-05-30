@@ -26,7 +26,7 @@ class RWConfig(Experiment):
     dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
 
     def __post_init__(self):
-        assert not self.is_sft_lora and self.sft_lora_path is None, "LoRA is not supported for now."
+        assert (not self.is_sft_lora and self.sft_lora_path is None), "LoRA is not supported for now."
 
         self.world_size = (self.model.parallel.pipeline_parallel_size *
                            self.model.parallel.model_parallel_size * self.model.parallel.data_parallel_size)
@@ -55,19 +55,16 @@ class RWConfig(Experiment):
         model_path = self.model.path
 
         dataset = Dataset(
-            "packed_rw_pair",
+            "rw_pair",
             args=dict(
-                n_tokens_per_batch=self.dataset.train_tokens_per_batch,
                 max_length=self.dataset.max_seqlen,
                 max_pairs_per_prompt=self.dataset.max_pairs_per_prompt,
                 dataset_path=self.dataset.train_path,
             ),
         )
-        dataloader = eval_dataloader = DataLoader("iterable_dataset_loader")
 
         eval_dataset = copy.deepcopy(dataset)
         eval_dataset.args["dataset_path"] = self.dataset.valid_path
-        eval_dataset.args["n_tokens_per_batch"] = self.dataset.valid_tokens_per_batch
 
         backend = ModelBackend(
             "ds_train",
@@ -84,7 +81,7 @@ class RWConfig(Experiment):
                 min_lr_ratio=self.model.optimizer.min_lr_ratio,
                 zero_stage=(self.model.zero_stage if self.model.parallel.pipeline_parallel_size == 1 else min(
                     self.model.zero_stage, 1)),
-                engine_type="pipe" if self.model.parallel.pipeline_parallel_size > 1 else "deepspeed",
+                engine_type=("pipe" if self.model.parallel.pipeline_parallel_size > 1 else "deepspeed"),
                 offload_optimizer_state=self.model.optimizer.offload,
                 enable_bf16=self.model.enable_bf16,
                 enable_fp16=self.model.enable_fp16,
@@ -131,12 +128,10 @@ class RWConfig(Experiment):
                         model=model,
                         backend=backend,
                         eval_datasets=[eval_dataset],
-                        eval_dataloader=eval_dataloader,
                     )
                 ],
                 tokenizer_name_or_path=model_path,
                 datasets=[dataset],
-                dataloader=dataloader,
                 cuda_cache_cleanliness=True,
                 cuda_cache_clear_freq=10,
             )
@@ -147,7 +142,7 @@ class RWConfig(Experiment):
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
             model_type=self.model.type,
-            input_data=["packed_input_ids", "input_lens", "group_factor", "pos_input_lens"],
+            input_data=["packed_input_ids", "group_factor", "pos_input_lens"],
             log_return_value=True,
             min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
             max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,

@@ -305,10 +305,12 @@ class ProfileExperiment(Experiment):
             ) for _ in range(self.n_workers)
         ]
 
-        return ExperimentConfig(exp_ctrl=exp_ctrl,
-                                model_rpcs=[],
-                                model_worker=[],
-                                profile_worker=profile_workers)
+        return ExperimentConfig(
+            exp_ctrl=exp_ctrl,
+            model_rpcs=[],
+            model_worker=[],
+            profile_worker=profile_workers,
+        )
 
 
 def register_profile_experiment(

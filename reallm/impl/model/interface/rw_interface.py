@@ -2,7 +2,6 @@ from typing import Dict, Optional
 import dataclasses
 import os
 
-from deepspeed import DeepSpeedEngine
 import colorama
 import deepspeed
 import torch
@@ -13,7 +12,6 @@ from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipeli
 from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 import reallm.api.core.model_api as model_api
-import reallm.base.constants as constants
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Packed Reward Modeling Interface", "benchmark")
@@ -52,16 +50,20 @@ class PairedRewardInterface(model_api.ModelInterface):
     def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
-        cu_seqlens: torch.Tensor = data["cu_seqlens"].int()
+        seqlens_cpu = data.metadata["seqlens"]
+        max_seqlen = max(seqlens_cpu)
+        cu_seqlens = torch.nn.functional.pad(
+            torch.tensor(seqlens_cpu, dtype=torch.int32, device=model.device).cumsum(0),
+            (1, 0),
+        )
 
         module: deepspeed.DeepSpeedEngine = model.module
-        max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
         module.eval()
 
         if isinstance(module, (InferencePipelineEngine, DeepSpeedPipelineEngine)):
             r = module.forward(
-                seqlens_cpu=data.metadata['seqlens'],
+                seqlens_cpu=data.metadata["seqlens"],
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
             )
@@ -71,9 +73,11 @@ class PairedRewardInterface(model_api.ModelInterface):
         else:
             if hasattr(module, "module"):
                 module = module.module
-            scores: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits
+            scores: torch.FloatTensor = module(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ).logits
 
         chosen_end_scores = scores.squeeze(-1)[cu_seqlens[1:] - 1].float()  # [bs]
         scores = (scores - self.output_bias) * self.output_scaling
@@ -97,7 +101,8 @@ class PairedRewardInterface(model_api.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
-        neg_input_lens = data["input_lens"] - data["pos_input_lens"]
+        pair_lens = torch.tensor(data.metadata["seqlens"], dtype=torch.int32, device=model.device)
+        neg_input_lens = pair_lens - data["pos_input_lens"]
         input_lens: torch.Tensor = torch.stack([data["pos_input_lens"], neg_input_lens], 1).view(-1)
         group_factor: torch.Tensor = data["group_factor"]
         cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
@@ -108,21 +113,23 @@ class PairedRewardInterface(model_api.ModelInterface):
 
         if isinstance(module, DeepSpeedPipelineEngine):
             loss_fn_kwargs = dict(
-                input_lens=data["input_lens"],
+                input_lens=pair_lens,
                 group_factor=data["group_factor"],
             )
             loss, stats = module.train_batch(
-                seqlens_cpu=data.metadata['seqlens'],
+                seqlens_cpu=data.metadata["seqlens"],
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
                 loss_fn=_paired_rw_loss_from_model_outputs,
-                input_lens_for_partition=data["input_lens"],
+                input_lens_for_partition=pair_lens,
                 **loss_fn_kwargs,
             )
         else:
-            scores: torch.FloatTensor = module(packed_input_ids=packed_input_ids,
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits
+            scores: torch.FloatTensor = module(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ).logits
             loss, stats = _paired_rw_loss_from_model_outputs(scores, packed_input_ids, cu_seqlens,
                                                              group_factor)
 
@@ -166,34 +173,36 @@ class PairedRewardInterface(model_api.ModelInterface):
         pos_score = neg_score = 0
 
         for step, data in enumerate(tqdm.tqdm(eval_dataloader)):
-            data = recursive_apply(from_dict(data), lambda x: x.to(device))
+            pair_lens = torch.tensor(data.metadata["seqlens"], dtype=torch.int32, device=model.device)
+            data = recursive_apply(data, lambda x: x.to(device))
 
             packed_input_ids: torch.Tensor = data["packed_input_ids"]
-            neg_input_lens = data["input_lens"] - data["pos_input_lens"]
+            neg_input_lens = pair_lens - data["pos_input_lens"]
             assert (neg_input_lens > 0).all()
             input_lens = torch.stack([data["pos_input_lens"], neg_input_lens], 1).view(-1)
             group_factor: torch.Tensor = data["group_factor"]
             cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
             max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
-            seqlens_cpu = data["input_lens"].cpu().numpy().tolist()
 
             if isinstance(model, DeepSpeedPipelineEngine):
                 loss_fn_kwargs = dict(
-                    input_lens=data["input_lens"],
+                    input_lens=pair_lens,
                     group_factor=data["group_factor"],
                 )
                 loss, stats = model.eval_batch(
-                    seqlens_cpu=seqlens_cpu,
+                    seqlens_cpu=data.metadata["seqlens"],
                     packed_input_ids=packed_input_ids,
                     cu_seqlens=cu_seqlens,
                     loss_fn=_paired_rw_loss_from_model_outputs,
-                    input_lens_for_partition=data["input_lens"],
+                    input_lens_for_partition=pair_lens,
                     **loss_fn_kwargs,
                 )
             else:
-                scores: torch.FloatTensor = model(packed_input_ids=packed_input_ids,
-                                                  cu_seqlens=cu_seqlens,
-                                                  max_seqlen=max_seqlen).logits
+                scores: torch.FloatTensor = model(
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                ).logits
                 loss, stats = _paired_rw_loss_from_model_outputs(scores, packed_input_ids, cu_seqlens,
                                                                  group_factor)
 

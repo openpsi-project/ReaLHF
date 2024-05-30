@@ -31,8 +31,8 @@ def get_activation_fn(activation_function: str) -> Callable:
 
 SEQUENCE_PARALLEL_WARNED = False
 
+
 class LayerNormQKVLinear(nn.Module):
-    
 
     def __init__(
         self,

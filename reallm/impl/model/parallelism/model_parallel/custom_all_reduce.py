@@ -36,7 +36,10 @@ def init_custom_ar() -> None:
         logger.warn(
             "Custom allreduce is disabled due to an unsupported world size: "
             "%d. Supported world sizes: %s. To silence this warning, specify"
-            "disable_custom_all_reduce=True explicitly.", world_size, str(_SUPPORTED_WORLD_SIZES))
+            "disable_custom_all_reduce=True explicitly.",
+            world_size,
+            str(_SUPPORTED_WORLD_SIZES),
+        )
         return
     if not _can_p2p(rank, world_size):
         logger.warn("Custom allreduce is disabled because your platform lacks GPU P2P"
@@ -123,7 +126,7 @@ def _is_full_nvlink(rank, world_size):
                 if not link_state:
                     return False
             except pynvml.NVMLError as error:
-                logger.info(f"NVLink detection failed with message \"{str(error)}\". "
+                logger.info(f'NVLink detection failed with message "{str(error)}". '
                             "This is normal if your machine has no NVLink equipped")
                 return False
     return True

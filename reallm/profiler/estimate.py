@@ -89,7 +89,7 @@ def parse_comm_stats_files(stats_file_dir):
                 data_size = 2 * 1024 * 1024 * 1024
             elif "offload" in op_name:
                 data_size = 20 * 1024 * 1024
-            res[op_name].append(data_size / v['mean'])
+            res[op_name].append(data_size / v["mean"])
 
     for k, v in res.items():
         res[k] = int(mean(v)) if len(v) > 0 else 0
@@ -174,8 +174,7 @@ def compute_inst_cost(op_cost, num_layers, num_pp, op_name, bs, seqlen):
     embedding_layer_cost = op_cost["embedding_layer"][real_op_key]
     real_model_block_0_cost = op_cost["real_model_block_0"][real_op_key]
     head_cost = op_cost["head"][real_op_key]
-    cost = (embedding_layer_cost + num_layers * real_model_block_0_cost\
-            + head_cost) / num_pp
+    cost = (embedding_layer_cost + num_layers * real_model_block_0_cost + head_cost) / num_pp
 
     # if op_name == "fwd_gen_1":
     #     print(f"op key {op_key} real op key {real_op_key}")
@@ -202,14 +201,15 @@ def comm_inst_cost(comm_stats, size, comm_type):
 
 
 def estimate_instruction_cost(
-        layer_stats_path: str,  # path to layer stats file
-        comm_stats_path: str,
-        num_layers: int,  # model configuration, num transformers layer
-        parallel_strategy: ModelParallelStrategy,
-        hidden_dim: int,
-        batch_size: int,
-        seq_len: int,
-        n_ppo_minibatches: int = 1):
+    layer_stats_path: str,  # path to layer stats file
+    comm_stats_path: str,
+    num_layers: int,  # model configuration, num transformers layer
+    parallel_strategy: ModelParallelStrategy,
+    hidden_dim: int,
+    batch_size: int,
+    seq_len: int,
+    n_ppo_minibatches: int = 1,
+):
     comm_stats = parse_comm_stats_files(comm_stats_path)
     layer_stats = parse_layer_stats_files(layer_stats_path)
     num_mp = parallel_strategy.num_mp
@@ -229,8 +229,8 @@ def estimate_instruction_cost(
     for layer_name in layer_names:
         assert layer_name in op_cost
 
-    train_mbs = batch_size / (2 * num_pp * num_dp * n_ppo_minibatches)\
-        if num_pp > 1 else batch_size / (num_dp * n_ppo_minibatches)
+    train_mbs = (batch_size / (2 * num_pp * num_dp * n_ppo_minibatches) if num_pp > 1 else batch_size /
+                 (num_dp * n_ppo_minibatches))
     gen_mbs = batch_size / (num_pp * num_dp)
     log_debug(f"in estimate_instruction_cost, train_mbs {train_mbs} gen_mbs {gen_mbs} ")
     log_debug(f"batch size {batch_size} num_pp {num_pp} num_dp {num_dp} num_mp {num_mp} "
@@ -238,7 +238,14 @@ def estimate_instruction_cost(
 
     # pprint.pprint(op_cost, indent=4)
     inst_cost = {}
-    inst_keys = ["gen_fwd_0", "gen_fwd_1", "inf_fwd", "train_fwd", "train_bwd", "train_opt"]
+    inst_keys = [
+        "gen_fwd_0",
+        "gen_fwd_1",
+        "inf_fwd",
+        "train_fwd",
+        "train_bwd",
+        "train_opt",
+    ]
     op_names = ["fwd_gen_0", "fwd_gen_1", "fwd", "fwd", "bwd", "opt"]
 
     for inst_key, op_name in zip(inst_keys, op_names):
@@ -262,13 +269,14 @@ def estimate_instruction_cost(
 
 
 def _estimate_rpc_cost(
-        inst_cost,
-        parallel_strategy: ModelParallelStrategy,
-        model_interface_type: ModelInterfaceType,
-        # model function call args
-        num_gen_tokens: int,
-        use_gradient_checkpointing: bool,
-        n_ppo_minibatches: int = 1):
+    inst_cost,
+    parallel_strategy: ModelParallelStrategy,
+    model_interface_type: ModelInterfaceType,
+    # model function call args
+    num_gen_tokens: int,
+    use_gradient_checkpointing: bool,
+    n_ppo_minibatches: int = 1,
+):
     num_pp = parallel_strategy.num_pp
     num_dp = parallel_strategy.num_dp
     num_mp = parallel_strategy.num_mp
@@ -290,7 +298,7 @@ def _estimate_rpc_cost(
         if use_gradient_checkpointing:
             compute_cost += inst_cost["train_fwd"] * (num_pp + num_micro_batches - 1)
             log_debug(f"Gradient ckpt overhead {inst_cost['train_fwd']} * {num_pp + num_micro_batches - 1}")
-        comm_cost = (inst_cost["grad_p2p"] + inst_cost["act_p2p"]) * (num_pp + num_micro_batches - 2) * 2
+        comm_cost = ((inst_cost["grad_p2p"] + inst_cost["act_p2p"]) * (num_pp + num_micro_batches - 2) * 2)
         compute_cost = compute_cost * n_ppo_minibatches
         comm_cost = comm_cost * n_ppo_minibatches
         if num_pp * num_dp <= 1:
@@ -301,8 +309,8 @@ def _estimate_rpc_cost(
     elif model_interface_type == ModelInterfaceType.GENERATE:
         num_micro_batches = num_pp
         num_gen_tokens = num_gen_tokens
-        compute_cost = inst_cost["gen_fwd_0"] * (num_pp + num_micro_batches - 1) +\
-                       inst_cost["gen_fwd_1"] * (num_gen_tokens - 1) * num_micro_batches
+        compute_cost = (inst_cost["gen_fwd_0"] * (num_pp + num_micro_batches - 1) + inst_cost["gen_fwd_1"] *
+                        (num_gen_tokens - 1) * num_micro_batches)
         log_debug(f"{inst_cost['gen_fwd_0']} * {num_pp + num_micro_batches - 1} + "
                   f"{inst_cost['gen_fwd_1']} * {(num_gen_tokens - 1) * num_micro_batches}")
 
@@ -335,13 +343,15 @@ def load_model_config(rpc: ModelRPC) -> ReaLModelConfig:
                    f"config_from_{rpc.model_type._class}")(model_path=MODEL_FAMILY_TO_PATH[rpc.model_type])
 
 
-def estimate_rpc_time(rpc: ModelRPC,
-                      parallel_strategy: ModelParallelStrategy,
-                      num_gen_tokens=256,
-                      use_gradient_checkpointing=False,
-                      n_ppo_minibatches: int = 1,
-                      bs=None,
-                      seq_len=None):
+def estimate_rpc_time(
+    rpc: ModelRPC,
+    parallel_strategy: ModelParallelStrategy,
+    num_gen_tokens=256,
+    use_gradient_checkpointing=False,
+    n_ppo_minibatches: int = 1,
+    bs=None,
+    seq_len=None,
+):
     # print(f"estimating rpc cost for {rpc.name}")
     model_type = rpc.model_type
     layer_stats_path = os.path.join(PROFILE_RESULT_PATH, str(model_type))
@@ -351,24 +361,28 @@ def estimate_rpc_time(rpc: ModelRPC,
 
     if bs == None or seq_len == None:
         bs = rpc.min_n_seqs
-        seq_len = rpc.max_n_tokens // bs  #FIXME:
+        seq_len = rpc.max_n_tokens // bs  # FIXME:
     # ps = ModelParallelStrategy.from_config(rpc_alloc.train_eval_config.parallel)
-    p = (rpc.interface_type == ModelInterfaceType.GENERATE)
-    inst_cost = estimate_instruction_cost(layer_stats_path,
-                                          comm_stats_path,
-                                          model_config.n_layers,
-                                          parallel_strategy,
-                                          model_config.hidden_dim,
-                                          bs,
-                                          seq_len,
-                                          n_ppo_minibatches=n_ppo_minibatches)
+    p = rpc.interface_type == ModelInterfaceType.GENERATE
+    inst_cost = estimate_instruction_cost(
+        layer_stats_path,
+        comm_stats_path,
+        model_config.n_layers,
+        parallel_strategy,
+        model_config.hidden_dim,
+        bs,
+        seq_len,
+        n_ppo_minibatches=n_ppo_minibatches,
+    )
     # print(inst_cost)
-    return _estimate_rpc_cost(inst_cost,
-                              parallel_strategy,
-                              rpc.interface_type,
-                              num_gen_tokens=num_gen_tokens,
-                              use_gradient_checkpointing=use_gradient_checkpointing,
-                              n_ppo_minibatches=n_ppo_minibatches)
+    return _estimate_rpc_cost(
+        inst_cost,
+        parallel_strategy,
+        rpc.interface_type,
+        num_gen_tokens=num_gen_tokens,
+        use_gradient_checkpointing=use_gradient_checkpointing,
+        n_ppo_minibatches=n_ppo_minibatches,
+    )
 
 
 # def comm_stats(exp: ProfileExperiment, if_print=False):
@@ -407,15 +421,17 @@ def estimate_model_size(model_config: ReaLModelConfig):
     return 2 * n_params
 
 
-def estimate_rpc_memory(rpc: ModelRPC,
-                        parallel_strategy: ModelParallelStrategy,
-                        batch_size: int,
-                        seq_len: int,
-                        offload: bool = False,
-                        gradient_checkpointing: bool = False,
-                        offload_optimizer: bool = False,
-                        n_ppo_minibatches: int = 1,
-                        gen_len: int = 128):
+def estimate_rpc_memory(
+    rpc: ModelRPC,
+    parallel_strategy: ModelParallelStrategy,
+    batch_size: int,
+    seq_len: int,
+    offload: bool = False,
+    gradient_checkpointing: bool = False,
+    offload_optimizer: bool = False,
+    n_ppo_minibatches: int = 1,
+    gen_len: int = 128,
+):
     interface_type = rpc.interface_type
     model_config = load_model_config(rpc)
 
@@ -440,8 +456,7 @@ def estimate_rpc_memory(rpc: ModelRPC,
     # enable sequence parallel
     if interface_type == ModelInterfaceType.TRAIN_STEP:
         # gradient checkpointing is always enabled for flash attn
-        static_mem = (param_mem + grad_mem) // (num_pp * num_mp) +\
-                     optimizer_mem // (num_pp * num_dp * num_mp)
+        static_mem = (param_mem + grad_mem) // (num_pp * num_mp) + optimizer_mem // (num_pp * num_dp * num_mp)
         micro_bs = b // (2 * num_pp * num_dp) if num_pp > 0 else b // (num_dp)
         active_mem = (micro_bs * s * h * num_pp * 2) * 2 * L // (num_pp * num_mp)
         # enabled gradient ckpt
@@ -463,7 +478,7 @@ def estimate_rpc_memory(rpc: ModelRPC,
         static_mem = int(2 * param_mem // (num_pp * num_mp))
         # if num_dp > 4 and num_dp * num_mp * num_pp <= 16:
         #     static_mem = static_mem * 1.1
-        active_mem = 2 * (2 * b * (gs + s) * h) * L // (num_pp * num_mp * num_dp)  # kv cache
+        active_mem = (2 * (2 * b * (gs + s) * h) * L // (num_pp * num_mp * num_dp))  # kv cache
         # print(f"generate static_mem: {static_mem/(1024*1024*1024):02f} GB, "
         #       f"kv_cache_mem: {kv_cache_mem/(1024*1024*1024):02f} GB, "
         #       f"total: {(static_mem + kv_cache_mem)/(1024*1024*1024):02f} GB")
@@ -486,12 +501,14 @@ def main(args):
         rpc_name = rpc.name
         p = ModelParallelStrategy.from_config(rpc_alloc.train_eval_config.parallel)
         for bs, seq_len in bs_seqlen_list:
-            rpc_cost = estimate_rpc_time(rpc,
-                                         p,
-                                         use_gradient_checkpointing=True,
-                                         bs=bs,
-                                         seq_len=seq_len,
-                                         num_gen_tokens=seq_len - 128)
+            rpc_cost = estimate_rpc_time(
+                rpc,
+                p,
+                use_gradient_checkpointing=True,
+                bs=bs,
+                seq_len=seq_len,
+                num_gen_tokens=seq_len - 128,
+            )
             stats_key = make_stats_key(rpc_name, bs, seq_len)
             r[stats_key] = rpc_cost
             # print(f"RPC {stats_key} cost: {rpc_cost}")
@@ -522,25 +539,29 @@ def example(args):
     seq_len = 128
 
     p1 = ModelParallelStrategy(num_pp=1, num_mp=4, num_dp=8)
-    rpc_cost = estimate_rpc_time(rollout,
-                                 p1,
-                                 use_gradient_checkpointing=True,
-                                 num_gen_tokens=896,
-                                 bs=bs,
-                                 seq_len=seq_len,
-                                 n_ppo_minibatches=4)
+    rpc_cost = estimate_rpc_time(
+        rollout,
+        p1,
+        use_gradient_checkpointing=True,
+        num_gen_tokens=896,
+        bs=bs,
+        seq_len=seq_len,
+        n_ppo_minibatches=4,
+    )
     mem_cost, static_mem = estimate_rpc_memory(rollout, p1, bs, seq_len)
     print(f"rollout {p1} rpc cost {rpc_cost} mem cost {mem_cost/(1024**3):.2f} GB")
 
     print("*" * 100)
     p2 = ModelParallelStrategy(num_pp=1, num_mp=4, num_dp=6)
-    rpc_cost = estimate_rpc_time(rollout,
-                                 p2,
-                                 use_gradient_checkpointing=True,
-                                 num_gen_tokens=896,
-                                 bs=bs,
-                                 seq_len=seq_len,
-                                 n_ppo_minibatches=4)
+    rpc_cost = estimate_rpc_time(
+        rollout,
+        p2,
+        use_gradient_checkpointing=True,
+        num_gen_tokens=896,
+        bs=bs,
+        seq_len=seq_len,
+        n_ppo_minibatches=4,
+    )
     mem_cost, static_mem = estimate_rpc_memory(rollout, p2, bs, seq_len)
     print(f"rollout {p2} rpc cost {rpc_cost} mem cost {mem_cost/(1024**3):.2f} GB")
 

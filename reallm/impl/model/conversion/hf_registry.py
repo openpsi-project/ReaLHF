@@ -93,7 +93,7 @@ class HFModelRegistry:
             partition_times.append(time.perf_counter() - partition_tik)
 
         copy_tik = time.perf_counter()
-        if init_critic_from_actor and f"{model.config.n_layers + 1}.weight" in state_dict:
+        if (init_critic_from_actor and f"{model.config.n_layers + 1}.weight" in state_dict):
             state_dict.pop(f"{model.config.n_layers + 1}.weight")
             model.load_state_dict(state_dict, strict=False)
         else:
@@ -130,7 +130,7 @@ class HFModelRegistry:
 
         # To decrease the size of each saved file, we split the file
         # of each pipeline stage into smaller shards.
-        approx_param_size = sum(v.numel() * v.element_size() for v in model.state_dict().values()) * mp_size
+        approx_param_size = (sum(v.numel() * v.element_size() for v in model.state_dict().values()) * mp_size)
 
         # By default a shard is at most 1GB. A small size enables parallel saving during training.
         max_shard_size_byte = int(os.getenv("REAL_SAVE_MAX_SHARD_SIZE_BYTE", int(1e9)))
@@ -142,7 +142,11 @@ class HFModelRegistry:
 
         n_shards_this_stage = torch.tensor(n_shards_this_stage, dtype=torch.int32, device="cuda")
         pp_stage_n_shards = [torch.zeros_like(n_shards_this_stage) for _ in range(pp_size)]
-        dist.all_gather(pp_stage_n_shards, n_shards_this_stage, group=constants.pipe_parallel_group())
+        dist.all_gather(
+            pp_stage_n_shards,
+            n_shards_this_stage,
+            group=constants.pipe_parallel_group(),
+        )
         pp_stage_n_shards = [int(n.item()) for n in pp_stage_n_shards]
         assert all(x >= 1 for x in pp_stage_n_shards)
 
@@ -181,7 +185,7 @@ class HFModelRegistry:
             if pp_rank == 0 and dp_rank == 0 and mp_rank == 0:
                 torch.save(hf_sd, os.path.join(save_dir, fn))
         else:
-            output_fn = "pytorch_model" + "-{shard:05d}" + f"-of-{sum(pp_stage_n_shards):05d}.bin"
+            output_fn = ("pytorch_model" + "-{shard:05d}" + f"-of-{sum(pp_stage_n_shards):05d}.bin")
 
             n_shards = pp_stage_n_shards[pp_rank]
             shard_offset = sum(pp_stage_n_shards[:pp_rank])

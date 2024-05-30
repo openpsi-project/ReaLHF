@@ -64,6 +64,7 @@ def make_interface():
     import reallm.api.core.dfg
     import reallm.api.core.model_api as model_api
     import reallm.profiler.interface
+
     return model_api.make_interface(dfg.ModelInterface(type_="profile", args=dict()))
 
 
@@ -122,6 +123,7 @@ def run_inference(rank: int, res_queue: mp.Queue, seed: int):
     # cu_seqlens = data['cu_seqlens']
     # max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
     import reallm.base.constants as constants
+
     with constants.model_scope(MODEL_NAME):
         model.module.eval()
 
@@ -160,13 +162,15 @@ def run_train_batch(rank: int, res_queue: mp.Queue, seed: int):
     # os.environ["REAL_TRACE"] = "1"
 
     with constants.model_scope(MODEL_NAME):
-        tracer = get_tracer(tracer_entries=int(2e6),
-                            max_stack_depth=10,
-                            ignore_c_function=False,
-                            ignore_frozen=True,
-                            log_async=True,
-                            min_duration=5,
-                            output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json")
+        tracer = get_tracer(
+            tracer_entries=int(2e6),
+            max_stack_depth=10,
+            ignore_c_function=False,
+            ignore_frozen=True,
+            log_async=True,
+            min_duration=5,
+            output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json",
+        )
         tracer.start()
 
         data = random_sample(BATCH_SIZE // NUM_DP, SEQ_LEN, 32000)
@@ -203,7 +207,8 @@ def run_generate(rank: int, res_queue: mp.Queue, seed: int):
             ignore_frozen=True,
             log_async=True,
             # min_duration=10,
-            output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json")
+            output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json",
+        )
         tracer.start()
 
         st = time.monotonic()
@@ -242,13 +247,15 @@ def run_mixed(rank: int, seed: int):
     import os
 
     os.environ["REAL_TRACE"] = "1"
-    tracer = get_tracer(tracer_entries=int(2e6),
-                        max_stack_depth=10,
-                        ignore_c_function=False,
-                        ignore_frozen=True,
-                        log_async=True,
-                        min_duration=10,
-                        output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json")
+    tracer = get_tracer(
+        tracer_entries=int(2e6),
+        max_stack_depth=10,
+        ignore_c_function=False,
+        ignore_frozen=True,
+        log_async=True,
+        min_duration=10,
+        output_file=f"/home/meizy/logs/viztracer/f/tracef{rank}.json",
+    )
 
     train_iters = 4
     gen_iters = 1
@@ -259,6 +266,7 @@ def run_mixed(rank: int, seed: int):
     # gen_datas = [init_data(model.tokenizer, device, BATCH_SIZE, seed=seed + i) for i in range(gen_iters)]
 
     from reallm.impl.model.nn.real_llm_generate import GenerationConfig
+
     gconfig = GenerationConfig(min_new_tokens=MIN_NEW_TOKENS, max_new_tokens=MAX_NEW_TOKENS)
 
     def mixed_one_step():
@@ -438,15 +446,19 @@ class ModelParallelReaLModelTest(unittest.TestCase):
         self.baseline_model.eval()
 
         st = time.monotonic()
-        r = self.baseline_model(packed_input_ids=packed_input_ids,
-                                cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen).float()
+        r = self.baseline_model(
+            packed_input_ids=packed_input_ids,
+            cu_seqlens=cu_seqlens,
+            max_seqlen=max_seqlen,
+        ).float()
         print(f"baseline FIRST inference time cost {time.monotonic() - st:.4f}")
 
         st = time.monotonic()
-        r = self.baseline_model(packed_input_ids=packed_input_ids,
-                                cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen).float()
+        r = self.baseline_model(
+            packed_input_ids=packed_input_ids,
+            cu_seqlens=cu_seqlens,
+            max_seqlen=max_seqlen,
+        ).float()
         print(f"baseline inference time cost {time.monotonic() - st:.4f}")
 
         print(f"diff: {r - res[0]}, max/correct_max {(r - res[0]).abs().max()}/{r.abs().max()}, "
@@ -472,15 +484,27 @@ class ModelParallelReaLModelTest(unittest.TestCase):
             p.join()
 
         torch.manual_seed(self.seed)
-        input = torch.randn(32, 1024, dtype=torch.float, device=torch.cuda.current_device()) * 0.02
-        w1 = torch.randn(2048, 1024, dtype=torch.float, device=torch.cuda.current_device()) * 0.02
-        w2 = torch.randn(1024, 2048, dtype=torch.float, device=torch.cuda.current_device()) * 0.02
+        input = (torch.randn(32, 1024, dtype=torch.float, device=torch.cuda.current_device()) * 0.02)
+        w1 = (torch.randn(2048, 1024, dtype=torch.float, device=torch.cuda.current_device()) * 0.02)
+        w2 = (torch.randn(1024, 2048, dtype=torch.float, device=torch.cuda.current_device()) * 0.02)
         print(input)
         print(w1)
         print(w2)
 
-        col = torch.nn.Linear(1024, 2048, bias=False, dtype=torch.float, device=torch.cuda.current_device())
-        row = torch.nn.Linear(2048, 1024, bias=False, dtype=torch.float, device=torch.cuda.current_device())
+        col = torch.nn.Linear(
+            1024,
+            2048,
+            bias=False,
+            dtype=torch.float,
+            device=torch.cuda.current_device(),
+        )
+        row = torch.nn.Linear(
+            2048,
+            1024,
+            bias=False,
+            dtype=torch.float,
+            device=torch.cuda.current_device(),
+        )
         col.load_state_dict({"weight": w1})
         row.load_state_dict({"weight": w2})
         r = row(col(input))

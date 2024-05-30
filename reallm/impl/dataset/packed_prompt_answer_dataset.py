@@ -43,17 +43,13 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
         self.max_length = max_length
 
         self.util = util
-        if self.util.tokenizer.pad_token_id is None:
-            self.util.tokenizer.pad_token_id = self.util.tokenizer.eos_token_id
-            if self.util.tokenizer.eos_token_id is None:
-                raise ValueError("eos_token_id must be defined.")
 
         if dataset_path is not None:
             if dataset_path.endswith(".jsonl"):
-                with open(dataset_path, 'r') as f:
+                with open(dataset_path, "r") as f:
                     data = [json.loads(ff) for ff in f]
             elif dataset_path.endswith(".json"):
-                with open(dataset_path, 'r') as f:
+                with open(dataset_path, "r") as f:
                     data = json.load(f)
             else:
                 raise NotImplementedError(f"Unkown extention: {dataset_path}")
@@ -64,32 +60,36 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
         shuffle_indices = data_api.get_shuffle_indices(util.seed, len(data))
         data = [data[i] for i in shuffle_indices]
         for x in data:
-            if x['answer'].startswith(x['prompt']):
+            if x["answer"].startswith(x["prompt"]):
                 raise ValueError("Answer should not start with prompt.")
 
-        all_prompt_str = [x['prompt'] for x in data]
-        all_prompt_chosen_str = [x['prompt'] + x['answer'] + util.tokenizer.eos_token for x in data]
-        all_prompt_encodings = util.tokenizer(all_prompt_str,
-                                              truncation=True,
-                                              max_length=max_length,
-                                              padding=False,
-                                              return_length=True,
-                                              return_attention_mask=False)
-        all_prompt_chosen_encodings = util.tokenizer(all_prompt_chosen_str,
-                                                     truncation=True,
-                                                     max_length=max_length,
-                                                     padding=False,
-                                                     return_length=True,
-                                                     return_attention_mask=False)
+        all_prompt_str = [x["prompt"] for x in data]
+        all_prompt_chosen_str = [x["prompt"] + x["answer"] + util.tokenizer.eos_token for x in data]
+        all_prompt_encodings = util.tokenizer(
+            all_prompt_str,
+            truncation=True,
+            max_length=max_length,
+            padding=False,
+            return_length=True,
+            return_attention_mask=False,
+        )
+        all_prompt_chosen_encodings = util.tokenizer(
+            all_prompt_chosen_str,
+            truncation=True,
+            max_length=max_length,
+            padding=False,
+            return_length=True,
+            return_attention_mask=False,
+        )
 
-        start, end = min_abs_diff_partition(np.array(all_prompt_chosen_encodings['length']),
+        start, end = min_abs_diff_partition(np.array(all_prompt_chosen_encodings["length"]),
                                             util.world_size)[util.ddp_rank]
 
-        prompt_lengths = all_prompt_encodings['length'][start:end]
-        prompts = all_prompt_encodings['input_ids'][start:end]
+        prompt_lengths = all_prompt_encodings["length"][start:end]
+        prompts = all_prompt_encodings["input_ids"][start:end]
 
-        seqlens = all_prompt_chosen_encodings['length'][start:end]
-        seqs = all_prompt_chosen_encodings['input_ids'][start:end]
+        seqlens = all_prompt_chosen_encodings["length"][start:end]
+        seqs = all_prompt_chosen_encodings["input_ids"][start:end]
 
         prompts_str = all_prompt_str[start:end]
         prompt_chosen_str = all_prompt_chosen_str[start:end]
@@ -99,7 +99,13 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
         for ii, (seq, prompt, seqlen, prompt_len, pstr, pcstr) in enumerate(
                 zip(seqs, prompts, seqlens, prompt_lengths, prompts_str, prompt_chosen_str)):
             try:
-                assert seq[:prompt_len] == prompt, (prompt, seq, prompt_len, pstr, pcstr)
+                assert seq[:prompt_len] == prompt, (
+                    prompt,
+                    seq,
+                    prompt_len,
+                    pstr,
+                    pcstr,
+                )
                 assert seqlen >= prompt_len, (seqlen, prompt_len)
             except AssertionError:
                 indices_to_pop.append(ii)
@@ -119,8 +125,8 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
         self.prompts = prompts
         self.prompt_masks = prompt_masks
 
-        assert len(self.seqlens) == len(self.prompt_lengths) == len(self.prompts) == len(
-            self.prompt_masks) == len(self.seqs)
+        assert (len(self.seqlens) == len(self.prompt_lengths) == len(self.prompts) == len(self.prompt_masks)
+                == len(self.seqs))
 
         logger.info(f"Number of sequences in the dataset: {len(self.seqs)}")
 
@@ -150,7 +156,9 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
 
     def _shuffle(self):
         shuffle_indices = data_api.get_shuffle_indices(
-            self.util.seed + self.shuffle_cnt * 7 + self.util.ddp_rank * 3, len(self.seqlens))
+            self.util.seed + self.shuffle_cnt * 7 + self.util.ddp_rank * 3,
+            len(self.seqlens),
+        )
 
         self.seqlens = [self.seqlens[i] for i in shuffle_indices]
         self.prompt_lengths = [self.prompt_lengths[i] for i in shuffle_indices]
@@ -170,15 +178,21 @@ class PackedPromptAnswerDataset(torch.utils.data.IterableDataset):
             prompt_masks = [self.prompt_masks[i] for i in indices]
 
             total_seqlen = sum(seqlens)
-            assert total_seqlen <= self.n_tokens_per_batch, (total_seqlen, self.n_tokens_per_batch)
+            assert total_seqlen <= self.n_tokens_per_batch, (
+                total_seqlen,
+                self.n_tokens_per_batch,
+            )
 
             seqlens = torch.tensor(seqlens, dtype=torch.int32)
             cu_seqlens = torch.cat([torch.tensor([0], dtype=torch.int32), torch.cumsum(seqlens, dim=0)])
             prompt_masks = torch.cat([torch.tensor(m, dtype=torch.bool) for m in prompt_masks])
             packed_input_ids = torch.cat([torch.tensor(p, dtype=torch.long) for p in seqs])
 
-            assert packed_input_ids.shape[0] == prompt_masks.shape[0], (packed_input_ids.shape[0],
-                                                                        prompt_masks.shape[0], total_seqlen)
+            assert packed_input_ids.shape[0] == prompt_masks.shape[0], (
+                packed_input_ids.shape[0],
+                prompt_masks.shape[0],
+                total_seqlen,
+            )
 
             yield dict(
                 packed_input_ids=packed_input_ids,
@@ -208,7 +222,7 @@ if __name__ != "__main__":
 else:
     import transformers
 
-    from reallm.base.dataparallel import PackedParallelDataBroker
+    from reallm.base.dataparallel import ParallelDataBroker
     from reallm.base.namedarray import from_dict
 
     def have_common_prefix_at_least(a, b, n):
@@ -233,5 +247,5 @@ else:
     for _ in range(10):
         print("dataset iteration")
         for x in dataloader:
-            datas = PackedParallelDataBroker.scatter_to(from_dict(x), n_dp)
+            datas = ParallelDataBroker.scatter_to(from_dict(x), n_dp)
             continue

@@ -23,7 +23,7 @@ def _dissect_param_hook(optimizer: torch.optim.Optimizer, args, kwargs):
     named_parameters = kwargs["named_parameters"]
     assert isinstance(named_parameters, list)
     for g in optimizer.param_groups:
-        g['params'] = None
+        g["params"] = None
     for pname, p in named_parameters:
         assert p in optimizer.state
         opt_state_cache[pname] = optimizer.state.pop(p)
@@ -34,7 +34,7 @@ def _compose_param_hook(optimizer: torch.optim.Optimizer, args, kwargs):
     named_parameters = kwargs["named_parameters"]
     assert isinstance(named_parameters, list)
     assert len(optimizer.param_groups) == 1
-    optimizer.param_groups[0]['params'] = [p for pname, p in named_parameters]
+    optimizer.param_groups[0]["params"] = [p for pname, p in named_parameters]
     if opt_state_cache:
         for pname, p in named_parameters:
             optimizer.state[p] = opt_state_cache.pop(pname)
@@ -47,10 +47,12 @@ class HookableFusedAdam(FusedAdam):
 
 
 def trace_handler(p: torch.profiler._KinetoProfile):
-    print(p.key_averages().table(sort_by="cuda_memory_usage",
-                                 row_limit=20,
-                                 max_name_column_width=30,
-                                 max_src_column_width=30))
+    print(p.key_averages().table(
+        sort_by="cuda_memory_usage",
+        row_limit=20,
+        max_name_column_width=30,
+        max_src_column_width=30,
+    ))
     # p.export_chrome_trace(os.path.join(dirname, f"rank{rank}.json"))
 
 
@@ -91,9 +93,10 @@ def test():
     opt_state_cache = {}
 
     for _ in range(5):
-        a.weight = torch.nn.Parameter(data=torch.randn(int(1e4), int(1e4), dtype=torch.float32,
-                                                       device="cuda"),
-                                      requires_grad=True)
+        a.weight = torch.nn.Parameter(
+            data=torch.randn(int(1e4), int(1e4), dtype=torch.float32, device="cuda"),
+            requires_grad=True,
+        )
         a.weight.grad = None
 
         print_memory(2)

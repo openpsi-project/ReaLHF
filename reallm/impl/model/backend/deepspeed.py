@@ -70,7 +70,13 @@ def get_train_ds_config(
     }
 
 
-def get_eval_ds_config(offload=False, stage=0, enable_fp16: bool = True, enable_bf16: bool = False, **kwargs):
+def get_eval_ds_config(
+    offload=False,
+    stage=0,
+    enable_fp16: bool = True,
+    enable_bf16: bool = False,
+    **kwargs,
+):
     if enable_bf16 and enable_fp16:
         raise ValueError("Cannot enable both fp16 and bf16 at the same time.")
     device = "cpu" if offload else "none"
@@ -163,7 +169,12 @@ def deepspeed_initialize(
         # Restore zero.Init context if necessary
         zero.partition_parameters.restore_init_context()
         logger.info(f"Deepspeed Engine initialze finished.")
-        return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
+        return_items = [
+            engine,
+            engine.optimizer,
+            engine.training_dataloader,
+            engine.lr_scheduler,
+        ]
     elif engine_type == "pipe":
         # mpu = model.mpu()
         config_class = DeepSpeedConfig(config, mpu)
@@ -179,7 +190,12 @@ def deepspeed_initialize(
             dist_init_required=False,
         )
         logger.info(f"Deepspeed Pipeline Engine initialze finished.")
-        return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
+        return_items = [
+            engine,
+            engine.optimizer,
+            engine.training_dataloader,
+            engine.lr_scheduler,
+        ]
     return tuple(return_items)
 
 

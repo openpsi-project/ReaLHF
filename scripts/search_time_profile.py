@@ -3,7 +3,7 @@ import pickle
 
 import matplotlib.pyplot as plt
 
-plt.rcParams.update({'font.size': 14})
+plt.rcParams.update({"font.size": 14})
 
 result_dir = "profile_result/search/"
 colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]

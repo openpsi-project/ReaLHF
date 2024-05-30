@@ -48,7 +48,7 @@ def _ppo_actor_loss_from_model_outputs(
         logits.masked_fill_(logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
 
     assert ppo_loss_mask is not None
-    (loss, importance_weight, clip_ratio, approx_kl) = ppo_functional.memory_efficient_ppo_loss_fn(
+    (loss, importance_weight, clip_ratio, approx_kl) = (ppo_functional.memory_efficient_ppo_loss_fn(
         logits=logits,
         cu_seqlens=cu_seqlens,
         packed_input_ids=packed_input_ids,
@@ -56,7 +56,7 @@ def _ppo_actor_loss_from_model_outputs(
         old_logprobs=old_logp,
         advantages=advantages,
         eps_clip=eps_clip,
-    )
+    ))
     loss = torch.where(ppo_loss_mask, loss, 0.0).sum() / ppo_loss_mask.count_nonzero()
 
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum() / ppo_loss_mask.sum()
@@ -78,9 +78,9 @@ def _ppo_actor_loss_from_model_outputs(
     )
 
     if logits_mask is not None:
-        stats["ignoring_logits_ratio"] = logits_mask.half().mean()  # inversed logits mask
+        stats["ignoring_logits_ratio"] = (logits_mask.half().mean())  # inversed logits mask
 
-    if (early_stop_kl is not None and approx_kl > early_stop_kl):
+    if early_stop_kl is not None and approx_kl > early_stop_kl:
         logger.warning(f"Current approximate KL divergence {approx_kl.item():.4f} is larger "
                        f"than early stop threshold {early_stop_kl}. Abort actor update.")
         loss = loss * 0.0
@@ -221,16 +221,19 @@ class PPOActorInterface(model_api.ModelInterface):
             gen_log_probs_list.append(logprobs[i, :gen_len])
             if logits_mask is not None:
                 gen_logits_mask_list.append(
-                    torch.cat([logits_mask[i, :gen_len],
-                               logits_mask.new_ones(1, logits_mask.shape[-1])]))
+                    torch.cat([
+                        logits_mask[i, :gen_len],
+                        logits_mask.new_ones(1, logits_mask.shape[-1]),
+                    ]))
 
         # For complete sequences, EOS token is included. Otherwise the sequence may end with arbitrary token.
         # cu_seqlens marks the boundary of these sequences, no matter whether they are complete or not.
         packed_seq = torch.cat(list(itertools.chain.from_iterable(zip(prompts_list, gen_tokens_list))))
         seq_lengths = prompt_lengths + gen_lengths
-        cu_seqlens = torch.cat(
-            [torch.zeros(1, dtype=torch.long, device=seq_lengths.device),
-             seq_lengths.cumsum(0)]).int()
+        cu_seqlens = torch.cat([
+            torch.zeros(1, dtype=torch.long, device=seq_lengths.device),
+            seq_lengths.cumsum(0),
+        ]).int()
         packed_logprobs = torch.cat(
             list(itertools.chain.from_iterable(zip(prompt_log_probs_list, gen_log_probs_list))))
         assert packed_seq.shape[0] == packed_logprobs.shape[0] + bs, (
@@ -254,7 +257,7 @@ class PPOActorInterface(model_api.ModelInterface):
             packed_seq=packed_seq,
             cu_seqlens=cu_seqlens,
             packed_logprobs=packed_logprobs,
-            packed_logits_mask=packed_logits_mask.bool() if packed_logits_mask is not None else None,
+            packed_logits_mask=(packed_logits_mask.bool() if packed_logits_mask is not None else None),
             prompt_mask=prompt_mask,
         )
         res = from_dict(res)
@@ -284,7 +287,11 @@ class PPOActorInterface(model_api.ModelInterface):
         else:
             if hasattr(module, "module"):
                 module = module.module
-            res = module(packed_input_ids=data["packed_seq"], cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+            res = module(
+                packed_input_ids=data["packed_seq"],
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            )
             logits = res.logits
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
@@ -332,8 +339,12 @@ class PPOActorInterface(model_api.ModelInterface):
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
         loss_mask = prompt_mask.logical_not()
         shift_one_indices = torch.cat([
-            torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
-            for i in range(cu_seqlens.shape[0] - 1)
+            torch.arange(
+                cu_seqlens[i] + 1,
+                cu_seqlens[i + 1],
+                dtype=torch.long,
+                device=cu_seqlens.device,
+            ) for i in range(cu_seqlens.shape[0] - 1)
         ])
         loss_mask = loss_mask[shift_one_indices]
 
@@ -384,7 +395,7 @@ class PPOActorInterface(model_api.ModelInterface):
                 packed_seq=data_["packed_seq"],
                 cu_seqlens=data_["cu_seqlens"].int(),
                 kl_rewards=kl_rewards,
-                logits_mask=data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None,
+                logits_mask=(data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None),
             ))
 
         data_.register_metadata(seqlens=batch_seqlens)
@@ -397,7 +408,7 @@ class PPOActorInterface(model_api.ModelInterface):
         for data in datas:
             cu_seqlens = data["cu_seqlens"]
             input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-            logits_mask = data["packed_logits_mask"] if "packed_logits_mask" in data else None
+            logits_mask = (data["packed_logits_mask"] if "packed_logits_mask" in data else None)
             if isinstance(module, DeepSpeedPipelineEngine):
                 module.set_version_steps(model.version.global_step)
                 seqlens = batch_seqlens[offset:offset + input_lens.shape[0]]
@@ -482,8 +493,12 @@ def _ppo_critic_loss_from_model_outputs(
     **kwargs,
 ) -> Tuple[torch.FloatTensor, Dict]:
     leave_one_indices = torch.cat([
-        torch.arange(cu_seqlens[i], cu_seqlens[i + 1] - 1, dtype=torch.long, device=cu_seqlens.device)
-        for i in range(cu_seqlens.shape[0] - 1)
+        torch.arange(
+            cu_seqlens[i],
+            cu_seqlens[i + 1] - 1,
+            dtype=torch.long,
+            device=cu_seqlens.device,
+        ) for i in range(cu_seqlens.shape[0] - 1)
     ])
     new_values = new_values[leave_one_indices].squeeze(-1)
     values = values[leave_one_indices].squeeze(-1)
@@ -586,9 +601,11 @@ class PPOCriticInterface(model_api.ModelInterface):
         else:
             if hasattr(module, "module"):
                 module = module.module
-            scores: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
-                                               cu_seqlens=cu_seqlens,
-                                               max_seqlen=max_seqlen).logits
+            scores: torch.FloatTensor = module(
+                packed_input_ids=data["packed_seq"],
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ).logits
         scores = scores.squeeze(-1)
         res = from_dict(dict(scores=scores))
         res.register_metadata(seqlens=data.metadata["seqlens"])
@@ -626,8 +643,12 @@ class PPOCriticInterface(model_api.ModelInterface):
 
         loss_mask = prompt_mask.logical_not()
         shift_one_indices = torch.cat([
-            torch.arange(cu_seqlens[i] + 1, cu_seqlens[i + 1], dtype=torch.long, device=cu_seqlens.device)
-            for i in range(cu_seqlens.shape[0] - 1)
+            torch.arange(
+                cu_seqlens[i] + 1,
+                cu_seqlens[i + 1],
+                dtype=torch.long,
+                device=cu_seqlens.device,
+            ) for i in range(cu_seqlens.shape[0] - 1)
         ])
         loss_mask = loss_mask[shift_one_indices]
 
@@ -707,9 +728,11 @@ class PPOCriticInterface(model_api.ModelInterface):
                 )
             else:
                 max_seqlen = int(max(input_lens))
-                new_values: torch.FloatTensor = module(packed_input_ids=data["packed_seq"],
-                                                       cu_seqlens=data["cu_seqlens"],
-                                                       max_seqlen=max_seqlen).logits.float()
+                new_values: torch.FloatTensor = module(
+                    packed_input_ids=data["packed_seq"],
+                    cu_seqlens=data["cu_seqlens"],
+                    max_seqlen=max_seqlen,
+                ).logits.float()
 
                 loss, stats = _ppo_critic_loss_from_model_outputs(
                     new_values=new_values,

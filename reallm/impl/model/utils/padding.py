@@ -15,8 +15,11 @@ class IndexFirstAxis(torch.autograd.Function):
         second_dim = other_shape.numel()
         # TD [2022-03-04] For some reason torch.gather is a bit faster than indexing.
         # return input[indices]
-        return torch.gather(rearrange(input, "b ... -> b (...)"), 0,
-                            repeat(indices, "z -> z d", d=second_dim)).reshape(-1, *other_shape)
+        return torch.gather(
+            rearrange(input, "b ... -> b (...)"),
+            0,
+            repeat(indices, "z -> z d", d=second_dim),
+        ).reshape(-1, *other_shape)
 
     @staticmethod
     def backward(ctx, grad_output):

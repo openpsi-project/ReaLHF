@@ -85,7 +85,7 @@ def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
 
         exp_name = args.experiment_name
         if args.trial_name == MISSING:
-            args.trial_name = trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+            args.trial_name = trial_name = (f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}")
         else:
             trial_name = args.trial_name
         from reallm.apps.main import main_start, main_stop
@@ -145,7 +145,7 @@ def main():
         print(f"Experiment name not manually set. Default to {experiment_name}.")
         sys.argv += [f"experiment_name={experiment_name}"]
 
-    if "--multirun" in sys.argv or "hydra.mode=MULTIRUN" in sys.argv or "-m" in sys.argv:
+    if ("--multirun" in sys.argv or "hydra.mode=MULTIRUN" in sys.argv or "-m" in sys.argv):
         raise NotImplementedError("Hydra multi-run is not supported.")
     # non-multirun mode, add trial_name and hydra run dir
     if any("trial_name=" in x for x in sys.argv):

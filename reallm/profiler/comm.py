@@ -139,8 +139,11 @@ class ProfileCommunication:
             constants.trial_name(),
             "profile_result",
         )
-        dump_path = os.path.join(DUMP_DIR, self.device_mesh_name,
-                                 f"full-{gethostname()}-{self.local_gpu_id}.json")
+        dump_path = os.path.join(
+            DUMP_DIR,
+            self.device_mesh_name,
+            f"full-{gethostname()}-{self.local_gpu_id}.json",
+        )
         os.makedirs(os.path.dirname(dump_path), exist_ok=True)
         with open(dump_path, "w") as f:
             logger.info(f"dumping to {os.path.abspath(dump_path)}")
@@ -154,10 +157,13 @@ class ProfileCommunication:
                 "mean": mean(value) / 1e3,
                 "stdev": stdev(value) / 1e3,
                 "min": min(value) / 1e3,
-                "max": max(value) / 1e3
+                "max": max(value) / 1e3,
             }
-        dump_path = os.path.join(DUMP_DIR, self.device_mesh_name,
-                                 f"summary-{gethostname()}-{self.local_gpu_id}.json")
+        dump_path = os.path.join(
+            DUMP_DIR,
+            self.device_mesh_name,
+            f"summary-{gethostname()}-{self.local_gpu_id}.json",
+        )
         with open(dump_path, "w") as f:
             json.dump(summary, f, indent=4)
 

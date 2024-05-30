@@ -184,7 +184,10 @@ class CausalSelfAttentionLayer(nn.Module):
         elif self.apply_rotary:
             self.rotary_emb._update_cos_sin_cache(k_cache.shape[1], device=q.device, dtype=q.dtype)
             # Rotary cos/sin will be automatically offset by cache_seqlens in flash_attn.
-            rotary_cos, rotary_sin = self.rotary_emb._cos_cached, self.rotary_emb._sin_cached
+            rotary_cos, rotary_sin = (
+                self.rotary_emb._cos_cached,
+                self.rotary_emb._sin_cached,
+            )
         else:
             rotary_cos = rotary_sin = None
 

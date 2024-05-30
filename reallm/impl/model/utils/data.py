@@ -56,7 +56,10 @@ class TensorDataclassToTupleInterface:
         for f in dataclasses.fields(self):
             v = getattr(self, f.name)
             t.append(to_tensor(v))
-        t = [torch.tensor(len(t), device=device), torch.tensor(self.encode(), device=device)] + t
+        t = [
+            torch.tensor(len(t), device=device),
+            torch.tensor(self.encode(), device=device),
+        ] + t
         return tuple(t)
 
     @classmethod

@@ -9,8 +9,14 @@ def dpo_loss(
     ref_logps: torch.Tensor,
     beta: float,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
-    assert len(pi_logps.shape) == 1 and pi_logps.shape[0] % 2 == 0, (pi_logps.shape, ref_logps.shape)
-    assert len(ref_logps.shape) == 1 and ref_logps.shape[0] % 2 == 0, (pi_logps.shape, ref_logps.shape)
+    assert len(pi_logps.shape) == 1 and pi_logps.shape[0] % 2 == 0, (
+        pi_logps.shape,
+        ref_logps.shape,
+    )
+    assert len(ref_logps.shape) == 1 and ref_logps.shape[0] % 2 == 0, (
+        pi_logps.shape,
+        ref_logps.shape,
+    )
     pi_logps = pi_logps.view(-1, 2)
     ref_logps = ref_logps.view(-1, 2)
     pi_yw_logps, pi_yl_logps = pi_logps[:, 0], pi_logps[:, 1]

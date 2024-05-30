@@ -188,6 +188,7 @@ def PackedDataLoader(dataset, *args, **kwargs):
         **kwargs,
     )
 
+
 def PackedEvalDataLoader(dataset, *args, **kwargs):
     # TODO: fix seeding
     return torch.utils.data.DataLoader(
@@ -332,7 +333,10 @@ def gather_sequences(src: List[namedarray.NamedArray]) -> namedarray.NamedArray:
         res["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
 
     if "prompt_cu_seqlens" in src[0]:
-        slens = torch.cat([x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1] for x in src], dim=0)
+        slens = torch.cat(
+            [x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1] for x in src],
+            dim=0,
+        )
         res["prompt_cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
 
     res.register_metadata(seqlens=seqlens)

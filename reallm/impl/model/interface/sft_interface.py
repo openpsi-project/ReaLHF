@@ -9,8 +9,7 @@ from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
-from reallm.impl.model.utils.functional import (build_shift_one_indices,
-                                                gather_packed_shifted_log_probs)
+from reallm.impl.model.utils.functional import build_shift_one_indices, gather_packed_shifted_log_probs
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
 
@@ -35,15 +34,18 @@ class SFTInterface(model_api.ModelInterface):
 
     def train_step(self, model: model_api.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_input_ids: torch.Tensor = data['packed_input_ids']  # shape [tot_seqlen]
-        prompt_mask: torch.BoolTensor = data['prompt_mask']  # shape [tot_seqlen]
+        packed_input_ids: torch.Tensor = data["packed_input_ids"]  # shape [tot_seqlen]
+        prompt_mask: torch.BoolTensor = data["prompt_mask"]  # shape [tot_seqlen]
         module: deepspeed.DeepSpeedEngine = model.module
 
         module.train()
 
         seqlens_cpu = data.metadata["seqlens"]
         max_seqlen = max(seqlens_cpu)
-        cu_seqlens = torch.nn.functional.pad(torch.tensor(seqlens_cpu, dtype=torch.int32, device=model.device).cumsum(0), (1,0))
+        cu_seqlens = torch.nn.functional.pad(
+            torch.tensor(seqlens_cpu, dtype=torch.int32, device=model.device).cumsum(0),
+            (1, 0),
+        )
 
         if isinstance(module, DeepSpeedPipelineEngine):
             loss_fn_kwargs = dict(
@@ -60,8 +62,11 @@ class SFTInterface(model_api.ModelInterface):
                 **loss_fn_kwargs,
             )
         else:
-            logits = module(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens,
-                            max_seqlen=max_seqlen).logits
+            logits = module(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ).logits
             loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
             module.backward(loss)
             module.step()
@@ -73,7 +78,7 @@ class SFTInterface(model_api.ModelInterface):
 
         res = dict()
         if loss is not None:
-            res['loss'] = float(loss)
+            res["loss"] = float(loss)
         return res
 
     def save(self, model: model_api.Model, save_dir: str):
@@ -102,23 +107,30 @@ class SFTInterface(model_api.ModelInterface):
             prompt_mask: torch.BoolTensor = data["prompt_mask"]  # shape [tot_seqlen]
 
             max_seqlen = max(seqlens_cpu)
-            cu_seqlens = torch.nn.functional.pad(torch.tensor(seqlens_cpu, dtype=torch.int32, device=model_.device).cumsum(0), (1,0))
+            cu_seqlens = torch.nn.functional.pad(
+                torch.tensor(seqlens_cpu, dtype=torch.int32, device=model_.device).cumsum(0),
+                (1, 0),
+            )
 
             if isinstance(module, DeepSpeedPipelineEngine):
                 loss_fn_kwargs = dict(
                     prompt_mask=prompt_mask,
                     input_lens=cu_seqlens[1:] - cu_seqlens[:-1],
                 )
-                loss, _ = module.eval_batch(seqlens_cpu=seqlens_cpu,
-                                            packed_input_ids=packed_input_ids,
-                                            cu_seqlens=cu_seqlens,
-                                            loss_fn=compute_packed_sft_loss,
-                                            num_micro_batches=constants.pipe_parallel_world_size(),
-                                            **loss_fn_kwargs)
+                loss, _ = module.eval_batch(
+                    seqlens_cpu=seqlens_cpu,
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    loss_fn=compute_packed_sft_loss,
+                    num_micro_batches=constants.pipe_parallel_world_size(),
+                    **loss_fn_kwargs,
+                )
             else:
-                logits = module(packed_input_ids=packed_input_ids,
-                                cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen).logits
+                logits = module(
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                ).logits
                 loss, _ = compute_packed_sft_loss(logits, packed_input_ids, cu_seqlens, prompt_mask)
 
             if loss is not None:
@@ -155,9 +167,11 @@ class SFTInterface(model_api.ModelInterface):
                 cu_seqlens=cu_seqlens,
             )
         else:
-            logits = model.module(packed_input_ids=packed_input_ids,
-                                  cu_seqlens=cu_seqlens,
-                                  max_seqlen=max_seqlen).logits
+            logits = model.module(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ).logits
         x = from_dict(dict(logits=logits))
         x.register_metadata(**data.medata)
         return x
@@ -182,8 +196,8 @@ class SFTInterface(model_api.ModelInterface):
             res = module.generate(
                 seqlens_cpu=data.metadata["seqlens"],
                 tokenizer=model.tokenizer,
-                packed_input_ids=data['packed_input_ids'],
-                cu_seqlens=data['cu_seqlens'],
+                packed_input_ids=data["packed_input_ids"],
+                cu_seqlens=data["cu_seqlens"],
                 gconfig=gconfig,
             )
             if res is None:
@@ -193,9 +207,9 @@ class SFTInterface(model_api.ModelInterface):
         else:
             res = module.generate(
                 tokenizer=model.tokenizer,
-                packed_input_ids=data['packed_input_ids'],
-                cu_seqlens=data['cu_seqlens'],
-                max_seqlen=max(data['cu_seqlens'][1:] - data['cu_seqlens'][:-1]),
+                packed_input_ids=data["packed_input_ids"],
+                cu_seqlens=data["cu_seqlens"],
+                max_seqlen=max(data["cu_seqlens"][1:] - data["cu_seqlens"][:-1]),
                 gconfig=gconfig,
             )
             gen_tokens = res.sequences
@@ -210,4 +224,3 @@ class SFTInterface(model_api.ModelInterface):
 
 
 model_api.register_interface("sft", SFTInterface)
-

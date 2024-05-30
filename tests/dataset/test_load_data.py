@@ -7,9 +7,9 @@ import reallm.impl.model
 
 def test_prompt_answer():
     tpath = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
-    dpath = "/lustre/fw/datasets/imdb/rl/sft_pos-train.jsonl"
+    dpath = "/lustre/fw/datasets/imdb/rl/rm_paired-train-lite.jsonl"
     dataset_config = system_api.Dataset(
-        "prompt",
+        "rw_pair",
         args=dict(
             max_length=1024,
             dataset_path=dpath,
@@ -28,8 +28,9 @@ def test_prompt_answer():
         x = dataset[i]
         assert isinstance(x, namedarray.NamedArray)
         assert "seqlens" in x.metadata
-        assert len(x.metadata["seqlens"]) == 1
-        assert isinstance(x.metadata['seqlens'][0], int)
+        assert isinstance(x.metadata["seqlens"], list)
+        for seqlen in x.metadata["seqlens"]:
+            assert isinstance(seqlen, int)
 
     dataloder = data_api.make_dataloader("packed", dataset)
     for x in dataloder:

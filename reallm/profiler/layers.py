@@ -152,10 +152,13 @@ class ProfileLayers:
 
     @torch.no_grad()
     def fwd_gen(self, bs, seq_len):
-        input_ids = torch.randint(0,
-                                  self.config.vocab_size, (bs, seq_len),
-                                  dtype=torch.long,
-                                  device=self.device)
+        input_ids = torch.randint(
+            0,
+            self.config.vocab_size,
+            (bs, seq_len),
+            dtype=torch.long,
+            device=self.device,
+        )
         attention_mask = torch.ones_like(input_ids)
         # fwd_gen_0
         packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
@@ -177,21 +180,23 @@ class ProfileLayers:
         layer_indices = range(len(ys))
 
         for y, layer_idx in zip(ys[1:-1], layer_indices[1:-1]):
-            assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
+            assert (y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None)
             kvcache_seqlen = max(max_seqlen + self.max_new_tokens, self.hidden_dim // self.head_dim + 10)
             # fix of a flash attention bug
-            k_cache = constants.get_global_memory_buffer().get_tensor(tensor_shape=(bs, kvcache_seqlen,
-                                                                                    *y.k_cache.shape[1:]),
-                                                                      dtype=y.k_cache.dtype,
-                                                                      name=f"kv_cache_{layer_idx}_k",
-                                                                      force_zero=True)
-            v_cache = constants.get_global_memory_buffer().get_tensor(tensor_shape=(bs, kvcache_seqlen,
-                                                                                    *y.v_cache.shape[1:]),
-                                                                      dtype=y.v_cache.dtype,
-                                                                      name=f"kv_cache_{layer_idx}_v",
-                                                                      force_zero=True)
-            indices = torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
-                                   dtype=torch.long)[None, :] < input_lens[:, None]
+            k_cache = constants.get_global_memory_buffer().get_tensor(
+                tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+                dtype=y.k_cache.dtype,
+                name=f"kv_cache_{layer_idx}_k",
+                force_zero=True,
+            )
+            v_cache = constants.get_global_memory_buffer().get_tensor(
+                tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+                dtype=y.v_cache.dtype,
+                name=f"kv_cache_{layer_idx}_v",
+                force_zero=True,
+            )
+            indices = (torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
+                                    dtype=torch.long)[None, :] < input_lens[:, None])
             k_cache[indices] = y.k_cache
             v_cache[indices] = y.v_cache
             y.k_cache = k_cache
@@ -212,10 +217,13 @@ class ProfileLayers:
             self.stats[make_stats_key(layer_name, "fwd_gen_1", bs, seq_len)].append(time.monotonic_ns() - st)
 
     def fwd_bwd_opt(self, bs, seq_len):
-        input_ids = torch.randint(0,
-                                  self.config.vocab_size, (bs, seq_len),
-                                  dtype=torch.long,
-                                  device=self.device)
+        input_ids = torch.randint(
+            0,
+            self.config.vocab_size,
+            (bs, seq_len),
+            dtype=torch.long,
+            device=self.device,
+        )
         attention_mask = torch.ones_like(input_ids)
         packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=False)
@@ -270,11 +278,13 @@ class ProfileLayers:
             # dump stats summary
             all_summary = {}
             for k, stats in self.stats.items():
-                key_summary = dict(len=len(stats),
-                                   mean=mean(stats) / 1e3,
-                                   stdev=stdev(stats) / 1e3,
-                                   max=max(stats) / 1e3,
-                                   min=min(stats) / 1e3)
+                key_summary = dict(
+                    len=len(stats),
+                    mean=mean(stats) / 1e3,
+                    stdev=stdev(stats) / 1e3,
+                    max=max(stats) / 1e3,
+                    min=min(stats) / 1e3,
+                )
                 all_summary[k] = key_summary
             dump_path = os.path.join(DUMP_DIR, self.model_name, f"summary-{world_size}.json")
             os.makedirs(os.path.dirname(dump_path), exist_ok=True)
@@ -282,13 +292,15 @@ class ProfileLayers:
                 json.dump(all_summary, f)
 
 
-def make_profile_layers(device: torch.device,
-                        model_path: str,
-                        model_name: str,
-                        use_sequence_parallel: bool = False,
-                        use_gradient_checkpointing: bool = False,
-                        dtype: Optional[str] = None,
-                        hf_model_type: str = "llama"):
+def make_profile_layers(
+    device: torch.device,
+    model_path: str,
+    model_name: str,
+    use_sequence_parallel: bool = False,
+    use_gradient_checkpointing: bool = False,
+    dtype: Optional[str] = None,
+    hf_model_type: str = "llama",
+):
     if dtype == "fp16" or dtype == None:
         dtype = torch.float16
     elif dtype == "bf16":
@@ -306,12 +318,14 @@ def make_profile_layers(device: torch.device,
     if tokenizer is None:
         tokenizer = model_api.load_hf_tokenizer(model_path)
 
-    profile_layers = ProfileLayers(model_name,
-                                   config,
-                                   use_sequence_parallel=use_sequence_parallel,
-                                   use_gradient_checkpointing=use_gradient_checkpointing,
-                                   tokenizer=tokenizer,
-                                   dtype=dtype,
-                                   device=device)
+    profile_layers = ProfileLayers(
+        model_name,
+        config,
+        use_sequence_parallel=use_sequence_parallel,
+        use_gradient_checkpointing=use_gradient_checkpointing,
+        tokenizer=tokenizer,
+        dtype=dtype,
+        device=device,
+    )
 
     return profile_layers

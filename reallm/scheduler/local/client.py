@@ -76,7 +76,7 @@ class LocalSchedulerClient(SchedulerClient):
             self._job_env_vars[worker_type] = env_vars
 
         if worker_type in self._job_cmd:
-            assert self._job_cmd[worker_type] == cmd, "All workers of the same type must have the same cmd."
+            assert (self._job_cmd[worker_type] == cmd), "All workers of the same type must have the same cmd."
         else:
             self._job_cmd[worker_type] = cmd
 

@@ -43,7 +43,7 @@ def _parse_log(rootdir: str, model_size, dp_size, pp_size, exp_identifier=""):
 
 def parse_log(model_size: ModelSize):
     print("-" * 40)
-    n_gpus = 64 if model_size == ModelSize.XLARGE else 32 if model_size == ModelSize.LARGE else 16
+    n_gpus = (64 if model_size == ModelSize.XLARGE else 32 if model_size == ModelSize.LARGE else 16)
     pp_sizes = [1, 2, 4, 8]
     if model_size == ModelSize.XLARGE:
         pp_sizes.append(16)

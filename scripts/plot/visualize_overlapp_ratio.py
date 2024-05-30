@@ -57,7 +57,11 @@ def compute_rlhf_pflops(
         hf_config = transformers.AutoConfig.from_pretrained(path)
         mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
         mconfigs[name] = mconfig
-    assert (prompt_len + gen_len) * batch_size == 2**17, (batch_size, prompt_len, gen_len)
+    assert (prompt_len + gen_len) * batch_size == 2**17, (
+        batch_size,
+        prompt_len,
+        gen_len,
+    )
     flops = 0
     flops += calculate_llama_gen_flops(
         batch_size,
@@ -240,14 +244,16 @@ def main():
                                       group["rew_inf_time"].to_numpy())
     overlap_ratio = (gen_time + train_time + inf_time -
                      group["overall_time"].to_numpy()) / group["overall_time"].to_numpy()
-    sns.barplot(x=settings,
-                y=overlap_ratio,
-                ax=ax,
-                color=cmap[3],
-                lw=2,
-                edgecolor="black",
-                hatch=r"\\",
-                width=width)
+    sns.barplot(
+        x=settings,
+        y=overlap_ratio,
+        ax=ax,
+        color=cmap[3],
+        lw=2,
+        edgecolor="black",
+        hatch=r"\\",
+        width=width,
+    )
     ax.set_ylim((0, 0.32))
     ax.set_xticklabels(settings, rotation=0, fontsize=xlabel_fontsize)
     ax.set_yticklabels([round_to_nearest_tenth(x) for x in ax.get_yticks()], fontsize=ylabel_fontsize)

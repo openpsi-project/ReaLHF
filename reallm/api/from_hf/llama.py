@@ -160,7 +160,7 @@ def convert_config_llama(hf_config: transformers.LlamaConfig) -> ReaLModelConfig
         vocab_size=hf_config.vocab_size,
         n_positions=hf_config.max_position_embeddings,
         embd_pdrop=0.0,
-        attn_pdrop=hf_config.attention_dropout if hasattr(hf_config, "attention_dropout") else 0.1,
+        attn_pdrop=(hf_config.attention_dropout if hasattr(hf_config, "attention_dropout") else 0.1),
         layer_norm_epsilon=hf_config.rms_norm_eps,
         activation_function=hf_config.hidden_act,
         use_attention_bias=hf_config.attention_bias,
@@ -170,8 +170,8 @@ def convert_config_llama(hf_config: transformers.LlamaConfig) -> ReaLModelConfig
         apply_rotary=True,
         rotary_base=hf_config.rope_theta,
         rotary_interleaved=False,
-        rotary_scaling=None if hf_config.rope_scaling is None else hf_config.rope_scaling["factor"],
-        rotary_scaling_type=None if hf_config.rope_scaling is None else hf_config.rope_scaling["type"],
+        rotary_scaling=(None if hf_config.rope_scaling is None else hf_config.rope_scaling["factor"]),
+        rotary_scaling_type=(None if hf_config.rope_scaling is None else hf_config.rope_scaling["type"]),
     )
 
 
