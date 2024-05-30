@@ -11,8 +11,8 @@ import torch.distributed
 from reallm.api.core import data_api
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
-from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
+from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (PipelinableModelRunner,
+                                                                  PipelinableModelRunnerWithZeRO)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
@@ -168,7 +168,7 @@ class PPOActorInterface(model_api.ModelInterface):
         # logger.info(f"packed_prompts shape {packed_prompts.shape}, bs {bs}")
 
         # st = time.monotonic()
-        if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
+        if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
             res = module.generate(
                 seqlens_cpu=data.metadata["seqlens"],
                 tokenizer=model.tokenizer,
@@ -275,7 +275,7 @@ class PPOActorInterface(model_api.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
+        if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
             res = module.forward(
                 seqlens_cpu=data.metadata["seqlens"],
                 packed_input_ids=data["packed_seq"],
@@ -409,7 +409,7 @@ class PPOActorInterface(model_api.ModelInterface):
             cu_seqlens = data["cu_seqlens"]
             input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
             logits_mask = (data["packed_logits_mask"] if "packed_logits_mask" in data else None)
-            if isinstance(module, DeepSpeedPipelineEngine):
+            if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
                 module.set_version_steps(model.version.global_step)
                 seqlens = batch_seqlens[offset:offset + input_lens.shape[0]]
                 offset += input_lens.shape[0]
@@ -467,8 +467,6 @@ class PPOActorInterface(model_api.ModelInterface):
 
         cur_epoch = model.version.epoch
         model.inc_version()
-        if model.version.epoch > cur_epoch:
-            module.tput_timer.update_epoch_count()
 
         if train_stats:
             train_stats: Dict[str, torch.Tensor] = dict(train_stats, **global_stats)
@@ -590,7 +588,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
+        if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
             scores = module.forward(
                 seqlens_cpu=data.metadata["seqlens"],
                 packed_input_ids=data["packed_seq"],
@@ -702,7 +700,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         offset = 0
         for data in datas:
             input_lens = data["cu_seqlens"][1:] - data["cu_seqlens"][:-1]
-            if isinstance(module, DeepSpeedPipelineEngine):
+            if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
                 seqlens_cpu = batch_seqlens[offset:offset + input_lens.shape[0]]
                 offset += input_lens.shape[0]
                 module.set_version_steps(model.version.global_step)
@@ -758,8 +756,6 @@ class PPOCriticInterface(model_api.ModelInterface):
 
         cur_epoch = model.version.epoch
         model.inc_version()
-        if model.version.epoch > cur_epoch:
-            module.tput_timer.update_epoch_count()
 
         if train_stats:
             train_stats: Dict[str, torch.Tensor] = dict(train_stats, **global_stats)

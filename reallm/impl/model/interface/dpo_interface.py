@@ -6,8 +6,8 @@ import torch.utils.data
 import tqdm
 
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
-from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
+from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (PipelinableModelRunner,
+                                                                  PipelinableModelRunnerWithZeRO)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs
 import reallm.api.core.model_api as model_api
@@ -65,9 +65,10 @@ class DPOInterface(model_api.ModelInterface):
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
 
-        n_pairs = data["input_lens"].shape[0]
+        n_pairs = data["pos_input_lens"].shape[0]
+        pair_lens = torch.tensor(data.metadata["seqlens"], dtype=torch.int32, device=model.device)
         input_lens: torch.IntTensor = torch.stack(
-            [data["pos_input_lens"], data["input_lens"] - data["pos_input_lens"]], 1).view(-1)
+            [data["pos_input_lens"], pair_lens - data["pos_input_lens"]], 1).view(-1)
         prompt_lens: torch.IntTensor = data["prompt_lens"]
         cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)]).int()
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
@@ -75,7 +76,7 @@ class DPOInterface(model_api.ModelInterface):
 
         seqlens_cpu = input_lens.cpu().numpy().tolist()
 
-        if isinstance(module, (DeepSpeedPipelineEngine, InferencePipelineEngine)):
+        if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
             res = module.forward(
                 seqlens_cpu=seqlens_cpu,
                 packed_input_ids=data["packed_input_ids"],
@@ -108,13 +109,16 @@ class DPOInterface(model_api.ModelInterface):
             input_lens.shape,
         )
 
-        return from_dict(dict(seqlogp=torch.stack(logprob_sum).view(n_pairs, -1)))
+        x = from_dict(dict(seqlogp=torch.stack(logprob_sum).view(n_pairs, -1)))
+        x.register_metadata(**data.metadata)
+        return x
 
     def train_step(self, model: model_api.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
-        neg_input_lens = data["input_lens"] - data["pos_input_lens"]
+        pair_lens = torch.tensor(data.metadata["seqlens"], dtype=torch.int32, device=model.device)
+        neg_input_lens = pair_lens - data["pos_input_lens"]
         input_lens: torch.Tensor = torch.stack([data["pos_input_lens"], neg_input_lens], 1).view(-1)
         prompt_lens: torch.IntTensor = data["prompt_lens"]
         cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
@@ -123,9 +127,9 @@ class DPOInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
 
-        if isinstance(module, DeepSpeedPipelineEngine):
+        if isinstance(module, PipelinableModelRunnerWithZeRO):
             loss_fn_kwargs = dict(
-                input_lens=data["input_lens"],
+                input_lens=pair_lens,
                 prompt_lens=prompt_lens,
                 seqlogp=data["seqlogp"],
                 beta=self.beta,
@@ -134,7 +138,7 @@ class DPOInterface(model_api.ModelInterface):
                 seqlens_cpu=data.metadata["seqlens"],
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
-                input_lens_for_partition=data["input_lens"],
+                input_lens_for_partition=pair_lens,
                 loss_fn=_dpo_loss_from_model_outputs,
                 **loss_fn_kwargs,
             )
@@ -159,8 +163,6 @@ class DPOInterface(model_api.ModelInterface):
 
         cur_epoch = model.version.epoch
         model.inc_version()
-        if model.version.epoch > cur_epoch:
-            module.tput_timer.update_epoch_count()
 
         if stats is None:
             stats = {}

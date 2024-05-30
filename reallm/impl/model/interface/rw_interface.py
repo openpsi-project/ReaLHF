@@ -8,8 +8,8 @@ import torch
 import tqdm
 
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
-from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
+from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (PipelinableModelRunner,
+                                                                  PipelinableModelRunnerWithZeRO)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 import reallm.api.core.model_api as model_api
 import reallm.base.logging as logging
@@ -61,7 +61,7 @@ class PairedRewardInterface(model_api.ModelInterface):
 
         module.eval()
 
-        if isinstance(module, (InferencePipelineEngine, DeepSpeedPipelineEngine)):
+        if isinstance(module, (PipelinableModelRunnerWithZeRO, PipelinableModelRunner)):
             r = module.forward(
                 seqlens_cpu=data.metadata["seqlens"],
                 packed_input_ids=packed_input_ids,
@@ -111,7 +111,7 @@ class PairedRewardInterface(model_api.ModelInterface):
         module = model.module
         module.train()
 
-        if isinstance(module, DeepSpeedPipelineEngine):
+        if isinstance(module, (PipelinableModelRunnerWithZeRO, PipelinableModelRunner)):
             loss_fn_kwargs = dict(
                 input_lens=pair_lens,
                 group_factor=data["group_factor"],
@@ -146,7 +146,6 @@ class PairedRewardInterface(model_api.ModelInterface):
         cur_epoch = model.version.epoch
         model.inc_version()
         if model.version.epoch > cur_epoch:
-            module.tput_timer.update_epoch_count()
             self.train_total_predictions = self.train_total_correct_predictions = 0
 
         if stats is None:
@@ -184,7 +183,7 @@ class PairedRewardInterface(model_api.ModelInterface):
             cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
             max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
-            if isinstance(model, DeepSpeedPipelineEngine):
+            if isinstance(model, (PipelinableModelRunnerWithZeRO, PipelinableModelRunner)):
                 loss_fn_kwargs = dict(
                     input_lens=pair_lens,
                     group_factor=data["group_factor"],

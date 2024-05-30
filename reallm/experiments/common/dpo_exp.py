@@ -62,15 +62,13 @@ class DPOConfig(Experiment):
         ref_path = self.ref.path
 
         dataset = Dataset(
-            "packed_rw_pair",
+            "rw_pair",
             args=dict(
-                n_tokens_per_batch=self.dataset.train_tokens_per_batch,
                 max_length=self.dataset.max_seqlen,
                 max_pairs_per_prompt=self.dataset.max_pairs_per_prompt,
                 dataset_path=self.dataset.train_path,
             ),
         )
-        dataloader = DataLoader("iterable_dataset_loader")
 
         train_backend = ModelBackend(
             "ds_train",
@@ -163,7 +161,6 @@ class DPOConfig(Experiment):
                 ],
                 tokenizer_name_or_path=actor_path,
                 datasets=[dataset],
-                dataloader=dataloader,
                 cuda_cache_cleanliness=True,
                 cuda_cache_clear_freq=10,
             )
@@ -176,7 +173,6 @@ class DPOConfig(Experiment):
             model_type=self.ref.type,
             input_data=[
                 "packed_input_ids",
-                "input_lens",
                 "pos_input_lens",
                 "prompt_lens",
             ],
@@ -192,7 +188,6 @@ class DPOConfig(Experiment):
             model_type=self.actor.type,
             input_data=[
                 "packed_input_ids",
-                "input_lens",
                 "pos_input_lens",
                 "seqlogp",
                 "prompt_lens",

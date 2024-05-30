@@ -118,7 +118,7 @@ class WorkerServer:
             key = names.worker(experiment_name, trial_name, worker_name)
             address = f"{host_ip}:{self.__task_queue.port}"
             name_resolve.add(key, address, keepalive_ttl=10, delete_on_exit=True)
-            logger.info("Added name_resolve entry %s for worker server at %s", key, address)
+            logger.debug("Added name_resolve entry %s for worker server at %s", key, address)
 
     def register_handler(self, command, fn):
         """Registers an RPC command. The handler `fn` shall be called when `self.handle_requests()` sees an
@@ -286,12 +286,12 @@ class WorkerControlPanel:
             try:
                 if timeout is not None:
                     timeout = max(0, deadline - time.monotonic())
-                self.__logger.info(f"Connecting to worker {name}, timeout {timeout}")
+                self.__logger.debug(f"Connecting to worker {name}, timeout {timeout}")
                 server_address = name_resolve.wait(
                     names.worker(self.__experiment_name, self.__trial_name, name),
                     timeout=timeout,
                 )
-                self.__logger.info(f"Connecting to worker {name} done")
+                self.__logger.debug(f"Connecting to worker {name} done")
             except TimeoutError as e:
                 if raises_timeout_error:
                     raise e
@@ -473,7 +473,7 @@ class Worker:
 
     def __set_status(self, status: WorkerServerStatus):
         if self._server is not None:
-            self.logger.info(f"Setting worker server status to {status}")
+            self.logger.debug(f"Setting worker server status to {status}")
             self._server.set_status(status)
 
     @property
@@ -498,7 +498,7 @@ class Worker:
 
     def configure(self, config):
         assert not self.__running
-        self.logger.info("Configuring with: %s", config)
+        self.logger.debug("Configuring with: %s", config)
 
         r = self._configure(config)
         self.__worker_info = r
@@ -545,7 +545,7 @@ class Worker:
             frequency_seconds=TRACER_SAVE_INTERVAL_SECONDS)
 
         self.__is_configured = True
-        self.logger.info("Configured successfully")
+        self.logger.debug("Configured successfully")
 
     def reconfigure(self, **kwargs):
         assert not self.__running
@@ -556,7 +556,7 @@ class Worker:
         self.logger.info("Reconfigured successfully")
 
     def start(self):
-        self.logger.info("Starting worker")
+        self.logger.debug("Starting worker")
         self.__running = True
         self.__set_status(WorkerServerStatus.RUNNING)
 
@@ -590,7 +590,7 @@ class Worker:
     def run(self):
         self._start_time_ns = time.monotonic_ns()
         self.__last_update_ns = None
-        self.logger.info("Running worker now")
+        self.logger.debug("Running worker now")
         try:
             while not self.__exiting:
                 self._server.handle_requests()

@@ -8,7 +8,7 @@ import time
 import torch
 import torch.distributed as dist
 
-from reallm.impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
+from reallm.impl.model.backend.pipe_engine import PipelinableModelRunner
 from reallm.impl.model.backend.pipe_engine.instruction import *
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
 import reallm.base.constants as constants
@@ -21,7 +21,7 @@ HOME_PATH = os.path.expanduser("~")
 DUMP_PATH = os.path.join(HOME_PATH, "logs/profile_stats")
 
 
-class ProfileEngine(DeepSpeedPipelineEngine):
+class ProfileEngine(PipelinableModelRunner):
     # compute_instructions = [OptimizerStep, ForwardPass, BackwardPass]
     # profile_instructions = {
     #     "fwd_gen_0": ForwardPass,

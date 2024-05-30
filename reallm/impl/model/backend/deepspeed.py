@@ -12,7 +12,7 @@ import torch.distributed
 
 from reallm.base.constants import (data_parallel_world_size, model_parallel_world_size,
                                    pipe_parallel_world_size)
-from reallm.impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
+from reallm.impl.model.backend.pipe_engine import PipelinableModelRunnerWithZeRO
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
 import reallm.base.logging as logging
@@ -168,7 +168,7 @@ def deepspeed_initialize(
 
         # Restore zero.Init context if necessary
         zero.partition_parameters.restore_init_context()
-        logger.info(f"Deepspeed Engine initialze finished.")
+        # logger.info(f"Deepspeed Engine initialze finished.")
         return_items = [
             engine,
             engine.optimizer,
@@ -178,9 +178,9 @@ def deepspeed_initialize(
     elif engine_type == "pipe":
         # mpu = model.mpu()
         config_class = DeepSpeedConfig(config, mpu)
-        engine_cls = DeepSpeedPipelineEngine
-        engine = engine_cls(
-            model=model,
+        runner = PipelinableModelRunnerWithZeRO(
+            module=model,
+            inference_only=False,
             args=None,
             config=config,
             config_class=config_class,
@@ -189,12 +189,12 @@ def deepspeed_initialize(
             lr_scheduler=lr_scheduler,
             dist_init_required=False,
         )
-        logger.info(f"Deepspeed Pipeline Engine initialze finished.")
+        # logger.info(f"Deepspeed Pipeline Engine initialze finished.")
         return_items = [
-            engine,
-            engine.optimizer,
-            engine.training_dataloader,
-            engine.lr_scheduler,
+            runner,
+            runner.ds_engine.optimizer,
+            runner.ds_engine.training_dataloader,
+            runner.ds_engine.lr_scheduler,
         ]
     return tuple(return_items)
 
@@ -313,14 +313,19 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
             engine_type=self.engine_type,
         )
 
-        if self.engine_type == "pipe":
-            # log pipeline infos
-            assert isinstance(module, DeepSpeedPipelineEngine)
-            logger.info(f"PipelineEngine:: ddp rank = {torch.distributed.get_rank()}; "
-                        f"pipe id = {module.stage_id}; dp id = {module.dp_id};")
-
         model.module = module
         return model
 
 
 model_api.register_backend("ds_train", DeepspeedTrainBackend)
+
+
+@dataclasses.dataclass
+class PipelineInferenceBackend(model_api.ModelBackend):
+
+    def _initialize(self, model: model_api.Model, spec: model_api.FinetuneSpec):
+        model.module = PipelinableModelRunnerWithZeRO(model.module)
+        return model
+
+
+model_api.register_backend("pipe_inference", PipelineInferenceBackend)

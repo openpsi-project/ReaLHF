@@ -9,9 +9,6 @@ import torch.utils.data
 import tqdm
 
 from reallm.api.core import data_api, model_api
-from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
-from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-from reallm.impl.model.backend.pipe_inf import InferencePipelineEngine
 from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from reallm.impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData

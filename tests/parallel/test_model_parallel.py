@@ -241,9 +241,6 @@ def run_mixed(rank: int, seed: int):
     device, model, backend, interface = init_handles(rank)
     engine = model.module
 
-    # from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
-    # assert isinstance(engine, DeepSpeedPipelineEngine)
-
     import os
 
     os.environ["REAL_TRACE"] = "1"

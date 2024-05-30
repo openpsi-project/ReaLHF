@@ -6,7 +6,8 @@ import torch.utils.data
 import tqdm
 
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
-from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import DeepSpeedPipelineEngine
+from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (PipelinableModelRunner,
+                                                                  PipelinableModelRunnerWithZeRO)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
 from reallm.impl.model.utils.functional import build_shift_one_indices, gather_packed_shifted_log_probs
@@ -47,7 +48,7 @@ class SFTInterface(model_api.ModelInterface):
             (1, 0),
         )
 
-        if isinstance(module, DeepSpeedPipelineEngine):
+        if isinstance(module, (PipelinableModelRunnerWithZeRO, PipelinableModelRunner)):
             loss_fn_kwargs = dict(
                 prompt_mask=prompt_mask,
                 input_lens=cu_seqlens[1:] -
@@ -71,10 +72,9 @@ class SFTInterface(model_api.ModelInterface):
             module.backward(loss)
             module.step()
 
+        # FIXME: here the epoch counter is incorrect
         cur_epoch = model.version.epoch
         model.inc_version()
-        if model.version.epoch > cur_epoch:
-            module.tput_timer.update_epoch_count()
 
         res = dict()
         if loss is not None:
@@ -112,7 +112,7 @@ class SFTInterface(model_api.ModelInterface):
                 (1, 0),
             )
 
-            if isinstance(module, DeepSpeedPipelineEngine):
+            if isinstance(module, (PipelinableModelRunnerWithZeRO, PipelinableModelRunner)):
                 loss_fn_kwargs = dict(
                     prompt_mask=prompt_mask,
                     input_lens=cu_seqlens[1:] - cu_seqlens[:-1],
@@ -160,7 +160,7 @@ class SFTInterface(model_api.ModelInterface):
         max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
         seqlens_cpu = data.metadata["seqlens"]
 
-        if isinstance(module, DeepSpeedPipelineEngine):
+        if isinstance(module, (PipelinableModelRunnerWithZeRO, PipelinableModelRunner)):
             logits = module.forward(
                 seqlens_cpu=seqlens_cpu,
                 packed_input_ids=packed_input_ids,
@@ -184,15 +184,8 @@ class SFTInterface(model_api.ModelInterface):
         module.eval()
 
         data = recursive_apply(data, lambda x: x.to(model.device))
-        # prompts: torch.LongTensor = data["prompts"]
-        # prompt_att_mask: torch.BoolTensor = data["prompt_att_mask"]
-        # bs, prompt_max_len = prompts.shape[:2]
 
-        # assert isinstance(module, DeepSpeedPipelineEngine)
-        # if isinstance(module, DeepSpeedPipelineEngine):
-        # packed_input_ids, _, cu_seqlens, _ = unpad_input(prompts, prompt_att_mask)
-
-        if isinstance(module, DeepSpeedPipelineEngine):
+        if isinstance(module, (PipelinableModelRunnerWithZeRO, PipelinableModelRunner)):
             res = module.generate(
                 seqlens_cpu=data.metadata["seqlens"],
                 tokenizer=model.tokenizer,
