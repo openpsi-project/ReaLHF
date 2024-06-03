@@ -65,6 +65,8 @@ class ReaLModel(nn.Module):
         self.dtype = dtype
         self.device = device
 
+        # The main attribute of the model: layers,
+        # including the embedding layer, decoder layers, and the output head.
         self.layer_mapping = partition_pipeline_layers(
             config,
             constants.pipe_parallel_world_size(),
@@ -78,12 +80,26 @@ class ReaLModel(nn.Module):
 
         self.layers = nn.ModuleList()
 
+        # The model is lazily instantiated for parameter reallocation.
+        # For models that will be redistributed, we instantiate replica 0
+        # and do not instantiate other replicas.
         self._instantiated = False
         self._instantiation_hooks = []
 
+        # Attributes used for parameter reallocation.
         self._reparallelize_targets: Dict[Tuple[ModelName, ModelName], ReparallelizeTraget] = {}
 
-        # Flatten all parameters to a contiguous GPU buffer to reduce the time of CUDAFree and CUDAMalloc
+        # Attributes used for offload.
+        self._offload_buffer = None
+        self._offloaded = False
+
+        # Attributes used for flattening parameters.
+        # Flattening parameters is an option, which must be 
+        # enabled for offload and parameter reallocation.
+        # We do not activate it by default because 
+        # it is not compatible with DeepSpeed optimizers.
+        # If we flatten parameters and pass the module to the DeepSpeed optimizer,
+        # it does not produce gradients on the sliced parameters.
         self._param_spec, self._param_size = build_param_spec(
             list(range(self.layer_idx_start, self.layer_idx_end)),
             self.config,
@@ -91,9 +107,7 @@ class ReaLModel(nn.Module):
             constants.sequence_parallel(),
         )
         self.contiguous_param = None
-
-        self._offload_buffer = None
-        self._offloaded = False
+        
 
     def instantiate(self):
         assert not self._instantiated
@@ -103,7 +117,6 @@ class ReaLModel(nn.Module):
 
         self.layers = nn.ModuleList(layers)
 
-        # FIXME: remap contigous memory only when necessary
         self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
         map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
                                       self.layer_idx_start)
@@ -114,37 +127,7 @@ class ReaLModel(nn.Module):
         self._instantiated = True
         self._instantiation_hooks = []
 
-    def async_offload(self):
-        assert not self._offloaded
-        assert self._instantiated
-        assert self.contiguous_param is not None
-        if self._offload_buffer is None:
-            self._offload_buffer = torch.empty_like(
-                self.contiguous_param,
-                dtype=self.dtype,
-                device="cpu",
-                pin_memory=True,
-            )
-        else:
-            assert self._offload_buffer.shape == self.contiguous_param.shape
-        dummy_tensor = torch.tensor((), device=self.device, dtype=self.dtype)
-        self._offload_stream = torch.cuda.Stream()
-        self._offload_event = torch.cuda.Event()
-        self.contiguous_param = None
-        for i, l in enumerate(self.layers):
-            layer_idx = self.layer_idx_start + i
-            with torch.cuda.stream(self._offload_stream):
-                for k, p in l.named_parameters():
-                    spec = self._param_spec[f"{layer_idx}.{k}"]
-                    self._offload_buffer[spec.start_idx:spec.end_idx].copy_(p.data.view(-1),
-                                                                            non_blocking=True)
-                    p.data = dummy_tensor
-        self._offload_event.record(self._offload_stream)
-        self._offloaded = True
-
-    def wait_for_offload(self):
-        assert self._offloaded
-        torch.cuda.current_stream().wait_event(self._offload_event)
+    
 
     @property
     def num_layers(self):
@@ -201,6 +184,38 @@ class ReaLModel(nn.Module):
                 dtype=dtype,
             )
         return l
+
+    def async_offload(self):
+        assert not self._offloaded
+        assert self._instantiated
+        assert self.contiguous_param is not None
+        if self._offload_buffer is None:
+            self._offload_buffer = torch.empty_like(
+                self.contiguous_param,
+                dtype=self.dtype,
+                device="cpu",
+                pin_memory=True,
+            )
+        else:
+            assert self._offload_buffer.shape == self.contiguous_param.shape
+        dummy_tensor = torch.tensor((), device=self.device, dtype=self.dtype)
+        self._offload_stream = torch.cuda.Stream()
+        self._offload_event = torch.cuda.Event()
+        self.contiguous_param = None
+        for i, l in enumerate(self.layers):
+            layer_idx = self.layer_idx_start + i
+            with torch.cuda.stream(self._offload_stream):
+                for k, p in l.named_parameters():
+                    spec = self._param_spec[f"{layer_idx}.{k}"]
+                    self._offload_buffer[spec.start_idx:spec.end_idx].copy_(p.data.view(-1),
+                                                                            non_blocking=True)
+                    p.data = dummy_tensor
+        self._offload_event.record(self._offload_stream)
+        self._offloaded = True
+
+    def wait_for_offload(self):
+        assert self._offloaded
+        torch.cuda.current_stream().wait_event(self._offload_event)
 
     def __overlapped_load_forward(self, x: PipeTransferData,
                                   ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
@@ -359,12 +374,12 @@ class ReaLModel(nn.Module):
 
         return h
 
-    def state_dict(self):
+    def state_dict(self, *args, **kwargs):
         """Map layer indices to global layer indices."""
-        state_dict = super().state_dict()
+        state_dict = self.layers.state_dict(*args, **kwargs)
         new_state_dict = {}
         for k, v in state_dict.items():
-            k = k.lstrip("layers.")
+            k = k.lstrip("module.").lstrip("layers.")
             local_idx = int(k.split(".")[0])
             name = k.split(".", 1)[1]
             new_state_dict[f"{local_idx + self.layer_idx_start}.{name}"] = v

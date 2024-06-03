@@ -145,7 +145,6 @@ class SFTInterface(model_api.ModelInterface):
             except OverflowError:
                 perplexity = float("inf")
             return dict(ppl=perplexity)
-        print(111111111111)
         return res
 
     @torch.no_grad()

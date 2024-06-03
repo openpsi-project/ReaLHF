@@ -308,8 +308,11 @@ class ModelWorker(worker_base.Worker):
             else:
                 self.__dataset = torch.utils.data.ConcatDataset(datasets)
             self.__dataloader = data_api.make_dataloader(self.config.dataloader, self.__dataset)
+            self.__dataset_n_seqs = 0
+            for tmp_sample in self.__dataloader:
+                self.__dataset_n_seqs += len(data_api.split_sequences(tmp_sample))
+            
             self.__data_generator = enumerate(self.__dataloader)
-            self.__dataset_length = len(self.__dataloader)
             self.__dataset_batch_counter = None
 
             self.__dataset_epoch = 0
@@ -523,7 +526,7 @@ class ModelWorker(worker_base.Worker):
                     seqlens=seqlens,
                     keys=list(self.__cur_sample.keys()),
                     epoch=self.__dataset_epoch,
-                    is_final_batch=(self.__dataset_batch_counter == self.__dataset_length - 1),
+                    is_final_batch=(self.__dataset_batch_counter == len(self.__dataloader) - 1),
                 )
                 self.__fetched_sample_cache += fetched_data
                 self.__cur_sample = None
@@ -540,10 +543,7 @@ class ModelWorker(worker_base.Worker):
                 self.__fetched_sample_cache.clear()
                 res = None
             elif request.handle_name == "spec":
-                n_seqs = 0
-                for tmp_sample in self.__dataloader:
-                    n_seqs += len(data_api.split_sequences(tmp_sample))
-                res = n_seqs
+                res = self.__dataset_n_seqs
             elif request.handle_name == "clear_data_cache":
                 with cuda_tmarked("clear_data_cache", CUDATimeMarkType.misc):
                     buf_indices = request.data
@@ -853,6 +853,7 @@ class ModelWorker(worker_base.Worker):
 
         r = self.__maybe_post_responses()
 
+        # FIXME: add memory monitoring
         if r.batch_count > 0:
             # tik = time.perf_counter()
             # blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(

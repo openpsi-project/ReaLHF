@@ -19,6 +19,7 @@ logger = logging.getLogger("model")
 
 @dataclasses.dataclass
 class ReaLModelConfig:
+    ### Architectural configurations. ###
     n_layers: int
     n_kv_heads: int
     head_dim: int
@@ -42,9 +43,10 @@ class ReaLModelConfig:
     rotary_interleaved: bool = False
     rotary_scaling: Optional[float] = None
     rotary_scaling_type: Optional[str] = None
-
+    # Whether it is a critic/reward model that outputs scores.
     is_critic: bool = False
 
+    ### Running configurations. ###
     gradient_accumulation_fusion: bool = False
 
 
