@@ -149,6 +149,7 @@ class AsyncIOSequenceBuffer:
         # Both are queues of size 1.
         self._fetch_ctl = fetch_ctl
         self._fetch_master_ctl = fetch_master_ctl
+        self._load_data_requested = False
 
         # Buffer indicators, should be locked by self._lock.
         # Put, amend, ready, idle, and empty are mutually exclusive.
@@ -228,6 +229,7 @@ class AsyncIOSequenceBuffer:
                                f"while the maximum size is {self.__max_size}. "
                                f"If your dataset has more than 1M sequences, consider enlarge "
                                f"the default batch size in the master worker.")
+            self._load_data_requested = False
         return indices
 
     async def amend_batch(self, indices: List[int], new_datas: List[Tuple[List[str], int]]):
@@ -256,14 +258,16 @@ class AsyncIOSequenceBuffer:
                 self._lock.notify(len(self._rpc_names))
 
     def _request_load_data(self):
-        try:
-            self._fetch_ctl.put_nowait(1)
-        except asyncio.QueueFull:
-            pass
-        try:
-            self._fetch_master_ctl.put_nowait(1)
-        except asyncio.QueueFull:
-            pass
+        if not self._load_data_requested:
+            try:
+                self._fetch_ctl.put_nowait(1)
+            except asyncio.QueueFull:
+                pass
+            try:
+                self._fetch_master_ctl.put_nowait(1)
+            except asyncio.QueueFull:
+                pass
+            self._load_data_requested = True
 
     async def get_batch_for_rpc(self, rpc: dfg.ModelRPC) -> SequenceSample:
         rpc_idx = self._rpc_names.index(rpc.name)
