@@ -24,6 +24,7 @@ dependencies = [
     "deepspeed",
     "hydra-core",
     "pyzmq",
+    "megatron_core==0.6.0",
 ]
 classifiers = [
     #   3 - Alpha

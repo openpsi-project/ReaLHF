@@ -334,7 +334,7 @@ def _derive_reparallelize_comm_plan(
             raise ValueError(
                 f"Can't load a checkpoint with different config (key `{k}`, "
                 f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`).")
-    if (from_model_config.n_kv_heads % src_mp_size == 0) != (from_model_config.n_kv_heads % dst_mp_size == 0):
+    if from_model_config.n_kv_heads > 1 and (from_model_config.n_kv_heads % src_mp_size == 0) != (from_model_config.n_kv_heads % dst_mp_size == 0):
         raise ValueError("Whether to partition kv heads should remain the same.")
 
     from_layer_mapping = partition_pipeline_layers(

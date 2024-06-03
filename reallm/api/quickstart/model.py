@@ -71,7 +71,7 @@ class OptimizerConfig:
         metadata={"choices": ["adam", "empty"]},
         default="empty",
     )
-    lr: float = 1e-6
+    lr: float = 1e-5
     weight_decay: float = 0.05
     beta1: float = 0.9
     beta2: float = 0.95
@@ -79,9 +79,9 @@ class OptimizerConfig:
     min_lr_ratio: float = 0.0
     lr_scheduler_type: str = dataclasses.field(
         metadata={"choices": ["linear", "cosine", "constant"]},
-        default="constant",
+        default="cosine",
     )
-    warmup_steps_proportion: float = 0.0
+    warmup_steps_proportion: float = 0.02
     offload: bool = False
 
     def __post_init__(self):
