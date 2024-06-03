@@ -312,7 +312,7 @@ class ModelWorker(worker_base.Worker):
             self.__dataset_length = len(self.__dataloader)
             self.__dataset_batch_counter = None
 
-            self.__dataset_epoch = -1
+            self.__dataset_epoch = 0
             self.__cur_sample = None
             self.__fetched_sample_cache = []
 
@@ -334,9 +334,6 @@ class ModelWorker(worker_base.Worker):
                 self.__models[s.id.model_name] = model = model_api.make_model(s.model,
                                                                               name=s.id.model_name,
                                                                               device=self.__device)
-                if self._dp_rank == 0:
-                    self.logger.info(
-                        f"Model {s.id.model_name} initialized in {time.perf_counter() - tik:.4f}s.")
                 self.__unwrapped_models[s.id.model_name] = model.module
                 if s.id.model_name.replica_id == 0:
                     assert isinstance(model.module, ReaLModel)
@@ -450,6 +447,7 @@ class ModelWorker(worker_base.Worker):
             if to_model_name in self.__models:
                 self.__unwrapped_models[to_model_name].patch_reparallelization((new_layers, new_param))
                 self.__model_is_handle[to_model_name] = False
+            # FIXME: suppress this log
             blogger.debug(f"param_realloc CPU time: {time.perf_counter() - tik:.4f}s")
             # profiler.__exit__(None, None, None)
         elif hook == "offload":
@@ -542,19 +540,10 @@ class ModelWorker(worker_base.Worker):
                 self.__fetched_sample_cache.clear()
                 res = None
             elif request.handle_name == "spec":
-                # if self.__dataloader.batch_size is not None:
-                #     batch_size = self.__dataloader.batch_size
-                # else:
-                #     # We assume that this is a packed dataset. Batch size equals to the number of tokens in the batch.
-                #     assert isinstance(self.__dataloader.dataset, torch.utils.data.IterableDataset)
-                #     batch_size = list(self.__cur_sample.values())[0].shape[0]
-                res = model_api.FinetuneSpec(
-                    total_train_epochs=-1,  # place-holder, to be filled by master worker
-                    total_train_steps=-1,  # place-holder, to be filled by master worker
-                    steps_per_epoch=len(self.__dataloader),
-                    batch_size_per_device=32,  # FIXME: do we need this field?
-                    max_seqlen=None,  # FIXME: do we need this field?
-                )
+                n_seqs = 0
+                for tmp_sample in self.__dataloader:
+                    n_seqs += len(data_api.split_sequences(tmp_sample))
+                res = n_seqs
             elif request.handle_name == "clear_data_cache":
                 with cuda_tmarked("clear_data_cache", CUDATimeMarkType.misc):
                     buf_indices = request.data
@@ -684,10 +673,11 @@ class ModelWorker(worker_base.Worker):
                             shape = _get_shape_from_key_and_seqlen(step.key, seqlen)
                             total_len += int(np.prod(shape))
                         dtype = _get_dtype_from_key(step.key)
-                        # TODO: Using global memory buffer may possibly cause OOM.
-                        buf = constants.get_global_memory_buffer().get_tensor((total_len,),
-                                                                              dtype,
-                                                                              name="data_transfer")
+                        buf = torch.zeros(
+                            (total_len,),
+                            dtype=dtype,
+                            device=torch.cuda.current_device(),
+                        )
                         # print(f"{dist.get_rank()} recv {step.key} from {step.src} with shape {buf.shape}")
                         dist.broadcast(buf, src=step.src, group=step.group)
                         vs = buf.clone().view(-1, *shape[1:])

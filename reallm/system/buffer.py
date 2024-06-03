@@ -223,6 +223,11 @@ class AsyncIOSequenceBuffer:
 
             self._buf_size += len(samples)
             self._n_tokens += self.__buffer._get_seqlen(indices).sum()
+            if self._buf_size >= 0.95 * self.__max_size:
+                logger.warning(f"Buffer is 95% full. The current buffer size is {self._buf_size} "
+                               f"while the maximum size is {self.__max_size}. "
+                               f"If your dataset has more than 1M sequences, consider enlarge "
+                               f"the default batch size in the master worker.")
         return indices
 
     async def amend_batch(self, indices: List[int], new_datas: List[Tuple[List[str], int]]):

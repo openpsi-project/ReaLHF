@@ -796,33 +796,27 @@ class MasterWorker(worker_base.Worker):
         )
         self.__stream: request_reply_stream.NameResolvingRequstClient
 
-        # Request training specification from data workers, e.g. batch size and total train steps.
-        p = request_reply_stream.Payload(
-            handler="__data0__",
-            handle_name="spec",
-        )
-        self.__stream.post(p)
-        self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
-        self.__stream.post(
-            request_reply_stream.Payload(handler="__data0__", handle_name="ack", request_id=p.ack_reply_id))
-        ft_spec: model_api.FinetuneSpec = self.__stream.poll(block=True,
-                                                             pattern=create_exact_match_pattern(
-                                                                 [p.request_id])).data
-        ft_spec.total_train_epochs = self.config.exp_ctrl.total_train_epochs
-        ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
+        src_rpc = [rpc for rpc in self.config.model_rpcs if rpc.is_src][0]
+        src_rpc_model_name = src_rpc.model_name
+        src_rpc_dp_size = self.config.model_topos[src_rpc.model_name].get_dim("data")
 
-        batch_size = ft_spec.batch_size_per_device
-        # logger.info(
-        #     "\n\n"
-        #     + "=" * 40
-        #     + f"\nTotal train epochs: {ft_spec.total_train_epochs}"
-        #     + f"\nTotal train steps: {ft_spec.total_train_steps}"
-        #     + f"\nSteps per epoch: {ft_spec.steps_per_epoch}"
-        #     + f"\nEffective batch size: {batch_size}\n"
-        #     + "=" * 40
-        #     + "\n"
-        # )
-        # logger.info(f"ft_spec = {ft_spec}")
+        # Request training specification from data workers.
+        total_n_seqs = 0
+        for i in range(src_rpc_dp_size):
+            p = request_reply_stream.Payload(
+                handler=f"__data{i}__",
+                handle_name="spec",
+            )
+            self.__stream.post(p)
+            self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
+            self.__stream.post(
+                request_reply_stream.Payload(handler=f"__data{i}__",
+                                             handle_name="ack",
+                                             request_id=p.ack_reply_id))
+            n_seqs_per_dataset_shard: int = self.__stream.poll(block=True,
+                                                               pattern=create_exact_match_pattern(
+                                                                   [p.request_id])).data
+            total_n_seqs += n_seqs_per_dataset_shard
 
         event_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(event_loop)
@@ -862,6 +856,27 @@ class MasterWorker(worker_base.Worker):
                 config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in range(topo.world_size())
             ]
+            train_rpcs = list(
+                filter(
+                    lambda rpc: rpc.model_name == model_name and rpc.interface_type == dfg.ModelInterfaceType.
+                    TRAIN_STEP,
+                    self.__model_rpcs,
+                ))
+            if len(train_rpcs) > 0:
+                assert len(train_rpcs) == 1
+                steps_per_epoch = (total_n_seqs * self.config.exp_ctrl.total_train_epochs +
+                                   train_rpcs[0].max_n_seqs - 1) // train_rpcs[0].max_n_seqs
+                ft_spec = model_api.FinetuneSpec(
+                    total_train_epochs=self.config.exp_ctrl.total_train_epochs,
+                    total_train_steps=steps_per_epoch * self.config.exp_ctrl.total_train_epochs,
+                    steps_per_epoch=steps_per_epoch,
+                )
+            else:
+                ft_spec = model_api.FinetuneSpec(
+                    total_train_epochs=self.config.exp_ctrl.total_train_epochs,
+                    total_train_steps=-1,
+                    steps_per_epoch=-1,
+                )
             model_ft_specs = [ft_spec] * topo.world_size()
 
             if model_name.replica_id > 0:
@@ -898,7 +913,7 @@ class MasterWorker(worker_base.Worker):
                     to_model_config=self.__model_configs[_param_realloc_src],
                 )
 
-        logger.info("initialize complete")
+        logger.info("Initializations of models and backends complete.")
 
         self.__rpc_ctrl = RPCCorountineControl(
             stop=asyncio.Event(),
@@ -919,7 +934,8 @@ class MasterWorker(worker_base.Worker):
 
         self.__fetch_master_ctl = asyncio.Queue(1)
 
-        # NOTE: we don't set a maximum buffer size here because we want to keep all data in the buffer
+        # NOTE: We don't set a configurable maximum buffer size here because we want to keep all data in the buffer.
+        # We assume that the dataset size is at most 1M. We have warnings if the buffer is 95% full.
         self.__seqbuffer = AsyncIOSequenceBuffer(
             self.__model_rpcs,
             max_size=int(1e6),
@@ -930,10 +946,6 @@ class MasterWorker(worker_base.Worker):
         self.__data_owner: Dict[Tuple[int, str], Tuple[str, int]] = {}
 
         logger.info(f"Creating asyncio coroutines...")
-
-        src_rpc = [rpc for rpc in self.config.model_rpcs if rpc.is_src][0]
-        src_rpc_model_name = src_rpc.model_name
-        src_rpc_dp_size = self.config.model_topos[src_rpc.model_name].get_dim("data")
 
         coroutine_tasks = []
         for rpc in self.__model_rpcs:
@@ -994,14 +1006,11 @@ class MasterWorker(worker_base.Worker):
             ))
         coroutine_tasks += [load_data_task, eval_task, save_task]
 
-        # self.__event_loop = event_loop
-        # self.__coroutine_tasks = coroutine_tasks
-
         # Set up a run context of EventLoop.run_util_complete, baiscally copy-paste from cpython.
         # With this context, we can call the non-block EventLoop._run_once (similar to worker._poll).
         self.__asyncio_ctx = setup_run_until_complete(event_loop, asyncio.gather(*coroutine_tasks))
 
-        logger.info(f"asyncio coroutines created, master worker ready to run.")
+        logger.info(f"Coroutines created. The master worker is ready to run.")
 
         self.__initialized = True
         self._train_start_time = time.perf_counter()
