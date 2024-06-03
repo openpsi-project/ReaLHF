@@ -79,7 +79,7 @@ class PairedRewardInterface(model_api.ModelInterface):
                 max_seqlen=max_seqlen,
             ).logits
 
-        chosen_end_scores = scores.squeeze(-1)[cu_seqlens[1:] - 1].float()  # [bs]
+        scores = scores.squeeze(-1)[cu_seqlens[1:] - 1].float()  # [bs]
         scores = (scores - self.output_bias) * self.output_scaling
 
         ###################### logging ######################
@@ -89,11 +89,12 @@ class PairedRewardInterface(model_api.ModelInterface):
         #                                         skip_special_tokens=True)
         # for seq_str, score in zip(seq_strs, chosen_end_scores):
         #     logger.info(
-        #         f"reward is {colorama.Fore.RED}{score.item()}{colorama.Style.RESET_ALL}, sequence is: {colorama.Fore.YELLOW + colorama.Style.DIM}{seq_str}{colorama.Style.RESET_ALL}"
+        #         f"reward is {colorama.Fore.RED}{score.item()}{colorama.Style.RESET_ALL}, "
+        #         f"sequence is: {colorama.Fore.YELLOW + colorama.Style.DIM}{seq_str}{colorama.Style.RESET_ALL}"
         #     )
         #####################################################
 
-        res = from_dict(dict(scores=chosen_end_scores))
+        res = from_dict(dict(scores=scores))
         res.register_metadata(**data.metadata)
         return res
 

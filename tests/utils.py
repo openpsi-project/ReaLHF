@@ -96,11 +96,14 @@ class StandaloneTestingProcess(mp.Process):
             raise e
 
 
-def init_global_constants(num_dp, num_mp, num_pp, topo=None, model_name=None, msid2mwid=None):
+def init_global_constants(num_dp, num_mp, num_pp, topo=None, model_name=None, msid2mwid=None,
+                          sequence_parallel=False, gradient_checkpointing=True):
     model_name = model_name if model_name is not None else MODEL_NAME
 
     if topo is None:
-        topo = PipeModelDataParallelTopology(num_dp=num_dp, num_mp=num_mp, num_pp=num_pp)
+        topo = PipeModelDataParallelTopology(num_dp=num_dp, num_mp=num_mp, num_pp=num_pp,
+                                             sequence_parallel=sequence_parallel,
+                                             gradient_checkpointing=gradient_checkpointing)
         ws = num_dp * num_mp * num_pp
     else:
         ws = topo.world_size()
@@ -178,8 +181,6 @@ def make_finetune_spec(
         total_train_epochs=total_train_epochs,
         total_train_steps=total_train_steps,
         steps_per_epoch=steps_per_epoch,
-        batch_size_per_device=bs_per_device,
-        max_seqlen=max_seq_len,
     )
     return finetune_spec
 

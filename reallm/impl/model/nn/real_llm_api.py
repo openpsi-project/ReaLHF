@@ -103,6 +103,7 @@ class ReaLModel(nn.Module):
 
         self.layers = nn.ModuleList(layers)
 
+        # FIXME: remap contigous memory only when necessary
         self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
         map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
                                       self.layer_idx_start)
@@ -121,7 +122,7 @@ class ReaLModel(nn.Module):
             self._offload_buffer = torch.empty_like(self.contiguous_param,
                                                     dtype=self.dtype,
                                                     device="cpu",
-                                                    pin_memory=True)
+                                                    pin_memory=True,)
         else:
             assert self._offload_buffer.shape == self.contiguous_param.shape
         dummy_tensor = torch.tensor((), device=self.device, dtype=self.dtype)
@@ -443,6 +444,7 @@ class ReaLModel(nn.Module):
         )
         self._reparallelize_targets[(from_model_name, to_model_name)] = rtgt
 
+    # FIXME: we can get topo given model name from constants
     @cuda_tmark("param_realloc", CUDATimeMarkType.mem_layout)
     def build_reparallelized_layers_async(
         self,
@@ -467,7 +469,8 @@ class ReaLModel(nn.Module):
         rtgt = self._reparallelize_targets[(from_model_name, to_model_name)]
 
         # The following tensor holds the contiguous memory of incoming parameters
-        to_contiguous_param = torch.empty(rtgt.to_param_size, dtype=self.dtype, device="cuda")
+        # NOTE: We will enable requires_grad after reallocation, not here.
+        to_contiguous_param = torch.empty(rtgt.to_param_size, dtype=self.dtype, device="cuda", )
         map_param_to_contigous_memory(
             rtgt.to_layers_handle,
             rtgt.to_param_spec,
@@ -547,7 +550,7 @@ class ReaLModel(nn.Module):
         # assert len(state_dict) == 0
         assert len(recv_events) == len(recv_buf_specs)
         for e, x in zip(recv_events, recv_buf_specs):
-            # torch.cuda.current_stream().wait_event(e)
+            torch.cuda.current_stream().wait_event(e)
             set_intervals(**x)
 
         # release the local GPU memory
@@ -557,6 +560,9 @@ class ReaLModel(nn.Module):
 
     def patch_reparallelization(self, x):
         self.layers, self.contiguous_param = x
+        for l in self.layers:
+            for p in l.parameters():
+                p.requires_grad_()
 
 
 # a helper function to make real_model look like huggingface model

@@ -113,6 +113,7 @@ def get_optimizer_grouped_parameters(
     weight_decay: float,
     no_decay_name_list: List[str] = ["bias", "LayerNorm.weight"],
 ):
+    # FIXME: fix no_decay_name_list
     optimizer_grouped_parameters = [
         {
             "params": [
@@ -144,6 +145,11 @@ def deepspeed_initialize(
     """A simple wrapper around deepspeed.initialize."""
     if mpu is None:
         mpu = constants.grid()
+    config_class = DeepSpeedConfig(config, mpu)
+    logger.info(f"DeepSpeedEngine Config: train_batch_size={config_class.train_batch_size}, "
+                f"train_micro_batch_size_per_gpu={config_class.train_micro_batch_size_per_gpu}, "
+                f"gradient_accumulation_steps={config_class.gradient_accumulation_steps}")
+
     if engine_type == "deepspeed":
         # Disable zero.Init context if it's currently enabled
         zero.partition_parameters.shutdown_init_context()
@@ -152,7 +158,6 @@ def deepspeed_initialize(
 
         deepspeed.dist = dist
 
-        config_class = DeepSpeedConfig(config, mpu)
         engine = DeepSpeedEngine(
             args=None,
             model=model,
@@ -176,8 +181,6 @@ def deepspeed_initialize(
             engine.lr_scheduler,
         ]
     elif engine_type == "pipe":
-        # mpu = model.mpu()
-        config_class = DeepSpeedConfig(config, mpu)
         runner = PipelinableModelRunnerWithZeRO(
             module=model,
             inference_only=False,
@@ -212,13 +215,6 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     enable_fp16: bool = True
     enable_bf16: bool = False
     zero_stage: int = 2
-    # hybrid engine args
-    enable_hybrid_engine: bool = False
-    max_out_tokens: int = 512
-    inference_tp_size: int = 1
-    release_inference_cache: bool = False
-    pin_parameters: bool = True
-    tp_gather_partition_size: int = 8
     # addtional deepspeed args
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
     engine_type: str = "deepspeed"
@@ -226,7 +222,6 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     def __post_init__(self):
         if self.engine_type == "pipe":
             assert self.zero_stage < 2
-            assert self.enable_hybrid_engine is False
 
     def _initialize(self, model: model_api.Model, spec: model_api.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -244,28 +239,17 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
         else:
             raise NotImplementedError(f"Unsupported optimizer: {self.optimizer_name}.")
 
-        hybrid_engine_args = dict(
-            enabled=self.enable_hybrid_engine,
-            max_out_tokens=self.max_out_tokens,
-            inference_tp_size=self.inference_tp_size,
-            release_inference_cache=self.release_inference_cache,
-            pin_parameters=self.pin_parameters,
-            tp_gather_partition_size=self.tp_gather_partition_size,
-        )
-
         ds_config = get_train_ds_config(
             offload_param=self.offload_param,
             offload_optimizer_state=self.offload_optimizer_state,
             stage=self.zero_stage,
             enable_bf16=self.enable_bf16,
             enable_fp16=self.enable_fp16,
-            hybrid_engine_args=hybrid_engine_args,
             **self.additional_ds_config,
         )
 
-        ds_config["train_micro_batch_size_per_gpu"] = spec.batch_size_per_device
-        ds_config["train_batch_size"] = (spec.batch_size_per_device * data_parallel_world_size() *
-                                         model_parallel_world_size() * pipe_parallel_world_size())
+        # NOTE: Just a fake batch size to make DeepSpeed happy.
+        ds_config["train_batch_size"] = data_parallel_world_size()
 
         def warmup_then_cosine_anneal(step, warmup_steps_proportion, total_steps, min_lr_ratio):
             warmup_steps = max(5, int(total_steps * warmup_steps_proportion))

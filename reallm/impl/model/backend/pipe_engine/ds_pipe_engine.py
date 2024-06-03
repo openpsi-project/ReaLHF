@@ -1486,10 +1486,10 @@ class PipelinableModelRunnerWithZeRO:
 
     # FIXME: merge these ad-hoc methods into train/gen states
     def set_version_steps(self, version_steps):
-        self.version_steps = version_steps
+        self.pipe_runner.set_version_steps(version_steps)
 
     def set_tokenizer(self, tokenizer):
-        self.tokenizer = tokenizer
+        self.pipe_runner.set_tokenizer(tokenizer)
 
     def backward(self, *args, **kwargs):
         """Disabled for pipeline parallel training. See ``train_batch()``."""

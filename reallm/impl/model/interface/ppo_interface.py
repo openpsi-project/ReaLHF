@@ -302,7 +302,7 @@ class PPOActorInterface(model_api.ModelInterface):
 
                 logits = gather_from_tensor_model_parallel_region(logits)
             logits.masked_fill_(packed_logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
-        # FIXME: the following line will OOM
+        # FIXME: the following line may OOM
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         res = from_dict(dict(logprobs=logprobs))
         res.register_metadata(seqlens=data.metadata["seqlens"])
@@ -692,9 +692,11 @@ class PPOCriticInterface(model_api.ModelInterface):
             ))
 
         data_.register_metadata(seqlens=batch_seqlens)
-        datas = data_api.split_sequences(data_,
-                                         self.n_minibatches,
-                                         min_size=constants.pipe_parallel_world_size() * 2)
+        datas = data_api.split_sequences(
+            data_,
+            self.n_minibatches,
+            min_size=constants.pipe_parallel_world_size() * 2,
+        )
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
