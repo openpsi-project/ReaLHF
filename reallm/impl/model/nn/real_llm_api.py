@@ -119,10 +119,12 @@ class ReaLModel(nn.Module):
         assert self._instantiated
         assert self.contiguous_param is not None
         if self._offload_buffer is None:
-            self._offload_buffer = torch.empty_like(self.contiguous_param,
-                                                    dtype=self.dtype,
-                                                    device="cpu",
-                                                    pin_memory=True,)
+            self._offload_buffer = torch.empty_like(
+                self.contiguous_param,
+                dtype=self.dtype,
+                device="cpu",
+                pin_memory=True,
+            )
         else:
             assert self._offload_buffer.shape == self.contiguous_param.shape
         dummy_tensor = torch.tensor((), device=self.device, dtype=self.dtype)
@@ -470,7 +472,11 @@ class ReaLModel(nn.Module):
 
         # The following tensor holds the contiguous memory of incoming parameters
         # NOTE: We will enable requires_grad after reallocation, not here.
-        to_contiguous_param = torch.empty(rtgt.to_param_size, dtype=self.dtype, device="cuda", )
+        to_contiguous_param = torch.empty(
+            rtgt.to_param_size,
+            dtype=self.dtype,
+            device="cuda",
+        )
         map_param_to_contigous_memory(
             rtgt.to_layers_handle,
             rtgt.to_param_spec,
