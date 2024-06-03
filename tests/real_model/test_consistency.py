@@ -12,8 +12,8 @@ import transformers
 from reallm.api.core.config import ModelFamily
 from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, MODEL_FAMILY_TO_PATH, ReaLModelConfig
 from reallm.base import constants, logging
+from reallm.base.testing import clear_name_resolve, init_global_constants, LocalMultiProcessTest
 from reallm.impl.model.nn.real_llm_api import add_helper_functions
-from tests.utils import clear_name_resolve, init_global_constants, LocalMultiProcessTest
 
 logger = logging.getLogger("tests.test_saveload")
 

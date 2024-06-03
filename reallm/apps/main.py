@@ -86,20 +86,26 @@ def _submit_workers(
     return scheduled_jobs
 
 
+def get_repo_path():
+    file_path = os.path.abspath(__file__)
+    reallm_path = os.path.dirname(os.path.dirname(file_path))
+    repo_path = os.path.dirname(reallm_path)
+    return repo_path
+
+
 def main_start(args, recover_count: int = 0):
     if args.mode == "ray" and args.image_name is None:
         raise ValueError("--image_name must be specified when using ray cluster. "
                          "This is becuase ray cluster requires all workers to have "
                          "the same version of Python and ray.")
+    args.ignore_worker_error = args.ignore_worker_error and args.recover_mode == "disabled"
 
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
     if recover_count == 0:
         constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
-    file_path = os.path.abspath(__file__)
-    reallm_path = os.path.dirname(os.path.dirname(file_path))
-    repo_path = os.path.dirname(reallm_path)
+    repo_path = get_repo_path()
 
     is_recover_run = (args.recover_mode == "auto" and recover_count > 0) or args.recover_mode == "resume"
     save_recover_states = args.recover_mode != "disabled"
@@ -121,7 +127,6 @@ def main_start(args, recover_count: int = 0):
     sched = sched_client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
 
     setup = experiment.scheduling_setup()
-    # exit(0)
 
     logger.info(f"Resetting name resolving repo...")
 
@@ -244,6 +249,62 @@ def main_find_config(args):
         print(exp_name)
 
 
+def main_profile_layers(args):
+    from reallm.api.core.model_api import ModelFamily
+    _main_profile_layers(ModelFamily(args.model_class, args.model_size, args.is_critic), args.model_path)
+
+
+def _main_profile_layers(model_family, model_path):
+    from reallm.api.core.model_api import ModelFamily
+    from reallm.base.slurm_utils import check_slurm_availability
+    from reallm.base.testing import clear_name_resolve
+    expr_name = trial_name = "profile"
+    cmd = f"python3 -m reallm.apps.profile_layers --expr_name {expr_name} --trial_name {trial_name} "\
+          f"--model_path {model_path} --model_name {model_family} "
+
+    if check_slurm_availability():
+        repo_path = get_repo_path()
+
+        from reallm.api.core.system_api import _LLM_ENVVARS
+        base_environs = {
+            "PYTHONPATH": repo_path,
+            "REAL_PACKAGE_PATH": repo_path,
+            "WANDB_MODE": "disabled",
+            "DLLM_MODE": "SLURM",
+            "DLLM_TRACE": "0",
+            **_LLM_ENVVARS,
+        }
+        clear_name_resolve(expr_name, trial_name)
+        sched = sched_client.make(mode="slurm", expr_name=expr_name, trial_name=trial_name)
+        print(f"Profiling {model_family} layers, model path {model_path}, "
+              f"cmd {cmd}")
+        sched.submit_array(
+            worker_type="profile_layer",
+            cmd=cmd,
+            count=1,
+            cpu=64,
+            gpu=8,
+            gpu_type="tesla",
+            mem=500000,
+            env_vars=base_environs,
+            container_image="llm/llm-gpu",
+        )
+
+        try:
+            sched.wait(timeout=None)
+        except (KeyboardInterrupt, sched_client.JobException, TimeoutError) as e:
+            sched.stop_all()
+            raise e
+    else:
+        try:
+            print(f"Profiling {model_family} layers, model path {model_path}, "
+                  f"cmd {cmd}")
+            clear_name_resolve(expr_name, trial_name)
+            os.system(cmd)
+        except (KeyboardInterrupt, sched_client.JobException, TimeoutError) as e:
+            raise e
+
+
 def main():
     parser = argparse.ArgumentParser(prog="distributed_llm")
     subparsers = parser.add_subparsers(dest="cmd", help="sub-command help")
@@ -308,6 +369,13 @@ def main():
                                       help="find configuration by matching regular expression.")
     subparser.add_argument("--regex", "-r", type=str, required=True)
     subparser.set_defaults(func=main_find_config)
+
+    subparser = subparsers.add_parser("profile_layers", help="profile layers of a model.")
+    subparser.add_argument("--model_class", type=str, required=True)
+    subparser.add_argument("--model_size", type=int, required=True)
+    subparser.add_argument("--is_critic", action="store_true")
+    subparser.add_argument("--model_path", type=str, required=True)
+    subparser.set_defaults(func=main_profile_layers)
 
     args = parser.parse_args()
     args.func(args)

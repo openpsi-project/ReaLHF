@@ -44,13 +44,9 @@ def main_worker(args):
         logger.info("CUDA_VISIBLE_DEVICES: %s", os.environ["CUDA_VISIBLE_DEVICES"])
 
     # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
-    # profiler.import_profiler_registers()
     import reallm.experiments
     import reallm.impl.dataset
     import reallm.impl.model
-    import reallm.profiler.experiments
-    # import reallm.profiler.worker
-    import reallm.profiler.interface
     import reallm.system
 
     logger.info(f"Run {args.worker_type} worker with args: %s", args)
@@ -111,7 +107,6 @@ def main_controller(args):
     import reallm.api.core.system_api as system_api
     import reallm.base.constants as constants
     import reallm.experiments
-    import reallm.profiler.experiments
     import reallm.system as system
 
     constants.set_experiment_trial_names(args.experiment_name, args.trial_name)

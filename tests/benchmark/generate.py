@@ -17,10 +17,10 @@ from reallm.api.core.config import ModelFamily
 from reallm.api.core.model_api import (HF_MODEL_FAMILY_REGISTRY, load_hf_tokenizer, Model, ModelName,
                                        ReaLModelConfig)
 from reallm.base import constants, logging
+from reallm.base.testing import clear_name_resolve, init_global_constants, LocalMultiProcessTest
 from reallm.impl.dataset.prompt_dataset import PromptDataset
 from reallm.impl.model.nn.real_llm_api import add_helper_functions, make_real_model, ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
-from tests.utils import clear_name_resolve, init_global_constants, LocalMultiProcessTest
 
 logger = logging.getLogger("tests.test_saveload")
 

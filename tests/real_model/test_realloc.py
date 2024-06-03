@@ -23,9 +23,10 @@ from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH, ModelFamily, ModelNa
 from reallm.api.core.system_api import ModelName, ModelShardID
 from reallm.api.quickstart.model import REAL_MODEL_CONFIG_CONVERTER
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType, fetch_latest_tmark
+from reallm.base.testing import (clear_name_resolve, get_pytorch_profiler, init_global_constants,
+                                 pytorch_memory_burnin)
 from reallm.base.topology import PipeModelDataParallelTopology
 from reallm.scheduler.client import make as make_scheduer
-from tests.utils import clear_name_resolve, get_pytorch_profiler, init_global_constants, pytorch_memory_burnin
 import reallm.base.constants as constants
 import reallm.base.gpu_utils as gpu_utils
 

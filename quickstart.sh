@@ -66,7 +66,10 @@
 SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240523/default/epoch7epochstep6globalstep100/
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240523/default/epoch1epochstep80globalstep80/
 python3 -m reallm.apps.quickstart ppo experiment_name=remote-quickstart-ppo-debug trial_name=20240528-0 \
-    recover_mode=auto \
+    allocation_mode=search \
+    n_nodes=1 \
+    n_gpus_per_node=8 \
+    nodelist=QH-com49 \
     save_freq_steps=null \
     global_train_bs=256 \
     global_gen_bs=256 \
@@ -74,37 +77,20 @@ python3 -m reallm.apps.quickstart ppo experiment_name=remote-quickstart-ppo-debu
     actor.type.size=7 \
     actor.type.is_critic=False \
     actor.path=$SFT_MODEL_PATH \
-    actor.parallel.pipeline_parallel_size=1 \
-    actor.parallel.model_parallel_size=2 \
-    actor.parallel.data_parallel_size=2 \
     actor.gradient_checkpointing=True \
-    actor.parallel.use_sequence_parallel=True \
-    actor_gen_parallel.pipeline_parallel_size=2 \
-    actor_gen_parallel.model_parallel_size=1 \
-    actor_gen_parallel.data_parallel_size=4 \
     critic.type._class=llama \
     critic.type.size=7 \
     critic.type.is_critic=True \
     critic.path=$RW_MODEL_PATH \
-    critic.parallel.pipeline_parallel_size=1 \
-    critic.parallel.model_parallel_size=2 \
-    critic.parallel.data_parallel_size=2 \
     critic.gradient_checkpointing=True \
-    critic.parallel.use_sequence_parallel=True \
-    critic_inf_parallel.pipeline_parallel_size=2 \
-    critic_inf_parallel.data_parallel_size=1 \
     ref.type._class=llama \
     ref.type.size=7 \
     ref.type.is_critic=False \
     ref.path=$SFT_MODEL_PATH  \
-    ref.parallel.data_parallel_size=2 \
-    ref.parallel.pipeline_parallel_size=2 \
     rew.type._class=llama \
     rew.type.size=7 \
     rew.type.is_critic=True \
     rew.path=$RW_MODEL_PATH \
-    rew.parallel.data_parallel_size=1 \
-    rew.parallel.pipeline_parallel_size=2 \
     dataset.max_prompt_len=256 \
     dataset.n_tokens_per_batch=8192 \
     ppo.max_new_tokens=256 \
@@ -112,3 +98,23 @@ python3 -m reallm.apps.quickstart ppo experiment_name=remote-quickstart-ppo-debu
     ppo.ppo_n_minibatches=4 \
     ppo.adv_norm=True ppo.value_norm=True \
     ppo.top_p=0.9 ppo.top_k=1024
+
+
+
+    # actor.parallel.pipeline_parallel_size=1 \
+    # actor.parallel.model_parallel_size=2 \
+    # actor.parallel.data_parallel_size=2 \
+    # actor.parallel.use_sequence_parallel=True \
+    # actor_gen_parallel.pipeline_parallel_size=2 \
+    # actor_gen_parallel.model_parallel_size=1 \
+    # actor_gen_parallel.data_parallel_size=4 \
+    # critic.parallel.pipeline_parallel_size=1 \
+    # critic.parallel.model_parallel_size=2 \
+    # critic.parallel.data_parallel_size=2 \
+    # critic.parallel.use_sequence_parallel=True \
+    # critic_inf_parallel.pipeline_parallel_size=2 \
+    # critic_inf_parallel.data_parallel_size=1 \
+    # ref.parallel.data_parallel_size=2 \
+    # ref.parallel.pipeline_parallel_size=2 \
+    # rew.parallel.data_parallel_size=1 \
+    # rew.parallel.pipeline_parallel_size=2 \

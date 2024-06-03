@@ -1,26 +1,30 @@
 from collections import defaultdict
-from statistics import mean, stdev
 from typing import List, Optional, Union
-import getpass
-import json
 import os
+import pickle
 import time
 
-from flash_attn.bert_padding import unpad_input
+import pandas as pd
 import torch
 import torch.distributed as dist
 import transformers
 
-from reallm.base.topology import *
+from reallm.api.core.model_api import ReaLModelConfig
+# from base.topology import *
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_base import (OutputHead, ReaLModelBlock, ReaLModelConfig,
-                                                SequenceParallelActorHead, SequenceParallelCriticHead,
-                                                VocabPositionEmbedding)
+from reallm.impl.model.nn.real_llm_base import OutputHead, ReaLModelBlock, VocabPositionEmbedding
 from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 import reallm.api.core.model_api as model_api
 import reallm.api.core.system_api as config_package
-import reallm.base.cluster
 import reallm.base.constants as constants
+import reallm.base.logging as logging
+
+try:
+    from flash_attn.bert_padding import unpad_input
+except ModuleNotFoundError:
+    pass
+
+logger = logging.getLogger("profile layers", "system")
 
 
 def make_layers(config: ReaLModelConfig, dtype, device):
@@ -29,7 +33,7 @@ def make_layers(config: ReaLModelConfig, dtype, device):
         dtype=dtype,
         device=device,
     )
-    real_model_blocks = [
+    flash_mqat_blocks = [
         ReaLModelBlock(
             config,
             layer_index=i,
@@ -38,27 +42,6 @@ def make_layers(config: ReaLModelConfig, dtype, device):
             device=device,
         ) for i in range(1)
     ]
-
-    # if config.is_critic and config.sequence_parallel:
-    #     head = SequenceParallelCriticHead(
-    #         config.hidden_dim,
-    #         1,
-    #         bias=False,
-    #         device=device,
-    #         dtype=dtype,
-    #     )
-    # elif not config.is_critic and constants.model_parallel_world_size() > 1:
-    #     head = SequenceParallelActorHead(
-    #         config.hidden_dim,
-    #         config.vocab_size,
-    #         bias=False,
-    #         sequence_parallel=config.sequence_parallel,
-    #         async_tensor_model_parallel_allreduce=not config.sequence_parallel,
-    #         gradient_accumulation_fusion=config.gradient_accumulation_fusion,
-    #         device=device,
-    #         dtype=dtype,
-    #     )
-    # else:
     head = OutputHead(
         config.hidden_dim,
         1 if config.is_critic else config.vocab_size,
@@ -67,18 +50,8 @@ def make_layers(config: ReaLModelConfig, dtype, device):
         dtype=dtype,
     )
 
-    # layer_names = ["embedding_layer", "real_model_block_0", "real_model_block_1", "head"]
-    layer_names = ["embedding_layer", "real_model_block_0", "head"]
-    return [embedding_layer] + real_model_blocks + [head], layer_names
-
-
-def make_stats_key(layer_name, name, bs, seq_len):
-    return f"{layer_name}-{name}-{bs}-{seq_len}"
-
-
-def parse_stats_key(key):
-    # layer_name, name, bs, seq_len
-    return key.split("-")
+    layer_names = ["embedding_layer", "block_0", "head"]
+    return [embedding_layer] + flash_mqat_blocks + [head], layer_names
 
 
 class ProfileLayers:
@@ -87,17 +60,11 @@ class ProfileLayers:
         self,
         model_name: str,
         config: ReaLModelConfig,
-        use_sequence_parallel: bool = False,
-        use_gradient_checkpointing: bool = False,
         tokenizer: transformers.PreTrainedTokenizerFast = None,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
         self.model_name = model_name
-        if use_sequence_parallel:
-            self.model_name += "_sp"
-        if use_gradient_checkpointing:
-            self.model_name += "_gc"
         self.config = config
         self.backend_config = config_package.ModelBackend(
             type_="ds_train",
@@ -108,11 +75,8 @@ class ProfileLayers:
                 min_lr_ratio=0.0,
                 zero_stage=1,
                 engine_type="deepspeed",
-                gradient_checkpointing=use_gradient_checkpointing,
                 enable_fp16=True,
                 enable_bf16=False,
-                sequence_parallel=use_sequence_parallel,
-                enable_async_p2p_communication=False,
             ),
         )
 
@@ -121,12 +85,8 @@ class ProfileLayers:
         self.layers, self.layer_names = make_layers(config, dtype, device)
         self.hidden_dim = config.hidden_dim
         self.head_dim = config.head_dim
-        self.max_new_tokens = 128
+        self.max_new_tokens = 128  # only useful in kv cache memory alloc
         self.min_new_tokens = 128
-
-        # print("hidden_dim: ", self.hidden_dim)
-        # print("head_dim: ", self.head_dim)
-        # print("n_layers", config.n_layers)
 
         self.stats = defaultdict(list)
         self.num_layers = len(self.layers)
@@ -138,17 +98,17 @@ class ProfileLayers:
         self.backend = model_api.make_backend(self.backend_config)
         ft_spec = model_api.FinetuneSpec(10, 100, 10, 32, 256)
         self.layers = [self.backend.initialize(layer, ft_spec) for layer in self.layers]
+        self.stats = defaultdict(list)
 
     def reset_stats(self):
         self.stats = defaultdict(list)
 
-    def sync_stats(self):
-        for key, times in self.stats.items():
-            times = torch.tensor(times, dtype=torch.float32, device=self.device)
-            times_list = [torch.zeros_like(times) for _ in range(dist.get_world_size())]
-            dist.all_gather(times_list, times)
-            times = torch.cat(times_list)
-            self.stats[key] = times.cpu().tolist()
+    def insert_data_point(self, layer_name, name, bs, seq_len, time_ns):
+        self.stats["layer_name"].append(layer_name)
+        self.stats["op_name"].append(name)
+        self.stats["bs"].append(bs)
+        self.stats["seq_len"].append(seq_len)
+        self.stats["time_ns"].append(time_ns)
 
     @torch.no_grad()
     def fwd_gen(self, bs, seq_len):
@@ -156,19 +116,21 @@ class ProfileLayers:
                                   self.config.vocab_size, (bs, seq_len),
                                   dtype=torch.long,
                                   device=self.device)
-        attention_mask = torch.ones_like(input_ids)
+        attention_mask = torch.ones_like(input_ids, device=self.device)
         # fwd_gen_0
         packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+        cu_seqlens = cu_seqlens.to(device=self.device)
+        packed_input_ids = packed_input_ids.to(device=self.device)
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=int(max_seqlen), store_kv_cache=True)
         ys = [PipeCacheData() for _ in range(self.num_layers)]
         ys[0].packed_input_ids = packed_input_ids
 
         for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             st = time.monotonic_ns()
-            x = layer.module(x, y)
+            x: PipeTransferData = layer.module(x, y)
             x.pp_input = x.pp_output
             torch.cuda.synchronize()
-            self.stats[make_stats_key(layer_name, "fwd_gen_0", bs, seq_len)].append(time.monotonic_ns() - st)
+            self.insert_data_point(layer_name, "fwd_gen_0", bs, seq_len, time.monotonic_ns() - st)
 
         prompt_logits = x.pp_output
         logits = prompt_logits[cu_seqlens[1:] - 1]
@@ -201,92 +163,73 @@ class ProfileLayers:
         ys[0].cache_seqlens = cache_seqlens
 
         # fwd_gen_1
-        new_tokens = torch.randint(0, self.config.vocab_size, (bs, 1), dtype=torch.long, device=self.device)
+        new_tokens = torch.randint(0, self.config.vocab_size, (bs,), dtype=torch.long, device=self.device)
         ys[0].packed_input_ids = new_tokens
         ys[0].packed_position_ids = None
+        x.cu_seqlens = torch.arange(bs + 1, dtype=torch.int32, device=self.device)
+        x.max_seqlen = 1
         for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             st = time.monotonic_ns()
             x = layer.module(x, y)
             x.pp_input = x.pp_output
             torch.cuda.synchronize()
-            self.stats[make_stats_key(layer_name, "fwd_gen_1", bs, seq_len)].append(time.monotonic_ns() - st)
+            self.insert_data_point(layer_name, "fwd_gen_1", bs, seq_len, time.monotonic_ns() - st)
 
     def fwd_bwd_opt(self, bs, seq_len):
         input_ids = torch.randint(0,
                                   self.config.vocab_size, (bs, seq_len),
                                   dtype=torch.long,
                                   device=self.device)
-        attention_mask = torch.ones_like(input_ids)
+        attention_mask = torch.ones_like(input_ids, device=self.device)
         packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+        cu_seqlens = cu_seqlens.to(device=self.device)
+        packed_input_ids = packed_input_ids.to(device=self.device)
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=False)
         ys = [PipeCacheData() for _ in range(self.num_layers)]
         ys[0].packed_input_ids = packed_input_ids
 
         for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             # fwd
-            # if self.device == "cpu":
-            #     layer.cuda()
             st = time.monotonic_ns()
-            x = layer.module(x, y)
+            x: PipeTransferData = layer.module(x, y)
             torch.cuda.synchronize()
-            self.stats[make_stats_key(layer_name, "fwd", bs, seq_len)].append(time.monotonic_ns() - st)
+            self.insert_data_point(layer_name, "fwd", bs, seq_len, time.monotonic_ns() - st)
             # bwd
             r = torch.rand(*x.pp_output.shape, device=x.pp_output.device, dtype=x.pp_output.dtype)
             loss = torch.max(x.pp_output * r)
             st = time.monotonic_ns()
             layer.module.backward(loss)
             torch.cuda.synchronize()
-            self.stats[make_stats_key(layer_name, "bwd", bs, seq_len)].append(time.monotonic_ns() - st)
+            self.insert_data_point(layer_name, "bwd", bs, seq_len, time.monotonic_ns() - st)
             # opt
             st = time.monotonic_ns()
             layer.module.step()
             torch.cuda.synchronize()
-            self.stats[make_stats_key(layer_name, "opt", bs, seq_len)].append(time.monotonic_ns() - st)
+            self.insert_data_point(layer_name, "opt", bs, seq_len, time.monotonic_ns() - st)
             x.pp_input = x.pp_output.clone().detach()
-            # if self.device == "cpu":
-            #     layer.cpu()
 
-    def print_stats(self):
-        for key, times in self.stats.items():
-            print(f"{key}: {mean(times)/1e3}, {stdev(times)/1e3}, "
-                  f"{max(times)/1e3}, {min(times)/1e3}")
+    def make_dataframe_and_print(self):
+        df = pd.DataFrame(self.stats)
+        logger.info(f"Current Stats: \nstr{df}")
 
     def dump_stats(self, world_size):
-        if dist.get_rank() == 0:
-            # dump full stats
-            DUMP_DIR = os.path.join(
-                reallm.base.cluster.spec.fileroot,
-                "logs",
-                getpass.getuser(),
-                "profile",
-                "profile",
-                "profile_result",
-            )
-            dump_path = os.path.join(DUMP_DIR, self.model_name, f"full-{world_size}.json")
-            os.makedirs(os.path.dirname(dump_path), exist_ok=True)
-            with open(dump_path, "w") as f:
-                json.dump(self.stats, f)
+        rank = dist.get_rank()
+        # dump full stats
+        dump_dir = os.path.join(
+            constants.PROFILER_CACHE_PATH,
+            "layer_stats",
+        )
+        dump_path = os.path.join(dump_dir, self.model_name, f"layer-stats_{world_size}_{rank}.pkl")
+        os.makedirs(os.path.dirname(dump_path), exist_ok=True)
 
-            # dump stats summary
-            all_summary = {}
-            for k, stats in self.stats.items():
-                key_summary = dict(len=len(stats),
-                                   mean=mean(stats) / 1e3,
-                                   stdev=stdev(stats) / 1e3,
-                                   max=max(stats) / 1e3,
-                                   min=min(stats) / 1e3)
-                all_summary[k] = key_summary
-            dump_path = os.path.join(DUMP_DIR, self.model_name, f"summary-{world_size}.json")
-            os.makedirs(os.path.dirname(dump_path), exist_ok=True)
-            with open(dump_path, "w") as f:
-                json.dump(all_summary, f)
+        with open(dump_path, "wb") as f:
+            df = pd.DataFrame(self.stats)
+            pickle.dump(df, f)
 
 
 def make_profile_layers(device: torch.device,
                         model_path: str,
                         model_name: str,
-                        use_sequence_parallel: bool = False,
-                        use_gradient_checkpointing: bool = False,
                         dtype: Optional[str] = None,
                         hf_model_type: str = "llama"):
     if dtype == "fp16" or dtype == None:
@@ -299,19 +242,9 @@ def make_profile_layers(device: torch.device,
         raise NotImplementedError(f"Unsupported dtype {dtype}")
     tokenizer = None
     config: ReaLModelConfig = getattr(ReaLModel, f"config_from_{hf_model_type}")(model_path=model_path,)
-    # with open(os.path.join(model_path, "real_model_config.json"), "r") as f:
-    #     config = ReaLModelConfig(**json.load(f))
-    config.sequence_parallel = use_sequence_parallel
-    # m.load(model_path, init_critic_from_actor=False)
     if tokenizer is None:
         tokenizer = model_api.load_hf_tokenizer(model_path)
 
-    profile_layers = ProfileLayers(model_name,
-                                   config,
-                                   use_sequence_parallel=use_sequence_parallel,
-                                   use_gradient_checkpointing=use_gradient_checkpointing,
-                                   tokenizer=tokenizer,
-                                   dtype=dtype,
-                                   device=device)
+    profile_layers = ProfileLayers(model_name, config, tokenizer=tokenizer, dtype=dtype, device=device)
 
     return profile_layers

@@ -23,7 +23,7 @@ import torch.distributed
 import torch.profiler
 
 from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH, ModelFamily
-from tests.utils import *
+from reallm.base.testing import *
 import reallm.api.core.system_api as config_package
 import reallm.base.constants as constants
 
@@ -80,7 +80,7 @@ def make_backend():
 def make_interface():
     import reallm.api.core.dfg
     import reallm.api.core.model_api as model_api
-    import reallm.profiler.interface
+    import reallm.search_engine.interface
     return model_api.make_interface(api.core.dfg.ModelInterface(type_="sft", args=dict()))
 
 

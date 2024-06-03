@@ -3,7 +3,7 @@ import dataclasses
 import json
 import os
 
-from reallm.api.core.config import Model, ModelFamily, ModelWrapper
+from reallm.api.core.config import Model, ModelBackend, ModelFamily, ModelWrapper
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Quickstart Model Config")

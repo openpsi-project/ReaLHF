@@ -1,5 +1,4 @@
 from typing import *
-import copy
 import dataclasses
 
 import reallm.base.topology as topology

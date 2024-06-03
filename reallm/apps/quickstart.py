@@ -15,6 +15,7 @@ import hydra
 
 from reallm.base.cluster import spec as cluster_spec
 from reallm.base.constants import LOG_ROOT, MODEL_SAVE_ROOT, quickstart_expr_cache_path
+from reallm.base.slurm_utils import check_slurm_availability
 from reallm.experiments.common import DPOConfig, PPOConfig, RWConfig, SFTConfig
 import reallm.api.core.system_api as system_api
 
@@ -60,13 +61,7 @@ def kind_reminder(config_name, logger, args):
     #         )
     #         v.tokenizer_path = v.base_model_path
 
-    slurm_available = (int(
-        subprocess.run(
-            "squeue",
-            shell=True,
-            stdout=open(os.devnull, "wb"),
-            stderr=open(os.devnull, "wb"),
-        ).returncode) == 0)
+    slurm_available = check_slurm_availability()
     if slurm_available:
         logger.warning("Slurm is available. You probably run the system on ctrl nodes. "
                        "Using slurm to launch remote workers.")

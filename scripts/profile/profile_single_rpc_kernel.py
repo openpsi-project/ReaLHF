@@ -10,8 +10,8 @@ import time
 import tqdm
 
 from reallm.api.core.dfg import ModelInterfaceType
-from reallm.profiler.multi_host_main import main
-from reallm.profiler.utils import find_factors
+from reallm.search_engine.multi_host_main import main
+from reallm.search_engine.utils import find_factors
 import reallm.base.constants as constants
 
 
