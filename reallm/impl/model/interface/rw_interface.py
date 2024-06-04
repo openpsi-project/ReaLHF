@@ -6,10 +6,14 @@ import colorama
 import deepspeed
 import torch
 import tqdm
+import torch.distributed as dist
 
+from reallm.base import constants
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
-from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (PipelinableModelRunner,
-                                                                  PipelinableModelRunnerWithZeRO)
+from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (
+    PipelinableModelRunner,
+    PipelinableModelRunnerWithZeRO,
+)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 import reallm.api.core.model_api as model_api
 import reallm.base.logging as logging
@@ -26,12 +30,25 @@ def _paired_rw_loss_from_model_outputs(
 ):
     scores = scores[cu_seqlens[1:] - 1].view(-1, 2).float()
     loss = -(torch.nn.functional.logsigmoid(scores[:, 0] - scores[:, 1]) * group_factor).sum()
+
+    # Logging.
     correct_predictions = (scores[:, 0] > scores[:, 1]).count_nonzero().detach().float()
+    total_predictions = torch.tensor(scores.shape[0], dtype=torch.float32, device=scores.device)
+    dist.all_reduce(correct_predictions, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+    dist.all_reduce(total_predictions, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+    pos_score_sum = scores[:, 0].sum().detach()
+    neg_score_sum = scores[:, 1].sum().detach()
+    dist.all_reduce(pos_score_sum, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+    dist.all_reduce(neg_score_sum, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+    loss_logging = loss.detach()
+    dist.all_reduce(loss_logging, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+
     return loss, dict(
-        loss=loss.cpu(),
-        correct_predictions=correct_predictions.cpu(),
-        avg_pos_score=scores[:, 0].mean().detach().cpu(),
-        avg_neg_score=scores[:, 1].mean().detach().cpu(),
+        loss=loss_logging,
+        correct_predictions=correct_predictions,
+        total_predictions=total_predictions,
+        pos_score=pos_score_sum,
+        neg_score=neg_score_sum,
     )
 
 
@@ -117,7 +134,7 @@ class PairedRewardInterface(model_api.ModelInterface):
                 input_lens=pair_lens,
                 group_factor=data["group_factor"],
             )
-            loss, stats = module.train_batch(
+            _, stats = module.train_batch(
                 seqlens_cpu=data.metadata["seqlens"],
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
@@ -131,27 +148,33 @@ class PairedRewardInterface(model_api.ModelInterface):
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             ).logits
-            loss, stats = _paired_rw_loss_from_model_outputs(scores, packed_input_ids, cu_seqlens,
-                                                             group_factor)
+            loss, stats = _paired_rw_loss_from_model_outputs(
+                scores, packed_input_ids, cu_seqlens, group_factor
+            )
 
             module.backward(loss)
             module.step()
 
+        res = {}
         if stats is not None:
-            self.train_total_correct_predictions += stats["correct_predictions"].item()
-            assert input_lens.shape[0] % 2 == 0
-            self.train_total_predictions += input_lens.shape[0] // 2
-            acc = self.train_total_correct_predictions / self.train_total_predictions
-            stats["acc"] = acc
+            self.train_total_predictions += int(stats["total_predictions"])
+            self.train_total_correct_predictions += int(stats["correct_predictions"])
+            res = dict(
+                loss=float(stats["loss"] / stats["total_predictions"]),
+                epoch_acc=self.train_total_correct_predictions / self.train_total_predictions,
+                batch_acc=float(stats["correct_predictions"] / stats["total_predictions"]),
+                avg_pos_score=float(stats["pos_score"] / stats["total_predictions"]),
+                avg_neg_score=float(stats["neg_score"] / stats["total_predictions"]),
+                total_predictions=int(stats["total_predictions"]),
+                correct_predictions=int(stats["correct_predictions"]),
+            )
 
         cur_epoch = model.version.epoch
         model.inc_version()
         if model.version.epoch > cur_epoch:
             self.train_total_predictions = self.train_total_correct_predictions = 0
 
-        if stats is None:
-            stats = {}
-        return {k: float(v) for k, v in stats.items()}
+        return res
 
     def save(self, model: model_api.Model, save_dir: str):
         module = model.module
@@ -189,7 +212,7 @@ class PairedRewardInterface(model_api.ModelInterface):
                     input_lens=pair_lens,
                     group_factor=data["group_factor"],
                 )
-                loss, stats = model.eval_batch(
+                _, stats = model.eval_batch(
                     seqlens_cpu=data.metadata["seqlens"],
                     packed_input_ids=packed_input_ids,
                     cu_seqlens=cu_seqlens,
@@ -203,16 +226,17 @@ class PairedRewardInterface(model_api.ModelInterface):
                     cu_seqlens=cu_seqlens,
                     max_seqlen=max_seqlen,
                 ).logits
-                loss, stats = _paired_rw_loss_from_model_outputs(scores, packed_input_ids, cu_seqlens,
-                                                                 group_factor)
+                _, stats = _paired_rw_loss_from_model_outputs(
+                    scores, packed_input_ids, cu_seqlens, group_factor
+                )
 
             if stats is not None:
                 assert input_lens.shape[0] % 2 == 0
-                losses += loss.item() * (input_lens.shape[0] // 2)
+                losses += stats["loss"].item()
                 correct_predictions += stats["correct_predictions"].item()
-                total_predictions += input_lens.shape[0] // 2
-                pos_score += stats["avg_pos_score"].item()
-                neg_score += stats["avg_neg_score"].item()
+                total_predictions += stats["total_predictions"].item()
+                pos_score += stats["pos_score"].item()
+                neg_score += stats["neg_score"].item()
 
         if total_predictions > 0:
             return dict(
@@ -220,6 +244,8 @@ class PairedRewardInterface(model_api.ModelInterface):
                 acc=correct_predictions / total_predictions,
                 pos_score=float(pos_score / total_predictions),
                 neg_score=float(neg_score / total_predictions),
+                correct_predictions=int(correct_predictions),
+                total_predictions=int(total_predictions),
             )
         return dict()
 

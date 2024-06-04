@@ -113,7 +113,7 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
             packed_input_ids=torch.tensor(packed_input_ids, dtype=torch.long),
             pos_input_lens=torch.tensor(pos_input_lens, dtype=torch.int32),
             group_factor=torch.tensor([1 / group_size for _ in range(group_size)], dtype=torch.float32),
-            prompt_lens=torch.tensor([prompt_len for _ in range(group_size)], dtype=torch.long),
+            prompt_lens=torch.tensor([prompt_len for _ in range(group_size)], dtype=torch.int32),
         )
         assert (x["pos_input_lens"].shape == x["group_factor"].shape == x["prompt_lens"].shape)
         assert x["pos_input_lens"].shape[0] == len(input_lens)

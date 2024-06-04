@@ -507,7 +507,7 @@ class PipelinableModelRunner:
         )
         self._exec_schedule(sched)
 
-        avg_loss, avg_stats = None, None
+        avg_loss, agg_stats = None, None
         if self.is_last_stage():
             losses = []
             stats = []
@@ -519,12 +519,12 @@ class PipelinableModelRunner:
 
             assert len(losses) > 0
             avg_loss = torch.stack(losses).mean()
-            avg_stats = dict()
+            agg_stats = dict()
             for key in stats[0].keys():
-                avg_stats[key] = torch.stack([stat[key] for stat in stats]).mean()
+                agg_stats[key] = torch.stack([stat[key] for stat in stats]).sum()
 
         self._post_eval_batch()
-        return avg_loss, avg_stats
+        return avg_loss, agg_stats
 
     def capture_generate_decoding_steps(self, ys: List[PipeCacheData]):
         torch.cuda.synchronize()
