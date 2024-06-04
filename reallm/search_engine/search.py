@@ -64,7 +64,7 @@ def search_rpc_allocations(device_mesh: DeviceMesh,
     model_size_dict = make_model_size_dict(rpcs, if_print=False)
 
     n_nodes = device_mesh.n_nodes
-    search_time = 10
+    search_time = 60
 
     rs: List[Dict[str, List]] = mdm_search.multi_mcmc_search(
         rpc_list,

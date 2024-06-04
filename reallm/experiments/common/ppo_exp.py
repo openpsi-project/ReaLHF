@@ -81,8 +81,19 @@ class PPOConfig(CommonExperimentConfig):
     ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
     rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
 
+    # for manual allocation only
+    actor_train_parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    actor_train_device_mesh: Optional[str] = None
     actor_gen_parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    actor_gen_device_mesh: Optional[str] = None
+    critic_train_parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    critic_train_device_mesh: Optional[str] = None
     critic_inf_parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    critic_inf_device_mesh: Optional[str] = None
+    rew_inf_parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    rew_inf_device_mesh: Optional[str] = None
+    ref_inf_parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    ref_inf_device_mesh: Optional[str] = None
 
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
 
@@ -252,7 +263,7 @@ class PPOConfig(CommonExperimentConfig):
             model_name=ModelName("critic", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=critic_interface,
-            model_type=ModelFamily("llama", 7, True),
+            model_type=self.critic.type,
             model_path=self.critic.path,
             input_data=[
                 "packed_seq",

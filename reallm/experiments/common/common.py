@@ -64,7 +64,7 @@ class CommonExperimentConfig(Experiment):
     recover_mode: str = "disabled"
     recover_retries: int = 1
     ignore_worker_error: bool = False
-    allocation_mode: str = "manual"
+    allocation_mode: str = "pipe_model"
     allocation_use_cache: bool = False
     n_nodes: int = 1
     n_gpus_per_node: int = 8
@@ -131,19 +131,35 @@ class CommonExperimentConfig(Experiment):
         rpcs = self.rpcs
         model_worker = []
 
+        global_device_mesh = DeviceMesh(n_nodes=self.n_nodes,
+                                        n_gpus_per_node=self.n_gpus_per_node,
+                                        mapping=np.ones((self.n_nodes, self.n_gpus_per_node), dtype=np.int32),
+                                        global_mesh_name=self.nodelist,
+                                        name=self.nodelist)
         if self.allocation_mode == "search":
             # assert self.mode == "slurm"
-            device_mesh = DeviceMesh(n_nodes=self.n_nodes,
-                                     n_gpus_per_node=self.n_gpus_per_node,
-                                     mapping=np.ones((self.n_nodes, self.n_gpus_per_node), dtype=np.int32),
-                                     global_mesh_name=self.nodelist,
-                                     name=self.nodelist)
             rpc_allocs: List[RPCAllocation] = search_rpc_allocations(
-                device_mesh=device_mesh,
+                device_mesh=global_device_mesh,
                 rpcs=rpcs,
                 use_cache=self.allocation_use_cache,
                 **self.search_kwargs,
             )
+        elif self.allocation_mode == "pipe_data" or self.allocation_mode == "pipe_model":
+            rpc_allocs: List[RPCAllocation] = [
+                RPCAllocation(
+                    rpc=rpc,
+                    device_mesh=global_device_mesh,
+                    parallel=ParallelismConfig(
+                        data_parallel_size=self.n_gpus_per_node if self.allocation_mode == "pipe_data" else 1,
+                        pipeline_parallel_size=self.n_nodes,
+                        model_parallel_size=self.n_gpus_per_node
+                        if self.allocation_mode == "pipe_model" else 1,
+                    )) for rpc in self.rpcs.values()
+            ]
+        elif self.allocation_mode == "manual":
+            raise NotImplementedError()
+        elif self.allocation_mode == "heuristic":
+            raise NotImplementedError()
         else:
             raise NotImplementedError()
 
@@ -151,6 +167,10 @@ class CommonExperimentConfig(Experiment):
         resolve_rpc_hooks(rpc_allocs)  # changes rpcs
         import pprint
         pprint.pprint(rpc_allocs)
+
+        model_name_to_rpc_allocs: Dict[ModelName, List[RPCAllocation]] = defaultdict(list)
+        for rpc_alloc in rpc_allocs:
+            model_name_to_rpc_allocs[rpc_alloc.rpc.model_name].append(rpc_alloc)
 
         for i, j in itertools.product(range(self.n_nodes), range(self.n_gpus_per_node)):
             mw = ModelWorker(
@@ -162,41 +182,40 @@ class CommonExperimentConfig(Experiment):
                 cuda_cache_clear_freq=10,
                 tokenizer_name_or_path=self.tokenizer_name_or_path,
             )
-            # print(f"Setting up ModelWorker ({i},{j})")
-            for rpc_alloc in rpc_allocs:
-                rpc = rpc_alloc.rpc
-                # import pprint
-                # pprint.pprint(rpc)
-                model_cfg = self.models[rpc.model_name.role]
-                model_cfg.parallel = rpc_alloc.parallel
+            print(f"Setting up ModelWorker ({i},{j})")
 
+            for model_name, model_rpc_allocs in model_name_to_rpc_allocs.items():
+                rpcs = [rpc_alloc.rpc for rpc_alloc in model_rpc_allocs]
+                model_cfg = self.models[model_name.role]
                 model = make_model_config(model_cfg)
                 mapping = rpc_alloc.device_mesh.mapping
                 gradient_checkpointing = (model_cfg.gradient_checkpointing
-                                          and rpc.interface_type == ModelInterfaceType.TRAIN_STEP)
+                                          and any(rpc.interface_type == ModelInterfaceType.TRAIN_STEP
+                                                  for rpc in rpcs))
 
                 topo = get_topo(rpc_alloc.parallel,
                                 gradient_checkpointing=gradient_checkpointing,
-                                max_prompt_len=self.max_prompt_len
-                                if rpc.interface_type == ModelInterfaceType.GENERATE else None)
+                                max_prompt_len=self.max_prompt_len if any(
+                                    rpc.interface_type == ModelInterfaceType.GENERATE
+                                    for rpc in rpcs) else None)
                 # pprint.pprint(topo)
 
-                if rpc.interface_type == ModelInterfaceType.TRAIN_STEP:
-                    backend = make_train_backend_config(model_cfg)
+                if any(rpc.interface_type == ModelInterfaceType.TRAIN_STEP for rpc in rpcs):
+                    backend = make_train_backend_config(model_cfg, rpc_alloc.parallel)
                 else:
-                    backend = make_inf_backend_config(model_cfg)
+                    backend = make_inf_backend_config(model_cfg, rpc_alloc.parallel)
 
-                # print(f"device mesh name {rpc_alloc.device_mesh.name} mapping {mapping}")
-                # print(f"RPC {rpc.name}, parallel {rpc_alloc.parallel}")
-                if mapping[i, j] and not any(rpc.model_name == s.id.model_name for s in mw.shards):
-                    shard_idx = shard_counter[rpc.model_name]
-                    # print(f"Setting up Shard {shard_idx}, "
-                    #       f"(dp, pp, mp) = ({topo.get_coord(shard_idx).data}, "
-                    #       f"{topo.get_coord(shard_idx).pipe}, {topo.get_coord(shard_idx).model})")
+                print(f"model name {model_name}, device mesh name {rpc_alloc.device_mesh.name},"
+                      f"mapping {mapping}")
+                if mapping[i, j]:
+                    shard_idx = shard_counter[model_name]
+                    print(f"Setting up Shard {shard_idx}, "
+                          f"(dp, pp, mp) = ({topo.get_coord(shard_idx).data}, "
+                          f"{topo.get_coord(shard_idx).pipe}, {topo.get_coord(shard_idx).model})")
                     mw.shards.append(
                         StandaloneModelShard(
                             id=ModelShardID(
-                                model_name=rpc.model_name,
+                                model_name=model_name,
                                 topo=topo,
                                 dp_rank=topo.get_coord(shard_idx).data,
                                 pp_rank=topo.get_coord(shard_idx).pipe,
@@ -206,8 +225,8 @@ class CommonExperimentConfig(Experiment):
                             backend=backend,
                             eval_datasets=self.eval_datasets,
                             eval_dataloader=self.eval_dataloader,
-                        ),)
-                    shard_counter[rpc.model_name] += 1
+                        ))
+                    shard_counter[model_name] += 1
             model_worker.append(mw)
 
         return ExperimentConfig(
@@ -215,35 +234,3 @@ class CommonExperimentConfig(Experiment):
             model_rpcs=[rpc_alloc.rpc for rpc_alloc in rpc_allocs],
             model_worker=model_worker,
         )
-
-
-def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
-    from reallm.api.quickstart.model import parallelism_config_equal
-    for rpc_alloc in rpc_allocs:
-        rpc = rpc_alloc.rpc
-        parallel = rpc_alloc.parallel
-        device_mesh = rpc_alloc.device_mesh
-        # check param realloc hooks for train_step rpcs
-        # only one param realloc is possible in each iteration
-        if rpc.interface_type == ModelInterfaceType.TRAIN_STEP:
-            for other in rpc_allocs:
-                if rpc.name == other.rpc.name:
-                    continue
-                if (rpc.model_name.role == other.rpc.model_name.role
-                        and not (parallelism_config_equal(parallel, other.parallel)
-                                 and device_mesh == other.device_mesh)):
-                    rpc.model_name = ModelName(rpc.model_name.role, other.rpc.model_name.replica_id + 1)
-                    rpc.pre_hooks.append(SyncParamHook(source=other.rpc.model_name))
-                    rpc.post_hooks.append(SyncParamHook(target=other.rpc.model_name))
-                    break
-
-        # add offload hooks for inference rpcs
-        if rpc.interface_type == ModelInterfaceType.INFERENCE:
-            offload_flag = True
-            # if there is training rpcs for the same model, can not offload
-            for other in rpc_allocs:
-                if (other.rpc.model_name.role == rpc.model_name.role
-                        and other.rpc.interface_type == ModelInterfaceType.TRAIN_STEP):
-                    offload_flag = False
-            if offload_flag:
-                rpc.post_hooks.append(OffloadHook())

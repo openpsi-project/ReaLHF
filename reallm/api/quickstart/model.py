@@ -140,7 +140,6 @@ class ModelTrainEvalConfig:
     enable_bf16: bool = False
     enable_async_p2p: bool = False
     offload: bool = False
-    parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
     zero_stage: int = dataclasses.field(
         metadata={"choices": [0, 1, 2, 3]},
         default=2,
@@ -150,15 +149,15 @@ class ModelTrainEvalConfig:
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
-        if self.enable_bf16 and (self.parallel.model_parallel_size > 1
-                                 or self.parallel.pipeline_parallel_size > 1):
-            raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
-        if self.parallel.pipeline_parallel_size > 1 and self.lora is not None:
-            raise ValueError("Use LoRA with pipeline parallel is not supported.")
-        if self.parallel.pipeline_parallel_size > 1 and self.zero_stage > 1:
-            logger.warning(f"ZeRO stage should be at most 1 when pipeline parallelism is used. "
-                           f"Force to set it to 1. (original {self.zero_stage})")
-            self.zero_stage = 1
+        # if self.enable_bf16 and (self.parallel.model_parallel_size > 1
+        #                          or self.parallel.pipeline_parallel_size > 1):
+        #     raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
+        # if self.parallel.pipeline_parallel_size > 1 and self.lora is not None:
+        #     raise ValueError("Use LoRA with pipeline parallel is not supported.")
+        # if self.parallel.pipeline_parallel_size > 1 and self.zero_stage > 1:
+        #     logger.warning(f"ZeRO stage should be at most 1 when pipeline parallelism is used. "
+        #                    f"Force to set it to 1. (original {self.zero_stage})")
+        #     self.zero_stage = 1
 
 
 def get_real_model_config(

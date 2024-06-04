@@ -6,10 +6,11 @@ from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType,
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptAnswerDatasetConfig
 from reallm.api.quickstart.model import ModelTrainEvalConfig
+from reallm.experiments.common.common import CommonExperimentConfig
 
 
 @dataclasses.dataclass
-class SFTConfig(Experiment):
+class SFTConfig(CommonExperimentConfig):
     seed: int = 1
     total_train_epochs: int = 1
     save_freq_steps: Optional[int] = 50
@@ -31,6 +32,7 @@ class SFTConfig(Experiment):
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
             model_type=self.model.type,
+            model_path=self.model.path,
             input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
             log_return_value=True,
             min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
@@ -54,6 +56,24 @@ class SFTConfig(Experiment):
 
     @property
     def dataloader(self):
+        return DataLoader("iterable_dataset_loader")
+
+    @property
+    def eval_datasets(self):
+        return [
+            Dataset(
+                "packed_prompt_answer",
+                args=dict(
+                    n_tokens_per_batch=self.dataset.valid_tokens_per_batch,
+                    min_seqs_per_batch=self.dataset.valid_tokens_per_batch // self.dataset.max_seqlen,
+                    max_length=self.dataset.max_seqlen,
+                    dataset_path=self.dataset.valid_path,
+                ),
+            )
+        ]
+
+    @property
+    def eval_dataloader(self):
         return DataLoader("iterable_dataset_loader")
 
     @property

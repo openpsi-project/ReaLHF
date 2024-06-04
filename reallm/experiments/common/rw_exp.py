@@ -4,10 +4,11 @@ from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
 from reallm.api.quickstart.model import ModelTrainEvalConfig
+from reallm.experiments.common.common import CommonExperimentConfig
 
 
 @dataclasses.dataclass
-class RWConfig(Experiment):
+class RWConfig(CommonExperimentConfig):
     total_train_epochs: int = 1
     save_freq_steps: Optional[int] = 20
     eval_freq_epochs: Optional[int] = 1
@@ -33,6 +34,7 @@ class RWConfig(Experiment):
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
             model_type=self.model.type,
+            model_path=self.model.path,
             input_data=["packed_input_ids", "input_lens", "group_factor", "pos_input_lens"],
             log_return_value=True,
             min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,

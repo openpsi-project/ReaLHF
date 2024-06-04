@@ -391,6 +391,7 @@ class ModelWorker(worker_base.Worker):
                 interface_impl = [
                     rpc.interface_impl for rpc in self.config.model_rpcs if rpc.model_name == s.id.model_name
                 ]
+                print(s.id.model_name, [rpc.model_name for rpc in self.config.model_rpcs])
                 assert all(x == interface_impl[0] for x in interface_impl)
                 self.__interfaces[s.id.model_name] = model_api.make_interface(interface_impl[0])
 
