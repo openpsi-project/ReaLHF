@@ -61,7 +61,6 @@ python3 -m reallm.apps.quickstart ppo experiment_name=remote-quickstart-ppo-debu
     allocation_use_cache=False \
     n_nodes=1 \
     n_gpus_per_node=8 \
-    nodelist=QH-com49 \
     recover_mode=disabled \
     save_freq_steps=null \
     global_train_bs=256 \

@@ -186,6 +186,7 @@ class CommonExperimentConfig(Experiment):
 
             for model_name, model_rpc_allocs in model_name_to_rpc_allocs.items():
                 rpcs = [rpc_alloc.rpc for rpc_alloc in model_rpc_allocs]
+                rpc_alloc = model_rpc_allocs[0]
                 model_cfg = self.models[model_name.role]
                 model = make_model_config(model_cfg)
                 mapping = rpc_alloc.device_mesh.mapping
