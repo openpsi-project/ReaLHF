@@ -22,21 +22,6 @@ import reallm.api.core.system_api as system_api
 cs = ConfigStore.instance()
 
 
-@dataclasses.dataclass
-class _MainStartArgs:
-    experiment_name: str
-    trial_name: str
-    mode: str
-    debug: bool = True
-    partition: str = "dev"
-    wandb_mode: str = "disabled"
-    image_name: Optional[str] = None
-    ignore_worker_error: bool = False
-    remote_reset: bool = False
-    recover_mode: Optional[str] = "disabled"
-    recover_retries: Optional[int] = 1
-
-
 def kind_reminder(config_name, logger, args):
     logger.info(f"Running {config_name} experiment.")
     logger.info(f"Logs will be dumped to {os.path.join(LOG_ROOT, args.experiment_name, args.trial_name)}")
@@ -87,7 +72,7 @@ def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
             trial_name = args.trial_name
         from reallm.apps.main import main_start, main_stop
 
-        mode = kind_reminder(config_name, logger, args)
+        args.mode = mode = kind_reminder(config_name, logger, args)
 
         exp_fn = functools.partial(exp_cls, **args)
 
@@ -97,15 +82,9 @@ def build_quickstart_entry_point(config_name: str, exp_cls: Callable):
         system_api.register_experiment(exp_name, exp_fn)
 
         try:
-            main_start(
-                _MainStartArgs(exp_name,
-                               trial_name,
-                               mode,
-                               recover_mode=args.recover_mode,
-                               recover_retries=args.recover_retries,
-                               debug=True))
+            main_start(args)
         except Exception as e:
-            main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+            main_stop(args)
             logger.warning("Exception occurred. Stopping all workers.")
             raise e
 

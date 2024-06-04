@@ -109,18 +109,21 @@ def main_start(args, recover_count: int = 0):
 
     is_recover_run = (args.recover_mode == "auto" and recover_count > 0) or args.recover_mode == "resume"
     save_recover_states = args.recover_mode != "disabled"
-    base_environs = {
-        "PYTHONPATH": repo_path,
-        "REAL_PACKAGE_PATH": repo_path,
-        "WANDB_MODE": args.wandb_mode,
-        "REAL_MODE": args.mode.upper(),
-        "REAL_TRACE": os.getenv("REAL_TRACE", "0"),
-        "IS_REMOTE": "1",
-        # identify whether this run is automatically recovering the last failed run
-        "RECOVER_RUN": "1" if is_recover_run else "0",
-        "SAVE_RECOVER_STATES": "1" if save_recover_states else "0"
-    }
-    os.environ["IS_REMOTE"] = "1"
+
+    def base_environs(is_controller: bool):
+        return {
+            "PYTHONPATH": repo_path,
+            "REAL_PACKAGE_PATH": repo_path,
+            "WANDB_MODE": args.wandb_mode,
+            "REAL_MODE": args.mode.upper(),
+            "REAL_TRACE": os.getenv("REAL_TRACE", "0"),
+            "IS_REMOTE": "0" if is_controller else "1",
+            # identify whether this run is automatically recovering the last failed run
+            "RECOVER_RUN": "1" if is_recover_run else "0",
+            "SAVE_RECOVER_STATES": "1" if save_recover_states else "0"
+        }
+
+    os.environ["IS_REMOTE"] = "0"
     os.environ["REAL_PACKAGE_PATH"] = repo_path
 
     experiment = config_package.make_experiment(args.experiment_name)
@@ -134,7 +137,7 @@ def main_start(args, recover_count: int = 0):
         sched.submit(
             "setup",
             cmd=sched_client.setup_cmd(expr_name, trial_name, args.debug),
-            env_vars=base_environs,
+            env_vars=base_environs(is_controller=False),
             container_image=args.image_name or setup.controller_image,
             multiprog=False,
             hostfile=False,
@@ -176,7 +179,7 @@ def main_start(args, recover_count: int = 0):
         cpu=1,
         gpu=0,
         mem=1024,
-        env_vars=base_environs,
+        env_vars=base_environs(is_controller=True),
         container_image=args.image_name or setup.controller_image,
         time_limit=CONTROLLER_TIME_LIMIT,
     )
@@ -196,7 +199,7 @@ def main_start(args, recover_count: int = 0):
                 args.debug,
                 name,
                 scheduling_setup,
-                base_environs,
+                base_environs(is_controller=False),
                 args.image_name,
                 use_ray_cluster=(args.mode == "ray"),
             )

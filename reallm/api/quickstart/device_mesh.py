@@ -7,7 +7,7 @@ import numpy as np
 from reallm.api.core.config import ModelBackend
 from reallm.api.core.dfg import ModelRPC
 from reallm.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
-from reallm.base.slurm_utils import are_ones_contiguous, parse_slurm_nodelist, slurm_nodelist_from_nodes
+from reallm.base.slurm_utils import are_ones_contiguous, nodelist_from_nodes, parse_nodelist
 from reallm.base.topology import PipeModelDataParallelTopology
 
 
@@ -27,11 +27,21 @@ class DeviceMesh:
     # cluster info, GPU memory cap in bytes
     gpu_memory_capacity: int = 80 * (1024**3)
 
+    def __post_init__(self):
+        if self.global_mesh_name is None:
+            self.global_mesh_name = f"NODE[01-{self.n_nodes:2d}]"
+            self.name = device_mesh_name_from_mapping(self.global_mesh_name, self.mapping)
+
+    def __eq__(self, other: 'DeviceMesh'):
+        assert self.global_mesh_name is None or self.global_mesh_name == other.global_mesh_name,\
+               "Only device meshes that on the same cluster mesh is comparable"
+        return np.all(self.mapping == other.mapping)
+
     def __repr__(self):
-        return self.name
+        return f"DeviceMesh({self.name} in {self.global_mesh_name})"
 
     def __op_assertion(self, other: "DeviceMesh"):
-        assert self.global_mesh_name == other.global_mesh_name,\
+        assert self.global_mesh_name is None or self.global_mesh_name == other.global_mesh_name,\
               "operation only support device meshes on the same cluster nodes"
         assert self.n_nodes == other.n_nodes
         assert self.n_gpus_per_node == other.n_gpus_per_node
@@ -54,38 +64,42 @@ class DeviceMesh:
             1. Sub device meshes have the same cluster mesh.  
             2. Sub device meshes of multiple nodes must contain consecutive nodes
                in the cluster mesh.
-            3. Sub device meshes of single node must start with GPU id:
-                N * n_gpus_per_node / num_gpus where N is an integer. 
-            4. Sub device meshes can only be of shape 1x1, 1x2, 1x4, 1x8 or Nx8
+            3. Sub device meshes can only be of shape 1x1, 1x2, 1x4, 1x8 or Nx8
+            4. If sub device meshes are of shape 1x2 or 1x4, the start GPU id
+               must be 0, 2, 4, 6 for 1x2 and 0, 4 for 1x4.
         """
-        assert self.global_mesh_name is not None and self.name is not None,\
-               "Only support device meshes in slurm cluster"
-        sub_names = []
-        # single node
-        assert self.n_gpus_per_node % min_n_gpus == 0\
-               or min_n_gpus % self.n_gpus_per_node == 0
-        node_names = parse_slurm_nodelist(self.name)
-        n_gpus = min_n_gpus
-        while n_gpus < min(self.n_gpus_per_node, np.sum(self.mapping)):
-            for node_name in node_names:
-                if n_gpus == self.n_gpus_per_node:
-                    sub_names.append(f"{node_name}")
-                else:
-                    for start in range(0, self.n_gpus_per_node, n_gpus):
-                        sub_names.append(f"{node_name}:{','.join(map(str, range(start, start + n_gpus)))}")
-            n_gpus *= 2
+        sub_mappings = []
+        rows, cols = np.where(self.mapping == 1)
 
-        if np.sum(self.mapping) >= self.n_gpus_per_node:
-            # multiple nodes
-            n_nodes = len(node_names)
-            for start in range(0, n_nodes):
-                for end in range(start, n_nodes):
-                    if (end + 1 - start) * self.n_gpus_per_node < min_n_gpus:
-                        continue
-                    sub_node_names = node_names[start:end + 1]
-                    sub_names.append(slurm_nodelist_from_nodes(sub_node_names))
+        unique_rows = np.unique(rows)
+        for row in unique_rows:
+            this_cols = cols[rows == row]
+            # print(row, this_cols)
+            assert self.n_gpus_per_node % min_n_gpus == 0\
+                    or min_n_gpus % self.n_gpus_per_node == 0
+            n_gpus = min_n_gpus
+            while n_gpus < min(self.n_gpus_per_node, np.sum(self.mapping)):
+                for start in range(np.min(this_cols), self.n_gpus_per_node, n_gpus):
+                    # print(row, start, start+n_gpus)
+                    sub_mapping = np.zeros((self.n_nodes, self.n_gpus_per_node), dtype=np.int32)
+                    sub_mapping[row, start:start + n_gpus] = 1
+                    sub_mappings.append(sub_mapping)
+                n_gpus *= 2
 
-        return [make_device_mesh_from_name(self.global_mesh_name, n) for n in sub_names]
+        for n_rows in range(1, len(unique_rows) + 1):
+            for start in range(0, len(unique_rows) - n_rows + 1):
+                sub_mapping = np.zeros((self.n_nodes, self.n_gpus_per_node), dtype=np.int32)
+                sub_mapping[start:start + n_rows, :] = 1
+                sub_mappings.append(sub_mapping)
+
+        return [
+            DeviceMesh(n_nodes=self.n_nodes,
+                       n_gpus_per_node=self.n_gpus_per_node,
+                       mapping=sub_mapping,
+                       global_mesh_name=self.global_mesh_name,
+                       name=device_mesh_name_from_mapping(self.global_mesh_name, sub_mapping))
+            for sub_mapping in sub_mappings
+        ]
 
     def _is_valid_mapping(self) -> bool:
         if self.mapping.shape != (self.n_nodes, self.n_gpus_per_node):
@@ -112,23 +126,32 @@ class DeviceMesh:
 
 def make_device_mesh_from_name(global_mesh_name: str, name: str):
     """
-    DeviceMesh name format for slurm: <slurm_nodelist>[:<gpu_ids>]
+    DeviceMesh name format: <prefix><node_indices>[:<gpu_ids>]
         slurm_nodelist is the name of slurm nodes the mesh is on, should follow slurm convention, 
-        for example "QH-com[40-43]" or "QH-com[01,11,13-14]", if n_nodes=1, gpu_ids are
-        the gpu id list delimited by comma if n_gpus < 8, for example "0,1,2,3" or "0,1".
-        An example of full device mesh name in this situation is "QH-com40:0,1,2,3" 
+        for example "QH-com[40-43]" or "QH-com[01,11,13-14]" with prefix QH-com, 
+        if n_nodes=1, gpu_ids are the gpu id list delimited by comma if n_gpus < 8, 
+        for example "0,1,2,3" or "0,1". An example of full device mesh name 
+        in this situation is "QH-com40:0,1,2,3" 
     
     Note: cluster device mesh name must occupy entire nodes.
     """
-    node_list = parse_slurm_nodelist(global_mesh_name)
+    if "QH-com" in global_mesh_name:
+        # slurm
+        prefix = "QH-com"
+    else:
+        # default
+        prefix = "NODE"
+    node_list = parse_nodelist(global_mesh_name, prefix)
     n_nodes = len(node_list)
     n_gpus_per_node = 8
 
     gpu_ids = None
     if ":" in name:
-        name, gpu_ids = name.split(":")
+        node_names, gpu_ids = name.split(":")
         gpu_ids = list(map(int, gpu_ids.split(",")))
-    node_names = parse_slurm_nodelist(name)
+    else:
+        node_names = name
+    node_names = parse_nodelist(node_names, prefix)
     mapping = np.zeros((n_nodes, n_gpus_per_node), dtype=np.int32)
     if gpu_ids is None:
         node_indices = [node_list.index(node_name) for node_name in node_names]
@@ -143,6 +166,30 @@ def make_device_mesh_from_name(global_mesh_name: str, name: str):
                       mapping=mapping,
                       global_mesh_name=global_mesh_name,
                       name=name)
+
+
+def device_mesh_name_from_mapping(global_mesh_name: str, mapping: np.ndarray):
+    if "QH-com" in global_mesh_name:
+        # slurm
+        prefix = "QH-com"
+    else:
+        # default
+        prefix = "NODE"
+    node_list = parse_nodelist(global_mesh_name, prefix)
+    n_nodes = len(node_list)
+    n_gpus_per_node = 8
+    assert mapping.shape == (n_nodes, n_gpus_per_node)
+    node_indices, gpu_ids = np.where(mapping == 1)
+
+    if np.sum(mapping) < 8:
+        node_name = node_list[node_indices[0]]
+        gpu_ids = list(map(str, gpu_ids))
+        return f"{node_name}:{','.join(gpu_ids)}"
+    else:
+        unique_node_indices = np.unique(node_indices)
+        sub_node_list = [node_list[i] for i in unique_node_indices]
+        node_name = nodelist_from_nodes(sub_node_list, prefix)
+        return node_name
 
 
 def find_parallel_strategies(device_mesh: DeviceMesh) -> List[ParallelismConfig]:

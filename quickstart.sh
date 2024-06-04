@@ -63,13 +63,14 @@
 #     dataset.train_tokens_per_batch=65536 \
 #     dataset.valid_tokens_per_batch=65536
 
-SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240523/default/epoch7epochstep6globalstep100/
-RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240523/default/epoch1epochstep80globalstep80/
+SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep5globalstep50/
+RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep40globalstep40/
 python3 -m reallm.apps.quickstart ppo experiment_name=remote-quickstart-ppo-debug trial_name=20240528-0 \
     allocation_mode=search \
+    allocation_use_cache=False \
     n_nodes=1 \
     n_gpus_per_node=8 \
-    nodelist=QH-com49 \
+    recover_mode=disabled \
     save_freq_steps=null \
     global_train_bs=256 \
     global_gen_bs=256 \

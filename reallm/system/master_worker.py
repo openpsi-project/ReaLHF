@@ -1252,8 +1252,6 @@ class MasterWorker(worker_base.Worker):
             # raise ExperimentComplete(msg) from e
 
     def __recover_save(self):
-        if os.environ["SAVE_RECOVER_STATES"] == "0":
-            return
         # save step info for recover
         if self.__recover_run:
             error_history = self.__recover_info.error_history + [self.__this_step_info]
@@ -1277,6 +1275,8 @@ class MasterWorker(worker_base.Worker):
 
     def _exit_hook(self, exit_status: worker_base.WorkerServerStatus):
         logger.info(f"Master worker exits with {exit_status}.")
+        if os.environ["SAVE_RECOVER_STATES"] == "0":
+            return
         if exit_status == worker_base.WorkerServerStatus.ERROR:
             try:
                 sleep_time = 600

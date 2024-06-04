@@ -123,11 +123,12 @@ class PPOConfig(CommonExperimentConfig):
 
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
+        # role to config
         return {
             "actor": self.actor,
             "critic": self.critic,
             "ref": self.ref,
-            "rew": self.rew,
+            "reward": self.rew,
         }
 
     @property
@@ -307,3 +308,7 @@ class PPOConfig(CommonExperimentConfig):
             "n_ppo_minibatches": self.ppo.ppo_n_minibatches,
             "seq_len": self.dataset.max_prompt_len,
         }
+
+    @property
+    def max_prompt_len(self):
+        return self.dataset.max_prompt_len

@@ -4,14 +4,14 @@ import re
 import numpy as np
 
 
-def parse_node_id(node_name: str) -> int:
-    return int(node_name.split("com")[-1])
+def parse_node_id(node_name: str, prefix: str) -> int:
+    return int(node_name.split(prefix)[-1])
 
 
-def parse_slurm_nodelist(nodelist: str) -> List[str]:
-    nodelist = nodelist.replace("QH-com", "")
+def parse_nodelist(nodelist: str, prefix: str) -> List[str]:
+    nodelist = nodelist.replace(prefix, "")
     if "[" not in nodelist:
-        return ["QH-com" + nodelist]
+        return [prefix + nodelist]
     else:
         nodelist = nodelist.strip("[]")
         node_ids = []
@@ -22,14 +22,14 @@ def parse_slurm_nodelist(nodelist: str) -> List[str]:
             else:
                 start, end = map(int, node_repr.split("-"))
                 node_ids += list(range(start, end + 1))
-        return [f"QH-com{node_id:02d}" for node_id in node_ids]
+        return [f"{prefix}{node_id:02d}" for node_id in node_ids]
 
 
-def slurm_nodelist_from_nodes(nodes: List[str]) -> str:
-    node_ids = sorted([parse_node_id(node) for node in nodes])
+def nodelist_from_nodes(nodes: List[str], prefix: str) -> str:
+    node_ids = sorted([parse_node_id(node, prefix) for node in nodes])
     assert len(node_ids) > 0
     if len(node_ids) == 1:
-        return f"QH-com{node_ids[0]:02d}"
+        return f"{prefix}{node_ids[0]:02d}"
     else:
         node_reprs = []
         start, end = node_ids[0], node_ids[0]
@@ -45,7 +45,7 @@ def slurm_nodelist_from_nodes(nodes: List[str]) -> str:
                     node_reprs.append(f"{start:02d}-{end:02d}")
                 start = next_node_id
                 end = next_node_id
-        return f"QH-com[{','.join(node_reprs)}]"
+        return f"{prefix}[{','.join(node_reprs)}]"
 
 
 def are_ones_contiguous(binary_array: np.ndarray):

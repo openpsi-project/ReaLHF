@@ -5,11 +5,12 @@ import dataclasses
 import functools
 
 from omegaconf import MISSING
+import numpy as np
 
 from reallm.api.core.config import Dataset
-from reallm.api.core.dfg import ModelInterfaceType, ModelRPC
+from reallm.api.core.dfg import ModelInterfaceType, ModelRPC, OffloadHook, SyncParamHook
 from reallm.api.core.system_api import *
-from reallm.api.quickstart.device_mesh import make_device_mesh_from_name, RPCAllocation
+from reallm.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig
 from reallm.experiments.common.utils import *
 from reallm.search_engine.search import search_rpc_allocations
@@ -45,6 +46,9 @@ class CommonExperimentConfig(Experiment):
                                           and configure parallel strategies with pipe+data parallelism.
                              'pipe_model': allocate all models on all cluster nodes available
                                            and configure parallel strategies with pipe+model parallelism. 
+        allocation_use_cache (bool): Whether to use cache in allocation search, only effective when 
+                                     allocation_mode=="search" and cache is available in the log dir of
+                                     current experiment name and trial.
         n_nodes (int): Number of nodes to run the experiment, only effective when mode=="slurm"
         n_gpus_per_node (int): Number of GPUs per node, only effective when mode=="slurm"
         nodelist (Optional[str]): slurm nodelist, only effective when mode=="slurm"
@@ -61,6 +65,7 @@ class CommonExperimentConfig(Experiment):
     recover_retries: int = 1
     ignore_worker_error: bool = False
     allocation_mode: str = "manual"
+    allocation_use_cache: bool = False
     n_nodes: int = 1
     n_gpus_per_node: int = 8
     nodelist: Optional[str] = None
@@ -99,6 +104,10 @@ class CommonExperimentConfig(Experiment):
         raise NotImplementedError(f"expr_ctrl is not implemented in {self.__class__}")
 
     @property
+    def max_prompt_len(self) -> int:
+        return None
+
+    @property
     def search_kwargs(self) -> Dict[str, Any]:
         return {}
 
@@ -123,19 +132,27 @@ class CommonExperimentConfig(Experiment):
         model_worker = []
 
         if self.allocation_mode == "search":
-            assert self.mode == "slurm"
-            device_mesh = make_device_mesh_from_name(self.nodelist, self.nodelist)
-            rpc_alloc_dict: Dict[str, RPCAllocation] = search_rpc_allocations(
+            # assert self.mode == "slurm"
+            device_mesh = DeviceMesh(n_nodes=self.n_nodes,
+                                     n_gpus_per_node=self.n_gpus_per_node,
+                                     mapping=np.ones((self.n_nodes, self.n_gpus_per_node), dtype=np.int32),
+                                     global_mesh_name=self.nodelist,
+                                     name=self.nodelist)
+            rpc_allocs: List[RPCAllocation] = search_rpc_allocations(
                 device_mesh=device_mesh,
                 rpcs=rpcs,
+                use_cache=self.allocation_use_cache,
                 **self.search_kwargs,
             )
         else:
             raise NotImplementedError()
 
         shard_counter = defaultdict(lambda: 0)
+        resolve_rpc_hooks(rpc_allocs)  # changes rpcs
+        import pprint
+        pprint.pprint(rpc_allocs)
 
-        for i, j in zip(range(self.n_nodes), range(self.n_gpus_per_node)):
+        for i, j in itertools.product(range(self.n_nodes), range(self.n_gpus_per_node)):
             mw = ModelWorker(
                 seed=self.seed,
                 shards=[],
@@ -145,24 +162,37 @@ class CommonExperimentConfig(Experiment):
                 cuda_cache_clear_freq=10,
                 tokenizer_name_or_path=self.tokenizer_name_or_path,
             )
-            for rpc_name, rpc in rpcs.items():
-                rpc_alloc = rpc_alloc_dict[rpc_name]
-
+            # print(f"Setting up ModelWorker ({i},{j})")
+            for rpc_alloc in rpc_allocs:
+                rpc = rpc_alloc.rpc
+                # import pprint
+                # pprint.pprint(rpc)
                 model_cfg = self.models[rpc.model_name.role]
                 model_cfg.parallel = rpc_alloc.parallel
 
                 model = make_model_config(model_cfg)
                 mapping = rpc_alloc.device_mesh.mapping
-                gradient_checkpointing = model_cfg.gradient_checkpointing\
-                    and rpc.interface_type == ModelInterfaceType.TRAIN_STEP
-                topo = get_topo(rpc_alloc.parallel, gradient_checkpointing=gradient_checkpointing)
+                gradient_checkpointing = (model_cfg.gradient_checkpointing
+                                          and rpc.interface_type == ModelInterfaceType.TRAIN_STEP)
 
-                backend = make_train_backend_config(model_cfg)\
-                    if rpc.interface_type == ModelInterfaceType.TRAIN_STEP\
-                    else make_inf_backend_config(model_cfg)
+                topo = get_topo(rpc_alloc.parallel,
+                                gradient_checkpointing=gradient_checkpointing,
+                                max_prompt_len=self.max_prompt_len
+                                if rpc.interface_type == ModelInterfaceType.GENERATE else None)
+                # pprint.pprint(topo)
 
+                if rpc.interface_type == ModelInterfaceType.TRAIN_STEP:
+                    backend = make_train_backend_config(model_cfg)
+                else:
+                    backend = make_inf_backend_config(model_cfg)
+
+                # print(f"device mesh name {rpc_alloc.device_mesh.name} mapping {mapping}")
+                # print(f"RPC {rpc.name}, parallel {rpc_alloc.parallel}")
                 if mapping[i, j] and not any(rpc.model_name == s.id.model_name for s in mw.shards):
                     shard_idx = shard_counter[rpc.model_name]
+                    # print(f"Setting up Shard {shard_idx}, "
+                    #       f"(dp, pp, mp) = ({topo.get_coord(shard_idx).data}, "
+                    #       f"{topo.get_coord(shard_idx).pipe}, {topo.get_coord(shard_idx).model})")
                     mw.shards.append(
                         StandaloneModelShard(
                             id=ModelShardID(
@@ -182,6 +212,38 @@ class CommonExperimentConfig(Experiment):
 
         return ExperimentConfig(
             exp_ctrl=self.exp_ctrl,
-            model_rpcs=rpcs,
+            model_rpcs=[rpc_alloc.rpc for rpc_alloc in rpc_allocs],
             model_worker=model_worker,
         )
+
+
+def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
+    from reallm.api.quickstart.model import parallelism_config_equal
+    for rpc_alloc in rpc_allocs:
+        rpc = rpc_alloc.rpc
+        parallel = rpc_alloc.parallel
+        device_mesh = rpc_alloc.device_mesh
+        # check param realloc hooks for train_step rpcs
+        # only one param realloc is possible in each iteration
+        if rpc.interface_type == ModelInterfaceType.TRAIN_STEP:
+            for other in rpc_allocs:
+                if rpc.name == other.rpc.name:
+                    continue
+                if (rpc.model_name.role == other.rpc.model_name.role
+                        and not (parallelism_config_equal(parallel, other.parallel)
+                                 and device_mesh == other.device_mesh)):
+                    rpc.model_name = ModelName(rpc.model_name.role, other.rpc.model_name.replica_id + 1)
+                    rpc.pre_hooks.append(SyncParamHook(source=other.rpc.model_name))
+                    rpc.post_hooks.append(SyncParamHook(target=other.rpc.model_name))
+                    break
+
+        # add offload hooks for inference rpcs
+        if rpc.interface_type == ModelInterfaceType.INFERENCE:
+            offload_flag = True
+            # if there is training rpcs for the same model, can not offload
+            for other in rpc_allocs:
+                if (other.rpc.model_name.role == rpc.model_name.role
+                        and other.rpc.interface_type == ModelInterfaceType.TRAIN_STEP):
+                    offload_flag = False
+            if offload_flag:
+                rpc.post_hooks.append(OffloadHook())

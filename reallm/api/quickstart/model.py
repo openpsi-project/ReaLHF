@@ -34,6 +34,23 @@ class ParallelismConfig:
             logger.warning("Sequence parallelism requires model parallelism.")
             self.use_sequence_parallel = False
 
+    def __str__(self):
+        return (f"Parallel(mp={self.model_parallel_size},"
+                f"pp={self.pipeline_parallel_size},"
+                f"dp={self.data_parallel_size})")
+
+    # this will cause error in hydra and omegaconf
+    # def __eq__(self, other: "ParallelismConfig"):
+    #     return (self.model_parallel_size == other.model_parallel_size and
+    #             self.pipeline_parallel_size == other.pipeline_parallel_size and
+    #             self.data_parallel_size == other.data_parallel_size)
+
+
+def parallelism_config_equal(parallel1: ParallelismConfig, parallel2: ParallelismConfig) -> bool:
+    return (parallel1.model_parallel_size == parallel2.model_parallel_size
+            and parallel1.pipeline_parallel_size == parallel2.pipeline_parallel_size
+            and parallel1.data_parallel_size == parallel2.data_parallel_size)
+
 
 @dataclasses.dataclass
 class LoRAConfig:

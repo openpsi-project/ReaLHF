@@ -12,6 +12,7 @@ MEM_INDEX = 1.0  # heuristic value to scale estimated memory
 def enumerate_rpc_executions(rpc: ModelRPC, device_mesh: DeviceMesh, seq_len: int, num_gen_tokens: int,
                              n_ppo_minibatches: int) -> List[RPCExecution]:
     sub_device_meshes = device_mesh.sub_device_meshes()
+    import pprint
     feasible = []
     for sub_device_mesh in sub_device_meshes:
         ps = find_parallel_strategies(sub_device_mesh)
@@ -56,7 +57,10 @@ def enumerate_rpc_executions(rpc: ModelRPC, device_mesh: DeviceMesh, seq_len: in
     return feasible
 
 
-def build_graph(rpcs: List[ModelRPC], num_epoch: int = 5, epoch_dependency_interval: int = 1, if_print=False):
+def build_graph(rpcs: List[ModelRPC],
+                num_epoch: int = 5,
+                epoch_dependency_interval: int = 1,
+                if_print=False) -> List[RPCInstance]:
     """ Build model function call graph of multiple training epochs,
     
     args:
@@ -65,6 +69,9 @@ def build_graph(rpcs: List[ModelRPC], num_epoch: int = 5, epoch_dependency_inter
         epoch_dependency_interval: int, the interval of epoch dependency, 
             e.g. if epoch_dependency_interval = 2, then the graph will have 
             edges between epoch i and epoch i+2, i+4, ...
+    
+    returns:
+        rpc_instances: List[RPCInstance], the list of RPCInstance objects
     """
     # one epoch dependency graph
     rpcs, edges = build_dfg(rpcs)
@@ -78,9 +85,9 @@ def build_graph(rpcs: List[ModelRPC], num_epoch: int = 5, epoch_dependency_inter
             parents = []
             if rpc.is_src and epoch_id >= epoch_dependency_interval:
                 for other in rpcs:
-                    if other.is_dst and other.model_name.role == "actor":
+                    if other.is_dst and other.model_name.role == rpc.model_name.role:
                         parents.append(RPCInstance(rpc, epoch_id - epoch_dependency_interval, [], []))
-            if rpc.is_dst and rpc.model_name.role == "actor":
+            if rpc.is_dst and rpc.model_name.role == rpc.model_name.role:
                 for other in rpcs:
                     if other.is_src and epoch_id + epoch_dependency_interval < num_epoch:
                         children.append(RPCInstance(rpc, epoch_id + epoch_dependency_interval, [], []))

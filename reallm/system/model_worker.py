@@ -979,17 +979,15 @@ class ModelWorker(worker_base.Worker):
         t = time.monotonic() - st
         self.__total_time += t
 
-        if self.__total_time > 40 and self.__recover_run is False and self.__worker_index == 0:
-            raise RuntimeError(f"Model worker {self.__worker_index} mock unexpected error")
-
+        # if self.__total_time > 40 and self.__recover_run is False and self.__worker_index == 0:
+        #     raise RuntimeError(f"Model worker {self.__worker_index} mock unexpected error")
         # blogger.debug(
         #     f"Model worker #{','.join(self.model_names)}# poll time: {t:.4f}s, engine poll time {pt:.4f}s, percent {pt/t:.4f}"
         # )
+
         return r
 
     def __recover_save(self):
-        if os.environ.get("SAVE_RECOVER_STATES", "0") == "0":
-            return
         # store model and dataset states for recover
         if self.__dist_env_resolved:
             for model_name, model in self.__models.items():
@@ -1013,6 +1011,8 @@ class ModelWorker(worker_base.Worker):
 
     def _exit_hook(self, exit_status: worker_base.WorkerServerStatus):
         logger.info(f"Model worker {self.__worker_index} exit with status {exit_status}.")
+        if os.environ.get("SAVE_RECOVER_STATES", "0") == "0":
+            return
         if exit_status == worker_base.WorkerServerStatus.ERROR:
             try:
                 sleep_time = 600

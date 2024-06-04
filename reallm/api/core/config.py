@@ -40,6 +40,10 @@ class ModelName:
     role: str
     replica_id: int
 
+    @property
+    def name(self):
+        return str(self)
+
 
 @dataclasses.dataclass(unsafe_hash=True)
 class ModelFamily:

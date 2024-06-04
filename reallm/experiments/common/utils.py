@@ -1,6 +1,6 @@
 from typing import *
 
-from reallm.api.core.model_api import ModelBackend
+from reallm.api.core.config import ModelBackend
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, ParallelismConfig
 from reallm.base.topology import PipeModelDataParallelTopology
 
