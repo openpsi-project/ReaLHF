@@ -5,15 +5,13 @@ import os
 import colorama
 import deepspeed
 import torch
-import tqdm
 import torch.distributed as dist
+import tqdm
 
 from reallm.base import constants
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
-from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (
-    PipelinableModelRunner,
-    PipelinableModelRunnerWithZeRO,
-)
+from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (PipelinableModelRunner,
+                                                                  PipelinableModelRunnerWithZeRO)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 import reallm.api.core.model_api as model_api
 import reallm.base.logging as logging
@@ -156,9 +154,8 @@ class PairedRewardInterface(model_api.ModelInterface):
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             ).logits
-            loss, stats = _paired_rw_loss_from_model_outputs(
-                scores, packed_input_ids, cu_seqlens, group_factor
-            )
+            loss, stats = _paired_rw_loss_from_model_outputs(scores, packed_input_ids, cu_seqlens,
+                                                             group_factor)
 
             module.backward(loss)
             module.step()
@@ -238,9 +235,8 @@ class PairedRewardInterface(model_api.ModelInterface):
                     cu_seqlens=cu_seqlens,
                     max_seqlen=max_seqlen,
                 ).logits
-                _, stats = _paired_rw_loss_from_model_outputs(
-                    scores, packed_input_ids, cu_seqlens, group_factor
-                )
+                _, stats = _paired_rw_loss_from_model_outputs(scores, packed_input_ids, cu_seqlens,
+                                                              group_factor)
 
             if stats is not None:
                 assert input_lens.shape[0] % 2 == 0

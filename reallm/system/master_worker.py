@@ -680,7 +680,9 @@ def _gather_stat(src: List[Dict]) -> Dict:
             logger.warning(f"Gathered `{k}` is not present in every returned stats.")
     for k, v in res.items():
         if any(abs(v - x.get(k, None)) > 1e-4 for x in src):
-            logger.warning(f"Gathered `{k}` is not all-reduced before returning: ({[x.get(k, None) for x in src]}, {v}).")
+            logger.warning(
+                f"Gathered `{k}` is not all-reduced before returning: ({[x.get(k, None) for x in src]}, {v})."
+            )
     return res
 
 

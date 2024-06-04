@@ -104,8 +104,11 @@ def actor_loss_fn(
         importance_weight = ratio.detach().mean()
         approx_kl = approx_kl.mean()
     # Remain torch.CudaTensor here for all-reduce after train step.
-    stat = dict(clip_ratio=proportion_clipped, importance_weight=importance_weight,
-                approx_kl=approx_kl)
+    stat = dict(
+        clip_ratio=proportion_clipped,
+        importance_weight=importance_weight,
+        approx_kl=approx_kl,
+    )
 
     return pg_loss, stat
 

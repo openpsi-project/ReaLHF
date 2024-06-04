@@ -2,15 +2,13 @@ from typing import Dict, List, Optional
 
 import deepspeed
 import torch
+import torch.distributed as dist
 import torch.utils.data
 import tqdm
-import torch.distributed as dist
 
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
-from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (
-    PipelinableModelRunner,
-    PipelinableModelRunnerWithZeRO,
-)
+from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (PipelinableModelRunner,
+                                                                  PipelinableModelRunnerWithZeRO)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
 from reallm.impl.model.utils.functional import build_shift_one_indices, gather_packed_shifted_log_probs
@@ -36,9 +34,12 @@ def compute_packed_sft_loss(
     with torch.no_grad():
         seqlogp = torch.zeros(cu_seqlens.shape[0] - 1, device=logits.device, dtype=torch.float64)
         for i in range(cu_seqlens.shape[0] - 1):
-            m = prompt_mask[cu_seqlens[i] - i : cu_seqlens[i + 1] - i - 1]
-            logp = logprobs[cu_seqlens[i] - i : cu_seqlens[i + 1] - i - 1]
-            assert cu_seqlens[i + 1] - i - 1 <= logprobs.shape[0], (cu_seqlens, logprobs.shape)
+            m = prompt_mask[cu_seqlens[i] - i:cu_seqlens[i + 1] - i - 1]
+            logp = logprobs[cu_seqlens[i] - i:cu_seqlens[i + 1] - i - 1]
+            assert cu_seqlens[i + 1] - i - 1 <= logprobs.shape[0], (
+                cu_seqlens,
+                logprobs.shape,
+            )
             seqlogp[i] = torch.where(m, 0.0, logp).sum() / (m.numel() - m.count_nonzero())
 
     logging_ppl = (-seqlogp).exp().sum()
@@ -51,7 +52,11 @@ def compute_packed_sft_loss(
     dist.all_reduce(logging_ppl, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
     dist.all_reduce(logging_loss, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
     dist.all_reduce(seq_denorm, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-    dist.all_reduce(logging_token_denorm, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+    dist.all_reduce(
+        logging_token_denorm,
+        op=dist.ReduceOp.SUM,
+        group=constants.data_parallel_group(),
+    )
 
     loss = loss_sum / token_denorm
     return loss, {
@@ -82,8 +87,8 @@ class SFTInterface(model_api.ModelInterface):
         if isinstance(module, (PipelinableModelRunnerWithZeRO, PipelinableModelRunner)):
             loss_fn_kwargs = dict(
                 prompt_mask=prompt_mask,
-                input_lens=cu_seqlens[1:]
-                - cu_seqlens[:-1],  # this is used to partition other loss_fn_kwargs into microbatches
+                input_lens=cu_seqlens[1:] -
+                cu_seqlens[:-1],  # this is used to partition other loss_fn_kwargs into microbatches
             )
             loss, stat = module.train_batch(
                 seqlens_cpu=seqlens_cpu,

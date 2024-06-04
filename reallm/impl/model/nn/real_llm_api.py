@@ -94,9 +94,9 @@ class ReaLModel(nn.Module):
         self._offloaded = False
 
         # Attributes used for flattening parameters.
-        # Flattening parameters is an option, which must be 
+        # Flattening parameters is an option, which must be
         # enabled for offload and parameter reallocation.
-        # We do not activate it by default because 
+        # We do not activate it by default because
         # it is not compatible with DeepSpeed optimizers.
         # If we flatten parameters and pass the module to the DeepSpeed optimizer,
         # it does not produce gradients on the sliced parameters.
@@ -107,7 +107,6 @@ class ReaLModel(nn.Module):
             constants.sequence_parallel(),
         )
         self.contiguous_param = None
-        
 
     def instantiate(self):
         assert not self._instantiated
@@ -126,8 +125,6 @@ class ReaLModel(nn.Module):
 
         self._instantiated = True
         self._instantiation_hooks = []
-
-    
 
     @property
     def num_layers(self):

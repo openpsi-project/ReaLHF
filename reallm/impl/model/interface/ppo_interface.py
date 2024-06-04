@@ -49,11 +49,13 @@ def _ppo_actor_loss_from_model_outputs(
 
     n_tokens = ppo_loss_mask.count_nonzero()
     logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids).float()
-    loss, ppo_stat = ppo_functional.actor_loss_fn(logprobs=logprobs,
-                                 old_logprobs=old_logp,
-                                 advantages=advantages,
-                                 eps_clip=eps_clip,
-                                 loss_mask=ppo_loss_mask,)
+    loss, ppo_stat = ppo_functional.actor_loss_fn(
+        logprobs=logprobs,
+        old_logprobs=old_logp,
+        advantages=advantages,
+        eps_clip=eps_clip,
+        loss_mask=ppo_loss_mask,
+    )
 
     # FIXME: The memory efficient loss function is buggy. It does not produce gradients correctly.
     # assert ppo_loss_mask is not None
@@ -67,9 +69,9 @@ def _ppo_actor_loss_from_model_outputs(
     #     eps_clip=eps_clip,
     # ))
     # loss = torch.where(ppo_loss_mask, loss, 0.0).sum() / ppo_loss_mask.count_nonzero()
-    importance_weight = ppo_stat['importance_weight'] * n_tokens
-    clip_ratio = ppo_stat['clip_ratio'] * n_tokens
-    approx_kl = ppo_stat['approx_kl'] * n_tokens
+    importance_weight = ppo_stat["importance_weight"] * n_tokens
+    clip_ratio = ppo_stat["clip_ratio"] * n_tokens
+    approx_kl = ppo_stat["approx_kl"] * n_tokens
 
     # Logging and early stopping according to KL (logp vs ref) or importance ratio (new logp vs old logp).
     mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum()
@@ -418,7 +420,7 @@ class PPOActorInterface(model_api.ModelInterface):
         datas = data_api.split_sequences(data_,
                                          self.n_minibatches,
                                          min_size=constants.pipe_parallel_world_size() * 2)
-        
+
         ### Logging code starts. ###
         _n_seqs = torch.tensor([reward_score.shape[0]], dtype=torch.float32, device=model.device)
         _n_tokens = loss_mask.count_nonzero()
@@ -446,7 +448,7 @@ class PPOActorInterface(model_api.ModelInterface):
         )
         ### Logging code ends. ###
 
-        # NOTE: We cannot randomly shuffle data here because 
+        # NOTE: We cannot randomly shuffle data here because
         # data must have the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
@@ -568,7 +570,7 @@ def _ppo_critic_loss_from_model_outputs(
     logging_loss = loss.detach() * n_tokens
     clip_ratio = loss_stat["clip_ratio"] * n_tokens
     normalized_values = torch.where(ppo_loss_mask, new_values, 0.0).sum().detach()
-    denormalized_values = torch.where(ppo_loss_mask, denormalized_values, 0.0).sum().detach()
+    denormalized_values = (torch.where(ppo_loss_mask, denormalized_values, 0.0).sum().detach())
     dist.all_reduce(n_tokens, group=constants.data_parallel_group())
     dist.all_reduce(mean_ref_kl, group=constants.data_parallel_group())
     dist.all_reduce(logging_loss, group=constants.data_parallel_group())
@@ -762,7 +764,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         dist.all_reduce(returns, group=constants.data_parallel_group())
         dist.all_reduce(n_tokens, group=constants.data_parallel_group())
         global_stats = dict(returns=float(returns), n_tokens=int(n_tokens))
-        
+
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0

@@ -311,7 +311,7 @@ class ModelWorker(worker_base.Worker):
             self.__dataset_n_seqs = 0
             for tmp_sample in self.__dataloader:
                 self.__dataset_n_seqs += len(data_api.split_sequences(tmp_sample))
-            
+
             self.__data_generator = enumerate(self.__dataloader)
             self.__dataset_batch_counter = None
 
