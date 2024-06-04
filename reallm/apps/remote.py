@@ -4,14 +4,17 @@ import os
 import pickle
 import re
 import socket
+import functools
 import subprocess
+from omegaconf import OmegaConf
+import json
 
 import torch
 
 multiprocessing.set_start_method("spawn", force=True)
 
-from reallm.base import constants, gpu_utils, logging, name_resolve, names
-from reallm.base.constants import QUICKSTART_EXPR_CACHE_PATH
+from reallm.base import constants, gpu_utils, logging, name_resolve, names, importing
+from reallm.api.quickstart.entrypoint import QUICKSTART_EXPR_CACHE_PATH, QUICKSTART_CONFIG_CLASSES
 
 RAY_HEAD_WAIT_TIME = 500
 logger = logging.getLogger("Main-Workers")
@@ -54,7 +57,6 @@ def main_worker(args):
     # profiler.import_profiler_registers()
     import system
 
-    import reallm.experiments
     import reallm.impl.dataset
     import reallm.impl.model
     import reallm.profiler.experiments
@@ -118,19 +120,26 @@ def main_controller(args):
     """
     import reallm.api.core.system_api as system_api
     import reallm.base.constants as constants
-    import reallm.experiments
-    import reallm.profiler.experiments
     import reallm.system as system
 
     constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
     if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
         for exp_cache in os.listdir(QUICKSTART_EXPR_CACHE_PATH):
-            if exp_cache == f"{args.experiment_name}_{args.trial_name}.pkl":
-                exp_cache_file = os.path.join(QUICKSTART_EXPR_CACHE_PATH, exp_cache)
-                with open(exp_cache_file, "rb") as f:
-                    system_api.register_experiment(*pickle.load(f))
-                os.system(f"rm -rf {exp_cache_file}")
+            target_cache_name = f"{args.experiment_name}_{args.trial_name}.json"
+            if exp_cache != target_cache_name:
+                continue
+            cache_file = os.path.join(QUICKSTART_EXPR_CACHE_PATH, target_cache_name)
+            with open(cache_file, "r") as f:
+                cache = json.load(f)
+            usercode_path = cache["usercode_path"]
+            exp_cls_args = OmegaConf.create(cache["args"])
+            config_name = cache["config_name"]
+            # Import user code to register quickstart experiments.
+            importing.import_usercode(usercode_path, "_reallm_user_code")
+            # Register the internal experiment.
+            exp_cls = QUICKSTART_CONFIG_CLASSES[config_name]
+            system_api.register_experiment(args.experiment_name, functools.partial(exp_cls, **exp_cls_args))
     logger.debug("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
     if args.type == "ray":

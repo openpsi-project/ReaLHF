@@ -9,8 +9,6 @@ import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.base.name_resolve as name_resolve
 import reallm.base.names as names
-# NOTE: This import is necessary to register all experiments.
-import reallm.experiments
 import reallm.scheduler.client as sched_client
 import reallm.system as system
 
