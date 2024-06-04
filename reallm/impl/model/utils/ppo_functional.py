@@ -80,8 +80,10 @@ def actor_loss_fn(
         loss_mask_count = loss_mask.count_nonzero()
         # For numerical stability.
         ratio = torch.where(loss_mask, torch.exp(logprobs - old_logprobs), 0)
+        approx_kl = torch.where(loss_mask, (logprobs - old_logprobs).detach(), 0.0)
     else:
         ratio = torch.exp(logprobs - old_logprobs)
+        approx_kl = (logprobs - old_logprobs).detach()
 
     clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
     pg_loss1 = -advantages * ratio
@@ -96,11 +98,14 @@ def actor_loss_fn(
     if loss_mask is not None:
         proportion_clipped = (clip_mask.logical_and_(loss_mask).count_nonzero() / loss_mask_count)
         importance_weight = (torch.where(loss_mask, ratio.detach(), 0).sum() / loss_mask_count)
+        approx_kl = approx_kl.sum() / loss_mask_count
     else:
         proportion_clipped = clip_mask.count_nonzero()
         importance_weight = ratio.detach().mean()
+        approx_kl = approx_kl.mean()
     # Remain torch.CudaTensor here for all-reduce after train step.
-    stat = dict(clip_ratio=proportion_clipped, importance_weight=importance_weight)
+    stat = dict(clip_ratio=proportion_clipped, importance_weight=importance_weight,
+                approx_kl=approx_kl)
 
     return pg_loss, stat
 

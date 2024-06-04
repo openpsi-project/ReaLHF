@@ -674,7 +674,14 @@ def _gather_stat(src: List[Dict]) -> Dict:
         for k, v in reply.items():
             cnt[k] = cnt.get(k, 0) + 1
             stats[k] = stats.get(k, 0) + v
-    return {k: v / cnt for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())}
+    res = {k: v / cnt for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())}
+    for k, c in cnt.items():
+        if c != len(src):
+            logger.warning(f"Gathered `{k}` is not present in every returned stats.")
+    for k, v in res.items():
+        if any(abs(v - x.get(k, None)) > 1e-4 for x in src):
+            logger.warning(f"Gathered `{k}` is not all-reduced before returning: ({[x.get(k, None) for x in src]}, {v}).")
+    return res
 
 
 async def model_eval_thread_func(
