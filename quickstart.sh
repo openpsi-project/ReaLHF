@@ -1,4 +1,5 @@
-SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep5globalstep50/
+# SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep5globalstep50/
+SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/Llama-2-13b-hf
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep40globalstep40/
 
 # python3 -m reallm.apps.quickstart sft experiment_name=quickstart-sft-debug trial_name=20240528 \
@@ -56,11 +57,10 @@ RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/def
 #     dataset.train_tokens_per_batch=65536 \
 #     dataset.valid_tokens_per_batch=65536
 
-python3 -m reallm.apps.quickstart ppo experiment_name=remote-quickstart-ppo-debug trial_name=20240604-1 \
-    allocation_mode=search \
-    allocation_use_cache=False \
-    n_nodes=1 \
-    n_gpus_per_node=8 \
+python3 -m reallm.apps.quickstart ppo experiment_name=remote-quickstart-ppo-debug trial_name=20240605-0 \
+    allocation_mode=heuristic \
+    n_nodes=2 \
+    nodelist=\'QH-com[47-48]\' \
     recover_mode=disabled \
     save_freq_steps=null \
     global_train_bs=256 \
@@ -90,3 +90,23 @@ python3 -m reallm.apps.quickstart ppo experiment_name=remote-quickstart-ppo-debu
     ppo.ppo_n_minibatches=4 \
     ppo.adv_norm=True ppo.value_norm=True \
     ppo.top_p=0.9 ppo.top_k=1024
+
+    # actor_train_allocation.parallel.model_parallel_size=8 \
+    # actor_train_allocation.parallel.pipeline_parallel_size=1 \
+    # actor_train_allocation.parallel.data_parallel_size=1 \
+    # actor_gen_allocation.parallel.model_parallel_size=1 \
+    # actor_gen_allocation.parallel.pipeline_parallel_size=4 \
+    # actor_gen_allocation.parallel.data_parallel_size=2 \
+    # critic_train_allocation.parallel.model_parallel_size=8 \
+    # critic_train_allocation.parallel.pipeline_parallel_size=1 \
+    # critic_train_allocation.parallel.data_parallel_size=1 \
+    # critic_inf_allocation.parallel.model_parallel_size=4 \
+    # critic_inf_allocation.parallel.pipeline_parallel_size=2 \
+    # critic_inf_allocation.parallel.data_parallel_size=1 \
+    # ref_inf_allocation.parallel.model_parallel_size=1 \
+    # ref_inf_allocation.parallel.pipeline_parallel_size=4 \
+    # ref_inf_allocation.parallel.data_parallel_size=2 \
+    # rew_inf_allocation.parallel.model_parallel_size=1 \
+    # rew_inf_allocation.parallel.pipeline_parallel_size=4 \
+    # rew_inf_allocation.parallel.data_parallel_size=2 
+

@@ -10,7 +10,7 @@ MEM_INDEX = 1.0  # heuristic value to scale estimated memory
 
 
 def enumerate_rpc_executions(rpc: ModelRPC, device_mesh: DeviceMesh, seq_len: int, num_gen_tokens: int,
-                             n_ppo_minibatches: int) -> List[RPCExecution]:
+                             n_ppo_minibatches: int, gradient_checkpointing: bool) -> List[RPCExecution]:
     sub_device_meshes = device_mesh.sub_device_meshes()
     import pprint
     feasible = []
@@ -39,6 +39,7 @@ def enumerate_rpc_executions(rpc: ModelRPC, device_mesh: DeviceMesh, seq_len: in
                                                             parallel,
                                                             bs,
                                                             seq_len,
+                                                            gradient_checkpointing=gradient_checkpointing,
                                                             n_ppo_minibatches=n_ppo_minibatches,
                                                             num_gen_tokens=num_gen_tokens,
                                                             offload=rpc.model_name.role in ["ref", "reward"])
@@ -49,7 +50,7 @@ def enumerate_rpc_executions(rpc: ModelRPC, device_mesh: DeviceMesh, seq_len: in
                                                bs=bs,
                                                seq_len=seq_len,
                                                num_gen_tokens=num_gen_tokens,
-                                               use_gradient_checkpointing=True,
+                                               gradient_checkpointing=gradient_checkpointing,
                                                n_ppo_minibatches=n_ppo_minibatches)
             time_cost = int(time_cost)
             if mem_cost < device_mesh.gpu_memory_capacity:

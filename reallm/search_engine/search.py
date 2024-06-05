@@ -24,10 +24,11 @@ import reallm.base.constants as constants
 
 
 def search_rpc_allocations(device_mesh: DeviceMesh,
-                           rpcs: Dict[str, ModelRPC],
+                           rpcs: List[ModelRPC],
                            num_gen_tokens: int = 256,
                            n_ppo_minibatches: int = 1,
                            seq_len: int = 256,
+                           gradient_checkpointing: bool = True,
                            use_cache: bool = False) -> List[RPCAllocation]:
     from_file = os.environ.get("IS_REMOTE", "0") == "1"
     dump_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
@@ -47,7 +48,7 @@ def search_rpc_allocations(device_mesh: DeviceMesh,
 
     n_nodes = device_mesh.n_nodes
     table = {}
-    for rpc_name, rpc in rpcs.items():
+    for rpc in rpcs:
         print(f"Getting param realloc stats for {rpc.model_type} at {rpc.model_path}")
         t = get_param_realloc_stats(rpc.model_type, rpc.model_path, n_nodes, True)
         table.update(t)
@@ -57,17 +58,17 @@ def search_rpc_allocations(device_mesh: DeviceMesh,
                                      num_gen_tokens=num_gen_tokens,
                                      n_ppo_minibatches=n_ppo_minibatches,
                                      seq_len=seq_len,
+                                     gradient_checkpointing=gradient_checkpointing,
                                      log_dir=rpc_exe_dir,
                                      if_print=False)
-    rpc_list = list(rpcs.values())
-    graph = build_graph(rpc_list, 5, 1, if_print=False)
+    graph = build_graph(rpcs, 5, 1, if_print=False)
     model_size_dict = make_model_size_dict(rpcs, if_print=False)
 
     n_nodes = device_mesh.n_nodes
-    search_time = 60
+    search_time = 10  # TODO: for debug, change this
 
     rs: List[Dict[str, List]] = mdm_search.multi_mcmc_search(
-        rpc_list,
+        rpcs,
         rpc_exe_list,
         graph,
         table,
@@ -87,12 +88,13 @@ def search_rpc_allocations(device_mesh: DeviceMesh,
     r: Dict[str, Dict[str, Any]] = rs[-1]
     pprint.pprint(r)
 
+    rpc_name_to_rpcs = {rpc.name: rpc for rpc in rpcs}
     rpc_allocs = []
     for rpc_name, alloc_info in r.items():
         if rpc_name in ["end_time", "mem_cost"]:
             continue
         # rpc = rpc_dict[rpc_name]
-        rpc = rpcs[rpc_name]
+        rpc = rpc_name_to_rpcs[rpc_name]
         parallel = ParallelismConfig(
             pipeline_parallel_size=alloc_info["num_pp"],
             data_parallel_size=alloc_info["num_dp"],
@@ -124,22 +126,24 @@ def search_rpc_allocations(device_mesh: DeviceMesh,
     return rpc_allocs
 
 
-def make_rpc_exe_list(rpcs: Dict[str, ModelRPC],
+def make_rpc_exe_list(rpcs: List[ModelRPC],
                       device_mesh: DeviceMesh,
                       num_gen_tokens: int,
                       n_ppo_minibatches: int,
                       seq_len: int,
+                      gradient_checkpointing: bool,
                       if_print: bool = False,
                       log_dir: Optional[str] = None) -> List[RPCExecution]:
     rpc_exe_list = []
     log_flag = False
-    for rpc_name, rpc in rpcs.items():
+    for rpc in rpcs:
         # flash_mqat_config = load_model_config(rpc)
         feasible = enumerate_rpc_executions(rpc,
                                             device_mesh,
                                             seq_len=seq_len,
                                             num_gen_tokens=num_gen_tokens,
-                                            n_ppo_minibatches=n_ppo_minibatches)
+                                            n_ppo_minibatches=n_ppo_minibatches,
+                                            gradient_checkpointing=gradient_checkpointing)
         rpc_exe_list.extend(feasible)
 
         if log_dir is not None:
@@ -171,10 +175,10 @@ def make_rpc_exe_list(rpcs: Dict[str, ModelRPC],
     return rpc_exe_list
 
 
-def make_model_size_dict(rpcs: Dict[str, ModelRPC], if_print: bool = False) -> Dict[str, int]:
+def make_model_size_dict(rpcs: List[ModelRPC], if_print: bool = False) -> Dict[str, int]:
     model_size_dict = {}
 
-    for rpc_name, rpc in rpcs.items():
+    for rpc in rpcs:
         if rpc.model_name.role in model_size_dict:
             continue
         # model_configs = load_model_config(rpc)
@@ -189,9 +193,10 @@ def make_model_size_dict(rpcs: Dict[str, ModelRPC], if_print: bool = False) -> D
 
 def dump_search_settings(
     device_mesh: DeviceMesh,
-    rpcs: Dict[str, ModelRPC],
+    rpcs: List[ModelRPC],
     num_gen_tokens: int = 256,
     n_ppo_minibatches: int = 1,
+    gradient_checkpointing: bool = True,
     seq_len: int = 256,
 ):
     dump_dir = "/home/meizy/model_device_mapping_search/test_case/"
@@ -201,14 +206,14 @@ def dump_search_settings(
         num_gen_tokens=num_gen_tokens,
         n_ppo_minibatches=n_ppo_minibatches,
         seq_len=seq_len,
+        gradient_checkpointing=gradient_checkpointing,
         # log_dir=rpc_exe_dir,
         if_print=True)
-    rpc_list = list(rpcs.values())
-    graph = build_graph(rpc_list, 5, 1, if_print=True)
+    graph = build_graph(rpcs, 5, 1, if_print=True)
     model_size_dict = make_model_size_dict(rpcs, if_print=True)
 
     with open(dump_dir + "rpc_list.pkl", "wb") as f:
-        pickle.dump(rpc_list, f)
+        pickle.dump(rpcs, f)
     with open(dump_dir + "rpc_exe_list.pkl", "wb") as f:
         pickle.dump(rpc_exe_list, f)
     with open(dump_dir + "graph.pkl", "wb") as f:

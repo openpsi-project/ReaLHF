@@ -10,10 +10,14 @@ import numpy as np
 from reallm.api.core.config import Dataset
 from reallm.api.core.dfg import ModelInterfaceType, ModelRPC, OffloadHook, SyncParamHook
 from reallm.api.core.system_api import *
-from reallm.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
+from reallm.api.quickstart.device_mesh import (AllocationConfig, DeviceMesh, make_device_mesh_from_name,
+                                               RPCAllocation)
 from reallm.api.quickstart.model import ModelTrainEvalConfig
 from reallm.experiments.common.utils import *
 from reallm.search_engine.search import search_rpc_allocations
+import reallm.base.logging as logging
+
+logger = logging.getLogger("CommonExperimentConfig", "colored")
 
 
 @dataclasses.dataclass
@@ -111,6 +115,13 @@ class CommonExperimentConfig(Experiment):
     def search_kwargs(self) -> Dict[str, Any]:
         return {}
 
+    @property
+    def allocations(self) -> Dict[str, AllocationConfig]:
+        return {}
+
+    def _heuristic_rpc_allocation(self) -> List[RPCAllocation]:
+        raise NotImplementedError(f"_heuristic_rpc_allocation is not implemented in {self.__class__}")
+
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
             master_worker=TasksGroup(
@@ -128,6 +139,13 @@ class CommonExperimentConfig(Experiment):
         )
 
     def initial_setup(self) -> ExperimentConfig:
+        if self.allocation_mode == "manual" and self.nodelist is None:
+            logger.warning("Warning: Nodelist is not set in manual allocation mode, "
+                           "in this case you cannot specify device mesh for each model RPC. "
+                           "All model RPC will be allocated on GPUs automatically "
+                           f"allocated according to n_nodes {self.n_nodes} "
+                           f"and n_gpus_per_node {self.n_gpus_per_node}.")
+
         rpcs = self.rpcs
         model_worker = []
 
@@ -138,9 +156,13 @@ class CommonExperimentConfig(Experiment):
                                         name=self.nodelist)
         if self.allocation_mode == "search":
             # assert self.mode == "slurm"
+            # assumes gradient checkpointing for all training RPCs if one is enabled
+            # for the simplicity of search configurations
+            gradient_checkpointing = any(model.gradient_checkpointing for model in self.models.values())
             rpc_allocs: List[RPCAllocation] = search_rpc_allocations(
                 device_mesh=global_device_mesh,
-                rpcs=rpcs,
+                rpcs=list(rpcs.values()),
+                gradient_checkpointing=gradient_checkpointing,
                 use_cache=self.allocation_use_cache,
                 **self.search_kwargs,
             )
@@ -157,14 +179,23 @@ class CommonExperimentConfig(Experiment):
                     )) for rpc in self.rpcs.values()
             ]
         elif self.allocation_mode == "manual":
-            raise NotImplementedError()
+            rpc_allocs: List[RPCAllocation] = [
+                RPCAllocation(
+                    rpc=rpc,
+                    device_mesh=make_device_mesh_from_name(
+                        self.nodelist,
+                        self.allocations[rpc_type].device_mesh,
+                    ) if self.allocations[rpc_type].device_mesh is not None else global_device_mesh,
+                    parallel=self.allocations[rpc_type].parallel,
+                ) for rpc_type, rpc in self.rpcs.items()
+            ]
         elif self.allocation_mode == "heuristic":
-            raise NotImplementedError()
+            rpc_allocs: List[RPCAllocation] = self._heuristic_rpc_allocation()
         else:
             raise NotImplementedError()
 
         shard_counter = defaultdict(lambda: 0)
-        resolve_rpc_hooks(rpc_allocs)  # changes rpcs
+        resolve_rpc_hooks(rpc_allocs)  # inplace modify ModelRPCs in rpc allocations
         import pprint
         pprint.pprint(rpc_allocs)
 
@@ -182,7 +213,7 @@ class CommonExperimentConfig(Experiment):
                 cuda_cache_clear_freq=10,
                 tokenizer_name_or_path=self.tokenizer_name_or_path,
             )
-            print(f"Setting up ModelWorker ({i},{j})")
+            # print(f"Setting up ModelWorker ({i},{j})")
 
             for model_name, model_rpc_allocs in model_name_to_rpc_allocs.items():
                 rpcs = [rpc_alloc.rpc for rpc_alloc in model_rpc_allocs]
@@ -206,13 +237,13 @@ class CommonExperimentConfig(Experiment):
                 else:
                     backend = make_inf_backend_config(model_cfg, rpc_alloc.parallel)
 
-                print(f"model name {model_name}, device mesh name {rpc_alloc.device_mesh.name},"
-                      f"mapping {mapping}")
+                # print(f"model name {model_name}, device mesh name {rpc_alloc.device_mesh.name},"
+                #       f"mapping {mapping}")
                 if mapping[i, j]:
                     shard_idx = shard_counter[model_name]
-                    print(f"Setting up Shard {shard_idx}, "
-                          f"(dp, pp, mp) = ({topo.get_coord(shard_idx).data}, "
-                          f"{topo.get_coord(shard_idx).pipe}, {topo.get_coord(shard_idx).model})")
+                    # print(f"Setting up Shard {shard_idx}, "
+                    #       f"(dp, pp, mp) = ({topo.get_coord(shard_idx).data}, "
+                    #       f"{topo.get_coord(shard_idx).pipe}, {topo.get_coord(shard_idx).model})")
                     mw.shards.append(
                         StandaloneModelShard(
                             id=ModelShardID(

@@ -215,7 +215,7 @@ def _estimate_rpc_time_cost(
         model_interface_type: ModelInterfaceType,
         # model function call args
         num_gen_tokens: int,
-        use_gradient_checkpointing: bool,
+        gradient_checkpointing: bool,
         n_ppo_minibatches: int = 1):
     # TODO: improve/remove heuristic
     num_pp = parallel_strategy.pipeline_parallel_size
@@ -232,7 +232,7 @@ def _estimate_rpc_time_cost(
         num_micro_batches = num_pp * 2 if num_pp > 1 else 1
         compute_cost = (inst_stats["train_fwd"] + inst_stats["train_bwd"]) * (num_pp + num_micro_batches -
                                                                               1) + inst_stats["train_opt"]
-        if use_gradient_checkpointing:
+        if gradient_checkpointing:
             compute_cost += inst_stats["train_fwd"] * (num_pp + num_micro_batches - 1)
         comm_cost = (inst_stats["grad_p2p"] + inst_stats["act_p2p"]) * (num_pp + num_micro_batches - 2) * 2
         compute_cost = compute_cost * n_ppo_minibatches
@@ -266,7 +266,7 @@ def estimate_rpc_time_cost(rpc: ModelRPC,
                            bs: int,
                            seq_len: int,
                            num_gen_tokens: int = 256,
-                           use_gradient_checkpointing: bool = False,
+                           gradient_checkpointing: bool = False,
                            n_ppo_minibatches: int = 1):
     # time unit: miliseconds
     # FIXME: n_ppo_minibatches > 1 will result in bad estimation
@@ -288,7 +288,7 @@ def estimate_rpc_time_cost(rpc: ModelRPC,
                                     parallel_strategy,
                                     rpc.interface_type,
                                     num_gen_tokens=num_gen_tokens,
-                                    use_gradient_checkpointing=use_gradient_checkpointing,
+                                    gradient_checkpointing=gradient_checkpointing,
                                     n_ppo_minibatches=n_ppo_minibatches)) / 1e6
 
 
@@ -397,7 +397,7 @@ def example(rpcs):
     p1 = ParallelismConfig(pipeline_parallel_size=1, model_parallel_size=4, data_parallel_size=8)
     rpc_cost = estimate_rpc_time_cost(train,
                                       p1,
-                                      use_gradient_checkpointing=True,
+                                      gradient_checkpointing=True,
                                       num_gen_tokens=896,
                                       bs=bs,
                                       seq_len=seq_len,

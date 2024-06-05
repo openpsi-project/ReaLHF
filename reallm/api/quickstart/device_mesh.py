@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 import dataclasses
 import math
 
@@ -29,7 +29,9 @@ class DeviceMesh:
 
     def __post_init__(self):
         if self.global_mesh_name is None:
-            self.global_mesh_name = f"NODE[01-{self.n_nodes:2d}]"
+            self.global_mesh_name = f"NODE[01-{self.n_nodes:02d}]" if self.n_nodes > 1 else "NODE01"
+
+        if self.global_mesh_name is not None and self.name is None:
             self.name = device_mesh_name_from_mapping(self.global_mesh_name, self.mapping)
 
     def __eq__(self, other: 'DeviceMesh'):
@@ -215,3 +217,23 @@ class RPCAllocation:
     rpc: ModelRPC
     device_mesh: DeviceMesh
     parallel: ParallelismConfig
+
+    def __post_init__(self):
+        world_size = (self.parallel.model_parallel_size * self.parallel.pipeline_parallel_size *
+                      self.parallel.data_parallel_size)
+        assert world_size == self.device_mesh.mapping.sum(), \
+               ("World size of ParallelismConfig does not match number of GPUs in device mesh"
+                f"world_size {world_size} != n GPUs {self.device_mesh.mapping.sum()}")
+
+
+@dataclasses.dataclass
+class AllocationConfig:
+    """Allocation configuration for one RPC, used for manual allocation.
+
+    Args:
+        parallel (ParallelismConfig): Parallelism strategy configuration.
+        device_mesh (str): String representation for device mesh, see DeviceMesh for naming rules.
+                           If set to None, the RPC will be allocated to all allocated cluster nodes.
+    """
+    parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    device_mesh: Optional[str] = None
