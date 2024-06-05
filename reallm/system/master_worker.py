@@ -31,6 +31,8 @@ import reallm.api.core.model_api as model_api
 import reallm.api.core.system_api as config_pkg
 import reallm.system.request_reply_stream as request_reply_stream
 import reallm.system.worker_base as worker_base
+from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
+                                         calculate_llama_train_flops)
 
 logger = logging.getLogger("master worker", "system")
 blogger = logging.getLogger("benchmark")
@@ -1098,55 +1100,56 @@ class MasterWorker(worker_base.Worker):
 
         # calculate flops
         #########################################
-        from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
-                                         calculate_llama_train_flops)
-
-        flops = 0
-        for train_bs, train_seqlens, real_config in zip(
-                self.__rpc_ctrl.data_amount.train_bs,
-                self.__rpc_ctrl.data_amount.train_seqlens,
-                self.__rpc_ctrl.data_amount.train_configs,
-        ):
-            flops += calculate_llama_train_flops(
-                checkpoint_activations_factor=4,
-                batch_size=train_bs,
-                seqlens=train_seqlens,
-                num_layers=real_config.n_layers,
-                hidden_size=real_config.hidden_dim,
-                intermediate_size=real_config.intermediate_dim,
-                vocab_size=real_config.vocab_size,
-            )
-        for inf_bs, inf_seqlens, real_config in zip(
-                self.__rpc_ctrl.data_amount.inf_bs,
-                self.__rpc_ctrl.data_amount.inf_seqlens,
-                self.__rpc_ctrl.data_amount.inf_configs,
-        ):
-            flops += caculuate_llama_forward_flops(
-                batch_size=inf_bs,
-                seqlens=inf_seqlens,
-                num_layers=real_config.n_layers,
-                hidden_size=real_config.hidden_dim,
-                intermediate_size=real_config.intermediate_dim,
-                vocab_size=real_config.vocab_size,
-            )
-        for gen_bs, prompt_lens, gen_len, real_config in zip(
-                self.__rpc_ctrl.data_amount.gen_bs,
-                self.__rpc_ctrl.data_amount.prompt_lens,
-                self.__rpc_ctrl.data_amount.gen_len,
-                self.__rpc_ctrl.data_amount.gen_configs,
-        ):
-            flops += calculate_llama_gen_flops(
-                batch_size=gen_bs,
-                prompt_lens=prompt_lens,
-                gen_len=gen_len,
-                num_layers=real_config.n_layers,
-                hidden_size=real_config.hidden_dim,
-                intermediate_size=real_config.intermediate_dim,
-                vocab_size=real_config.vocab_size,
-            )
+        if not all(isinstance(v, ReaLModelConfig) for v in self.__model_configs.values()):
+            logger.warning(f"Not all models are ReaLModels. Unable to calculate FLOP/s.")
+            flops = None
+        else:
+            flops = 0
+            for train_bs, train_seqlens, real_config in zip(
+                    self.__rpc_ctrl.data_amount.train_bs,
+                    self.__rpc_ctrl.data_amount.train_seqlens,
+                    self.__rpc_ctrl.data_amount.train_configs,
+            ):
+                flops += calculate_llama_train_flops(
+                    checkpoint_activations_factor=4,
+                    batch_size=train_bs,
+                    seqlens=train_seqlens,
+                    num_layers=real_config.n_layers,
+                    hidden_size=real_config.hidden_dim,
+                    intermediate_size=real_config.intermediate_dim,
+                    vocab_size=real_config.vocab_size,
+                )
+            for inf_bs, inf_seqlens, real_config in zip(
+                    self.__rpc_ctrl.data_amount.inf_bs,
+                    self.__rpc_ctrl.data_amount.inf_seqlens,
+                    self.__rpc_ctrl.data_amount.inf_configs,
+            ):
+                flops += caculuate_llama_forward_flops(
+                    batch_size=inf_bs,
+                    seqlens=inf_seqlens,
+                    num_layers=real_config.n_layers,
+                    hidden_size=real_config.hidden_dim,
+                    intermediate_size=real_config.intermediate_dim,
+                    vocab_size=real_config.vocab_size,
+                )
+            for gen_bs, prompt_lens, gen_len, real_config in zip(
+                    self.__rpc_ctrl.data_amount.gen_bs,
+                    self.__rpc_ctrl.data_amount.prompt_lens,
+                    self.__rpc_ctrl.data_amount.gen_len,
+                    self.__rpc_ctrl.data_amount.gen_configs,
+            ):
+                flops += calculate_llama_gen_flops(
+                    batch_size=gen_bs,
+                    prompt_lens=prompt_lens,
+                    gen_len=gen_len,
+                    num_layers=real_config.n_layers,
+                    hidden_size=real_config.hidden_dim,
+                    intermediate_size=real_config.intermediate_dim,
+                    vocab_size=real_config.vocab_size,
+                )
+            tflops = flops / (e2e_time * (10**12))
+            tflops_per_gpu = flops / (e2e_time * self.config.n_model_workers * (10**12))
         self.__rpc_ctrl.data_amount.clear()
-        tflops = flops / (e2e_time * (10**12))
-        tflops_per_gpu = flops / (e2e_time * self.config.n_model_workers * (10**12))
         #########################################
 
         # Logging.
@@ -1167,7 +1170,8 @@ class MasterWorker(worker_base.Worker):
             remain_t = avg_t * remaining_steps
             remain_t += avg_t * self.__cur_steps_per_epoch * remaining_epochs
             s += f"Estimated remaining time: {remain_t:.3f}s. "
-        s += f"TFLOP/s per GPU: {tflops_per_gpu:.2f}, total TFLOP/s: {tflops:.2f}."
+        if flops is not None:
+            s += f"TFLOP/s per GPU: {tflops_per_gpu:.2f}, total TFLOP/s: {tflops:.2f}."
         logger.info(s)
 
         if (self.__benchmark_steps is not None and self._global_step >= self.__benchmark_steps):

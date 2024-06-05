@@ -339,8 +339,8 @@ class ModelWorker(worker_base.Worker):
                                                                               device=self.__device)
                 self.__unwrapped_models[s.id.model_name] = model.module
                 if s.id.model_name.replica_id == 0:
-                    assert isinstance(model.module, ReaLModel)
-                    model.module.instantiate()
+                    if isinstance(model.module, ReaLModel):
+                        model.module.instantiate()
                     self.__model_is_handle[s.id.model_name] = False
                 else:
                     self.__model_is_handle[s.id.model_name] = True
@@ -436,7 +436,9 @@ class ModelWorker(worker_base.Worker):
                 m = self.__unwrapped_models[from_model_name]
             else:
                 m = self.__unwrapped_models[to_model_name]
-            assert isinstance(m, ReaLModel), type(m)
+            if not isinstance(m, ReaLModel):
+                raise ValueError(f"Model {from_model_name} (type={type(m)}) is not a ReaLModel, "
+                                 f"so it can't use parameter realloction.")
             new_layers, new_param, _ = m.build_reparallelized_layers_async(
                 from_model_name=from_model_name,
                 to_model_name=to_model_name,
@@ -457,7 +459,9 @@ class ModelWorker(worker_base.Worker):
             with cuda_tmarked("offload", CUDATimeMarkType.mem_layout):
                 tik = time.perf_counter()
                 m = self.__unwrapped_models[hook_data["model_name"]]
-                assert isinstance(m, ReaLModel), type(m)
+                if not isinstance(m, ReaLModel):
+                    raise ValueError(f"Model {from_model_name} (type={type(m)}) is not a ReaLModel, "
+                                    f"so it can't use offload.")
                 m.async_offload()
                 # blogger.debug(f"async_offload enqueue CUDA request time: {time.perf_counter() - tik:.4f}s")
         else:
@@ -515,8 +519,10 @@ class ModelWorker(worker_base.Worker):
                 self.__models[request.handler.model_name] = self._backend.initialize(self._model, data)
                 self.__backend_initialized[request.handler.model_name] = True
             elif request.handle_name == "model_config":
-                assert isinstance(self.__unwrapped_models[request.handler.model_name], ReaLModel)
-                res = self.__unwrapped_models[request.handler.model_name].config
+                if isinstance(self.__unwrapped_models[request.handler.model_name], ReaLModel):
+                    res = self.__unwrapped_models[request.handler.model_name].config
+                else:
+                    res = None
             ############## data loading ##############
             elif request.handle_name == "fetch":
                 fetched_data = data_api.split_sequences(self.__cur_sample)

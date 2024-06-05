@@ -19,6 +19,24 @@ from reallm.api.quickstart.entrypoint import QUICKSTART_EXPR_CACHE_PATH, QUICKST
 RAY_HEAD_WAIT_TIME = 500
 logger = logging.getLogger("Main-Workers")
 
+def _patch_external_impl(exp_name, trial_name):
+    import reallm.api.core.system_api as system_api
+    if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
+        for exp_cache in os.listdir(QUICKSTART_EXPR_CACHE_PATH):
+            target_cache_name = f"{exp_name}_{trial_name}.json"
+            if exp_cache != target_cache_name:
+                continue
+            cache_file = os.path.join(QUICKSTART_EXPR_CACHE_PATH, target_cache_name)
+            with open(cache_file, "r") as f:
+                cache = json.load(f)
+            usercode_path = cache["usercode_path"]
+            exp_cls_args = OmegaConf.create(cache["args"])
+            config_name = cache["config_name"]
+            # Import user code to register quickstart experiments.
+            importing.import_usercode(usercode_path, "_reallm_user_code")
+            # Register the internal experiment.
+            exp_cls = QUICKSTART_CONFIG_CLASSES[config_name]
+            system_api.register_experiment(exp_name, functools.partial(exp_cls, **exp_cls_args))
 
 def main_reset_name_resolve(args):
     name_resolve.clear_subtree(
@@ -29,6 +47,7 @@ def main_worker(args):
     import reallm.base.constants as constants
 
     constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
+    _patch_external_impl(args.experiment_name, args.trial_name)
 
     worker_index_start = args.jobstep_id * args.wprocs_per_jobstep + args.wproc_offset
     worker_index_end = min(
@@ -59,9 +78,6 @@ def main_worker(args):
 
     import reallm.impl.dataset
     import reallm.impl.model
-    import reallm.profiler.experiments
-    # import reallm.profiler.worker
-    import reallm.profiler.interface
 
     logger.debug(f"Run {args.worker_type} worker with args: %s", args)
     assert not args.experiment_name.startswith(
@@ -123,23 +139,8 @@ def main_controller(args):
     import reallm.system as system
 
     constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
-
-    if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
-        for exp_cache in os.listdir(QUICKSTART_EXPR_CACHE_PATH):
-            target_cache_name = f"{args.experiment_name}_{args.trial_name}.json"
-            if exp_cache != target_cache_name:
-                continue
-            cache_file = os.path.join(QUICKSTART_EXPR_CACHE_PATH, target_cache_name)
-            with open(cache_file, "r") as f:
-                cache = json.load(f)
-            usercode_path = cache["usercode_path"]
-            exp_cls_args = OmegaConf.create(cache["args"])
-            config_name = cache["config_name"]
-            # Import user code to register quickstart experiments.
-            importing.import_usercode(usercode_path, "_reallm_user_code")
-            # Register the internal experiment.
-            exp_cls = QUICKSTART_CONFIG_CLASSES[config_name]
-            system_api.register_experiment(args.experiment_name, functools.partial(exp_cls, **exp_cls_args))
+    _patch_external_impl(args.experiment_name, args.trial_name)
+    
     logger.debug("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
     if args.type == "ray":
