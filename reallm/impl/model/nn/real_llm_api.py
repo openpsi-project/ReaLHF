@@ -26,22 +26,28 @@ from reallm.impl.model.comm.param_realloc import (_derive_reparallelize_comm_pla
 from reallm.impl.model.nn.flatten_param import set_intervals, slice_intervals
 from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
                                                                   RowParallelLinear)
-from reallm.impl.model.utils.data import (DuckGenerationOutput, DuckModelOutput, PipeCacheData,
-                                          PipeTransferData)
+from reallm.impl.model.utils.padding import pad_input, unpad_input
 
 from .flatten_param import build_param_spec, map_param_to_contigous_memory, recursive_getattr
-from .real_llm_base import (OutputHead, real_model_embed_param_count, real_model_head_param_count,
-                            real_model_tblock_param_count, ReaLModelBlock, SequenceParallelActorHead,
-                            SequenceParallelCriticHead, VocabPositionEmbedding)
+from .real_llm_base import (OutputHead, PipeCacheData, PipeTransferData, real_model_embed_param_count,
+                            real_model_head_param_count, real_model_tblock_param_count, ReaLModelBlock,
+                            SequenceParallelActorHead, SequenceParallelCriticHead, VocabPositionEmbedding)
 from .real_llm_generate import generate, GenerationConfig
 from .real_llm_parallel import partition_pipeline_layers
 
-try:
-    from flash_attn.bert_padding import pad_input, unpad_input
-except ModuleNotFoundError:
-    pass
-
 logger = logging.getLogger("ReaLModel Interface")
+
+
+@dataclasses.dataclass
+class DuckModelOutput:
+    logits: Optional[Union[List[torch.Tensor], torch.Tensor]] = None
+
+
+@dataclasses.dataclass
+class DuckGenerationOutput:
+    sequences: torch.Tensor
+    scores: Optional[torch.Tensor] = None
+    logits_mask: Optional[torch.Tensor] = None
 
 
 class ReaLModel(nn.Module):
@@ -59,6 +65,8 @@ class ReaLModel(nn.Module):
         self.dtype = dtype
         self.device = device
 
+        # The main attribute of the model: layers,
+        # including the embedding layer, decoder layers, and the output head.
         self.layer_mapping = partition_pipeline_layers(
             config,
             constants.pipe_parallel_world_size(),
@@ -72,12 +80,26 @@ class ReaLModel(nn.Module):
 
         self.layers = nn.ModuleList()
 
+        # The model is lazily instantiated for parameter reallocation.
+        # For models that will be redistributed, we instantiate replica 0
+        # and do not instantiate other replicas.
         self._instantiated = False
         self._instantiation_hooks = []
 
+        # Attributes used for parameter reallocation.
         self._reparallelize_targets: Dict[Tuple[ModelName, ModelName], ReparallelizeTraget] = {}
 
-        # Flatten all parameters to a contiguous GPU buffer to reduce the time of CUDAFree and CUDAMalloc
+        # Attributes used for offload.
+        self._offload_buffer = None
+        self._offloaded = False
+
+        # Attributes used for flattening parameters.
+        # Flattening parameters is an option, which must be
+        # enabled for offload and parameter reallocation.
+        # We do not activate it by default because
+        # it is not compatible with DeepSpeed optimizers.
+        # If we flatten parameters and pass the module to the DeepSpeed optimizer,
+        # it does not produce gradients on the sliced parameters.
         self._param_spec, self._param_size = build_param_spec(
             list(range(self.layer_idx_start, self.layer_idx_end)),
             self.config,
@@ -85,9 +107,6 @@ class ReaLModel(nn.Module):
             constants.sequence_parallel(),
         )
         self.contiguous_param = None
-
-        self._offload_buffer = None
-        self._offloaded = False
 
     def instantiate(self):
         assert not self._instantiated
@@ -106,36 +125,6 @@ class ReaLModel(nn.Module):
 
         self._instantiated = True
         self._instantiation_hooks = []
-
-    def async_offload(self):
-        assert not self._offloaded
-        assert self._instantiated
-        assert self.contiguous_param is not None
-        if self._offload_buffer is None:
-            self._offload_buffer = torch.empty_like(self.contiguous_param,
-                                                    dtype=self.dtype,
-                                                    device="cpu",
-                                                    pin_memory=True)
-        else:
-            assert self._offload_buffer.shape == self.contiguous_param.shape
-        dummy_tensor = torch.tensor((), device=self.device, dtype=self.dtype)
-        self._offload_stream = torch.cuda.Stream()
-        self._offload_event = torch.cuda.Event()
-        self.contiguous_param = None
-        for i, l in enumerate(self.layers):
-            layer_idx = self.layer_idx_start + i
-            with torch.cuda.stream(self._offload_stream):
-                for k, p in l.named_parameters():
-                    spec = self._param_spec[f"{layer_idx}.{k}"]
-                    self._offload_buffer[spec.start_idx:spec.end_idx].copy_(p.data.view(-1),
-                                                                            non_blocking=True)
-                    p.data = dummy_tensor
-        self._offload_event.record(self._offload_stream)
-        self._offloaded = True
-
-    def wait_for_offload(self):
-        assert self._offloaded
-        torch.cuda.current_stream().wait_event(self._offload_event)
 
     @property
     def num_layers(self):
@@ -192,6 +181,38 @@ class ReaLModel(nn.Module):
                 dtype=dtype,
             )
         return l
+
+    def async_offload(self):
+        assert not self._offloaded
+        assert self._instantiated
+        assert self.contiguous_param is not None
+        if self._offload_buffer is None:
+            self._offload_buffer = torch.empty_like(
+                self.contiguous_param,
+                dtype=self.dtype,
+                device="cpu",
+                pin_memory=True,
+            )
+        else:
+            assert self._offload_buffer.shape == self.contiguous_param.shape
+        dummy_tensor = torch.tensor((), device=self.device, dtype=self.dtype)
+        self._offload_stream = torch.cuda.Stream()
+        self._offload_event = torch.cuda.Event()
+        self.contiguous_param = None
+        for i, l in enumerate(self.layers):
+            layer_idx = self.layer_idx_start + i
+            with torch.cuda.stream(self._offload_stream):
+                for k, p in l.named_parameters():
+                    spec = self._param_spec[f"{layer_idx}.{k}"]
+                    self._offload_buffer[spec.start_idx:spec.end_idx].copy_(p.data.view(-1),
+                                                                            non_blocking=True)
+                    p.data = dummy_tensor
+        self._offload_event.record(self._offload_stream)
+        self._offloaded = True
+
+    def wait_for_offload(self):
+        assert self._offloaded
+        torch.cuda.current_stream().wait_event(self._offload_event)
 
     def __overlapped_load_forward(self, x: PipeTransferData,
                                   ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
@@ -259,7 +280,7 @@ class ReaLModel(nn.Module):
         padded_batch_length = (batch_length + mp_size - 1) // mp_size * mp_size
         pad_size = padded_batch_length - batch_length
 
-        if constants.sequence_parallel() and pad_size > 0 and ys[0].packed_input_ids is not None:
+        if (constants.sequence_parallel() and pad_size > 0 and ys[0].packed_input_ids is not None):
             _cu_seqlens = x.cu_seqlens
             _max_seqlen = x.max_seqlen
             _input_ids = ys[0].packed_input_ids
@@ -296,7 +317,7 @@ class ReaLModel(nn.Module):
                 x, ys = self.__overlapped_load_forward(x, ys)
 
         # Resume from padding.
-        if constants.sequence_parallel() and pad_size > 0 and ys[0].packed_input_ids is not None:
+        if (constants.sequence_parallel() and pad_size > 0 and ys[0].packed_input_ids is not None):
             x.pp_output = x.pp_output[:-pad_size]
 
             x.pp_input = _pp_input
@@ -350,12 +371,12 @@ class ReaLModel(nn.Module):
 
         return h
 
-    def state_dict(self):
+    def state_dict(self, *args, **kwargs):
         """Map layer indices to global layer indices."""
-        state_dict = super().state_dict()
+        state_dict = self.layers.state_dict(*args, **kwargs)
         new_state_dict = {}
         for k, v in state_dict.items():
-            k = k.lstrip("layers.")
+            k = k.lstrip("module.").lstrip("layers.")
             local_idx = int(k.split(".")[0])
             name = k.split(".", 1)[1]
             new_state_dict[f"{local_idx + self.layer_idx_start}.{name}"] = v
@@ -437,6 +458,7 @@ class ReaLModel(nn.Module):
         )
         self._reparallelize_targets[(from_model_name, to_model_name)] = rtgt
 
+    # FIXME: we can get topo given model name from constants
     @cuda_tmark("param_realloc", CUDATimeMarkType.mem_layout)
     def build_reparallelized_layers_async(
         self,
@@ -461,7 +483,12 @@ class ReaLModel(nn.Module):
         rtgt = self._reparallelize_targets[(from_model_name, to_model_name)]
 
         # The following tensor holds the contiguous memory of incoming parameters
-        to_contiguous_param = torch.empty(rtgt.to_param_size, dtype=self.dtype, device="cuda")
+        # NOTE: We will enable requires_grad after reallocation, not here.
+        to_contiguous_param = torch.empty(
+            rtgt.to_param_size,
+            dtype=self.dtype,
+            device="cuda",
+        )
         map_param_to_contigous_memory(
             rtgt.to_layers_handle,
             rtgt.to_param_spec,
@@ -474,7 +501,7 @@ class ReaLModel(nn.Module):
         send_buf_specs = []
         comm_volume = torch.zeros((), dtype=torch.long, device="cuda")
         for step in rtgt.comm_plan:
-            if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
+            if (isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank()):
                 if step.rank == step.src:
                     buf = slice_intervals(
                         self.contiguous_param,
@@ -496,7 +523,7 @@ class ReaLModel(nn.Module):
                         max_interval_size=step.receiver_max_interval_size,
                     ))
 
-            if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
+            if (isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank()):
                 if step.group is not None:
                     buf = slice_intervals(
                         self.contiguous_param,
@@ -512,7 +539,7 @@ class ReaLModel(nn.Module):
                         layer_idx = int(layer_idx)
                         dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
                         recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
-                                          k).data = (dummy_tensor)
+                                          k).data = dummy_tensor
 
         # Run boradcast!
         streams = [torch.cuda.Stream() for step in rtgt.comm_plan]
@@ -520,7 +547,8 @@ class ReaLModel(nn.Module):
         recv_events = []
         for step, s in zip(rtgt.comm_plan, streams):
             with torch.cuda.stream(s):
-                if isinstance(step, ReparallelizeReceiverStep) and step.rank == torch.distributed.get_rank():
+                if (isinstance(step, ReparallelizeReceiverStep)
+                        and step.rank == torch.distributed.get_rank()):
                     e = torch.cuda.Event()
                     if step.rank != step.src:
                         buf = recv_buf_specs[recv_buf_cnt]["src"]
@@ -529,7 +557,7 @@ class ReaLModel(nn.Module):
                     recv_events.append(e)
                     recv_buf_cnt += 1
 
-                if isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank():
+                if (isinstance(step, ReparallelizeSenderStep) and step.rank == torch.distributed.get_rank()):
                     if step.group is not None:
                         buf = send_buf_specs.pop(0)
                         torch.distributed.broadcast(buf, src=step.rank, group=step.group)
@@ -540,7 +568,7 @@ class ReaLModel(nn.Module):
         # assert len(state_dict) == 0
         assert len(recv_events) == len(recv_buf_specs)
         for e, x in zip(recv_events, recv_buf_specs):
-            # torch.cuda.current_stream().wait_event(e)
+            torch.cuda.current_stream().wait_event(e)
             set_intervals(**x)
 
         # release the local GPU memory
@@ -550,6 +578,9 @@ class ReaLModel(nn.Module):
 
     def patch_reparallelization(self, x):
         self.layers, self.contiguous_param = x
+        for l in self.layers:
+            for p in l.parameters():
+                p.requires_grad_()
 
 
 # a helper function to make real_model look like huggingface model

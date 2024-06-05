@@ -28,7 +28,7 @@ class ParallelismConfig:
     use_sequence_parallel: bool = False
 
     def __post_init__(self):
-        if self.pipeline_parallel_size < 1 or self.data_parallel_size < 1 or self.model_parallel_size < 1:
+        if (self.pipeline_parallel_size < 1 or self.data_parallel_size < 1 or self.model_parallel_size < 1):
             raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
         if self.use_sequence_parallel and self.model_parallel_size <= 1:
             logger.warning("Sequence parallelism requires model parallelism.")
@@ -71,7 +71,7 @@ class OptimizerConfig:
         metadata={"choices": ["adam", "empty"]},
         default="empty",
     )
-    lr: float = 1e-6
+    lr: float = 1e-5
     weight_decay: float = 0.05
     beta1: float = 0.9
     beta2: float = 0.95
@@ -79,9 +79,9 @@ class OptimizerConfig:
     min_lr_ratio: float = 0.0
     lr_scheduler_type: str = dataclasses.field(
         metadata={"choices": ["linear", "cosine", "constant"]},
-        default="constant",
+        default="cosine",
     )
-    warmup_steps_proportion: float = 0.0
+    warmup_steps_proportion: float = 0.02
     offload: bool = False
 
     def __post_init__(self):
@@ -159,8 +159,7 @@ def get_real_model_config(
     is_rew_lora: bool = False,
     rew_lora_path: Optional[str] = None,
 ) -> Model:
-    """Make a configuration to build model.
-    """
+    """Make a configuration to build model."""
     model = Model(
         "real_model",
         args=dict(

@@ -80,27 +80,35 @@ def actor_loss_fn(
         loss_mask_count = loss_mask.count_nonzero()
         # For numerical stability.
         ratio = torch.where(loss_mask, torch.exp(logprobs - old_logprobs), 0)
+        approx_kl = torch.where(loss_mask, (logprobs - old_logprobs).detach(), 0.0)
     else:
         ratio = torch.exp(logprobs - old_logprobs)
+        approx_kl = (logprobs - old_logprobs).detach()
 
     clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
     pg_loss1 = -advantages * ratio
     pg_loss2 = -advantages * clipped_ratio
 
     if loss_mask is not None:
-        pg_loss = torch.where(loss_mask, torch.max(pg_loss1, pg_loss2), 0).sum() / loss_mask_count
+        pg_loss = (torch.where(loss_mask, torch.max(pg_loss1, pg_loss2), 0).sum() / loss_mask_count)
     else:
         pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
     clip_mask = pg_loss1.detach() < pg_loss2.detach()
     if loss_mask is not None:
-        proportion_clipped = clip_mask.logical_and_(loss_mask).count_nonzero() / loss_mask_count
-        importance_weight = torch.where(loss_mask, ratio.detach(), 0).sum() / loss_mask_count
+        proportion_clipped = (clip_mask.logical_and_(loss_mask).count_nonzero() / loss_mask_count)
+        importance_weight = (torch.where(loss_mask, ratio.detach(), 0).sum() / loss_mask_count)
+        approx_kl = approx_kl.sum() / loss_mask_count
     else:
         proportion_clipped = clip_mask.count_nonzero()
         importance_weight = ratio.detach().mean()
+        approx_kl = approx_kl.mean()
     # Remain torch.CudaTensor here for all-reduce after train step.
-    stat = dict(clip_ratio=proportion_clipped, importance_weight=importance_weight)
+    stat = dict(
+        clip_ratio=proportion_clipped,
+        importance_weight=importance_weight,
+        approx_kl=approx_kl,
+    )
 
     return pg_loss, stat
 
@@ -122,9 +130,11 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         target = labels = torch.nn.functional.pad(packed_input_ids[1:], (0, 1), value=0.0)
         # Maximum value along vocab dimension across all GPUs.
         logits_max = torch.max(vocab_parallel_logits, dim=-1)[0]
-        torch.distributed.all_reduce(logits_max,
-                                     op=torch.distributed.ReduceOp.MAX,
-                                     group=constants.model_parallel_group())
+        torch.distributed.all_reduce(
+            logits_max,
+            op=torch.distributed.ReduceOp.MAX,
+            group=constants.model_parallel_group(),
+        )
         # Subtract the maximum value.
         vocab_parallel_logits = vocab_parallel_logits - logits_max.unsqueeze(dim=-1)
 
@@ -181,16 +191,16 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         ratio = torch.where(ppo_loss_mask, torch.exp(new_logprobs - old_logprobs), 0)
 
         loss_mask_count = ppo_loss_mask.count_nonzero()
-        approx_kl = torch.where(ppo_loss_mask,
-                                (old_logprobs - new_logprobs).detach(), 0.0).sum() / loss_mask_count
-        importance_weight = torch.where(ppo_loss_mask, ratio.detach(), 0).sum() / loss_mask_count
+        approx_kl = (torch.where(ppo_loss_mask,
+                                 (old_logprobs - new_logprobs).detach(), 0.0).sum() / loss_mask_count)
+        importance_weight = (torch.where(ppo_loss_mask, ratio.detach(), 0).sum() / loss_mask_count)
 
         clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
         pg_loss1 = -advantages * ratio
         pg_loss2 = -advantages * clipped_ratio
 
         clip_mask = (pg_loss1 < pg_loss2).detach()
-        proportion_clipped = clip_mask.logical_and_(ppo_loss_mask).count_nonzero() / loss_mask_count
+        proportion_clipped = (clip_mask.logical_and_(ppo_loss_mask).count_nonzero() / loss_mask_count)
 
         # Store softmax, target-mask and masked-target for backward pass.
         ctx.save_for_backward(
@@ -204,7 +214,12 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         )
         ctx.eps_clip = eps_clip
 
-        return torch.max(pg_loss1, pg_loss2), importance_weight, proportion_clipped, approx_kl
+        return (
+            torch.max(pg_loss1, pg_loss2),
+            importance_weight,
+            proportion_clipped,
+            approx_kl,
+        )
 
     @staticmethod
     def backward(ctx, grad_output, g1, g2, g3):
@@ -255,7 +270,16 @@ class _MemoryEfficientPPOActorLossFn(torch.autograd.Function):
 
     @staticmethod
     @custom_fwd
-    def forward(ctx, logits, cu_seqlens, packed_input_ids, ppo_loss_mask, old_logprobs, advantages, eps_clip):
+    def forward(
+        ctx,
+        logits,
+        cu_seqlens,
+        packed_input_ids,
+        ppo_loss_mask,
+        old_logprobs,
+        advantages,
+        eps_clip,
+    ):
         labels = torch.nn.functional.pad(packed_input_ids[1:], (0, 1), value=0.0)
         _new_logprobs = torch.nn.functional.log_softmax(logits, dim=-1)
         new_logprobs_labels = _new_logprobs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
@@ -267,26 +291,31 @@ class _MemoryEfficientPPOActorLossFn(torch.autograd.Function):
         ratio = torch.where(ppo_loss_mask, torch.exp(new_logprobs - old_logprobs), 0)
 
         loss_mask_count = ppo_loss_mask.count_nonzero()
-        approx_kl = torch.where(ppo_loss_mask,
-                                (old_logprobs - new_logprobs).detach(), 0.0).sum() / loss_mask_count
-        importance_weight = torch.where(ppo_loss_mask, ratio.detach(), 0).sum() / loss_mask_count
+        approx_kl = (torch.where(ppo_loss_mask,
+                                 (old_logprobs - new_logprobs).detach(), 0.0).sum() / loss_mask_count)
+        importance_weight = (torch.where(ppo_loss_mask, ratio.detach(), 0).sum() / loss_mask_count)
 
         clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
         pg_loss1 = -advantages * ratio
         pg_loss2 = -advantages * clipped_ratio
 
         clip_mask = (pg_loss1 < pg_loss2).detach()
-        proportion_clipped = clip_mask.logical_and_(ppo_loss_mask).count_nonzero() / loss_mask_count
+        proportion_clipped = (clip_mask.logical_and_(ppo_loss_mask).count_nonzero() / loss_mask_count)
 
         ctx.save_for_backward(logits, leave_one_indices, labels, ppo_loss_mask, ratio, advantages)
         ctx.eps_clip = eps_clip
 
-        return torch.max(pg_loss1, pg_loss2), importance_weight, proportion_clipped, approx_kl
+        return (
+            torch.max(pg_loss1, pg_loss2),
+            importance_weight,
+            proportion_clipped,
+            approx_kl,
+        )
 
     @staticmethod
     @custom_bwd
     def backward(ctx, grad_output, g1, g2, g3):
-        logits, leave_one_indices, labels, ppo_loss_mask, ratio, advantages = ctx.saved_tensors
+        logits, leave_one_indices, labels, ppo_loss_mask, ratio, advantages = (ctx.saved_tensors)
         eps_clip = ctx.eps_clip
 
         clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
@@ -396,7 +425,7 @@ def critic_loss_fn(
         clip_mask = value_loss_clipped.detach() > value_loss_original.detach()
         if loss_mask is not None:
             mask_count = loss_mask.count_nonzero()
-            proportion_clipped = clip_mask.logical_and_(loss_mask).count_nonzero() / mask_count
+            proportion_clipped = (clip_mask.logical_and_(loss_mask).count_nonzero() / mask_count)
         else:
             proportion_clipped = clip_mask.count_nonzero()
 

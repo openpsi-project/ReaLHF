@@ -9,6 +9,7 @@ from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
 from reallm.base.topology import PipeModelDataParallelTopology
 import reallm.base.logging as logging
+from reallm.api.quickstart.entrypoint import register_quickstart_exp
 
 logger = logging.getLogger("DPO Experiment")
 
@@ -28,7 +29,7 @@ class DPOConfig(Experiment):
     beta: float = 0.1
 
     def __post_init__(self):
-        assert not self.is_sft_lora and self.sft_lora_path is None, "LoRA is not supported for now."
+        assert (not self.is_sft_lora and self.sft_lora_path is None), "LoRA is not supported for now."
         self.n_actors = int(self.actor.parallel.pipeline_parallel_size *
                             self.actor.parallel.data_parallel_size * self.actor.parallel.model_parallel_size)
         self.n_refs = int(self.ref.parallel.pipeline_parallel_size * self.ref.parallel.data_parallel_size *
@@ -62,15 +63,13 @@ class DPOConfig(Experiment):
         ref_path = self.ref.path
 
         dataset = Dataset(
-            "packed_rw_pair",
+            "rw_pair",
             args=dict(
-                n_tokens_per_batch=self.dataset.train_tokens_per_batch,
                 max_length=self.dataset.max_seqlen,
                 max_pairs_per_prompt=self.dataset.max_pairs_per_prompt,
                 dataset_path=self.dataset.train_path,
             ),
         )
-        dataloader = DataLoader("iterable_dataset_loader")
 
         train_backend = ModelBackend(
             "ds_train",
@@ -87,7 +86,7 @@ class DPOConfig(Experiment):
                 min_lr_ratio=self.actor.optimizer.min_lr_ratio,
                 zero_stage=(self.actor.zero_stage if self.actor.parallel.pipeline_parallel_size == 1 else min(
                     self.actor.zero_stage, 1)),
-                engine_type="pipe" if self.actor.parallel.pipeline_parallel_size > 1 else "deepspeed",
+                engine_type=("pipe" if self.actor.parallel.pipeline_parallel_size > 1 else "deepspeed"),
                 offload_optimizer_state=self.actor.optimizer.offload,
                 enable_bf16=self.actor.enable_bf16,
                 enable_fp16=self.actor.enable_fp16,
@@ -163,7 +162,6 @@ class DPOConfig(Experiment):
                 ],
                 tokenizer_name_or_path=actor_path,
                 datasets=[dataset],
-                dataloader=dataloader,
                 cuda_cache_cleanliness=True,
                 cuda_cache_clear_freq=10,
             )
@@ -174,10 +172,14 @@ class DPOConfig(Experiment):
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=ref_interface,
             model_type=self.ref.type,
-            input_data=["packed_input_ids", "input_lens", "pos_input_lens", "prompt_lens"],
+            input_data=[
+                "packed_input_ids",
+                "pos_input_lens",
+                "prompt_lens",
+            ],
             output_data=["seqlogp"],
-            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
-            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
             post_hooks=[dfg.OffloadHook()],
         )
         dpo = ModelRPC(
@@ -187,14 +189,13 @@ class DPOConfig(Experiment):
             model_type=self.actor.type,
             input_data=[
                 "packed_input_ids",
-                "input_lens",
                 "pos_input_lens",
                 "seqlogp",
                 "prompt_lens",
             ],
             log_return_value=True,
-            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
-            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         exp_ctrl = ExperimentSaveEvalControl(
@@ -207,3 +208,4 @@ class DPOConfig(Experiment):
             model_worker=model_worker,
         )
         return cfg
+register_quickstart_exp("dpo", DPOConfig)

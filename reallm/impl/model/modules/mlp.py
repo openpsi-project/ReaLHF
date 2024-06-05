@@ -29,6 +29,9 @@ def get_activation_fn(activation_function: str) -> Callable:
         raise NotImplementedError('Only "gelu" activation function is available.')
 
 
+SEQUENCE_PARALLEL_WARNED = False
+
+
 class LayerNormQKVLinear(nn.Module):
 
     def __init__(
@@ -52,9 +55,12 @@ class LayerNormQKVLinear(nn.Module):
         super().__init__()
         sequence_parallel = constants.sequence_parallel()
         if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
-            logger.warning(
-                "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
-            )
+            global SEQUENCE_PARALLEL_WARNED
+            if not SEQUENCE_PARALLEL_WARNED:
+                logger.warning(
+                    "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
+                )
+                SEQUENCE_PARALLEL_WARNED = True
             sequence_parallel = False
             gradient_accumulation_fusion = False
         if dtype is None:
@@ -213,6 +219,7 @@ class LayerNormQKVLinear(nn.Module):
 
 
 class LayerNormMLP(nn.Module):
+    SEQUENCE_PARALLEL_WARNED = False
 
     def __init__(
         self,
@@ -232,9 +239,12 @@ class LayerNormMLP(nn.Module):
         super().__init__()
         sequence_parallel = constants.sequence_parallel()
         if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
-            logger.warning(
-                "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
-            )
+            global SEQUENCE_PARALLEL_WARNED
+            if not SEQUENCE_PARALLEL_WARNED:
+                logger.warning(
+                    "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
+                )
+                SEQUENCE_PARALLEL_WARNED = True
             sequence_parallel = False
             gradient_accumulation_fusion = False
         if dtype is None:
@@ -291,9 +301,12 @@ class LlamaLayerNormMLP(nn.Module):
         super().__init__()
         sequence_parallel = constants.sequence_parallel()
         if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
-            logger.warning(
-                "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
-            )
+            global SEQUENCE_PARALLEL_WARNED
+            if not SEQUENCE_PARALLEL_WARNED:
+                logger.warning(
+                    "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
+                )
+                SEQUENCE_PARALLEL_WARNED = True
             sequence_parallel = False
             gradient_accumulation_fusion = False
 

@@ -40,7 +40,7 @@ with open(data_path, "rb") as f:
 df = pd.DataFrame(df_dict)
 print(df)
 
-cmap = sns.color_palette("viridis", n_colors=len(df['n_nodes'].unique()))
+cmap = sns.color_palette("viridis", n_colors=len(df["n_nodes"].unique()))
 fig, axes = plt.subplots(1, 1, figsize=(4, 3))
 legend_labels = {
     1: "8 GPUs",
@@ -49,7 +49,7 @@ legend_labels = {
     8: "64 GPUs",
     16: "128 GPUs",
 }
-colors = {n: cmap[i] for i, n in enumerate(sorted(df['n_nodes'].unique()))}
+colors = {n: cmap[i] for i, n in enumerate(sorted(df["n_nodes"].unique()))}
 print(colors)
 # for n_nodes in df['n_nodes'].unique():
 #     subset = df[df['n_nodes'] == n_nodes]
@@ -58,9 +58,14 @@ print(colors)
 # axes.set_xscale("log")
 # axes.set_yscale("log")
 
-for n_nodes in reversed(df['n_nodes'].unique()):
-    subset = df[df['n_nodes'] == n_nodes]
-    axes.scatter(subset["estimated"], subset["time"], color=colors[n_nodes], label=legend_labels[n_nodes])
+for n_nodes in reversed(df["n_nodes"].unique()):
+    subset = df[df["n_nodes"] == n_nodes]
+    axes.scatter(
+        subset["estimated"],
+        subset["time"],
+        color=colors[n_nodes],
+        label=legend_labels[n_nodes],
+    )
     print(subset["time"])
 
 axes.set_xlabel("Estimated Time (s)")
@@ -75,10 +80,10 @@ axes.set_ylim(1, 140)
 axes.set_xticks([0, 10, 20, 50, 100])
 axes.set_yticks([0, 10, 20, 50, 100])
 
-axes.plot(range(120), range(120), color='black', linestyle='--', alpha=0.5)
-axes.plot(range(120), [1.3 * i for i in range(120)], color='black', linestyle='--', alpha=0.5)
+axes.plot(range(120), range(120), color="black", linestyle="--", alpha=0.5)
+axes.plot(range(120), [1.3 * i for i in range(120)], color="black", linestyle="--", alpha=0.5)
 
-plt.legend(fontsize='small', borderpad=0.25)
+plt.legend(fontsize="small", borderpad=0.25)
 plt.tight_layout()
 plt.savefig("logs/estimate_error.pdf")
 

@@ -3,13 +3,10 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 import asyncio
 import copy
 import dataclasses
-import gc
 import getpass
 import itertools
 import os
 import re
-import sys
-import threading
 import time
 import uuid
 
@@ -21,7 +18,7 @@ import torch.distributed
 
 from reallm.api.core.config import ModelName
 from reallm.api.core.model_api import ReaLModelConfig
-from reallm.base import datapack, dataparallel, logging, namedarray, numpy_utils, timeutil, topology
+from reallm.base import datapack, logging, namedarray, timeutil, topology
 from reallm.base.asyncio_utils import (raise_asyncio_exception, setup_run_until_complete,
                                        teardown_run_util_complete)
 from reallm.base.cluster import spec as cluster_spec
@@ -34,28 +31,11 @@ import reallm.api.core.model_api as model_api
 import reallm.api.core.system_api as config_pkg
 import reallm.system.request_reply_stream as request_reply_stream
 import reallm.system.worker_base as worker_base
+from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
+                                         calculate_llama_train_flops)
 
 logger = logging.getLogger("master worker", "system")
 blogger = logging.getLogger("benchmark")
-
-
-def _get_n_seqs_from_batch_sample(sample: namedarray.NamedArray) -> int:
-    assert ("input_lens" in sample.keys() or "cu_seqlens" in sample.keys()
-            or "prompt_cu_seqlens" in sample.keys() or "prompt_lens" in sample.keys()), (
-                list(sample.keys()),
-                sample,
-            )
-    if "input_lens" in sample.keys():
-        return len(sample["input_lens"])
-    elif "cu_seqlens" in sample.keys():
-        return len(sample["cu_seqlens"]) - 1
-    # NOTE: The order matters. We should first try to get the length of the generated text rather than prompts.
-    elif "prompt_lens" in sample.keys():
-        return len(sample["prompt_lens"])
-    elif "prompt_cu_seqlens" in sample.keys():
-        return len(sample["prompt_cu_seqlens"]) - 1
-    else:
-        raise NotImplementedError(f"Unknown seqlens keys: {list(sample.keys())}.")
 
 
 class ExperimentComplete(Exception):
@@ -145,33 +125,6 @@ async def group_rpc_blocked(
     return [p.data for p in payloads]
 
 
-def split_packed_batch_into_seqs(
-    sample: namedarray.NamedArray,
-    input_lens: Optional[torch.Tensor] = None,
-    return_seqlens: bool = False,
-) -> List[namedarray.NamedArray]:
-    if input_lens is None:
-        if "input_lens" in sample:
-            input_lens = sample["input_lens"]
-        elif "prompt_lens" in sample:
-            input_lens = sample["prompt_lens"]
-        elif "cu_seqlens" in sample:
-            input_lens = sample["cu_seqlens"][1:] - sample["cu_seqlens"][:-1]
-        elif "prompt_cu_seqlens" in sample:
-            input_lens = sample["prompt_cu_seqlens"][1:] - sample["prompt_cu_seqlens"][:-1]
-
-    partitions = [(i, i + 1) for i in range(input_lens.shape[0])]
-    sample["input_lens"] = input_lens
-    sample.register_metadata(seqlens=input_lens.cpu().numpy().tolist())
-    res = dataparallel.PackedParallelDataBroker.scatter_to(sample,
-                                                           n_dp=len(input_lens),
-                                                           partitions=partitions)
-    if not return_seqlens:
-        return res
-    else:
-        return res, input_lens
-
-
 def _request_parameter_sync(
     stream: request_reply_stream.NameResolvingRequstClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
@@ -209,10 +162,12 @@ def _request_parameter_sync(
         "to_model_config": to_model_config,
     }
     payloads = [
-        request_reply_stream.Payload(handler=h,
-                                     handle_name="empty",
-                                     pre_hooks=["param_realloc"],
-                                     pre_hook_data=[ps_data]) for h in handlers
+        request_reply_stream.Payload(
+            handler=h,
+            handle_name="empty",
+            pre_hooks=["param_realloc"],
+            pre_hook_data=[ps_data],
+        ) for h in handlers
     ]
     request_ids = [stream.post(p) for p in payloads]
     [stream.poll(pattern=create_exact_match_pattern([p.syn_reply_id]), block=True) for p in payloads]
@@ -264,6 +219,7 @@ class RPCCorountineControl:
     train_count: asyncio.Queue
     # for loading data, save and eval model
     fetch_data_queue: asyncio.Queue
+    data_spec_queue: asyncio.Queue
     eval_queue: asyncio.Queue
     save_queue: asyncio.Queue
 
@@ -509,9 +465,11 @@ async def model_rpc_request_func(
             min_n_seqs_per_dp = len(sample.seqlens) // dp_size
         else:
             min_n_seqs_per_dp = 1
-        partitions = datapack.min_abs_diff_partition(np.array(sample.seqlens, dtype=np.int32),
-                                                     dp_size,
-                                                     min_size=min_n_seqs_per_dp)
+        partitions = datapack.min_abs_diff_partition(
+            np.array(sample.seqlens, dtype=np.int32),
+            dp_size,
+            min_size=min_n_seqs_per_dp,
+        )
         target_mapping = {i: list(range(v[0], v[1])) for i, v in enumerate(partitions)}
 
         # Set data owner of produced data by this RPC, such that downstream RPCs can know
@@ -593,7 +551,7 @@ async def model_rpc_reply_func(
         responses: List[request_reply_stream.Payload] = [responses[i] for i in dp_head_indices]
         recv_tik = time.perf_counter()
 
-        if isinstance(responses[-1].data, dict) and responses[-1].data.get("seqlens") is not None:
+        if (isinstance(responses[-1].data, dict) and responses[-1].data.get("seqlens") is not None):
             res = []
             for k in responses[0].data["keys"]:
                 if k in rpc.output_key_remap:
@@ -601,7 +559,7 @@ async def model_rpc_reply_func(
                 else:
                     res.append(k)
         else:
-            res = dataparallel.PackedParallelDataBroker.gather_from([response.data for response in responses])
+            res = _gather_stat([response.data for response in responses])
 
         if rpc.log_return_value:
             logger.info(f"RPC name {rpc.name} returns {res}")
@@ -622,6 +580,7 @@ async def model_rpc_reply_func(
 
 
 async def load_data_func(
+    src_rpc: dfg.ModelRPC,
     src_rpc_dp_size: int,
     src_rpc_model_name: str,
     buffer: AsyncIOSequenceBuffer,
@@ -629,61 +588,104 @@ async def load_data_func(
     stream: request_reply_stream.NameResolvingRequstClient,
     fetch_ctl: asyncio.Queue,
     stop_ctl: asyncio.Event,
+    data_spec_ctl: asyncio.Queue,
 ):
-    # FIXME: estimate average tokens per batch
-    # FIXME: change dataset to plain dataset and do dynamic batching here
     while not stop_ctl.is_set():
         await fetch_ctl.get()
         # fetch data from dataloader to fill the sequence buffer
         blogger.info(f"Filling data into the buffer in a new epoch.")
         fetch_data_start = time.perf_counter()
-        cur_epoch = latest_epoch = None
-        while cur_epoch is None or cur_epoch == latest_epoch:
-            data_batches: List[data_api.DataBatch] = await group_rpc_blocked(
+
+        loaded_data_batches = []
+
+        is_final_batch = False
+        while not is_final_batch:
+            data_batches: List[data_api.DataBatchMeta] = await group_rpc_blocked(
                 stream,
                 handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
                 handle_type="fetch",
                 datas=[None for _ in range(src_rpc_dp_size)],
                 verbose=False,
             )
+            cur_epoch = data_batches[0].epoch
 
-            # Update counters. All starting from 0.
-            if cur_epoch is None:
-                cur_epoch = latest_epoch = data_batches[0].epoch
-            else:
-                latest_epoch = data_batches[0].epoch
+            loaded_data_batches += data_batches
 
-            # Merge fetched data. We assume fetched data is a flattened dict.
-            datas = [x.data for x in data_batches]
-            n_seqs = [_get_n_seqs_from_batch_sample(d) for d in datas]
-            sample = dataparallel.ParallelDataBroker.gather_from([namedarray.from_dict(x) for x in datas])
-            xs, seqlens = split_packed_batch_into_seqs(sample, return_seqlens=True)
-            buffer_indices = await buffer.put_batch([(list(x.keys()), seqlen)
-                                                     for x, seqlen in zip(xs, seqlens)])
-            assert len(buffer_indices) == sum(n_seqs)
+            is_final_batch = data_batches[0].is_final_batch
+            assert all(is_final_batch == x.is_final_batch for x in data_batches)
 
-            for dp_i, (st, ed) in enumerate(
-                    zip([0] + list(itertools.accumulate(n_seqs)), itertools.accumulate(n_seqs))):
-                for buf_idx in buffer_indices[st:ed]:
-                    for k in sample.keys():
-                        data_owner[(buf_idx, k)] = (src_rpc_model_name, dp_i)
+        # PyTorch dataloader will shuffle data for us.
+        all_data = []
+        for x in loaded_data_batches:
+            all_data += data_api.unpack_data_batch(x)
 
-            await group_rpc_blocked(
-                stream,
-                handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
-                handle_type="store",
-                datas=[
-                    buffer_indices[st:ed]
-                    for st, ed in zip([0] + list(itertools.accumulate(n_seqs)), itertools.accumulate(n_seqs))
-                ],
-                verbose=False,
-            )
+        steps_per_epoch = len(all_data) // src_rpc.max_n_seqs
+        avg_tokens_per_batch = sum(x.seqlens[0] for x in all_data) / steps_per_epoch
+        logger.info(f"Training epoch {cur_epoch + 1} approximately has {steps_per_epoch} steps. "
+                    f"Each batch has {avg_tokens_per_batch:.2f} tokens in average.")
+        await data_spec_ctl.put((steps_per_epoch, avg_tokens_per_batch))
+
+        dp_data_batches = [0 for _ in range(src_rpc_dp_size)]
+        for x in all_data:
+            dp_data_batches[x.dp_rank] += 1
+
+        assert all(len(x.seqlens) == 1 for x in all_data)
+        seqlens = np.array([x.seqlens[0] for x in all_data], dtype=np.int32)
+
+        # NOTE: The reordered indices prioritize longer sequences for detecting OOM errors early.
+        reorder_indices, _ = datapack.reorder_to_balanced_batches(seqlens, src_rpc.max_n_seqs)
+        recover_indices = np.argsort(reorder_indices)
+        all_data: List[data_api.DataBatchMeta] = [all_data[i] for i in reorder_indices]
+
+        keys = all_data[0].keys
+        buffer_indices = await buffer.put_batch([(keys, x.seqlens[0]) for x in all_data])
+
+        all_data = [all_data[i] for i in recover_indices]
+        buffer_indices = [buffer_indices[i] for i in recover_indices]
+        assert len(buffer_indices) == len(all_data)
+
+        for k in keys:
+            for buf_idx, x in zip(buffer_indices, all_data):
+                data_owner[(buf_idx, k)] = (src_rpc_model_name, x.dp_rank)
+
+        store_buffer_indices = [[] for _ in range(src_rpc_dp_size)]
+        for buf_idx, x in zip(buffer_indices, all_data):
+            store_buffer_indices[x.dp_rank].append(buf_idx)
+
+        for x, y in zip(store_buffer_indices, dp_data_batches):
+            assert len(x) == y, (len(x), y)
+
+        await group_rpc_blocked(
+            stream,
+            handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
+            handle_type="store",
+            datas=store_buffer_indices,
+            verbose=False,
+        )
 
         async with buffer.lock:
             buffer.lock.notify(buffer.n_rpcs)
 
         blogger.info(
             f"Filling data finished. Time consumption: {time.perf_counter() - fetch_data_start:.3f}s.")
+
+
+def _gather_stat(src: List[Dict]) -> Dict:
+    cnt, stats = {}, {}
+    for reply in src:
+        for k, v in reply.items():
+            cnt[k] = cnt.get(k, 0) + 1
+            stats[k] = stats.get(k, 0) + v
+    res = {k: v / cnt for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())}
+    for k, c in cnt.items():
+        if c != len(src):
+            logger.warning(f"Gathered `{k}` is not present in every returned stats.")
+    for k, v in res.items():
+        if any(abs(v - x.get(k, None)) > 1e-4 for x in src):
+            logger.warning(
+                f"Gathered `{k}` is not all-reduced before returning: ({[x.get(k, None) for x in src]}, {v})."
+            )
+    return res
 
 
 async def model_eval_thread_func(
@@ -694,8 +696,8 @@ async def model_eval_thread_func(
 ):
     while not stop_ctl.is_set():
         epoch, epoch_step = await eval_queue.get()
-        eval_stats = dataparallel.ParallelDataBroker.gather_from(await group_rpc_blocked(
-            stream, handlers, "evaluate", [None for _ in handlers]))
+        eval_stats = _gather_stat(await group_rpc_blocked(stream, handlers, "evaluate",
+                                                          [None for _ in handlers]))
         logger.info(f"Evaluation results at epoch {epoch + 1} step {epoch_step + 1}: {eval_stats}")
 
 
@@ -713,8 +715,11 @@ async def model_save_thread_func(
         handlers = list(filter(lambda s: s.model_name.replica_id == 0, handlers))
 
         model_save_dirs = [
-            os.path.join(model_save_root, s.model_name.role,
-                         f"epoch{epoch}epochstep{epoch_step}globalstep{global_step}") for s in handlers
+            os.path.join(
+                model_save_root,
+                s.model_name.role,
+                f"epoch{epoch}epochstep{epoch_step}globalstep{global_step}",
+            ) for s in handlers
         ]
         await group_rpc_blocked(stream, handlers, "save", model_save_dirs)
         logger.info(f"Save models at epoch {epoch} step {epoch_step}.")
@@ -726,7 +731,7 @@ class MasterWorker(worker_base.Worker):
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
 
-        self.__model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = config.model_topos
+        self.__model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = (config.model_topos)
 
         # Build execution graph and initialize concurrency utilities.
         self.__model_rpcs, _ = dfg.build_graph(config.model_rpcs)
@@ -790,9 +795,11 @@ class MasterWorker(worker_base.Worker):
         for i in range(src_rpc_dp_size):
             rank = src_rpc_topo.get_rank(data=i, pipe=src_rpc_pp_size - 1, model=0)
             handler_routing[f"__data{i}__"] = self.config.msid2mwid[
-                config_pkg.ModelShardID.from_parallelism_rank(model_name=src_rpc.model_name,
-                                                              topo=src_rpc_topo,
-                                                              parallelism_rank=rank)]
+                config_pkg.ModelShardID.from_parallelism_rank(
+                    model_name=src_rpc.model_name,
+                    topo=src_rpc_topo,
+                    parallelism_rank=rank,
+                )]
         self.__stream = request_reply_stream.make_master_stream(
             self.config.worker_info,
             n_subscribers=self.config.n_model_workers,
@@ -800,33 +807,27 @@ class MasterWorker(worker_base.Worker):
         )
         self.__stream: request_reply_stream.NameResolvingRequstClient
 
-        # Request training specification from data workers, e.g. batch size and total train steps.
-        p = request_reply_stream.Payload(
-            handler="__data0__",
-            handle_name="spec",
-        )
-        self.__stream.post(p)
-        self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
-        self.__stream.post(
-            request_reply_stream.Payload(handler="__data0__", handle_name="ack", request_id=p.ack_reply_id))
-        ft_spec: model_api.FinetuneSpec = self.__stream.poll(block=True,
-                                                             pattern=create_exact_match_pattern(
-                                                                 [p.request_id])).data
-        ft_spec.total_train_epochs = self.config.exp_ctrl.total_train_epochs
-        ft_spec.total_train_steps = ft_spec.total_train_epochs * ft_spec.steps_per_epoch
+        src_rpc = [rpc for rpc in self.config.model_rpcs if rpc.is_src][0]
+        src_rpc_model_name = src_rpc.model_name
+        src_rpc_dp_size = self.config.model_topos[src_rpc.model_name].get_dim("data")
 
-        batch_size = ft_spec.batch_size_per_device
-        # logger.info(
-        #     "\n\n"
-        #     + "=" * 40
-        #     + f"\nTotal train epochs: {ft_spec.total_train_epochs}"
-        #     + f"\nTotal train steps: {ft_spec.total_train_steps}"
-        #     + f"\nSteps per epoch: {ft_spec.steps_per_epoch}"
-        #     + f"\nEffective batch size: {batch_size}\n"
-        #     + "=" * 40
-        #     + "\n"
-        # )
-        # logger.info(f"ft_spec = {ft_spec}")
+        # Request training specification from data workers.
+        total_n_seqs = 0
+        for i in range(src_rpc_dp_size):
+            p = request_reply_stream.Payload(
+                handler=f"__data{i}__",
+                handle_name="spec",
+            )
+            self.__stream.post(p)
+            self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
+            self.__stream.post(
+                request_reply_stream.Payload(handler=f"__data{i}__",
+                                             handle_name="ack",
+                                             request_id=p.ack_reply_id))
+            n_seqs_per_dataset_shard: int = self.__stream.poll(block=True,
+                                                               pattern=create_exact_match_pattern(
+                                                                   [p.request_id])).data
+            total_n_seqs += n_seqs_per_dataset_shard
 
         event_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(event_loop)
@@ -866,6 +867,27 @@ class MasterWorker(worker_base.Worker):
                 config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in range(topo.world_size())
             ]
+            train_rpcs = list(
+                filter(
+                    lambda rpc: rpc.model_name == model_name and rpc.interface_type == dfg.ModelInterfaceType.
+                    TRAIN_STEP,
+                    self.__model_rpcs,
+                ))
+            if len(train_rpcs) > 0:
+                assert len(train_rpcs) == 1
+                steps_per_epoch = (total_n_seqs * self.config.exp_ctrl.total_train_epochs +
+                                   train_rpcs[0].max_n_seqs - 1) // train_rpcs[0].max_n_seqs
+                ft_spec = model_api.FinetuneSpec(
+                    total_train_epochs=self.config.exp_ctrl.total_train_epochs,
+                    total_train_steps=steps_per_epoch * self.config.exp_ctrl.total_train_epochs,
+                    steps_per_epoch=steps_per_epoch,
+                )
+            else:
+                ft_spec = model_api.FinetuneSpec(
+                    total_train_epochs=self.config.exp_ctrl.total_train_epochs,
+                    total_train_steps=-1,
+                    steps_per_epoch=-1,
+                )
             model_ft_specs = [ft_spec] * topo.world_size()
 
             if model_name.replica_id > 0:
@@ -902,12 +924,13 @@ class MasterWorker(worker_base.Worker):
                     to_model_config=self.__model_configs[_param_realloc_src],
                 )
 
-        logger.info("initialize complete")
+        logger.info("Initializations of models and backends complete.")
 
         self.__rpc_ctrl = RPCCorountineControl(
             stop=asyncio.Event(),
             train_count=asyncio.Queue(maxsize=len(self.__rpc_dsts)),
             fetch_data_queue=asyncio.Queue(1),
+            data_spec_queue=asyncio.Queue(1),
             eval_queue=asyncio.Queue(1),
             save_queue=asyncio.Queue(1),
             rpc_traversal={rpc.name: 0
@@ -922,7 +945,8 @@ class MasterWorker(worker_base.Worker):
 
         self.__fetch_master_ctl = asyncio.Queue(1)
 
-        # NOTE: we don't set a maximum buffer size here because we want to keep all data in the buffer
+        # NOTE: We don't set a configurable maximum buffer size here because we want to keep all data in the buffer.
+        # We assume that the dataset size is at most 1M. We have warnings if the buffer is 95% full.
         self.__seqbuffer = AsyncIOSequenceBuffer(
             self.__model_rpcs,
             max_size=int(1e6),
@@ -933,10 +957,6 @@ class MasterWorker(worker_base.Worker):
         self.__data_owner: Dict[Tuple[int, str], Tuple[str, int]] = {}
 
         logger.info(f"Creating asyncio coroutines...")
-
-        src_rpc = [rpc for rpc in self.config.model_rpcs if rpc.is_src][0]
-        src_rpc_model_name = src_rpc.model_name
-        src_rpc_dp_size = self.config.model_topos[src_rpc.model_name].get_dim("data")
 
         coroutine_tasks = []
         for rpc in self.__model_rpcs:
@@ -970,6 +990,7 @@ class MasterWorker(worker_base.Worker):
 
         load_data_task = event_loop.create_task(
             load_data_func(
+                src_rpc=src_rpc,
                 src_rpc_dp_size=src_rpc_dp_size,
                 src_rpc_model_name=src_rpc_model_name,
                 data_owner=self.__data_owner,
@@ -977,6 +998,7 @@ class MasterWorker(worker_base.Worker):
                 stream=self.__stream,
                 fetch_ctl=self.__rpc_ctrl.fetch_data_queue,
                 stop_ctl=self.__rpc_ctrl.stop,
+                data_spec_ctl=self.__rpc_ctrl.data_spec_queue,
             ))
         eval_task = event_loop.create_task(
             model_eval_thread_func(
@@ -995,19 +1017,19 @@ class MasterWorker(worker_base.Worker):
             ))
         coroutine_tasks += [load_data_task, eval_task, save_task]
 
-        # self.__event_loop = event_loop
-        # self.__coroutine_tasks = coroutine_tasks
-
         # Set up a run context of EventLoop.run_util_complete, baiscally copy-paste from cpython.
         # With this context, we can call the non-block EventLoop._run_once (similar to worker._poll).
         self.__asyncio_ctx = setup_run_until_complete(event_loop, asyncio.gather(*coroutine_tasks))
 
-        logger.info(f"asyncio coroutines created, master worker ready to run.")
+        logger.info(f"Coroutines created. The master worker is ready to run.")
 
         self.__initialized = True
         self._train_start_time = time.perf_counter()
 
         self.__clear_data_cache_reqids = None
+
+        self.__cur_steps_per_epoch = None
+        self.__cur_avg_tokens_per_batch = None
 
     def _poll(self):
         if not self.__initialized:
@@ -1046,6 +1068,12 @@ class MasterWorker(worker_base.Worker):
         except asyncio.QueueEmpty:
             is_new_epoch = False
 
+        try:
+            (self.__cur_steps_per_epoch,
+             self.__cur_avg_tokens_per_batch) = (self.__rpc_ctrl.data_spec_queue.get_nowait())
+        except asyncio.QueueEmpty:
+            pass
+
         should_eval = self.__eval_ctl.check(epochs=int(is_new_epoch), steps=1)
         should_save = self.__save_ctl.check(epochs=int(is_new_epoch), steps=1)
 
@@ -1072,68 +1100,81 @@ class MasterWorker(worker_base.Worker):
 
         # calculate flops
         #########################################
-        from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
-                                         calculate_llama_train_flops)
-
-        flops = 0
-        for train_bs, train_seqlens, real_config in zip(
-                self.__rpc_ctrl.data_amount.train_bs,
-                self.__rpc_ctrl.data_amount.train_seqlens,
-                self.__rpc_ctrl.data_amount.train_configs,
-        ):
-            flops += calculate_llama_train_flops(
-                checkpoint_activations_factor=4,
-                batch_size=train_bs,
-                seqlens=train_seqlens,
-                num_layers=real_config.n_layers,
-                hidden_size=real_config.hidden_dim,
-                intermediate_size=real_config.intermediate_dim,
-                vocab_size=real_config.vocab_size,
-            )
-        for inf_bs, inf_seqlens, real_config in zip(
-                self.__rpc_ctrl.data_amount.inf_bs,
-                self.__rpc_ctrl.data_amount.inf_seqlens,
-                self.__rpc_ctrl.data_amount.inf_configs,
-        ):
-            flops += caculuate_llama_forward_flops(
-                batch_size=inf_bs,
-                seqlens=inf_seqlens,
-                num_layers=real_config.n_layers,
-                hidden_size=real_config.hidden_dim,
-                intermediate_size=real_config.intermediate_dim,
-                vocab_size=real_config.vocab_size,
-            )
-        for gen_bs, prompt_lens, gen_len, real_config in zip(
-                self.__rpc_ctrl.data_amount.gen_bs,
-                self.__rpc_ctrl.data_amount.prompt_lens,
-                self.__rpc_ctrl.data_amount.gen_len,
-                self.__rpc_ctrl.data_amount.gen_configs,
-        ):
-            flops += calculate_llama_gen_flops(
-                batch_size=gen_bs,
-                prompt_lens=prompt_lens,
-                gen_len=gen_len,
-                num_layers=real_config.n_layers,
-                hidden_size=real_config.hidden_dim,
-                intermediate_size=real_config.intermediate_dim,
-                vocab_size=real_config.vocab_size,
-            )
+        if not all(isinstance(v, ReaLModelConfig) for v in self.__model_configs.values()):
+            logger.warning(f"Not all models are ReaLModels. Unable to calculate FLOP/s.")
+            flops = None
+        else:
+            flops = 0
+            for train_bs, train_seqlens, real_config in zip(
+                    self.__rpc_ctrl.data_amount.train_bs,
+                    self.__rpc_ctrl.data_amount.train_seqlens,
+                    self.__rpc_ctrl.data_amount.train_configs,
+            ):
+                flops += calculate_llama_train_flops(
+                    checkpoint_activations_factor=4,
+                    batch_size=train_bs,
+                    seqlens=train_seqlens,
+                    num_layers=real_config.n_layers,
+                    hidden_size=real_config.hidden_dim,
+                    intermediate_size=real_config.intermediate_dim,
+                    vocab_size=real_config.vocab_size,
+                )
+            for inf_bs, inf_seqlens, real_config in zip(
+                    self.__rpc_ctrl.data_amount.inf_bs,
+                    self.__rpc_ctrl.data_amount.inf_seqlens,
+                    self.__rpc_ctrl.data_amount.inf_configs,
+            ):
+                flops += caculuate_llama_forward_flops(
+                    batch_size=inf_bs,
+                    seqlens=inf_seqlens,
+                    num_layers=real_config.n_layers,
+                    hidden_size=real_config.hidden_dim,
+                    intermediate_size=real_config.intermediate_dim,
+                    vocab_size=real_config.vocab_size,
+                )
+            for gen_bs, prompt_lens, gen_len, real_config in zip(
+                    self.__rpc_ctrl.data_amount.gen_bs,
+                    self.__rpc_ctrl.data_amount.prompt_lens,
+                    self.__rpc_ctrl.data_amount.gen_len,
+                    self.__rpc_ctrl.data_amount.gen_configs,
+            ):
+                flops += calculate_llama_gen_flops(
+                    batch_size=gen_bs,
+                    prompt_lens=prompt_lens,
+                    gen_len=gen_len,
+                    num_layers=real_config.n_layers,
+                    hidden_size=real_config.hidden_dim,
+                    intermediate_size=real_config.intermediate_dim,
+                    vocab_size=real_config.vocab_size,
+                )
+            tflops = flops / (e2e_time * (10**12))
+            tflops_per_gpu = flops / (e2e_time * self.config.n_model_workers * (10**12))
         self.__rpc_ctrl.data_amount.clear()
-        tflops = flops / (e2e_time * (10**12))
-        tflops_per_gpu = flops / (e2e_time * self.config.n_model_workers * (10**12))
         #########################################
 
-        # TODO: add time estimation
-        logger.info(
-            f"Epoch {self._epoch}/{self.config.exp_ctrl.total_train_epochs} "
-            f"step {self._epoch_step} "
-            f"(global step {self._global_step}) finishes. "
-            f"#End to end# execution time: *{e2e_time:.3f}*s. "
-            f"Total time consumption: {total_time_consumption:.3f}s. TFLOP/s per GPU: {tflops_per_gpu:.2f}, total TFLOP/s: {tflops:.2f}."
-            # f"Estimated remaining time of this epoch: {self._buffer_size_tokens / buffer_size_decre_per_step * time_per_step:.3f}s."
-        )
+        # Logging.
+        s = f"Epoch {self._epoch}/{self.config.exp_ctrl.total_train_epochs} "
+        if self.__cur_steps_per_epoch is not None:
+            s += f"step {self._epoch_step}/{self.__cur_steps_per_epoch} "
+        else:
+            s += f"step {self._epoch_step} "
+        s += f"(global step {self._global_step}) finishes. "
+        if self.__cur_avg_tokens_per_batch is not None:
+            s += f"Average #tokens per batch is {self.__cur_avg_tokens_per_batch:.0f}. "
+        s += f"#End to end# execution time: *{e2e_time:.3f}*s. "
+        s += f"Total time consumption: {total_time_consumption:.3f}s. "
+        if self.__cur_steps_per_epoch is not None and len(self.e2e_time_history) > 2:
+            remaining_steps = self.__cur_steps_per_epoch - self._epoch_step
+            remaining_epochs = self.__total_train_epochs - self._epoch
+            avg_t = np.mean(self.e2e_time_history[2:])
+            remain_t = avg_t * remaining_steps
+            remain_t += avg_t * self.__cur_steps_per_epoch * remaining_epochs
+            s += f"Estimated remaining time: {remain_t:.3f}s. "
+        if flops is not None:
+            s += f"TFLOP/s per GPU: {tflops_per_gpu:.2f}, total TFLOP/s: {tflops:.2f}."
+        logger.info(s)
 
-        if self.__benchmark_steps is not None and self._global_step >= self.__benchmark_steps:
+        if (self.__benchmark_steps is not None and self._global_step >= self.__benchmark_steps):
             logger.info(
                 f"Finished benchmark {self.__benchmark_steps}. Total time consumption {total_time_consumption:.3f}"
             )

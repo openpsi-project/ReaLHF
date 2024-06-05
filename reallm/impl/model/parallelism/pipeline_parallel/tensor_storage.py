@@ -33,13 +33,15 @@ class TensorBuffer:
     def put(self, name: str, mbid: int, x: torch.Tensor):
         self.tensors[name][mbid] = x
 
-    def alloc(self,
-              name: str,
-              mbid: int,
-              shape: Tuple[int],
-              dtype: torch.dtype,
-              device: torch.device,
-              require_grads: bool = False):
+    def alloc(
+        self,
+        name: str,
+        mbid: int,
+        shape: Tuple[int],
+        dtype: torch.dtype,
+        device: torch.device,
+        require_grads: bool = False,
+    ):
         self.tensors[name][mbid] = torch.zeros(shape, dtype=dtype, device=device, requires_grad=require_grads)
         return self.tensors[name][mbid]
 

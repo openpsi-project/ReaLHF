@@ -19,6 +19,7 @@ logger = logging.getLogger("model")
 
 @dataclasses.dataclass
 class ReaLModelConfig:
+    ### Architectural configurations. ###
     n_layers: int
     n_kv_heads: int
     head_dim: int
@@ -42,9 +43,10 @@ class ReaLModelConfig:
     rotary_interleaved: bool = False
     rotary_scaling: Optional[float] = None
     rotary_scaling_type: Optional[str] = None
-
+    # Whether it is a critic/reward model that outputs scores.
     is_critic: bool = False
 
+    ### Running configurations. ###
     gradient_accumulation_fusion: bool = False
 
 
@@ -86,8 +88,6 @@ class FinetuneSpec:
     total_train_epochs: int
     total_train_steps: int
     steps_per_epoch: int
-    batch_size_per_device: int
-    max_seqlen: int
 
 
 @dataclasses.dataclass
@@ -131,6 +131,12 @@ class NullBackend(ModelBackend):
     def _initialize(self, model: Model, spec: FinetuneSpec) -> Model:
         return model
 
+def null_model(name: ModelName, device: Union[str, torch.device]) -> Model:
+    return Model(name, torch.nn.Identity(), None, device)
+
+def tokenizer_only_model(name: ModelName, device: Union[str, torch.device],
+                         tokenizer_path:str) -> Model:
+    return Model(name, torch.nn.Identity(), load_hf_tokenizer(tokenizer_path), device)
 
 class ModelInterface(abc.ABC):
 
@@ -192,7 +198,7 @@ def make_model_wrapper(cfg: system_api.ModelWrapper) -> Callable[[Model], Model]
 
 
 def make_model(cfg: system_api.Model, name: ModelName, device: Union[str, torch.device]) -> Model:
-    logger.info(f"making model {cfg.type_} on {device}")
+    logger.debug(f"making model {cfg.type_} on {device}")
     model_cls = ALL_MODEL_CLASSES[cfg.type_]
     model = model_cls(**cfg.args, name=name, device=device)
     assert isinstance(model, Model)
@@ -213,6 +219,8 @@ def make_backend(cfg: system_api.ModelBackend) -> ModelBackend:
 
 
 register_backend("null", NullBackend)
+register_model("null", null_model)
+register_model("tokenizer", tokenizer_only_model)
 
 SUPPORTED_MODELS = []
 HF_MODEL_FAMILY_REGISTRY = {}

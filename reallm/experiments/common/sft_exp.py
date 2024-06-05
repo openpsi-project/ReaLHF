@@ -7,7 +7,7 @@ from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptAnswerDatasetConfig
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
 from reallm.base.topology import PipeModelDataParallelTopology
-
+from reallm.api.quickstart.entrypoint import register_quickstart_exp
 
 @dataclasses.dataclass
 class SFTConfig(Experiment):
@@ -45,19 +45,16 @@ class SFTConfig(Experiment):
         model_path = self.model.path
 
         dataset = Dataset(
-            "packed_prompt_answer",
+            "prompt_answer",
             args=dict(
-                n_tokens_per_batch=self.dataset.train_tokens_per_batch,
-                min_seqs_per_batch=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
                 max_length=self.dataset.max_seqlen,
                 dataset_path=self.dataset.train_path,
             ),
         )
-        dataloader = eval_dataloader = DataLoader("iterable_dataset_loader")
 
         eval_dataset = copy.deepcopy(dataset)
         eval_dataset.args["dataset_path"] = self.dataset.valid_path
-        eval_dataset.args["n_tokens_per_batch"] = self.dataset.valid_tokens_per_batch
+        eval_dataloader = DataLoader("packed_eval", args=dict(batch_size=self.dataset.valid_bs_n_seqs))
 
         backend = ModelBackend(
             "ds_train",
@@ -74,7 +71,7 @@ class SFTConfig(Experiment):
                 min_lr_ratio=self.model.optimizer.min_lr_ratio,
                 zero_stage=(self.model.zero_stage if self.model.parallel.pipeline_parallel_size == 1 else min(
                     self.model.zero_stage, 1)),
-                engine_type="pipe" if self.model.parallel.pipeline_parallel_size > 1 else "deepspeed",
+                engine_type=("pipe" if self.model.parallel.pipeline_parallel_size > 1 else "deepspeed"),
                 offload_optimizer_state=self.model.optimizer.offload,
                 enable_bf16=self.model.enable_bf16,
                 enable_fp16=self.model.enable_fp16,
@@ -127,7 +124,6 @@ class SFTConfig(Experiment):
                 ],
                 tokenizer_name_or_path=model_path,
                 datasets=[dataset],
-                dataloader=dataloader,
                 cuda_cache_cleanliness=False,
                 cuda_cache_clear_freq=10,
             )
@@ -138,10 +134,10 @@ class SFTConfig(Experiment):
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
             model_type=self.model.type,
-            input_data=["packed_input_ids", "cu_seqlens", "prompt_mask"],
+            input_data=["packed_input_ids", "prompt_mask"],
             log_return_value=True,
-            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
-            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         exp_ctrl = ExperimentSaveEvalControl(
@@ -155,3 +151,5 @@ class SFTConfig(Experiment):
             model_worker=model_worker,
         )
         return cfg
+
+register_quickstart_exp("sft", SFTConfig)

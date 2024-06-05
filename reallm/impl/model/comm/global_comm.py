@@ -70,7 +70,7 @@ def setup_global_comm(
         for model_name, topo in model_topos.items():
             mw_ranks[model_name] = filter_match_mwids(model_name, topo, msid2mwid)
 
-    if "GPU_DEVICES_ISOLATED" not in os.environ and "RAY" not in os.environ["REAL_MODE"]:
+    if ("GPU_DEVICES_ISOLATED" not in os.environ and "RAY" not in os.environ["REAL_MODE"]):
         raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
 
     assert len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")) == 1, os.environ["CUDA_VISIBLE_DEVICES"]

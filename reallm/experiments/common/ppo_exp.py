@@ -9,7 +9,7 @@ from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, ParallelismConfig
 from reallm.base.topology import PipeModelDataParallelTopology
 import reallm.base.logging as logging
-
+from reallm.api.quickstart.entrypoint import register_quickstart_exp
 logger = logging.getLogger("PPO exp", "colored")
 
 
@@ -29,7 +29,7 @@ def get_topo(
 
 
 def get_world_size(parallel: ParallelismConfig) -> int:
-    return parallel.model_parallel_size * parallel.pipeline_parallel_size * parallel.data_parallel_size
+    return (parallel.model_parallel_size * parallel.pipeline_parallel_size * parallel.data_parallel_size)
 
 
 @dataclasses.dataclass
@@ -67,6 +67,7 @@ class PPOHyperparameters:
     max_new_tokens: int = 256
     min_new_tokens: int = 256
     greedy: bool = False
+    # FIXME: logits mask
     top_p: float = 0.9
     top_k: int = 200
     temperature: float = 1.0
@@ -113,9 +114,6 @@ class PPOConfig(Experiment):
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
 
     ppo: PPOHyperparameters = dataclasses.field(default_factory=PPOHyperparameters)
-
-    global_train_bs: int = 512
-    global_gen_bs: int = 512
 
     def __post_init__(self):
         if self.is_sft_lora or self.sft_lora_path is not None:
@@ -164,11 +162,11 @@ class PPOConfig(Experiment):
 
     def initial_setup(self) -> ExperimentConfig:
         dataset = Dataset(
-            "packed_prompt",
+            "prompt",
             args=dict(
                 dataset_path=self.dataset.path,
-                n_tokens_per_batch=self.dataset.n_tokens_per_batch,
                 max_length=self.dataset.max_prompt_len,
+                pad_to_max_length=self.dataset.pad_to_max_length,
             ),
         )
 
@@ -228,8 +226,8 @@ class PPOConfig(Experiment):
         actor_backend = _make_train_backend_config(self.actor)
         critic_backend = _make_train_backend_config(self.critic)
 
-        inf_backend = ModelBackend("pipe_inference" if self.ref.parallel.pipeline_parallel_size >
-                                   1 else "null")
+        def inf_backend(parallel_cfg: ParallelismConfig):
+            return ModelBackend("pipe_inference" if parallel_cfg.pipeline_parallel_size > 1 else "null")
 
         ppo_kwargs = dict(
             n_minibatches=self.ppo.ppo_n_minibatches,
@@ -292,7 +290,7 @@ class PPOConfig(Experiment):
                         mp_rank=gen_topo.get_coord(i).model,
                     ),
                     model=actor_model,
-                    backend=inf_backend,
+                    backend=inf_backend(self.actor_gen_parallel),
                 ),
             ]
             if i < self.actor_train_ws:
@@ -335,7 +333,7 @@ class PPOConfig(Experiment):
                             mp_rank=rw_topo.get_coord(i).model,
                         ),
                         model=rw_model,
-                        backend=inf_backend,
+                        backend=inf_backend(self.rew.parallel),
                     ),
                 ]
             elif i < self.rew_inf_ws + self.critic_inf_ws:
@@ -350,7 +348,7 @@ class PPOConfig(Experiment):
                             mp_rank=critic_inf_topo.get_coord(i - offset).model,
                         ),
                         model=critic_model,
-                        backend=inf_backend,
+                        backend=inf_backend(self.critic.parallel),
                     ),
                 ]
             else:
@@ -365,7 +363,7 @@ class PPOConfig(Experiment):
                             mp_rank=ref_topo.get_coord(i - offset).model,
                         ),
                         model=ref_model,
-                        backend=inf_backend,
+                        backend=inf_backend(self.ref.parallel),
                     ),
                 ]
             mw = ModelWorker(
@@ -373,7 +371,6 @@ class PPOConfig(Experiment):
                 shards=shards,
                 tokenizer_name_or_path=self.actor.path,
                 datasets=[dataset],
-                dataloader=DataLoader("iterable_dataset_loader"),
                 cuda_cache_cleanliness=True,
                 cuda_cache_clear_freq=10,
             )
@@ -384,7 +381,7 @@ class PPOConfig(Experiment):
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             interface_impl=actor_interface,
-            input_data=["packed_prompts", "prompt_cu_seqlens"],
+            input_data=["packed_prompts"],
             output_data=[
                 "seq_no_eos_mask",
                 "packed_seq",
@@ -393,8 +390,8 @@ class PPOConfig(Experiment):
                 "prompt_mask",
             ],
             balanced_dp=True,
-            min_n_seqs=self.global_gen_bs,
-            max_n_seqs=self.global_gen_bs,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         inf_reward = ModelRPC(
@@ -407,8 +404,8 @@ class PPOConfig(Experiment):
             output_data=["scores"],
             output_key_remap={"scores": "rewards"},
             post_hooks=[OffloadHook()],
-            min_n_seqs=self.global_gen_bs,
-            max_n_seqs=self.global_gen_bs,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         inf_ref_logits = ModelRPC(
@@ -423,8 +420,8 @@ class PPOConfig(Experiment):
             output_data=["logprobs"],
             output_key_remap={"logprobs": "packed_ref_logprobs"},
             post_hooks=[OffloadHook()],
-            min_n_seqs=self.global_gen_bs,
-            max_n_seqs=self.global_gen_bs,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         inf_values = ModelRPC(
@@ -435,8 +432,8 @@ class PPOConfig(Experiment):
             input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
             output_data=["scores"],
             output_key_remap={"scores": "values"},
-            min_n_seqs=self.global_gen_bs,
-            max_n_seqs=self.global_gen_bs,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         train_actor = ModelRPC(
@@ -457,8 +454,8 @@ class PPOConfig(Experiment):
             log_return_value=True,
             pre_hooks=[SyncParamHook(source=ModelName("actor", 0))],
             post_hooks=[SyncParamHook(target=ModelName("actor", 0))],
-            min_n_seqs=self.global_train_bs,
-            max_n_seqs=self.global_train_bs,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         train_critic = ModelRPC(
@@ -479,8 +476,8 @@ class PPOConfig(Experiment):
             log_return_value=True,
             pre_hooks=[SyncParamHook(source=ModelName("critic", 0))],
             post_hooks=[SyncParamHook(target=ModelName("critic", 0))],
-            min_n_seqs=self.global_train_bs,
-            max_n_seqs=self.global_train_bs,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         if actor_train_topo.get_dim("pipe") > 1:
@@ -489,7 +486,7 @@ class PPOConfig(Experiment):
         else:
             train_actor.min_n_seqs_per_dp = self.ppo.ppo_n_minibatches
 
-        rollout.min_n_seqs_per_dp = self.global_gen_bs // gen_topo.get_dim("data")
+        rollout.min_n_seqs_per_dp = self.dataset.train_bs_n_seqs // gen_topo.get_dim("data")
 
         exp_ctrl = ExperimentSaveEvalControl(
             total_train_epochs=self.total_train_epochs,
@@ -497,6 +494,15 @@ class PPOConfig(Experiment):
         )
         return ExperimentConfig(
             exp_ctrl=exp_ctrl,
-            model_rpcs=[rollout, inf_ref_logits, inf_reward, inf_values, train_actor, train_critic],
+            model_rpcs=[
+                rollout,
+                inf_ref_logits,
+                inf_reward,
+                inf_values,
+                train_actor,
+                train_critic,
+            ],
             model_worker=model_worker,
         )
+
+register_quickstart_exp("ppo", PPOConfig)

@@ -57,7 +57,11 @@ def compute_rlhf_pflops(
         hf_config = transformers.AutoConfig.from_pretrained(path)
         mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
         mconfigs[name] = mconfig
-    assert (prompt_len + gen_len) * batch_size == 2**17, (batch_size, prompt_len, gen_len)
+    assert (prompt_len + gen_len) * batch_size == 2**17, (
+        batch_size,
+        prompt_len,
+        gen_len,
+    )
     flops = 0
     flops += calculate_llama_gen_flops(
         batch_size,
@@ -174,8 +178,7 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
                     _phn = "inf"
                 else:
                     _phn = "gen"
-                _profile_log_path = (
-                    f"/lustre/aigc/llm/logs/fw/profile-s{model_size}p{p}m{m}d{d}-{_phn}/cudakernel/")
+                _profile_log_path = f"/lustre/aigc/llm/logs/fw/profile-s{model_size}p{p}m{m}d{d}-{_phn}/cudakernel/"
                 kernel_time = CUDAKernelTime(0, 0, 0, 0)
                 for _j in range(p * m * d):
                     with open(os.path.join(_profile_log_path, f"kernel_time{_j}.pkl"), "rb") as f:
@@ -197,9 +200,11 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
                 key1 = str((actor_size, world_size, from_topo, to_topo))
                 key2 = str((actor_size, world_size, to_topo, from_topo))
                 if key1 in reallocation_cost_table:
-                    param_realloc_time += reallocation_cost_table[key1]["mem_shift_time_ns"] / 1e9 * world_size
+                    param_realloc_time += (reallocation_cost_table[key1]["mem_shift_time_ns"] / 1e9 *
+                                           world_size)
                 elif key2 in reallocation_cost_table:
-                    param_realloc_time += reallocation_cost_table[key2]["mem_shift_time_ns"] / 1e9 * world_size
+                    param_realloc_time += (reallocation_cost_table[key2]["mem_shift_time_ns"] / 1e9 *
+                                           world_size)
                 else:
                     raise RuntimeError()
             if critic_topos[0][0] != critic_topos[1][0]:
@@ -209,9 +214,11 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
                 key1 = str((critic_size, world_size, from_topo, to_topo))
                 key2 = str((critic_size, world_size, to_topo, from_topo))
                 if key1 in reallocation_cost_table:
-                    param_realloc_time += reallocation_cost_table[key1]["mem_shift_time_ns"] / 1e9 * world_size
+                    param_realloc_time += (reallocation_cost_table[key1]["mem_shift_time_ns"] / 1e9 *
+                                           world_size)
                 elif key2 in reallocation_cost_table:
-                    param_realloc_time += reallocation_cost_table[key2]["mem_shift_time_ns"] / 1e9 * world_size
+                    param_realloc_time += (reallocation_cost_table[key2]["mem_shift_time_ns"] / 1e9 *
+                                           world_size)
                 else:
                     raise RuntimeError()
         else:
@@ -233,8 +240,7 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
                     _phn = "inf"
                 else:
                     _phn = "gen"
-                _profile_log_path = (
-                    f"/lustre/aigc/llm/logs/fw/profile-s{actor_size}p{p}m{m}d{d}-{_phn}/cudakernel/")
+                _profile_log_path = f"/lustre/aigc/llm/logs/fw/profile-s{actor_size}p{p}m{m}d{d}-{_phn}/cudakernel/"
                 kernel_time = CUDAKernelTime(0, 0, 0, 0)
                 for _j in range(p * m * d):
                     with open(os.path.join(_profile_log_path, f"kernel_time{_j}.pkl"), "rb") as f:
@@ -263,8 +269,8 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
             ("ref", "inference"),
             ("reward", "inference"),
         ]:
-            factor = handle_type2gpu_time[_key].total_secs / np.mean(
-                handle_type2time[_key]) / handle_type2device_count[_key]
+            factor = (handle_type2gpu_time[_key].total_secs / np.mean(handle_type2time[_key]) /
+                      handle_type2device_count[_key])
             handle_type2gpu_time[_key] = handle_type2gpu_time[_key] / factor
         compute_time = comm_time = misc_time = 0
         for x in [
@@ -351,7 +357,7 @@ def main():
     # Plot for each seqlen setting
     width = 0.35
     # factor = df[(df["System"] == "ReaL-Heuristic")]['gpu_compute_time'].to_numpy() + df[(df["System"] == "ReaL-Heuristic")]['gpu_comm_time'].to_numpy()
-    factor = df[(df["System"] == "ReaL-Heuristic")]['total_gpu_time'].to_numpy()
+    factor = df[(df["System"] == "ReaL-Heuristic")]["total_gpu_time"].to_numpy()
     for i, system in enumerate(["ReaL (Ours)", "ReaL-Heuristic"]):
         group = df[(df["System"] == system)]
         # hatch = "/" if i == 0 else "-"
@@ -427,14 +433,23 @@ def main():
             hatch=hatch,
         )
         for xpos, t1, t2 in zip(barpos, compute_time, comm_time):
-            ax.text(xpos, t1 / 2, f"{(float(t1) * 100):.0f}%", ha='center', color='white', weight='bold')
-            ax.text(xpos,
-                    t1 + t2 / 2,
-                    f"{(float(t2) * 100):.0f}%",
-                    ha='center',
-                    color='white',
-                    weight='bold',
-                    va='center')
+            ax.text(
+                xpos,
+                t1 / 2,
+                f"{(float(t1) * 100):.0f}%",
+                ha="center",
+                color="white",
+                weight="bold",
+            )
+            ax.text(
+                xpos,
+                t1 + t2 / 2,
+                f"{(float(t2) * 100):.0f}%",
+                ha="center",
+                color="white",
+                weight="bold",
+                va="center",
+            )
         if i == 0:
             ax.set_xticks(np.arange(len(settings)))
             ax.set_xticklabels(settings, rotation=0, fontsize=xlabel_fontsize)
@@ -444,7 +459,10 @@ def main():
         ax.set_ylim(0, 1.2)
         if i == 0:
             ax.legend(fontsize=legend_fontsize, ncol=4, loc="upper center")
-            ax.set_title("GPU Time Breakdown, ReaL (Left) vs Heuristic (Right)", fontsize=title_fontsize)
+            ax.set_title(
+                "GPU Time Breakdown, ReaL (Left) vs Heuristic (Right)",
+                fontsize=title_fontsize,
+            )
 
     # group = df[(df["System"] == "ReaL (Ours)")]
     # ax = all_axes[1, 0]

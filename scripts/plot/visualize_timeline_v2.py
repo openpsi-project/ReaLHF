@@ -22,8 +22,10 @@ def main():
 
     all_time_marks: List[List[TimeMarkEntry]] = []
     for i in tqdm.tqdm(range(32), desc="loading time marks"):
-        with open(f"/lustre/aigc/llm/logs/meizy/sosp-a7c34s896g128t128-t/timemark/time_marks{i}.pkl",
-                  "rb") as f:
+        with open(
+                f"/lustre/aigc/llm/logs/meizy/sosp-a7c34s896g128t128-t/timemark/time_marks{i}.pkl",
+                "rb",
+        ) as f:
             time_marks: List[TimeMarkEntry] = pickle.load(f)
         all_time_marks.append(time_marks)
 

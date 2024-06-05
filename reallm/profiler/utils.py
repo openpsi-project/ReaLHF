@@ -3,8 +3,9 @@ import reallm.base.namedarray
 
 
 def random_sample(bs, seq_len, vocab_size):
-    from flash_attn.bert_padding import unpad_input
     import torch
+
+    from reallm.impl.model.utils.padding import unpad_input
 
     input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)

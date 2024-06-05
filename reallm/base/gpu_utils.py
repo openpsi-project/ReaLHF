@@ -89,7 +89,7 @@ def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment
         rank,
         keepalive_ttl=30,
     )
-    logger.info(f"Worker type {worker_type} rank {rank} waiting for peers, world size {world_size}...")
+    logger.debug(f"Worker type {worker_type} rank {rank} waiting for peers, world size {world_size}...")
     while (len(
             name_resolve.get_subtree(
                 names.trainer_ddp_peer(experiment_name, trial_name, name_resolve_identifier))) < world_size):

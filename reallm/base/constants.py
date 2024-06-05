@@ -28,13 +28,18 @@ class GlobalMemoryBuffer:
 
         required_len = int(np.prod(tensor_shape))
         if self.buffer.get((name, dtype), None) is None:
-            self.buffer[(name, dtype)] = torch.empty(required_len,
-                                                     dtype=dtype,
-                                                     device=torch.cuda.current_device(),
-                                                     requires_grad=False)
+            self.buffer[(name, dtype)] = torch.empty(
+                required_len,
+                dtype=dtype,
+                device=torch.cuda.current_device(),
+                requires_grad=False,
+            )
         elif self.buffer[(name, dtype)].numel() < required_len:
             self.buffer[(name, dtype)] = torch.nn.functional.pad(
-                self.buffer[(name, dtype)], (0, required_len - self.buffer[(name, dtype)].numel()), value=0)
+                self.buffer[(name, dtype)],
+                (0, required_len - self.buffer[(name, dtype)].numel()),
+                value=0,
+            )
         res = self.buffer[(name, dtype)][0:required_len].view(*tensor_shape)
         if force_zero:
             res.zero_()
@@ -47,12 +52,12 @@ LOG_ROOT = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}"
 
 SLURM_LOCK_FILE_NAME = f"{cluster_spec.fileroot}/logs/slurm_scheduler.lock"
 
-PYTORCH_KERNEL_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/kernels"
+PYTORCH_KERNEL_CACHE_PATH = (f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/kernels")
 TRITON_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/triton"
 DATASET_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/datasets"
-TORCH_EXTENSIONS_DIR = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/extensions"
+TORCH_EXTENSIONS_DIR = (f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/extensions")
 
-QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/quickstart.pkl"
+QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/"
 
 # _model_name will be changed in the model_scope context manager
 _model_name: "ModelName" = None

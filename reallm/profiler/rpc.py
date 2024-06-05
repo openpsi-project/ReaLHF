@@ -7,16 +7,19 @@ from reallm.profiler.device_mesh import DeviceMesh, ModelParallelStrategy
 
 @dataclasses.dataclass
 class RPC:
-    """ simple RPC class for cpp search module input """
+    """simple RPC class for cpp search module input"""
+
     rpc_name: str
     model_name: str
     interface_type: str
 
     @classmethod
     def from_config(cls, model_rpc: ModelRPC):
-        return cls(rpc_name=model_rpc.name,
-                   model_name=model_rpc.model_name.role,
-                   interface_type=str(model_rpc.interface_type))
+        return cls(
+            rpc_name=model_rpc.name,
+            model_name=model_rpc.model_name.role,
+            interface_type=str(model_rpc.interface_type),
+        )
 
 
 @dataclasses.dataclass
@@ -51,8 +54,8 @@ class RPCInstance:
         if len(self.parents) == 0 and len(self.children) == 0:
             return f"RPCInstance({self.rpc.rpc_name}, {self.epoch_id})"
         else:
-            return f"RPCInstance({self.rpc.rpc_name}, {self.epoch_id}, "\
-                   f"{self.parents}, {self.children})"
+            return (f"RPCInstance({self.rpc.rpc_name}, {self.epoch_id}, "
+                    f"{self.parents}, {self.children})")
 
     def __hash__(self):
         return hash((self.rpc.rpc_name, self.epoch_id))

@@ -8,14 +8,14 @@ import torch
 from reallm.base.constants import *
 
 _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS = {
-    'tensor_model_parallel': False,
-    'partition_dim': -1,
-    'partition_stride': 1
+    "tensor_model_parallel": False,
+    "partition_dim": -1,
+    "partition_stride": 1,
 }
 
 
 def param_is_not_model_parallel_duplicate(param):
-    return (hasattr(param, 'tensor_model_parallel')
+    return (hasattr(param, "tensor_model_parallel")
             and param.tensor_model_parallel) or (model_parallel_rank() == 0)
 
 
@@ -24,9 +24,9 @@ def set_tensor_model_parallel_attributes(tensor, is_parallel, dim, stride):
     for attribute in _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS:
         assert not hasattr(tensor, attribute)
     # Set the attributes.
-    setattr(tensor, 'tensor_model_parallel', is_parallel)
-    setattr(tensor, 'partition_dim', dim)
-    setattr(tensor, 'partition_stride', stride)
+    setattr(tensor, "tensor_model_parallel", is_parallel)
+    setattr(tensor, "partition_dim", dim)
+    setattr(tensor, "partition_stride", stride)
 
 
 def set_defaults_if_not_set_tensor_model_parallel_attributes(tensor):
@@ -58,16 +58,18 @@ def _initialize_affine_weight_gpu(weight, init_method, partition_dim, stride=1):
     init_method(weight)
 
 
-def _initialize_affine_weight_cpu(weight,
-                                  output_size,
-                                  input_size,
-                                  per_partition_size,
-                                  partition_dim,
-                                  init_method,
-                                  stride=1,
-                                  return_master_weight=False,
-                                  *,
-                                  params_dtype=torch.float32):
+def _initialize_affine_weight_cpu(
+    weight,
+    output_size,
+    input_size,
+    per_partition_size,
+    partition_dim,
+    init_method,
+    stride=1,
+    return_master_weight=False,
+    *,
+    params_dtype=torch.float32,
+):
     """Initialize affine weight for model parallel.
 
     Build the master weight on all processes and scatter
@@ -111,16 +113,16 @@ def split_tensor_along_last_dim(
     num_partitions: int,
     contiguous_split_chunks: bool = False,
 ) -> List[torch.Tensor]:
-    """ Split a tensor along its last dimension.
+    """Split a tensor along its last dimension.
 
-        Arguments:
-            tensor: input tensor.
-            num_partitions: number of partitions to split the tensor
-            contiguous_split_chunks: If True, make each chunk contiguous
-                                     in memory.
+    Arguments:
+        tensor: input tensor.
+        num_partitions: number of partitions to split the tensor
+        contiguous_split_chunks: If True, make each chunk contiguous
+                                 in memory.
 
-        Returns:
-            A list of Tensors
+    Returns:
+        A list of Tensors
     """
     # Get the size and dimension.
     last_dim = tensor.dim() - 1
@@ -135,27 +137,29 @@ def split_tensor_along_last_dim(
 
 
 def split_tensor_into_1d_equal_chunks(tensor, new_buffer=False):
-    """ Break a tensor into equal 1D chunks across tensor parallel ranks.
+    """Break a tensor into equal 1D chunks across tensor parallel ranks.
 
-        Returns a Tensor or View with this rank's portion of the data.
+    Returns a Tensor or View with this rank's portion of the data.
 
-        Arguments:
-            tensor: The tensor to split
+    Arguments:
+        tensor: The tensor to split
 
-        Keyword Arguments:
-            new_buffer (bool): If True, returns a new Tensor.
-                               If False, returns a view into the existing Tensor.
-                               Default is False
+    Keyword Arguments:
+        new_buffer (bool): If True, returns a new Tensor.
+                           If False, returns a view into the existing Tensor.
+                           Default is False
 
     """
     partition_size = torch.numel(tensor) // model_parallel_world_size()
     start_index = partition_size * model_parallel_rank()
     end_index = start_index + partition_size
     if new_buffer:
-        data = torch.empty(partition_size,
-                           dtype=tensor.dtype,
-                           device=torch.cuda.current_device(),
-                           requires_grad=False)
+        data = torch.empty(
+            partition_size,
+            dtype=tensor.dtype,
+            device=torch.cuda.current_device(),
+            requires_grad=False,
+        )
         data.copy_(tensor.view(-1)[start_index:end_index])
     else:
         data = tensor.view(-1)[start_index:end_index]
@@ -163,19 +167,21 @@ def split_tensor_into_1d_equal_chunks(tensor, new_buffer=False):
 
 
 def gather_split_1d_tensor(tensor):
-    """ Opposite of split_tensor_into_1d_equal_chunks. Gather values from tensor
-        model parallel ranks.
+    """Opposite of split_tensor_into_1d_equal_chunks. Gather values from tensor
+    model parallel ranks.
 
-        Returns a new Tensor with the gathered data.
+    Returns a new Tensor with the gathered data.
 
-        Arguments:
-            tensor: A Tensor or view of this rank's portion of the data.
+    Arguments:
+        tensor: A Tensor or view of this rank's portion of the data.
     """
     numel_gathered = torch.numel(tensor) * model_parallel_world_size()
-    gathered = torch.empty(numel_gathered,
-                           dtype=tensor.dtype,
-                           device=torch.cuda.current_device(),
-                           requires_grad=False)
+    gathered = torch.empty(
+        numel_gathered,
+        dtype=tensor.dtype,
+        device=torch.cuda.current_device(),
+        requires_grad=False,
+    )
     # NOTE: This API is experimental in pytorch (as of Feb 2022) and
     # this might break in future pytorch releases. We chose this API
     # as opposed to torch.distributed.all_gather for efficiency reasons.
@@ -186,9 +192,9 @@ def gather_split_1d_tensor(tensor):
 
 
 class VocabUtility:
-    """ Split the vocabulary into `world_size` chunks and return the first
-        and last index of the vocabulary belonging to the `rank`
-        partition: Note that indices in [fist, last)
+    """Split the vocabulary into `world_size` chunks and return the first
+    and last index of the vocabulary belonging to the `rank`
+    partition: Note that indices in [fist, last)
 
     """
 
@@ -205,3 +211,31 @@ class VocabUtility:
         per_partition_vocab_size = divide(global_vocab_size, world_size)
         return VocabUtility.vocab_range_from_per_partition_vocab_size(per_partition_vocab_size, rank,
                                                                       world_size)
+
+
+def assert_viewless_tensor(tensor, extra_msg=None):
+    """Assert that a tensor is not a view (i.e., its '._base' field is
+    not set)."""
+    if isinstance(tensor, list):
+        [assert_viewless_tensor(t) for t in tensor]
+        return tensor
+    if not isinstance(tensor, torch.Tensor):
+        return tensor
+    assert tensor._base is None, ("Ensure tensor._base is None before setting tensor.data or storing "
+                                  "tensor to memory buffer. Otherwise, a memory leak will occur (and "
+                                  "likely accumulate over iterations). %s") % extra_msg
+    return tensor
+
+
+def safely_set_viewless_tensor_data(tensor, new_data_tensor):
+    """Safely set tensor's '.data' field.
+
+    Check first that the tensor is viewless (i.e., '._base' not set). If not,
+    raise an exception.
+    """
+    assert_viewless_tensor(
+        tensor,
+        extra_msg="FYI, tensor._base has shape %s, and new_data_tensor has shape %s." %
+        ("--" if tensor._base is None else tensor._base.shape, new_data_tensor.shape),
+    )
+    tensor.data = new_data_tensor

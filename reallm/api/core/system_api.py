@@ -77,7 +77,7 @@ class Scheduling:
             "mem": 20 * 1024,
             "gpu": 0,
             "container_image": _LLM_CPU_IMAGE,
-            **kwargs
+            **kwargs,
         })
 
     @staticmethod
@@ -110,11 +110,17 @@ class WorkerInformation:
     experiment_name: str = ""
     trial_name: str = ""  # Name of the trial of the experiment; e.g. "{USER}-0".
     worker_type: str = ""  # E.g. "policy", "actor", or "trainer".
-    worker_index: int = -1  # The index of the worker of the specific type, starting from 0.
-    worker_count: int = 0  # Total number of workers; hence, 0 <= worker_index < worker_count.
-    worker_tag: Optional[str] = None  # For actor and policy worker, can be "training" or "evaluation".
+    worker_index: int = (-1)  # The index of the worker of the specific type, starting from 0.
+    worker_count: int = (
+        0  # Total number of workers; hence, 0 <= worker_index < worker_count.
+    )
+    worker_tag: Optional[str] = (
+        None  # For actor and policy worker, can be "training" or "evaluation".
+    )
     host_key: Optional[str] = None  # Worker will update and keep this key alive.
-    watch_keys: Union[str, List[str]] = None  # Worker will exit if all of the watching keys are gone.
+    watch_keys: Union[str, List[str]] = (
+        None  # Worker will exit if all of the watching keys are gone.
+    )
     wandb_entity: Optional[str] = (
         None  # wandb_{config} are optional. They overwrite system wandb_configuration.
     )
@@ -141,7 +147,7 @@ class ModelWorker:
     # dataset, for source model workers
     tokenizer_name_or_path: Optional[str] = None
     datasets: Optional[List[Union[str, Dataset]]] = None
-    dataloader: Union[str, DataLoader] = "default"
+    dataloader: Union[str, DataLoader] = "packed"
     use_dataset_cache: bool = False
     dataset_cahce_root: str = DATASET_CACHE_PATH
     # cuda & cudnn config
@@ -266,7 +272,10 @@ class ExperimentConfig:
         model_configs: Dict[ModelName, Model] = {}
         for model_name in model_names:
             _this_mws = list(
-                filter(lambda mw: any(x.id.model_name == model_name for x in mw.shards), self.model_worker))
+                filter(
+                    lambda mw: any(x.id.model_name == model_name for x in mw.shards),
+                    self.model_worker,
+                ))
             all_shards: List[StandaloneModelShard] = [
                 next(filter(lambda x: x.id.model_name == model_name, mw.shards)) for mw in _this_mws
             ]
@@ -316,8 +325,9 @@ class ExperimentConfig:
                                                          model_configs[hook.source].type_ == "real_model")):
                     raise ValueError(
                         "To synchronize parameters between two models, both models must be ReaLModel.")
-                other_model_name = hook.target if hook.target is not None else hook.source
-                other_topo = model_topos[hook.target] if hook.target is not None else model_topos[hook.source]
+                other_model_name = (hook.target if hook.target is not None else hook.source)
+                other_topo = (model_topos[hook.target]
+                              if hook.target is not None else model_topos[hook.source])
                 self_topo = model_topos[rpc.model_name]
                 if (self_topo.get_dim("model") % other_topo.get_dim("model") != 0
                         and other_topo.get_dim("model") % self_topo.get_dim("model") != 0):

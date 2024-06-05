@@ -9,7 +9,7 @@ import warnings
 
 import numpy as np
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 bs_seqlen = [(128, 896), (256, 384), (512, 128)]
 model_sizes = [7, 13, 34, 70]
@@ -84,8 +84,13 @@ def _parse_log(rootdir: str, model_size, seqlen, bs, mode, n_nodes):
             f"{model_size}B mode {mode} seqlen={seqlen} bs={bs} n_nodes={n_nodes} mean step time {np.mean(record_times):.2f}s"
         )
         if len(record_times) > 10:
-            return LogResult(np.mean(record_times), np.max(record_times), np.min(record_times),
-                             np.std(record_times), len(record_times))
+            return LogResult(
+                np.mean(record_times),
+                np.max(record_times),
+                np.min(record_times),
+                np.std(record_times),
+                len(record_times),
+            )
         else:
             return LogResult(-1, -1, -1, -1, -1)
 
@@ -94,8 +99,18 @@ def parse_log():
     modes = ["s", "m"]
     # modes = ["s", "m"]
     trial_names = [
-        "20240407-0", "20240408-0", "20240408-1", "20240408-2", "20240409-2", "20240409-3", "20240409-4",
-        "20240410-1", "20240410-2", "20240411-2", "20240412-3", "20240413-1"
+        "20240407-0",
+        "20240408-0",
+        "20240408-1",
+        "20240408-2",
+        "20240409-2",
+        "20240409-3",
+        "20240409-4",
+        "20240410-1",
+        "20240410-2",
+        "20240411-2",
+        "20240412-3",
+        "20240413-1",
     ]
     ms_to_n_nodes = {
         (7, 7, 1): 1,
@@ -136,7 +151,7 @@ def parse_log():
 
                 if len(rs) > 0:
                     res[key] = np.max(rs) if mode == "m" else np.min(rs)
-                    log_path[key] = lps[np.argmax(rs)] if mode == "m" else lps[np.argmin(rs)]
+                    log_path[key] = (lps[np.argmax(rs)] if mode == "m" else lps[np.argmin(rs)])
 
     # import pprint
     # pprint.pprint(res)
@@ -170,12 +185,18 @@ def parse_log():
 
                 if len(rs) > 0:
                     res[key] = np.max(rs) if mode == "m" else np.min(rs)
-                    log_path[key] = lps[np.argmax(rs)] if mode == "m" else lps[np.argmin(rs)]
+                    log_path[key] = (lps[np.argmax(rs)] if mode == "m" else lps[np.argmin(rs)])
 
     print("*" * 30)
     trial_names = [
-        "20240410-1", "20240410-2", "20240411-2", "20240412-2", "20240412-3", "20240412-4", "20240413-0",
-        "20240413-1"
+        "20240410-1",
+        "20240410-2",
+        "20240411-2",
+        "20240412-2",
+        "20240412-3",
+        "20240412-4",
+        "20240413-0",
+        "20240413-1",
     ]
     # trial_names = ["20240412-4"]
     for model_size in model_sizes:
@@ -188,7 +209,7 @@ def parse_log():
                 for trial_name in trial_names:
                     n_nodes = ms_to_n_nodes[(model_size, model_size, 1)]
                     key = (model_size, model_size, bs, seqlen, mode, n_nodes)
-                    exp_name = f"sosp-a{model_size}c{model_size}s{seqlen}g{bs}t{bs}-{mode}"
+                    exp_name = (f"sosp-a{model_size}c{model_size}s{seqlen}g{bs}t{bs}-{mode}")
                     root_dir = f"/lustre/aigc/llm/logs/meizy/{exp_name}/{trial_name}"
                     # print(exp_name)
 
@@ -205,7 +226,7 @@ def parse_log():
 
                 if len(rs) > 0:
                     res[key] = np.max(rs) if mode == "m" else np.min(rs)
-                    log_path[key] = lps[np.argmax(rs)] if mode == "m" else lps[np.argmin(rs)]
+                    log_path[key] = (lps[np.argmax(rs)] if mode == "m" else lps[np.argmin(rs)])
 
     print("*" * 30)
 
@@ -235,7 +256,7 @@ def parse_log():
 
             if len(rs) > 0:
                 res[key] = np.max(rs) if mode == "m" else np.min(rs)
-                log_path[key] = lps[np.argmax(rs)] if mode == "m" else lps[np.argmin(rs)]
+                log_path[key] = (lps[np.argmax(rs)] if mode == "m" else lps[np.argmin(rs)])
 
     print("*" * 30)
 
@@ -254,11 +275,13 @@ def parse_log():
 
     import pickle
     import pprint
+
     pprint.pprint(log_path)
 
     import collections
 
     import pandas
+
     df_dict = collections.defaultdict(list)
     for k, v in res.items():
         v: LogResult

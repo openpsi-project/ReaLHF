@@ -19,8 +19,7 @@ SCHEDULING_TIMEOUT_MAX_SECONDS = 3600 * 24
 
 
 class SlurmSchedulerClient(SchedulerClient):
-    """Uses Slurm (https://slurm.schedmd.com/overview.html).
-    """
+    """Uses Slurm (https://slurm.schedmd.com/overview.html)."""
 
     def __init__(self, expr_name, trial_name):
         super().__init__(expr_name, trial_name)
@@ -35,25 +34,26 @@ class SlurmSchedulerClient(SchedulerClient):
         self.submit_array(worker_type, cmd, count=1, **kwargs)
 
     def submit_array(
-            self,
-            worker_type: str,
-            cmd: str,  # XXX: should be None for workers
-            count: int,
-            cpu: int = 1,
-            gpu_type: str = "geforce",
-            gpu: int = 0,
-            mem: int = 1024,  # MB
-            env_vars: Optional[Dict] = None,
-            container_image: str = "llm/llm-gpu",
-            container_mounts: str = cluster_spec.default_mount,
-            node_type: Optional[str] = None,
-            nodelist: Optional[str] = None,
-            exclude: Optional[str] = None,
-            hostfile: bool = True,
-            multiprog: bool = True,
-            begin: str = None,
-            deadline: str = None,
-            time_limit: str = None):
+        self,
+        worker_type: str,
+        cmd: str,  # XXX: should be None for workers
+        count: int,
+        cpu: int = 1,
+        gpu_type: str = "geforce",
+        gpu: int = 0,
+        mem: int = 1024,  # MB
+        env_vars: Optional[Dict] = None,
+        container_image: str = "llm/llm-gpu",
+        container_mounts: str = cluster_spec.default_mount,
+        node_type: Optional[str] = None,
+        nodelist: Optional[str] = None,
+        exclude: Optional[str] = None,
+        hostfile: bool = True,
+        multiprog: bool = True,
+        begin: str = None,
+        deadline: str = None,
+        time_limit: str = None,
+    ):
         # record launch information, do not submit to slurm until `wait()` is called
         # NOTE: fractional GPU requirement will be resolved automatically in `__post_init__` of SlurnLaunchInfo
         launch_info = SlurmLaunchInfo(
@@ -78,8 +78,7 @@ class SlurmSchedulerClient(SchedulerClient):
             time_limit=time_limit,
         )
 
-        if launch_info.slurm_name in self.__pending_jobs \
-            or launch_info.slurm_name in self.__committed_jobs:
+        if (launch_info.slurm_name in self.__pending_jobs or launch_info.slurm_name in self.__committed_jobs):
             raise ValueError(f"job name {launch_info.slurm_name} already existed.")
 
         if launch_info.multiprog:
@@ -94,7 +93,7 @@ class SlurmSchedulerClient(SchedulerClient):
     def __resolve_multiprog_file(self, launch_info: SlurmLaunchInfo):
         worker_type = launch_info.worker_type
         cmd = launch_info.cmd.format(
-            jobstep_id='%t',
+            jobstep_id="%t",
             n_jobsteps=launch_info.n_jobsteps,
             worker_submission_index=self.__submission_counter[worker_type],
             wprocs_per_jobstep=launch_info.wprocs_per_jobstep,
@@ -156,8 +155,15 @@ class SlurmSchedulerClient(SchedulerClient):
             launch_info.cancel()
         time.sleep(0.2)
         # print("before stop wait", self.__pending_jobs)
-        self.wait(check_status=(),
-                  remove_status=(JobState.CANCELLED, JobState.NOT_FOUND, JobState.FAILED, JobState.COMPLETED))
+        self.wait(
+            check_status=(),
+            remove_status=(
+                JobState.CANCELLED,
+                JobState.NOT_FOUND,
+                JobState.FAILED,
+                JobState.COMPLETED,
+            ),
+        )
 
     def find(self, slurm_name: str) -> JobInfo:
         launch_info = self.__committed_jobs.get(slurm_name, None)
@@ -179,7 +185,11 @@ class SlurmSchedulerClient(SchedulerClient):
     def wait(
             self,
             timeout=None,
-            check_status: Tuple[JobState, ...] = (JobState.CANCELLED, JobState.FAILED, JobState.NOT_FOUND),
+            check_status: Tuple[JobState, ...] = (
+                JobState.CANCELLED,
+                JobState.FAILED,
+                JobState.NOT_FOUND,
+            ),
             remove_status: Tuple[JobState, ...] = (JobState.COMPLETED,),
             update=False,
     ):
@@ -212,10 +222,12 @@ class SlurmSchedulerClient(SchedulerClient):
                     continue
                 if launch_info.job_info.state in check_status:
                     launch_info.show_log()
-                    raise JobException(run_name=self.run_name,
-                                       worker_type=launch_info.worker_type,
-                                       host=launch_info.job_info.host,
-                                       reason=launch_info.job_info.state)
+                    raise JobException(
+                        run_name=self.run_name,
+                        worker_type=launch_info.worker_type,
+                        host=launch_info.job_info.host,
+                        reason=launch_info.job_info.state,
+                    )
                 if launch_info.job_info.state in remove_status:
                     logger.info(f"Job {launch_info.slurm_name} is {launch_info.job_info.state}.(Removed)")
                     left.remove(job_slurm_name)

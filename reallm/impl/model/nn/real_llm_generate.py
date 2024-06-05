@@ -13,14 +13,10 @@ import transformers
 from reallm.api.core import model_api
 # import reallm.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
 from reallm.base import constants, logging
-from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
+from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import mask_eos_token
 from reallm.impl.model.utils.logits_warper import top_k_top_p_logits
-
-try:
-    from flash_attn.bert_padding import index_first_axis, unpad_input
-except ModuleNotFoundError:
-    pass
+from reallm.impl.model.utils.padding import index_first_axis, unpad_input
 
 if TYPE_CHECKING:
     from .real_llm_api import ReaLModel
@@ -85,8 +81,10 @@ def genstep(
             _vocab_indices = _batch_indices.new_zeros((1, next_token_logits.shape[1]))
             if tokenizer.eos_token_id is not None:
                 _vocab_indices[:, tokenizer.eos_token_id] = 1
-            next_token_logits.masked_fill_(_batch_indices * _vocab_indices,
-                                           torch.finfo(next_token_logits.dtype).min)
+            next_token_logits.masked_fill_(
+                _batch_indices * _vocab_indices,
+                torch.finfo(next_token_logits.dtype).min,
+            )
 
     if not gconfig.greedy:
         next_token_logits /= gconfig.temperature
@@ -112,9 +110,11 @@ def genstep(
             async_op=True,
             group=constants.model_parallel_group(),
         )
-        torch.distributed.all_reduce(next_tokens,
-                                     torch.distributed.ReduceOp.SUM,
-                                     group=constants.model_parallel_group())
+        torch.distributed.all_reduce(
+            next_tokens,
+            torch.distributed.ReduceOp.SUM,
+            group=constants.model_parallel_group(),
+        )
 
     if tokenizer.eos_token_id is not None:
         if tokenizer.pad_token_id is None:
@@ -214,9 +214,14 @@ def generate(
     cu_seqlens: Optional[torch.LongTensor] = None,
     max_seqlen: Optional[int] = None,
     gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData], Optional[torch.Tensor]]:
-    """Generete a sequence with a ReaLModel.
-    """
+) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        List[PipeCacheData],
+        Optional[torch.Tensor],
+]:
+    """Generete a sequence with a ReaLModel."""
     bs = cu_seqlens.shape[0] - 1
     device = model.device
     mconfig: model_api.ReaLModelConfig = model.config
@@ -248,7 +253,7 @@ def generate(
     logits = prompt_logits[cu_seqlens[1:] - 1]
     cache_seqlens = input_lens.clone().to(dtype=torch.int32)
     for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
-        assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
+        assert (y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None)
         # fix of a flash attention bug
         kvcache_seqlen = max(
             constants.max_prompt_len() + gconfig.max_new_tokens,
@@ -327,7 +332,9 @@ def generate(
         x.max_seqlen = 1
         # K/v cache will be changed in-place with flash attention.
         logits = model(x, ys)[0].pp_output.squeeze(dim=1)
-        cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
+        cache_seqlens += (
+            1  # The global handle. This will increase all handles in ys by 1.
+        )
 
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
             logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
@@ -484,8 +491,10 @@ class InflightBatchingGenerator:
         self.batch_size = batch_size
         self.max_prompt_len = max_prompt_len
 
-        kvcache_seqlen = max(max_prompt_len + gconfig.max_new_tokens,
-                             mconfig.hidden_dim // mconfig.head_dim + 10)
+        kvcache_seqlen = max(
+            max_prompt_len + gconfig.max_new_tokens,
+            mconfig.hidden_dim // mconfig.head_dim + 10,
+        )
         _p = next(self.model.parameters())
         dtype, device = _p.dtype, _p.device
 
@@ -568,7 +577,12 @@ class InflightBatchingGenerator:
                     ]
                     gen_logits_mask = torch.stack(gen_logits_mask, -2)
 
-                res = dict(prompt=prompt_tokens, gen=gen_tokens, logp=gen_logp, logits_mask=gen_logits_mask)
+                res = dict(
+                    prompt=prompt_tokens,
+                    gen=gen_tokens,
+                    logp=gen_logp,
+                    logits_mask=gen_logits_mask,
+                )
                 try:
                     self.outqueue.put_nowait(res)
                 except queue.Full as e:
@@ -626,7 +640,12 @@ class InflightBatchingGenerator:
             logits = self._get_non_eos_logits()
 
         next_tokens, logprob, logits_mask, _, self.unfinished_sequences = genstep(
-            logits, self.tokenizer, self.unfinished_sequences, self.generate_idx, self.gconfig)
+            logits,
+            self.tokenizer,
+            self.unfinished_sequences,
+            self.generate_idx,
+            self.gconfig,
+        )
 
         for i in range(self.batch_size):
             self.output_tokens_buf[i].append(next_tokens[i].long())

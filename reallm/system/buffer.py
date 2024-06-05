@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import *
 import asyncio
+import copy
 import time
 
 import numpy as np
@@ -46,29 +47,9 @@ class _ReplayEntry:
     reuses_left: int
     receive_time: float
     # We don't save data explicitly, but store metadata.
-    # We can know shape and dtype from seqlen and key,
-    # just as we implemented in base/dataparallel.py
+    # We can know shape and dtype from seqlen and key.
     keys: List[str]
     seqlen: int
-
-
-# def _get_seqlen_from_sample(sample: namedarray.NamedArray) -> int:
-#     assert ("input_lens" in sample.keys() or "cu_seqlens" in sample.keys()
-#             or "prompt_cu_seqlens" in sample.keys() or "prompt_lens" in sample.keys()), (
-#                 list(sample.keys()),
-#                 sample,
-#             )
-#     if "input_lens" in sample.keys():
-#         return sample["input_lens"].item()
-#     elif "cu_seqlens" in sample.keys():
-#         return int(sample["cu_seqlens"][1] - 1)
-#     # NOTE: The order matters. We should first try to get the length of the generated text rather than prompts.
-#     elif "prompt_lens" in sample.keys():
-#         return sample["prompt_lens"].item()
-#     elif "prompt_cu_seqlens" in sample.keys():
-#         return int(sample["prompt_cu_seqlens"][1] - 1)
-#     else:
-#         return None
 
 
 class _TensorDictSequenceBuffer:
@@ -112,7 +93,7 @@ class _TensorDictSequenceBuffer:
             self.__storage[idx] = _ReplayEntry(
                 reuses_left=self.__reuses,
                 receive_time=time.time(),
-                keys=keys,
+                keys=copy.deepcopy(keys),
                 seqlen=seqlen,
             )
 
@@ -121,8 +102,10 @@ class _TensorDictSequenceBuffer:
         # Can be parallelized.
         for idx, new_data in zip(indices, new_datas):
             new_keys, new_seqlen = new_data
-            assert len(set(new_keys).intersection(self.__storage[idx].keys)) == 0, (new_keys,
-                                                                                    self.__storage[idx].keys)
+            assert len(set(new_keys).intersection(self.__storage[idx].keys)) == 0, (
+                new_keys,
+                self.__storage[idx].keys,
+            )
             self.__storage[idx].keys += new_keys
             self.__storage[idx].seqlen = new_seqlen
 
@@ -166,6 +149,7 @@ class AsyncIOSequenceBuffer:
         # Both are queues of size 1.
         self._fetch_ctl = fetch_ctl
         self._fetch_master_ctl = fetch_master_ctl
+        self._load_data_requested = False
 
         # Buffer indicators, should be locked by self._lock.
         # Put, amend, ready, idle, and empty are mutually exclusive.
@@ -186,7 +170,9 @@ class AsyncIOSequenceBuffer:
         self._rpc_data_keys = rpc_data_keys = list(set().union(*[rpc.input_data for rpc in rpcs]))
         # We can efficiently compute whether an RPC is ready using this mask
         self._rpc_key_mask = np.stack(
-            [np.array([k in rpc.input_data for k in rpc_data_keys], dtype=bool) for rpc in rpcs], axis=1)
+            [np.array([k in rpc.input_data for k in rpc_data_keys], dtype=bool) for rpc in rpcs],
+            axis=1,
+        )
         self._rpc_names = [rpc.name for rpc in rpcs]
 
         # The internal buffer implementation.
@@ -238,6 +224,12 @@ class AsyncIOSequenceBuffer:
 
             self._buf_size += len(samples)
             self._n_tokens += self.__buffer._get_seqlen(indices).sum()
+            if self._buf_size >= 0.95 * self.__max_size:
+                logger.warning(f"Buffer is 95% full. The current buffer size is {self._buf_size} "
+                               f"while the maximum size is {self.__max_size}. "
+                               f"If your dataset has more than 1M sequences, consider enlarge "
+                               f"the default batch size in the master worker.")
+            self._load_data_requested = False
         return indices
 
     async def amend_batch(self, indices: List[int], new_datas: List[Tuple[List[str], int]]):
@@ -266,14 +258,16 @@ class AsyncIOSequenceBuffer:
                 self._lock.notify(len(self._rpc_names))
 
     def _request_load_data(self):
-        try:
-            self._fetch_ctl.put_nowait(1)
-        except asyncio.QueueFull:
-            pass
-        try:
-            self._fetch_master_ctl.put_nowait(1)
-        except asyncio.QueueFull:
-            pass
+        if not self._load_data_requested:
+            try:
+                self._fetch_ctl.put_nowait(1)
+            except asyncio.QueueFull:
+                pass
+            try:
+                self._fetch_master_ctl.put_nowait(1)
+            except asyncio.QueueFull:
+                pass
+            self._load_data_requested = True
 
     async def get_batch_for_rpc(self, rpc: dfg.ModelRPC) -> SequenceSample:
         rpc_idx = self._rpc_names.index(rpc.name)
@@ -308,8 +302,11 @@ class AsyncIOSequenceBuffer:
 
             indices = ready_indices[:rpc.max_n_seqs]
             seqlens = seqlens[:rpc.max_n_seqs]
-            assert rpc.min_n_seqs <= len(indices) <= rpc.max_n_seqs, (rpc.min_n_seqs, len(indices),
-                                                                      rpc.max_n_seqs)
+            assert rpc.min_n_seqs <= len(indices) <= rpc.max_n_seqs, (
+                rpc.min_n_seqs,
+                len(indices),
+                rpc.max_n_seqs,
+            )
 
             self._is_idle[indices] = False
             self._is_being_read[indices] = True

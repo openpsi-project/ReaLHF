@@ -31,9 +31,9 @@ def profile_model_type(model_type: ModelFamily):
     def profile_layers_cmd(model_path, model_type, batch_size_list, seq_len_list):
         batch_size_list = ",".join(str(x) for x in batch_size_list)
         seq_len_list = ",".join(str(x) for x in seq_len_list)
-        return f"python -m profiler.layers_main "\
-               f"--model_path {model_path} --model_name {model_type} "\
-               f"--batch_size_list {batch_size_list} --seq_len_list {seq_len_list}"
+        return (f"python -m profiler.layers_main "
+                f"--model_path {model_path} --model_name {model_type} "
+                f"--batch_size_list {batch_size_list} --seq_len_list {seq_len_list}")
 
     bs_list = [1, 2, 4, 8, 16, 32, 64, 128] * 3
     sl_list = [128] * 8 + [256] * 8 + [512] * 8

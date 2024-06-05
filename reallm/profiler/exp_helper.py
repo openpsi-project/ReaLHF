@@ -75,10 +75,18 @@ def file_to_allocation_pkl(  # model_rpcs: List[ModelRPC],
 
     # rollout, rew_inf, ref_inf, critic_inf, actor_train, critic_train = model_rpcs
 
-    rollout_topo = (r[rollout.name]["device_mesh"], r[rollout.name]["num_pp"], r[rollout.name]["num_dp"],
-                    r[rollout.name]["num_mp"])
-    actor_train_topo = (r[actor_train.name]["device_mesh"], r[actor_train.name]["num_pp"],
-                        r[actor_train.name]["num_dp"], r[actor_train.name]["num_mp"])
+    rollout_topo = (
+        r[rollout.name]["device_mesh"],
+        r[rollout.name]["num_pp"],
+        r[rollout.name]["num_dp"],
+        r[rollout.name]["num_mp"],
+    )
+    actor_train_topo = (
+        r[actor_train.name]["device_mesh"],
+        r[actor_train.name]["num_pp"],
+        r[actor_train.name]["num_dp"],
+        r[actor_train.name]["num_mp"],
+    )
     old_name = actor_train.name
     optim_model_name = []
     if rollout_topo != actor_train_topo:
@@ -90,10 +98,18 @@ def file_to_allocation_pkl(  # model_rpcs: List[ModelRPC],
         actor_train.model_name = ModelName("actor", 0)
         rollout.model_name = ModelName("actor", 0)
 
-    critic_inf_topo = (r[critic_inf.name]["device_mesh"], r[critic_inf.name]["num_pp"],
-                       r[critic_inf.name]["num_dp"], r[critic_inf.name]["num_mp"])
-    critic_train_topo = (r[critic_train.name]["device_mesh"], r[critic_train.name]["num_pp"],
-                         r[critic_train.name]["num_dp"], r[critic_train.name]["num_mp"])
+    critic_inf_topo = (
+        r[critic_inf.name]["device_mesh"],
+        r[critic_inf.name]["num_pp"],
+        r[critic_inf.name]["num_dp"],
+        r[critic_inf.name]["num_mp"],
+    )
+    critic_train_topo = (
+        r[critic_train.name]["device_mesh"],
+        r[critic_train.name]["num_pp"],
+        r[critic_train.name]["num_dp"],
+        r[critic_train.name]["num_mp"],
+    )
     old_name = critic_train.name
     if critic_inf_topo != critic_train_topo:
         critic_train.pre_hooks.append(SyncParamHook(source=ModelName("critic", 0)))

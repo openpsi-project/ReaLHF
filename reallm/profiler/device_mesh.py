@@ -19,15 +19,19 @@ class ModelParallelStrategy:
 
     @classmethod
     def from_config(cls, parallel: ParallelismConfig):
-        return cls(num_pp=parallel.pipeline_parallel_size,
-                   num_mp=parallel.model_parallel_size,
-                   num_dp=parallel.data_parallel_size)
+        return cls(
+            num_pp=parallel.pipeline_parallel_size,
+            num_mp=parallel.model_parallel_size,
+            num_dp=parallel.data_parallel_size,
+        )
 
     def to_config(self, use_sequence_parallel: bool):
-        return ParallelismConfig(pipeline_parallel_size=self.num_pp,
-                                 model_parallel_size=self.num_mp,
-                                 data_parallel_size=self.num_dp,
-                                 use_sequence_parallel=use_sequence_parallel)
+        return ParallelismConfig(
+            pipeline_parallel_size=self.num_pp,
+            model_parallel_size=self.num_mp,
+            data_parallel_size=self.num_dp,
+            use_sequence_parallel=use_sequence_parallel,
+        )
 
 
 @dataclasses.dataclass
@@ -35,16 +39,17 @@ class DeviceMesh:
     """
     Args:
         device_mesh_name: str, naming rule: <slurm_nodelist>[:<gpu_ids>], slurm_nodelist
-            is the name of slurm nodes the mesh is on, should follow slurm convention, 
+            is the name of slurm nodes the mesh is on, should follow slurm convention,
             for example "QH-com[40-43]" or "QH-com[01,11,13-14]", if n_nodes=1, gpu_ids are
             the gpu id list delimited by comma if n_gpus < 8, for example "0,1,2,3" or "0,1".
-            An example of full device mesh name in this situation is "QH-com40:0,1,2,3" 
+            An example of full device mesh name in this situation is "QH-com40:0,1,2,3"
         n_nodes: int
         n_gpus: int
         node_names: List[str]
         gpu_ids: Optional[List[int]] = None
         n_gpus_per_node: int = 8
     """
+
     device_mesh_name: str
     n_nodes: int
     n_gpus: int
@@ -62,9 +67,13 @@ class DeviceMesh:
     def __repr__(self):
         return self.device_mesh_name
 
-    def to_config(self, device_mesh: 'DeviceMesh', train_eval_config: ModelTrainEvalConfig,
-                  rpc: ModelRPC) -> RPCAllocation:
-        """ 
+    def to_config(
+        self,
+        device_mesh: "DeviceMesh",
+        train_eval_config: ModelTrainEvalConfig,
+        rpc: ModelRPC,
+    ) -> RPCAllocation:
+        """
         args:
             device_mesh: DeviceMesh, the entire device mesh of the experiment,
                          must contain this device mesh and contain whole nodes.
@@ -148,22 +157,26 @@ def make_device_mesh_from_name(name: str):
     if ":" in name:
         node_name, gpu_ids = name.split(":")
         gpu_ids = list(map(int, gpu_ids.split(",")))
-        return DeviceMesh(device_mesh_name=name,
-                          n_nodes=1,
-                          n_gpus=len(gpu_ids),
-                          node_names=[node_name],
-                          gpu_ids=gpu_ids,
-                          n_gpus_per_node=len(gpu_ids))
+        return DeviceMesh(
+            device_mesh_name=name,
+            n_nodes=1,
+            n_gpus=len(gpu_ids),
+            node_names=[node_name],
+            gpu_ids=gpu_ids,
+            n_gpus_per_node=len(gpu_ids),
+        )
     else:
         node_names = parse_slurm_nodelist(name)
         print(node_names)
         n_nodes = len(node_names)
-        return DeviceMesh(device_mesh_name=name,
-                          n_nodes=n_nodes,
-                          n_gpus=n_nodes * 8,
-                          node_names=node_names,
-                          gpu_ids=list(range(8)),
-                          n_gpus_per_node=8)
+        return DeviceMesh(
+            device_mesh_name=name,
+            n_nodes=n_nodes,
+            n_gpus=n_nodes * 8,
+            node_names=node_names,
+            gpu_ids=list(range(8)),
+            n_gpus_per_node=8,
+        )
 
 
 def slurm_nodelist_from_nodes(nodes: List[str]) -> str:
@@ -197,12 +210,14 @@ def find_sub_device_meshes(device_mesh: DeviceMesh) -> List[DeviceMesh]:
     assert device_mesh.n_gpus_per_node == 8
     if device_mesh.n_nodes == 1:
         return [
-            DeviceMesh(device_mesh_name=f"{device_mesh.node_names[0]}:"
-                       f"{gpu_id},{gpu_id+1},{gpu_id+2},{gpu_id+3}",
-                       n_nodes=1,
-                       n_gpus=4,
-                       node_names=device_mesh.node_names,
-                       gpu_ids=[gpu_id + i for i in range(4)]) for gpu_id in [0, 4]
+            DeviceMesh(
+                device_mesh_name=f"{device_mesh.node_names[0]}:"
+                f"{gpu_id},{gpu_id+1},{gpu_id+2},{gpu_id+3}",
+                n_nodes=1,
+                n_gpus=4,
+                node_names=device_mesh.node_names,
+                gpu_ids=[gpu_id + i for i in range(4)],
+            ) for gpu_id in [0, 4]
         ] + [device_mesh]
     # if device_mesh.n_gpus == 1:
     #     return [device_mesh]
@@ -254,11 +269,13 @@ def find_sub_device_meshes(device_mesh: DeviceMesh) -> List[DeviceMesh]:
     res = []
     for node in device_mesh.node_names:
         res += find_sub_device_meshes(
-            DeviceMesh(device_mesh_name=f"{node}",
-                       n_nodes=1,
-                       n_gpus=8,
-                       node_names=[node],
-                       gpu_ids=list(range(8))))
+            DeviceMesh(
+                device_mesh_name=f"{node}",
+                n_nodes=1,
+                n_gpus=8,
+                node_names=[node],
+                gpu_ids=list(range(8)),
+            ))
 
     # multi-node meshes
     node_ids = sorted([parse_node_id(node) for node in device_mesh.node_names])
@@ -267,11 +284,13 @@ def find_sub_device_meshes(device_mesh: DeviceMesh) -> List[DeviceMesh]:
             sub_mesh_node_ids = node_ids[j:j + i]
             node_names = [f"QH-com{node_id:02d}" for node_id in sub_mesh_node_ids]
             res.append(
-                DeviceMesh(device_mesh_name=slurm_nodelist_from_nodes(node_names),
-                           n_nodes=i,
-                           n_gpus=8 * i,
-                           node_names=node_names,
-                           gpu_ids=list(range(8))))
+                DeviceMesh(
+                    device_mesh_name=slurm_nodelist_from_nodes(node_names),
+                    n_nodes=i,
+                    n_gpus=8 * i,
+                    node_names=node_names,
+                    gpu_ids=list(range(8)),
+                ))
 
     res += [device_mesh]
     return res
@@ -287,8 +306,8 @@ def find_parallel_strategies(device_mesh: DeviceMesh) -> List[ModelParallelStrat
             num_pp = 1
             while num_pp <= num_dp_pp:
                 num_dp_mp = n_gpus // num_pp
-                valid = (num_dp_mp in [1, 2, 4, 8] or num_dp_mp % 8 == 0)\
-                        and num_dp_pp % num_pp == 0 and num_pp <= 16
+                valid = ((num_dp_mp in [1, 2, 4, 8] or num_dp_mp % 8 == 0) and num_dp_pp % num_pp == 0
+                         and num_pp <= 16)
                 if valid:
                     res.append(ModelParallelStrategy(num_pp, num_mp, num_dp_pp // num_pp))
                 num_pp += 1

@@ -9,6 +9,7 @@ from reallm.api.core import system_api
 from reallm.api.core.config import ModelName
 from reallm.base import topology
 from reallm.impl.model.comm.global_comm import filter_match_mwids
+from reallm.impl.model.comm.param_realloc import pipeline_repartition_strategy
 
 
 @dataclasses.dataclass(unsafe_hash=True)
@@ -76,3 +77,85 @@ def setup_data_transfer(
         data_transfer_src_ranks=data_transfer_src_ranks,
         data_transfer_dst_ranks=data_transfer_dst_ranks,
     )
+
+
+@dataclasses.dataclass
+class DataTransferSenderStep:
+    rank: int
+    dst_ranks: List[int]
+    group: torch.distributed.ProcessGroup
+    key: str
+    buf_indices: List[int]
+    seqlens: List[int]
+
+
+@dataclasses.dataclass
+class DataTransferReceiverStep:
+    rank: int
+    src: int
+    dst_ranks: List[int]
+    group: torch.distributed.ProcessGroup
+    key: str
+    buf_indices: List[int]
+    seqlens: List[int]
+
+
+def derive_data_transfer_plan(
+    keys: List[str],
+    global_buffer_indices: List[int],
+    global_seqlens: List[int],
+    consumer_name: ModelName,
+    consumer_mapping: Dict[int, List[int]],
+    producer_names: Dict[str, ModelName],
+    producer_mappings: Dict[Tuple[ModelName, str], Dict[int, List[int]]],
+    data_transfer_info: DataTransferInfo,
+) -> List[DataTransferReceiverStep | DataTransferSenderStep]:
+    comm_plan = []
+
+    for k in keys:
+        producer_name = producer_names[k]
+        producer_mapping = producer_mappings[(producer_name, k)]
+
+        # partition mapping starts from zero, which is different from buffer indices
+        repart_strat = pipeline_repartition_strategy(producer_mapping, consumer_mapping)
+
+        for (dp_i, dp_j), comm_slots in repart_strat.items():
+            if len(comm_slots) == 0:
+                continue
+
+            group_key = DataTransferPair(
+                src=producer_name,
+                src_dp_rank=dp_i,
+                dst=consumer_name,
+                dst_dp_rank=dp_j,
+            )
+            bcast_src = data_transfer_info.data_transfer_src_ranks[group_key]
+            group = data_transfer_info.data_transfer_groups[group_key]
+            dst_ranks = data_transfer_info.data_transfer_dst_ranks[group_key]
+
+            buf_indices = [global_buffer_indices[_i] for _i in comm_slots]
+            seqlens = [global_seqlens[_i] for _i in comm_slots]
+
+            for dst_rank in dst_ranks:
+                comm_plan.append(
+                    DataTransferReceiverStep(
+                        rank=dst_rank,
+                        src=bcast_src,
+                        dst_ranks=dst_ranks,
+                        group=group,
+                        key=k,
+                        buf_indices=buf_indices,
+                        seqlens=seqlens,
+                    ))
+
+            comm_plan.append(
+                DataTransferSenderStep(
+                    rank=bcast_src,
+                    dst_ranks=dst_ranks,
+                    group=group,
+                    key=k,
+                    buf_indices=buf_indices,
+                    seqlens=seqlens,
+                ))
+
+    return comm_plan

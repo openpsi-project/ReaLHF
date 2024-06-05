@@ -18,7 +18,11 @@ COLUMN_LINEAR_KEYS = [
     ".mlp.gate_proj",
     ".mlp.up_proj",
 ]  # dim=0 + partition bias
-ROW_LINEAR_KEYS = [".attn.c_proj", ".mlp.down_proj", ".mlp.c_proj"]  # dim=1 + no partition bias
+ROW_LINEAR_KEYS = [
+    ".attn.c_proj",
+    ".mlp.down_proj",
+    ".mlp.c_proj",
+]  # dim=1 + no partition bias
 
 if constants.use_te_impl():
     COLUMN_LINEAR_KEYS = [
@@ -113,8 +117,10 @@ def mp_partition_key(
     mp_rank: Optional[int],
     mp_size: Optional[int],
     config: model_api.ReaLModelConfig,
-    partition_fn: Callable[[torch.Tensor, Optional[int], int, Optional[int]],
-                           Union[List[torch.Tensor], torch.Tensor]] = tensor_slice_partition_fn,
+    partition_fn: Callable[
+        [torch.Tensor, Optional[int], int, Optional[int]],
+        Union[List[torch.Tensor], torch.Tensor],
+    ] = tensor_slice_partition_fn,
 ) -> torch.Tensor:
     """Partition a parameter of ReaLModel with name `key` by the method `partition_fn`."""
     if any([ek in key for ek in EMBEDDING_KEYS]):
@@ -130,9 +136,9 @@ def mp_partition_key(
             return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif any([ck in key for ck in COLUMN_LINEAR_KEYS]):
         if (("k_attn" in key) or ("v_attn" in key)) and config.n_kv_heads % mp_size != 0:
-            logger.warning(f"Cannot split {config.n_kv_heads} kv heads evenly among "
-                           f"{mp_size} model parallel ranks, "
-                           f"use unsplitted linear for kv heads instead")
+            # logger.warning(f"Cannot split {config.n_kv_heads} kv heads evenly among "
+            #                f"{mp_size} model parallel ranks, "
+            #                f"use unsplitted linear for kv heads instead")
             return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
         # partition both weight and bias
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
@@ -191,7 +197,10 @@ def get_real_model_param_shape(k: str, config: model_api.ReaLModelConfig, mp_siz
         if "k_attn" in k or "v_attn" in k:
             if "weight" in k:
                 if config.n_kv_heads % mp_size == 0:
-                    return (config.head_dim * config.n_kv_heads // mp_size, config.hidden_dim)
+                    return (
+                        config.head_dim * config.n_kv_heads // mp_size,
+                        config.hidden_dim,
+                    )
                 else:
                     return (config.head_dim * config.n_kv_heads, config.hidden_dim)
             else:

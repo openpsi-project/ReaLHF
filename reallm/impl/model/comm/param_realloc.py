@@ -162,8 +162,10 @@ def _create_param_realloc_groups(
                 # This is not the optimal solution for intra-node communication
                 # because there may exist a source rank that is also dst rank,
                 # but we forcely select the first source rank on each node here.
-                assignment = _assign_src_to_dsts(_group_mwids_by_node(_src_ranks),
-                                                 _group_mwids_by_node(_all_dst_ranks))
+                assignment = _assign_src_to_dsts(
+                    _group_mwids_by_node(_src_ranks),
+                    _group_mwids_by_node(_all_dst_ranks),
+                )
                 _idle_src_ranks = [r for r in _src_ranks if r not in assignment]
                 for _src_rank in _idle_src_ranks:
                     dp_i, mp_i = (
@@ -332,7 +334,8 @@ def _derive_reparallelize_comm_plan(
             raise ValueError(
                 f"Can't load a checkpoint with different config (key `{k}`, "
                 f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`).")
-    if (from_model_config.n_kv_heads % src_mp_size == 0) != (from_model_config.n_kv_heads % dst_mp_size == 0):
+    if from_model_config.n_kv_heads > 1 and (from_model_config.n_kv_heads % src_mp_size
+                                             == 0) != (from_model_config.n_kv_heads % dst_mp_size == 0):
         raise ValueError("Whether to partition kv heads should remain the same.")
 
     from_layer_mapping = partition_pipeline_layers(
@@ -410,7 +413,7 @@ def _derive_reparallelize_comm_plan(
                     max_param_interval_size = max_receiver_param_interval_size = -1
                     param_intervals_cpu = receiver_param_intervals_cpu = None
                     param_size = -1
-                    if torch.distributed.get_rank() in dst_ranks or torch.distributed.get_rank() == src:
+                    if (torch.distributed.get_rank() in dst_ranks or torch.distributed.get_rank() == src):
                         param_keys = keys_from_layer_indices(from_model_config, layer_indices)
 
                         if torch.distributed.get_rank() == src:
@@ -445,16 +448,20 @@ def _derive_reparallelize_comm_plan(
                                 portion_rank=receiver_mp_portion_id,
                                 sequence_parallel=to_topo.sequence_parallel,
                             )
-                            if len(receiver_param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
+                            if (len(receiver_param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS):
                                 receiver_param_intervals_cpu = _split_intervals(
-                                    receiver_param_intervals_cpu, CUDA_INTERVAL_OP_CHUNK_SIZE)
-                                max_receiver_param_interval_size = CUDA_INTERVAL_OP_CHUNK_SIZE
+                                    receiver_param_intervals_cpu,
+                                    CUDA_INTERVAL_OP_CHUNK_SIZE,
+                                )
+                                max_receiver_param_interval_size = (CUDA_INTERVAL_OP_CHUNK_SIZE)
                             else:
                                 max_receiver_param_interval_size = max(
                                     j - i for i, j in receiver_param_intervals_cpu)
-                            receiver_param_intervals = torch.tensor(receiver_param_intervals_cpu,
-                                                                    dtype=torch.long,
-                                                                    device="cuda")
+                            receiver_param_intervals = torch.tensor(
+                                receiver_param_intervals_cpu,
+                                dtype=torch.long,
+                                device="cuda",
+                            )
                         param_size = param_size_from_keys(
                             config=from_model_config,
                             src_mp_size=src_mp_size,

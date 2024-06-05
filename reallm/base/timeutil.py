@@ -11,8 +11,7 @@ INFINITE_DURATION = 60 * 60 * 24 * 365 * 1000
 
 
 class FrequencyControl:
-    """An utility to control the execution of code with a time or/and step frequency.
-    """
+    """An utility to control the execution of code with a time or/and step frequency."""
 
     def __init__(self, frequency_seconds=None, frequency_steps=None, initial_value=False):
         """Initialization method of FrequencyControl.
@@ -75,9 +74,9 @@ class FrequencyControl:
             self.__interval_steps = self.__steps - self.__last_steps
             if self.frequency_steps is None and self.frequency_seconds is None:
                 return False
-            if self.frequency_seconds is not None and self.__interval_seconds < self.frequency_seconds:
+            if (self.frequency_seconds is not None and self.__interval_seconds < self.frequency_seconds):
                 return False
-            if self.frequency_steps is not None and self.__interval_steps < self.frequency_steps:
+            if (self.frequency_steps is not None and self.__interval_steps < self.frequency_steps):
                 return False
             self.__last_time = now
             self.__last_steps = self.__steps
@@ -100,7 +99,11 @@ class EpochStepTimeFreqCtl:
         self.time_ctl = FrequencyControl(frequency_seconds=self.freq_sec)
 
     def check(self, epochs: int, steps: int):
-        x, y, z = self.epoch_ctl.check(epochs), self.step_ctl.check(steps), self.time_ctl.check()
+        x, y, z = (
+            self.epoch_ctl.check(epochs),
+            self.step_ctl.check(steps),
+            self.time_ctl.check(),
+        )
         return x or y or z
 
 
@@ -177,7 +180,7 @@ class CosineDecayScheduler(Scheduler):
 
     def _get(self, step: int) -> float:
         delta = self.init_value - self.end_value
-        return delta * 0.5 * (1 + math.cos(math.pi / self.total_iters * step)) + self.end_value
+        return (delta * 0.5 * (1 + math.cos(math.pi / self.total_iters * step)) + self.end_value)
 
 
 @dataclasses.dataclass
@@ -199,7 +202,7 @@ class ChainedScheduler:
     def __post_init__(self):
         for i in range(len(self.schedulers) - 1):
             # Float point err 1e-8.
-            if abs(self.schedulers[i + 1].get(0) - self.schedulers[i].final_value) > 1e-8:
+            if (abs(self.schedulers[i + 1].get(0) - self.schedulers[i].final_value) > 1e-8):
                 raise ValueError(f"Values should be consecutive between "
                                  f"the {i}-th ({type(self.schedulers[i])}) and "
                                  f"the {i+1}-th {type(self.schedulers[i+1])} schedulers! "

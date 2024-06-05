@@ -14,13 +14,78 @@ from reallm.api.core import model_api
 from reallm.impl.model.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
 from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, parallel_lm_logits,
                                                                   ParallelEmbedding, RowParallelLinear)
-from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
 from reallm.impl.model.utils.functional import compute_varlen_position_indices
 import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.impl.model.parallelism.model_parallel.mappings as tensor_parallel
 
 logger = logging.getLogger("ReaLModelBase")
+
+
+@dataclasses.dataclass
+class PipeTransferData:
+    """Data structure for transferring data between stages.
+
+    Each pipeline stage has exactly one PipeTransferData as the input and the output,
+    no matter how many layers are in this stage.
+
+    Attributes:
+        pp_input: The input to the current stage. Usually hidden states
+            with shape [bs, seq_len, hidden_dim].
+        pp_output: The output of the current stage, also the input to the next stage.
+            Usually hidden states with shape [bs, seq_len, hidden_dim].
+        cu_seqlens: The cumulative sequence lengths of packed input_ids.
+            Used by flash_attn_varlen_func. Will not be used during generation.
+            It's configuration-like data that must be transfered from the first stage
+            to the last. Shape [bs + 1].
+        max_seqlen: The maximum sequence length of packed input_ids.
+            Used by flash_attn_varlen_func. Will not be used during generation.
+            It's configuration-like data that must be transfered from the first stage
+            to the last.
+        store_kv_cache: Whether to store the key and value cache for generation.
+        attention_mask: The attention mask of the input, the same as huggingface transformers.
+            Used by torch_attn_func to examine the outputs of PyTorch attention and flash
+            attention are the same. Only for debugging. Shape [bs, seq_len].
+    """
+
+    pp_input: torch.Tensor = None
+    pp_output: torch.Tensor = None
+
+    # The followings are "configuration"-like data that should be passed across all stages.
+    cu_seqlens: torch.Tensor = None
+    max_seqlen: int = None
+    store_kv_cache: bool = False
+
+
+@dataclasses.dataclass
+class PipeCacheData:
+    """Data structure for caching data locally that will not be trasferred.
+
+    Each layer has exactly one PipeCacheData as the input.
+    If a pipeline stage has multiple layers, a list of PipeCacheData should be passed
+    as the input. The cached tensors will be changed in-place.
+
+    Attributes:
+        input_ids: The input token ids. Used only at the first stage.
+            Can be packed with shape [total_seq_len] or unpacked with shape [bs, seq].
+        prompt_mask: Prompt mask used
+        position_ids: Input position IDs. Can be resolved automatically in most cases.
+            Used only at the first stage. The same shape as input_ids.
+            If None, will be resolved automatically.
+        k_cache: Key cache used for generation, shape [bs, max_seq, n_kv_heads, head_dim].
+            Note that this is the cache for a specific layer, not for all layers.
+        v_cache: Value cache used for generation, shape [bs, max_seq, n_kv_heads, head_dim].
+            Note that this is the cache for a specific layer, not for all layers.
+        cache_seqlens: The sequence lengths of the cached tokens. Used for generation. Shape [bs].
+    """
+
+    # Only cached in the first stage.
+    packed_input_ids: torch.Tensor = None
+    packed_position_ids: torch.Tensor = None
+    # Cached in each transformer layer.
+    k_cache: torch.Tensor = None
+    v_cache: torch.Tensor = None
+    cache_seqlens: torch.Tensor = None
 
 
 class ReaLModelBlock(nn.Module):
@@ -183,7 +248,11 @@ class VocabPositionEmbedding(nn.Module):
         self.embed_drop = nn.Dropout(config.embd_pdrop)
 
         self.self_attention_mask = torch.tril(
-            torch.ones((config.n_positions, config.n_positions), dtype=torch.bool, device=device))
+            torch.ones(
+                (config.n_positions, config.n_positions),
+                dtype=torch.bool,
+                device=device,
+            ))
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         # Set position ids.
@@ -300,7 +369,7 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
         raise NotImplementedError()
 
     # layernorm qkv linear
-    count += ln_count + config.head_dim * (nq + config.n_kv_heads * 2) * config.hidden_dim
+    count += (ln_count + config.head_dim * (nq + config.n_kv_heads * 2) * config.hidden_dim)
     if config.use_attention_bias:
         count += config.head_dim * (nq + config.n_kv_heads * 2)
 

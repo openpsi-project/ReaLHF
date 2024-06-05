@@ -41,7 +41,7 @@ def inference_stream_constant(experiment_name, trial_name, stream_name, constant
 
 
 def sample_stream(experiment_name, trial_name, stream_name):
-    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/sample_stream/{stream_name}"
+    return (f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/sample_stream/{stream_name}")
 
 
 def request_reply_stream(experiment_name, trial_name, stream_name):
@@ -49,7 +49,7 @@ def request_reply_stream(experiment_name, trial_name, stream_name):
 
 
 def trainer_ddp_peer(experiment_name, trial_name, model_name):
-    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/trainer_ddp_peer/{model_name}"
+    return (f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/trainer_ddp_peer/{model_name}")
 
 
 def trainer_ddp_local_peer(experiment_name, trial_name, host_name, model_name):
@@ -73,7 +73,7 @@ def parameter_server(experiment_name, trial_name, parameter_id_str):
 
 
 def shared_memory(experiment_name, trial_name, stream_name):
-    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/shared_memory/{stream_name}"
+    return (f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/shared_memory/{stream_name}")
 
 
 def shared_memory_dock_server(experiment_name, trial_name, stream_name, server_type):

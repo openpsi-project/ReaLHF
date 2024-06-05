@@ -13,27 +13,29 @@ class PipeInstruction:
     All keyword arguments are stored as members similar to a ``namedtuple``. These are
     then accessible to the :class:`PipeEngine` during execution.
 
-    Each instruction has following attributes: 
+    Each instruction has following attributes:
     1. stage_id: pipeline stage that the instruction should be executed by.
     2. micro_batch_id: the ID of data micro batch that this instruction should be executed on.
     3. step_id: usually used by generation schedules, identical to generation token id.
-    4. priority: priority of the instruction, higher priority instructions should be scheduled first in 
+    4. priority: priority of the instruction, higher priority instructions should be scheduled first in
                  the dynamic schedule.
     5. deps: list of instructions that this instruction depends on.
-    6. bind: Instruction that this instruction is binded with. Binded instructions are send/recv instructions 
+    6. bind: Instruction that this instruction is binded with. Binded instructions are send/recv instructions
              that should appear in pair, belong to different (adjancent) stages and have the same micro_batch_id.
              Two binded instructions should have the same dependency list. This feature is used to avoid NCCL
              communication deadlock.
-    
+
     """
 
-    def __init__(self,
-                 stage_id: int,
-                 micro_batch_id: int,
-                 deps: List['PipeInstruction'] = [],
-                 bind: List['PipeInstruction'] = [],
-                 step_id: int = 0,
-                 schedule_id: int = 0):
+    def __init__(
+        self,
+        stage_id: int,
+        micro_batch_id: int,
+        deps: List["PipeInstruction"] = [],
+        bind: List["PipeInstruction"] = [],
+        step_id: int = 0,
+        schedule_id: int = 0,
+    ):
         self.stage_id = stage_id
         self.micro_batch_id = micro_batch_id
         self.deps = deps
@@ -41,25 +43,24 @@ class PipeInstruction:
         self.name = self.__class__.__name__
         self.step_id = step_id
         self.args = (stage_id, micro_batch_id, step_id)
-        self.__str_encode = f"{self.name};{self.stage_id};{self.micro_batch_id};{self.step_id}"
+        self.__str_encode = (f"{self.name};{self.stage_id};{self.micro_batch_id};{self.step_id}")
         self.schedule_id = schedule_id
 
     def __repr__(self):
         return f"{self.name}{self.args}"
         # return call_to_str(self.name, self.args, self.kwargs)
 
-    def __eq__(self, other: 'PipeInstruction'):
-        return self.stage_id == other.stage_id and \
-               self.micro_batch_id == other.micro_batch_id and \
-               self.step_id == other.step_id and \
-               self.name == other.name
+    def __eq__(self, other: "PipeInstruction"):
+        return (self.stage_id == other.stage_id and self.micro_batch_id == other.micro_batch_id
+                and self.step_id == other.step_id and self.name == other.name)
 
-    def __lt__(self, other: 'PipeInstruction'):
+    def __lt__(self, other: "PipeInstruction"):
         # order by stage_id, micro_batch_id, step_id
         # used to sort finded results in InstructionSet
-        return self.stage_id < other.stage_id or \
-               (self.stage_id == other.stage_id and self.micro_batch_id < other.micro_batch_id) or \
-               (self.stage_id == other.stage_id and self.micro_batch_id == other.micro_batch_id and self.step_id < other.step_id)
+        return (self.stage_id < other.stage_id
+                or (self.stage_id == other.stage_id and self.micro_batch_id < other.micro_batch_id)
+                or (self.stage_id == other.stage_id and self.micro_batch_id == other.micro_batch_id
+                    and self.step_id < other.step_id))
 
     def encode_str(self) -> str:
         return self.__str_encode
@@ -68,14 +69,18 @@ class PipeInstruction:
         return self.encode_str().encode(encoding="utf-8")
 
     @classmethod
-    def decode(cls, encoded: Union[bytes, str]) -> 'PipeInstruction':
+    def decode(cls, encoded: Union[bytes, str]) -> "PipeInstruction":
         if isinstance(encoded, bytes):
             s = encoded.decode(encoding="utf-8")
         else:
             s = encoded
         cls_name, stage_id, micro_batch_id, step_id = s.split(";")
         cls_ = getattr(sys.modules[__name__], cls_name)
-        return cls_(stage_id=int(stage_id), micro_batch_id=int(micro_batch_id), step_id=int(step_id))
+        return cls_(
+            stage_id=int(stage_id),
+            micro_batch_id=int(micro_batch_id),
+            step_id=int(step_id),
+        )
 
 
 def decode_stage_by_encoded(s: str):
@@ -89,38 +94,39 @@ class OptimizerStep(PipeInstruction):
 
     .. note:: Can be a synchronization point among data-parallel ranks.
     """
+
     pass
 
 
 class ReduceGrads(PipeInstruction):
-    """Reduce the computed gradients among data-parallel processes within the stage.
-    """
+    """Reduce the computed gradients among data-parallel processes within the stage."""
+
     pass
 
 
 # Compute
 class ForwardPass(PipeInstruction):
-    """Compute a forward pass.
-    """
+    """Compute a forward pass."""
+
     pass
 
 
 class BackwardPass(PipeInstruction):
-    """Compute a backward pass and accumulate gradients.
-    """
+    """Compute a backward pass and accumulate gradients."""
+
     pass
 
 
 # Communication
 class SendActivation(PipeInstruction):
-    """Send activations to the next stage in the pipeline.
-    """
+    """Send activations to the next stage in the pipeline."""
+
     pass
 
 
 class RecvActivation(PipeInstruction):
-    """Receive activations from the previous stage in the pipeline.
-    """
+    """Receive activations from the previous stage in the pipeline."""
+
     pass
 
 
@@ -128,36 +134,36 @@ class SendGrad(PipeInstruction):
     """Send computed gradients to the previous pipeline stage.
     with respect to the received activations
     """
+
     pass
 
 
 class RecvGrad(PipeInstruction):
-    """Receive computed gradients the next pipeline stage.
-    """
+    """Receive computed gradients the next pipeline stage."""
+
     pass
 
 
 # generation
 class SendNextTokens(PipeInstruction):
-    """ In GenerateSchedule, send next tokens to the first stage. Only available in the last stage.
-    """
+    """In GenerateSchedule, send next tokens to the first stage. Only available in the last stage."""
+
     pass
 
 
 class RecvNextTokens(PipeInstruction):
-    """ In GenerateSchedule, recv next tokens from the last stage. Only available in the first stage.
-    """
+    """In GenerateSchedule, recv next tokens from the last stage. Only available in the first stage."""
+
     pass
 
 
 class EndSchedule(PipeInstruction):
-    """ Force terminate schedule.
-    """
+    """Force terminate schedule."""
 
 
 class InstructionSet:
-    """ A set of instructions that can be indexed by stage_id, micro_batch_id and step_id.
-    Instructions are stored in their string representation, dependency of instructions are stored 
+    """A set of instructions that can be indexed by stage_id, micro_batch_id and step_id.
+    Instructions are stored in their string representation, dependency of instructions are stored
     separately, update only when new instruction has a different dependency with length > 0.
     """
 
@@ -183,8 +189,7 @@ class InstructionSet:
         self.__roots = []
 
     def add(self, inst: PipeInstruction):
-        """ Add one or multiple instructions to the set.
-        """
+        """Add one or multiple instructions to the set."""
         s = inst.encode_str()
         # if len(inst.deps) > 0:
         #     self.__deps_storage[s] = inst.deps
@@ -233,14 +238,12 @@ class InstructionSet:
         return r
 
     def contain(self, inst: PipeInstruction):
-        """ Check if the set contains the instruction.
-        """
+        """Check if the set contains the instruction."""
         s = inst.encode_str()
         return s in self.__stage_sets[inst.stage_id]
 
     def remove(self, inst: PipeInstruction):
-        """ Remove one or multiple instructions from the set.
-        """
+        """Remove one or multiple instructions from the set."""
         try:
             s = inst.encode_str()
             self.__stage_sets[inst.stage_id].remove(s)
@@ -263,8 +266,7 @@ class InstructionSet:
             raise KeyError(f"Instruction {inst} not in set.")
 
     def find(self, stage_id: Optional[int] = None, unmutable_result: bool = False) -> List[PipeInstruction]:
-        """ Find all instructions in set that satisfies arguments as a list.
-        """
+        """Find all instructions in set that satisfies arguments as a list."""
         related_sets: List[Set] = []
         if stage_id is not None:
             related_sets.append(self.__stage_sets[stage_id])

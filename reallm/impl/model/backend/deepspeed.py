@@ -12,7 +12,7 @@ import torch.distributed
 
 from reallm.base.constants import (data_parallel_world_size, model_parallel_world_size,
                                    pipe_parallel_world_size)
-from reallm.impl.model.backend.pipe_engine import DeepSpeedPipelineEngine
+from reallm.impl.model.backend.pipe_engine import PipelinableModelRunnerWithZeRO
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
 import reallm.base.logging as logging
@@ -70,7 +70,13 @@ def get_train_ds_config(
     }
 
 
-def get_eval_ds_config(offload=False, stage=0, enable_fp16: bool = True, enable_bf16: bool = False, **kwargs):
+def get_eval_ds_config(
+    offload=False,
+    stage=0,
+    enable_fp16: bool = True,
+    enable_bf16: bool = False,
+    **kwargs,
+):
     if enable_bf16 and enable_fp16:
         raise ValueError("Cannot enable both fp16 and bf16 at the same time.")
     device = "cpu" if offload else "none"
@@ -107,6 +113,7 @@ def get_optimizer_grouped_parameters(
     weight_decay: float,
     no_decay_name_list: List[str] = ["bias", "LayerNorm.weight"],
 ):
+    # FIXME: fix no_decay_name_list
     optimizer_grouped_parameters = [
         {
             "params": [
@@ -138,6 +145,11 @@ def deepspeed_initialize(
     """A simple wrapper around deepspeed.initialize."""
     if mpu is None:
         mpu = constants.grid()
+    config_class = DeepSpeedConfig(config, mpu)
+    logger.info(f"DeepSpeedEngine Config: train_batch_size={config_class.train_batch_size}, "
+                f"train_micro_batch_size_per_gpu={config_class.train_micro_batch_size_per_gpu}, "
+                f"gradient_accumulation_steps={config_class.gradient_accumulation_steps}")
+
     if engine_type == "deepspeed":
         # Disable zero.Init context if it's currently enabled
         zero.partition_parameters.shutdown_init_context()
@@ -146,7 +158,6 @@ def deepspeed_initialize(
 
         deepspeed.dist = dist
 
-        config_class = DeepSpeedConfig(config, mpu)
         engine = DeepSpeedEngine(
             args=None,
             model=model,
@@ -162,14 +173,17 @@ def deepspeed_initialize(
 
         # Restore zero.Init context if necessary
         zero.partition_parameters.restore_init_context()
-        logger.info(f"Deepspeed Engine initialze finished.")
-        return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
+        # logger.info(f"Deepspeed Engine initialze finished.")
+        return_items = [
+            engine,
+            engine.optimizer,
+            engine.training_dataloader,
+            engine.lr_scheduler,
+        ]
     elif engine_type == "pipe":
-        # mpu = model.mpu()
-        config_class = DeepSpeedConfig(config, mpu)
-        engine_cls = DeepSpeedPipelineEngine
-        engine = engine_cls(
-            model=model,
+        runner = PipelinableModelRunnerWithZeRO(
+            module=model,
+            inference_only=False,
             args=None,
             config=config,
             config_class=config_class,
@@ -178,8 +192,13 @@ def deepspeed_initialize(
             lr_scheduler=lr_scheduler,
             dist_init_required=False,
         )
-        logger.info(f"Deepspeed Pipeline Engine initialze finished.")
-        return_items = [engine, engine.optimizer, engine.training_dataloader, engine.lr_scheduler]
+        # logger.info(f"Deepspeed Pipeline Engine initialze finished.")
+        return_items = [
+            runner,
+            runner.ds_engine.optimizer,
+            runner.ds_engine.training_dataloader,
+            runner.ds_engine.lr_scheduler,
+        ]
     return tuple(return_items)
 
 
@@ -196,13 +215,6 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     enable_fp16: bool = True
     enable_bf16: bool = False
     zero_stage: int = 2
-    # hybrid engine args
-    enable_hybrid_engine: bool = False
-    max_out_tokens: int = 512
-    inference_tp_size: int = 1
-    release_inference_cache: bool = False
-    pin_parameters: bool = True
-    tp_gather_partition_size: int = 8
     # addtional deepspeed args
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
     engine_type: str = "deepspeed"
@@ -210,7 +222,6 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     def __post_init__(self):
         if self.engine_type == "pipe":
             assert self.zero_stage < 2
-            assert self.enable_hybrid_engine is False
 
     def _initialize(self, model: model_api.Model, spec: model_api.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -228,28 +239,17 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
         else:
             raise NotImplementedError(f"Unsupported optimizer: {self.optimizer_name}.")
 
-        hybrid_engine_args = dict(
-            enabled=self.enable_hybrid_engine,
-            max_out_tokens=self.max_out_tokens,
-            inference_tp_size=self.inference_tp_size,
-            release_inference_cache=self.release_inference_cache,
-            pin_parameters=self.pin_parameters,
-            tp_gather_partition_size=self.tp_gather_partition_size,
-        )
-
         ds_config = get_train_ds_config(
             offload_param=self.offload_param,
             offload_optimizer_state=self.offload_optimizer_state,
             stage=self.zero_stage,
             enable_bf16=self.enable_bf16,
             enable_fp16=self.enable_fp16,
-            hybrid_engine_args=hybrid_engine_args,
             **self.additional_ds_config,
         )
 
-        ds_config["train_micro_batch_size_per_gpu"] = spec.batch_size_per_device
-        ds_config["train_batch_size"] = (spec.batch_size_per_device * data_parallel_world_size() *
-                                         model_parallel_world_size() * pipe_parallel_world_size())
+        # NOTE: Just a fake batch size to make DeepSpeed happy.
+        ds_config["train_batch_size"] = data_parallel_world_size()
 
         def warmup_then_cosine_anneal(step, warmup_steps_proportion, total_steps, min_lr_ratio):
             warmup_steps = max(5, int(total_steps * warmup_steps_proportion))
@@ -297,14 +297,19 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
             engine_type=self.engine_type,
         )
 
-        if self.engine_type == "pipe":
-            # log pipeline infos
-            assert isinstance(module, DeepSpeedPipelineEngine)
-            logger.info(f"PipelineEngine:: ddp rank = {torch.distributed.get_rank()}; "
-                        f"pipe id = {module.stage_id}; dp id = {module.dp_id};")
-
         model.module = module
         return model
 
 
 model_api.register_backend("ds_train", DeepspeedTrainBackend)
+
+
+@dataclasses.dataclass
+class PipelineInferenceBackend(model_api.ModelBackend):
+
+    def _initialize(self, model: model_api.Model, spec: model_api.FinetuneSpec):
+        model.module = PipelinableModelRunnerWithZeRO(model.module)
+        return model
+
+
+model_api.register_backend("pipe_inference", PipelineInferenceBackend)

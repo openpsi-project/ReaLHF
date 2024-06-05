@@ -47,25 +47,25 @@ class QizhiClusterSpec(ClusterSpec):
 
     @property
     def name(self):
-        return 'qizhi'
+        return "qizhi"
 
     def node_type_from_node_name(self, node_name: str) -> str:
-        if 'frl1g' in node_name:
-            return 'g1'
-        if 'frl2g' in node_name:
-            return 'g2'
-        if 'frl8g' in node_name:
-            return 'g8'
-        if 'frl4a' in node_name or 'frl8a' in node_name:
-            return 'a100'
+        if "frl1g" in node_name:
+            return "g1"
+        if "frl2g" in node_name:
+            return "g2"
+        if "frl8g" in node_name:
+            return "g8"
+        if "frl4a" in node_name or "frl8a" in node_name:
+            return "a100"
         else:
             raise NotImplementedError()
 
     def gpu_type_from_node_name(self, node_name: str) -> str:
-        if 'g' in self.node_type_from_node_name(node_name):
-            return 'geforce'
+        if "g" in self.node_type_from_node_name(node_name):
+            return "geforce"
         else:
-            return 'tesla'
+            return "tesla"
 
     @property
     def fileroot(self) -> str:
@@ -80,14 +80,14 @@ class QHClusterSpec(ClusterSpec):
 
     @property
     def name(self):
-        return 'qh'
+        return "qh"
 
     def node_type_from_node_name(self, node_name: str) -> str:
-        assert 'QH-com' in node_name
-        return 'a800'
+        assert "QH-com" in node_name
+        return "a100"
 
     def gpu_type_from_node_name(self, node_name: str) -> str:
-        return 'tesla'
+        return "tesla"
 
     @property
     def fileroot(self) -> str:
@@ -98,28 +98,6 @@ class QHClusterSpec(ClusterSpec):
         return "/lustre:/lustre,/dev/infiniband:/dev/infiniband,/sys/class/infiniband_verbs:/sys/class/infiniband_verbs"
 
 
-class YLClusterSpec(ClusterSpec):
-
-    @property
-    def name(self):
-        return 'yl'
-
-    def node_type_from_node_name(self, node_name: str) -> str:
-        assert 'YL-com' in node_name
-        return 'a800'
-
-    def gpu_type_from_node_name(self, node_name: str) -> str:
-        return 'tesla'
-
-    @property
-    def fileroot(self) -> str:
-        return "/data/aigc/llm"
-
-    @property
-    def default_mount(self) -> str:
-        return "/data:/data"
-
-
 hostname = socket.gethostname()
 if not (hostname.startswith("YL-ctrl0") or hostname.startswith("QH-ctrl0") or hostname.startswith("YL-com")
         or hostname.startswith("QH-com") or hostname.startswith("frl") or hostname.startswith("ctrl0")):
@@ -127,9 +105,7 @@ if not (hostname.startswith("YL-ctrl0") or hostname.startswith("QH-ctrl0") or ho
                        "Please properly implement methods of `ClusterSpec` in base/cluster.py.")
 
 spec = None
-if hostname.startswith("YL-ctrl0") or hostname.startswith("YL-com"):
-    spec = YLClusterSpec()
-elif hostname.startswith("QH-ctrl0") or hostname.startswith("QH-com"):
+if hostname.startswith("QH-ctrl0") or hostname.startswith("QH-com"):
     spec = QHClusterSpec()
 else:
     spec = QizhiClusterSpec()
@@ -142,7 +118,7 @@ def node_name_is_node_type(node_name: str, node_type: Optional[Union[List[str], 
         node_type = [node_type]
     nt_condition = []
     for nt in node_type:
-        if nt not in ['g1', 'g2', 'g8', 'a100', 'a800']:
+        if nt not in ["g1", "g2", "g8", "a100"]:
             raise ValueError(f"Unknown node type {nt}.")
         else:
             cond = spec.node_type_from_node_name(node_name) == nt

@@ -32,7 +32,10 @@ def test_gae1d_nolp_misalign(max_seqlen: int, bs: int, gamma: float, lam: float)
     assert torch.allclose(adv, py_adv, atol=1e-5), (adv - py_adv).abs().max()
     assert torch.allclose(ret, py_ret, atol=1e-5), (ret - py_ret).abs().max()
 
-    print(f"max_seqlen={max_seqlen},bs={bs}, CUDA acceleration ratio", (t2 - t1) / (t3 - t2))
+    print(
+        f"max_seqlen={max_seqlen},bs={bs}, CUDA acceleration ratio",
+        (t2 - t1) / (t3 - t2),
+    )
 
 
 @pytest.mark.parametrize("seqlen", [32, 128, 512, 1024])
@@ -72,7 +75,8 @@ def test_gae2d_nolp(bs: int, seqlen: int, gamma: float, lam: float):
     values = torch.randn(bs, seqlen + 1).cuda()
     on_reset_ = torch.randint(0, 2, (bs, seqlen + 2)).bool().cuda()
     on_reset = on_reset_[:, :-1].contiguous()
-    truncates = on_reset_[:, 1:].logical_and(torch.randint(0, 2, (bs, seqlen + 1)).bool().cuda()).contiguous()
+    truncates = (on_reset_[:, 1:].logical_and(torch.randint(0, 2,
+                                                            (bs, seqlen + 1)).bool().cuda()).contiguous())
 
     py_adv, py_ret = pygae2d_nolp(rewards, values, on_reset, truncates, gamma, lam)
     adv, ret = cugae2d_nolp_func(rewards, values, on_reset, truncates, gamma, lam)

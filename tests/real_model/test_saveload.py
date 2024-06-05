@@ -23,8 +23,13 @@ def _shrink_mconfig(mconfig: ReaLModelConfig):
     return mconfig
 
 
-def _save_then_load(model_family_name: str, is_critic: bool, init_critic_from_actor: bool, pp_dp_mp: Tuple,
-                    tokenizer_path: str):
+def _save_then_load(
+    model_family_name: str,
+    is_critic: bool,
+    init_critic_from_actor: bool,
+    pp_dp_mp: Tuple,
+    tokenizer_path: str,
+):
     # NOTE: import here to avoid initializing CUDA context in the main process
     from reallm.impl.model.nn.real_llm_api import ReaLModel
 
@@ -85,7 +90,7 @@ def _save_then_load(model_family_name: str, is_critic: bool, init_critic_from_ac
             hf_model = transformers.AutoModelForCausalLM.from_pretrained(save_path)
             dist.barrier()
             if constants.model_parallel_world_size() == 1:
-                sd3 = HF_MODEL_FAMILY_REGISTRY[model_family_name]['sd_from_hf_converter'](
+                sd3 = HF_MODEL_FAMILY_REGISTRY[model_family_name]["sd_from_hf_converter"](
                     hf_model.state_dict(), mconfig)
                 for k, v in sd1.items():
                     assert torch.allclose(v.cpu(), sd3[k]), k
@@ -100,8 +105,13 @@ def _save_then_load(model_family_name: str, is_critic: bool, init_critic_from_ac
         assert file_size2 == file_size, (file_size, file_size2)
 
 
-def test_save_then_load(model_family_name: str, is_critic: bool, init_critic_from_actor: bool,
-                        pp_dp_mp: Tuple, tokenizer_path: str):
+def test_save_then_load(
+    model_family_name: str,
+    is_critic: bool,
+    init_critic_from_actor: bool,
+    pp_dp_mp: Tuple,
+    tokenizer_path: str,
+):
     expr_name = "saveload_test"
     trial_name = "test"
     clear_name_resolve(expr_name=expr_name, trial_name=trial_name)

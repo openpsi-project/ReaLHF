@@ -39,7 +39,11 @@ def compute_rlhf_pflops(
         hf_config = transformers.AutoConfig.from_pretrained(path)
         mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
         mconfigs[name] = mconfig
-    assert (prompt_len + gen_len) * batch_size == 2**17, (batch_size, prompt_len, gen_len)
+    assert (prompt_len + gen_len) * batch_size == 2**17, (
+        batch_size,
+        prompt_len,
+        gen_len,
+    )
     flops = 0
     flops += calculate_llama_gen_flops(
         batch_size,
@@ -163,7 +167,7 @@ def amend_baseline_data(all_data: List, baseline_name: str):
                     cih=cih,
                     cil=cil,
                     System=baseline_name,
-                    t=df['avg_t'].values.item(),
+                    t=df["avg_t"].values.item(),
                 ))
     return all_data
 
@@ -245,7 +249,7 @@ def amend_ours_data(all_data: List, data: pd.DataFrame, mode):
                     pflops=p,
                     cih=cih,
                     cil=cil,
-                    t=d['time'],
+                    t=d["time"],
                     System=name,
                 ))
     return all_data
@@ -293,8 +297,10 @@ def main():
                              & (df["ngpus"] == 32)
                              & (df["subplot_x"] == 1)
                              & (df["subplot_y"] == 1)]["pflops"].values
-    _openrlhf_flops_7b34b = df[(df["System"] == "OpenRLHF") & (df["ngpus"] == 32) & (df["subplot_x"] == 1) &
-                               (df["subplot_y"] == 1)]["pflops"].values
+    _openrlhf_flops_7b34b = df[(df["System"] == "OpenRLHF")
+                               & (df["ngpus"] == 32)
+                               & (df["subplot_x"] == 1)
+                               & (df["subplot_y"] == 1)]["pflops"].values
     print(
         f"Relative improvement in 7b+34b genlen 896 #GPU 32 case: ",
         (_real_flops_7b34b - _heuristic_flops_7b34b) / _heuristic_flops_7b34b,
@@ -318,8 +324,8 @@ def main():
     _max = np.where(mask, rel, 0.0).max()
     print(f"Relative improvement over openrlhf: {_mean}, min {_min}, max {_max}")
 
-    _d = df[(df['subplot_x'] == 2) & (df['subplot_y'] == 0) & (df['ngpus'] == 128)]
-    _complete_train_hours = _d['t'].values * 1600 / 3600
+    _d = df[(df["subplot_x"] == 2) & (df["subplot_y"] == 0) & (df["ngpus"] == 128)]
+    _complete_train_hours = _d["t"].values * 1600 / 3600
     print(f"Complete training hours for {_d['System']}: ", _complete_train_hours)
 
     # Plot for each seqlen setting

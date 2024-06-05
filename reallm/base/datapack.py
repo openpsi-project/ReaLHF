@@ -9,10 +9,10 @@ def ffd_check(a: np.ndarray, c: int, n: int) -> bool:
     """Check if a[] could fit in n bins with capacity c.
 
     Adopted from https://github.com/imoneoi/openchat/blob/cd99f6366d243daf1a906b24f9475a811a90aaff/ochat/training_deepspeed/multipack_dataloader.py
-     
+
     First-fit-decreasing bin packing.
     https://en.wikipedia.org/wiki/First-fit-decreasing_bin_packing
-    
+
     Args:
         a (np.ndarray): _description_
         c (int): Capacity of bins.
@@ -43,7 +43,7 @@ def ffd_with_result(a: np.ndarray, c: int) -> List[List[int]]:
     """First-fit-decreasing bin packing.
 
     Adopted from https://github.com/imoneoi/openchat/blob/cd99f6366d243daf1a906b24f9475a811a90aaff/ochat/training_deepspeed/multipack_dataloader.py
-    
+
     Args:
         a (np.ndarray): Items to be packed.
         c (int): Capacity of each bin.
@@ -108,7 +108,7 @@ def allocate(lengths: np.ndarray, lengths_cumsum: np.ndarray, c: int, rank: int,
     """Dynamic batch allocator, similar to Multifit, https://en.wikipedia.org/wiki/Multifit_algorithm.
 
     Adopted from https://github.com/imoneoi/openchat/blob/cd99f6366d243daf1a906b24f9475a811a90aaff/ochat/training_deepspeed/multipack_dataloader.py
-    
+
     Args:
         lengths (np.ndarray): Sequence lengths.
         lengths_cumsum (np.ndarray): Cumulative summation of sequence length.
@@ -184,7 +184,7 @@ def partition_balanced(nums: np.ndarray, k: int, min_size: int = 1):
     for j in range(2, k + 1):
         for i in range(j * min_size, n + 1):
             for x in range(min_size, i - min_size + 1):
-                xx = (prefix_sums[i] - prefix_sums[x])
+                xx = prefix_sums[i] - prefix_sums[x]
                 min_diff = max(dp[x, j - 1], maxval[x, j - 1] - xx, xx - minval[x, j - 1])
                 dp[i, j] = min(dp[i, j], min_diff)
 
@@ -213,8 +213,8 @@ def partition_balanced_tuples(nums: np.ndarray, k: int, min_size: int = 1) -> Li
 
 
 def min_abs_diff_partition(arr: Union[np.ndarray, List], k: int, min_size: int = 1) -> List[Tuple[int]]:
-    err_hint = " Errors should not be reported in this function. It is probably a bug in the dataset code"\
-               " or too small batch size in pipeline parallel reallm.experiments."
+    err_hint = (" Errors should not be reported in this function. It is probably a bug in the dataset code"
+                " or too small batch size in pipeline parallel reallm.experiments.")
 
     if isinstance(arr, list):
         arr = np.array(arr)
@@ -243,13 +243,44 @@ def min_abs_diff_partition(arr: Union[np.ndarray, List], k: int, min_size: int =
     return partitions
 
 
+# @numba.njit
+def reorder_to_balanced_batches(
+    seqlens: np.ndarray,
+    n_seqs_per_batch: int,
+) -> Tuple[np.ndarray, int]:
+    max_bins = (len(seqlens) + n_seqs_per_batch - 1) // n_seqs_per_batch
+
+    bins = [[] for _ in range(max_bins)]
+    bin_sizes = np.zeros(max_bins, dtype=np.int32)
+    bin_seqlens = np.zeros(max_bins, dtype=np.int32)
+    for i in seqlens.argsort()[::-1]:
+        idx = np.where(bin_sizes + 1 <= n_seqs_per_batch, bin_seqlens, np.iinfo(np.int32).max).argmin()
+        bins[idx].append(i)
+        bin_sizes[idx] += 1
+        bin_seqlens[idx] += seqlens[i]
+
+    assert np.all(bin_sizes <= n_seqs_per_batch), (bin_sizes, n_seqs_per_batch)
+    max_diff = 0
+    for i in range(max_bins):
+        for j in range(i + 1, max_bins):
+            max_diff = max(max_diff, abs(bin_seqlens[i] - bin_seqlens[j]))
+
+    reordered_indices = []
+    for i in bin_seqlens.argsort()[::-1]:
+        reordered_indices.extend(bins[i])
+    return np.array(reordered_indices), max_diff
+
+
 if __name__ == "__main__":
     import time
+
     for i in range(100):
         st = time.monotonic()
-        nums = np.random.randint(1, 4000, size=(1000,))
-        k = np.random.randint(2, 20)
-        min_size = np.random.randint(1, len(nums) // k)
-        res = min_abs_diff_partition(nums, k, min_size)
-        assert all(y - x >= min_size for x, y in res)
-        print(res, time.monotonic() - st)
+        nums = np.random.randint(128, 150, size=(10000,))
+        # k = np.random.randint(2, 20)
+        # min_size = np.random.randint(1, len(nums) // k)
+        # res = min_abs_diff_partition(nums, k, min_size)
+        # assert all(y - x >= min_size for x, y in res)
+        n_seqs_per_batch = 256
+        res, max_diff = reorder_to_balanced_batches(nums, n_seqs_per_batch)
+        print(max_diff, res, time.monotonic() - st)
