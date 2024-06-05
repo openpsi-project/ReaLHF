@@ -68,7 +68,14 @@ class ZmqRequester(worker_base.WorkerControlPanelRequester):
 
     class ZmqFuture(worker_base.WorkerControlPanelRequester.Future):
         # Every ZmqFuture connect one socket, close after returning results.
-        def __init__(self, payload, context: zmq.Context, address, worker_name, wait_response=True):
+        def __init__(
+            self,
+            payload,
+            context: zmq.Context,
+            address,
+            worker_name,
+            wait_response=True,
+        ):
             self.__worker_name = worker_name
             self.__socket = context.socket(zmq.REQ)
             self.__socket.setsockopt(zmq.LINGER, 0)
@@ -97,11 +104,13 @@ class ZmqRequester(worker_base.WorkerControlPanelRequester):
         self.__context.set(zmq.MAX_SOCKETS, 20480)
 
     def async_request(self, worker_name, address, command, wait_response=True, **kwargs):
-        return self.ZmqFuture(pickle.dumps((command, kwargs)),
-                              self.__context,
-                              address,
-                              worker_name,
-                              wait_response=wait_response)
+        return self.ZmqFuture(
+            pickle.dumps((command, kwargs)),
+            self.__context,
+            address,
+            worker_name,
+            wait_response=wait_response,
+        )
 
 
 class RayRequester(worker_base.WorkerControlPanelRequester):
@@ -134,7 +143,7 @@ class RayRequester(worker_base.WorkerControlPanelRequester):
 def make_server(type_, worker_name, experiment_name, trial_name, **kwargs):
     if type_ == "zmq":
         q = ZmqTaskQueue(**kwargs)
-    elif type_ == 'ray':
+    elif type_ == "ray":
         q = RayTaskQueue(**kwargs)
     else:
         raise NotImplementedError(type_)
@@ -144,7 +153,7 @@ def make_server(type_, worker_name, experiment_name, trial_name, **kwargs):
 def make_control(type_, experiment_name, trial_name, **kwargs):
     if type_ == "zmq":
         requester = ZmqRequester(**kwargs)
-    elif type_ == 'ray':
+    elif type_ == "ray":
         requester = RayRequester(**kwargs)
     else:
         raise NotImplementedError(type_)

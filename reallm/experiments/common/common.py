@@ -22,8 +22,8 @@ logger = logging.getLogger("CommonExperimentConfig", "colored")
 
 @dataclasses.dataclass
 class CommonExperimentConfig(Experiment):
-    """ Common config for quickstart experiments, which is parsed and utilized by apps/main.py
-    
+    """Common config for quickstart experiments, which is parsed and utilized by apps/main.py
+
     Args:
         experiment_name (str): Name of the experiment
         trial_name (str): Name of the trial
@@ -32,31 +32,32 @@ class CommonExperimentConfig(Experiment):
         partition (str): Slurm partition to run the experiment, only effective when mode=="slurm"
         wandb_mode (str): Mode of wandb, "disabled", "online", "offline"
         image_name (Optional[str]): Name of the image used by controller and workers of ray cluster
-        remote_reset (bool): Whether to reset name resolve repo remotely in computation nodes. 
-        recover_mode (str): Recover mode, 
-                            'auto': automatically recover the last failed run; 
-                            'save': save recover states if any error occurs; 
-                            'resume': resume from saved recover states and save states if fail again; 
-                            'disabled': do nothing when error occurs. 
+        remote_reset (bool): Whether to reset name resolve repo remotely in computation nodes.
+        recover_mode (str): Recover mode,
+                            'auto': automatically recover the last failed run;
+                            'save': save recover states if any error occurs;
+                            'resume': resume from saved recover states and save states if fail again;
+                            'disabled': do nothing when error occurs.
         recover_retries (int): Number of retries for recovery, only effective when recover_mode=="auto"
         ignore_worker_error (bool): Whether to ignore worker error, only effective when recover_mode=="disabled".
                                     When recover_mode!="disabled", ignore_worker_error is always False.
-        allocation_mode (str): Mode of GPU resource/model parallel strategy allocation. 
+        allocation_mode (str): Mode of GPU resource/model parallel strategy allocation.
                              'manual': manually allocate resources with experiment configs;
                              'search': allocate resources and configure parallel strategies with search.
-                             'heuristic': allocate resources and configure parallel strategies 
+                             'heuristic': allocate resources and configure parallel strategies
                                           with heuristic strategy.
-                             'pipe_data': allocate all models on all cluster nodes available 
+                             'pipe_data': allocate all models on all cluster nodes available
                                           and configure parallel strategies with pipe+data parallelism.
                              'pipe_model': allocate all models on all cluster nodes available
-                                           and configure parallel strategies with pipe+model parallelism. 
-        allocation_use_cache (bool): Whether to use cache in allocation search, only effective when 
+                                           and configure parallel strategies with pipe+model parallelism.
+        allocation_use_cache (bool): Whether to use cache in allocation search, only effective when
                                      allocation_mode=="search" and cache is available in the log dir of
                                      current experiment name and trial.
         n_nodes (int): Number of nodes to run the experiment, only effective when mode=="slurm"
         n_gpus_per_node (int): Number of GPUs per node, only effective when mode=="slurm"
         nodelist (Optional[str]): slurm nodelist, only effective when mode=="slurm"
     """
+
     experiment_name: str = MISSING
     trial_name: str = MISSING
     mode: str = "slurm"
@@ -88,16 +89,12 @@ class CommonExperimentConfig(Experiment):
         return []
 
     @property
-    def dataloader(self) -> DataLoader:
-        return None
-
-    @property
     def eval_datasets(self) -> List[Dataset]:
-        return []
+        return None
 
     @property
     def eval_dataloader(self) -> DataLoader:
-        return None
+        return DataLoader("packed_eval", args=dict(batch_size=128))
 
     @property
     def tokenizer_name_or_path(self) -> str:
@@ -149,11 +146,13 @@ class CommonExperimentConfig(Experiment):
         rpcs = self.rpcs
         model_worker = []
 
-        global_device_mesh = DeviceMesh(n_nodes=self.n_nodes,
-                                        n_gpus_per_node=self.n_gpus_per_node,
-                                        mapping=np.ones((self.n_nodes, self.n_gpus_per_node), dtype=np.int32),
-                                        global_mesh_name=self.nodelist,
-                                        name=self.nodelist)
+        global_device_mesh = DeviceMesh(
+            n_nodes=self.n_nodes,
+            n_gpus_per_node=self.n_gpus_per_node,
+            mapping=np.ones((self.n_nodes, self.n_gpus_per_node), dtype=np.int32),
+            global_mesh_name=self.nodelist,
+            name=self.nodelist,
+        )
         if self.allocation_mode == "search":
             # assert self.mode == "slurm"
             # assumes gradient checkpointing for all training RPCs if one is enabled
@@ -166,26 +165,30 @@ class CommonExperimentConfig(Experiment):
                 use_cache=self.allocation_use_cache,
                 **self.search_kwargs,
             )
-        elif self.allocation_mode == "pipe_data" or self.allocation_mode == "pipe_model":
+        elif (self.allocation_mode == "pipe_data" or self.allocation_mode == "pipe_model"):
             rpc_allocs: List[RPCAllocation] = [
                 RPCAllocation(
                     rpc=rpc,
                     device_mesh=global_device_mesh,
                     parallel=ParallelismConfig(
-                        data_parallel_size=self.n_gpus_per_node if self.allocation_mode == "pipe_data" else 1,
+                        data_parallel_size=(self.n_gpus_per_node
+                                            if self.allocation_mode == "pipe_data" else 1),
                         pipeline_parallel_size=self.n_nodes,
-                        model_parallel_size=self.n_gpus_per_node
-                        if self.allocation_mode == "pipe_model" else 1,
-                    )) for rpc in self.rpcs.values()
+                        model_parallel_size=(self.n_gpus_per_node
+                                             if self.allocation_mode == "pipe_model" else 1),
+                        use_sequence_parallel=(rpc.interface_type == ModelInterfaceType.TRAIN_STEP
+                                               and self.allocation_mode == "pipe_model"),
+                    ),
+                ) for rpc in self.rpcs.values()
             ]
         elif self.allocation_mode == "manual":
             rpc_allocs: List[RPCAllocation] = [
                 RPCAllocation(
                     rpc=rpc,
-                    device_mesh=make_device_mesh_from_name(
+                    device_mesh=(make_device_mesh_from_name(
                         self.nodelist,
                         self.allocations[rpc_type].device_mesh,
-                    ) if self.allocations[rpc_type].device_mesh is not None else global_device_mesh,
+                    ) if self.allocations[rpc_type].device_mesh is not None else global_device_mesh),
                     parallel=self.allocations[rpc_type].parallel,
                 ) for rpc_type, rpc in self.rpcs.items()
             ]
@@ -197,6 +200,7 @@ class CommonExperimentConfig(Experiment):
         shard_counter = defaultdict(lambda: 0)
         resolve_rpc_hooks(rpc_allocs)  # inplace modify ModelRPCs in rpc allocations
         import pprint
+
         pprint.pprint(rpc_allocs)
 
         model_name_to_rpc_allocs: Dict[ModelName, List[RPCAllocation]] = defaultdict(list)
@@ -208,7 +212,6 @@ class CommonExperimentConfig(Experiment):
                 seed=self.seed,
                 shards=[],
                 datasets=self.datasets,
-                dataloader=self.dataloader,
                 cuda_cache_cleanliness=False,
                 cuda_cache_clear_freq=10,
                 tokenizer_name_or_path=self.tokenizer_name_or_path,
@@ -221,16 +224,17 @@ class CommonExperimentConfig(Experiment):
                 model_cfg = self.models[model_name.role]
                 model = make_model_config(model_cfg)
                 mapping = rpc_alloc.device_mesh.mapping
-                gradient_checkpointing = (model_cfg.gradient_checkpointing
-                                          and any(rpc.interface_type == ModelInterfaceType.TRAIN_STEP
-                                                  for rpc in rpcs))
+                gradient_checkpointing = model_cfg.gradient_checkpointing and any(
+                    rpc.interface_type == ModelInterfaceType.TRAIN_STEP for rpc in rpcs)
 
-                topo = get_topo(rpc_alloc.parallel,
-                                gradient_checkpointing=gradient_checkpointing,
-                                max_prompt_len=self.max_prompt_len if any(
-                                    rpc.interface_type == ModelInterfaceType.GENERATE
-                                    for rpc in rpcs) else None)
-                # pprint.pprint(topo)
+                topo = get_topo(
+                    rpc_alloc.parallel,
+                    gradient_checkpointing=gradient_checkpointing,
+                    max_prompt_len=(self.max_prompt_len if any(
+                        rpc.interface_type == ModelInterfaceType.GENERATE for rpc in rpcs) else None),
+                )
+                pprint.pprint(topo)
+                print("gradient_checkpointing", gradient_checkpointing)
 
                 if any(rpc.interface_type == ModelInterfaceType.TRAIN_STEP for rpc in rpcs):
                     backend = make_train_backend_config(model_cfg, rpc_alloc.parallel)

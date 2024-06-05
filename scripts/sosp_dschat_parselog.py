@@ -52,7 +52,7 @@ def _parselog(
     except FileNotFoundError:
         return False
     if not oom:
-        if len(time_records) == 0 or len(tflops_records) == 0 or len(thpt_records) == 0 or max_mem == 0.0:
+        if (len(time_records) == 0 or len(tflops_records) == 0 or len(thpt_records) == 0 or max_mem == 0.0):
             return False
         avg_time = np.mean(time_records[1:])
         avg_tflops = np.mean(tflops_records[1:])
@@ -91,7 +91,14 @@ def parselog(model_size: int):
     offloads = [True, False]
     for critic_zero_stage, actor_zero_stage in itertools.product(critic_zero_stages, actor_zero_stages):
         for max_answer_len, gen_bs, offload in itertools.product(seqlens, gen_batch_sizes, offloads):
-            _parselog(model_size, actor_zero_stage, critic_zero_stage, max_answer_len, gen_bs, offload)
+            _parselog(
+                model_size,
+                actor_zero_stage,
+                critic_zero_stage,
+                max_answer_len,
+                gen_bs,
+                offload,
+            )
 
 
 if __name__ == "__main__":

@@ -33,7 +33,9 @@ class JobException(Exception):
 class JobInfo:
     name: str
     state: JobState
-    host: str = None  # The host on which the job is/was running. None if the job had not run.
+    host: str = (
+        None  # The host on which the job is/was running. None if the job had not run.
+    )
     submit_time: str = None
     start_time: str = None
     slurm_id: str = None  # Slurm only. The Slurm id of the job.
@@ -65,7 +67,11 @@ class SchedulerClient:
             count: Number of jobs. The indices of the jobs shall be 0..count-1.
         """
         for index in range(count):
-            self.submit(worker_type + "_" + str(index), cmd.format(index=index, count=count), **kwargs)
+            self.submit(
+                worker_type + "_" + str(index),
+                cmd.format(index=index, count=count),
+                **kwargs,
+            )
 
     def stop(self, job_name):
         """Stops a running job. Raises exception if there is no such job, but passes if the job has stopped
@@ -74,8 +80,7 @@ class SchedulerClient:
         raise NotImplementedError()
 
     def stop_all(self, signal=None):
-        """Stops the whole job.
-        """
+        """Stops the whole job."""
         raise NotImplementedError()
 
     def find(self, job_name) -> Optional[JobInfo]:
@@ -101,21 +106,16 @@ class SchedulerClient:
         raise NotImplementedError()
 
     def wait(self, timeout=None, **kwargs):
-        """Waits until all jobs submitted via this client instance finish.
-        """
+        """Waits until all jobs submitted via this client instance finish."""
         raise NotImplementedError()
 
 
 def remote_worker_cmd(expr_name, trial_name, debug, worker_type):
     # requires information in scheduler package
-    # HACK: slurm do not substitute %t in the command
-    bash_cmd = (
-        # f"pip3 install -e $REAL_PACKAGE_PATH --no-build-isolation && "
+    return (
         f"python3 {'' if debug else '-O'} -m reallm.apps.remote worker -w {worker_type} "
         f"-e {expr_name} -f {trial_name} -i {{jobstep_id}} -g {{n_jobsteps}} -r {{worker_submission_index}} "
         f"-p {{wprocs_per_jobstep}} -j {{wprocs_in_job}} -o {{wproc_offset}}")
-    # return f"bash -c \"{bash_cmd}\""
-    return bash_cmd
 
 
 def setup_cmd(expr_name, trial_name, debug):
@@ -138,18 +138,17 @@ def control_cmd(expr_name, trial_name, debug, ignore_worker_error, controller_ty
 
 def ray_cluster_cmd(expr_name, trial_name, worker_type):
     flags = [f"-e {expr_name}", f"-f {trial_name}", f"-w {worker_type}"]
-    bash_cmd = (f"pip3 install -e $REAL_PACKAGE_PATH --no-build-isolation && python3 -m apps.remote "
-                f"ray -i {{index}} -g {{count}} {' '.join(flags)}")
-    # return f"bash -c \"{bash_cmd}\""
-    return bash_cmd
+    return (f"python3 -m reallm.apps.remote ray -i {{index}} -g {{count}} {' '.join(flags)}")
 
 
 def make(mode, expr_name, trial_name, **kwargs) -> SchedulerClient:
     if mode == "slurm":
         from reallm.scheduler.slurm.client import SlurmSchedulerClient
+
         return SlurmSchedulerClient(expr_name, trial_name)
-    elif mode == 'local':
+    elif mode == "local":
         from reallm.scheduler.local.client import LocalSchedulerClient
+
         return LocalSchedulerClient(expr_name, trial_name)
     else:
         raise NotImplementedError(f"Scheduler {mode} not found")

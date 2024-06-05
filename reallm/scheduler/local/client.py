@@ -76,7 +76,7 @@ class LocalSchedulerClient(SchedulerClient):
             self._job_env_vars[worker_type] = env_vars
 
         if worker_type in self._job_cmd:
-            assert self._job_cmd[worker_type] == cmd, "All workers of the same type must have the same cmd."
+            assert (self._job_cmd[worker_type] == cmd), "All workers of the same type must have the same cmd."
         else:
             self._job_cmd[worker_type] = cmd
 
@@ -107,7 +107,7 @@ class LocalSchedulerClient(SchedulerClient):
                     wprocs_in_job=count,
                     wproc_offset=0,
                 )
-                logger.info("Starting local process with command: %s", cmd)
+                logger.debug("Starting local process with command: %s", cmd)
                 process = subprocess.Popen(cmd, shell=isinstance(cmd, str))
                 self._jobs[f"{worker_type}/{i}"] = process
             self._running_worker_types.append(worker_type)

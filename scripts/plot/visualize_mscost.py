@@ -75,9 +75,11 @@ def build_plot_data():
             world_size=d["world_size"],
             from_model_name=ModelName("Actor", 0),
             to_model_name=ModelName("Actor", 1),
-            from_topo=topology.PipeModelDataParallelTopology(num_pp=d["from_pp_size"],
-                                                             num_mp=d["from_mp_size"],
-                                                             num_dp=d["from_dp_size"]),
+            from_topo=topology.PipeModelDataParallelTopology(
+                num_pp=d["from_pp_size"],
+                num_mp=d["from_mp_size"],
+                num_dp=d["from_dp_size"],
+            ),
             to_topo=topology.PipeModelDataParallelTopology(num_pp=d["to_pp_size"],
                                                            num_mp=d["to_mp_size"],
                                                            num_dp=d["to_dp_size"]),
@@ -85,7 +87,12 @@ def build_plot_data():
             bw=200.0,
             set_interval_cost=0.03,
         )
-        key1 = (d["world_size"], d["from_dp_size"], d["from_mp_size"], d["from_pp_size"])
+        key1 = (
+            d["world_size"],
+            d["from_dp_size"],
+            d["from_mp_size"],
+            d["from_pp_size"],
+        )
         key2 = (d["world_size"], d["to_dp_size"], d["to_mp_size"], d["to_pp_size"])
         print(
             max(x1 + x2
@@ -151,7 +158,7 @@ def main():
 
     group = df[(df["world_size"] == 32) & (df["total_remote_volume"] > 0)]
     # print(group["local_comm_ratio"])
-    sns.displot(group['bw_util'], ax=axes)
+    sns.displot(group["bw_util"], ax=axes)
     # sns.barplot(ax=axes,
     #             x=np.arange(len(group)),
     #             y=group["local_comm_ratio"])

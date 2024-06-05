@@ -152,8 +152,10 @@ def _create_param_realloc_groups(
                 # This is not the optimal solution for intra-node communication
                 # because there may exist a source rank that is also dst rank,
                 # but we forcely select the first source rank on each node here.
-                assignment = _assign_src_to_dsts(_group_mwids_by_node(_src_ranks),
-                                                 _group_mwids_by_node(_all_dst_ranks))
+                assignment = _assign_src_to_dsts(
+                    _group_mwids_by_node(_src_ranks),
+                    _group_mwids_by_node(_all_dst_ranks),
+                )
                 _idle_src_ranks = [r for r in _src_ranks if r not in assignment]
                 for _src_rank in _idle_src_ranks:
                     dp_i, mp_i = (
@@ -444,7 +446,11 @@ def main():
         inaccurate_cnt = total_cnt = 0
         for ff in f.readlines():
             data = json.loads(ff)
-            from_pp_mp_dp = (data["from_pp_size"], data["from_mp_size"], data["from_dp_size"])
+            from_pp_mp_dp = (
+                data["from_pp_size"],
+                data["from_mp_size"],
+                data["from_dp_size"],
+            )
             to_pp_mp_dp = (data["to_pp_size"], data["to_mp_size"], data["to_dp_size"])
             world_size = data["world_size"]
             profile_res = data["mem_shift_time_ns"] / 1e9
@@ -504,7 +510,10 @@ def get_table():
         all_configs = list(itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)))
         all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
         all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
-        all_configs = list(filter(lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8], all_configs))
+        all_configs = list(filter(
+            lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8],
+            all_configs,
+        ))
         all_configs = list(filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs))
         all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
         for config_id, (from_pp_mp_dp, to_pp_mp_dp) in enumerate(all_configs):

@@ -124,13 +124,31 @@ def test_impl(world_size, profile: bool):
             tik = time.perf_counter()
         with torch.no_grad():
             if constants.pipe_parallel_world_size() == 1:
-                y = engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
+                y = engine.forward(
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=256,
+                )
                 for _ in range(5):
-                    engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
+                    engine.forward(
+                        packed_input_ids=packed_input_ids,
+                        cu_seqlens=cu_seqlens,
+                        max_seqlen=256,
+                    )
             else:
-                y = engine.forward(seqlens_cpu, packed_input_ids, cu_seqlens, num_micro_batches=world_size)
+                y = engine.forward(
+                    seqlens_cpu,
+                    packed_input_ids,
+                    cu_seqlens,
+                    num_micro_batches=world_size,
+                )
                 for _ in range(5):
-                    engine.forward(seqlens_cpu, packed_input_ids, cu_seqlens, num_micro_batches=world_size)
+                    engine.forward(
+                        seqlens_cpu,
+                        packed_input_ids,
+                        cu_seqlens,
+                        num_micro_batches=world_size,
+                    )
                     # assert torch.allclose(m(input_ids=x), y)
         if profile:
             torch.cuda.synchronize()

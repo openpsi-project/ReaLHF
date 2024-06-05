@@ -106,24 +106,26 @@ class StandaloneTestingProcess(mp.Process):
             raise e
 
 
-def init_global_constants(num_dp,
-                          num_mp,
-                          num_pp,
-                          sequence_parallel,
-                          gradient_checkpointing,
-                          topo=None,
-                          model_name=None,
-                          msid2mwid=None,
-                          max_prompt_len=None):
+def init_global_constants(
+    num_dp,
+    num_mp,
+    num_pp,
+    topo=None,
+    model_name=None,
+    msid2mwid=None,
+    sequence_parallel=False,
+    gradient_checkpointing=True,
+):
     model_name = model_name if model_name is not None else MODEL_NAME
 
     if topo is None:
-        topo = PipeModelDataParallelTopology(num_dp=num_dp,
-                                             num_mp=num_mp,
-                                             num_pp=num_pp,
-                                             sequence_parallel=sequence_parallel,
-                                             gradient_checkpointing=gradient_checkpointing,
-                                             max_prompt_len=max_prompt_len)
+        topo = PipeModelDataParallelTopology(
+            num_dp=num_dp,
+            num_mp=num_mp,
+            num_pp=num_pp,
+            sequence_parallel=sequence_parallel,
+            gradient_checkpointing=gradient_checkpointing,
+        )
         ws = num_dp * num_mp * num_pp
     else:
         ws = topo.world_size()
@@ -188,19 +190,19 @@ def clear_name_resolve(expr_name=None, trial_name=None):
     name_resolve.clear_subtree(names.trial_root(experiment_name=expr_name, trial_name=trial_name))
 
 
-def make_finetune_spec(bs_per_device,
-                       total_train_epochs=1,
-                       total_train_steps=10,
-                       steps_per_epoch=10,
-                       max_seq_len=1024):
+def make_finetune_spec(
+    bs_per_device,
+    total_train_epochs=1,
+    total_train_steps=10,
+    steps_per_epoch=10,
+    max_seq_len=1024,
+):
     import reallm.api.core.model_api as model_api
 
     finetune_spec = model_api.FinetuneSpec(
         total_train_epochs=total_train_epochs,
         total_train_steps=total_train_steps,
         steps_per_epoch=steps_per_epoch,
-        batch_size_per_device=bs_per_device,
-        max_seqlen=max_seq_len,
     )
     return finetune_spec
 
@@ -233,7 +235,7 @@ def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
 
 
 def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
-    from flash_attn.bert_padding import unpad_input
+    from reallm.impl.model.utils.padding import unpad_input
 
     if dp_rank == None:
         assert num_dp == None
@@ -253,8 +255,9 @@ def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
 
 
 def random_sample(bs, seq_len, vocab_size):
-    from flash_attn.bert_padding import unpad_input
     import torch
+
+    from reallm.impl.model.utils.padding import unpad_input
 
     input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)
@@ -307,7 +310,10 @@ def get_pytorch_profiler(save_fn: str):
         p.export_chrome_trace(save_fn)
 
     return torch.profiler.profile(
-        activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
         record_shapes=True,
         profile_memory=True,
         with_stack=True,

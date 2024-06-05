@@ -42,7 +42,7 @@ STATUS_MAPPING = {
     "COMPLETED": JobState.COMPLETED,
     "OUT_OF_MEMORY": JobState.FAILED,
     "DEADLINE": JobState.COMPLETED,
-    "TIMEOUT": JobState.COMPLETED
+    "TIMEOUT": JobState.COMPLETED,
 }
 
 
@@ -65,49 +65,50 @@ class SlurmResource:
         self_gpu_type = None if self.gpu == 0 else self.gpu_type
         other_gpu_type = None if other.gpu == 0 else other.gpu_type
         valid_gpu_type = self_gpu_type == other_gpu_type or (self_gpu_type or other_gpu_type)
-        assert valid_gpu_type, f"Cannot add two different gpu types {self_gpu_type}, {other_gpu_type}."
+        assert (valid_gpu_type), f"Cannot add two different gpu types {self_gpu_type}, {other_gpu_type}."
         return self_gpu_type if self_gpu_type else other_gpu_type
 
     def __str__(self):
-        return "SlurmResource: \n" + \
-               "mem: " + str(self.mem) + " MB \n" + \
-               "cpu: " + str(self.cpu) + " \n" + \
-               "gpu: " + str(self.gpu) + " \n" + \
-               "gpu_type: " + str(self.gpu_type)
+        return ("SlurmResource: \n" + "mem: " + str(self.mem) + " MB \n" + "cpu: " + str(self.cpu) + " \n" +
+                "gpu: " + str(self.gpu) + " \n" + "gpu_type: " + str(self.gpu_type))
 
     def __mul__(self, other: int) -> SlurmResource:
         assert isinstance(other, int), "ResourceRequirement can only be multiplied by int."
-        return SlurmResource(mem=self.mem * other,
-                             cpu=self.cpu * other,
-                             gpu=self.gpu * other,
-                             gpu_type=self.gpu_type)
+        return SlurmResource(
+            mem=self.mem * other,
+            cpu=self.cpu * other,
+            gpu=self.gpu * other,
+            gpu_type=self.gpu_type,
+        )
 
     def __rmul__(self, other: int) -> SlurmResource:
         return self.__mul__(other)
 
     def __add__(self, other: SlurmResource) -> SlurmResource:
         assert isinstance(other, SlurmResource), "SlurmResource can only add another SlurmResource instance."
-        return SlurmResource(mem=self.mem + other.mem,
-                             cpu=self.cpu + other.cpu,
-                             gpu=self.gpu + other.gpu,
-                             gpu_type=self.__check_gpu_type(other))
+        return SlurmResource(
+            mem=self.mem + other.mem,
+            cpu=self.cpu + other.cpu,
+            gpu=self.gpu + other.gpu,
+            gpu_type=self.__check_gpu_type(other),
+        )
 
     def __sub__(self, other: SlurmResource) -> SlurmResource:
         assert isinstance(other,
                           SlurmResource), "SlurmResource can only subtract another SlurmResource instance."
-        return SlurmResource(mem=self.mem - other.mem,
-                             cpu=self.cpu - other.cpu,
-                             gpu=self.gpu - other.gpu,
-                             gpu_type=self.__check_gpu_type(other))
+        return SlurmResource(
+            mem=self.mem - other.mem,
+            cpu=self.cpu - other.cpu,
+            gpu=self.gpu - other.gpu,
+            gpu_type=self.__check_gpu_type(other),
+        )
 
     def __neg__(self) -> SlurmResource:
         return SlurmResource(mem=-self.mem, cpu=-self.cpu, gpu=-self.gpu, gpu_type=self.gpu_type)
 
     def __eq__(self, other: SlurmResource) -> bool:
-        return self.mem == other.mem and \
-               self.cpu == other.cpu and \
-               self.gpu == other.gpu and \
-               self.gpu_type == other.gpu_type
+        return (self.mem == other.mem and self.cpu == other.cpu and self.gpu == other.gpu
+                and self.gpu_type == other.gpu_type)
 
     def __lt__(self, other: SlurmResource) -> bool:
         if self.gpu_type != other.gpu_type:
@@ -138,7 +139,7 @@ class SlurmLaunchInfo:
     """A SlurmLaunchInfo contains all informantion required to **launch** a slurm job.
 
     Matching one `TasksGroup` in `SchedulingConfig` and one slurm job.
-    
+
     The naming conventions:
         - `job`: Literally a slurm job with a (maybe non-unique) job name and an unique job ID,
             which may contain multiple job steps and processes. It corresponds an `sbatch` or `srun` call.
@@ -180,6 +181,7 @@ class SlurmLaunchInfo:
         multiprog (bool): Whether to use multiprog file for `--multi-prog` job submission.
         multiprog_content (str, optional): The content of the multiprog file.
     """
+
     run_name: str
     exper_name: str
     trial_name: str
@@ -212,8 +214,7 @@ class SlurmLaunchInfo:
     job_info: Optional[JobInfo] = None
 
     def __post_init__(self):
-        """ resolve fractional GPU resource requirement
-        """
+        """resolve fractional GPU resource requirement"""
         gpu_per_worker = self.resource_requirement.gpu
         # assert gpu_per_worker <= 1 and gpu_per_worker >= 0
         if gpu_per_worker < 1 and gpu_per_worker > 0:
@@ -249,18 +250,30 @@ class SlurmLaunchInfo:
 
     @property
     def log_path(self) -> str:
-        return os.path.join(LOG_ROOT, self.exper_name, self.trial_name,
-                            f"{self.worker_type}-{self.worker_submission_idx}")
+        return os.path.join(
+            LOG_ROOT,
+            self.exper_name,
+            self.trial_name,
+            f"{self.worker_type}-{self.worker_submission_idx}",
+        )
 
     @property
     def multiprog_path(self) -> str:
-        return os.path.join(LOG_ROOT, self.exper_name, self.trial_name,
-                            f"{self.worker_type}-{self.worker_submission_idx}.multiprog")
+        return os.path.join(
+            LOG_ROOT,
+            self.exper_name,
+            self.trial_name,
+            f"{self.worker_type}-{self.worker_submission_idx}.multiprog",
+        )
 
     @property
     def hostfile_path(self) -> str:
-        return os.path.join(LOG_ROOT, self.exper_name, self.trial_name,
-                            f"{self.worker_type}-{self.worker_submission_idx}.hostfile")
+        return os.path.join(
+            LOG_ROOT,
+            self.exper_name,
+            self.trial_name,
+            f"{self.worker_type}-{self.worker_submission_idx}.hostfile",
+        )
 
     def show_log(self):
         try:
@@ -323,21 +336,21 @@ class SlurmLaunchInfo:
                 f.write(self.hostfile_content)
 
         logger.info(
-            f"Allocating {ntasks} jobstep(s) \"{self.worker_type}\" submission index {self.worker_submission_idx}"
+            f'Allocating {ntasks} jobstep(s) "{self.worker_type}" submission index {self.worker_submission_idx}'
             f" with {cpu} cpu, {gpu} gpu and {mem} MB memory.")
         logger.info(f"To check the output, run \n\t`tail -f {self.log_path}`.")
 
         # Setup sbatch
         # head
         lines = [
-            '#!/bin/bash',
-            f'#SBATCH --job-name={self.slurm_name}',
-            f'#SBATCH --output={self.log_path}',
-            f'#SBATCH --ntasks={ntasks}',
-            f'#SBATCH --gpus-per-task={gpu_type}:{gpu}' if gpu >= 1 else "",
-            f'#SBATCH --cpus-per-task={cpu}',
-            f'#SBATCH --mem-per-cpu={mem // max(1, cpu)}M',
-            f'#SBATCH --partition={self.partition}' if self.partition else "",
+            "#!/bin/bash",
+            f"#SBATCH --job-name={self.slurm_name}",
+            f"#SBATCH --output={self.log_path}",
+            f"#SBATCH --ntasks={ntasks}",
+            f"#SBATCH --gpus-per-task={gpu_type}:{gpu}" if gpu >= 1 else "",
+            f"#SBATCH --cpus-per-task={cpu}",
+            f"#SBATCH --mem-per-cpu={mem // max(1, cpu)}M",
+            f"#SBATCH --partition={self.partition}" if self.partition else "",
             "#SBATCH --distribution=arbitrary" if self.hostfile else "",
             # f'#SBATCH --nodelist={spec.nodelist}' if spec.nodelist is not None else "",
             # f'#SBATCH --exclude={spec.exclude}' if spec.exclude is not None else "",
@@ -351,15 +364,15 @@ class SlurmLaunchInfo:
             srun_env["SLURM_HOSTFILE"] = self.hostfile_path
         # Setup step command.
         # add current directory into container mounts to ensure editable mode for reallm package
-        container_mounts = f"{os.environ.get('REAL_PACKAGE_PATH', '$PWD')}:/distributed_llm,"\
-            + self.container_mounts
+        container_mounts = (f"{os.environ.get('REAL_PACKAGE_PATH', '$PWD')}:/distributed_llm," +
+                            self.container_mounts)
         srun_flags = [
             f"--ntasks={ntasks}",
             f"--cpus-per-task={cpu}",
             f"--gpus-per-task={gpu_type}:{gpu}" if gpu >= 1 else "",
             f"--mem-per-cpu={mem // max(1, cpu)}",
-            f"--export={','.join(str(k)+'='+str(v) for k, v in self.env_vars.items())}"
-            if self.env_vars else "",
+            (f"--export={','.join(str(k)+'='+str(v) for k, v in self.env_vars.items())}"
+             if self.env_vars else ""),
             f"--multi-prog" if self.multiprog else "",
             f"--container-image={self.container_image}",
             f"--container-mounts={container_mounts}",
@@ -379,15 +392,15 @@ class SlurmLaunchInfo:
             'echo "[Runner] CudaVisible: $CUDA_VISIBLE_DEVICES"',
             'echo "[Runner] CudaMpsPerc: $CUDA_MPS_ACTIVE_THREAD_PERCENTAGE"',
             srun_cmd,
-            'RETCODE=$?',
+            "RETCODE=$?",
             'echo "[Runner] FinishTime: $(date -u)"',
             'echo "[Runner] RetCode: $RETCODE"',
             'echo "[Runner] ------------"',
-            'exit $RETCODE',
+            "exit $RETCODE",
         ]
 
-        script_strs = '\n'.join(list(filter(lambda x: x, lines))) + '\n'
-        script = script_strs.encode('ascii')
+        script_strs = "\n".join(list(filter(lambda x: x, lines))) + "\n"
+        script = script_strs.encode("ascii")
 
         def pad_output_str_to_length(s: str, pad_s: str, length: int):
             assert len(pad_s) == 1
@@ -403,8 +416,8 @@ class SlurmLaunchInfo:
             f.write(str(self))
             f.write(pad_output_str_to_length("SBATCH JOB INFO END", "=", 80) + "\n")
             f.write(pad_output_str_to_length("JOB OUTPUT BEGIN", "=", 80) + "\n")
-        r = subprocess.check_output(['sbatch', '--parsable'], input=script,
-                                    env=srun_env).decode('ascii').strip()
+        r = (subprocess.check_output(["sbatch", "--parsable"], input=script,
+                                     env=srun_env).decode("ascii").strip())
         self.job_info = JobInfo(name=self.slurm_name, state=JobState.PENDING)
 
 
@@ -423,34 +436,40 @@ def unparse_formatted_time(timestamp: int) -> str:
 
 
 # slurm command execute and output parsing
-def query_jobs(slurm_names: Optional[List[str]] = None,
-               slurm_ids: Optional[List[str]] = None,
-               status: str = "all",
-               delimiter: str = "__PSI__") -> List[JobInfo]:
+def query_jobs(
+    slurm_names: Optional[List[str]] = None,
+    slurm_ids: Optional[List[str]] = None,
+    status: str = "all",
+    delimiter: str = "__PSI__",
+) -> List[JobInfo]:
     squeue_format = f":.{delimiter},".join(SQUEUE_FIELDS)
     cmd = ["squeue", "-O", squeue_format, f"-t{status}"]
     if slurm_names is not None:
         cmd += ["-n", ",".join(slurm_names)]
     if slurm_ids is not None:
         cmd += ["-j", ",".join([str(s) for s in slurm_ids])]
-    output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("ascii").strip()
+    output = (subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("ascii").strip())
     rs = []
     for line in output.split("\n")[1:]:
         job_id, state, submit_time, start_time, slurm_name, nodelist, *_ = line.split(delimiter)
         rs.append(
-            JobInfo(name=slurm_name,
-                    state=STATUS_MAPPING[state],
-                    host=nodelist,
-                    submit_time=submit_time,
-                    start_time=start_time,
-                    slurm_id=job_id.strip()))
+            JobInfo(
+                name=slurm_name,
+                state=STATUS_MAPPING[state],
+                host=nodelist,
+                submit_time=submit_time,
+                start_time=start_time,
+                slurm_id=job_id.strip(),
+            ))
     return rs
 
 
-def cancel_jobs(slurm_names: Optional[List[str]] = None,
-                slurm_ids: Optional[List[str]] = None,
-                signal: Literal["SIGINT", "SIGKILL"] = "SIGKILL"):
-    assert slurm_names is not None or slurm_ids is not None, "Must specify slurm_names or slurm_ids."
+def cancel_jobs(
+    slurm_names: Optional[List[str]] = None,
+    slurm_ids: Optional[List[str]] = None,
+    signal: Literal["SIGINT", "SIGKILL"] = "SIGKILL",
+):
+    assert (slurm_names is not None or slurm_ids is not None), "Must specify slurm_names or slurm_ids."
     assert not (slurm_names and slurm_ids), "Cannot specify both slurm_names and slurm_ids."
     cmd = ["scancel", "-s", signal]
     if slurm_names is not None:
@@ -531,32 +550,32 @@ def available_hostnames(
     nodelist: Optional[str] = None,
     exclude: Optional[str] = None,
 ) -> List[str]:
-    all_nodelist: str = subprocess.check_output("sinfo -o \"%N\" --noheader",
-                                                shell=True).decode("utf-8").strip()
-    all_hostnames: List[str] = subprocess.check_output([
-        'scontrol',
-        'show',
-        'hostnames',
+    all_nodelist: str = (subprocess.check_output('sinfo -o "%N" --noheader',
+                                                 shell=True).decode("utf-8").strip())
+    all_hostnames: List[str] = (subprocess.check_output([
+        "scontrol",
+        "show",
+        "hostnames",
         all_nodelist,
-    ]).decode('utf-8').strip().split('\n')
+    ]).decode("utf-8").strip().split("\n"))
 
     if nodelist is not None:
-        valid_hostnames: List[str] = subprocess.check_output([
-            'scontrol',
-            'show',
-            'hostnames',
+        valid_hostnames: List[str] = (subprocess.check_output([
+            "scontrol",
+            "show",
+            "hostnames",
             nodelist,
-        ]).decode('utf-8').strip().split('\n')
+        ]).decode("utf-8").strip().split("\n"))
     else:
         valid_hostnames = all_hostnames
 
     if exclude is not None:
-        excluded_hostnames: List[str] = subprocess.check_output([
-            'scontrol',
-            'show',
-            'hostnames',
+        excluded_hostnames: List[str] = (subprocess.check_output([
+            "scontrol",
+            "show",
+            "hostnames",
             exclude,
-        ]).decode('utf-8').strip().split('\n')
+        ]).decode("utf-8").strip().split("\n"))
         for hn in excluded_hostnames:
             if hn in valid_hostnames:
                 valid_hostnames.remove(hn)
@@ -565,12 +584,15 @@ def available_hostnames(
         if hn not in all_hostnames:
             raise ValueError(f"Invalid host name: {hn}. Available host names: {all_hostnames}.")
 
-    return list(filter(lambda x: reallm.base.cluster.node_name_is_node_type(x, node_type), valid_hostnames))
+    return list(filter(
+        lambda x: reallm.base.cluster.node_name_is_node_type(x, node_type),
+        valid_hostnames,
+    ))
 
 
 def get_all_node_resources() -> Dict[str, SlurmResource]:
-    """ Execute `scontrol show node` to get all node resources
-    available in the slurm cluster. 
+    """Execute `scontrol show node` to get all node resources
+    available in the slurm cluster.
     Return a list of SlurmResource
     """
     o = subprocess.check_output(["scontrol", "show", "node"]).decode("utf-8")
@@ -593,7 +615,7 @@ def get_all_node_resources() -> Dict[str, SlurmResource]:
                 ctres = _parse_output_tres_line(l)
             if l.startswith("AllocTRES"):
                 atres = _parse_output_tres_line(l)
-        ctres.gpu_type = atres.gpu_type = reallm.base.cluster.spec.gpu_type_from_node_name(node_name)
+        ctres.gpu_type = atres.gpu_type = (reallm.base.cluster.spec.gpu_type_from_node_name(node_name))
         rres = ctres - atres
         if rres.valid():
             all_rres[node_name] = rres
@@ -611,7 +633,7 @@ def resource_to_string(resources: Dict[str, SlurmResource]) -> str:
         **{
             field.name: getattr(r, field.name)
             for field in r.__dataclass_fields__.values()
-        }
+        },
     } for k, r in resources.items()]
     return pd.DataFrame(resource_list).to_string(index=False)
 
@@ -619,8 +641,8 @@ def resource_to_string(resources: Dict[str, SlurmResource]) -> str:
 def allocate_resources(infos: List[SlurmLaunchInfo],
                        # strategy: Literal["pack", "plane"] = "pack",
                        ) -> List[SlurmLaunchInfo]:
-    """ Allocate all slurm task specs, fill in the hostfile field of the specs
-    Only support simple greedy strategy now, which allocates tasks to node with the most 
+    """Allocate all slurm task specs, fill in the hostfile field of the specs
+    Only support simple greedy strategy now, which allocates tasks to node with the most
     available resources without considering other tasks.
     """
     all_resources = get_all_node_resources()
@@ -655,20 +677,20 @@ def allocate_resources(infos: List[SlurmLaunchInfo],
         if task_left > 0:
             # logger.warning(f"Current resources in the cluster:\n {resource_to_string(get_all_node_resources())}")
             logger.warning(
-                f"Unable to allocate {info.n_jobsteps} Jobs with name \"{info.slurm_name}\". "
+                f'Unable to allocate {info.n_jobsteps} Jobs with name "{info.slurm_name}". '
                 f"Resource Requirement of this job is: {dataclasses.asdict(info.resource_requirement)}. "
                 f"Valid resources for this job is "
                 f"(according to NodeType={info.node_type}, NodeList={info.nodelist}, "
                 f"and Exclude={info.exclude}):\n {resource_to_string({k: v for k, v in get_all_node_resources().items() if k in valid_hostnames})}"
             )
             for pinfo in infos[:info_idx]:
-                if len(set(pinfo.hostfile_content.split('\n')).intersection(set(valid_hostnames))) == 0:
+                if (len(set(pinfo.hostfile_content.split("\n")).intersection(set(valid_hostnames))) == 0):
                     continue
                 palloc = collections.defaultdict(lambda: 0)
-                for _n in pinfo.hostfile_content.split('\n'):
+                for _n in pinfo.hostfile_content.split("\n"):
                     palloc[_n] += 1
                 logger.warning(
-                    f"Found previous job \"{pinfo.slurm_name}\" (ntasks={pinfo.n_jobsteps}) "
+                    f'Found previous job "{pinfo.slurm_name}" (ntasks={pinfo.n_jobsteps}) '
                     f"has been allocated to the same set of nodes. "
                     f"Resource requirement of this job is: {dataclasses.asdict(pinfo.resource_requirement)}, "
                     f"allocation of this job is {dict(palloc)}.")
@@ -683,8 +705,7 @@ def allocate_resources(infos: List[SlurmLaunchInfo],
 def show_tesla():
     all_rres = get_all_node_resources()
     hostname = socket.gethostname()
-    for k in available_hostnames(
-            node_type=["a100" if "YL" not in hostname and "QH" not in hostname else "a800"]):
+    for k in available_hostnames(node_type=["a100"]):
         print(k, all_rres[k])
 
 

@@ -61,13 +61,15 @@ def single_gpu_generate(model_families: List[ModelFamily]):
                 return
             hf_path = MODEL_FAMILY_TO_PATH[model_family]
 
-            model: Model = make_real_model(model_name,
-                                           device="cuda",
-                                           is_critic=False,
-                                           init_critic_from_actor=False,
-                                           model_path=hf_path,
-                                           dtype="fp16",
-                                           hf_model_family=model_family._class)
+            model: Model = make_real_model(
+                model_name,
+                device="cuda",
+                is_critic=False,
+                init_critic_from_actor=False,
+                model_path=hf_path,
+                dtype="fp16",
+                hf_model_family=model_family._class,
+            )
             module: ReaLModel = model.module
             module.instantiate()
             module.eval()
@@ -89,9 +91,11 @@ def single_gpu_generate(model_families: List[ModelFamily]):
                 try:
                     # dataloader = torch.utils.data.DataLoader(dataset, batch_size=bs)
                     # NOTE: this test will not always pass, so we run multiple trials
-                    gconfig = GenerationConfig(min_new_tokens=min_seqlen,
-                                               max_new_tokens=max_seqlen,
-                                               greedy=True)
+                    gconfig = GenerationConfig(
+                        min_new_tokens=min_seqlen,
+                        max_new_tokens=max_seqlen,
+                        greedy=True,
+                    )
                     # for i in range(num_warmup + num_profile):
                     # for i, x in enumerate(dataloader):
                     #     if i > num_profile + num_warmup:
@@ -100,9 +104,11 @@ def single_gpu_generate(model_families: List[ModelFamily]):
                         input_ids = torch.randint(0, mconfig.vocab_size, (bs, prompt_len), dtype=torch.long)
                         st = time.monotonic()
                         # print(x)
-                        res = module.generate(input_ids=input_ids.cuda(),
-                                              tokenizer=tokenizer,
-                                              gconfig=gconfig)
+                        res = module.generate(
+                            input_ids=input_ids.cuda(),
+                            tokenizer=tokenizer,
+                            gconfig=gconfig,
+                        )
                         tt = time.monotonic() - st
                         print(f"bs {bs} sequences shape {res.sequences.shape}, time cost {tt} s")
                         if i >= num_warmup:
@@ -121,6 +127,7 @@ def single_gpu_generate(model_families: List[ModelFamily]):
                 bs = bs * 2
 
     import pandas as pd
+
     df = pd.DataFrame({
         "model_class": model_class,
         "model_size": model_size,
@@ -134,8 +141,9 @@ def single_gpu_generate(model_families: List[ModelFamily]):
     # avg token throughput
     for model_class, model_size in zip(model_classes, model_sizes):
         for bs in df["batch_size"].unique():
-            df_bs = df[(df["model_class"] == model_class) & (df["model_size"] == model_size) &
-                       (df["batch_size"] == bs)]
+            df_bs = df[(df["model_class"] == model_class)
+                       & (df["model_size"] == model_size)
+                       & (df["batch_size"] == bs)]
             time_cost = df_bs["time_cost"].mean()
             print(f"Model: {(model_class, model_size)} batch_size: {bs}; "
                   f"time_cost: {time_cost:.4f}; throughput: {bs*max_seqlen/time_cost:.4f} tokens/s")
@@ -167,6 +175,7 @@ def huggingface_generate(model_families: List[ModelFamily]):
     for model_family in model_families:
         hf_path = MODEL_FAMILY_TO_PATH[model_family]
         from transformers import AutoModelForCausalLM, AutoTokenizer
+
         tokenizer = AutoTokenizer.from_pretrained(hf_path)
         model = AutoModelForCausalLM.from_pretrained(hf_path, attn_implementation="flash_attention_2")
 
@@ -179,11 +188,13 @@ def huggingface_generate(model_families: List[ModelFamily]):
                     st = time.monotonic()
                     input_ids = torch.randint(0, tokenizer.vocab_size, (bs, prompt_len),
                                               dtype=torch.long).cuda()
-                    res = model.generate(input_ids=input_ids,
-                                         max_new_tokens=max_seqlen,
-                                         min_new_tokens=min_seqlen,
-                                         num_beams=1,
-                                         do_sample=False)
+                    res = model.generate(
+                        input_ids=input_ids,
+                        max_new_tokens=max_seqlen,
+                        min_new_tokens=min_seqlen,
+                        num_beams=1,
+                        do_sample=False,
+                    )
                     tt = time.monotonic() - st
                     print(f"bs {bs} sequences shape {res.shape}, time cost {tt} s")
                     if i >= num_warmup:
@@ -202,6 +213,7 @@ def huggingface_generate(model_families: List[ModelFamily]):
             bs = bs * 2
 
     import pandas as pd
+
     df = pd.DataFrame({
         "model_class": model_class,
         "model_size": model_size,
@@ -215,8 +227,9 @@ def huggingface_generate(model_families: List[ModelFamily]):
     # avg token throughput
     for model_class, model_size in zip(model_classes, model_sizes):
         for bs in df["batch_size"].unique():
-            df_bs = df[(df["model_class"] == model_class) & (df["model_size"] == model_size) &
-                       (df["batch_size"] == bs)]
+            df_bs = df[(df["model_class"] == model_class)
+                       & (df["model_size"] == model_size)
+                       & (df["batch_size"] == bs)]
             time_cost = df_bs["time_cost"].mean()
             print(f"Model: {(model_class, model_size)} batch_size: {bs}; "
                   f"time_cost: {time_cost:.4f}; throughput: {bs*max_seqlen/time_cost:.4f} tokens/s")

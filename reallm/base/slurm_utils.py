@@ -71,6 +71,7 @@ def slurm_hostname_key(hostname):
 def check_slurm_availability():
     import os
     import subprocess
+
     slurm_available = (int(
         subprocess.run(
             "squeue",

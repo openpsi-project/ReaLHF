@@ -4,8 +4,9 @@ import reallm.base.namedarray
 
 
 def random_sample(bs, seq_len, vocab_size):
-    from flash_attn.bert_padding import unpad_input
     import torch
+
+    from reallm.impl.model.utils.padding import unpad_input
 
     input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)
@@ -42,4 +43,5 @@ def parse_stats_key(key):
 
 def load_model_config(model_class: str, model_path: str) -> ReaLModelConfig:
     from reallm.impl.model.nn.real_llm_api import ReaLModel
+
     return getattr(ReaLModel, f"config_from_{model_class}")(model_path=model_path)

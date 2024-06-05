@@ -76,7 +76,7 @@ class NameResolvingRequstClient:
 
             master_send_name = names.request_reply_stream(experiment_name, trial_name, f"master_send_{i}")
             name_resolve.add(name=master_send_name, value=f"{host_ip}:{send_port}")
-            logger.info(f"Add master send address {host_ip}:{send_port} as {master_send_name}")
+            logger.debug(f"Add master send address {host_ip}:{send_port} as {master_send_name}")
             self.send_sockets.append(s)
 
         self.recv_socket: zmq.Socket = self.context.socket(zmq.PULL)
@@ -86,7 +86,7 @@ class NameResolvingRequstClient:
 
         master_recv_name = names.request_reply_stream(experiment_name, trial_name, "master_recv")
         name_resolve.add(name=master_recv_name, value=self.recv_address)
-        logger.info(f"Add master send address {self.recv_address} as {master_recv_name}")
+        logger.debug(f"Add master send address {self.recv_address} as {master_recv_name}")
 
         self._response_buffer: Dict[uuid.UUID, Payload] = {}
         self._handler_routing = handler_routing
@@ -97,7 +97,7 @@ class NameResolvingRequstClient:
                     names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME)))
                < n_subscribers):
             time.sleep(0.1)
-        logger.info(
+        logger.debug(
             f"Master discovered all {n_subscribers} "
             f"subscribers: {name_resolve.get_subtree(names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME))}."
         )

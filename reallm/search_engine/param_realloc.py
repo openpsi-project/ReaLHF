@@ -107,7 +107,13 @@ def decompose_to_three_factors(n: int):
     return factors
 
 
-def dump_table(n_nodes: int, model_family: ModelFamily, model_path: str, rank: int = 0, parallel: int = 1):
+def dump_table(
+    n_nodes: int,
+    model_family: ModelFamily,
+    model_path: str,
+    rank: int = 0,
+    parallel: int = 1,
+):
     from_model_name = ModelName("actor", 0)
     to_model_name = ModelName("actor", 1)
 
@@ -115,6 +121,7 @@ def dump_table(n_nodes: int, model_family: ModelFamily, model_path: str, rank: i
         return ",".join([str(i) for i in t])
 
     import tqdm
+
     res = {}
     device_mesh_sizes = [4] + [8 * i for i in range(1, n_nodes + 1)]
     space = list(itertools.product(device_mesh_sizes, device_mesh_sizes))
@@ -125,7 +132,10 @@ def dump_table(n_nodes: int, model_family: ModelFamily, model_path: str, rank: i
         all_configs = list(itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)))
         all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
         all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
-        all_configs = list(filter(lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8], all_configs))
+        all_configs = list(filter(
+            lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8],
+            all_configs,
+        ))
         all_configs = list(filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs))
         all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
         for config_id, (from_pp_mp_dp, to_pp_mp_dp) in tqdm.tqdm(enumerate(all_configs)):
@@ -137,6 +147,7 @@ def dump_table(n_nodes: int, model_family: ModelFamily, model_path: str, rank: i
             assert world_size >= to_topo.world_size()
 
             from reallm.search_engine.utils import load_model_config
+
             mconfig = load_model_config(model_family._class, model_path)
 
             # tik = time.perf_counter()
@@ -163,6 +174,7 @@ def dump_table(n_nodes: int, model_family: ModelFamily, model_path: str, rank: i
 
     import os
     import pickle
+
     dump_path = os.path.join(constants.PROFILER_CACHE_PATH, "param_realloc")
     fn = f"prtc_{model_family}_n{n_nodes}_{rank}_{parallel}.pkl"
     if not os.path.exists(dump_path):
@@ -181,7 +193,10 @@ def dump_table_parallel(n_nodes: int, model_family_to_path: Dict[ModelFamily, st
     ps = []
     for model_family, model_path in model_family_to_path.items():
         for rank in range(parallel):
-            ps.append(mp.Process(target=dump_table, args=(n_nodes, model_family, model_path, rank, parallel)))
+            ps.append(mp.Process(
+                target=dump_table,
+                args=(n_nodes, model_family, model_path, rank, parallel),
+            ))
 
     for p in ps:
         p.start()
@@ -193,6 +208,7 @@ def dump_table_parallel(n_nodes: int, model_family_to_path: Dict[ModelFamily, st
 def merge_tables(n_nodes: int, model_family_to_path: Dict[ModelFamily, str], parallel: int = 4):
     import os
     import pickle
+
     res_path = os.path.join(constants.PROFILER_CACHE_PATH, "param_realloc")
 
     for model_family in model_family_to_path.keys():

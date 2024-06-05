@@ -12,7 +12,7 @@ from reallm.impl.model.nn.real_llm_api import ReaLModel
 import reallm.api.from_hf
 
 # Import all model implementations.
-_p = re.compile(r'^(?!.*__init__).*\.py$')
+_p = re.compile(r"^(?!.*__init__).*\.py$")
 _filepath = os.path.dirname(__file__)
 import_module(os.path.join(_filepath, "backend"), _p)
 import_module(os.path.join(_filepath, "interface"), _p)

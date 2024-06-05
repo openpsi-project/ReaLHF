@@ -7,9 +7,6 @@ import re
 
 import numpy as np
 
-from reallm.search_engine.enumerate import build_graph, enumerate_rpc_executions
-from reallm.search_engine.estimate import get_param_realloc_stats, load_model_config
-
 try:
     import reallm._C.mdm_search as mdm_search
 except ModuleNotFoundError:
@@ -23,22 +20,43 @@ from reallm.api.quickstart.search import RPCExecution
 import reallm.base.constants as constants
 
 
-def search_rpc_allocations(device_mesh: DeviceMesh,
-                           rpcs: List[ModelRPC],
-                           num_gen_tokens: int = 256,
-                           n_ppo_minibatches: int = 1,
-                           seq_len: int = 256,
-                           gradient_checkpointing: bool = True,
-                           use_cache: bool = False) -> List[RPCAllocation]:
+def search_rpc_allocations(
+    device_mesh: DeviceMesh,
+    rpcs: List[ModelRPC],
+    num_gen_tokens: int = 256,
+    n_ppo_minibatches: int = 1,
+    seq_len: int = 256,
+    gradient_checkpointing: bool = True,
+    use_cache: bool = False,
+) -> List[RPCAllocation]:
+    from reallm.search_engine.enumerate import build_graph
+    from reallm.search_engine.estimate import get_param_realloc_stats
+
     from_file = os.environ.get("IS_REMOTE", "0") == "1"
-    dump_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
-                            "device_mapping.pkl")
-    log_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
-                           "device_mapping")
-    rs_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
-                          "raw_search_result")
-    rpc_exe_dir = os.path.join(constants.LOG_ROOT, constants.experiment_name(), constants.trial_name(),
-                               "rpc_exe_info")
+    dump_dir = os.path.join(
+        constants.LOG_ROOT,
+        constants.experiment_name(),
+        constants.trial_name(),
+        "device_mapping.pkl",
+    )
+    log_dir = os.path.join(
+        constants.LOG_ROOT,
+        constants.experiment_name(),
+        constants.trial_name(),
+        "device_mapping",
+    )
+    rs_dir = os.path.join(
+        constants.LOG_ROOT,
+        constants.experiment_name(),
+        constants.trial_name(),
+        "raw_search_result",
+    )
+    rpc_exe_dir = os.path.join(
+        constants.LOG_ROOT,
+        constants.experiment_name(),
+        constants.trial_name(),
+        "rpc_exe_info",
+    )
 
     if from_file or (use_cache and os.path.exists(dump_dir)):
         with open(dump_dir, "rb") as f:
@@ -53,14 +71,16 @@ def search_rpc_allocations(device_mesh: DeviceMesh,
         t = get_param_realloc_stats(rpc.model_type, rpc.model_path, n_nodes, True)
         table.update(t)
 
-    rpc_exe_list = make_rpc_exe_list(rpcs,
-                                     device_mesh,
-                                     num_gen_tokens=num_gen_tokens,
-                                     n_ppo_minibatches=n_ppo_minibatches,
-                                     seq_len=seq_len,
-                                     gradient_checkpointing=gradient_checkpointing,
-                                     log_dir=rpc_exe_dir,
-                                     if_print=False)
+    rpc_exe_list = make_rpc_exe_list(
+        rpcs,
+        device_mesh,
+        num_gen_tokens=num_gen_tokens,
+        n_ppo_minibatches=n_ppo_minibatches,
+        seq_len=seq_len,
+        gradient_checkpointing=gradient_checkpointing,
+        log_dir=rpc_exe_dir,
+        if_print=False,
+    )
     graph = build_graph(rpcs, 5, 1, if_print=False)
     model_size_dict = make_model_size_dict(rpcs, if_print=False)
 
@@ -82,9 +102,11 @@ def search_rpc_allocations(device_mesh: DeviceMesh,
     if not from_file:
         with open(rs_dir, "w") as f:
             import pprint
+
             pprint.pprint(rs, stream=f)
 
     import pprint
+
     r: Dict[str, Dict[str, Any]] = rs[-1]
     pprint.pprint(r)
 
@@ -121,29 +143,36 @@ def search_rpc_allocations(device_mesh: DeviceMesh,
             pickle.dump(rpc_allocs, f)
         with open(log_dir, "w") as f:
             import pprint
+
             pprint.pprint(rpc_allocs, stream=f)
 
     return rpc_allocs
 
 
-def make_rpc_exe_list(rpcs: List[ModelRPC],
-                      device_mesh: DeviceMesh,
-                      num_gen_tokens: int,
-                      n_ppo_minibatches: int,
-                      seq_len: int,
-                      gradient_checkpointing: bool,
-                      if_print: bool = False,
-                      log_dir: Optional[str] = None) -> List[RPCExecution]:
+def make_rpc_exe_list(
+    rpcs: List[ModelRPC],
+    device_mesh: DeviceMesh,
+    num_gen_tokens: int,
+    n_ppo_minibatches: int,
+    seq_len: int,
+    gradient_checkpointing: bool,
+    if_print: bool = False,
+    log_dir: Optional[str] = None,
+) -> List[RPCExecution]:
+    from reallm.search_engine.enumerate import enumerate_rpc_executions
+
     rpc_exe_list = []
     log_flag = False
     for rpc in rpcs:
         # flash_mqat_config = load_model_config(rpc)
-        feasible = enumerate_rpc_executions(rpc,
-                                            device_mesh,
-                                            seq_len=seq_len,
-                                            num_gen_tokens=num_gen_tokens,
-                                            n_ppo_minibatches=n_ppo_minibatches,
-                                            gradient_checkpointing=gradient_checkpointing)
+        feasible = enumerate_rpc_executions(
+            rpc,
+            device_mesh,
+            seq_len=seq_len,
+            num_gen_tokens=num_gen_tokens,
+            n_ppo_minibatches=n_ppo_minibatches,
+            gradient_checkpointing=gradient_checkpointing,
+        )
         rpc_exe_list.extend(feasible)
 
         if log_dir is not None:
@@ -199,6 +228,9 @@ def dump_search_settings(
     gradient_checkpointing: bool = True,
     seq_len: int = 256,
 ):
+
+    from reallm.search_engine.enumerate import build_graph
+
     dump_dir = "/home/meizy/model_device_mapping_search/test_case/"
     rpc_exe_list = make_rpc_exe_list(
         rpcs,
@@ -208,7 +240,8 @@ def dump_search_settings(
         seq_len=seq_len,
         gradient_checkpointing=gradient_checkpointing,
         # log_dir=rpc_exe_dir,
-        if_print=True)
+        if_print=True,
+    )
     graph = build_graph(rpcs, 5, 1, if_print=True)
     model_size_dict = make_model_size_dict(rpcs, if_print=True)
 
@@ -226,6 +259,9 @@ def print_model_device_mapping_by_index(rpcs: List[ModelRPC], device_mesh: Devic
     # print_list = [0, 30, 36, 38, 38, 27, ]
     rpc_exe_table = {}
     avg_time_cost = []
+
+    from reallm.search_engine.enumerate import enumerate_rpc_executions
+    from reallm.search_engine.estimate import load_model_config
 
     for i, rpc in enumerate(rpcs):
         flash_mqat_config = load_model_config(rpc)
@@ -247,6 +283,7 @@ def print_model_device_mapping_by_index(rpcs: List[ModelRPC], device_mesh: Devic
 if __name__ == "__main__":
     # profile_search(rank=args.rank)
     from reallm.experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
+
     constants.set_experiment_trial_names("test", "test")
     actor = ModelTrainEvalConfig(
         type=ModelFamily("llama", 7, False),
@@ -267,18 +304,20 @@ if __name__ == "__main__":
         path="/lustre/public/pretrained_model_weights/Llama-2-7b-hf",
     )
     ppo_cfg = PPOHyperparameters(ppo_n_minibatches=4, max_new_tokens=256, min_new_tokens=256)
-    exp = PPOConfig(experiment_name="test",
-                    trial_name="test",
-                    allocation_mode="search",
-                    global_train_bs=128,
-                    global_gen_bs=128,
-                    n_nodes=1,
-                    n_gpus_per_node=8,
-                    actor=actor,
-                    critic=critic,
-                    ref=ref,
-                    rew=rew,
-                    ppo=ppo_cfg)
+    exp = PPOConfig(
+        experiment_name="test",
+        trial_name="test",
+        allocation_mode="search",
+        global_train_bs=128,
+        global_gen_bs=128,
+        n_nodes=1,
+        n_gpus_per_node=8,
+        actor=actor,
+        critic=critic,
+        ref=ref,
+        rew=rew,
+        ppo=ppo_cfg,
+    )
     device_mesh = DeviceMesh(1, 8, np.ones((1, 8), dtype=np.int32), None, None)
     print(device_mesh.global_mesh_name)
     exp.initial_setup()

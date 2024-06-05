@@ -1,8 +1,11 @@
+from typing import List
 import dataclasses
 
 from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
+from reallm.api.quickstart.device_mesh import AllocationConfig
+from reallm.api.quickstart.entrypoint import register_quickstart_exp
 from reallm.api.quickstart.model import ModelTrainEvalConfig
 from reallm.experiments.common.common import CommonExperimentConfig
 
@@ -15,10 +18,12 @@ class RWConfig(CommonExperimentConfig):
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
     model: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
+    allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+
     dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
 
     def __post_init__(self):
-        assert not self.is_sft_lora and self.sft_lora_path is None, "LoRA is not supported for now."
+        assert (not self.is_sft_lora and self.sft_lora_path is None), "LoRA is not supported for now."
 
     @property
     def models(self):
@@ -35,20 +40,23 @@ class RWConfig(CommonExperimentConfig):
             interface_impl=interface,
             model_type=self.model.type,
             model_path=self.model.path,
-            input_data=["packed_input_ids", "input_lens", "group_factor", "pos_input_lens"],
+            input_data=["packed_input_ids", "group_factor", "pos_input_lens"],
             log_return_value=True,
-            min_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
-            max_n_seqs=self.dataset.train_tokens_per_batch // self.dataset.max_seqlen,
+            min_n_seqs=self.dataset.train_bs_n_seqs,
+            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
-        return {rpc.name: rpc}
+        return {"default": rpc}
+
+    @property
+    def allocations(self):
+        return {"default": self.allocation}
 
     @property
     def datasets(self):
         return [
             Dataset(
-                "packed_rw_pair",
+                "rw_pair",
                 args=dict(
-                    n_tokens_per_batch=self.dataset.train_tokens_per_batch,
                     max_length=self.dataset.max_seqlen,
                     max_pairs_per_prompt=self.dataset.max_pairs_per_prompt,
                     dataset_path=self.dataset.train_path,
@@ -57,16 +65,11 @@ class RWConfig(CommonExperimentConfig):
         ]
 
     @property
-    def dataloader(self):
-        return DataLoader("iterable_dataset_loader")
-
-    @property
     def eval_datasets(self):
         return [
             Dataset(
-                "packed_rw_pair",
+                "rw_pair",
                 args=dict(
-                    n_tokens_per_batch=self.dataset.valid_tokens_per_batch,
                     max_length=self.dataset.max_seqlen,
                     max_pairs_per_prompt=self.dataset.max_pairs_per_prompt,
                     dataset_path=self.dataset.valid_path,
@@ -76,7 +79,7 @@ class RWConfig(CommonExperimentConfig):
 
     @property
     def eval_dataloader(self):
-        return DataLoader("iterable_dataset_loader")
+        return DataLoader("packed_eval", args=dict(batch_size=self.dataset.valid_bs_n_seqs))
 
     @property
     def tokenizer_name_or_path(self):
@@ -89,3 +92,6 @@ class RWConfig(CommonExperimentConfig):
             save_frequency_steps=self.save_freq_steps,
             eval_frequency_epochs=self.eval_freq_epochs,
         )
+
+
+register_quickstart_exp("rw", RWConfig)

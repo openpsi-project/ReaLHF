@@ -1,11 +1,12 @@
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
+import itertools
 import json
 
-import torch
+import numpy as np
 import torch.utils.data
 
 from reallm.api.core import data_api
-import reallm.base.logging as logging
+from reallm.base import logging, namedarray
 
 logger = logging.getLogger("Prompt Dataset")
 
@@ -15,67 +16,51 @@ class PromptDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         util: data_api.DatasetUtility,
-        max_prompt_len: int,
-        pad_to_max_length: bool = False,
+        max_length: Optional[int] = None,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
+        pad_to_max_length: bool = False,
     ):
-        """Prompt dataset used for RLHF (PPO).
+        """A dataset with prompts. Usually used for PPO.
 
         Args:
-            util (api.data.DatasetUtility): Dataset utility.
-            max_prompt_len (int): The maximum prompt length. Prompts will be truncated and left-padded to this length.
+            util (api.data.DatasetUtility): .
+            max_length (Optional[int], optional): The maximum length of each sequence in the batch.
             dataset_path (Optional[str], optional): Path to the dataset json/jsonl file.
                 The json/jsonl file should be a list of dictionary. Each element in the list should have
-                the key "prompt". Defaults to None.
+                a key "prompt". Defaults to None.
             dataset_builder (Optional[Callable[[], List[Dict]]], optional): Alternative to dataset_path.
                 A callable that returns a list of dictionary. Defaults to None.
+            pad_to_max_length (bool): Whether to pad the prompts to max_length. Defaults to False.
         """
-        self.util = util
-        seed = self.util.seed
-        world_size = self.util.world_size
-        tokenizer = self.util.tokenizer
-        ddp_rank = self.util.ddp_rank
+        self.max_length = max_length
 
-        if dataset_path is not None:
-            if dataset_path.endswith(".jsonl"):
-                with open(dataset_path, 'r') as f:
-                    data = [json.loads(ff) for ff in f]
-            elif dataset_path.endswith(".json"):
-                with open(dataset_path, 'r') as f:
-                    data = json.load(f)
-            else:
-                raise NotImplementedError(f"Unkown dataset extension: {dataset_path}")
-        else:
-            assert dataset_builder is not None
-            data = dataset_builder()
+        data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
 
-        datasize_per_rank = len(data) // world_size
-        shuffle_indices = data_api.get_shuffle_indices(seed, datasize_per_rank * world_size)
-        subset_indices = shuffle_indices[ddp_rank * datasize_per_rank:(ddp_rank + 1) * datasize_per_rank]
-        data: List[Dict[str, str]] = [data[i] for i in subset_indices]
+        prompts_str = [x["prompt"] for x in data]
+        util.tokenizer.padding_side = "left"
+        prompt_encodings = util.tokenizer(
+            prompts_str,
+            truncation=True,
+            max_length=max_length,
+            padding=pad_to_max_length,
+            return_length=True,
+            return_attention_mask=False,
+        )
 
-        prompts = [x['prompt'] for x in data]
+        self.prompt_lengths = prompt_encodings["length"]
+        self.prompts = prompt_encodings["input_ids"]
+        assert all(len(x) == l for x, l in zip(self.prompts, self.prompt_lengths))
 
-        original_padding_side = tokenizer.padding_side
-        tokenizer.padding_side = 'left'
-        prompt_tokens = tokenizer(prompts,
-                                  return_tensors='pt',
-                                  padding=True if not pad_to_max_length else 'max_length',
-                                  truncation=True,
-                                  max_length=max_prompt_len)
-        tokenizer.padding_side = original_padding_side
-
-        self.prompt_tokens = prompt_tokens
+        logger.info(f"Number of prompts in the dataset: {len(self.prompts)}")
 
     def __len__(self):
-        return len(self.prompt_tokens['input_ids'])
+        return len(self.prompts)
 
     def __getitem__(self, idx):
-        return {
-            "prompts": self.prompt_tokens["input_ids"][idx],
-            "prompt_att_mask": self.prompt_tokens["attention_mask"][idx],
-        }
+        x = namedarray.NamedArray(packed_prompts=torch.tensor(self.prompts[idx], dtype=torch.long),)
+        x.register_metadata(seqlens=[self.prompt_lengths[idx]])
+        return x
 
 
 data_api.register_dataset("prompt", PromptDataset)

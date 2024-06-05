@@ -10,8 +10,6 @@ import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.base.name_resolve as name_resolve
 import reallm.base.names as names
-# NOTE: This import is necessary to register all experiments.
-import reallm.experiments
 import reallm.scheduler.client as sched_client
 import reallm.system as system
 
@@ -98,7 +96,8 @@ def main_start(args, recover_count: int = 0):
         raise ValueError("--image_name must be specified when using ray cluster. "
                          "This is becuase ray cluster requires all workers to have "
                          "the same version of Python and ray.")
-    args.ignore_worker_error = args.ignore_worker_error and args.recover_mode == "disabled"
+    assert args.recover_mode == "disabled", "Recover mode is not supported now!"
+    args.ignore_worker_error = (args.ignore_worker_error and args.recover_mode == "disabled")
 
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
@@ -120,7 +119,7 @@ def main_start(args, recover_count: int = 0):
             "IS_REMOTE": "0" if is_controller else "1",
             # identify whether this run is automatically recovering the last failed run
             "RECOVER_RUN": "1" if is_recover_run else "0",
-            "SAVE_RECOVER_STATES": "1" if save_recover_states else "0"
+            "SAVE_RECOVER_STATES": "1" if save_recover_states else "0",
         }
 
     os.environ["IS_REMOTE"] = "0"
@@ -204,11 +203,18 @@ def main_start(args, recover_count: int = 0):
                 use_ray_cluster=(args.mode == "ray"),
             )
 
-    timeout = None if os.getenv("REAL_TRACE", "0") == "0" else TRACE_TIMEOUT  # run 5 mins to collect trace
+    timeout = (None if os.getenv("REAL_TRACE", "0") == "0" else TRACE_TIMEOUT)  # run 5 mins to collect trace
     try:
-        sched.wait(check_status=(JobState.CANCELLED, JobState.FAILED, JobState.NOT_FOUND, JobState.COMPLETED),
-                   remove_status=(),
-                   timeout=timeout)
+        sched.wait(
+            check_status=(
+                JobState.CANCELLED,
+                JobState.FAILED,
+                JobState.NOT_FOUND,
+                JobState.COMPLETED,
+            ),
+            remove_status=(),
+            timeout=timeout,
+        )
     except (KeyboardInterrupt, JobException, TimeoutError) as e:
         if os.getenv("REAL_TRACE", "0") != "0" and isinstance(e, TimeoutError):
             s = "#" * 30 + "  Trace complete. Killing all processes...  " + "#" * 30
@@ -216,7 +222,7 @@ def main_start(args, recover_count: int = 0):
 
         recover_states = [JobState.CANCELLED, JobState.FAILED, JobState.NOT_FOUND]
         reason = e.reason if isinstance(e, JobException) else None
-        recover_this = args.recover_mode == "auto" and recover_count < args.recover_retries
+        recover_this = (args.recover_mode == "auto" and recover_count < args.recover_retries)
         recover_this = recover_this and reason in recover_states
 
         # FIXME: in recover mode, this will interrupt saving exit
@@ -254,6 +260,7 @@ def main_find_config(args):
 
 def main_profile_layers(args):
     from reallm.api.core.model_api import ModelFamily
+
     _main_profile_layers(ModelFamily(args.model_class, args.model_size, args.is_critic), args.model_path)
 
 
@@ -261,14 +268,16 @@ def _main_profile_layers(model_family, model_path):
     from reallm.api.core.model_api import ModelFamily
     from reallm.base.slurm_utils import check_slurm_availability
     from reallm.base.testing import clear_name_resolve
+
     expr_name = trial_name = "profile"
-    cmd = f"python3 -m reallm.apps.profile_layers --expr_name {expr_name} --trial_name {trial_name} "\
-          f"--model_path {model_path} --model_name {model_family} "
+    cmd = (f"python3 -m reallm.apps.profile_layers --expr_name {expr_name} --trial_name {trial_name} "
+           f"--model_path {model_path} --model_name {model_family} ")
 
     if check_slurm_availability():
         repo_path = get_repo_path()
 
         from reallm.api.core.system_api import _LLM_ENVVARS
+
         base_environs = {
             "PYTHONPATH": repo_path,
             "REAL_PACKAGE_PATH": repo_path,
@@ -314,7 +323,13 @@ def main():
     subparsers.required = True
 
     subparser = subparsers.add_parser("start", help="starts an experiment")
-    subparser.add_argument("--experiment_name", "-e", type=str, required=True, help="name of the experiment")
+    subparser.add_argument(
+        "--experiment_name",
+        "-e",
+        type=str,
+        required=True,
+        help="name of the experiment",
+    )
     subparser.add_argument(
         "--trial_name",
         "-f",
@@ -324,10 +339,12 @@ def main():
     )
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
-    subparser.add_argument("--wandb_mode",
-                           type=str,
-                           default="disabled",
-                           choices=["online", "offline", "disabled"])
+    subparser.add_argument(
+        "--wandb_mode",
+        type=str,
+        default="disabled",
+        choices=["online", "offline", "disabled"],
+    )
     subparser.add_argument(
         "--image_name",
         type=str,
@@ -336,34 +353,45 @@ def main():
         help="if specified, all workers will use this image. Useful in CI/CD pipeline.",
     )
     subparser.add_argument("--ignore_worker_error", action="store_true")
-    subparser.add_argument("--debug",
-                           action="store_true",
-                           help="If True, activate all assertions in the code.")
+    subparser.add_argument(
+        "--debug",
+        action="store_true",
+        help="If True, activate all assertions in the code.",
+    )
     subparser.add_argument(
         "--remote_reset",
         action="store_true",
         help="If True, reset name resolve repo remotely in computation nodes. Otherwise reset locally.",
     )
-    subparser.add_argument("--recover_mode",
-                           required=False,
-                           default="disabled",
-                           choices=["disabled", "auto", "save", "resume"],
-                           help="Recover mode, 'auto': automatically recover the last failed run; "
-                           "'save': save recover states if any error occurs; "
-                           "'resume': resume from saved recover states and save states if fail again; "
-                           "'disabled': do nothing when error occurs. ")
+    subparser.add_argument(
+        "--recover_mode",
+        required=False,
+        default="disabled",
+        choices=["disabled", "auto", "save", "resume"],
+        help="Recover mode, 'auto': automatically recover the last failed run; "
+        "'save': save recover states if any error occurs; "
+        "'resume': resume from saved recover states and save states if fail again; "
+        "'disabled': do nothing when error occurs. ",
+    )
     subparser.add_argument(
         "--recover_retries",
         type=int,
         required=False,
         default=1,
         help="Total number of trials for the system to recover automatically when a worker fails. "
-        "Only effective when recover_mode is 'auto'.")
+        "Only effective when recover_mode is 'auto'.",
+    )
     subparser.set_defaults(ignore_worker_error=False)
     subparser.set_defaults(func=main_start)
 
     subparser = subparsers.add_parser("stop", help="stops an experiment. only slurm experiment is supported.")
-    subparser.add_argument("--experiment_name", "-e", type=str, required=True, help="name of the experiment")
+    subparser.add_argument(
+        "--experiment_name",
+        "-e",
+        type=str,
+        required=True,
+        help="name of the experiment",
+    )
     subparser.add_argument("--trial_name", "-f", type=str, required=True, help="name of the trial")
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.set_defaults(func=main_stop)

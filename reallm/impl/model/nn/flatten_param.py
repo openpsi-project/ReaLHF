@@ -197,4 +197,7 @@ def map_param_to_contigous_memory(
             if old_param_data.shape == spec.shape:
                 v.data.copy_(old_param_data)
             else:
-                assert old_param_data.shape == torch.Size([0]), (old_param_data.shape, spec.shape)
+                assert old_param_data.shape == torch.Size([0]), (
+                    old_param_data.shape,
+                    spec.shape,
+                )

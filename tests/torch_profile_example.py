@@ -13,6 +13,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=8 --module \
 ```
 
 """
+
 import functools
 import os
 import time
@@ -81,7 +82,8 @@ def make_interface():
     import reallm.api.core.dfg
     import reallm.api.core.model_api as model_api
     import reallm.search_engine.interface
-    return model_api.make_interface(api.core.dfg.ModelInterface(type_="sft", args=dict()))
+
+    return model_api.make_interface(reallm.api.core.dfg.ModelInterface(type_="sft", args=dict()))
 
 
 def make_model(device):
@@ -172,7 +174,7 @@ def main(rank: int = None, world_size: int = None):
 
     s = torch.profiler.schedule(skip_first=0, warmup=0, active=1, repeat=1, wait=0)
 
-    dirname = f"./trace_result/{SHORTNAME[PROFILE_INTERFACE_TYPE]}_mp{NUM_MP}pp{NUM_PP}_local"
+    dirname = (f"./trace_result/{SHORTNAME[PROFILE_INTERFACE_TYPE]}_mp{NUM_MP}pp{NUM_PP}_local")
     os.makedirs(dirname, exist_ok=True)
 
     def trace_handler(p: torch.profiler._KinetoProfile):
@@ -181,7 +183,10 @@ def main(rank: int = None, world_size: int = None):
             p.export_chrome_trace(os.path.join(dirname, f"rank{rank}.json"))
 
     with torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
             record_shapes=True,
             profile_memory=True,
             with_stack=True,
@@ -197,6 +202,7 @@ def main(rank: int = None, world_size: int = None):
                 res = getattr(interface, PROFILE_INTERFACE_TYPE)(model, data)
             else:
                 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
+
                 gconfig = GenerationConfig(min_new_tokens=10, max_new_tokens=10)
                 res = interface.generate(model, data, gconfig=gconfig)
         torch.cuda.synchronize()

@@ -27,7 +27,14 @@ def sweep_model_size(model_size: int, verbose_only: bool):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_size", "-x", type=int, nargs="+", choices=[7, 13, 34, 70], required=True)
+    parser.add_argument(
+        "--model_size",
+        "-x",
+        type=int,
+        nargs="+",
+        choices=[7, 13, 34, 70],
+        required=True,
+    )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--verbose_only", "-v", action="store_true")
     args = parser.parse_args()

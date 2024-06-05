@@ -13,14 +13,15 @@ from torch.cuda import device as device_ctx_manager
 from torch.utils.checkpoint import detach_variable
 import torch
 
-from reallm.impl.model.utils.tensor import (gather_split_1d_tensor, safely_set_viewless_tensor_data,
-                                            split_tensor_into_1d_equal_chunks)
+from reallm.impl.model.parallelism.model_parallel.utils import (gather_split_1d_tensor,
+                                                                safely_set_viewless_tensor_data,
+                                                                split_tensor_into_1d_equal_chunks)
 import reallm.base.constants as constants
 
 # Default name for the model parallel rng tracker.
-_MODEL_PARALLEL_RNG_TRACKER_NAME = 'model-parallel-rng'
-_EXPERT_PARALLEL_RNG_TRACKER_NAME = 'expert-parallel-rng'
-_DATA_PARALLEL_RNG_TRACKER_NAME = 'data-parallel-rng'
+_MODEL_PARALLEL_RNG_TRACKER_NAME = "model-parallel-rng"
+_EXPERT_PARALLEL_RNG_TRACKER_NAME = "expert-parallel-rng"
+_DATA_PARALLEL_RNG_TRACKER_NAME = "data-parallel-rng"
 
 
 def _set_cuda_rng_state(new_state, device=-1):
@@ -32,7 +33,7 @@ def _set_cuda_rng_state(new_state, device=-1):
     with a single change: the input state is not cloned. Cloning caused
     major performance issues for +4 GPU cases.
     """
-    if hasattr(_C, '_cuda_setRNGState') and callable(_C._cuda_setRNGState):
+    if hasattr(_C, "_cuda_setRNGState") and callable(_C._cuda_setRNGState):
         # older PyTorch
         def cb():
             with device_ctx_manager(device):
@@ -41,11 +42,11 @@ def _set_cuda_rng_state(new_state, device=-1):
     else:
         # newer PyTorch
         if device == -1:
-            device = torch.device('cuda')
+            device = torch.device("cuda")
         elif isinstance(device, str):
             device = torch.device(device)
         elif isinstance(device, int):
-            device = torch.device('cuda', device)
+            device = torch.device("cuda", device)
 
         def cb():
             idx = device.index
@@ -104,11 +105,11 @@ class CudaRNGStatesTracker:
         """Track the rng state."""
         # Check seed is not already used.
         if seed in self.seeds_:
-            raise Exception('seed {} already exists'.format(seed))
+            raise Exception("seed {} already exists".format(seed))
         self.seeds_.add(seed)
         # Check that state is not already defined.
         if name in self.states_:
-            raise Exception('cuda rng state {} already exists'.format(name))
+            raise Exception("cuda rng state {} already exists".format(name))
         # Get the current rng state.
         orig_rng_state = torch.cuda.get_rng_state()
         # Set the new state and store it.
@@ -123,7 +124,7 @@ class CudaRNGStatesTracker:
         the original state."""
         # Check if we have added the state
         if name not in self.states_:
-            raise Exception('cuda rng state {} is not added'.format(name))
+            raise Exception("cuda rng state {} is not added".format(name))
         # Store current rng state.
         orig_cuda_rng_state = torch.cuda.get_rng_state()
         # Set rng state to the desired one
@@ -173,12 +174,12 @@ def model_parallel_cuda_manual_seed(seed):
     # and model parallel state.
     _CUDA_RNG_STATE_TRACKER.add(_MODEL_PARALLEL_RNG_TRACKER_NAME, tensor_model_parallel_seed)
 
-    expert_parallel_seed = (seed + 1024 + model_parallel_rank)
+    expert_parallel_seed = seed + 1024 + model_parallel_rank
     _CUDA_RNG_STATE_TRACKER.add(_EXPERT_PARALLEL_RNG_TRACKER_NAME, expert_parallel_seed)
 
 
 class CheckpointFunction(torch.autograd.Function):
-    """Checkpoint Function 
+    """Checkpoint Function
 
     This function is adapted from torch.utils.checkpoint with two main changes:
     1) torch.cuda.set_rng_state is replaced with `_set_cuda_rng_state`
@@ -202,8 +203,10 @@ class CheckpointFunction(torch.autograd.Function):
         # the chunk corresponding to the current rank.
         if distribute_saved_activations:
             ctx.input_0_shape = args[0].data.shape
-            safely_set_viewless_tensor_data(args[0],
-                                            split_tensor_into_1d_equal_chunks(args[0].data, new_buffer=True))
+            safely_set_viewless_tensor_data(
+                args[0],
+                split_tensor_into_1d_equal_chunks(args[0].data, new_buffer=True),
+            )
 
         # Store everything.
         ctx.save_for_backward(*args)
@@ -217,8 +220,10 @@ class CheckpointFunction(torch.autograd.Function):
                                "please use .backward() if possible")
         inputs = ctx.saved_tensors
         if ctx.distribute_saved_activations:
-            safely_set_viewless_tensor_data(inputs[0],
-                                            gather_split_1d_tensor(inputs[0].data).view(ctx.input_0_shape))
+            safely_set_viewless_tensor_data(
+                inputs[0],
+                gather_split_1d_tensor(inputs[0].data).view(ctx.input_0_shape),
+            )
 
         # Store the current states.
         bwd_cpu_rng_state = torch.get_rng_state()

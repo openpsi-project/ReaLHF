@@ -112,10 +112,13 @@ class ProfileLayers:
 
     @torch.no_grad()
     def fwd_gen(self, bs, seq_len):
-        input_ids = torch.randint(0,
-                                  self.config.vocab_size, (bs, seq_len),
-                                  dtype=torch.long,
-                                  device=self.device)
+        input_ids = torch.randint(
+            0,
+            self.config.vocab_size,
+            (bs, seq_len),
+            dtype=torch.long,
+            device=self.device,
+        )
         attention_mask = torch.ones_like(input_ids, device=self.device)
         # fwd_gen_0
         packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
@@ -139,21 +142,23 @@ class ProfileLayers:
         layer_indices = range(len(ys))
 
         for y, layer_idx in zip(ys[1:-1], layer_indices[1:-1]):
-            assert y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None
+            assert (y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None)
             kvcache_seqlen = max(max_seqlen + self.max_new_tokens, self.hidden_dim // self.head_dim + 10)
             # fix of a flash attention bug
-            k_cache = constants.get_global_memory_buffer().get_tensor(tensor_shape=(bs, kvcache_seqlen,
-                                                                                    *y.k_cache.shape[1:]),
-                                                                      dtype=y.k_cache.dtype,
-                                                                      name=f"kv_cache_{layer_idx}_k",
-                                                                      force_zero=True)
-            v_cache = constants.get_global_memory_buffer().get_tensor(tensor_shape=(bs, kvcache_seqlen,
-                                                                                    *y.v_cache.shape[1:]),
-                                                                      dtype=y.v_cache.dtype,
-                                                                      name=f"kv_cache_{layer_idx}_v",
-                                                                      force_zero=True)
-            indices = torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
-                                   dtype=torch.long)[None, :] < input_lens[:, None]
+            k_cache = constants.get_global_memory_buffer().get_tensor(
+                tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+                dtype=y.k_cache.dtype,
+                name=f"kv_cache_{layer_idx}_k",
+                force_zero=True,
+            )
+            v_cache = constants.get_global_memory_buffer().get_tensor(
+                tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+                dtype=y.v_cache.dtype,
+                name=f"kv_cache_{layer_idx}_v",
+                force_zero=True,
+            )
+            indices = (torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
+                                    dtype=torch.long)[None, :] < input_lens[:, None])
             k_cache[indices] = y.k_cache
             v_cache[indices] = y.v_cache
             y.k_cache = k_cache
@@ -176,10 +181,13 @@ class ProfileLayers:
             self.insert_data_point(layer_name, "fwd_gen_1", bs, seq_len, time.monotonic_ns() - st)
 
     def fwd_bwd_opt(self, bs, seq_len):
-        input_ids = torch.randint(0,
-                                  self.config.vocab_size, (bs, seq_len),
-                                  dtype=torch.long,
-                                  device=self.device)
+        input_ids = torch.randint(
+            0,
+            self.config.vocab_size,
+            (bs, seq_len),
+            dtype=torch.long,
+            device=self.device,
+        )
         attention_mask = torch.ones_like(input_ids, device=self.device)
         packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
         cu_seqlens = cu_seqlens.to(device=self.device)
@@ -227,11 +235,13 @@ class ProfileLayers:
             pickle.dump(df, f)
 
 
-def make_profile_layers(device: torch.device,
-                        model_path: str,
-                        model_name: str,
-                        dtype: Optional[str] = None,
-                        hf_model_type: str = "llama"):
+def make_profile_layers(
+    device: torch.device,
+    model_path: str,
+    model_name: str,
+    dtype: Optional[str] = None,
+    hf_model_type: str = "llama",
+):
     if dtype == "fp16" or dtype == None:
         dtype = torch.float16
     elif dtype == "bf16":

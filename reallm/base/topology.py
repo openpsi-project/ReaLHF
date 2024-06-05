@@ -102,7 +102,7 @@ class ProcessTopology:
             raise ValueError("get_rank() does not support slices. Use filter_match())")
 
         key = self.ProcessCoord(**coord_kwargs)
-        assert key in self.mapping, f"key {coord_kwargs} invalid, mapping: {self.mapping}, key: {key}"
+        assert (key in self.mapping), f"key {coord_kwargs} invalid, mapping: {self.mapping}, key: {key}"
         return self.mapping[key]
 
     def get_axis_names(self):
@@ -275,13 +275,15 @@ def _prime_factors(N):
 class PipeModelDataParallelTopology(ProcessTopology):
     """A topology for hybrid pipeline, model, and data parallelism."""
 
-    def __init__(self,
-                 num_pp: int,
-                 num_mp: int,
-                 num_dp: int,
-                 sequence_parallel: bool,
-                 gradient_checkpointing: bool,
-                 max_prompt_len: Optional[int] = None):
+    def __init__(
+        self,
+        num_pp: int,
+        num_mp: int,
+        num_dp: int,
+        sequence_parallel: bool,
+        gradient_checkpointing: bool,
+        max_prompt_len: Optional[int] = None,
+    ):
         super().__init__(axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp])
 
         self.sequence_parallel = sequence_parallel
@@ -514,8 +516,7 @@ class ParallelGrid:
 
 
 class FakeGrid:
-    """ Used for testing dynamic scheduling in none-GPU environment.
-    """
+    """Used for testing dynamic scheduling in none-GPU environment."""
 
     def __init__(self, rank: int, topo: PipeModelDataParallelTopology):
         self.rank = rank
@@ -530,7 +531,7 @@ class FakeGrid:
         self.pp_id = self.coord.pipe
         self.mp_id = self.coord.model
 
-        self.world_size = self.data_parallel_size * self.pipe_parallel_size * self.model_parallel_size
+        self.world_size = (self.data_parallel_size * self.pipe_parallel_size * self.model_parallel_size)
 
     def get_pipe_parallel_group(self):
         raise RuntimeError("No groups in fake grid.")

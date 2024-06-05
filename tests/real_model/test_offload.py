@@ -74,7 +74,11 @@ def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_
             torch.cuda.synchronize()
             tik = time.perf_counter_ns()
             if constants.pipe_parallel_world_size() == 1:
-                engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
+                engine.forward(
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=256,
+                )
             else:
                 engine.forward(
                     seqlens_cpu=seqlens_cpu,
@@ -93,7 +97,11 @@ def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_
             torch.cuda.synchronize()
             tik = time.perf_counter_ns()
             if constants.pipe_parallel_world_size() == 1:
-                engine.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
+                engine.forward(
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=256,
+                )
             else:
                 engine.forward(
                     seqlens_cpu=seqlens_cpu,
@@ -124,7 +132,11 @@ def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_
             tik = time.perf_counter_ns()
             m.async_offload()
             if constants.pipe_parallel_world_size() == 1:
-                engine2.forward(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens, max_seqlen=256)
+                engine2.forward(
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=256,
+                )
             else:
                 engine2.forward(
                     seqlens_cpu=seqlens_cpu,
@@ -143,13 +155,13 @@ def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_
                 profiler.__exit__(None, None, None)
 
             if record_cost_to_file:
-                normal_fwd_t = torch.tensor(normal_fwd_t, device="cuda", dtype=torch.long) / world_size
+                normal_fwd_t = (torch.tensor(normal_fwd_t, device="cuda", dtype=torch.long) / world_size)
                 torch.distributed.all_reduce(normal_fwd_t)
 
-                load_fwd_t = torch.tensor(load_fwd_t, device="cuda", dtype=torch.long) / world_size
+                load_fwd_t = (torch.tensor(load_fwd_t, device="cuda", dtype=torch.long) / world_size)
                 torch.distributed.all_reduce(load_fwd_t)
 
-                offload_fwd_t = torch.tensor(offload_fwd_t, device="cuda", dtype=torch.long) / world_size
+                offload_fwd_t = (torch.tensor(offload_fwd_t, device="cuda", dtype=torch.long) / world_size)
                 torch.distributed.all_reduce(offload_fwd_t)
 
                 mem_diff = torch.tensor(mem_diff, device="cuda", dtype=torch.long)
@@ -159,7 +171,11 @@ def test_impl(rank, world_size, topo, profile, check, n_iterations, record_cost_
                     with open("offload_cost.jsonl", "a") as f:
                         d = dict(
                             world_size=world_size,
-                            pp_mp_dp=(topo.get_dim("pipe"), topo.get_dim("model"), topo.get_dim("data")),
+                            pp_mp_dp=(
+                                topo.get_dim("pipe"),
+                                topo.get_dim("model"),
+                                topo.get_dim("data"),
+                            ),
                             normal_fwd_t=normal_fwd_t.item(),
                             load_fwd_t=load_fwd_t.item(),
                             offload_fwd_t=offload_fwd_t.item(),

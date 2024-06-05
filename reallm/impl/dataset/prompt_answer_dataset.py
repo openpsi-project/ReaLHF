@@ -1,13 +1,14 @@
 from typing import Callable, Dict, List, Optional
 import json
 
+import numpy as np
 import torch
 import torch.utils.data
 
 from reallm.api.core import data_api
-import reallm.base.logging as logging
+from reallm.base import logging, namedarray
 
-logger = logging.getLogger("Prompt Dataset")
+logger = logging.getLogger("Prompt Answer Dataset")
 
 
 class PromptAnswerDataset(torch.utils.data.Dataset):
@@ -15,7 +16,7 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         util: data_api.DatasetUtility,
-        max_seq_len: int,
+        max_length: int,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
     ):
@@ -23,8 +24,7 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
 
         Args:
             util (api.data.DatasetUtility): .
-            n_tokens_per_batch (int, optional): The number of tokens in the batch.
-            max_length (Optional[int], optional): The maximum length of each sequence in the batch. Defaults to n_tokens_per_batch.
+            max_length (Optional[int], optional): The maximum length of each sequence in the batch.
             dataset_path (Optional[str], optional): Path to the dataset json/jsonl file.
                 The json/jsonl file should be a list of dictionary. Each element in the list should have
                 a key "prompt" and a key "answer". Defaults to None.
@@ -32,66 +32,65 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
                 A callable that returns a list of dictionary. Defaults to None.
         """
         self.util = util
-        seed = self.util.seed
-        world_size = self.util.world_size
         tokenizer = self.util.tokenizer
-        ddp_rank = self.util.ddp_rank
 
-        if dataset_path is not None:
-            if dataset_path.endswith(".jsonl"):
-                with open(dataset_path, 'r') as f:
-                    data = [json.loads(ff) for ff in f]
-            elif dataset_path.endswith(".json"):
-                with open(dataset_path, 'r') as f:
-                    data = json.load(f)
-            else:
-                raise NotImplementedError(f"Unkown dataset extension: {dataset_path}")
-        else:
-            assert dataset_builder is not None
-            data = dataset_builder()
+        data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
 
-        datasize_per_rank = len(data) // world_size
-        shuffle_indices = data_api.get_shuffle_indices(seed, datasize_per_rank * world_size)
-        subset_indices = shuffle_indices[ddp_rank * datasize_per_rank:(ddp_rank + 1) * datasize_per_rank]
-        data: List[Dict[str, str]] = [data[i] for i in subset_indices]
+        seqs = [x["prompt"] + x["answer"] + tokenizer.eos_token for x in data]
+        prompts = [x["prompt"] for x in data]
 
-        seqs = [x['prompt'] + x['answer'] + tokenizer.eos_token for x in data]
-        prompts = [x['prompt'] for x in data]
+        self.tokens = tokenizer(
+            seqs,
+            padding=False,
+            truncation=True,
+            max_length=max_length,
+            return_length=True,
+            return_attention_mask=False,
+        )
+        prompt_tokens = tokenizer(
+            prompts,
+            padding=False,
+            truncation=True,
+            return_length=True,
+            max_length=max_length,
+            return_attention_mask=False,
+        )
 
-        self.tokens = tokenizer(seqs,
-                                return_tensors='pt',
-                                padding=True,
-                                truncation=True,
-                                max_length=max_seq_len)
-        prompt_tokens = tokenizer(prompts,
-                                  padding=False,
-                                  truncation=True,
-                                  max_length=max_seq_len,
-                                  return_length=True,
-                                  return_attention_mask=False)
-        prompt_lengths = prompt_tokens['length']
+        prompt_lengths = prompt_tokens["length"]
+        seq_lengths = self.tokens["length"]
         prompt_masks = []
         for i in range(len(self)):
-            seq = self.tokens['input_ids'][i]
             prompt_len = prompt_lengths[i]
-            prompt = prompt_tokens['input_ids'][i]
-            attention_mask = self.tokens['attention_mask'][i]
-            seqlen = attention_mask.sum()
-            assert seq[:prompt_len] == prompt
+            seqlen = self.tokens["length"][i]
+            # seq = self.tokens["input_ids"][i]
+            # prompt = prompt_tokens["input_ids"][i]
+            # assert seq[:prompt_len] == prompt, (seq, prompt, prompt_len, seqlen)
             assert seqlen >= prompt_len, (seqlen, prompt_len)
-            prompt_masks.append(torch.tensor([1] * prompt_len + [0] * (seqlen - prompt_len)))
+            prompt_mask = [1] * prompt_len + [0] * (seqlen - prompt_len)
+            prompt_masks.append(prompt_mask)
 
         self.prompt_masks = prompt_masks
 
+        logger.info(
+            f"Loaded Prompt Answer Dataset with INFO: "
+            f"#seqs={len(self)}, "
+            f"truncation length={max_length}, "
+            f"avg prompt length={np.mean(prompt_lengths):.1f}, "
+            f"avg answer length={np.mean(seq_lengths) - np.mean(prompt_lengths):.1f}",)
+
     def __len__(self):
-        return len(self.tokens['input_ids'])
+        return len(self.tokens["input_ids"])
 
     def __getitem__(self, idx):
-        return {
-            "input_ids": self.tokens['input_ids'][idx],
-            "attention_mask": self.tokens['attention_mask'][idx],
-            "prompt_mask": self.prompt_masks[idx],
+        d = {
+            "packed_input_ids": torch.tensor(self.tokens["input_ids"][idx], dtype=torch.long),
+            "prompt_mask": torch.tensor(self.prompt_masks[idx], dtype=torch.bool),
         }
+        assert len(d["packed_input_ids"]) == len(d["prompt_mask"])
+        seqlen = len(d["packed_input_ids"])
+        x = namedarray.from_dict(d)
+        x.register_metadata(seqlens=[seqlen])
+        return x
 
 
 data_api.register_dataset("prompt_answer", PromptAnswerDataset)

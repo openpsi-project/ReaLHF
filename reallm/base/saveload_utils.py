@@ -23,7 +23,10 @@ def split_state_dict_into_shards(state_dict: Dict, n_shards: int) -> Dict:
     shard_size_list[-1] = shard_size + extra
     start, shards = 0, []
     for i, size in enumerate(
-            tqdm.tqdm(shard_size_list, desc=f"Splitting state dict into {len(shard_size_list)} shards...")):
+            tqdm.tqdm(
+                shard_size_list,
+                desc=f"Splitting state dict into {len(shard_size_list)} shards...",
+            )):
         shard = {}
         for j in range(start, start + size):
             shard[keys[j]] = state_dict[keys[j]]

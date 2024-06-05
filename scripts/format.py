@@ -6,7 +6,7 @@ import subprocess
 
 
 def format_pyfile(file_path):
-    os.system(f"yapf -rip {file_path} && isort {file_path}")
+    os.system(f"black {file_path} && yapf -rip {file_path} && isort {file_path}")
 
 
 def format_cppfile(file_path):
@@ -14,14 +14,14 @@ def format_cppfile(file_path):
 
 
 def count_loc(file_path):
-    return int(subprocess.check_output(f"wc -l {file_path}", shell=True).decode('ascii').split()[0])
+    return int(subprocess.check_output(f"wc -l {file_path}", shell=True).decode("ascii").split()[0])
 
 
 if __name__ == "__main__":
     executor = ProcessPoolExecutor()
     python_loc = cpp_loc = 0
     for root, dirnames, files in os.walk(Path(__file__).parent.parent.absolute()):
-        if "thirdparty" in root or "pycache" in root or ".git" in root or ".vscode" in root:
+        if ("thirdparty" in root or "pycache" in root or ".git" in root or ".vscode" in root):
             continue
         for file in files:
             if file.endswith(".py"):

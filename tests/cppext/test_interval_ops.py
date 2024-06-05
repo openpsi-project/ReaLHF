@@ -110,8 +110,14 @@ def test_get():
     torch.cuda.synchronize()
     tik = time.perf_counter()
     for _ in range(5):
-        output_tensor = interval_op_cuda.slice_intervals_cuda(input_tensor, intervals_cuda, interval_sizes,
-                                                              offsets, max_interval_size, output_size)
+        output_tensor = interval_op_cuda.slice_intervals_cuda(
+            input_tensor,
+            intervals_cuda,
+            interval_sizes,
+            offsets,
+            max_interval_size,
+            output_size,
+        )
     torch.cuda.synchronize()
     t1 = time.perf_counter() - tik
 

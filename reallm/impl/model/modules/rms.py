@@ -62,7 +62,7 @@ class ExponentialRunningMeanStd(nn.Module):
 
         self.__mean.data[:] = self.__beta * self.__mean.data[:] + batch_mean * (1.0 - self.__beta)
         self.__mean_sq.data[:] = self.__beta * self.__mean_sq.data[:] + batch_sq_mean * (1.0 - self.__beta)
-        self.__debiasing_term.data[:] = self.__beta * self.__debiasing_term.data[:] + 1.0 - self.__beta
+        self.__debiasing_term.data[:] = (self.__beta * self.__debiasing_term.data[:] + 1.0 - self.__beta)
 
     @torch.no_grad()
     def mean_std(self):
@@ -75,7 +75,7 @@ class ExponentialRunningMeanStd(nn.Module):
     def normalize(self, x):
         x = x.to(self.__dtype)
         mean, std = self.mean_std()
-        return ((x - mean) / std).clip(-5, 5).float()  # clipping is a trick from hide and seek
+        return (((x - mean) / std).clip(-5, 5).float())  # clipping is a trick from hide and seek
 
     @torch.no_grad()
     def denormalize(self, x):
@@ -134,13 +134,16 @@ class MovingAverageRunningMeanStd(nn.Module):
 
     @torch.no_grad()
     def mean_std(self):
-        return self.__mean.clone(), (self.__mean_sq - self.__mean**2).clamp(min=1e-2).sqrt()
+        return (
+            self.__mean.clone(),
+            (self.__mean_sq - self.__mean**2).clamp(min=1e-2).sqrt(),
+        )
 
     @torch.no_grad()
     def normalize(self, x):
         x = x.to(self.__dtype)
         mean, std = self.mean_std()
-        return ((x - mean) / std).clip(-5, 5).float()  # clipping is a trick from hide and seek
+        return (((x - mean) / std).clip(-5, 5).float())  # clipping is a trick from hide and seek
 
     @torch.no_grad()
     def denormalize(self, x):

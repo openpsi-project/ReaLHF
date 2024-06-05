@@ -35,11 +35,13 @@ class ParallelDataBroker:
                 input_lens = torch.cat([x["prompt_lens"] for x in src], dim=0)
             elif "prompt_cu_seqlens" in src[0]:
                 input_lens = torch.cat(
-                    [x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1] for x in src], dim=0)
+                    [x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1] for x in src],
+                    dim=0,
+                )
             res = namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
             if "cu_seqlens" in src[0] and len(src[0]["cu_seqlens"].shape) == 1:
                 res["cu_seqlens"] = torch.cat([input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)])
-            elif "prompt_cu_seqlens" in src[0] and len(src[0]["prompt_cu_seqlens"].shape) == 1:
+            elif ("prompt_cu_seqlens" in src[0] and len(src[0]["prompt_cu_seqlens"].shape) == 1):
                 res["prompt_cu_seqlens"] = torch.cat(
                     [input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)])
             return res
@@ -88,7 +90,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
                 if "prompt_lens" in src:
                     raw_input_lens = src["prompt_lens"]
                 else:
-                    raw_input_lens = src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1]
+                    raw_input_lens = (src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1])
             else:
                 raise RuntimeError("input_lens/cu_seqlens/prompt_lens/prompt_cu_seqlens "
                                    "must be in the return data when using packed data broker. "
@@ -176,7 +178,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
             for x, slens in zip(splitted_data, input_lens):
                 x["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
         if "prompt_cu_seqlens" in src.keys():
-            raw_prompt_lens = src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1]
+            raw_prompt_lens = (src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1])
             all_prompt_lens: List[torch.IntTensor] = [
                 raw_prompt_lens[start:end].int() for start, end in partitions
             ]

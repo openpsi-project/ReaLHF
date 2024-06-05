@@ -65,8 +65,8 @@ def new_gelu_activation(input: torch.Tensor) -> torch.Tensor:
     Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT). Also see
     the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
     """
-    return 0.5 * input * (1.0 +
-                          torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
+    return (0.5 * input *
+            (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0)))))
 
 
 # gradient of tanh approximation of gelu

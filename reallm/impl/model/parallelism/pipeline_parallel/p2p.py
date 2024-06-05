@@ -240,9 +240,11 @@ def send_tensor_meta(tensor: torch.Tensor, recv_stage: int):
     """
     if isinstance(tensor, torch.Tensor):
         device = torch.cuda.current_device()
-        send_ndims_dtype = torch.tensor([len(tensor.size()), DTYPE_TO_ID[tensor.dtype]],
-                                        dtype=torch.long,
-                                        device=device)
+        send_ndims_dtype = torch.tensor(
+            [len(tensor.size()), DTYPE_TO_ID[tensor.dtype]],
+            dtype=torch.long,
+            device=device,
+        )
         send_shape = torch.tensor(tensor.size(), dtype=torch.long, device=device)
         send(send_ndims_dtype, recv_stage)
         send(send_shape, recv_stage)
@@ -314,8 +316,10 @@ def allocate_buffers(shapes_and_dtypes, requires_grad=False):
             buffer.append(None)
         else:
             buffer.append(
-                torch.zeros(shape,
-                            dtype=dtype,
-                            requires_grad=requires_grad,
-                            device=torch.cuda.current_device()))
+                torch.zeros(
+                    shape,
+                    dtype=dtype,
+                    requires_grad=requires_grad,
+                    device=torch.cuda.current_device(),
+                ))
     return buffer

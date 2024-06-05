@@ -6,17 +6,19 @@ import torch.distributed as dist
 import transformers
 
 from reallm.base import constants, logging
+from reallm.impl.model.utils.padding import pad_input, unpad_input
 
-try:
-    from flash_attn.bert_padding import pad_input, unpad_input
-except ModuleNotFoundError:
-    pass
 logger = logging.getLogger("Modeling Functional Utils")
 
 
 @torch.jit.script
-def upcast_masked_softmax(x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor, scale: float,
-                          softmax_dtype: torch.dtype):
+def upcast_masked_softmax(
+    x: torch.Tensor,
+    mask: torch.Tensor,
+    mask_value: torch.Tensor,
+    scale: float,
+    softmax_dtype: torch.dtype,
+):
     input_dtype = x.dtype
     x = x.to(softmax_dtype) * scale
     x = torch.where(mask, x, mask_value)
@@ -138,7 +140,7 @@ def build_leave_one_indices(x: torch.HalfTensor, cu_seqlens: torch.IntTensor) ->
     short1lens = cu_seqlens[1:] - cu_seqlens[:-1] - 1
     short1cu_seqlens = torch.nn.functional.pad(short1lens.cumsum(0), (1, 0), value=0)
     indexing_t = torch.arange(total_seqlen - bs, dtype=torch.long, device=cu_seqlens.device)
-    return indexing_t + (indexing_t.unsqueeze(0) >= short1cu_seqlens[:-1].unsqueeze(1)).sum(0) - 1
+    return (indexing_t + (indexing_t.unsqueeze(0) >= short1cu_seqlens[:-1].unsqueeze(1)).sum(0) - 1)
 
 
 def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch.Tensor,
@@ -340,8 +342,8 @@ def torch_attn_func(
     v = v.transpose(1, 2)
     scores = torch.matmul(q, k.transpose(2, 3)) * softmax_scale
 
-    mask = attention_mask_k.unsqueeze(1).unsqueeze(1).repeat(1, nq, max_seqlen_q,
-                                                             1)  # [bs, nq, seqlen, seqlen]
+    mask = (attention_mask_k.unsqueeze(1).unsqueeze(1).repeat(1, nq, max_seqlen_q,
+                                                              1))  # [bs, nq, seqlen, seqlen]
     if causal:
         _ms = max(max_seqlen_q, max_seqlen_k)
         causal_mask = torch.tril(torch.ones(_ms, _ms, device=q.device, dtype=torch.bool))[-max_seqlen_q:,
@@ -352,7 +354,12 @@ def torch_attn_func(
     scores = upcast_masked_softmax(
         scores,
         mask,
-        mask_value=torch.full([], torch.finfo(torch.float32).min, device=scores.device, dtype=torch.float32),
+        mask_value=torch.full(
+            [],
+            torch.finfo(torch.float32).min,
+            device=scores.device,
+            dtype=torch.float32,
+        ),
         scale=upcast_unscale,
         softmax_dtype=torch.float32,
     )
@@ -419,7 +426,10 @@ def apply_rotary_varlen(
     # cos = repeat(cos, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
     # sin = repeat(sin, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
     return torch.cat(
-        [x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]],
+        [
+            x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin,
+            x[..., ro_dim:],
+        ],
         dim=-1,
     )
 
@@ -443,6 +453,9 @@ def apply_rotary(
         cos = cos[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
         sin = sin[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
     return torch.cat(
-        [x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]],
+        [
+            x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin,
+            x[..., ro_dim:],
+        ],
         dim=-1,
     )

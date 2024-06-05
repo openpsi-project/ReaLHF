@@ -24,7 +24,7 @@ def get_topo(
 
 
 def get_world_size(parallel: ParallelismConfig) -> int:
-    return parallel.model_parallel_size * parallel.pipeline_parallel_size * parallel.data_parallel_size
+    return (parallel.model_parallel_size * parallel.pipeline_parallel_size * parallel.data_parallel_size)
 
 
 def make_train_backend_config(model_cfg: ModelTrainEvalConfig, parallel_cfg: ParallelismConfig):
@@ -76,6 +76,7 @@ def make_model_config(cfg: ModelTrainEvalConfig):
 
 def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
     from reallm.api.quickstart.model import parallelism_config_equal
+
     for rpc_alloc in rpc_allocs:
         rpc = rpc_alloc.rpc
         parallel = rpc_alloc.parallel
@@ -86,9 +87,8 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
             for other in rpc_allocs:
                 if rpc.name == other.rpc.name:
                     continue
-                if (rpc.model_name.role == other.rpc.model_name.role
-                        and not (parallelism_config_equal(parallel, other.parallel)
-                                 and device_mesh == other.device_mesh)):
+                if rpc.model_name.role == other.rpc.model_name.role and not (parallelism_config_equal(
+                        parallel, other.parallel) and device_mesh == other.device_mesh):
                     rpc.model_name = ModelName(rpc.model_name.role, other.rpc.model_name.replica_id + 1)
                     rpc.pre_hooks.append(SyncParamHook(source=other.rpc.model_name))
                     rpc.post_hooks.append(SyncParamHook(target=other.rpc.model_name))

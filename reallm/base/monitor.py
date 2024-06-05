@@ -53,7 +53,11 @@ def time_mark(name, identifier, step=0):
 
 def parse_time_mark_in_line(line, name, step_range=None):
     if f"*{name}*" in line:
-        identifer, t, step = line.split("#")[1], int(line.split("$")[1]), int(line.split("&")[1])
+        identifer, t, step = (
+            line.split("#")[1],
+            int(line.split("$")[1]),
+            int(line.split("&")[1]),
+        )
         if step_range:
             if step >= step_range[1] or step < step_range[0]:
                 return None
@@ -230,9 +234,9 @@ def summary_time_points(
         for k in time_sum:
             time_perc = round(time_sum[k] / (max_time - min_time) * 100, 2)
             # print time cost percent
-            avg_val = round(mean(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
-            max_val = round(max(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
-            min_val = round(min(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
+            avg_val = (round(mean(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-")
+            max_val = (round(max(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-")
+            min_val = (round(min(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-")
 
             bubble_time -= time_perc
             print(f"{k} -- {time_perc} %, "
@@ -280,9 +284,9 @@ def get_tracer(
     min_duration: int = 0,
     output_file: str = "result.json",
 ) -> viztracer.VizTracer:
-    logger.info(f"trace: {os.environ.get('REAL_TRACE')}")
+    # print("trace: ", os.environ.get("REAL_TRACE"))
     if os.environ.get("REAL_TRACE") == "1":
-        logger.info("initialized viztracer")
+        # print("initialized viztracer")
         return viztracer.VizTracer(
             tracer_entries=tracer_entries,
             verbose=verbose,
@@ -499,6 +503,7 @@ class CUDAKernelTime:  # in us
     @classmethod
     def from_profiler(cls, p):
         import torch
+
         compute_time = comm_time = mem_time = misc_time = 0
         unknown_keys = []
         for x in p.key_averages():

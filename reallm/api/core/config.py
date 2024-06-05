@@ -106,15 +106,9 @@ class ModelShardID:
 
 @dataclasses.dataclass
 class StandaloneModelShard:
-    """A combination of model, model interface, and model backend. Representing
-    a runnable model shard, which has topology `topo` and is indexed by `dp_rank`,
-    `mp_rank`, and `pp_rank`. `StandaloneModelShard` resides in model workers,
-    and each model worker can have multiple shards.
-    """
-
     id: ModelShardID
     model: Model
     backend: ModelBackend
     # evaluation
     eval_datasets: Optional[List[Dataset]] = None
-    eval_dataloader: Optional[DataLoader] = None
+    eval_dataloader: Optional[DataLoader] = DataLoader("packed_eval", args=dict(batch_size=128))

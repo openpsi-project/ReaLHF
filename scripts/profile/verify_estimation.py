@@ -43,6 +43,7 @@ def verify_compute():
     prs = []
 
     import pandas as pd
+
     data_modelsize = []
     data_bs = []
     data_seqlen = []
@@ -84,7 +85,7 @@ def verify_compute():
         "model_size": data_modelsize,
         "batch_size": data_bs,
         # "seq_len": data_seqlen,
-        "error_rate": data_error_rate
+        "error_rate": data_error_rate,
     })
     ms_bs_to_df = {}
 

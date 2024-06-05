@@ -8,23 +8,27 @@ BATCH_SIZE_RANGE = [1, 2, 4, 8, 16, 32, 64, 128]
 SEQ_LEN_RANGE = [128, 256, 512]
 
 
-def profile_layer_func(world_size,
-                       model_path,
-                       model_name,
-                       warm_up_rounds,
-                       profile_rounds,
-                       batch_size_range,
-                       seq_len_range,
-                       use_sequence_parallel=False,
-                       use_gradient_checkpointing=False):
+def profile_layer_func(
+    world_size,
+    model_path,
+    model_name,
+    warm_up_rounds,
+    profile_rounds,
+    batch_size_range,
+    seq_len_range,
+    use_sequence_parallel=False,
+    use_gradient_checkpointing=False,
+):
     # FIXME: use_sequence_parallel=True and use_gradient_checkpointing=True will cause bugs
     import torch
 
     import reallm.base.constants as constants
+
     testing.init_global_constants(1, world_size, 1, False, False)
     device = torch.device("cuda")
     with constants.model_scope(testing.MODEL_NAME):
         from reallm.search_engine.layers import make_profile_layers
+
         profile_layers = make_profile_layers(device, model_path, model_name)
 
         st = time.monotonic_ns()
@@ -46,9 +50,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="profile_layers")
     parser.add_argument("--expr_name", type=str, default="profile")
     parser.add_argument("--trial_name", type=str, default="profile")
-    parser.add_argument("--model_path",
-                        type=str,
-                        default="/lustre/public/pretrained_model_weights/sharded/Llama-2-70b-hf_8pp_3s")
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default="/lustre/public/pretrained_model_weights/sharded/Llama-2-70b-hf_8pp_3s",
+    )
     parser.add_argument("--model_name", type=str, default="Llama-2-70b")
     parser.add_argument("--warm_up_rounds", type=int, default=1)
     parser.add_argument("--profile_rounds", type=int, default=3)
@@ -60,17 +66,19 @@ if __name__ == "__main__":
 
     for world_size in world_sizes:
         testing.clear_name_resolve(args.expr_name, args.trial_name)
-        mp = testing.LocalMultiProcessTest(world_size,
-                                           profile_layer_func,
-                                           world_size,
-                                           args.model_path,
-                                           args.model_name,
-                                           args.warm_up_rounds,
-                                           args.profile_rounds,
-                                           BATCH_SIZE_RANGE,
-                                           SEQ_LEN_RANGE,
-                                           expr_name=args.expr_name,
-                                           trial_name=args.trial_name)
+        mp = testing.LocalMultiProcessTest(
+            world_size,
+            profile_layer_func,
+            world_size,
+            args.model_path,
+            args.model_name,
+            args.warm_up_rounds,
+            args.profile_rounds,
+            BATCH_SIZE_RANGE,
+            SEQ_LEN_RANGE,
+            expr_name=args.expr_name,
+            trial_name=args.trial_name,
+        )
         mp.launch()
 
     t = (time.monotonic_ns() - st) / int(1e9)
