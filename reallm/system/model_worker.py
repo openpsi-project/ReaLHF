@@ -279,7 +279,8 @@ class ModelWorker(worker_base.Worker):
             rpc = [rpc for rpc in self.config.model_rpcs if rpc.model_name == model_name_]
             assert len(rpc) == 1
             rpc = rpc[0]
-            param_realloc_comm.set_trainable(model_name_, rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP)
+            param_realloc_comm.set_trainable(model_name_,
+                                             rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP)
             constants.set_rank_mapping(model_name_, topo_, self.config.msid2mwid)
             grid = topology.ParallelGrid(
                 topology=topo_,
@@ -461,7 +462,7 @@ class ModelWorker(worker_base.Worker):
                 m = self.__unwrapped_models[hook_data["model_name"]]
                 if not isinstance(m, ReaLModel):
                     raise ValueError(f"Model {from_model_name} (type={type(m)}) is not a ReaLModel, "
-                                    f"so it can't use offload.")
+                                     f"so it can't use offload.")
                 m.async_offload()
                 # blogger.debug(f"async_offload enqueue CUDA request time: {time.perf_counter() - tik:.4f}s")
         else:

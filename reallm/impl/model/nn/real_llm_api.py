@@ -21,8 +21,10 @@ from reallm.api.core.config import ModelName
 from reallm.base import constants, logging, topology
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.impl.model.comm.global_comm import NCCLProcessGroupInfo
-from reallm.impl.model.comm.param_realloc import (_derive_reparallelize_comm_plan, ReparallelizeReceiverStep,
-                                                  ReparallelizeSenderStep, ReparallelizeTraget, is_trainable, store_trainable_params, fetch_trainable_params)
+from reallm.impl.model.comm.param_realloc import (_derive_reparallelize_comm_plan, fetch_trainable_params,
+                                                  is_trainable, ReparallelizeReceiverStep,
+                                                  ReparallelizeSenderStep, ReparallelizeTraget,
+                                                  store_trainable_params)
 from reallm.impl.model.nn.flatten_param import set_intervals, slice_intervals
 from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
                                                                   RowParallelLinear)
@@ -112,8 +114,12 @@ class ReaLModel(nn.Module):
 
         if self.config.use_contiguous_param:
             self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
-            map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
-                                        self.layer_idx_start)
+            map_param_to_contigous_memory(
+                self.layers,
+                self._param_spec,
+                self.contiguous_param,
+                self.layer_idx_start,
+            )
 
         for h in self._instantiation_hooks:
             h()
@@ -485,15 +491,15 @@ class ReaLModel(nn.Module):
         rtgt = self._reparallelize_targets[(from_model_name, to_model_name)]
 
         # Since the default implementation of PyTorch optimizers holds
-        # the reference of trainable parameters, we cannot deallocate 
+        # the reference of trainable parameters, we cannot deallocate
         # them even after parameter reallocation. Therefore, there is no
         # need to release and re-allocate the trainable parameters back-and-forth.
         # We simply store the layer handles and fetch them when converting back.
         with constants.model_scope(from_model_name):
-            from_model_ranks = constants.parallellism_group_ranks()
+            from_model_ranks = constants.parallelism_group_ranks()
         with constants.model_scope(to_model_name):
-            to_model_ranks = constants.parallellism_group_ranks()
-        if is_trainable(from_model_name) and torch.distributed.get_rank() in from_model_ranks:
+            to_model_ranks = constants.parallelism_group_ranks()
+        if (is_trainable(from_model_name) and torch.distributed.get_rank() in from_model_ranks):
             store_trainable_params(from_model_name, (self.layers, self.contiguous_param))
         elif is_trainable(to_model_name):
             del self.layers, self.contiguous_param

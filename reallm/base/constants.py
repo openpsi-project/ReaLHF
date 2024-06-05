@@ -123,11 +123,13 @@ def set_parallelism_group(model_name: "ModelName", pgroup, ranks):
     _pgroups[model_name] = pgroup
     _pgroup_ranks[model_name] = ranks
 
+
 def set_self_group(pgroup):
     global _self_group
     if _self_group is not None:
         raise RuntimeError("Self group is already set.")
     _self_group = pgroup
+
 
 def set_rank_mapping(
     model_name: "ModelName",
@@ -172,6 +174,7 @@ def gradient_checkpointing() -> bool:
 
 def has_model_name(name: str) -> bool:
     return name in _grids and _grids[name].global_rank != -1
+
 
 def self_group():
     global _self_group
@@ -219,12 +222,14 @@ def parallelism_group():
         raise RuntimeError(f"Parallelism group for model {_model_name} is not set.")
     return _pgroups[_model_name]
 
-def parallellism_group_ranks():
+
+def parallelism_group_ranks():
     if _model_name is None:
         raise RuntimeError("Global constant `model_name` is accessed before set.")
     if _pgroup_ranks.get(_model_name, None) is None:
         raise RuntimeError(f"Parallelism group ranks for model {_model_name} is not set.")
     return _pgroup_ranks[_model_name]
+
 
 def parallelism_group_size() -> int:
     """The 3D parallelism group size of a specific model, normally dp_size * pp_size * mp_size."""

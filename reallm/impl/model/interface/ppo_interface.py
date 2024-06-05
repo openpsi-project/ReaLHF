@@ -204,7 +204,7 @@ class PPOActorInterface(model_api.ModelInterface):
                     param_changed = True
                     changed_keys.append(k)
             print(">>>>>>>> actor gen param changed?", param_changed)
-        self._last_gen_sd = sd      
+        self._last_gen_sd = sd
         # st = time.monotonic()
         if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
             res = module.generate(
@@ -679,7 +679,7 @@ class PPOCriticInterface(model_api.ModelInterface):
                     param_changed = True
                     changed_keys.append(k)
             print(">>>>>>>> critic inf param changed?", param_changed)
-        self._last_inf_sd = sd   
+        self._last_inf_sd = sd
 
         if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
             scores = module.forward(

@@ -394,7 +394,7 @@ class ParallelGrid:
             if self.global_rank in ranks:
                 self.pp_group = ranks
                 self.pp_proc_group = proc_group
-            
+
             # Create embedding groups for communicating gradients between LM head and the embedding.
             # Used to tie gradients of the embedding layer, e.g. for GPT.
             if len(ranks) > 1:
@@ -407,7 +407,8 @@ class ParallelGrid:
                 self.embedding_proc_group = embedding_group
 
             # TODO: support pipline_model_parallel_split_rank
-            position_embedding_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in position_embedding_ranks])
+            position_embedding_group = new_or_get_group(
+                ranks=[rank_mapping[rank] for rank in position_embedding_ranks])
             if self.global_rank in position_embedding_ranks:
                 self.position_embedding_proc_group = position_embedding_group
 
@@ -426,7 +427,7 @@ class ParallelGrid:
             if self.global_rank in g:
                 self.slice_group = g
                 self.slice_proc_group = proc_group
-        
+
         # Create tp+dp group to be consistent with Megatron.
         self.tp_dp_proc_group = None
         for pp in range(self.pipe_parallel_size):

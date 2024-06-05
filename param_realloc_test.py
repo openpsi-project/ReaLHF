@@ -1,11 +1,11 @@
 from typing import *
+import dataclasses
 import os
 import shutil
 
 import torch
 import torch.distributed as dist
 import transformers
-import dataclasses
 
 from reallm.api.core.config import ModelFamily, ModelName, ModelShardID
 from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, ReaLModelConfig
@@ -86,7 +86,7 @@ def setup_constants_and_param_realloc(
     from_pp_dp_mp,
     to_pp_dp_mp,
 ):
-    from reallm.impl.model.comm.param_realloc import setup_param_realloc, set_trainable
+    from reallm.impl.model.comm.param_realloc import set_trainable, setup_param_realloc
 
     num_pp, num_dp, num_mp = from_pp_dp_mp
     assert num_pp * num_dp * num_mp == 8
@@ -287,7 +287,7 @@ def _test_para_realloc(
                 delta_reduce = delta.clone()
                 dist.all_reduce(delta_reduce, group=constants.data_parallel_group())
                 delta_reduce /= dist.get_world_size(group=constants.data_parallel_group())
-                assert torch.allclose(delta, delta_reduce, atol=1e-4), (delta - delta_reduce).abs().max()
+                assert torch.allclose(delta, delta_reduce, atol=1e-4), ((delta - delta_reduce).abs().max())
 
             except AssertionError as e:
                 if i < max_trials - 1:
@@ -333,8 +333,7 @@ def test_param_realloc(
 
 if __name__ == "__main__":
     for i, (from_pp_dp_mp, to_pp_dp_mp) in enumerate([((1, 4, 2), (1, 2, 4))]):
-        print(
-            ">" * 10 + f" testing with from_pp_dp_mp={from_pp_dp_mp}, to_pp_dp_mp={to_pp_dp_mp} " + "<" * 10
-        )
+        print(">" * 10 + f" testing with from_pp_dp_mp={from_pp_dp_mp}, to_pp_dp_mp={to_pp_dp_mp} " +
+              "<" * 10)
         for model_family_name, path in [("llama", "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/")]:
             test_param_realloc(model_family_name, False, False, from_pp_dp_mp, to_pp_dp_mp, path)

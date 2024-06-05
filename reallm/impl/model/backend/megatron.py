@@ -1,20 +1,22 @@
-from reallm.base import constants
-from megatron.core import parallel_state
-import torch.distributed as dist
-from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel
-from megatron.core.transformer.transformer_config import TransformerConfig
 from contextlib import contextmanager
 from typing import Dict, Optional
-from reallm.impl.model.modules.mlp import get_activation_fn
-from reallm.api.core import model_api
-from reallm.impl.model.nn.real_llm_api import ReaLModel
-import torch.nn as nn
-import torch
-from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
-from megatron.core.optimizer.optimizer_config import OptimizerConfig
-from megatron.core.optimizer import get_megatron_optimizer, MegatronOptimizer
 import dataclasses
+
+from megatron.core import parallel_state
+from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel
 from megatron.core.distributed.finalize_model_grads import finalize_model_grads
+from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
+from megatron.core.optimizer import get_megatron_optimizer, MegatronOptimizer
+from megatron.core.optimizer.optimizer_config import OptimizerConfig
+from megatron.core.transformer.transformer_config import TransformerConfig
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+
+from reallm.api.core import model_api
+from reallm.base import constants
+from reallm.impl.model.modules.mlp import get_activation_fn
+from reallm.impl.model.nn.real_llm_api import ReaLModel
 
 WITHIN_MEGATRON_CONTEXT = False
 
@@ -37,7 +39,7 @@ def megatron_ctx():
     parallel_state._DATA_PARALLEL_GROUP_GLOO = grid.get_data_parallel_group_gloo()
     parallel_state._DATA_PARALLEL_GLOBAL_RANKS = dist.get_process_group_ranks(g)
     parallel_state._DATA_PARALLEL_GROUP_WITH_CP = g
-    parallel_state._DATA_PARALLEL_GROUP_WITH_CP_GLOO = grid.get_data_parallel_group_gloo()
+    parallel_state._DATA_PARALLEL_GROUP_WITH_CP_GLOO = (grid.get_data_parallel_group_gloo())
     parallel_state._DATA_PARALLEL_GLOBAL_RANKS_WITH_CP = dist.get_process_group_ranks(g)
 
     # Build the context-parallel groups.
@@ -60,8 +62,7 @@ def megatron_ctx():
     parallel_state._EMBEDDING_GLOBAL_RANKS = dist.get_process_group_ranks(grid.embedding_proc_group)
     parallel_state._POSITION_EMBEDDING_GROUP = grid.position_embedding_proc_group
     parallel_state._POSITION_EMBEDDING_GLOBAL_RANKS = dist.get_process_group_ranks(
-        grid.position_embedding_proc_group
-    )
+        grid.position_embedding_proc_group)
 
     # Build the tensor + data parallel groups.
     parallel_state._TENSOR_AND_DATA_PARALLEL_GROUP = grid.tp_dp_proc_group
@@ -72,13 +73,13 @@ def megatron_ctx():
     parallel_state._TENSOR_AND_EXPERT_PARALLEL_GROUP = constants.model_parallel_group()
     g = constants.data_parallel_group()
     parallel_state._DATA_MODULO_EXPERT_PARALLEL_GROUP = g
-    parallel_state._DATA_MODULO_EXPERT_PARALLEL_GROUP_GLOO = grid.get_data_parallel_group_gloo()
+    parallel_state._DATA_MODULO_EXPERT_PARALLEL_GROUP_GLOO = (grid.get_data_parallel_group_gloo())
 
     yield
     WITHIN_MEGATRON_CONTEXT = False
 
 
-def get_megatron_transformer_config(mconfig: model_api.ReaLModelConfig) -> TransformerConfig:
+def get_megatron_transformer_config(mconfig: model_api.ReaLModelConfig,) -> TransformerConfig:
     nq = mconfig.hidden_dim // mconfig.head_dim
     n_group = nq // mconfig.n_kv_heads
     return TransformerConfig(
@@ -131,7 +132,7 @@ class MegatronModelRunner:
         with megatron_ctx():
             # TODO: lr scheduler here
             return self.optimizer.step()
-    
+
     def train(self, *args, **kwargs):
         with megatron_ctx():
             return self.megatron_module.train(*args, **kwargs)
@@ -139,7 +140,6 @@ class MegatronModelRunner:
     def eval(self, *args, **kwargs):
         with megatron_ctx():
             return self.megatron_module.eval(*args, **kwargs)
-    
 
 
 @dataclasses.dataclass
@@ -149,8 +149,7 @@ class MegatronTrainBackend(model_api.ModelBackend):
         default="adam",
     )
     optimizer_config: dict = dataclasses.field(
-        default_factory=lambda: dict(lr=1e-5, weight_decay=0.1, betas=(0.9, 0.95), eps=1e-5)
-    )
+        default_factory=lambda: dict(lr=1e-5, weight_decay=0.1, betas=(0.9, 0.95), eps=1e-5))
     lr_scheduler_type: str = "cosine"
     warmup_steps_proportion: float = 0.0
     min_lr_ratio: float = 0.0  # will be used for linear and cosine schedule

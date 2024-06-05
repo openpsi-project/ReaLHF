@@ -1,18 +1,19 @@
 from typing import Dict, List, Optional
-import dataclasses
 import argparse
+import dataclasses
 
-import torch
 import colorama
+import torch
 import transformers
-from reallm.api.core.system_api import ExperimentConfig
-from reallm.base.namedarray import NamedArray
 
-from reallm.api.core import model_api, dfg, system_api, config as config_api
+from reallm.api.core import config as config_api
+from reallm.api.core import dfg, model_api, system_api
+from reallm.api.core.system_api import ExperimentConfig
 from reallm.api.quickstart.entrypoint import register_quickstart_exp
 from reallm.apps.quickstart import main
-from reallm.experiments.common.ppo_exp import PPOConfig
 from reallm.base import logging
+from reallm.base.namedarray import NamedArray
+from reallm.experiments.common.ppo_exp import PPOConfig
 
 logger = logging.getLogger("Sentiment PPO example")
 
@@ -22,16 +23,12 @@ class SentimentScoringInterface(model_api.ModelInterface):
 
     def __post_init__(self):
         super().__post_init__()
-        self.score_model = (
-            transformers.AutoModelForSequenceClassification.from_pretrained(
-                "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english"
-            ).cuda()
-        )
+        self.score_model = (transformers.AutoModelForSequenceClassification.from_pretrained(
+            "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english").cuda())
         self.score_model.eval()
 
         self.score_tokenizer = transformers.AutoTokenizer.from_pretrained(
-            "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english"
-        )
+            "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english")
 
     @torch.no_grad()
     def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
@@ -59,9 +56,7 @@ class SentimentScoringInterface(model_api.ModelInterface):
 
         # Re-tokenize.
         texts = model.tokenizer.batch_decode(input_ids, skip_special_tokens=True)
-        encoding = self.score_tokenizer(
-            texts, return_tensors="pt", padding=True, truncation=True
-        )
+        encoding = self.score_tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
 
         # Inference to get the score.
         logits = self.score_model(
@@ -91,13 +86,9 @@ model_api.register_interface("sentiment_scoring", SentimentScoringInterface)
 class MyPPOConfig(PPOConfig):
 
     def initial_setup(self) -> ExperimentConfig:
-        if (
-            self.rew.parallel.model_parallel_size > 1
-            or self.rew.parallel.pipeline_parallel_size > 1
-        ):
+        if (self.rew.parallel.model_parallel_size > 1 or self.rew.parallel.pipeline_parallel_size > 1):
             raise ValueError(
-                "For this example, the reward model does not support model parallel or pipeline parallel."
-            )
+                "For this example, the reward model does not support model parallel or pipeline parallel.")
 
         cfg = super().initial_setup()
 
@@ -107,9 +98,7 @@ class MyPPOConfig(PPOConfig):
                 if s.id.model_name.role == "reward":
                     s.model = config_api.Model(
                         "tokenizer",
-                        args=dict(
-                            tokenizer_path=self.rew.path,
-                        ),
+                        args=dict(tokenizer_path=self.rew.path,),
                     )
                     s.backend = config_api.ModelBackend("null")
 
@@ -122,7 +111,6 @@ class MyPPOConfig(PPOConfig):
 
 
 register_quickstart_exp("my-ppo", MyPPOConfig)
-
 
 if __name__ == "__main__":
     main()

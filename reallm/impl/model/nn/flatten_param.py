@@ -111,7 +111,7 @@ def build_param_spec(
 ) -> Tuple[Dict[str, ContiguousParamSpec], int]:
     if len(layer_indices) == 0:
         return {}, 0
-    
+
     sd_keys = []
     for layer_idx in layer_indices:
         if layer_idx == 0:

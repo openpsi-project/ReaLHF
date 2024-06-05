@@ -9,7 +9,7 @@ import torch.distributed
 
 from reallm.api.core import system_api
 from reallm.api.core.config import ModelName
-from reallm.base import gpu_utils, name_resolve, names, network, topology, constants
+from reallm.base import constants, gpu_utils, name_resolve, names, network, topology
 
 
 @dataclasses.dataclass
