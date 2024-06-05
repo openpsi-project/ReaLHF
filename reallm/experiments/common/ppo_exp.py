@@ -179,19 +179,21 @@ class PPOConfig(Experiment):
             temperature=self.ppo.temperature,
         )
 
-        def _make_model_config(cfg: ModelTrainEvalConfig):
+        # FIXME: init_critic_from_actor is just for debugging
+        def _make_model_config(cfg: ModelTrainEvalConfig, init_critic_from_actor=False):
             return get_real_model_config(
                 model_path=cfg.path,
                 hf_model_family=cfg.type._class,
                 is_critic=cfg.type.is_critic,
-                init_critic_from_actor=False,
+                init_critic_from_actor=init_critic_from_actor,
                 dtype="bf16" if cfg.enable_bf16 else "fp16",
                 lora=cfg.lora,
             )
 
         actor_model = _make_model_config(self.actor)
         ref_model = _make_model_config(self.ref)
-        critic_model = _make_model_config(self.critic)
+        # FIXME:
+        critic_model = _make_model_config(self.critic, True)
         rw_model = _make_model_config(self.rew)
 
         def _make_train_backend_config(cfg: ModelTrainEvalConfig):

@@ -21,7 +21,8 @@
 #     dataset.train_bs_n_seqs=512 \
 #     dataset.valid_bs_n_seqs=512
 
-SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
+# SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
+SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/
 # python3 -m reallm.apps.quickstart rw experiment_name=quickstart-rw-debug trial_name=20240603-1 \
 #     total_train_epochs=1 \
 #     save_freq_steps=5 eval_freq_epochs=1 \
@@ -70,8 +71,10 @@ SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/d
 #     dataset.train_bs_n_seqs=512 \
 #     dataset.valid_bs_n_seqs=512
 
-RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep10globalstep10/
-python3 -m reallm.apps.quickstart ppo experiment_name=quickstart-ppo-debug trial_name=20240523 \
+# RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep10globalstep10/
+RW_MODEL_PATH=/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/
+# python3 -m reallm.apps.quickstart ppo experiment_name=quickstart-ppo-debug trial_name=20240523 \
+python3 examples/ppo_sentiment.py my-ppo experiment_name=quickstart-ppo-debug trial_name=20240523 \
     total_train_epochs=8 \
     save_freq_steps=null \
     actor.type._class=llama \

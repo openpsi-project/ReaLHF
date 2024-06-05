@@ -22,7 +22,7 @@ from reallm.base import constants, logging, topology
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.impl.model.comm.global_comm import NCCLProcessGroupInfo
 from reallm.impl.model.comm.param_realloc import (_derive_reparallelize_comm_plan, ReparallelizeReceiverStep,
-                                                  ReparallelizeSenderStep, ReparallelizeTraget)
+                                                  ReparallelizeSenderStep, ReparallelizeTraget, is_trainable, store_trainable_params, fetch_trainable_params)
 from reallm.impl.model.nn.flatten_param import set_intervals, slice_intervals
 from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, ParallelEmbedding,
                                                                   RowParallelLinear)
@@ -80,7 +80,7 @@ class ReaLModel(nn.Module):
 
         self.layers = nn.ModuleList()
 
-        # The model is lazily instantiated for parameter reallocation.
+        # The model is lazily instantiated due to parameter reallocation.
         # For models that will be redistributed, we instantiate replica 0
         # and do not instantiate other replicas.
         self._instantiated = False
@@ -94,12 +94,6 @@ class ReaLModel(nn.Module):
         self._offloaded = False
 
         # Attributes used for flattening parameters.
-        # Flattening parameters is an option, which must be
-        # enabled for offload and parameter reallocation.
-        # We do not activate it by default because
-        # it is not compatible with DeepSpeed optimizers.
-        # If we flatten parameters and pass the module to the DeepSpeed optimizer,
-        # it does not produce gradients on the sliced parameters.
         self._param_spec, self._param_size = build_param_spec(
             list(range(self.layer_idx_start, self.layer_idx_end)),
             self.config,
@@ -116,9 +110,10 @@ class ReaLModel(nn.Module):
 
         self.layers = nn.ModuleList(layers)
 
-        self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
-        map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
-                                      self.layer_idx_start)
+        if self.config.use_contiguous_param:
+            self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
+            map_param_to_contigous_memory(self.layers, self._param_spec, self.contiguous_param,
+                                        self.layer_idx_start)
 
         for h in self._instantiation_hooks:
             h()
@@ -182,10 +177,16 @@ class ReaLModel(nn.Module):
             )
         return l
 
+    def _requires_contiguous_param(self):
+        valid = self.config.use_contiguous_param
+        valid &= self.contiguous_param is not None
+        if not valid:
+            raise RuntimeError("Contiguous parameter is not available.")
+
     def async_offload(self):
         assert not self._offloaded
         assert self._instantiated
-        assert self.contiguous_param is not None
+        self._requires_contiguous_param()
         if self._offload_buffer is None:
             self._offload_buffer = torch.empty_like(
                 self.contiguous_param,
@@ -469,7 +470,8 @@ class ReaLModel(nn.Module):
         to_model_config: model_api.ReaLModelConfig,
         pg_info: NCCLProcessGroupInfo,
     ) -> Tuple[nn.ModuleList, torch.Tensor, torch.Tensor]:
-        # FIXME: remote synchronization deletes the local model, but sometimes it is uncessary.
+        self._requires_contiguous_param()
+        assert not (is_trainable(from_model_name) and is_trainable(to_model_name))
 
         if (from_model_name, to_model_name) not in self._reparallelize_targets:
             self.build_reparallelization_plan(
@@ -482,8 +484,28 @@ class ReaLModel(nn.Module):
             )
         rtgt = self._reparallelize_targets[(from_model_name, to_model_name)]
 
+        # Since the default implementation of PyTorch optimizers holds
+        # the reference of trainable parameters, we cannot deallocate 
+        # them even after parameter reallocation. Therefore, there is no
+        # need to release and re-allocate the trainable parameters back-and-forth.
+        # We simply store the layer handles and fetch them when converting back.
+        with constants.model_scope(from_model_name):
+            from_model_ranks = constants.parallellism_group_ranks()
+        with constants.model_scope(to_model_name):
+            to_model_ranks = constants.parallellism_group_ranks()
+        if is_trainable(from_model_name) and torch.distributed.get_rank() in from_model_ranks:
+            store_trainable_params(from_model_name, (self.layers, self.contiguous_param))
+        elif is_trainable(to_model_name):
+            del self.layers, self.contiguous_param
+            self.layers = self.contiguous_param = None
+            if torch.distributed.get_rank() in to_model_ranks:
+                layers, param = fetch_trainable_params(to_model_name)
+            else:
+                layers, param = None, None
+            return layers, param, 0.0
+
         # The following tensor holds the contiguous memory of incoming parameters
-        # NOTE: We will enable requires_grad after reallocation, not here.
+        # If this process is not a receiver, to_param_size is 0 and it's an empty tensor.
         to_contiguous_param = torch.empty(
             rtgt.to_param_size,
             dtype=self.dtype,
@@ -533,13 +555,13 @@ class ReaLModel(nn.Module):
                         step.param_size,
                     )
                     send_buf_specs.append(buf)
-                if step.remove:
-                    for param_key in step.param_keys:
-                        layer_idx, k = param_key.split(".", 1)
-                        layer_idx = int(layer_idx)
-                        dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
-                        recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
-                                          k).data = dummy_tensor
+                # if step.remove:
+                #     for param_key in step.param_keys:
+                #         layer_idx, k = param_key.split(".", 1)
+                #         layer_idx = int(layer_idx)
+                #         dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
+                #         recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
+                #                           k).data = dummy_tensor
 
         # Run boradcast!
         streams = [torch.cuda.Stream() for step in rtgt.comm_plan]

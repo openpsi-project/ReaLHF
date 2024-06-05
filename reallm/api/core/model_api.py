@@ -48,6 +48,7 @@ class ReaLModelConfig:
 
     ### Running configurations. ###
     gradient_accumulation_fusion: bool = False
+    use_contiguous_param: bool = False
 
 
 def load_hf_tokenizer(model_name_or_path: str,

@@ -122,9 +122,10 @@ def init_global_constants(
 
     with constants.model_scope(model_name):
         constants.set_rank_mapping(model_name, topo, msid2mwid=msid2mwid)
-        wg = topology.new_or_get_group(ranks=[constants.to_global_pg_rank(i) for i in range(ws)])
+        wg_ranks = [constants.to_global_pg_rank(i) for i in range(ws)]
+        wg = topology.new_or_get_group(ranks=wg_ranks)
 
-        constants.set_parallelism_group(model_name=model_name, pgroup=wg)
+        constants.set_parallelism_group(model_name=model_name, pgroup=wg, ranks=wg_ranks)
         grid = ParallelGrid(process_group=wg, topology=topo)
         constants.set_grid(model_name=model_name, grid=grid)
 

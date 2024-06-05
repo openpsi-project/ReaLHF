@@ -9,7 +9,7 @@ import reallm.base.logging as logging
 
 logger = logging.getLogger("Topology")
 
-GLOBAL_PROCESS_GROUP_REGISTRY: Dict[Tuple, torch.distributed.ProcessGroup] = {}
+GLOBAL_PROCESS_GROUP_REGISTRY: Dict[Tuple[Tuple[int], str], torch.distributed.ProcessGroup] = {}
 
 
 def new_or_get_group(ranks: List[int], backend=None):
@@ -17,9 +17,10 @@ def new_or_get_group(ranks: List[int], backend=None):
         backend = torch.distributed.get_backend()
     ranks = tuple(sorted(ranks))
     global GLOBAL_PROCESS_GROUP_REGISTRY
-    if ranks not in GLOBAL_PROCESS_GROUP_REGISTRY:
-        GLOBAL_PROCESS_GROUP_REGISTRY[ranks] = torch.distributed.new_group(ranks, backend=backend)
-    return GLOBAL_PROCESS_GROUP_REGISTRY[ranks]
+    key = (ranks, backend)
+    if key not in GLOBAL_PROCESS_GROUP_REGISTRY:
+        GLOBAL_PROCESS_GROUP_REGISTRY[key] = torch.distributed.new_group(ranks, backend=backend)
+    return GLOBAL_PROCESS_GROUP_REGISTRY[key]
 
 
 class PipeDataModelProcessCoord(NamedTuple):
@@ -329,6 +330,7 @@ class ParallelGrid:
 
         if rank_mapping is None:
             rank_mapping = {i: i for i in range(topology.world_size())}
+        self.rank_mapping = rank_mapping
 
         self.global_rank = dist.get_rank(group=process_group)
         # NOTE: we don't use dist.get_world_size(process_group) because it will only return the true
@@ -336,8 +338,6 @@ class ParallelGrid:
         # self.world_size=-1 will trigger assertion errors.
         self.world_size = topology.world_size()
 
-        # if self.global_rank == 0:
-        #     print("Using topology:", topology)
         self._topo = topology
 
         self.data_parallel_size = max(self._topo.get_dim("data"), 1)
@@ -349,8 +349,7 @@ class ParallelGrid:
         self.stage_id = self.get_stage_id()
         self.data_parallel_id = self.get_data_parallel_id()
 
-        # Create new ProcessGroups for all model parallelism. DeepSpeedLight uses these
-        # to detect overflow, etc.
+        # Create new ProcessGroups for TP + PP parallelism approaches.
         self.ds_model_proc_group = None
         self.ds_model_rank = -1
         for dp in range(self.data_parallel_size):
@@ -360,9 +359,6 @@ class ParallelGrid:
                 self.ds_model_proc_group = proc_group
                 self.ds_model_world_size = len(ranks)
                 self.ds_model_rank = ranks.index(self.global_rank)
-                # logger.info(f"parallelism_rank={self.global_rank} (global_rank={dist.get_rank()}) "
-                #             f"dp_rank={dp} building DeepSpeed model group "
-                #             f"(i.e., pipeline+model parallel group) with global ranks: {ranks}")
         if self.global_rank != -1:
             assert self.ds_model_rank > -1
             assert self.ds_model_proc_group is not None
@@ -373,29 +369,48 @@ class ParallelGrid:
         # Create new ProcessGroup for gradient all-reduces - these are the data parallel groups
         self.dp_group = []
         self.dp_groups = self._topo.get_axis_comm_lists("data")
+        self.dp_proc_group = self.dp_proc_group_gloo = None
         for g in self.dp_groups:
             proc_group = new_or_get_group(ranks=[rank_mapping[x] for x in g])
+            proc_group_gloo = new_or_get_group(ranks=[rank_mapping[x] for x in g], backend="gloo")
             if self.global_rank in g:
                 self.dp_group = g
                 self.dp_proc_group = proc_group
+                self.dp_proc_group_gloo = proc_group_gloo
 
         self.is_first_stage = self.stage_id == 0
         self.is_last_stage = self.stage_id == (self.pipe_parallel_size - 1)
 
-        self.p2p_groups = self._build_p2p_groups()
+        # These ranks will be used only when NCCL P2P is not supported (torch version <= 1.8).
+        # Otherwise we don't need to create groups for P2P communication.
+        self.p2p_groups: List[List[int]] = self._build_p2p_groups()
 
         # Create new ProcessGroup for pipeline collectives - these are pipe parallel groups
         self.pp_group = []
         self.pp_proc_group = None
         self.pipe_groups = self._topo.get_axis_comm_lists("pipe")
         for ranks in self.pipe_groups:
-            if self.global_rank == 0:
-                # print(f'RANK={self.global_rank} building pipeline group: {ranks}')
-                pass
             proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])
             if self.global_rank in ranks:
                 self.pp_group = ranks
                 self.pp_proc_group = proc_group
+            
+            # Create embedding groups for communicating gradients between LM head and the embedding.
+            # Used to tie gradients of the embedding layer, e.g. for GPT.
+            if len(ranks) > 1:
+                embedding_ranks = [ranks[0], ranks[-1]]
+                position_embedding_ranks = [ranks[0]]
+            else:
+                embedding_ranks = position_embedding_ranks = ranks
+            embedding_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in embedding_ranks])
+            if self.global_rank in embedding_ranks:
+                self.embedding_proc_group = embedding_group
+
+            # TODO: support pipline_model_parallel_split_rank
+            position_embedding_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in position_embedding_ranks])
+            if self.global_rank in position_embedding_ranks:
+                self.position_embedding_proc_group = position_embedding_group
+
         if self.global_rank != -1:
             assert self.pp_proc_group is not None
         else:
@@ -411,6 +426,14 @@ class ParallelGrid:
             if self.global_rank in g:
                 self.slice_group = g
                 self.slice_proc_group = proc_group
+        
+        # Create tp+dp group to be consistent with Megatron.
+        self.tp_dp_proc_group = None
+        for pp in range(self.pipe_parallel_size):
+            ranks = sorted(self._topo.get_axis_list(axis="pipe", idx=pp))
+            proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])
+            if self.global_rank in ranks:
+                self.tp_dp_proc_group = proc_group
 
     def get_stage_id(self):
         if self.global_rank == -1:
@@ -434,7 +457,7 @@ class ParallelGrid:
                 if rank in l:
                     idx = l.index(rank)
                     buddy_rank = l[(idx + 1) % self.pipe_parallel_size]
-                    p2p_lists.append([rank, buddy_rank])
+                    p2p_lists.append([self.rank_mapping[rank], self.rank_mapping[buddy_rank]])
                     break  # next global rank
         assert len(p2p_lists) == self.world_size
         return p2p_lists
@@ -486,6 +509,9 @@ class ParallelGrid:
     def get_data_parallel_group(self):
         """The group of ranks within the same stage of all pipelines."""
         return self.dp_proc_group
+
+    def get_data_parallel_group_gloo(self):
+        return self.dp_proc_group_gloo
 
     # These are model parallel groups across all types of model parallelism.
     # Deepspeed uses them to detect overflow, etc.

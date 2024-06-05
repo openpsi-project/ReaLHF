@@ -165,6 +165,8 @@ class PPOActorInterface(model_api.ModelInterface):
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
 
+        self._last_gen_sd = None
+
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
@@ -193,6 +195,16 @@ class PPOActorInterface(model_api.ModelInterface):
 
         # logger.info(f"packed_prompts shape {packed_prompts.shape}, bs {bs}")
 
+        sd = {k: v.detach().clone() for k, v in module.state_dict().items()}
+        if self._last_gen_sd is not None:
+            param_changed = False
+            changed_keys = []
+            for k, v1, v2 in zip(sd.keys(), sd.values(), self._last_gen_sd.values()):
+                if not torch.allclose(v1, v2):
+                    param_changed = True
+                    changed_keys.append(k)
+            print(">>>>>>>> actor gen param changed?", param_changed)
+        self._last_gen_sd = sd      
         # st = time.monotonic()
         if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
             res = module.generate(
@@ -448,6 +460,7 @@ class PPOActorInterface(model_api.ModelInterface):
         )
         ### Logging code ends. ###
 
+        sd = {k: v.detach().clone() for k, v in module.state_dict().items()}
         # NOTE: We cannot randomly shuffle data here because
         # data must have the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
@@ -512,6 +525,14 @@ class PPOActorInterface(model_api.ModelInterface):
                 for k, v in stats.items():
                     train_stats[k] += v
 
+        sd2 = {k: v.detach().clone() for k, v in module.state_dict().items()}
+        param_changed = False
+        changed_keys = []
+        for k, v1, v2 in zip(sd.keys(), sd.values(), sd2.values()):
+            if not torch.allclose(v1, v2):
+                param_changed = True
+                changed_keys.append(k)
+        print(">>>>>>>> actor train param changed?", param_changed)
         cur_epoch = model.version.epoch
         model.inc_version()
 
@@ -626,6 +647,7 @@ class PPOCriticInterface(model_api.ModelInterface):
             else:
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
+        self._last_inf_sd = None
 
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
@@ -647,6 +669,17 @@ class PPOCriticInterface(model_api.ModelInterface):
         cu_seqlens = data["cu_seqlens"].int()
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
+
+        sd = {k: v.detach().clone() for k, v in module.state_dict().items()}
+        if self._last_inf_sd is not None:
+            param_changed = False
+            changed_keys = []
+            for k, v1, v2 in zip(sd.keys(), sd.values(), self._last_inf_sd.values()):
+                if not torch.allclose(v1, v2):
+                    param_changed = True
+                    changed_keys.append(k)
+            print(">>>>>>>> critic inf param changed?", param_changed)
+        self._last_inf_sd = sd   
 
         if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
             scores = module.forward(
@@ -765,6 +798,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         dist.all_reduce(n_tokens, group=constants.data_parallel_group())
         global_stats = dict(returns=float(returns), n_tokens=int(n_tokens))
 
+        sd = {k: v.detach().clone() for k, v in module.state_dict().items()}
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
@@ -824,6 +858,14 @@ class PPOCriticInterface(model_api.ModelInterface):
                 for k, v in stats.items():
                     train_stats[k] += v
 
+        sd2 = {k: v.detach().clone() for k, v in module.state_dict().items()}
+        param_changed = False
+        changed_keys = []
+        for k, v1, v2 in zip(sd.keys(), sd.values(), sd2.values()):
+            if not torch.allclose(v1, v2):
+                param_changed = True
+                changed_keys.append(k)
+        print(">>>>>>>> critic train param changed?", param_changed)
         cur_epoch = model.version.epoch
         model.inc_version()
 

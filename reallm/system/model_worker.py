@@ -276,10 +276,10 @@ class ModelWorker(worker_base.Worker):
         self.__device = torch.device("cuda:0")
 
         for model_name_, topo_ in self.config.model_topos.items():
-            constants.set_parallelism_group(
-                model_name_,
-                self.__pg_info.model_groups[model_name_],
-            )
+            rpc = [rpc for rpc in self.config.model_rpcs if rpc.model_name == model_name_]
+            assert len(rpc) == 1
+            rpc = rpc[0]
+            param_realloc_comm.set_trainable(model_name_, rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP)
             constants.set_rank_mapping(model_name_, topo_, self.config.msid2mwid)
             grid = topology.ParallelGrid(
                 topology=topo_,
