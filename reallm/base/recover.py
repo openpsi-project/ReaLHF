@@ -1,11 +1,7 @@
-from typing import List, Optional, Set
+from typing import Optional, Set
 import dataclasses
 import os
 import pickle
-import random
-
-import numpy as np
-import torch
 
 import reallm.base.constants as constants
 
@@ -23,7 +19,6 @@ class StepInfo:
 class RecoverInfo:
     recover_start: StepInfo
     last_step_info: StepInfo
-    error_history: List[StepInfo] = dataclasses.field(default_factory=list)
     hash_vals_to_ignore: Set[int] = dataclasses.field(default_factory=set)
 
 

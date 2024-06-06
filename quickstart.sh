@@ -64,6 +64,7 @@ python3 -m reallm.apps.quickstart ppo experiment_name=debug-recover trial_name=2
     n_nodes=1 \
     nodelist=\'QH-com49\'\
     recover_mode=disabled \
+    recover_retries=1 \
     save_freq_steps=null \
     actor.type._class=llama \
     actor.type.size=7 \
@@ -83,7 +84,7 @@ python3 -m reallm.apps.quickstart ppo experiment_name=debug-recover trial_name=2
     rew.type.size=7 \
     rew.type.is_critic=True \
     rew.path=$RW_MODEL_PATH \
-    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
+    dataset.path=/lustre/meizy/data/antropic-hh/ppo_prompt_only_short.jsonl \
     dataset.max_prompt_len=256 \
     dataset.train_bs_n_seqs=256 \
     ppo.max_new_tokens=256 \

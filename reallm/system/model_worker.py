@@ -16,11 +16,11 @@ import torch.distributed as dist
 import torch.utils.data
 
 from reallm.api.core.config import ModelName
-from reallm.base import constants, gpu_utils, logging, namedarray, numpy_utils, seeding, timeutil, topology
+from reallm.base import (constants, gpu_utils, logging, namedarray, numpy_utils, recover, seeding, timeutil,
+                         topology)
 from reallm.base.monitor import (cuda_tmark, cuda_tmarked, CUDATimeMarkType, dump_tmark_db,
                                  gpu_utilization_monitor)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_parallel import pipeline_repartition_strategy
 from reallm.system import request_reply_stream, worker_base
 import reallm.api.core.dfg as dfg
 import reallm.api.core.system_api as system_api
@@ -174,6 +174,14 @@ class ModelWorker(worker_base.Worker):
         # log info
         self.__total_time = 0.01
 
+        # recover info
+        self.__recover_run = os.environ.get("RECOVER_RUN", "0") == "1"
+        self.__recover_info = (recover.load_recover_info() if self.__recover_run else None)
+        self.__recover_states_root = os.path.join(constants.RECOVER_ROOT, self.__experiment_name,
+                                                  self.__trial_name)
+        self.__epoch_since_recover = 0
+        self.__recover_first_epoch_done = False
+
         return r
 
     @property
@@ -315,7 +323,7 @@ class ModelWorker(worker_base.Worker):
             self.__data_generator = enumerate(self.__dataloader)
             self.__dataset_batch_counter = None
 
-            self.__dataset_epoch = 0
+            self.__dataset_epoch = (0 if not self.__recover_run else self.__recover_info.recover_start.epoch)
             self.__cur_sample = None
             self.__fetched_sample_cache = []
 
@@ -334,6 +342,12 @@ class ModelWorker(worker_base.Worker):
             with constants.model_scope(s.id.model_name):
                 self.__backend_initialized[s.id.model_name] = False
                 tik = time.perf_counter()
+                # HACK: ref and reward models are not saved
+                if self.__recover_run and s.id.model_name.role not in ["ref", "reward"]:
+                    model_path = os.path.join(self.__recover_states_root, "ckpt", s.id.model_name.role)
+                    s.model.args["model_path"] = model_path
+                    s.model.args["init_critic_from_actor"] = False
+
                 self.__models[s.id.model_name] = model = model_api.make_model(s.model,
                                                                               name=s.id.model_name,
                                                                               device=self.__device)
@@ -408,6 +422,10 @@ class ModelWorker(worker_base.Worker):
                 self.__dataset_batch_counter, self.__cur_sample = next(self.__data_generator)
             except StopIteration:
                 self.__dataset_epoch += 1
+                if self.__recover_run:
+                    self.__epoch_since_recover += 1
+                    if self.__epoch_since_recover > 1:
+                        self.__recover_first_epoch_done = True
                 self.__data_generator = enumerate(self.__dataloader)
                 self.__dataset_batch_counter, self.__cur_sample = next(self.__data_generator)
 
@@ -540,6 +558,13 @@ class ModelWorker(worker_base.Worker):
             ############## data loading ##############
             elif request.handle_name == "fetch":
                 fetched_data = data_api.split_sequences(self.__cur_sample)
+                if self.__recover_run and not self.__recover_first_epoch_done:
+                    fetched_data = list(
+                        filter(
+                            lambda x: hash(x) not in self.__recover_info.hash_vals_to_ignore,
+                            fetched_data,
+                        ))
+
                 seqlens = [x.metadata["seqlens"][0] for x in fetched_data]
                 res = data_api.DataBatchMeta(
                     dp_rank=self._dp_rank,
@@ -547,6 +572,7 @@ class ModelWorker(worker_base.Worker):
                     keys=list(self.__cur_sample.keys()),
                     epoch=self.__dataset_epoch,
                     is_final_batch=(self.__dataset_batch_counter == len(self.__dataloader) - 1),
+                    hash_vals=[hash(x) for x in fetched_data],
                 )
                 self.__fetched_sample_cache += fetched_data
                 self.__cur_sample = None
@@ -904,6 +930,7 @@ class ModelWorker(worker_base.Worker):
 
         t = time.monotonic() - st
         self.__total_time += t
+
         # blogger.debug(
         #     f"Model worker #{','.join(self.model_names)}# poll time: {t:.4f}s, engine poll time {pt:.4f}s, percent {pt/t:.4f}"
         # )
@@ -911,27 +938,27 @@ class ModelWorker(worker_base.Worker):
 
     def __recover_save(self):
         # store model and dataset states for recover
-        # if self.__dist_env_resolved:
-        #     for model_name, model in self.__models.items():
-        #         if model_name.replica_id != 0 or model_name.role in ["ref", "reward"]:
-        #             continue
-        #         with constants.model_scope(model_name):
-        #             ckpt_save_dir = os.path.join(self.__recover_states_root, "ckpt", model_name.role)
-        #             # only one ckpt directory will exist in ckpt_save_dir
-        #             os.makedirs(ckpt_save_dir, exist_ok=True)
-        #             shutil.rmtree(ckpt_save_dir, ignore_errors=True)
-        #             logger.info(f"saving model {model_name} ckpt for recover at {ckpt_save_dir}. "
-        #                         f"epoch {model.version.epoch}, epoch_step {model.version.epoch_step}, "
-        #                         f"global step {model.version.global_step}")
-        #             if self.__has_dataset:
-        #                 logger.info(f"Dataset info: "
-        #                             f"dataset epoch {self.__dataset_epoch}, "
-        #                             f"dataset epoch step {self.__dataset_epoch_step}, "
-        #                             f"dataset global step {self.__dataset_global_step}.")
-        #             self._interface.save(model, ckpt_save_dir)
-        #             logger.info(f"saving done.")
-        # TODO: fix recover
-        pass
+        if self.__dist_env_resolved:
+            import shutil
+
+            for model_name, model in self.__models.items():
+                # HACK: ad-hoc solution, do not save ref and reward models
+                if model_name.replica_id != 0 or model_name.role in ["ref", "reward"]:
+                    continue
+                constants._model_name = None  # force quit model_scope
+                with constants.model_scope(model_name):
+                    ckpt_save_dir = os.path.join(self.__recover_states_root, "ckpt", model_name.role)
+                    # only one ckpt directory will exist in ckpt_save_dir
+                    os.makedirs(ckpt_save_dir, exist_ok=True)
+                    shutil.rmtree(ckpt_save_dir, ignore_errors=True)
+                    logger.info(f"saving model {model_name} ckpt for recover at {ckpt_save_dir}. "
+                                f"epoch {model.version.epoch}, epoch_step {model.version.epoch_step}, "
+                                f"global step {model.version.global_step}")
+                    if self.__has_dataset:
+                        logger.info(f"Dataset info: "
+                                    f"dataset epoch {self.__dataset_epoch}")
+                    self._interface.save(model, ckpt_save_dir)
+                    logger.info(f"saving done.")
 
     def _exit_hook(self, exit_status: worker_base.WorkerServerStatus):
         logger.info(f"Model worker {self.__worker_index} exit with status {exit_status}.")

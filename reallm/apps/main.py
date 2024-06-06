@@ -96,7 +96,8 @@ def main_start(args, recover_count: int = 0):
         raise ValueError("--image_name must be specified when using ray cluster. "
                          "This is becuase ray cluster requires all workers to have "
                          "the same version of Python and ray.")
-    assert args.recover_mode == "disabled", "Recover mode is not supported now!"
+    if args.mode == "local":
+        assert (args.recover_mode == "disabled"), "Recover mode is not supported for local runs!"
     args.ignore_worker_error = (args.ignore_worker_error and args.recover_mode == "disabled")
 
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
