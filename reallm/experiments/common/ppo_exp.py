@@ -87,12 +87,12 @@ class PPOConfig(CommonExperimentConfig):
     rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
 
     # for manual allocation only
-    actor_train_allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    critic_train_allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    actor_gen_allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    critic_inf_allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    rew_inf_allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    ref_inf_allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    critic_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    actor_gen: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    critic_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    rew_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    ref_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
 
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
 
@@ -288,12 +288,12 @@ class PPOConfig(CommonExperimentConfig):
     @property
     def allocations(self):
         return {
-            "actor_gen": self.actor_gen_allocation,
-            "actor_train": self.actor_train_allocation,
-            "critic_inf": self.critic_inf_allocation,
-            "critic_train": self.critic_train_allocation,
-            "ref_inf": self.ref_inf_allocation,
-            "rew_inf": self.rew_inf_allocation,
+            "actor_gen": self.actor_gen,
+            "actor_train": self.actor_train,
+            "critic_inf": self.critic_inf,
+            "critic_train": self.critic_train,
+            "ref_inf": self.ref_inf,
+            "rew_inf": self.rew_inf,
         }
 
     @property

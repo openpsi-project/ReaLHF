@@ -22,8 +22,8 @@ class DPOConfig(CommonExperimentConfig):
     actor: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
     ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
 
-    actor_allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    ref_allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    ref_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
 
     dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
     beta: float = 0.1
@@ -81,8 +81,8 @@ class DPOConfig(CommonExperimentConfig):
     @property
     def allocations(self):
         return {
-            "dpo": self.actor_allocation,
-            "ref_inf": self.ref_allocation,
+            "dpo": self.actor_train,
+            "ref_inf": self.ref_inf,
         }
 
     @property

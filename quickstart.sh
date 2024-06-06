@@ -60,7 +60,7 @@ RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/def
 #     dataset.valid_bs_n_seqs=256
 
 python3 -m reallm.apps.quickstart ppo experiment_name=debug-recover trial_name=20240606-0 \
-    allocation_mode=heuristic \
+    allocation_mode=manual \
     n_nodes=1 \
     nodelist=\'QH-com49\'\
     recover_mode=disabled \
@@ -84,7 +84,7 @@ python3 -m reallm.apps.quickstart ppo experiment_name=debug-recover trial_name=2
     rew.type.size=7 \
     rew.type.is_critic=True \
     rew.path=$RW_MODEL_PATH \
-    dataset.path=/lustre/meizy/data/antropic-hh/ppo_prompt_only_short.jsonl \
+    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
     dataset.max_prompt_len=256 \
     dataset.train_bs_n_seqs=256 \
     ppo.max_new_tokens=256 \
@@ -94,24 +94,23 @@ python3 -m reallm.apps.quickstart ppo experiment_name=debug-recover trial_name=2
     ppo.value_eps_clip=0.5 \
     ppo.reward_output_scaling=1.0 \
     ppo.adv_norm=True ppo.value_norm=True \
-    ppo.top_p=0.9 ppo.top_k=1024
-
-    # actor_train_allocation.parallel.model_parallel_size=8 \
-    # actor_train_allocation.parallel.pipeline_parallel_size=1 \
-    # actor_train_allocation.parallel.data_parallel_size=1 \
-    # actor_gen_allocation.parallel.model_parallel_size=1 \
-    # actor_gen_allocation.parallel.pipeline_parallel_size=4 \
-    # actor_gen_allocation.parallel.data_parallel_size=2 \
-    # critic_train_allocation.parallel.model_parallel_size=8 \
-    # critic_train_allocation.parallel.pipeline_parallel_size=1 \
-    # critic_train_allocation.parallel.data_parallel_size=1 \
-    # critic_inf_allocation.parallel.model_parallel_size=4 \
-    # critic_inf_allocation.parallel.pipeline_parallel_size=2 \
-    # critic_inf_allocation.parallel.data_parallel_size=1 \
-    # ref_inf_allocation.parallel.model_parallel_size=1 \
-    # ref_inf_allocation.parallel.pipeline_parallel_size=4 \
-    # ref_inf_allocation.parallel.data_parallel_size=2 \
-    # rew_inf_allocation.parallel.model_parallel_size=1 \
-    # rew_inf_allocation.parallel.pipeline_parallel_size=4 \
-    # rew_inf_allocation.parallel.data_parallel_size=2 
+    ppo.top_p=0.9 ppo.top_k=1024 \
+    actor_train.parallel.model_parallel_size=8 \
+    actor_train.parallel.pipeline_parallel_size=1 \
+    actor_train.parallel.data_parallel_size=1 \
+    actor_gen.parallel.model_parallel_size=1 \
+    actor_gen.parallel.pipeline_parallel_size=4 \
+    actor_gen.parallel.data_parallel_size=2 \
+    critic_train.parallel.model_parallel_size=8 \
+    critic_train.parallel.pipeline_parallel_size=1 \
+    critic_train.parallel.data_parallel_size=1 \
+    critic_inf.parallel.model_parallel_size=4 \
+    critic_inf.parallel.pipeline_parallel_size=2 \
+    critic_inf.parallel.data_parallel_size=1 \
+    ref_inf.parallel.model_parallel_size=1 \
+    ref_inf.parallel.pipeline_parallel_size=4 \
+    ref_inf.parallel.data_parallel_size=2 \
+    rew_inf.parallel.model_parallel_size=1 \
+    rew_inf.parallel.pipeline_parallel_size=4 \
+    rew_inf.parallel.data_parallel_size=2 
 
