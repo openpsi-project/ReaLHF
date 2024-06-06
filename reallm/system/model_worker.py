@@ -467,6 +467,25 @@ class ModelWorker(worker_base.Worker):
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
 
+    def __handle_all_pre_hooks(self):
+        # drain request queues, handle all pending hooks, then recover the queue
+        cache = []
+        while True:
+            try:
+                request, data, handled, res = self.__request_queue.get_nowait()
+                request: request_reply_stream.Payload
+                if not handled:
+                    while len(request.pre_hooks) > 0:
+                        assert len(request.pre_hooks) == len(request.pre_hook_data)
+                        assert not handled and res is None
+                        self.__handle_one_rpc_hook(request.pre_hooks.pop(0), request.pre_hook_data.pop(0))
+                cache.append((request, data, handled, res))
+            except queue.Empty:
+                break
+
+        for c in cache:
+            self.__request_queue.put_nowait(c)
+
     def __model_poll_step(
         self,
         request: request_reply_stream.Payload,
@@ -485,20 +504,15 @@ class ModelWorker(worker_base.Worker):
         else:
             handler_model_name = request.handler.model_name
 
-        if len(request.pre_hooks) > 0:
-            assert len(request.pre_hooks) == len(request.pre_hook_data)
-            assert not handled and res is None
-            self.__handle_one_rpc_hook(request.pre_hooks.pop(0), request.pre_hook_data.pop(0))
-            self.__request_queue.put_nowait((request, data, False, None))
-            return
+        # handle post hooks
         if handled and len(request.post_hooks) > 0:
             assert len(request.post_hooks) == len(request.post_hook_data)
             self.__handle_one_rpc_hook(request.post_hooks.pop(0), request.post_hook_data.pop(0))
             self.__request_queue.put_nowait((request, data, True, res))
             return
+
         if handled and len(request.post_hooks) == 0:
             self.__reply_queue.put_nowait((request, res))
-
             # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
             #                          f"finish handling request *{request.handle_name}*, "
             #                          f"request_id {request.request_id}.")
@@ -506,7 +520,7 @@ class ModelWorker(worker_base.Worker):
             self.__request_sample_size[request.request_id] = sample_count
             return
 
-        assert not handled and res is None
+        assert not handled and res is None, (handled, res, len(request.post_hooks))
 
         with constants.model_scope(handler_model_name):
             res = None
@@ -747,6 +761,9 @@ class ModelWorker(worker_base.Worker):
                 x.register_metadata(seqlens=[seqlen])
                 _data.append(x)
             r = data_api.gather_sequences(_data)
+            # import pprint
+            # pprint.pprint(hook_data["handle_name"])
+            # pprint.pprint(r)
             self.__compute_input_queues[hook_data["handle_name"]].put_nowait(
                 (r, local_buffer_indices, local_seqlens, hook_data["output_key_remap"]))
 
@@ -847,6 +864,7 @@ class ModelWorker(worker_base.Worker):
         st = time.monotonic()
         self.__maybe_receive_requests()
 
+        self.__handle_all_pre_hooks()
         for _ in range(16):
             # TODO: we can have a smarter scheduling plan, the current plan is basically round-robin
             try:

@@ -233,8 +233,6 @@ class CommonExperimentConfig(Experiment):
                     max_prompt_len=(self.max_prompt_len if any(
                         rpc.interface_type == ModelInterfaceType.GENERATE for rpc in rpcs) else None),
                 )
-                pprint.pprint(topo)
-                print("gradient_checkpointing", gradient_checkpointing)
 
                 if any(rpc.interface_type == ModelInterfaceType.TRAIN_STEP for rpc in rpcs):
                     backend = make_train_backend_config(model_cfg, rpc_alloc.parallel)

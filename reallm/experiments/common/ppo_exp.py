@@ -166,8 +166,6 @@ class PPOConfig(CommonExperimentConfig):
                 output_bias=self.ppo.reward_output_bias,
             ),
         )
-
-        print(self.actor, self.actor.path)
         rollout = ModelRPC(
             model_name=ModelName("actor", 0),
             interface_type=ModelInterfaceType.GENERATE,
@@ -514,10 +512,9 @@ class PPOConfig(CommonExperimentConfig):
                     global_mesh_name=self.nodelist,
                 ),
                 parallel=ParallelismConfig(
-                    # FIXME: avoid model worker scheduling bug, fix after model worker bug fixed
-                    data_parallel_size=4,
+                    data_parallel_size=2,
                     pipeline_parallel_size=critic_inf_n_nodes,
-                    model_parallel_size=2,
+                    model_parallel_size=4,
                 ),
             )
         return [actor_gen, actor_train, ref_inf, rew_inf, critic_inf, critic_train]
