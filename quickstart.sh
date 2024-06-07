@@ -8,8 +8,8 @@
 #     model.type.size=7 \
 #     model.type.is_critic=False \
 #     model.path=/lustre/public/pretrained_model_weights/Llama-2-7b-hf \
-#     model.parallel.pipeline_parallel_size=2 \
-#     model.parallel.model_parallel_size=1 \
+#     model.parallel.pipeline_parallel_size=1 \
+#     model.parallel.model_parallel_size=2 \
 #     model.parallel.data_parallel_size=4 \
 #     model.gradient_checkpointing=True \
 #     model.parallel.use_sequence_parallel=True \
@@ -21,29 +21,29 @@
 #     dataset.train_bs_n_seqs=512 \
 #     dataset.valid_bs_n_seqs=512
 
-# SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
-SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/
-# python3 -m reallm.apps.quickstart rw experiment_name=quickstart-rw-debug trial_name=20240603-1 \
-#     total_train_epochs=1 \
-#     save_freq_steps=5 eval_freq_epochs=1 \
-#     model.type._class=llama \
-#     model.type.size=7 \
-#     model.type.is_critic=True \
-#     model.path=$SFT_MODEL_PATH \
-#     model.parallel.pipeline_parallel_size=1 \
-#     model.parallel.model_parallel_size=4 \
-#     model.parallel.data_parallel_size=2 \
-#     model.gradient_checkpointing=True \
-#     model.parallel.use_sequence_parallel=True \
-#     model.optimizer.lr_scheduler_type=cosine \
-#     model.optimizer.lr=1e-5 \
-#     model.optimizer.warmup_steps_proportion=0.0 \
-#     dataset.train_path=/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl \
-#     dataset.valid_path=/lustre/fw/datasets/imdb/rl/rm_paired-valid.jsonl \
-#     dataset.max_pairs_per_prompt=2 \
-#     dataset.max_seqlen=1024 \
-#     dataset.train_bs_n_seqs=512 \
-#     dataset.valid_bs_n_seqs=512
+SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
+# SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/
+python3 -m reallm.apps.quickstart rw experiment_name=quickstart-rw-debug trial_name=20240603-1 \
+    total_train_epochs=1 \
+    save_freq_steps=5 eval_freq_epochs=1 \
+    model.type._class=llama \
+    model.type.size=7 \
+    model.type.is_critic=True \
+    model.path=$SFT_MODEL_PATH \
+    model.parallel.pipeline_parallel_size=2 \
+    model.parallel.model_parallel_size=2 \
+    model.parallel.data_parallel_size=2 \
+    model.gradient_checkpointing=True \
+    model.parallel.use_sequence_parallel=True \
+    model.optimizer.lr_scheduler_type=cosine \
+    model.optimizer.lr=1e-5 \
+    model.optimizer.warmup_steps_proportion=0.0 \
+    dataset.train_path=/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl \
+    dataset.valid_path=/lustre/fw/datasets/imdb/rl/rm_paired-valid.jsonl \
+    dataset.max_pairs_per_prompt=2 \
+    dataset.max_seqlen=1024 \
+    dataset.train_bs_n_seqs=512 \
+    dataset.valid_bs_n_seqs=512
 
 # python3 -m reallm.apps.quickstart dpo experiment_name=quickstart-dpo-debug trial_name=20240523 \
 #     total_train_epochs=2 \
@@ -52,8 +52,8 @@ SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/
 #     actor.type.size=7 \
 #     actor.type.is_critic=False \
 #     actor.path=$SFT_MODEL_PATH \
-#     actor.parallel.pipeline_parallel_size=4 \
-#     actor.parallel.model_parallel_size=1 \
+#     actor.parallel.pipeline_parallel_size=2 \
+#     actor.parallel.model_parallel_size=2 \
 #     actor.parallel.data_parallel_size=2 \
 #     actor.gradient_checkpointing=True \
 #     actor.parallel.use_sequence_parallel=True \
@@ -67,7 +67,7 @@ SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/
 #     ref.path=$SFT_MODEL_PATH \
 #     dataset.train_path=/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl \
 #     dataset.max_pairs_per_prompt=2 \
-#     dataset.max_seqlen=512 \
+#     dataset.max_seqlen=1024 \
 #     dataset.train_bs_n_seqs=512 \
 #     dataset.valid_bs_n_seqs=512
 

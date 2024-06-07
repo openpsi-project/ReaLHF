@@ -9,11 +9,11 @@ import torch
 import torch.distributed as dist
 
 from reallm.impl.model.backend.pipe_engine import PipelinableModelRunner
-from reallm.impl.model.backend.pipe_engine.instruction import *
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
+from reallm.impl.model.parallelism.pipeline_parallel.instruction import *
 import reallm.base.constants as constants
 import reallm.base.logging as logging
-import reallm.impl.model.backend.pipe_engine.static_schedule as schedule
+import reallm.impl.model.parallelism.pipeline_parallel.static_schedule as schedule
 
 logger = logging.getLogger("Profile", "benchmark")
 

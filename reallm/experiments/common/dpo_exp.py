@@ -72,7 +72,7 @@ class DPOConfig(Experiment):
         )
 
         train_backend = ModelBackend(
-            "ds_train",
+            "deepspeed",
             args=dict(
                 optimizer_name="adam",
                 optimizer_config=dict(
@@ -86,7 +86,6 @@ class DPOConfig(Experiment):
                 min_lr_ratio=self.actor.optimizer.min_lr_ratio,
                 zero_stage=(self.actor.zero_stage if self.actor.parallel.pipeline_parallel_size == 1 else min(
                     self.actor.zero_stage, 1)),
-                engine_type=("pipe" if self.actor.parallel.pipeline_parallel_size > 1 else "deepspeed"),
                 offload_optimizer_state=self.actor.optimizer.offload,
                 enable_bf16=self.actor.enable_bf16,
                 enable_fp16=self.actor.enable_fp16,

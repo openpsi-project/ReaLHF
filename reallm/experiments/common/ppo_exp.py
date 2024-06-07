@@ -198,13 +198,8 @@ class PPOConfig(Experiment):
         rw_model = _make_model_config(self.rew)
 
         def _make_train_backend_config(cfg: ModelTrainEvalConfig):
-            parallel = cfg.parallel
-            if parallel.pipeline_parallel_size > 1:
-                engine_type = "pipe"
-            else:
-                engine_type = "deepspeed"
             return ModelBackend(
-                "ds_train",
+                "deepspeed",
                 args=dict(
                     optimizer_name="adam",
                     optimizer_config=dict(
@@ -218,7 +213,6 @@ class PPOConfig(Experiment):
                     min_lr_ratio=cfg.optimizer.min_lr_ratio,
                     zero_stage=(cfg.zero_stage if parallel.pipeline_parallel_size == 1 else min(
                         cfg.zero_stage, 1)),
-                    engine_type=engine_type,
                     offload_optimizer_state=cfg.optimizer.offload,
                     offload_param=cfg.offload,
                     enable_bf16=cfg.enable_bf16,

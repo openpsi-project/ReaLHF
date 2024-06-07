@@ -32,12 +32,9 @@ class ClusterDeviceMesh:
 
 
 def make_train_backend_config(cfg: ModelTrainEvalConfig):
-    if cfg.parallel.pipeline_parallel_size > 1:
-        engine_type = "pipe"
-    else:
-        engine_type = "deepspeed"
+
     return ModelBackend(
-        "ds_train",
+        "deepspeed",
         args=dict(
             optimizer_name="adam",
             optimizer_config=dict(
@@ -52,7 +49,6 @@ def make_train_backend_config(cfg: ModelTrainEvalConfig):
             zero_stage=(cfg.zero_stage if cfg.parallel.pipeline_parallel_size == 1 else min(
                 cfg.zero_stage, 1)),
             gradient_checkpointing=cfg.gradient_checkpointing,
-            engine_type=engine_type,
             offload_optimizer_state=cfg.optimizer.offload,
             offload_param=cfg.offload,
             enable_bf16=cfg.enable_bf16,
@@ -74,7 +70,6 @@ def make_inf_backend_config(cfg: ModelTrainEvalConfig):
     #         zero_stage=3 if cfg.offload else 0,
     #         offload=cfg.offload,
     #         enable_bf16=cfg.enable_bf16,
-    #         engine_type="pipe" if cfg.parallel.pipeline_parallel_size > 1 else "deepspeed",
     #         sequence_parallel=cfg.parallel.use_sequence_parallel,
     #     ),
     # )

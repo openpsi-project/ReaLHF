@@ -11,8 +11,6 @@ import torch.distributed as dist
 from reallm.api.core import data_api
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
-from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (PipelinableModelRunner,
-                                                                  PipelinableModelRunnerWithZeRO)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
@@ -206,33 +204,18 @@ class PPOActorInterface(model_api.ModelInterface):
             print(">>>>>>>> actor gen param changed?", param_changed)
         self._last_gen_sd = sd
         # st = time.monotonic()
-        if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
-            res = module.generate(
-                seqlens_cpu=data.metadata["seqlens"],
-                tokenizer=model.tokenizer,
-                packed_input_ids=packed_prompts,
-                cu_seqlens=cu_seqlens,
-                gconfig=GenerationConfig(**self.generation_config),
-            )
-            if res is None:
-                return None
 
-            gen_tokens, logprobs, logits_mask, *_ = res
-            # logger.info(f"gen_tokens shape {gen_tokens.shape}")
-        else:
-            # unwrap deepspeed engine here
-            if hasattr(module, "module"):
-                module = module.module
-            gen_res = module.generate(
-                tokenizer=model.tokenizer,
-                packed_input_ids=packed_prompts,
-                cu_seqlens=cu_seqlens,
-                max_seqlen=int(max(prompt_lengths)),
-                gconfig=GenerationConfig(**self.generation_config),
-            )
-            gen_tokens = gen_res.sequences
-            logprobs = gen_res.scores
-            logits_mask = gen_res.logits_mask
+        res = module.generate(
+            seqlens_cpu=data.metadata["seqlens"],
+            tokenizer=model.tokenizer,
+            packed_input_ids=packed_prompts,
+            cu_seqlens=cu_seqlens,
+            gconfig=GenerationConfig(**self.generation_config),
+        )
+        if res is None:
+            return None
+
+        gen_tokens, logprobs, logits_mask, *_ = res
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
@@ -313,24 +296,13 @@ class PPOActorInterface(model_api.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
-            res = module.forward(
-                seqlens_cpu=data.metadata["seqlens"],
-                packed_input_ids=data["packed_seq"],
-                cu_seqlens=cu_seqlens,
-            )
-            if res is None:
-                return None
-            logits = res
-        else:
-            if hasattr(module, "module"):
-                module = module.module
-            res = module(
-                packed_input_ids=data["packed_seq"],
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-            )
-            logits = res.logits
+        logits = module.forward(
+            seqlens_cpu=data.metadata["seqlens"],
+            packed_input_ids=data["packed_seq"],
+            cu_seqlens=cu_seqlens,
+        )
+        if logits is None:
+            return None
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             packed_logits_mask = data["packed_logits_mask"]
@@ -469,57 +441,29 @@ class PPOActorInterface(model_api.ModelInterface):
             cu_seqlens = data["cu_seqlens"]
             input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
             logits_mask = (data["packed_logits_mask"] if "packed_logits_mask" in data else None)
-            if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
-                module.set_version_steps(model.version.global_step)
-                seqlens = batch_seqlens[offset:offset + input_lens.shape[0]]
-                offset += input_lens.shape[0]
-                loss_fn_kwargs = dict(
-                    input_lens=input_lens,  # used for partition
-                    old_logp=data["old_logp"],
-                    ppo_loss_mask=data["ppo_loss_mask"],
-                    advantages=data["advantages"],
-                    kl_rewards=data["kl_rewards"],
-                    kl_adapter=self.kl_adapter,
-                    eps_clip=self.eps_clip,
-                    early_stop_imp_ratio=self.early_stop_imp_ratio,
-                    early_stop_kl=self.early_stop_kl,
-                    logits_mask=logits_mask,
-                )
+            seqlens = batch_seqlens[offset:offset + input_lens.shape[0]]
+            offset += input_lens.shape[0]
+            loss_fn_kwargs = dict(
+                input_lens=input_lens,  # used for partition
+                old_logp=data["old_logp"],
+                ppo_loss_mask=data["ppo_loss_mask"],
+                advantages=data["advantages"],
+                kl_rewards=data["kl_rewards"],
+                kl_adapter=self.kl_adapter,
+                eps_clip=self.eps_clip,
+                early_stop_imp_ratio=self.early_stop_imp_ratio,
+                early_stop_kl=self.early_stop_kl,
+                logits_mask=logits_mask,
+            )
 
-                loss, stats = module.train_batch(
-                    seqlens_cpu=seqlens,
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=data["cu_seqlens"],
-                    loss_fn=_ppo_actor_loss_from_model_outputs,
-                    **loss_fn_kwargs,
-                )
-            else:
-                max_seqlen = int(max(input_lens))
-                output = module(
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=cu_seqlens,
-                    max_seqlen=max_seqlen,
-                )
-                loss, stats = _ppo_actor_loss_from_model_outputs(
-                    logits=output.logits,
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=cu_seqlens,
-                    old_logp=data["old_logp"],
-                    ppo_loss_mask=data["ppo_loss_mask"],
-                    advantages=data["advantages"],
-                    kl_rewards=data["kl_rewards"],
-                    kl_adapter=self.kl_adapter,
-                    eps_clip=self.eps_clip,
-                    early_stop_imp_ratio=self.early_stop_imp_ratio,
-                    early_stop_kl=self.early_stop_kl,
-                    logits_mask=logits_mask,
-                )
-
-                with cuda_tmarked("bwd", CUDATimeMarkType.backward):
-                    module.backward(loss)
-
-                with cuda_tmarked("optim_step", CUDATimeMarkType.optim_step):
-                    module.step(lr_kwargs={"epoch": model.version.global_step})
+            stats = module.train_batch(
+                seqlens_cpu=seqlens,
+                packed_input_ids=data["packed_seq"],
+                cu_seqlens=data["cu_seqlens"],
+                version_steps=model.version.global_step,
+                loss_fn=_ppo_actor_loss_from_model_outputs,
+                **loss_fn_kwargs,
+            )
 
             if stats:
                 for k, v in stats.items():
@@ -681,22 +625,13 @@ class PPOCriticInterface(model_api.ModelInterface):
             print(">>>>>>>> critic inf param changed?", param_changed)
         self._last_inf_sd = sd
 
-        if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
-            scores = module.forward(
-                seqlens_cpu=data.metadata["seqlens"],
-                packed_input_ids=data["packed_seq"],
-                cu_seqlens=cu_seqlens,
-            )
-            if scores is None:
-                return None
-        else:
-            if hasattr(module, "module"):
-                module = module.module
-            scores: torch.FloatTensor = module(
-                packed_input_ids=data["packed_seq"],
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-            ).logits
+        scores = module.forward(
+            seqlens_cpu=data.metadata["seqlens"],
+            packed_input_ids=data["packed_seq"],
+            cu_seqlens=cu_seqlens,
+        )
+        if scores is None:
+            return None
         scores = scores.squeeze(-1)
         res = from_dict(dict(scores=scores))
         res.register_metadata(seqlens=data.metadata["seqlens"])
@@ -804,55 +739,28 @@ class PPOCriticInterface(model_api.ModelInterface):
         offset = 0
         for data in datas:
             input_lens = data["cu_seqlens"][1:] - data["cu_seqlens"][:-1]
-            if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
-                seqlens_cpu = batch_seqlens[offset:offset + input_lens.shape[0]]
-                offset += input_lens.shape[0]
-                module.set_version_steps(model.version.global_step)
-                module.set_tokenizer(tokenizer)
+            seqlens_cpu = batch_seqlens[offset:offset + input_lens.shape[0]]
+            offset += input_lens.shape[0]
 
-                loss_kwargs = dict(
-                    input_lens=input_lens,
-                    values=data["values"],
-                    ppo_loss_mask=data["ppo_loss_mask"],
-                    returns=data["returns"],
-                    kl_rewards=data["kl_rewards"],
-                    value_eps_clip=self.value_eps_clip,
-                    kl_adapter=self.kl_adapter,
-                    rms=self.rms if self.value_norm else None,
-                )
+            loss_kwargs = dict(
+                input_lens=input_lens,
+                values=data["values"],
+                ppo_loss_mask=data["ppo_loss_mask"],
+                returns=data["returns"],
+                kl_rewards=data["kl_rewards"],
+                value_eps_clip=self.value_eps_clip,
+                kl_adapter=self.kl_adapter,
+                rms=self.rms if self.value_norm else None,
+            )
 
-                loss, stats = module.train_batch(
-                    seqlens_cpu=seqlens_cpu,
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=data["cu_seqlens"],
-                    loss_fn=_ppo_critic_loss_from_model_outputs,
-                    **loss_kwargs,
-                )
-            else:
-                max_seqlen = int(max(input_lens))
-                new_values: torch.FloatTensor = module(
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=data["cu_seqlens"],
-                    max_seqlen=max_seqlen,
-                ).logits.float()
-
-                loss, stats = _ppo_critic_loss_from_model_outputs(
-                    new_values=new_values,
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=data["cu_seqlens"],
-                    values=data["values"],
-                    ppo_loss_mask=data["ppo_loss_mask"],
-                    returns=data["returns"],
-                    kl_rewards=data["kl_rewards"],
-                    value_eps_clip=self.value_eps_clip,
-                    kl_adapter=self.kl_adapter,
-                    rms=self.rms if self.value_norm else None,
-                )
-
-                with cuda_tmarked("bwd", CUDATimeMarkType.backward):
-                    module.backward(loss)
-                with cuda_tmarked("optim_step", CUDATimeMarkType.optim_step):
-                    module.step(lr_kwargs={"epoch": model.version.global_step})
+            stats = module.train_batch(
+                seqlens_cpu=seqlens_cpu,
+                packed_input_ids=data["packed_seq"],
+                cu_seqlens=data["cu_seqlens"],
+                version_steps=model.version.global_step,
+                loss_fn=_ppo_critic_loss_from_model_outputs,
+                **loss_kwargs,
+            )
 
             if stats:
                 for k, v in stats.items():

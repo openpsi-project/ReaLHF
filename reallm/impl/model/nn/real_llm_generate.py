@@ -206,6 +206,42 @@ def genstep(
 #     return graph, input_buffers, output_buffers
 
 
+def init_kv_cache(
+    module: "ReaLModel",
+    gconfig: GenerationConfig,
+    x: PipeTransferData,
+    ys: List[PipeCacheData],
+):
+    cu_seqlens = x.cu_seqlens
+    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+    layer_indices = range(module.layer_idx_start, module.layer_idx_end)
+    assert len(layer_indices) == len(ys)
+    bs = input_lens.shape[0]
+    for y, layer_idx in zip(ys, layer_indices):
+        assert (y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None)
+        kvcache_seqlen = max(
+            constants.max_prompt_len() + gconfig.max_new_tokens,
+            module.config.hidden_dim // module.config.head_dim + 10,
+        )
+        k_cache = torch.zeros(
+            (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+            dtype=y.k_cache.dtype,
+            device=y.k_cache.device,
+        )
+        v_cache = torch.zeros(
+            (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+            dtype=y.v_cache.dtype,
+            device=y.v_cache.device,
+        )
+        indices = (torch.arange(kvcache_seqlen, device=module.device, dtype=torch.long)[None, :]
+                   < input_lens[:, None])
+        k_cache[indices] = y.k_cache
+        v_cache[indices] = y.v_cache
+        y.k_cache = k_cache
+        y.v_cache = v_cache
+        y.cache_seqlens = input_lens.clone().to(dtype=torch.int32)
+
+
 @torch.no_grad()
 def generate(
     model: "ReaLModel",
@@ -343,16 +379,81 @@ def generate(
         gen_logits_mask_ph.append(logits_mask)
         generated_idx += 1
 
-    gen_tokens = torch.stack(gen_token_ph, -1)
-    log_probs = torch.stack(gen_logprob_ph, -1)
+    gen_tokens, log_probs, logits_mask = _gather_gen_output_from_list(gen_token_ph, gen_logprob_ph,
+                                                                      gen_logits_mask_ph)
+
+    return gen_tokens, log_probs, logits_mask, ys[1:-1], prompt_logits
+
+
+def _gather_gen_output_from_list(
+    gen_token_ph: List[torch.LongTensor],
+    gen_logprob_ph: List[torch.FloatTensor],
+    gen_logits_mask_ph: List[torch.BoolTensor],
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Stack over the sequence dimension given a list of single-token tensors."""
+    gen_tokens = torch.stack(gen_token_ph, -1)  # [bs, seqlen]
+    log_probs = torch.stack(gen_logprob_ph, -1)  # [bs, seqlen]
     if all([m is None for m in gen_logits_mask_ph]):
         logits_mask = None
     else:
         mm = next(m for m in gen_logits_mask_ph if m is not None)
         gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
-        logits_mask = torch.stack(gen_logits_mask_ph, -2)
+        logits_mask = torch.stack(gen_logits_mask_ph, -2)  # [bs, seqlen, vocab_size]
+    return gen_tokens, log_probs, logits_mask
 
-    return gen_tokens, log_probs, logits_mask, ys[1:-1], prompt_logits
+
+def _gather_minibatch_gen_outputs(
+    all_gen_tokens: List[torch.LongTensor],
+    all_log_probs: List[torch.FloatTensor],
+    all_logits_mask: List[torch.BoolTensor],
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Concate over the batch dimension given multiple [bs, seqlen] mini-batch tensors.
+
+    Since different minibatches may have different generated lengths,
+    we should pad them to the same length.
+    """
+    gen_tokens_lengths = [t.shape[-1] for t in all_gen_tokens]
+    max_gen_tokens_length = max(gen_tokens_lengths)
+
+    padded_gen_tokens = []
+    padded_log_probs = []
+    padded_logits_mask = []
+
+    n_mbs = len(all_gen_tokens)
+    for i in range(n_mbs):
+        assert all_gen_tokens[i].shape == all_log_probs[i].shape
+        gen_len = all_gen_tokens[i].shape[-1]
+
+        gen_token = all_gen_tokens[i]
+        log_probs = all_log_probs[i]
+        logits_mask = all_logits_mask[i]
+
+        if gen_len < max_gen_tokens_length:
+            pad_size = gen_len - max_gen_tokens_length
+            gen_token = torch.nn.functional.pad(gen_token, (0, pad_size))
+            log_probs = torch.nn.functional.pad(log_probs, (0, pad_size))
+            if logits_mask is not None:
+                logits_mask = torch.nn.functional.pad(
+                    logits_mask,
+                    (0, 0, 0, pad_size),
+                    mode="constant",
+                    value=1,
+                )
+
+        padded_gen_tokens.append(gen_token)
+        padded_log_probs.append(log_probs)
+        padded_logits_mask.append(logits_mask)
+
+    gen_tokens = torch.cat(padded_gen_tokens, 0)
+    log_probs = torch.cat(padded_log_probs, 0)
+    if all([m is None for m in padded_logits_mask]):
+        logits_mask = None
+    else:
+        mm = next(m for m in padded_logits_mask if m is not None)
+        padded_logits_mask = [torch.ones_like(mm) if m is None else m for m in padded_logits_mask]
+        logits_mask = torch.stack(padded_logits_mask, -2)  # [bs, seqlen, vocab_size]
+
+    return (gen_tokens, log_probs, logits_mask)
 
 
 @torch.no_grad()

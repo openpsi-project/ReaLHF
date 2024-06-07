@@ -57,14 +57,12 @@ OFFLOAD_PARAM = False
 def make_backend():
     import reallm.api.core.model_api as model_api
 
-    engine_type = "pipe" if NUM_PP > 1 else "deepspeed"
     args = dict(
         optimizer_name="adam",
         optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
         warmup_steps_proportion=0.0,
         min_lr_ratio=0.0,
         zero_stage=1,
-        engine_type=engine_type,
         offload_optimizer_state=OFFLOAD_OPTIMIZER_STATE,
         offload_param=OFFLOAD_PARAM,
         enable_fp16=not USE_BF16,
@@ -73,7 +71,7 @@ def make_backend():
         enable_async_p2p_communication=ASYNC_P2P,
     )
     return model_api.make_backend(config_package.ModelBackend(
-        type_="ds_train",
+        type_="deepspeed",
         args=args,
     ))
 

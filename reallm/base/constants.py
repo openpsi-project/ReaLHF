@@ -271,6 +271,22 @@ def pipe_parallel_group():
     return grid().get_pipe_parallel_group()
 
 
+def is_last_pipe_stage():
+    return pipe_parallel_rank() == pipe_parallel_world_size() - 1
+
+
+def is_first_pipe_stage():
+    return pipe_parallel_rank() == 0
+
+
+def next_pipe_stage():
+    return (pipe_parallel_rank() + 1) % pipe_parallel_world_size()
+
+
+def prev_pipe_stage():
+    return (pipe_parallel_world_size() + pipe_parallel_rank() - 1) % pipe_parallel_world_size()
+
+
 def model_parallel_rank() -> int:
     try:
         return grid().get_tensor_model_parallel_rank()

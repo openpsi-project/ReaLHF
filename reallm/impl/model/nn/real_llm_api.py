@@ -112,14 +112,13 @@ class ReaLModel(nn.Module):
 
         self.layers = nn.ModuleList(layers)
 
-        if self.config.use_contiguous_param:
-            self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
-            map_param_to_contigous_memory(
-                self.layers,
-                self._param_spec,
-                self.contiguous_param,
-                self.layer_idx_start,
-            )
+        self.contiguous_param = torch.empty(self._param_size, dtype=self.dtype, device=self.device)
+        map_param_to_contigous_memory(
+            self.layers,
+            self._param_spec,
+            self.contiguous_param,
+            self.layer_idx_start,
+        )
 
         for h in self._instantiation_hooks:
             h()
@@ -184,8 +183,7 @@ class ReaLModel(nn.Module):
         return l
 
     def _requires_contiguous_param(self):
-        valid = self.config.use_contiguous_param
-        valid &= self.contiguous_param is not None
+        valid = self.contiguous_param is not None
         if not valid:
             raise RuntimeError("Contiguous parameter is not available.")
 

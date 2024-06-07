@@ -69,7 +69,7 @@ class RWConfig(Experiment):
         eval_dataloader = DataLoader("packed_eval", args=dict(batch_size=self.dataset.valid_bs_n_seqs))
 
         backend = ModelBackend(
-            "ds_train",
+            "deepspeed",
             args=dict(
                 optimizer_name="adam",
                 optimizer_config=dict(
@@ -83,7 +83,6 @@ class RWConfig(Experiment):
                 min_lr_ratio=self.model.optimizer.min_lr_ratio,
                 zero_stage=(self.model.zero_stage if self.model.parallel.pipeline_parallel_size == 1 else min(
                     self.model.zero_stage, 1)),
-                engine_type=("pipe" if self.model.parallel.pipeline_parallel_size > 1 else "deepspeed"),
                 offload_optimizer_state=self.model.optimizer.offload,
                 enable_bf16=self.model.enable_bf16,
                 enable_fp16=self.model.enable_fp16,

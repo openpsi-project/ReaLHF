@@ -38,7 +38,6 @@ def create_model(model_family_name, model_name, hf_path, is_critic, instantiate=
         mconfig: ReaLModelConfig = getattr(ReaLModel, f"config_from_{model_family_name}")(hf_config)
         mconfig = _shrink_mconfig(mconfig)
         mconfig.is_critic = is_critic
-        mconfig.use_contiguous_param = True
 
         # initialize model
         model = ReaLModel(mconfig, dtype=torch.float16, device="cuda")

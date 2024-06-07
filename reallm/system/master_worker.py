@@ -696,8 +696,8 @@ async def model_eval_thread_func(
 ):
     while not stop_ctl.is_set():
         epoch, epoch_step = await eval_queue.get()
-        eval_stats = _gather_stat(await group_rpc_blocked(stream, handlers, "evaluate",
-                                                          [None for _ in handlers]))
+        eval_stats = await group_rpc_blocked(stream, handlers, "evaluate", [None for _ in handlers])
+        eval_stats = _gather_stat(list(filter(lambda x: bool(x), eval_stats)))
         logger.info(f"Evaluation results at epoch {epoch + 1} step {epoch_step + 1}: {eval_stats}")
 
 
