@@ -5,9 +5,9 @@ from omegaconf import MISSING
 from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptAnswerDatasetConfig
+from reallm.api.quickstart.device_mesh import AllocationConfig
 from reallm.api.quickstart.entrypoint import register_quickstart_exp
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
-from reallm.base.topology import PipeModelDataParallelTopology
 from reallm.experiments.common.common import CommonExperimentConfig
 
 
@@ -18,6 +18,7 @@ class SFTConfig(CommonExperimentConfig):
     save_freq_steps: Optional[int] = 50
     eval_freq_epochs: Optional[int] = 1
     model: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
+    allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
     dataset: PromptAnswerDatasetConfig = dataclasses.field(default_factory=PromptAnswerDatasetConfig)
 
     @property
@@ -40,7 +41,7 @@ class SFTConfig(CommonExperimentConfig):
             min_n_seqs=self.dataset.train_bs_n_seqs,
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
-        return {rpc.name: rpc}
+        return {"default": rpc}
 
     @property
     def datasets(self):
@@ -53,6 +54,10 @@ class SFTConfig(CommonExperimentConfig):
                 ),
             )
         ]
+
+    @property
+    def allocations(self):
+        return {"default": self.allocation}
 
     @property
     def eval_datasets(self):

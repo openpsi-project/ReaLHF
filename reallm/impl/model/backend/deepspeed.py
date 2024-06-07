@@ -10,8 +10,10 @@ from deepspeed.runtime.engine import DeepSpeedEngine, DeepSpeedOptimizerCallable
 import deepspeed
 import torch
 import torch.distributed as dist
+import transformers
 
 from reallm.impl.model.nn.real_llm_api import ReaLModel
+from reallm.impl.model.nn.real_llm_generate import GenerationConfig
 from reallm.impl.model.parallelism.pipeline_parallel.pipe_runner import PipelineRunner
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
@@ -147,18 +149,57 @@ class ReaLDeepSpeedEngine:
             _, stat = loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs)
             return stat
 
-    def forward(self, *args, **kwargs):
+    def forward(
+        self,
+        seqlens_cpu: List[int],
+        packed_input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        num_micro_batches: Optional[int] = None,
+    ):
         if constants.pipe_parallel_world_size() > 1:
-            return self.pipe_runner.forward(*args, **kwargs)
+            return self.pipe_runner.forward(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                seqlens_cpu=seqlens_cpu,
+                num_micro_batches=num_micro_batches,
+            )
         else:
-            return self.ds_engine(*args, **kwargs).logits
+            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+            return self.ds_engine(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ).logits
 
     @torch.no_grad()
-    def generate(self, *args, **kwargs):
+    def generate(
+        self,
+        seqlens_cpu: List[int],
+        packed_input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        tokenizer: transformers.PreTrainedTokenizerFast,
+        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        num_micro_batches: Optional[int] = None,
+    ):
         if constants.pipe_parallel_world_size() > 1:
-            return self.pipe_runner.generate(*args, **kwargs)
+            return self.pipe_runner.generate(
+                seqlens_cpu=seqlens_cpu,
+                num_micro_batches=num_micro_batches,
+                tokenizer=tokenizer,
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                gconfig=gconfig,
+            )
         else:
-            return self.module.generate(*args, **kwargs)
+            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+            res = self.module.generate(
+                tokenizer=tokenizer,
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+                gconfig=gconfig,
+            )
+            return res.sequences, res.scores, res.logits_mask
 
 
 def get_train_ds_config(

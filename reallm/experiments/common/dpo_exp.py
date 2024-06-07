@@ -1,6 +1,6 @@
 import dataclasses
 
-from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC
+from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC, OffloadHook
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
 from reallm.api.quickstart.device_mesh import AllocationConfig

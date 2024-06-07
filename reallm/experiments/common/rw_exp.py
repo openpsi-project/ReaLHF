@@ -24,6 +24,7 @@ class RWConfig(CommonExperimentConfig):
 
     def __post_init__(self):
         assert (not self.is_sft_lora and self.sft_lora_path is None), "LoRA is not supported for now."
+        self.model.init_critic_from_actor = True
 
     @property
     def models(self):

@@ -86,7 +86,8 @@ model_api.register_interface("sentiment_scoring", SentimentScoringInterface)
 class MyPPOConfig(PPOConfig):
 
     def initial_setup(self) -> ExperimentConfig:
-        if (self.rew.parallel.model_parallel_size > 1 or self.rew.parallel.pipeline_parallel_size > 1):
+        if (self.rew_inf.parallel.model_parallel_size > 1
+                or self.rew_inf.parallel.pipeline_parallel_size > 1):
             raise ValueError(
                 "For this example, the reward model does not support model parallel or pipeline parallel.")
 

@@ -133,7 +133,7 @@ class ModelTrainEvalConfig:
     type: ModelFamily = dataclasses.field(default=ModelFamily("llama", 7, False))
     path: str = ""
     lora: Optional[LoRAConfig] = None
-    gradient_checkpointing: bool = False
+    gradient_checkpointing: bool = True
     enable_fp16: bool = True
     enable_bf16: bool = False
     enable_async_p2p: bool = False
@@ -143,6 +143,7 @@ class ModelTrainEvalConfig:
         default=2,
     )
     optimizer: Optional[OptimizerConfig] = dataclasses.field(default_factory=OptimizerConfig)
+    init_critic_from_actor: bool = False
 
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:

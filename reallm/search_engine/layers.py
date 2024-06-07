@@ -67,14 +67,13 @@ class ProfileLayers:
         self.model_name = model_name
         self.config = config
         self.backend_config = config_package.ModelBackend(
-            type_="ds_train",
+            type_="deepspeed",
             args=dict(
                 optimizer_name="adam",
                 optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
                 zero_stage=1,
-                engine_type="deepspeed",
                 enable_fp16=True,
                 enable_bf16=False,
             ),

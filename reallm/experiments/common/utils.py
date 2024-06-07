@@ -28,12 +28,8 @@ def get_world_size(parallel: ParallelismConfig) -> int:
 
 
 def make_train_backend_config(model_cfg: ModelTrainEvalConfig, parallel_cfg: ParallelismConfig):
-    if parallel_cfg.pipeline_parallel_size > 1:
-        engine_type = "pipe"
-    else:
-        engine_type = "deepspeed"
     return ModelBackend(
-        "ds_train",
+        "deepspeed",
         args=dict(
             optimizer_name="adam",
             optimizer_config=dict(
@@ -47,7 +43,6 @@ def make_train_backend_config(model_cfg: ModelTrainEvalConfig, parallel_cfg: Par
             min_lr_ratio=model_cfg.optimizer.min_lr_ratio,
             zero_stage=(model_cfg.zero_stage if parallel_cfg.pipeline_parallel_size == 1 else min(
                 model_cfg.zero_stage, 1)),
-            engine_type=engine_type,
             offload_optimizer_state=model_cfg.optimizer.offload,
             offload_param=model_cfg.offload,
             enable_bf16=model_cfg.enable_bf16,
@@ -57,10 +52,7 @@ def make_train_backend_config(model_cfg: ModelTrainEvalConfig, parallel_cfg: Par
 
 
 def make_inf_backend_config(model_cfg: ModelTrainEvalConfig, parallel_cfg: ParallelismConfig):
-    if parallel_cfg.pipeline_parallel_size > 1:
-        return ModelBackend("pipe_inference")
-    else:
-        return ModelBackend("null")
+    return ModelBackend("inference")
 
 
 def make_model_config(cfg: ModelTrainEvalConfig):
@@ -68,7 +60,7 @@ def make_model_config(cfg: ModelTrainEvalConfig):
         model_path=cfg.path,
         hf_model_family=cfg.type._class,
         is_critic=cfg.type.is_critic,
-        init_critic_from_actor=False,
+        init_critic_from_actor=cfg.init_critic_from_actor,
         dtype="bf16" if cfg.enable_bf16 else "fp16",
         lora=cfg.lora,
     )
