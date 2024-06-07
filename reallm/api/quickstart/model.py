@@ -1,7 +1,5 @@
 from typing import *
 import dataclasses
-import json
-import os
 
 from reallm.api.core.config import Model, ModelFamily, ModelWrapper
 import reallm.base.logging as logging
@@ -33,6 +31,23 @@ class ParallelismConfig:
         if self.use_sequence_parallel and self.model_parallel_size <= 1:
             logger.warning("Sequence parallelism requires model parallelism.")
             self.use_sequence_parallel = False
+
+    def __str__(self):
+        return (f"Parallel(mp={self.model_parallel_size},"
+                f"pp={self.pipeline_parallel_size},"
+                f"dp={self.data_parallel_size})")
+
+    # this will cause error in hydra and omegaconf
+    # def __eq__(self, other: "ParallelismConfig"):
+    #     return (self.model_parallel_size == other.model_parallel_size and
+    #             self.pipeline_parallel_size == other.pipeline_parallel_size and
+    #             self.data_parallel_size == other.data_parallel_size)
+
+
+def parallelism_config_equal(parallel1: ParallelismConfig, parallel2: ParallelismConfig) -> bool:
+    return (parallel1.model_parallel_size == parallel2.model_parallel_size
+            and parallel1.pipeline_parallel_size == parallel2.pipeline_parallel_size
+            and parallel1.data_parallel_size == parallel2.data_parallel_size)
 
 
 @dataclasses.dataclass
@@ -104,10 +119,7 @@ class ModelTrainEvalConfig:
     If you find that the model of your interest is not supported, please reach out @fuwei for help.
 
     Args:
-        type (str): Model type. Please check SUPPORTED_MODELS.
-        path (str): Model checkpoint path, the directory instead of the file.
-        base_model_path (str): HuggingFace model checkpoint path. Used for loading tokenizer and HuggingFace config.
-        tokenizer_path (str): Tokenizer path.
+        type (ModelFamily): Model type. Please check SUPPORTED_MODELS.
         lora (bool): Whether to use LoRA.
         gradient_checkpointing (bool): Whether to use gradient checkpointing of MLP inside each block.
         enable_fp16 (bool): Whether to use fp16.
@@ -124,8 +136,8 @@ class ModelTrainEvalConfig:
     gradient_checkpointing: bool = False
     enable_fp16: bool = True
     enable_bf16: bool = False
+    enable_async_p2p: bool = False
     offload: bool = False
-    parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
     zero_stage: int = dataclasses.field(
         metadata={"choices": [0, 1, 2, 3]},
         default=2,
@@ -135,15 +147,15 @@ class ModelTrainEvalConfig:
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
-        if self.enable_bf16 and (self.parallel.model_parallel_size > 1
-                                 or self.parallel.pipeline_parallel_size > 1):
-            raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
-        if self.parallel.pipeline_parallel_size > 1 and self.lora is not None:
-            raise ValueError("Use LoRA with pipeline parallel is not supported.")
-        if self.parallel.pipeline_parallel_size > 1 and self.zero_stage > 1:
-            logger.warning(f"ZeRO stage should be at most 1 when pipeline parallelism is used. "
-                           f"Force to set it to 1. (original {self.zero_stage})")
-            self.zero_stage = 1
+        # if self.enable_bf16 and (self.parallel.model_parallel_size > 1
+        #                          or self.parallel.pipeline_parallel_size > 1):
+        #     raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
+        # if self.parallel.pipeline_parallel_size > 1 and self.lora is not None:
+        #     raise ValueError("Use LoRA with pipeline parallel is not supported.")
+        # if self.parallel.pipeline_parallel_size > 1 and self.zero_stage > 1:
+        #     logger.warning(f"ZeRO stage should be at most 1 when pipeline parallelism is used. "
+        #                    f"Force to set it to 1. (original {self.zero_stage})")
+        #     self.zero_stage = 1
 
 
 def get_real_model_config(

@@ -10,7 +10,7 @@ import torch.multiprocessing as mp
 from reallm.api.core import dfg, model_api, system_api
 from reallm.api.core.model_api import MODEL_FAMILY_TO_PATH, ModelFamily
 from reallm.base.monitor import get_tracer
-from tests.utils import *
+from reallm.base.testing import *
 import reallm.base.constants as constants
 
 # mp2pp4 8.4 0.57 mp4pp2 7.84 0.53
@@ -61,7 +61,7 @@ def make_backend():
 def make_interface():
     import reallm.api.core.dfg
     import reallm.api.core.model_api as model_api
-    import reallm.profiler.interface
+    import reallm.search_engine.interface
 
     return model_api.make_interface(dfg.ModelInterface(type_="profile", args=dict()))
 

@@ -10,13 +10,13 @@ import torch.distributed
 
 from reallm.api.core import model_api, system_api
 from reallm.api.core.config import ModelName
+from reallm.base.testing import get_llama7b_real_config
 from reallm.impl.model.nn.real_llm_api import (_keys_from_layer_indices, _param_size_from_keys,
                                                ReparallelizeReceiverStep, ReparallelizeSenderStep)
 from reallm.impl.model.nn.real_llm_base import (real_model_embed_param_count, real_model_head_param_count,
                                                 real_model_tblock_param_count, ReaLModelConfig)
 from reallm.impl.model.nn.real_llm_parallel import (get_real_model_param_shape, partition_pipeline_layers,
                                                     pipeline_repartition_strategy)
-from tests.utils import get_llama7b_real_config
 import reallm.api.core.system_api
 import reallm.base.gpu_utils as gpu_utils
 import reallm.base.topology

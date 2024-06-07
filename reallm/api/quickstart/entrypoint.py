@@ -14,20 +14,8 @@ import hydra
 import omegaconf
 
 from reallm.base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
+from reallm.base.slurm_utils import check_slurm_availability
 import reallm.api.core.system_api as system_api
-
-
-@dataclasses.dataclass
-class _MainStartArgs:
-    experiment_name: str
-    trial_name: str
-    mode: str
-    debug: bool = True
-    partition: str = "dev"
-    wandb_mode: str = "disabled"
-    image_name: Optional[str] = None
-    ignore_worker_error: bool = False
-    remote_reset: bool = False
 
 
 def kind_reminder(config_name, logger, args):
@@ -37,13 +25,7 @@ def kind_reminder(config_name, logger, args):
         f"Model checkpoints will be saved to {os.path.join(MODEL_SAVE_ROOT, args.experiment_name, args.trial_name)}"
     )
 
-    slurm_available = (int(
-        subprocess.run(
-            "squeue",
-            shell=True,
-            stdout=open(os.devnull, "wb"),
-            stderr=open(os.devnull, "wb"),
-        ).returncode) == 0)
+    slurm_available = check_slurm_availability()
     if slurm_available:
         logger.warning("Slurm is available. You probably run the system on ctrl nodes. "
                        "Using slurm to launch remote workers.")
@@ -84,7 +66,7 @@ def register_quickstart_exp(config_name: str, exp_cls: Callable):
             trial_name = args.trial_name
         from reallm.apps.main import main_start, main_stop
 
-        mode = kind_reminder(config_name, logger, args)
+        args.mode = kind_reminder(config_name, logger, args)
 
         exp_fn = functools.partial(exp_cls, **args)
 
@@ -102,13 +84,14 @@ def register_quickstart_exp(config_name: str, exp_cls: Callable):
         system_api.register_experiment(exp_name, exp_fn)
 
         try:
-            main_start(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+            main_start(args)
         except Exception as e:
-            main_stop(_MainStartArgs(exp_name, trial_name, mode, debug=True))
+            main_stop(args)
             logger.warning("Exception occurred. Stopping all workers.")
             raise e
 
     cs.store(name=config_name, node=exp_cls)
+
     assert config_name not in QUICKSTART_CONFIG_CLASSES
     QUICKSTART_CONFIG_CLASSES[config_name] = exp_cls
     assert config_name not in QUICKSTART_USERCODE_PATHS

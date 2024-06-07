@@ -16,11 +16,11 @@ import torch.distributed as dist
 import torch.utils.data
 
 from reallm.api.core.config import ModelName
-from reallm.base import constants, gpu_utils, logging, namedarray, numpy_utils, seeding, timeutil, topology
+from reallm.base import (constants, gpu_utils, logging, namedarray, numpy_utils, recover, seeding, timeutil,
+                         topology)
 from reallm.base.monitor import (cuda_tmark, cuda_tmarked, CUDATimeMarkType, dump_tmark_db,
                                  gpu_utilization_monitor)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_parallel import pipeline_repartition_strategy
 from reallm.system import request_reply_stream, worker_base
 import reallm.api.core.dfg as dfg
 import reallm.api.core.system_api as system_api
@@ -174,6 +174,14 @@ class ModelWorker(worker_base.Worker):
         # log info
         self.__total_time = 0.01
 
+        # recover info
+        self.__recover_run = os.environ.get("RECOVER_RUN", "0") == "1"
+        self.__recover_info = (recover.load_recover_info() if self.__recover_run else None)
+        self.__recover_states_root = os.path.join(constants.RECOVER_ROOT, self.__experiment_name,
+                                                  self.__trial_name)
+        self.__epoch_since_recover = 0
+        self.__recover_first_epoch_done = False
+
         return r
 
     @property
@@ -316,7 +324,7 @@ class ModelWorker(worker_base.Worker):
             self.__data_generator = enumerate(self.__dataloader)
             self.__dataset_batch_counter = None
 
-            self.__dataset_epoch = 0
+            self.__dataset_epoch = (0 if not self.__recover_run else self.__recover_info.recover_start.epoch)
             self.__cur_sample = None
             self.__fetched_sample_cache = []
 
@@ -335,6 +343,12 @@ class ModelWorker(worker_base.Worker):
             with constants.model_scope(s.id.model_name):
                 self.__backend_initialized[s.id.model_name] = False
                 tik = time.perf_counter()
+                # HACK: ref and reward models are not saved
+                if self.__recover_run and s.id.model_name.role not in ["ref", "reward"]:
+                    model_path = os.path.join(self.__recover_states_root, "ckpt", s.id.model_name.role)
+                    s.model.args["model_path"] = model_path
+                    s.model.args["init_critic_from_actor"] = False
+
                 self.__models[s.id.model_name] = model = model_api.make_model(s.model,
                                                                               name=s.id.model_name,
                                                                               device=self.__device)
@@ -409,6 +423,10 @@ class ModelWorker(worker_base.Worker):
                 self.__dataset_batch_counter, self.__cur_sample = next(self.__data_generator)
             except StopIteration:
                 self.__dataset_epoch += 1
+                if self.__recover_run:
+                    self.__epoch_since_recover += 1
+                    if self.__epoch_since_recover > 1:
+                        self.__recover_first_epoch_done = True
                 self.__data_generator = enumerate(self.__dataloader)
                 self.__dataset_batch_counter, self.__cur_sample = next(self.__data_generator)
 
@@ -468,6 +486,25 @@ class ModelWorker(worker_base.Worker):
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
 
+    def __handle_all_pre_hooks(self):
+        # drain request queues, handle all pending hooks, then recover the queue
+        cache = []
+        while True:
+            try:
+                request, data, handled, res = self.__request_queue.get_nowait()
+                request: request_reply_stream.Payload
+                if not handled:
+                    while len(request.pre_hooks) > 0:
+                        assert len(request.pre_hooks) == len(request.pre_hook_data)
+                        assert not handled and res is None
+                        self.__handle_one_rpc_hook(request.pre_hooks.pop(0), request.pre_hook_data.pop(0))
+                cache.append((request, data, handled, res))
+            except queue.Empty:
+                break
+
+        for c in cache:
+            self.__request_queue.put_nowait(c)
+
     def __model_poll_step(
         self,
         request: request_reply_stream.Payload,
@@ -486,20 +523,15 @@ class ModelWorker(worker_base.Worker):
         else:
             handler_model_name = request.handler.model_name
 
-        if len(request.pre_hooks) > 0:
-            assert len(request.pre_hooks) == len(request.pre_hook_data)
-            assert not handled and res is None
-            self.__handle_one_rpc_hook(request.pre_hooks.pop(0), request.pre_hook_data.pop(0))
-            self.__request_queue.put_nowait((request, data, False, None))
-            return
+        # handle post hooks
         if handled and len(request.post_hooks) > 0:
             assert len(request.post_hooks) == len(request.post_hook_data)
             self.__handle_one_rpc_hook(request.post_hooks.pop(0), request.post_hook_data.pop(0))
             self.__request_queue.put_nowait((request, data, True, res))
             return
+
         if handled and len(request.post_hooks) == 0:
             self.__reply_queue.put_nowait((request, res))
-
             # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
             #                          f"finish handling request *{request.handle_name}*, "
             #                          f"request_id {request.request_id}.")
@@ -507,7 +539,7 @@ class ModelWorker(worker_base.Worker):
             self.__request_sample_size[request.request_id] = sample_count
             return
 
-        assert not handled and res is None
+        assert not handled and res is None, (handled, res, len(request.post_hooks))
 
         with constants.model_scope(handler_model_name):
             res = None
@@ -527,6 +559,13 @@ class ModelWorker(worker_base.Worker):
             ############## data loading ##############
             elif request.handle_name == "fetch":
                 fetched_data = data_api.split_sequences(self.__cur_sample)
+                if self.__recover_run and not self.__recover_first_epoch_done:
+                    fetched_data = list(
+                        filter(
+                            lambda x: hash(x) not in self.__recover_info.hash_vals_to_ignore,
+                            fetched_data,
+                        ))
+
                 seqlens = [x.metadata["seqlens"][0] for x in fetched_data]
                 res = data_api.DataBatchMeta(
                     dp_rank=self._dp_rank,
@@ -534,6 +573,7 @@ class ModelWorker(worker_base.Worker):
                     keys=list(self.__cur_sample.keys()),
                     epoch=self.__dataset_epoch,
                     is_final_batch=(self.__dataset_batch_counter == len(self.__dataloader) - 1),
+                    hash_vals=[hash(x) for x in fetched_data],
                 )
                 self.__fetched_sample_cache += fetched_data
                 self.__cur_sample = None
@@ -748,6 +788,9 @@ class ModelWorker(worker_base.Worker):
                 x.register_metadata(seqlens=[seqlen])
                 _data.append(x)
             r = data_api.gather_sequences(_data)
+            # import pprint
+            # pprint.pprint(hook_data["handle_name"])
+            # pprint.pprint(r)
             self.__compute_input_queues[hook_data["handle_name"]].put_nowait(
                 (r, local_buffer_indices, local_seqlens, hook_data["output_key_remap"]))
 
@@ -848,6 +891,7 @@ class ModelWorker(worker_base.Worker):
         st = time.monotonic()
         self.__maybe_receive_requests()
 
+        self.__handle_all_pre_hooks()
         for _ in range(16):
             # TODO: we can have a smarter scheduling plan, the current plan is basically round-robin
             try:
@@ -887,7 +931,47 @@ class ModelWorker(worker_base.Worker):
 
         t = time.monotonic() - st
         self.__total_time += t
+
         # blogger.debug(
         #     f"Model worker #{','.join(self.model_names)}# poll time: {t:.4f}s, engine poll time {pt:.4f}s, percent {pt/t:.4f}"
         # )
         return r
+
+    def __recover_save(self):
+        # store model and dataset states for recover
+        if self.__dist_env_resolved:
+            import shutil
+
+            for model_name, model in self.__models.items():
+                # HACK: ad-hoc solution, do not save ref and reward models
+                if model_name.replica_id != 0 or model_name.role in ["ref", "reward"]:
+                    continue
+                constants._model_name = None  # force quit model_scope
+                with constants.model_scope(model_name):
+                    ckpt_save_dir = os.path.join(self.__recover_states_root, "ckpt", model_name.role)
+                    # replace old recover ckpt
+                    logger.info(f"saving model {model_name} ckpt for recover at {ckpt_save_dir}. "
+                                f"epoch {model.version.epoch}, epoch_step {model.version.epoch_step}, "
+                                f"global step {model.version.global_step}")
+                    if self.__has_dataset:
+                        logger.info(f"Dataset info: "
+                                    f"dataset epoch {self.__dataset_epoch}")
+                    self._interface.save(model, ckpt_save_dir)
+                    logger.info(f"saving done.")
+
+    def _exit_hook(self, exit_status: worker_base.WorkerServerStatus):
+        logger.info(f"Model worker {self.__worker_index} exit with status {exit_status}.")
+        if os.environ.get("SAVE_RECOVER_STATES", "0") == "0":
+            return
+        if exit_status == worker_base.WorkerServerStatus.ERROR:
+            try:
+                sleep_time = 600
+                current_sleep_time = 0
+                while current_sleep_time < sleep_time:
+                    logger.info(f"ERROR exit, waited {current_sleep_time} s for interruption ...")
+                    time.sleep(10)
+                    current_sleep_time += 10
+            except KeyboardInterrupt:
+                logger.info("Received SIGINT, starting recover save")
+
+        self.__recover_save()

@@ -31,6 +31,7 @@ import reallm.api.core.data_api as data_api
 import reallm.api.core.dfg as dfg
 import reallm.api.core.model_api as model_api
 import reallm.api.core.system_api as config_pkg
+import reallm.base.recover as recover
 import reallm.system.request_reply_stream as request_reply_stream
 import reallm.system.worker_base as worker_base
 
@@ -232,6 +233,11 @@ class RPCCorountineControl:
 
     training_buffer_indices: Set[int] = dataclasses.field(default_factory=set)
     data_amount: InterfaceDataAmount = dataclasses.field(default_factory=InterfaceDataAmount)
+
+    # recover information
+    used_hash_vals_this_epoch: Set[int] = dataclasses.field(default_factory=set)
+    is_recover_epoch: bool = False
+    hash_vals_to_ignore_in_recover: Set[int] = dataclasses.field(default_factory=set)
 
 
 def _attach_payloads_with_hooks(
@@ -441,6 +447,7 @@ async def model_rpc_request_func(
 
         if rpc.is_src:
             ctrl.training_buffer_indices = ctrl.training_buffer_indices.union(sample.indices)
+            ctrl.used_hash_vals_this_epoch = ctrl.used_hash_vals_this_epoch.union(sample.hash_vals)
 
         if rpc.interface_type == dfg.ModelInterfaceType.GENERATE:
             ctrl.data_amount.gen_configs.append(model_configs[rpc.model_name])
@@ -586,12 +593,10 @@ async def load_data_func(
     buffer: AsyncIOSequenceBuffer,
     data_owner: Dict[Tuple[int, str], Tuple[str, int]],
     stream: request_reply_stream.NameResolvingRequstClient,
-    fetch_ctl: asyncio.Queue,
-    stop_ctl: asyncio.Event,
-    data_spec_ctl: asyncio.Queue,
+    ctrl: RPCCorountineControl,
 ):
-    while not stop_ctl.is_set():
-        await fetch_ctl.get()
+    while not ctrl.stop.is_set():
+        await ctrl.fetch_data_queue.get()
         # fetch data from dataloader to fill the sequence buffer
         blogger.info(f"Filling data into the buffer in a new epoch.")
         fetch_data_start = time.perf_counter()
@@ -623,7 +628,7 @@ async def load_data_func(
         avg_tokens_per_batch = sum(x.seqlens[0] for x in all_data) / steps_per_epoch
         logger.info(f"Training epoch {cur_epoch + 1} approximately has {steps_per_epoch} steps. "
                     f"Each batch has {avg_tokens_per_batch:.2f} tokens in average.")
-        await data_spec_ctl.put((steps_per_epoch, avg_tokens_per_batch))
+        await ctrl.data_spec_queue.put((steps_per_epoch, avg_tokens_per_batch))
 
         dp_data_batches = [0 for _ in range(src_rpc_dp_size)]
         for x in all_data:
@@ -638,7 +643,10 @@ async def load_data_func(
         all_data: List[data_api.DataBatchMeta] = [all_data[i] for i in reorder_indices]
 
         keys = all_data[0].keys
-        buffer_indices = await buffer.put_batch([(keys, x.seqlens[0]) for x in all_data])
+        batch = [(keys, x.seqlens[0], x.hash_vals[0]) for x in all_data]
+        if ctrl.is_recover_epoch:
+            batch = list(filter(lambda x: x[2] not in ctrl.hash_vals_to_ignore_in_recover, batch))
+        buffer_indices = await buffer.put_batch(batch)
 
         all_data = [all_data[i] for i in recover_indices]
         buffer_indices = [buffer_indices[i] for i in recover_indices]
@@ -775,8 +783,25 @@ class MasterWorker(worker_base.Worker):
         os.makedirs(self.MODEL_SAVE_ROOT, exist_ok=True)
 
         self.__initialized = False
+        self.__recover_run = os.environ.get("RECOVER_RUN", "0") == "1"
+        self.__recover_info = (recover.load_recover_info() if self.__recover_run else None)
+        self.__recover_first_epoch_done = False
+
         self._epoch = 0
         self._epoch_step = self._global_step = 0
+        if self.__recover_run:
+            self._epoch = self.__recover_info.recover_start.epoch
+            self._epoch_step = self.__recover_info.recover_start.epoch_step
+            self._start_global_step = self._global_step = (self.__recover_info.recover_start.global_step)
+            logger.info(f"Recovering from previous run: "
+                        f"{(self._epoch, self._epoch_step, self._global_step)}")
+
+        self.__this_step_info = recover.StepInfo(
+            epoch=0,
+            epoch_step=0,
+            global_step=0,
+        )
+        self.__last_step_info = None
 
         # for benchmark
         self.e2e_time_history = []
@@ -941,6 +966,11 @@ class MasterWorker(worker_base.Worker):
                 rpc.name: [asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)]
                 for rpc in self.__model_rpcs
             },
+            is_recover_epoch=self.__recover_run,
+            used_hash_vals_this_epoch=(self.__recover_info.hash_vals_to_ignore
+                                       if self.__recover_run else set()),
+            hash_vals_to_ignore_in_recover=(self.__recover_info.hash_vals_to_ignore
+                                            if self.__recover_run else set()),
         )
 
         self.__fetch_master_ctl = asyncio.Queue(1)
@@ -996,9 +1026,7 @@ class MasterWorker(worker_base.Worker):
                 data_owner=self.__data_owner,
                 buffer=self.__seqbuffer,
                 stream=self.__stream,
-                fetch_ctl=self.__rpc_ctrl.fetch_data_queue,
-                stop_ctl=self.__rpc_ctrl.stop,
-                data_spec_ctl=self.__rpc_ctrl.data_spec_queue,
+                ctrl=self.__rpc_ctrl,
             ))
         eval_task = event_loop.create_task(
             model_eval_thread_func(
@@ -1058,6 +1086,9 @@ class MasterWorker(worker_base.Worker):
             except asyncio.exceptions.InvalidStateError:
                 # Catch the exception when future.result() is not ready.
                 pass
+            except KeyboardInterrupt as e:
+                raise_asyncio_exception(self.__asyncio_ctx, raise_error=False)
+                raise e
             except:
                 raise_asyncio_exception(self.__asyncio_ctx)
         logger.info("Execution finished!")
@@ -1078,8 +1109,13 @@ class MasterWorker(worker_base.Worker):
         should_save = self.__save_ctl.check(epochs=int(is_new_epoch), steps=1)
 
         if is_new_epoch:
-            self._epoch += 1
-            self._epoch_step = 0
+            # do not update epoch counter when recover for the first step
+            if self.__recover_run and not self.__recover_first_epoch_done:
+                self.__recover_first_epoch_done = True
+            else:
+                self._epoch += 1
+                self._epoch_step = 0
+                self.__rpc_ctrl.used_hash_vals_this_epoch = set()
 
         self._epoch_step += 1
         self._global_step += 1
@@ -1088,6 +1124,14 @@ class MasterWorker(worker_base.Worker):
             self.__rpc_ctrl.eval_queue.put_nowait((self._epoch, self._epoch_step))
         if should_save:
             self.__rpc_ctrl.save_queue.put_nowait((self._epoch, self._epoch_step, self._global_step))
+
+        # update step info
+        self.__last_step_info = self.__this_step_info
+        self.__this_step_info = recover.StepInfo(
+            epoch=self._epoch,
+            epoch_step=self._epoch_step,
+            global_step=self._global_step,
+        )
 
         if is_new_epoch:
             if self._epoch > self.__total_train_epochs:
@@ -1204,4 +1248,40 @@ class MasterWorker(worker_base.Worker):
         try:
             teardown_run_util_complete(self.__asyncio_ctx)
         except RuntimeError as e:
-            raise ExperimentComplete(msg) from e
+            logger.info(colorama.Style.RESET_ALL + colorama.Fore.YELLOW + colorama.Style.BRIGHT + "\033[1m" +
+                        msg + colorama.Style.RESET_ALL)
+            self.exit()
+            # raise ExperimentComplete(msg) from e
+
+    def __recover_save(self):
+        # save step info for recover
+        recover_info = recover.RecoverInfo(
+            # recover_start=self.__last_step_info,
+            recover_start=self.__this_step_info,
+            last_step_info=self.__last_step_info,
+            hash_vals_to_ignore=self.__rpc_ctrl.used_hash_vals_this_epoch,
+        )
+        import pprint
+
+        logger.info("dumped recover info to file")
+        pprint.pprint(recover_info.recover_start)
+        pprint.pprint(recover_info.last_step_info)
+        pprint.pprint(len(recover_info.hash_vals_to_ignore))
+        recover.dump_recover_info(recover_info)
+
+    def _exit_hook(self, exit_status: worker_base.WorkerServerStatus):
+        logger.info(f"Master worker exits with {exit_status}.")
+        if os.environ["SAVE_RECOVER_STATES"] == "0":
+            return
+        if exit_status == worker_base.WorkerServerStatus.ERROR:
+            try:
+                sleep_time = 600
+                current_sleep_time = 0
+                while current_sleep_time < sleep_time:
+                    logger.info(f"ERROR exit, waited {current_sleep_time} s for interruption ...")
+                    time.sleep(10)
+                    current_sleep_time += 10
+            except KeyboardInterrupt:
+                logger.info("Received SIGINT, starting recover save")
+
+        self.__recover_save()

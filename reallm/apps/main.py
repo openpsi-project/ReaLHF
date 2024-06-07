@@ -4,6 +4,7 @@ import getpass
 import os
 import re
 
+from reallm.scheduler.client import JobException, JobState
 import reallm.api.core.system_api as config_package
 import reallm.base.constants as constants
 import reallm.base.logging as logging
@@ -83,30 +84,58 @@ def _submit_workers(
     return scheduled_jobs
 
 
-def main_start(args):
+def get_repo_path():
+    file_path = os.path.abspath(__file__)
+    reallm_path = os.path.dirname(os.path.dirname(file_path))
+    repo_path = os.path.dirname(reallm_path)
+    return repo_path
+
+
+def main_start(args, recover_count: int = 0):
     if args.mode == "ray" and args.image_name is None:
         raise ValueError("--image_name must be specified when using ray cluster. "
                          "This is becuase ray cluster requires all workers to have "
                          "the same version of Python and ray.")
+    if args.mode == "local":
+        assert (args.recover_mode == "disabled"), "Recover mode is not supported for local runs!"
+    # Use search cache for recover runs
+    force_allocation_use_cache = (recover_count > 1
+                                  or args.recover_mode == "resume") and args.allocation_mode == "search"
+
+    args.ignore_worker_error = (args.ignore_worker_error and args.recover_mode == "disabled")
 
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
-    constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
+    if recover_count == 0:
+        constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
-    base_environs = {
-        "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
+    repo_path = get_repo_path()
+
+    is_recover_run = (args.recover_mode == "auto" and recover_count > 0) or args.recover_mode == "resume"
+    save_recover_states = args.recover_mode != "disabled"
+
+    BASE_ENVIRONS = {
+        "PYTHONPATH": repo_path,
+        "REAL_PACKAGE_PATH": repo_path,
         "WANDB_MODE": args.wandb_mode,
         "REAL_MODE": args.mode.upper(),
         "REAL_TRACE": os.getenv("REAL_TRACE", "0"),
         "IS_REMOTE": "1",
+        # identify whether this run is automatically recovering the last failed run
+        "RECOVER_RUN": "1" if is_recover_run else "0",
+        "SAVE_RECOVER_STATES": "1" if save_recover_states else "0",
     }
-    os.environ["IS_REMOTE"] = "1"
+
+    os.environ["IS_REMOTE"] = "0" if not force_allocation_use_cache else "1"
+    os.environ["REAL_PACKAGE_PATH"] = repo_path
 
     experiment = config_package.make_experiment(args.experiment_name)
+    if args.allocation_mode == "search":
+        experiment._search()
+
     sched = sched_client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
 
     setup = experiment.scheduling_setup()
-    # exit(0)
 
     logger.info(f"Resetting name resolving repo...")
 
@@ -114,7 +143,7 @@ def main_start(args):
         sched.submit(
             "setup",
             cmd=sched_client.setup_cmd(expr_name, trial_name, args.debug),
-            env_vars=base_environs,
+            env_vars=BASE_ENVIRONS,
             container_image=args.image_name or setup.controller_image,
             multiprog=False,
             hostfile=False,
@@ -156,7 +185,7 @@ def main_start(args):
         cpu=1,
         gpu=0,
         mem=1024,
-        env_vars=base_environs,
+        env_vars=BASE_ENVIRONS,
         container_image=args.image_name or setup.controller_image,
         time_limit=CONTROLLER_TIME_LIMIT,
     )
@@ -176,20 +205,42 @@ def main_start(args):
                 args.debug,
                 name,
                 scheduling_setup,
-                base_environs,
+                BASE_ENVIRONS,
                 args.image_name,
                 use_ray_cluster=(args.mode == "ray"),
             )
 
     timeout = (None if os.getenv("REAL_TRACE", "0") == "0" else TRACE_TIMEOUT)  # run 5 mins to collect trace
     try:
-        sched.wait(timeout=timeout)
-    except (KeyboardInterrupt, sched_client.JobException, TimeoutError) as e:
+        sched.wait(
+            check_status=(
+                JobState.CANCELLED,
+                JobState.FAILED,
+                JobState.NOT_FOUND,
+                JobState.COMPLETED,
+            ),
+            remove_status=(),
+            timeout=timeout,
+        )
+    except (KeyboardInterrupt, JobException, TimeoutError) as e:
         if os.getenv("REAL_TRACE", "0") != "0" and isinstance(e, TimeoutError):
             s = "#" * 30 + "  Trace complete. Killing all processes...  " + "#" * 30
             logger.info("\n" + "#" * len(s) + "\n" + s + "\n" + "#" * len(s))
-        sched.stop_all()
-        raise e
+
+        recover_states = [JobState.CANCELLED, JobState.FAILED, JobState.NOT_FOUND]
+        reason = e.reason if isinstance(e, JobException) else None
+        recover_this = (args.recover_mode == "auto" and recover_count < args.recover_retries)
+        recover_this = recover_this and reason in recover_states
+
+        # FIXME: in recover mode, this will interrupt saving exit
+        #        hook of the error worker as well, fix this by modifying stop_all method!
+        sched.stop_all("SIGINT" if (recover_this or args.recover_mode == "save") else "SIGKILL")
+        if recover_this:
+            logger.warning(f"Recovering from error {e}. Recover count: {recover_count+1}, "
+                           f"total recover count {args.recover_retries}")
+            main_start(args, recover_count=recover_count + 1)
+        else:
+            raise e
 
 
 def main_stop(args):
@@ -212,6 +263,65 @@ def main_find_config(args):
             return
     for exp_name in exp_names:
         print(exp_name)
+
+
+def main_profile_layers(args):
+    from reallm.api.core.model_api import ModelFamily
+
+    _main_profile_layers(ModelFamily(args.model_class, args.model_size, args.is_critic), args.model_path)
+
+
+def _main_profile_layers(model_family, model_path):
+    from reallm.api.core.model_api import ModelFamily
+    from reallm.base.slurm_utils import check_slurm_availability
+    from reallm.base.testing import clear_name_resolve
+
+    expr_name = trial_name = "profile"
+    cmd = (f"python3 -m reallm.apps.profile_layers --expr_name {expr_name} --trial_name {trial_name} "
+           f"--model_path {model_path} --model_name {model_family} ")
+
+    if check_slurm_availability():
+        repo_path = get_repo_path()
+
+        from reallm.api.core.system_api import _LLM_ENVVARS
+
+        BASE_ENVIRONS = {
+            "PYTHONPATH": repo_path,
+            "REAL_PACKAGE_PATH": repo_path,
+            "WANDB_MODE": "disabled",
+            "DLLM_MODE": "SLURM",
+            "DLLM_TRACE": "0",
+            **_LLM_ENVVARS,
+        }
+        clear_name_resolve(expr_name, trial_name)
+        sched = sched_client.make(mode="slurm", expr_name=expr_name, trial_name=trial_name)
+        print(f"Profiling {model_family} layers, model path {model_path}, "
+              f"cmd {cmd}")
+        sched.submit_array(
+            worker_type="profile_layer",
+            cmd=cmd,
+            count=1,
+            cpu=64,
+            gpu=8,
+            gpu_type="tesla",
+            mem=500000,
+            env_vars=BASE_ENVIRONS,
+            container_image=config_package._LLM_GPU_IMAGE,
+        )
+
+        try:
+            sched.wait(timeout=None)
+        except (KeyboardInterrupt, sched_client.JobException, TimeoutError) as e:
+            sched.stop_all()
+            raise e
+    else:
+        try:
+            print(f"Profiling {model_family} layers, model path {model_path}, "
+                  f"cmd {cmd}")
+            clear_name_resolve(expr_name, trial_name)
+            os.system(cmd)
+        except (KeyboardInterrupt, sched_client.JobException, TimeoutError) as e:
+            raise e
 
 
 def main():
@@ -260,6 +370,24 @@ def main():
         action="store_true",
         help="If True, reset name resolve repo remotely in computation nodes. Otherwise reset locally.",
     )
+    subparser.add_argument(
+        "--recover_mode",
+        required=False,
+        default="disabled",
+        choices=["disabled", "auto", "save", "resume"],
+        help="Recover mode, 'auto': automatically recover the last failed run; "
+        "'save': save recover states if any error occurs; "
+        "'resume': resume from saved recover states and save states if fail again; "
+        "'disabled': do nothing when error occurs. ",
+    )
+    subparser.add_argument(
+        "--recover_retries",
+        type=int,
+        required=False,
+        default=1,
+        help="Total number of trials for the system to recover automatically when a worker fails. "
+        "Only effective when recover_mode is 'auto'.",
+    )
     subparser.set_defaults(ignore_worker_error=False)
     subparser.set_defaults(func=main_start)
 
@@ -279,6 +407,13 @@ def main():
                                       help="find configuration by matching regular expression.")
     subparser.add_argument("--regex", "-r", type=str, required=True)
     subparser.set_defaults(func=main_find_config)
+
+    subparser = subparsers.add_parser("profile_layers", help="profile layers of a model.")
+    subparser.add_argument("--model_class", type=str, required=True)
+    subparser.add_argument("--model_size", type=int, required=True)
+    subparser.add_argument("--is_critic", action="store_true")
+    subparser.add_argument("--model_path", type=str, required=True)
+    subparser.set_defaults(func=main_profile_layers)
 
     args = parser.parse_args()
     args.func(args)

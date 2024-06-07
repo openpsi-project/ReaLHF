@@ -1,5 +1,4 @@
 from typing import *
-import copy
 import dataclasses
 
 import reallm.base.topology as topology
@@ -40,6 +39,10 @@ class ModelBackend:
 class ModelName:
     role: str
     replica_id: int
+
+    @property
+    def name(self):
+        return str(self)
 
 
 @dataclasses.dataclass(unsafe_hash=True)

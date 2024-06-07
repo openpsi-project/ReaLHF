@@ -7,7 +7,12 @@ import torch
 from reallm.api.core import model_api
 from reallm.api.core.config import ModelName
 from reallm.base import logging
-import reallm._C.interval_op_cuda as interval_op_cuda
+
+try:
+    import reallm._C.interval_op_cuda as interval_op_cuda
+except ImportError:
+    print("interval_op_cuda not found. "
+          "This should only appear on workers without CUDA supports.")
 
 from .real_llm_base import (OutputHead, real_model_embed_param_count, real_model_embedding_param_keys,
                             real_model_head_param_count, real_model_head_param_keys,

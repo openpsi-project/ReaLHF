@@ -223,7 +223,11 @@ def _create_param_realloc_groups(
                         _dst_ranks = [_src_rank] + _dst_ranks
                     assert len(set(_dst_ranks)) == len(_dst_ranks)
                     if len(_dst_ranks) > 1:
-                        param_realloc_groups[key] = topology.new_or_get_group(_dst_ranks)
+                        if torch.distributed.is_initialized():
+                            param_realloc_groups[key] = topology.new_or_get_group(_dst_ranks)
+                        else:
+                            # for estimating parameter realloc cost
+                            param_realloc_groups[key] = 1
                     else:
                         param_realloc_groups[key] = None
                     param_realloc_src_ranks[key] = _src_rank
@@ -432,12 +436,18 @@ def _derive_reparallelize_comm_plan(
                     param_intervals = param_keys = receiver_param_intervals = None
                     max_param_interval_size = max_receiver_param_interval_size = -1
                     param_intervals_cpu = receiver_param_intervals_cpu = None
-                    param_size = -1
-                    if (torch.distributed.get_rank() in dst_ranks or torch.distributed.get_rank() == src):
-                        param_keys = keys_from_layer_indices(from_model_config, layer_indices)
-
+                    param_keys = keys_from_layer_indices(from_model_config, layer_indices)
+                    param_size = param_size_from_keys(
+                        config=from_model_config,
+                        src_mp_size=src_mp_size,
+                        sd_keys=param_keys,
+                        src2dst_tp_size=max(dst_mp_size // src_mp_size, 1),
+                        src2dst_tp_rank=sender_mp_portion_id,
+                        sequence_parallel=from_topo.sequence_parallel,
+                    )
+                    if torch.distributed.is_initialized():
+                        # torch.distributed is not initialized when estimating param realloc cost
                         if torch.distributed.get_rank() == src:
-
                             param_intervals_cpu = param_intervals_from_keys(
                                 model_name=from_model_name,
                                 config=from_model_config,
@@ -482,14 +492,6 @@ def _derive_reparallelize_comm_plan(
                                 dtype=torch.long,
                                 device="cuda",
                             )
-                        param_size = param_size_from_keys(
-                            config=from_model_config,
-                            src_mp_size=src_mp_size,
-                            sd_keys=param_keys,
-                            src2dst_tp_size=max(dst_mp_size // src_mp_size, 1),
-                            src2dst_tp_rank=sender_mp_portion_id,
-                            sequence_parallel=from_topo.sequence_parallel,
-                        )
 
                     for dst_rank in dst_ranks:
                         comm_plan.append(

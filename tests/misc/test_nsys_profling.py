@@ -10,8 +10,8 @@ import torch
 import torch.distributed
 import torch.profiler
 
-from tests.utils import (clear_gpu_cache, clear_name_resolve, get_llama7b_real_config, get_memory,
-                         init_global_constants, MODEL_NAME, setup_barrier, setup_gpu)
+from reallm.base.testing import (clear_gpu_cache, clear_name_resolve, get_llama7b_real_config, get_memory,
+                                 init_global_constants, MODEL_NAME, setup_barrier, setup_gpu)
 import reallm.base.constants as constants
 
 COMPUTE_KERNEL_KEYS = [

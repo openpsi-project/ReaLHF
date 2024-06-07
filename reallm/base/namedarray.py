@@ -2,6 +2,7 @@ from typing import Callable, Dict, List, Tuple
 import ast
 import copy
 import enum
+import hashlib
 import itertools
 import pickle
 import time
@@ -638,6 +639,19 @@ class NamedArray:
 
     def __str__(self):
         return f"{self.__class__.__name__}({', '.join(k+'='+repr(v) for k, v in self.items())})"
+
+    def __hash__(self):
+        d = self.to_dict()
+        to_hash = []
+        for k, v in d.items():
+            if torch.is_tensor(v):
+                vv = int(hashlib.md5(v.numpy().tobytes()).hexdigest(), 16)
+            else:
+                vv = hash(v)
+            to_hash.append(k)
+            to_hash.append(vv)
+        serialized = pickle.dumps(to_hash)
+        return int(hashlib.md5(serialized).hexdigest(), 16)
 
     def __deepcopy__(self, memo={}):
         cls = self.__class__

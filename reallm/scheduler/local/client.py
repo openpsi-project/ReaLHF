@@ -126,7 +126,8 @@ class LocalSchedulerClient(SchedulerClient):
             del p
         self._running_worker_types.remove(worker_type)
 
-    def stop_all(self):
+    def stop_all(self, signal=None):
+        # signal argument is ignored in local stop_all
         for name in self._job_counter:
             self.stop(name)
 
