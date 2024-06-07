@@ -135,7 +135,6 @@ class PairedRewardInterface(model_api.ModelInterface):
             version_steps=model.version.global_step,
             **loss_fn_kwargs,
         )
-        
 
         res = {}
         if stats:
