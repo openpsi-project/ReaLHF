@@ -20,7 +20,7 @@ NVIDIA_SUPPORTED_ARCHS = {"7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
 
 
 def _is_cuda() -> bool:
-    return torch.version.cuda is not None
+    return torch.cuda.is_available()
 
 
 # Compiler flags.
@@ -28,7 +28,8 @@ CXX_FLAGS = ["-g", "-O3", "-std=c++17"]
 NVCC_FLAGS = ["-O3", "-std=c++17"]
 
 if _is_cuda() and CUDA_HOME is None:
-    raise RuntimeError("Cannot find CUDA_HOME. CUDA must be available to build the package.")
+    raise RuntimeError(
+        "Cannot find CUDA_HOME. In GPU environment, CUDA must be available to build the package.")
 
 ABI = 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
 CXX_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
@@ -173,49 +174,51 @@ if _is_cuda():
         with contextlib.suppress(ValueError):
             torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
 
-cr_extension = CUDAExtension(
-    name="reallm._C.custom_all_reduce",
-    sources=[
-        "csrc/custom_all_reduce/custom_all_reduce.cu",
-        "csrc/custom_all_reduce/pybind.cpp",
-    ],
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS,
-    },
-    libraries=["cuda"] if _is_cuda() else [],
-)
-# ext_modules.append(cr_extension)
-
-interval_extension = CUDAExtension(
-    name="reallm._C.interval_op_cuda",
-    sources=[
-        "csrc/interval_op/interval_ops.cu",
-    ],
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS,
-    },
-    libraries=["cuda"] if _is_cuda() else [],
-)
-ext_modules.append(interval_extension)
-
-gae_extension = CUDAExtension(
-    name="reallm._C.cugae",
-    sources=[
-        "csrc/cugae/gae.cu",
-    ],
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS + [
-            "--expt-relaxed-constexpr",
-            "--expt-extended-lambda",
-            "--use_fast_math",
+os.makedirs(os.path.join(ROOT_DIR, "reallm", "_C"), exist_ok=True)
+if _is_cuda():
+    cr_extension = CUDAExtension(
+        name="reallm._C.custom_all_reduce",
+        sources=[
+            "csrc/custom_all_reduce/custom_all_reduce.cu",
+            "csrc/custom_all_reduce/pybind.cpp",
         ],
-    },
-    libraries=["cuda"] if _is_cuda() else [],
-)
-ext_modules.append(gae_extension)
+        extra_compile_args={
+            "cxx": CXX_FLAGS,
+            "nvcc": NVCC_FLAGS,
+        },
+        libraries=["cuda"] if _is_cuda() else [],
+    )
+    # ext_modules.append(cr_extension)
+
+    interval_extension = CUDAExtension(
+        name="reallm._C.interval_op_cuda",
+        sources=[
+            "csrc/interval_op/interval_ops.cu",
+        ],
+        extra_compile_args={
+            "cxx": CXX_FLAGS,
+            "nvcc": NVCC_FLAGS,
+        },
+        libraries=["cuda"] if _is_cuda() else [],
+    )
+    ext_modules.append(interval_extension)
+
+    gae_extension = CUDAExtension(
+        name="reallm._C.cugae",
+        sources=[
+            "csrc/cugae/gae.cu",
+        ],
+        extra_compile_args={
+            "cxx": CXX_FLAGS,
+            "nvcc": NVCC_FLAGS + [
+                "--expt-relaxed-constexpr",
+                "--expt-extended-lambda",
+                "--use_fast_math",
+            ],
+        },
+        libraries=["cuda"] if _is_cuda() else [],
+    )
+    ext_modules.append(gae_extension)
 
 search_extension = setuptools.Extension(
     name="reallm._C.mdm_search",

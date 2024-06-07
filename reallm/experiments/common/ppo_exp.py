@@ -1,35 +1,16 @@
-import functools
+import torch
 
-from omegaconf import MISSING
-
-from reallm.api.core.dfg import (ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC, OffloadHook,
-                                 SyncParamHook)
+from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
-from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, ParallelismConfig
-from reallm.base.topology import PipeModelDataParallelTopology
-import reallm.base.logging as logging
+from reallm.api.quickstart.device_mesh import AllocationConfig, DeviceMesh, RPCAllocation
 from reallm.api.quickstart.entrypoint import register_quickstart_exp
+from reallm.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
+from reallm.experiments.common.common import CommonExperimentConfig
+from reallm.experiments.common.utils import *
+import reallm.base.logging as logging
+
 logger = logging.getLogger("PPO exp", "colored")
-
-
-def get_topo(
-    parallel: ParallelismConfig,
-    gradient_checkpointing: bool,
-    max_prompt_len: Optional[int] = None,
-) -> PipeModelDataParallelTopology:
-    return PipeModelDataParallelTopology(
-        num_mp=parallel.model_parallel_size,
-        num_pp=parallel.pipeline_parallel_size,
-        num_dp=parallel.data_parallel_size,
-        sequence_parallel=parallel.use_sequence_parallel,
-        gradient_checkpointing=gradient_checkpointing,
-        max_prompt_len=max_prompt_len,
-    )
-
-
-def get_world_size(parallel: ParallelismConfig) -> int:
-    return (parallel.model_parallel_size * parallel.pipeline_parallel_size * parallel.data_parallel_size)
 
 
 @dataclasses.dataclass
@@ -90,10 +71,7 @@ class PPOHyperparameters:
 
 
 @dataclasses.dataclass
-class PPOConfig(Experiment):
-    experiment_name: str = MISSING
-    trial_name: str = MISSING
-    seed: int = 1
+class PPOConfig(CommonExperimentConfig):
     total_train_epochs: int = 1
     save_freq_steps: Optional[int] = 20
 
@@ -108,8 +86,13 @@ class PPOConfig(Experiment):
     ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
     rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
 
-    actor_gen_parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
-    critic_inf_parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    # for manual allocation only
+    actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    critic_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    actor_gen: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    critic_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    rew_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    ref_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
 
     dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
 
@@ -121,115 +104,7 @@ class PPOConfig(Experiment):
         if self.is_rew_lora or self.rew_lora_path is not None:
             raise NotImplementedError("Rew LoRA is not supported yet.")
 
-        self.world_size = get_world_size(self.actor_gen_parallel)
-
-        self.critic_train_ws = get_world_size(self.critic.parallel)
-        self.actor_train_ws = get_world_size(self.actor.parallel)
-        train_ws = self.actor_train_ws + self.critic_train_ws
-
-        self.ref_inf_ws = get_world_size(self.ref.parallel)
-        self.rew_inf_ws = get_world_size(self.rew.parallel)
-        self.critic_inf_ws = get_world_size(self.critic_inf_parallel)
-        inf_ws = self.ref_inf_ws + self.rew_inf_ws + self.critic_inf_ws
-
-        if (self.world_size != train_ws) or (self.world_size != inf_ws):
-            raise ValueError(
-                "World size of generate, inference, and training must be the same. "
-                "This is the restriction of this heuristic PPO execution plan. "
-                f"Current world sizes are: (actor_train={self.actor_train_ws}, critic_train={self.critic_train_ws}, "
-                f"ref_inf={self.ref_inf_ws}, rew_inf={self.rew_inf_ws}, critic_inf={self.critic_inf_ws}, "
-                f"actor_gen={self.world_size}).")
-
-    def scheduling_setup(self) -> ExperimentScheduling:
-        return ExperimentScheduling(
-            master_worker=TasksGroup(
-                count=1,
-                scheduling=Scheduling.master_worker_default(
-                    cpu=4,
-                    mem=20000,
-                ),
-            ),
-            model_worker=TasksGroup(
-                count=self.world_size,
-                scheduling=Scheduling.model_worker_default(
-                    cpu=4,
-                    gpu=1,
-                    gpu_type="tesla",
-                    mem=100000,
-                ),
-            ),
-        )
-
-    def initial_setup(self) -> ExperimentConfig:
-        dataset = Dataset(
-            "prompt",
-            args=dict(
-                dataset_path=self.dataset.path,
-                max_length=self.dataset.max_prompt_len,
-                pad_to_max_length=self.dataset.pad_to_max_length,
-            ),
-        )
-
-        generation_kwargs = dict(
-            max_new_tokens=self.ppo.max_new_tokens,
-            min_new_tokens=self.ppo.min_new_tokens,
-            greedy=self.ppo.greedy,
-            top_p=self.ppo.top_p,
-            top_k=self.ppo.top_k,
-            temperature=self.ppo.temperature,
-        )
-
-        def _make_model_config(cfg: ModelTrainEvalConfig):
-            return get_real_model_config(
-                model_path=cfg.path,
-                hf_model_family=cfg.type._class,
-                is_critic=cfg.type.is_critic,
-                init_critic_from_actor=False,
-                dtype="bf16" if cfg.enable_bf16 else "fp16",
-                lora=cfg.lora,
-            )
-
-        actor_model = _make_model_config(self.actor)
-        ref_model = _make_model_config(self.ref)
-        critic_model = _make_model_config(self.critic)
-        rw_model = _make_model_config(self.rew)
-
-        def _make_train_backend_config(cfg: ModelTrainEvalConfig):
-            parallel = cfg.parallel
-            if parallel.pipeline_parallel_size > 1:
-                engine_type = "pipe"
-            else:
-                engine_type = "deepspeed"
-            return ModelBackend(
-                "ds_train",
-                args=dict(
-                    optimizer_name="adam",
-                    optimizer_config=dict(
-                        lr=cfg.optimizer.lr,
-                        weight_decay=cfg.optimizer.weight_decay,
-                        eps=cfg.optimizer.eps,
-                        betas=(cfg.optimizer.beta1, cfg.optimizer.beta2),
-                    ),
-                    lr_scheduler_type=cfg.optimizer.lr_scheduler_type,
-                    warmup_steps_proportion=cfg.optimizer.warmup_steps_proportion,
-                    min_lr_ratio=cfg.optimizer.min_lr_ratio,
-                    zero_stage=(cfg.zero_stage if parallel.pipeline_parallel_size == 1 else min(
-                        cfg.zero_stage, 1)),
-                    engine_type=engine_type,
-                    offload_optimizer_state=cfg.optimizer.offload,
-                    offload_param=cfg.offload,
-                    enable_bf16=cfg.enable_bf16,
-                    enable_fp16=cfg.enable_fp16,
-                ),
-            )
-
-        actor_backend = _make_train_backend_config(self.actor)
-        critic_backend = _make_train_backend_config(self.critic)
-
-        def inf_backend(parallel_cfg: ParallelismConfig):
-            return ModelBackend("pipe_inference" if parallel_cfg.pipeline_parallel_size > 1 else "null")
-
-        ppo_kwargs = dict(
+        self.ppo_kwargs = dict(
             n_minibatches=self.ppo.ppo_n_minibatches,
             kl_ctl=self.ppo.kl_ctl,
             discount=self.ppo.discount,
@@ -244,11 +119,33 @@ class PPOConfig(Experiment):
             value_norm_eps=self.ppo.value_norm_eps,
         )
 
+        self.generation_kwargs = dict(
+            max_new_tokens=self.ppo.max_new_tokens,
+            min_new_tokens=self.ppo.min_new_tokens,
+            greedy=self.ppo.greedy,
+            top_p=self.ppo.top_p,
+            top_k=self.ppo.top_k,
+            temperature=self.ppo.temperature,
+        )
+
+    @property
+    def models(self) -> Dict[str, ModelTrainEvalConfig]:
+        # role to config
+        return {
+            "actor": self.actor,
+            "critic": self.critic,
+            "ref": self.ref,
+            "reward": self.rew,
+        }
+
+    @property
+    def rpcs(self):
+        # interfaces
         actor_interface = ModelInterface(
             "ppo_actor",
             args={
-                **copy.deepcopy(ppo_kwargs),
-                "generation_config": generation_kwargs,
+                **copy.deepcopy(self.ppo_kwargs),
+                "generation_config": self.generation_kwargs,
                 "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
                 "force_no_logits_mask": True,
                 "adv_norm": self.ppo.adv_norm,
@@ -259,7 +156,7 @@ class PPOConfig(Experiment):
 
         critic_interface = ModelInterface(
             "ppo_critic",
-            args=copy.deepcopy(ppo_kwargs),
+            args=copy.deepcopy(self.ppo_kwargs),
         )
         rw_interface = ModelInterface(
             "paired_rw",
@@ -269,117 +166,11 @@ class PPOConfig(Experiment):
                 output_bias=self.ppo.reward_output_bias,
             ),
         )
-
-        gen_topo = get_topo(self.actor_gen_parallel, False, self.dataset.max_prompt_len)
-        actor_train_topo = get_topo(self.actor.parallel, self.actor.gradient_checkpointing)
-        critic_train_topo = get_topo(self.critic.parallel, self.critic.gradient_checkpointing)
-        critic_inf_topo = get_topo(self.critic_inf_parallel, False)
-        ref_topo = get_topo(self.ref.parallel, False)
-        rw_topo = get_topo(self.rew.parallel, False)
-
-        model_worker = []
-        for i in range(self.world_size):
-            shards = []
-            shards += [
-                StandaloneModelShard(
-                    id=ModelShardID(
-                        model_name=ModelName("actor", 0),
-                        topo=gen_topo,
-                        dp_rank=gen_topo.get_coord(i).data,
-                        pp_rank=gen_topo.get_coord(i).pipe,
-                        mp_rank=gen_topo.get_coord(i).model,
-                    ),
-                    model=actor_model,
-                    backend=inf_backend(self.actor_gen_parallel),
-                ),
-            ]
-            if i < self.actor_train_ws:
-                shards += [
-                    StandaloneModelShard(
-                        id=ModelShardID(
-                            model_name=ModelName("actor", 1),
-                            topo=actor_train_topo,
-                            dp_rank=actor_train_topo.get_coord(i).data,
-                            pp_rank=actor_train_topo.get_coord(i).pipe,
-                            mp_rank=actor_train_topo.get_coord(i).model,
-                        ),
-                        model=actor_model,
-                        backend=actor_backend,
-                    ),
-                ]
-            else:
-                offset = self.actor_train_ws
-                shards += [
-                    StandaloneModelShard(
-                        id=ModelShardID(
-                            model_name=ModelName("critic", 1),
-                            topo=critic_train_topo,
-                            dp_rank=critic_train_topo.get_coord(i - offset).data,
-                            pp_rank=critic_train_topo.get_coord(i - offset).pipe,
-                            mp_rank=critic_train_topo.get_coord(i - offset).model,
-                        ),
-                        model=critic_model,
-                        backend=critic_backend,
-                    ),
-                ]
-            if i < self.rew_inf_ws:
-                shards += [
-                    StandaloneModelShard(
-                        id=ModelShardID(
-                            model_name=ModelName("reward", 0),
-                            topo=rw_topo,
-                            dp_rank=rw_topo.get_coord(i).data,
-                            pp_rank=rw_topo.get_coord(i).pipe,
-                            mp_rank=rw_topo.get_coord(i).model,
-                        ),
-                        model=rw_model,
-                        backend=inf_backend(self.rew.parallel),
-                    ),
-                ]
-            elif i < self.rew_inf_ws + self.critic_inf_ws:
-                offset = self.rew_inf_ws
-                shards += [
-                    StandaloneModelShard(
-                        id=ModelShardID(
-                            model_name=ModelName("critic", 0),
-                            topo=critic_inf_topo,
-                            dp_rank=critic_inf_topo.get_coord(i - offset).data,
-                            pp_rank=critic_inf_topo.get_coord(i - offset).pipe,
-                            mp_rank=critic_inf_topo.get_coord(i - offset).model,
-                        ),
-                        model=critic_model,
-                        backend=inf_backend(self.critic.parallel),
-                    ),
-                ]
-            else:
-                offset = self.rew_inf_ws + self.critic_inf_ws
-                shards += [
-                    StandaloneModelShard(
-                        id=ModelShardID(
-                            model_name=ModelName("ref", 0),
-                            topo=ref_topo,
-                            dp_rank=ref_topo.get_coord(i - offset).data,
-                            pp_rank=ref_topo.get_coord(i - offset).pipe,
-                            mp_rank=ref_topo.get_coord(i - offset).model,
-                        ),
-                        model=ref_model,
-                        backend=inf_backend(self.ref.parallel),
-                    ),
-                ]
-            mw = ModelWorker(
-                seed=self.seed,
-                shards=shards,
-                tokenizer_name_or_path=self.actor.path,
-                datasets=[dataset],
-                cuda_cache_cleanliness=True,
-                cuda_cache_clear_freq=10,
-            )
-            model_worker.append(mw)
-
         rollout = ModelRPC(
             model_name=ModelName("actor", 0),
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
+            model_path=self.actor.path,
             interface_impl=actor_interface,
             input_data=["packed_prompts"],
             output_data=[
@@ -399,11 +190,12 @@ class PPOConfig(Experiment):
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
             model_type=self.rew.type,
+            model_path=self.rew.path,
             input_data=["packed_seq", "cu_seqlens"],
             input_key_remap={"packed_seq": "packed_input_ids"},
             output_data=["scores"],
             output_key_remap={"scores": "rewards"},
-            post_hooks=[OffloadHook()],
+            # post_hooks=[OffloadHook()],
             min_n_seqs=self.dataset.train_bs_n_seqs,
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
@@ -412,6 +204,7 @@ class PPOConfig(Experiment):
             model_name=ModelName("ref", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             model_type=self.ref.type,
+            model_path=self.ref.path,
             interface_impl=ref_interface,
             input_data=[
                 "packed_seq",
@@ -419,7 +212,7 @@ class PPOConfig(Experiment):
             ],
             output_data=["logprobs"],
             output_key_remap={"logprobs": "packed_ref_logprobs"},
-            post_hooks=[OffloadHook()],
+            # post_hooks=[OffloadHook()],
             min_n_seqs=self.dataset.train_bs_n_seqs,
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
@@ -429,6 +222,7 @@ class PPOConfig(Experiment):
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=critic_interface,
             model_type=self.critic.type,
+            model_path=self.critic.path,
             input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
             output_data=["scores"],
             output_key_remap={"scores": "values"},
@@ -437,9 +231,10 @@ class PPOConfig(Experiment):
         )
 
         train_actor = ModelRPC(
-            model_name=ModelName("actor", 1),
+            model_name=ModelName("actor", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             model_type=self.actor.type,
+            model_path=self.actor.path,
             interface_impl=actor_interface,
             input_data=[
                 "packed_seq",
@@ -452,17 +247,18 @@ class PPOConfig(Experiment):
                 "seq_no_eos_mask",
             ],
             log_return_value=True,
-            pre_hooks=[SyncParamHook(source=ModelName("actor", 0))],
-            post_hooks=[SyncParamHook(target=ModelName("actor", 0))],
+            # pre_hooks=[SyncParamHook(source=ModelName("actor", 0))],
+            # post_hooks=[SyncParamHook(target=ModelName("actor", 0))],
             min_n_seqs=self.dataset.train_bs_n_seqs,
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         train_critic = ModelRPC(
-            model_name=ModelName("critic", 1),
+            model_name=ModelName("critic", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=critic_interface,
-            model_type=ModelFamily("llama", 7, True),
+            model_type=self.critic.type,
+            model_path=self.critic.path,
             input_data=[
                 "packed_seq",
                 "cu_seqlens",
@@ -474,35 +270,254 @@ class PPOConfig(Experiment):
                 "seq_no_eos_mask",
             ],
             log_return_value=True,
-            pre_hooks=[SyncParamHook(source=ModelName("critic", 0))],
-            post_hooks=[SyncParamHook(target=ModelName("critic", 0))],
+            # pre_hooks=[SyncParamHook(source=ModelName("critic", 0))],
+            # post_hooks=[SyncParamHook(target=ModelName("critic", 0))],
             min_n_seqs=self.dataset.train_bs_n_seqs,
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
+        # rpcs = [rollout, inf_reward, inf_ref_logits, inf_values, train_actor, train_critic]
+        return {
+            "actor_gen": rollout,
+            "actor_train": train_actor,
+            "critic_inf": inf_values,
+            "critic_train": train_critic,
+            "ref_inf": inf_ref_logits,
+            "rew_inf": inf_reward,
+        }
 
-        if actor_train_topo.get_dim("pipe") > 1:
-            pp_nmbs = actor_train_topo.get_dim("pipe") * 2
-            train_actor.min_n_seqs_per_dp = self.ppo.ppo_n_minibatches * pp_nmbs
-        else:
-            train_actor.min_n_seqs_per_dp = self.ppo.ppo_n_minibatches
+    @property
+    def allocations(self):
+        return {
+            "actor_gen": self.actor_gen,
+            "actor_train": self.actor_train,
+            "critic_inf": self.critic_inf,
+            "critic_train": self.critic_train,
+            "ref_inf": self.ref_inf,
+            "rew_inf": self.rew_inf,
+        }
 
-        rollout.min_n_seqs_per_dp = self.dataset.train_bs_n_seqs // gen_topo.get_dim("data")
+    @property
+    def datasets(self):
+        return [
+            Dataset(
+                "prompt",
+                args=dict(
+                    dataset_path=self.dataset.path,
+                    max_length=self.dataset.max_prompt_len,
+                    pad_to_max_length=self.dataset.pad_to_max_length,
+                ),
+            )
+        ]
 
-        exp_ctrl = ExperimentSaveEvalControl(
+    @property
+    def tokenizer_name_or_path(self) -> str:
+        return self.actor.path
+
+    @property
+    def exp_ctrl(self) -> ExperimentSaveEvalControl:
+        return ExperimentSaveEvalControl(
             total_train_epochs=self.total_train_epochs,
             save_frequency_steps=self.save_freq_steps,
         )
-        return ExperimentConfig(
-            exp_ctrl=exp_ctrl,
-            model_rpcs=[
-                rollout,
-                inf_ref_logits,
-                inf_reward,
-                inf_values,
-                train_actor,
-                train_critic,
-            ],
-            model_worker=model_worker,
+
+    @property
+    def search_kwargs(self):
+        return {
+            "num_gen_tokens": self.ppo.max_new_tokens,
+            "n_ppo_minibatches": self.ppo.ppo_n_minibatches,
+            "seq_len": self.dataset.max_prompt_len,
+        }
+
+    @property
+    def max_prompt_len(self):
+        return self.dataset.max_prompt_len
+
+    def _heuristic_rpc_allocation(self):
+        """Heurisitc RPC allocation for PPO experiments."""
+        import math
+
+        import numpy as np
+
+        assert self.n_gpus_per_node == 8
+
+        actor_size = self.actor.type.size
+        critic_size = self.critic.type.size
+
+        # level 1
+        actor_gen_pp_size = max(2, self.n_nodes)
+        actor_gen_dp_size = (self.n_nodes * 8) // actor_gen_pp_size
+        actor_gen = RPCAllocation(
+            rpc=self.rpcs["actor_gen"],
+            device_mesh=DeviceMesh(
+                n_nodes=self.n_nodes,
+                n_gpus_per_node=8,
+                mapping=np.ones((self.n_nodes, 8), dtype=np.int32),
+                global_mesh_name=self.nodelist,
+            ),
+            parallel=ParallelismConfig(
+                data_parallel_size=actor_gen_dp_size,
+                pipeline_parallel_size=actor_gen_pp_size,
+                model_parallel_size=1,
+            ),
         )
+        # level 2
+        if self.n_nodes == 1:
+            assert actor_size <= 16
+            assert critic_size <= 16
+            actor_train = RPCAllocation(
+                rpc=self.rpcs["actor_train"],
+                device_mesh=DeviceMesh(
+                    n_nodes=1,
+                    n_gpus_per_node=8,
+                    mapping=np.array([[1, 1, 1, 1, 0, 0, 0, 0]], dtype=np.int32),
+                    global_mesh_name=self.nodelist,
+                ),
+                parallel=ParallelismConfig(
+                    data_parallel_size=2 if actor_size <= 7 else 1,
+                    pipeline_parallel_size=1,
+                    model_parallel_size=2 if actor_size <= 7 else 4,
+                    use_sequence_parallel=True,
+                ),
+            )
+            critic_train = RPCAllocation(
+                rpc=self.rpcs["critic_train"],
+                device_mesh=DeviceMesh(
+                    n_nodes=1,
+                    n_gpus_per_node=8,
+                    mapping=np.array([[0, 0, 0, 0, 1, 1, 1, 1]], dtype=np.int32),
+                    global_mesh_name=self.nodelist,
+                ),
+                parallel=ParallelismConfig(
+                    data_parallel_size=2 if critic_size <= 7 else 1,
+                    pipeline_parallel_size=1,
+                    model_parallel_size=2 if critic_size <= 7 else 4,
+                    use_sequence_parallel=True,
+                ),
+            )
+        else:
+            actor_train_n_nodes = min(
+                math.ceil(self.n_nodes * actor_size / (actor_size + critic_size)),
+                self.n_nodes - 1,
+            )
+            critic_train_n_nodes = self.n_nodes - actor_train_n_nodes
+
+            actor_train_mapping = np.zeros((self.n_nodes, 8), dtype=np.int32)
+            actor_train_mapping[:actor_train_n_nodes, :] = 1
+            actor_train = RPCAllocation(
+                rpc=self.rpcs["actor_train"],
+                device_mesh=DeviceMesh(
+                    n_nodes=self.n_nodes,
+                    n_gpus_per_node=8,
+                    mapping=actor_train_mapping,
+                    global_mesh_name=self.nodelist,
+                ),
+                parallel=ParallelismConfig(
+                    data_parallel_size=2,
+                    pipeline_parallel_size=actor_train_n_nodes,
+                    model_parallel_size=4,
+                    use_sequence_parallel=True,
+                ),
+            )
+
+            critic_train_mapping = np.zeros((self.n_nodes, 8), dtype=np.int32)
+            critic_train_mapping[actor_train_n_nodes:, :] = 1
+            critic_train = RPCAllocation(
+                rpc=self.rpcs["critic_train"],
+                device_mesh=DeviceMesh(
+                    n_nodes=self.n_nodes,
+                    n_gpus_per_node=8,
+                    mapping=critic_train_mapping,
+                    global_mesh_name=self.nodelist,
+                ),
+                parallel=ParallelismConfig(
+                    data_parallel_size=2,
+                    pipeline_parallel_size=critic_train_n_nodes,
+                    model_parallel_size=4,
+                    use_sequence_parallel=True,
+                ),
+            )
+        # level 3
+        ref_inf = RPCAllocation(
+            rpc=self.rpcs["ref_inf"],
+            device_mesh=DeviceMesh(
+                n_nodes=self.n_nodes,
+                n_gpus_per_node=8,
+                mapping=np.ones((self.n_nodes, 8), dtype=np.int32),
+                global_mesh_name=self.nodelist,
+            ),
+            parallel=ParallelismConfig(
+                data_parallel_size=2,
+                pipeline_parallel_size=self.n_nodes,
+                model_parallel_size=4,
+            ),
+        )
+        # level 4
+        if self.n_nodes == 1:
+            rew_inf = RPCAllocation(
+                rpc=self.rpcs["rew_inf"],
+                device_mesh=DeviceMesh(
+                    n_nodes=1,
+                    n_gpus_per_node=8,
+                    mapping=np.array([[1, 1, 1, 1, 0, 0, 0, 0]], dtype=np.int32),
+                    global_mesh_name=self.nodelist,
+                ),
+                parallel=ParallelismConfig(
+                    data_parallel_size=2,
+                    pipeline_parallel_size=1,
+                    model_parallel_size=2,
+                ),
+            )
+            critic_inf = RPCAllocation(
+                rpc=self.rpcs["critic_inf"],
+                device_mesh=DeviceMesh(
+                    n_nodes=1,
+                    n_gpus_per_node=8,
+                    mapping=np.array([[0, 0, 0, 0, 1, 1, 1, 1]], dtype=np.int32),
+                    global_mesh_name=self.nodelist,
+                ),
+                parallel=ParallelismConfig(
+                    data_parallel_size=2,
+                    pipeline_parallel_size=1,
+                    model_parallel_size=2,
+                ),
+            )
+        else:
+            rew_inf_n_nodes = math.ceil(self.n_nodes / 2)
+            rew_inf_mapping = np.zeros((self.n_nodes, 8), dtype=np.int32)
+            rew_inf_mapping[:rew_inf_n_nodes, :] = 1
+            rew_inf = RPCAllocation(
+                rpc=self.rpcs["rew_inf"],
+                device_mesh=DeviceMesh(
+                    n_nodes=self.n_nodes,
+                    n_gpus_per_node=8,
+                    mapping=rew_inf_mapping,
+                    global_mesh_name=self.nodelist,
+                ),
+                parallel=ParallelismConfig(
+                    data_parallel_size=2,
+                    pipeline_parallel_size=rew_inf_n_nodes,
+                    model_parallel_size=4,
+                ),
+            )
+
+            critic_inf_n_nodes = self.n_nodes - rew_inf_n_nodes
+            critic_inf_mapping = np.zeros((self.n_nodes, 8), dtype=np.int32)
+            critic_inf_mapping[rew_inf_n_nodes:, :] = 1
+            critic_inf = RPCAllocation(
+                rpc=self.rpcs["critic_inf"],
+                device_mesh=DeviceMesh(
+                    n_nodes=self.n_nodes,
+                    n_gpus_per_node=8,
+                    mapping=critic_inf_mapping,
+                    global_mesh_name=self.nodelist,
+                ),
+                parallel=ParallelismConfig(
+                    data_parallel_size=2,
+                    pipeline_parallel_size=critic_inf_n_nodes,
+                    model_parallel_size=4,
+                ),
+            )
+        return [actor_gen, actor_train, ref_inf, rew_inf, critic_inf, critic_train]
+
 
 register_quickstart_exp("ppo", PPOConfig)

@@ -11,10 +11,10 @@ import shutil
 import socket
 import subprocess
 
-from scheduler.client import JobException, JobInfo, JobState
 import pandas as pd
 
 from reallm.base.constants import LOG_ROOT
+from reallm.scheduler.client import JobException, JobInfo, JobState
 import reallm.base.cluster
 import reallm.base.logging as logging
 
@@ -295,8 +295,8 @@ class SlurmLaunchInfo:
         else:
             return None
 
-    def cancel(self):
-        cancel_jobs(slurm_names=[self.slurm_name])
+    def cancel(self, signal: Literal["SIGINT", "SIGKILL"] = "SIGKILL"):
+        cancel_jobs(slurm_names=[self.slurm_name], signal=signal)
         self.job_info = JobInfo(name=self.slurm_name, state=JobState.CANCELLED)
 
     def __str__(self):
@@ -363,6 +363,9 @@ class SlurmLaunchInfo:
         if self.hostfile:
             srun_env["SLURM_HOSTFILE"] = self.hostfile_path
         # Setup step command.
+        # add current directory into container mounts to ensure editable mode for reallm package
+        container_mounts = (f"{os.environ.get('REAL_PACKAGE_PATH', '$PWD')}:/distributed_llm," +
+                            self.container_mounts)
         srun_flags = [
             f"--ntasks={ntasks}",
             f"--cpus-per-task={cpu}",
@@ -372,7 +375,7 @@ class SlurmLaunchInfo:
              if self.env_vars else ""),
             f"--multi-prog" if self.multiprog else "",
             f"--container-image={self.container_image}",
-            f"--container-mounts={self.container_mounts}",
+            f"--container-mounts={container_mounts}",
             f"--container-mount-home",
         ]
 
@@ -461,16 +464,21 @@ def query_jobs(
     return rs
 
 
-def cancel_jobs(slurm_names: Optional[List[str]] = None, slurm_ids: Optional[List[str]] = None):
+def cancel_jobs(
+    slurm_names: Optional[List[str]] = None,
+    slurm_ids: Optional[List[str]] = None,
+    signal: Literal["SIGINT", "SIGKILL"] = "SIGKILL",
+):
     assert (slurm_names is not None or slurm_ids is not None), "Must specify slurm_names or slurm_ids."
     assert not (slurm_names and slurm_ids), "Cannot specify both slurm_names and slurm_ids."
-    cmd = ["scancel"]
+    cmd = ["scancel", "-s", signal]
     if slurm_names is not None:
         cmd += ["-n", ",".join(slurm_names)]
     elif slurm_ids is not None:
         cmd += ["-j", ",".join([str(s) for s in slurm_ids])]
     subprocess.check_call(cmd)
-    logger.info(f"Cancelled Slurm job: slurm identifiers {slurm_names if slurm_ids is None else slurm_ids}")
+    logger.info(f"Cancelled Slurm job with signal {signal}: "
+                f"slurm identifiers {slurm_names if slurm_ids is None else slurm_ids}")
 
 
 def parse_output_status_line(status):

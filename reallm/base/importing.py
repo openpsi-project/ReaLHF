@@ -1,8 +1,8 @@
 from pathlib import Path
 import importlib
+import importlib.util
 import os
 import re
-import importlib.util
 import sys
 
 
@@ -17,6 +17,7 @@ def import_module(path: str, pattern: re.Pattern):
         module_path = module_path[start_idx:]
         module_path = module_path.replace(os.sep, ".")
         importlib.import_module(module_path)
+
 
 def import_usercode(module_path: str, module_name: str):
     # Create a module spec

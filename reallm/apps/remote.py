@@ -1,26 +1,28 @@
 import argparse
+import functools
+import json
 import multiprocessing
 import os
 import pickle
 import re
 import socket
-import functools
 import subprocess
-from omegaconf import OmegaConf
-import json
 
+from omegaconf import OmegaConf
 import torch
 
 multiprocessing.set_start_method("spawn", force=True)
 
-from reallm.base import constants, gpu_utils, logging, name_resolve, names, importing
-from reallm.api.quickstart.entrypoint import QUICKSTART_EXPR_CACHE_PATH, QUICKSTART_CONFIG_CLASSES
+from reallm.api.quickstart.entrypoint import QUICKSTART_CONFIG_CLASSES, QUICKSTART_EXPR_CACHE_PATH
+from reallm.base import constants, gpu_utils, importing, logging, name_resolve, names
 
 RAY_HEAD_WAIT_TIME = 500
 logger = logging.getLogger("Main-Workers")
 
+
 def _patch_external_impl(exp_name, trial_name):
     import reallm.api.core.system_api as system_api
+
     if os.path.exists(QUICKSTART_EXPR_CACHE_PATH):
         for exp_cache in os.listdir(QUICKSTART_EXPR_CACHE_PATH):
             target_cache_name = f"{exp_name}_{trial_name}.json"
@@ -37,6 +39,7 @@ def _patch_external_impl(exp_name, trial_name):
             # Register the internal experiment.
             exp_cls = QUICKSTART_CONFIG_CLASSES[config_name]
             system_api.register_experiment(exp_name, functools.partial(exp_cls, **exp_cls_args))
+
 
 def main_reset_name_resolve(args):
     name_resolve.clear_subtree(
@@ -74,16 +77,15 @@ def main_worker(args):
 
     # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
     # profiler.import_profiler_registers()
-    import system
-
     import reallm.impl.dataset
     import reallm.impl.model
+    import reallm.system
 
     logger.debug(f"Run {args.worker_type} worker with args: %s", args)
     assert not args.experiment_name.startswith(
         "/"), f'Invalid experiment_name "{args.experiment_name}" starts with "/"'
     if args.wprocs_per_jobstep == 1:
-        system.run_worker(
+        reallm.system.run_worker(
             worker_type=args.worker_type,
             experiment_name=args.experiment_name,
             trial_name=args.trial_name,
@@ -100,7 +102,7 @@ def main_worker(args):
                 worker_name=f"{args.worker_type}/{wid}",
                 worker_server_type="zmq",
             )
-            p = multiprocessing.Process(target=system.run_worker, kwargs=worker_args)
+            p = multiprocessing.Process(target=reallm.system.run_worker, kwargs=worker_args)
             p.name = f"{args.worker_type}/{wid}"
             p.start()
             workers.append(p)
@@ -140,7 +142,7 @@ def main_controller(args):
 
     constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
     _patch_external_impl(args.experiment_name, args.trial_name)
-    
+
     logger.debug("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
     if args.type == "ray":

@@ -13,6 +13,7 @@ import torch
 import torch.distributed as dist
 
 from reallm.api.core import config
+from reallm.api.core.config import ModelFamily
 from reallm.base import constants, gpu_utils, name_resolve, namedarray, names, topology
 from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
 
@@ -21,6 +22,15 @@ from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
 MODEL_NAME = "default"
 _DEFAULT_EXPR_NAME = "test"
 _DEFAULT_TRIAL_NAME = "test"
+
+# for testing and profiling only
+MODEL_FAMILY_TO_PATH = {
+    # ModelFamily("llama", 0, True): "/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/",
+    ModelFamily("llama", 7, True): "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/",
+    ModelFamily("llama", 13, True): "/lustre/public/pretrained_model_weights/Llama-2-13b-hf/",
+    ModelFamily("llama", 70, True): "/lustre/public/pretrained_model_weights/Llama-2-70b-hf/",
+    ModelFamily("codellama", 34, True): "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf",
+}
 
 
 class StandaloneTestingProcess(mp.Process):
@@ -148,11 +158,11 @@ class LocalMultiProcessTest:
         self.err_queue = mp.Queue(world_size)
         self.processes = [
             StandaloneTestingProcess(
-                rank=rank,
-                world_size=world_size,
-                barrier=self.barrier,
-                err_queue=self.err_queue,
-                func=func,
+                rank,
+                world_size,
+                self.barrier,
+                self.err_queue,
+                func,
                 *args,
                 expr_name=expr_name,
                 trial_name=trial_name,
@@ -309,4 +319,57 @@ def get_pytorch_profiler(save_fn: str):
         with_stack=True,
         on_trace_ready=trace_handler,
         with_flops=True,
+    )
+
+
+def get_llama_config(size):
+    from reallm.api.core.model_api import ReaLModelConfig
+
+    if size == 7:
+        size_args = dict(
+            n_layers=40,
+            n_kv_heads=32,
+            head_dim=128,
+            hidden_dim=4096,
+            intermediate_dim=11008,
+            n_positions=4096,
+        )
+    elif size == 13:
+        size_args = dict(
+            n_layers=40,
+            n_kv_heads=40,
+            head_dim=128,
+            hidden_dim=5120,
+            intermediate_dim=13824,
+            n_positions=4096,
+        )
+    elif size == 34:
+        size_args = dict(
+            n_layers=48,
+            n_kv_heads=8,
+            head_dim=128,
+            hidden_dim=8192,
+            intermediate_dim=22016,
+            n_positions=16384,
+        )
+    elif size == 70:
+        size_args = dict(
+            n_layers=80,
+            n_kv_heads=8,
+            head_dim=128,
+            hidden_dim=8192,
+            intermediate_dim=28672,
+            n_positions=32768,
+        )
+    else:
+        raise ValueError(f"size {size} not supported")
+
+    return ReaLModelConfig(
+        vocab_size=32000,
+        activation_function="silu",
+        use_attention_bias=False,
+        layer_norm_type="rms",
+        mlp_type="llama",
+        apply_rotary=True,
+        **size_args,
     )

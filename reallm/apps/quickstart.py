@@ -5,14 +5,13 @@ import sys
 
 import hydra
 
-from reallm.base.cluster import spec as cluster_spec
 from reallm.api.quickstart.entrypoint import QUICKSTART_FN
-
+from reallm.base.cluster import spec as cluster_spec
 # NOTE: Register all implemented experiments inside ReaL.
 import reallm.experiments.common.dpo_exp
 import reallm.experiments.common.ppo_exp
-import reallm.experiments.common.sft_exp
 import reallm.experiments.common.rw_exp
+import reallm.experiments.common.sft_exp
 
 
 def main():
@@ -33,9 +32,7 @@ def launch_hydra_task(name: str, func: hydra.TaskFunction):
         sys.argv += ["hydra/job_logging=disabled"]
 
     if any("experiment_name=" in x for x in sys.argv):
-        experiment_name = next(x for x in sys.argv if "experiment_name=" in x).split(
-            "="
-        )[1]
+        experiment_name = next(x for x in sys.argv if "experiment_name=" in x).split("=")[1]
         if "_" in experiment_name:
             raise RuntimeError("experiment_name should not contain `_`.")
     else:
@@ -43,11 +40,7 @@ def launch_hydra_task(name: str, func: hydra.TaskFunction):
         print(f"Experiment name not manually set. Default to {experiment_name}.")
         sys.argv += [f"experiment_name={experiment_name}"]
 
-    if (
-        "--multirun" in sys.argv
-        or "hydra.mode=MULTIRUN" in sys.argv
-        or "-m" in sys.argv
-    ):
+    if ("--multirun" in sys.argv or "hydra.mode=MULTIRUN" in sys.argv or "-m" in sys.argv):
         raise NotImplementedError("Hydra multi-run is not supported.")
     # non-multirun mode, add trial_name and hydra run dir
     if any("trial_name=" in x for x in sys.argv):

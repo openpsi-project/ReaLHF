@@ -149,10 +149,10 @@ class SlurmSchedulerClient(SchedulerClient):
         if launch_info:
             launch_info.cancel()
 
-    def stop_all(self):
+    def stop_all(self, signal: Literal["SIGINT", "SIGKILL"] = "SIGKILL"):
         for launch_info in self.__committed_jobs.values():
             logger.info(f"Canceling job {launch_info.slurm_name}")
-            launch_info.cancel()
+            launch_info.cancel(signal)
         time.sleep(0.2)
         # print("before stop wait", self.__pending_jobs)
         self.wait(

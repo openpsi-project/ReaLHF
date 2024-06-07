@@ -131,12 +131,14 @@ class NullBackend(ModelBackend):
     def _initialize(self, model: Model, spec: FinetuneSpec) -> Model:
         return model
 
+
 def null_model(name: ModelName, device: Union[str, torch.device]) -> Model:
     return Model(name, torch.nn.Identity(), None, device)
 
-def tokenizer_only_model(name: ModelName, device: Union[str, torch.device],
-                         tokenizer_path:str) -> Model:
+
+def tokenizer_only_model(name: ModelName, device: Union[str, torch.device], tokenizer_path: str) -> Model:
     return Model(name, torch.nn.Identity(), load_hf_tokenizer(tokenizer_path), device)
+
 
 class ModelInterface(abc.ABC):
 

@@ -108,11 +108,12 @@ class PairedRewardInterface(model_api.ModelInterface):
         seq_strs = model.tokenizer.batch_decode(input_ids,
                                                 clean_up_tokenization_spaces=False,
                                                 skip_special_tokens=True)
-        for seq_str, score in zip(seq_strs, scores):
-            logger.info(
-                f"reward is {colorama.Fore.RED}{score.item()}{colorama.Style.RESET_ALL}, "
-                f"sequence is: {colorama.Fore.YELLOW + colorama.Style.DIM}{seq_str}{colorama.Style.RESET_ALL}"
-            )
+        # TODO: add it back before merge into main
+        # for seq_str, score in zip(seq_strs, scores):
+        #     logger.info(
+        #         f"reward is {colorama.Fore.RED}{score.item()}{colorama.Style.RESET_ALL}, "
+        #         f"sequence is: {colorama.Fore.YELLOW + colorama.Style.DIM}{seq_str}{colorama.Style.RESET_ALL}"
+        #     )
         #####################################################
 
         res = from_dict(dict(scores=scores))
