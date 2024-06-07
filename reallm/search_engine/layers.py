@@ -12,8 +12,8 @@ import transformers
 from reallm.api.core.model_api import ReaLModelConfig
 # from base.topology import *
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_base import OutputHead, ReaLModelBlock, VocabPositionEmbedding
-from reallm.impl.model.utils.data import PipeCacheData, PipeTransferData
+from reallm.impl.model.nn.real_llm_base import (OutputHead, PipeCacheData, PipeTransferData, ReaLModelBlock,
+                                                VocabPositionEmbedding)
 import reallm.api.core.model_api as model_api
 import reallm.api.core.system_api as config_package
 import reallm.base.constants as constants
@@ -96,7 +96,7 @@ class ProfileLayers:
             for layer, name in zip(self.layers, self.layer_names)
         ]
         self.backend = model_api.make_backend(self.backend_config)
-        ft_spec = model_api.FinetuneSpec(10, 100, 10, 32, 256)
+        ft_spec = model_api.FinetuneSpec(10, 100, 10)
         self.layers = [self.backend.initialize(layer, ft_spec) for layer in self.layers]
         self.stats = defaultdict(list)
 

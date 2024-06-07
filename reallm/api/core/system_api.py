@@ -50,8 +50,8 @@ _LLM_ENVVARS = {
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
 
-_LLM_GPU_IMAGE = "llm/llm-gpu:reallm-20240527"
-_LLM_CPU_IMAGE = "llm/llm-cpu:reallm-20240527"  # if cluster_spec.name == 'qizhi' else "meizy/llm-cpu"
+_LLM_GPU_IMAGE = "llm/llm-gpu:reallm-20240606"
+_LLM_CPU_IMAGE = "llm/llm-cpu:reallm-20240606"  # if cluster_spec.name == 'qizhi' else "meizy/llm-cpu"
 
 
 @dataclasses.dataclass

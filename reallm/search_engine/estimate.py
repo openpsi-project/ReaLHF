@@ -137,7 +137,7 @@ def computation_instruction_time_cost(
         for layer_name in layer_names:
             layer_stats = op_stats[op_stats["layer_name"] == layer_name]
             assert layer_stats[(layer_stats["bs"] == bs) & (layer_stats["seq_len"] == seqlen)].empty
-            assert not layer_stats.empty
+            assert not layer_stats.empty, (layer_name, op_name, num_mp, op_stats)
             xs = layer_stats["x"]
             ys = layer_stats["avg_time_ns"]
             x = int(bs) if op_name == "fwd_gen_1" else int(bs * seqlen)

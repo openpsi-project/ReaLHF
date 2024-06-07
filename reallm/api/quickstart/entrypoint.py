@@ -91,6 +91,7 @@ def register_quickstart_exp(config_name: str, exp_cls: Callable):
             raise e
 
     cs.store(name=config_name, node=exp_cls)
+
     assert config_name not in QUICKSTART_CONFIG_CLASSES
     QUICKSTART_CONFIG_CLASSES[config_name] = exp_cls
     assert config_name not in QUICKSTART_USERCODE_PATHS

@@ -948,9 +948,7 @@ class ModelWorker(worker_base.Worker):
                 constants._model_name = None  # force quit model_scope
                 with constants.model_scope(model_name):
                     ckpt_save_dir = os.path.join(self.__recover_states_root, "ckpt", model_name.role)
-                    # only one ckpt directory will exist in ckpt_save_dir
-                    os.makedirs(ckpt_save_dir, exist_ok=True)
-                    shutil.rmtree(ckpt_save_dir, ignore_errors=True)
+                    # replace old recover ckpt
                     logger.info(f"saving model {model_name} ckpt for recover at {ckpt_save_dir}. "
                                 f"epoch {model.version.epoch}, epoch_step {model.version.epoch_step}, "
                                 f"global step {model.version.global_step}")

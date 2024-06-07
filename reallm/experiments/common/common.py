@@ -116,8 +116,30 @@ class CommonExperimentConfig(Experiment):
     def allocations(self) -> Dict[str, AllocationConfig]:
         return {}
 
+    @property
+    def global_device_mesh(self) -> DeviceMesh:
+        return DeviceMesh(
+            n_nodes=self.n_nodes,
+            n_gpus_per_node=self.n_gpus_per_node,
+            mapping=np.ones((self.n_nodes, self.n_gpus_per_node), dtype=np.int32),
+            global_mesh_name=self.nodelist,
+            name=self.nodelist,
+        )
+
     def _heuristic_rpc_allocation(self) -> List[RPCAllocation]:
         raise NotImplementedError(f"_heuristic_rpc_allocation is not implemented in {self.__class__}")
+
+    def _search(self):
+        # called in both api.main and controller
+        gradient_checkpointing = any(model.gradient_checkpointing for model in self.models.values())
+        rpc_allocs: List[RPCAllocation] = search_rpc_allocations(
+            device_mesh=self.global_device_mesh,
+            rpcs=list(self.rpcs.values()),
+            gradient_checkpointing=gradient_checkpointing,
+            use_cache=self.allocation_use_cache,
+            **self.search_kwargs,
+        )
+        return rpc_allocs
 
     def scheduling_setup(self) -> ExperimentScheduling:
         return ExperimentScheduling(
@@ -146,30 +168,24 @@ class CommonExperimentConfig(Experiment):
         rpcs = self.rpcs
         model_worker = []
 
-        global_device_mesh = DeviceMesh(
-            n_nodes=self.n_nodes,
-            n_gpus_per_node=self.n_gpus_per_node,
-            mapping=np.ones((self.n_nodes, self.n_gpus_per_node), dtype=np.int32),
-            global_mesh_name=self.nodelist,
-            name=self.nodelist,
-        )
         if self.allocation_mode == "search":
             # assert self.mode == "slurm"
             # assumes gradient checkpointing for all training RPCs if one is enabled
             # for the simplicity of search configurations
-            gradient_checkpointing = any(model.gradient_checkpointing for model in self.models.values())
-            rpc_allocs: List[RPCAllocation] = search_rpc_allocations(
-                device_mesh=global_device_mesh,
-                rpcs=list(rpcs.values()),
-                gradient_checkpointing=gradient_checkpointing,
-                use_cache=self.allocation_use_cache,
-                **self.search_kwargs,
-            )
+            rpc_allocs = self._search()
+            for rpc_alloc in rpc_allocs:
+                assert isinstance(rpc_alloc.rpc, str)
+                for rpc in rpcs.values():
+                    if rpc.name == rpc_alloc.rpc:
+                        rpc_alloc.rpc = rpc
+                        break
+                else:
+                    raise ValueError(f"RPC {rpc_alloc.rpc} not found in rpcs.")
         elif (self.allocation_mode == "pipe_data" or self.allocation_mode == "pipe_model"):
             rpc_allocs: List[RPCAllocation] = [
                 RPCAllocation(
                     rpc=rpc,
-                    device_mesh=global_device_mesh,
+                    device_mesh=self.global_device_mesh,
                     parallel=ParallelismConfig(
                         data_parallel_size=(self.n_gpus_per_node
                                             if self.allocation_mode == "pipe_data" else 1),
@@ -188,7 +204,7 @@ class CommonExperimentConfig(Experiment):
                     device_mesh=(make_device_mesh_from_name(
                         self.nodelist,
                         self.allocations[rpc_type].device_mesh,
-                    ) if self.allocations[rpc_type].device_mesh is not None else global_device_mesh),
+                    ) if self.allocations[rpc_type].device_mesh is not None else self.global_device_mesh),
                     parallel=self.allocations[rpc_type].parallel,
                 ) for rpc_type, rpc in self.rpcs.items()
             ]

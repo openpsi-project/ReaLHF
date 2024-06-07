@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Literal, Optional
 import argparse
 import functools
+import json
 import os
 import pickle
 import re
@@ -14,7 +15,7 @@ except ModuleNotFoundError:
 
 from reallm.api.core.dfg import ModelInterfaceType, ModelRPC
 from reallm.api.core.model_api import ModelFamily
-from reallm.api.quickstart.device_mesh import DeviceMesh, make_device_mesh_from_name, RPCAllocation
+from reallm.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from reallm.api.quickstart.search import RPCExecution
 import reallm.base.constants as constants
@@ -59,8 +60,10 @@ def search_rpc_allocations(
     )
 
     if from_file or (use_cache and os.path.exists(dump_dir)):
-        with open(dump_dir, "rb") as f:
-            return pickle.load(f)
+        with open(dump_dir, "r") as f:
+            s = json.load(f)
+            rpc_allocs = [RPCAllocation.from_dict(d) for d in s]
+        return rpc_allocs
     else:
         os.makedirs(os.path.dirname(dump_dir), exist_ok=True)
 
@@ -85,7 +88,7 @@ def search_rpc_allocations(
     model_size_dict = make_model_size_dict(rpcs, if_print=False)
 
     n_nodes = device_mesh.n_nodes
-    search_time = 10  # TODO: for debug, change this
+    search_time = 120
 
     rs: List[Dict[str, List]] = mdm_search.multi_mcmc_search(
         rpcs,
@@ -139,8 +142,8 @@ def search_rpc_allocations(
         rpc_allocs.append(rpc_alloc)
 
     if not from_file:
-        with open(dump_dir, "wb") as f:
-            pickle.dump(rpc_allocs, f)
+        with open(dump_dir, "w") as f:
+            json.dump([rpc_alloc.to_dict() for rpc_alloc in rpc_allocs], f, indent=4)
         with open(log_dir, "w") as f:
             import pprint
 

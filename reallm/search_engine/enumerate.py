@@ -39,6 +39,8 @@ def enumerate_rpc_executions(
             if (num_mp * num_dp > device_mesh.n_gpus_per_node
                     and rpc.interface_type == ModelInterfaceType.TRAIN_STEP):
                 continue
+            if num_mp > 8:
+                continue
             if num_pp > max(device_mesh.n_nodes, 8):
                 continue
             # memory and time estimation

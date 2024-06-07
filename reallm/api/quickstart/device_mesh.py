@@ -1,5 +1,6 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 import dataclasses
+import json
 import math
 
 import numpy as np
@@ -24,6 +25,22 @@ class DeviceMesh:
     name: str = None
     # cluster info, GPU memory cap in bytes
     gpu_memory_capacity: int = 80 * (1024**3)
+
+    def to_dict(self):
+        return dict(
+            n_nodes=self.n_nodes,
+            n_gpus_per_node=self.n_gpus_per_node,
+            mapping=self.mapping.tolist(),
+            global_mesh_name=self.global_mesh_name,
+            name=self.name,
+            gpu_memory_capacity=self.gpu_memory_capacity,
+        )
+
+    @staticmethod
+    def from_dict(d):
+        device_mesh = DeviceMesh(**d)
+        device_mesh.mapping = np.array(d["mapping"])
+        return device_mesh
 
     def __post_init__(self):
         if self.global_mesh_name is None:
@@ -215,7 +232,7 @@ def find_parallel_strategies(device_mesh: DeviceMesh) -> List[ParallelismConfig]
 
 @dataclasses.dataclass
 class RPCAllocation:
-    rpc: ModelRPC
+    rpc: Union[ModelRPC, str]
     device_mesh: DeviceMesh
     parallel: ParallelismConfig
 
@@ -225,6 +242,21 @@ class RPCAllocation:
         assert world_size == self.device_mesh.mapping.sum(), (
             "World size of ParallelismConfig does not match number of GPUs in device mesh"
             f"world_size {world_size} != n GPUs {self.device_mesh.mapping.sum()}")
+
+    def to_dict(self):
+        return dict(
+            rpc=self.rpc.name,
+            device_mesh=self.device_mesh.to_dict(),
+            parallel=dataclasses.asdict(self.parallel),
+        )
+
+    @staticmethod
+    def from_dict(d):
+        return RPCAllocation(
+            rpc=d["rpc"],
+            device_mesh=DeviceMesh.from_dict(d["device_mesh"]),
+            parallel=ParallelismConfig(**d["parallel"]),
+        )
 
 
 @dataclasses.dataclass
