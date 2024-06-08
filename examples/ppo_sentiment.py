@@ -104,7 +104,12 @@ class MyPPOConfig(PPOConfig):
                     s.backend = config_api.ModelBackend("null")
 
         # Change the model function call implementation.
-        inf_reward_rpc = cfg.model_rpcs[2]
+        idx = 0
+        for rpc in cfg.model_rpcs:
+            if rpc.model_name.role == "reward":
+                break
+            idx += 1
+        inf_reward_rpc = cfg.model_rpcs[idx]
         inf_reward_rpc.interface_impl = dfg.ModelInterface("sentiment_scoring")
         inf_reward_rpc.post_hooks = []
 

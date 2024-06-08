@@ -16,6 +16,7 @@ from reallm.impl.model.nn.real_llm_generate import (_gather_gen_output_from_list
 from reallm.impl.model.parallelism.pipeline_parallel.instruction_impl import (_exec_pipe_schedule,
                                                                               _prepare_input,
                                                                               PipeInferenceInstrSet,
+                                                                              PipeGenInstrSet,
                                                                               PipeTrainForwardCommInstrSet,
                                                                               PipeTrainInstrSet)
 from reallm.impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
@@ -159,7 +160,7 @@ class PipelineRunner:
         _exec_pipe_schedule(
             self.module,
             tensor_buffer,
-            instr_map=PipeInferenceInstrSet.INSTRUCTION_MAP,
+            instr_map=PipeGenInstrSet.INSTRUCTION_MAP,
             pipe_schedule=sched,
             terminate_condition=terminate_condition,
         )

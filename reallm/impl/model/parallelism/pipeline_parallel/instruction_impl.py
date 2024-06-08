@@ -372,18 +372,35 @@ class PipeGenInstrSet:
 
         tensor_buffer.put("batch_output_x", micro_batch_id, x)
 
+        tokenizer = tensor_buffer.get("tokenizer", micro_batch_id)
+        gconfig = tensor_buffer.get("gconfig", micro_batch_id)
+        
         # Init KV cache.
         is_prefill_phase = False
-        if (tensor_buffer.get("kv_cache_reserved", micro_batch_id, raise_error=False) is None):
+        if not tensor_buffer.get("kv_cache_reserved", micro_batch_id):
             # KV cache is attached to x and ys.
-            init_kv_cache(x, ys)
+            assert constants.pipe_parallel_world_size() >= 2
+            if constants.is_first_pipe_stage():
+                ys[0].cache_seqlens = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
+                init_kv_cache(module, gconfig, x, ys[1:])
+            elif constants.is_last_pipe_stage():
+                init_kv_cache(module, gconfig, x, ys[:-1])
+            else:
+                init_kv_cache(module, gconfig, x, ys)
             is_prefill_phase = True
             tensor_buffer.put("kv_cache_reserved", micro_batch_id, True)
 
         # Increase cache_seqlens in the decoding phase.
         if not is_prefill_phase:
-            for y in ys:
-                y.cache_seqlens += 1
+            if constants.is_last_pipe_stage():
+                for y in ys[:-1]:
+                    y.cache_seqlens += 1
+                assert all(torch.allclose(ys[0].cache_seqlens, y.cache_seqlens) for y in ys[:-1])
+            else:
+                for y in ys:
+                    y.cache_seqlens += 1
+                assert all(torch.allclose(ys[0].cache_seqlens, y.cache_seqlens) for y in ys)
+            
 
         # Perform a decoding step.
         if constants.is_last_pipe_stage():
@@ -395,8 +412,7 @@ class PipeGenInstrSet:
             unfinished_sequences = tensor_buffer.get("unfinished_sequences", micro_batch_id)
             generated_idx = tensor_buffer.get("generated_idx", micro_batch_id)
 
-            tokenizer = tensor_buffer.get("tokenizer", micro_batch_id)
-            gconfig = tensor_buffer.get("gconfig", micro_batch_id)
+            
             next_tokens, logprob, logits_mask, terminate, unfinished_sequences = (genstep(
                 logits,
                 tokenizer,
@@ -491,7 +507,7 @@ class PipeGenInstrSet:
         assert constants.is_first_pipe_stage()
         batch_length = tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
 
-        device = tensor_buffer.get("device", micro_batch_id)
+        device = module.device
         prev_stage = constants.prev_pipe_stage()
 
         recv_buf = torch.empty((batch_length,), dtype=torch.long, device=device)

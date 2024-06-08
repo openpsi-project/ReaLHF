@@ -196,7 +196,6 @@ class PPOConfig(CommonExperimentConfig):
             input_key_remap={"packed_seq": "packed_input_ids"},
             output_data=["scores"],
             output_key_remap={"scores": "rewards"},
-            # post_hooks=[OffloadHook()],
             min_n_seqs=self.dataset.train_bs_n_seqs,
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
@@ -213,7 +212,6 @@ class PPOConfig(CommonExperimentConfig):
             ],
             output_data=["logprobs"],
             output_key_remap={"logprobs": "packed_ref_logprobs"},
-            # post_hooks=[OffloadHook()],
             min_n_seqs=self.dataset.train_bs_n_seqs,
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )

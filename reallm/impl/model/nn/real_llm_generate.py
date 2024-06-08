@@ -214,8 +214,14 @@ def init_kv_cache(
 ):
     cu_seqlens = x.cu_seqlens
     input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+    assert constants.pipe_parallel_world_size() >= 2
     layer_indices = range(module.layer_idx_start, module.layer_idx_end)
-    assert len(layer_indices) == len(ys)
+    if constants.is_first_pipe_stage():
+        layer_indices = layer_indices[1:]
+    elif constants.is_last_pipe_stage():
+        layer_indices = layer_indices[:-1]
+
+    assert len(layer_indices) == len(ys), (len(ys), layer_indices)
     bs = input_lens.shape[0]
     for y, layer_idx in zip(ys, layer_indices):
         assert (y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None)
@@ -398,7 +404,7 @@ def _gather_gen_output_from_list(
     else:
         mm = next(m for m in gen_logits_mask_ph if m is not None)
         gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
-        logits_mask = torch.stack(gen_logits_mask_ph, -2)  # [bs, seqlen, vocab_size]
+        logits_mask = torch.stack(gen_logits_mask_ph, 1)  # [bs, seqlen, vocab_size]
     return gen_tokens, log_probs, logits_mask
 
 
@@ -451,7 +457,7 @@ def _gather_minibatch_gen_outputs(
     else:
         mm = next(m for m in padded_logits_mask if m is not None)
         padded_logits_mask = [torch.ones_like(mm) if m is None else m for m in padded_logits_mask]
-        logits_mask = torch.stack(padded_logits_mask, -2)  # [bs, seqlen, vocab_size]
+        logits_mask = torch.cat(padded_logits_mask, 0)  # [bs, seqlen, vocab_size]
 
     return (gen_tokens, log_probs, logits_mask)
 

@@ -3,6 +3,7 @@ from typing import *
 from reallm.api.core.config import ModelBackend
 from reallm.api.core.dfg import ModelInterfaceType, ModelRPC, OffloadHook, SyncParamHook
 from reallm.api.core.system_api import ModelName
+import collections
 from reallm.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, ParallelismConfig
 from reallm.base.topology import PipeModelDataParallelTopology
@@ -69,22 +70,23 @@ def make_model_config(cfg: ModelTrainEvalConfig):
 def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
     from reallm.api.quickstart.model import parallelism_config_equal
 
+    role_cnt = collections.defaultdict(int)
     for rpc_alloc in rpc_allocs:
         rpc = rpc_alloc.rpc
         parallel = rpc_alloc.parallel
         device_mesh = rpc_alloc.device_mesh
         # check param realloc hooks for train_step rpcs
-        # only one param realloc is possible in each iteration
         if rpc.interface_type == ModelInterfaceType.TRAIN_STEP:
             for other in rpc_allocs:
                 if rpc.name == other.rpc.name:
                     continue
                 if rpc.model_name.role == other.rpc.model_name.role and not (parallelism_config_equal(
                         parallel, other.parallel) and device_mesh == other.device_mesh):
-                    rpc.model_name = ModelName(rpc.model_name.role, other.rpc.model_name.replica_id + 1)
-                    rpc.pre_hooks.append(SyncParamHook(source=other.rpc.model_name))
-                    rpc.post_hooks.append(SyncParamHook(target=other.rpc.model_name))
-                    break
+                    other.rpc.model_name = ModelName(rpc.model_name.role, role_cnt[rpc.model_name.role] + 1)
+                    role_cnt[rpc.model_name.role] += 1
+                    other.rpc.pre_hooks.append(SyncParamHook(source=rpc.model_name))
+                    other.rpc.post_hooks.append(SyncParamHook(target=rpc.model_name))
+
 
         # add offload hooks for inference rpcs
         if rpc.interface_type == ModelInterfaceType.INFERENCE:

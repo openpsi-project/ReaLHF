@@ -343,8 +343,7 @@ class ModelWorker(worker_base.Worker):
             with constants.model_scope(s.id.model_name):
                 self.__backend_initialized[s.id.model_name] = False
                 tik = time.perf_counter()
-                # HACK: ref and reward models are not saved
-                if self.__recover_run and s.id.model_name.role not in ["ref", "reward"]:
+                if self.__recover_run:
                     model_path = os.path.join(self.__recover_states_root, "ckpt", s.id.model_name.role)
                     s.model.args["model_path"] = model_path
                     s.model.args["init_critic_from_actor"] = False
@@ -353,7 +352,7 @@ class ModelWorker(worker_base.Worker):
                                                                               name=s.id.model_name,
                                                                               device=self.__device)
                 self.__unwrapped_models[s.id.model_name] = model.module
-                if s.id.model_name.replica_id == 0:
+                if s.should_instantiate:
                     if isinstance(model.module, ReaLModel):
                         model.module.instantiate()
                     self.__model_is_handle[s.id.model_name] = False
@@ -406,12 +405,12 @@ class ModelWorker(worker_base.Worker):
         self.__data_received_worker_indices: Dict[int, Dict[str, Set]] = (
             collections.defaultdict(lambda: collections.defaultdict(set)))
 
-        self.__compute_input_queues = dict(
+        self.__compute_input_queues = {model_name: dict(
             train_step=queue.Queue(4),
             inference=queue.Queue(4),
             generate=queue.Queue(4),
             evaluate=queue.Queue(4),
-        )
+        ) for model_name in self.__models.keys()}
 
         # A monitoring process.
         self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor, args=(self.__worker_index, 20, 7200))
@@ -615,7 +614,7 @@ class ModelWorker(worker_base.Worker):
             elif request.handle_name == "inference":
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 data, buffer_indices, seqlens, output_key_remap = (
-                    self.__compute_input_queues[request.handle_name].get_nowait())
+                    self.__compute_input_queues[handler_model_name][request.handle_name].get_nowait())
                 data: namedarray.NamedArray
                 data.register_metadata(seqlens=seqlens)
                 # if constants.model_name().role == "reward":
@@ -641,13 +640,13 @@ class ModelWorker(worker_base.Worker):
                     res = new_res, buffer_indices, seqlens
             elif request.handle_name == "train_step":
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
-                data, _, seqlens, *_ = self.__compute_input_queues[request.handle_name].get_nowait()
+                data, _, seqlens, *_ = self.__compute_input_queues[handler_model_name][request.handle_name].get_nowait()
                 data.register_metadata(seqlens=seqlens)
                 res = self._interface.train_step(self._model, data)  # -> Dict
             elif request.handle_name == "generate":
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 data, buffer_indices, seqlens, output_key_remap = (
-                    self.__compute_input_queues[request.handle_name].get_nowait())
+                    self.__compute_input_queues[handler_model_name][request.handle_name].get_nowait())
                 data.register_metadata(seqlens=seqlens)
                 res = self._interface.generate(self._model, data)  # -> NamedArray
                 if res is not None:
@@ -664,8 +663,8 @@ class ModelWorker(worker_base.Worker):
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 res = self._interface.evaluate(self._model, self._eval_dataloader)  # -> Dict
             elif request.handle_name == "save":
-                assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
-                res = self._interface.save(self._model, data)  # -> None
+                if not self.__model_is_handle[request.handler.model_name]:
+                    self._interface.save(self._model, data)  # -> None
             else:
                 raise NotImplementedError(f"Unknown request type: {request.handle_name}.")
 
@@ -774,7 +773,6 @@ class ModelWorker(worker_base.Worker):
             for buf_idx in local_buffer_indices:
                 local_seqlens.append(data[(buf_idx, local_keys[0])][1])
 
-            k = local_keys[0]
             input_key_remap = hook_data["input_key_remap"]
             _data = []
             for buf_idx in local_buffer_indices:
@@ -788,10 +786,7 @@ class ModelWorker(worker_base.Worker):
                 x.register_metadata(seqlens=[seqlen])
                 _data.append(x)
             r = data_api.gather_sequences(_data)
-            # import pprint
-            # pprint.pprint(hook_data["handle_name"])
-            # pprint.pprint(r)
-            self.__compute_input_queues[hook_data["handle_name"]].put_nowait(
+            self.__compute_input_queues[hook_data['target']][hook_data["handle_name"]].put_nowait(
                 (r, local_buffer_indices, local_seqlens, hook_data["output_key_remap"]))
 
     def __post_one_response(self, request: request_reply_stream.Payload, res):
@@ -943,8 +938,7 @@ class ModelWorker(worker_base.Worker):
             import shutil
 
             for model_name, model in self.__models.items():
-                # HACK: ad-hoc solution, do not save ref and reward models
-                if model_name.replica_id != 0 or model_name.role in ["ref", "reward"]:
+                if self.__model_is_handle[model_name]:
                     continue
                 constants._model_name = None  # force quit model_scope
                 with constants.model_scope(model_name):

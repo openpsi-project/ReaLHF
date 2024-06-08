@@ -193,7 +193,7 @@ class PPOActorInterface(model_api.ModelInterface):
 
         # logger.info(f"packed_prompts shape {packed_prompts.shape}, bs {bs}")
 
-        sd = {k: v.detach().clone() for k, v in module.state_dict().items()}
+        sd = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
         if self._last_gen_sd is not None:
             param_changed = False
             changed_keys = []
@@ -432,7 +432,7 @@ class PPOActorInterface(model_api.ModelInterface):
         )
         ### Logging code ends. ###
 
-        sd = {k: v.detach().clone() for k, v in module.state_dict().items()}
+        sd = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
         # NOTE: We cannot randomly shuffle data here because
         # data must have the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
@@ -469,7 +469,7 @@ class PPOActorInterface(model_api.ModelInterface):
                 for k, v in stats.items():
                     train_stats[k] += v
 
-        sd2 = {k: v.detach().clone() for k, v in module.state_dict().items()}
+        sd2 = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
         param_changed = False
         changed_keys = []
         for k, v1, v2 in zip(sd.keys(), sd.values(), sd2.values()):
@@ -614,7 +614,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        sd = {k: v.detach().clone() for k, v in module.state_dict().items()}
+        sd = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
         if self._last_inf_sd is not None:
             param_changed = False
             changed_keys = []
@@ -733,7 +733,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         dist.all_reduce(n_tokens, group=constants.data_parallel_group())
         global_stats = dict(returns=float(returns), n_tokens=int(n_tokens))
 
-        sd = {k: v.detach().clone() for k, v in module.state_dict().items()}
+        sd = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
@@ -766,7 +766,7 @@ class PPOCriticInterface(model_api.ModelInterface):
                 for k, v in stats.items():
                     train_stats[k] += v
 
-        sd2 = {k: v.detach().clone() for k, v in module.state_dict().items()}
+        sd2 = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
         param_changed = False
         changed_keys = []
         for k, v1, v2 in zip(sd.keys(), sd.values(), sd2.values()):

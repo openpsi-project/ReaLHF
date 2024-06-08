@@ -24,8 +24,8 @@
 #     dataset.train_bs_n_seqs=512 \
 #     dataset.valid_bs_n_seqs=512
 
-SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
-# SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/
+# SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
+SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/
 # python3 -m reallm.apps.quickstart rw experiment_name=quickstart-rw-debug trial_name=20240603-1 \
 #     mode=local allocation_mode=manual \
 #     total_train_epochs=1 \

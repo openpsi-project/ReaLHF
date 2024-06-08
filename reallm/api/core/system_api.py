@@ -258,7 +258,7 @@ class ExperimentConfig:
             ##### Sanity check of parallelism ranks. #####
 
         data_transfer_pairs: List[Tuple[ModelName, ModelName]] = []
-        _, edges = dfg.build_graph(self.model_rpcs, verbose=True)
+        _rpc_nodes, edges = dfg.build_graph(self.model_rpcs, verbose=True)
         for i in range(len(self.model_rpcs)):
             for j in range(len(self.model_rpcs)):
                 if len(edges[i][j]) > 0:
@@ -314,6 +314,24 @@ class ExperimentConfig:
                                  f"so it is necceary to do bidirectional synchronization. "
                                  f"{(a,b)} found in sync param pairs but not {(b,a)}")
         ######### sanity check of sync param hooks #########
+
+        # Mark which shard of the same role should be instantiated.
+        _model_is_trainable = {rpc.model_name: rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP for rpc in _rpc_nodes}
+        _roles = set([rpc.model_name.role for rpc in _rpc_nodes])
+        _role_cnt = {role: len([rpc for rpc in _rpc_nodes if rpc.model_name.role == role]) for role in _roles}
+        model_names_to_instantiate = []
+        for role in _roles:
+            _trainable_this_role = [_model_is_trainable[ModelName(role, i)] for i in range(_role_cnt[role])]
+            if _role_cnt[role] == 1 or not any(_trainable_this_role):
+                model_names_to_instantiate.append(ModelName(role, 0))
+                continue
+            if any(_trainable_this_role):
+                assert sum(_trainable_this_role) == 1
+                _trainable_idx = _trainable_this_role.index(True)
+                model_names_to_instantiate.append(ModelName(role, _trainable_idx))
+        for mw in self.model_worker:
+            for s in mw.shards:
+                s.should_instantiate = s.id.model_name in model_names_to_instantiate
 
         msid2mwid = {}
         for i, mw in enumerate(self.model_worker):
