@@ -1,9 +1,9 @@
 from typing import *
+import collections
 
 from reallm.api.core.config import ModelBackend
 from reallm.api.core.dfg import ModelInterfaceType, ModelRPC, OffloadHook, SyncParamHook
 from reallm.api.core.system_api import ModelName
-import collections
 from reallm.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
 from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, ParallelismConfig
 from reallm.base.topology import PipeModelDataParallelTopology
@@ -86,7 +86,6 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
                     role_cnt[rpc.model_name.role] += 1
                     other.rpc.pre_hooks.append(SyncParamHook(source=rpc.model_name))
                     other.rpc.post_hooks.append(SyncParamHook(target=rpc.model_name))
-
 
         # add offload hooks for inference rpcs
         if rpc.interface_type == ModelInterfaceType.INFERENCE:

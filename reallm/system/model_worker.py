@@ -405,12 +405,15 @@ class ModelWorker(worker_base.Worker):
         self.__data_received_worker_indices: Dict[int, Dict[str, Set]] = (
             collections.defaultdict(lambda: collections.defaultdict(set)))
 
-        self.__compute_input_queues = {model_name: dict(
-            train_step=queue.Queue(4),
-            inference=queue.Queue(4),
-            generate=queue.Queue(4),
-            evaluate=queue.Queue(4),
-        ) for model_name in self.__models.keys()}
+        self.__compute_input_queues = {
+            model_name: dict(
+                train_step=queue.Queue(4),
+                inference=queue.Queue(4),
+                generate=queue.Queue(4),
+                evaluate=queue.Queue(4),
+            )
+            for model_name in self.__models.keys()
+        }
 
         # A monitoring process.
         self.__gpu_util_mp = mp.Process(target=gpu_utilization_monitor, args=(self.__worker_index, 20, 7200))
@@ -640,7 +643,8 @@ class ModelWorker(worker_base.Worker):
                     res = new_res, buffer_indices, seqlens
             elif request.handle_name == "train_step":
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
-                data, _, seqlens, *_ = self.__compute_input_queues[handler_model_name][request.handle_name].get_nowait()
+                data, _, seqlens, *_ = self.__compute_input_queues[handler_model_name][
+                    request.handle_name].get_nowait()
                 data.register_metadata(seqlens=seqlens)
                 res = self._interface.train_step(self._model, data)  # -> Dict
             elif request.handle_name == "generate":
@@ -786,7 +790,7 @@ class ModelWorker(worker_base.Worker):
                 x.register_metadata(seqlens=[seqlen])
                 _data.append(x)
             r = data_api.gather_sequences(_data)
-            self.__compute_input_queues[hook_data['target']][hook_data["handle_name"]].put_nowait(
+            self.__compute_input_queues[hook_data["target"]][hook_data["handle_name"]].put_nowait(
                 (r, local_buffer_indices, local_seqlens, hook_data["output_key_remap"]))
 
     def __post_one_response(self, request: request_reply_stream.Payload, res):

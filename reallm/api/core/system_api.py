@@ -316,7 +316,10 @@ class ExperimentConfig:
         ######### sanity check of sync param hooks #########
 
         # Mark which shard of the same role should be instantiated.
-        _model_is_trainable = {rpc.model_name: rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP for rpc in _rpc_nodes}
+        _model_is_trainable = {
+            rpc.model_name: rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
+            for rpc in _rpc_nodes
+        }
         _roles = set([rpc.model_name.role for rpc in _rpc_nodes])
         _role_cnt = {role: len([rpc for rpc in _rpc_nodes if rpc.model_name.role == role]) for role in _roles}
         model_names_to_instantiate = []

@@ -14,9 +14,8 @@ from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from reallm.impl.model.nn.real_llm_generate import (_gather_gen_output_from_list,
                                                     _gather_minibatch_gen_outputs, GenerationConfig)
 from reallm.impl.model.parallelism.pipeline_parallel.instruction_impl import (_exec_pipe_schedule,
-                                                                              _prepare_input,
+                                                                              _prepare_input, PipeGenInstrSet,
                                                                               PipeInferenceInstrSet,
-                                                                              PipeGenInstrSet,
                                                                               PipeTrainForwardCommInstrSet,
                                                                               PipeTrainInstrSet)
 from reallm.impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer

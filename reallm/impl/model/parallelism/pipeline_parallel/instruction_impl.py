@@ -374,7 +374,7 @@ class PipeGenInstrSet:
 
         tokenizer = tensor_buffer.get("tokenizer", micro_batch_id)
         gconfig = tensor_buffer.get("gconfig", micro_batch_id)
-        
+
         # Init KV cache.
         is_prefill_phase = False
         if not tensor_buffer.get("kv_cache_reserved", micro_batch_id):
@@ -400,7 +400,6 @@ class PipeGenInstrSet:
                 for y in ys:
                     y.cache_seqlens += 1
                 assert all(torch.allclose(ys[0].cache_seqlens, y.cache_seqlens) for y in ys)
-            
 
         # Perform a decoding step.
         if constants.is_last_pipe_stage():
@@ -412,7 +411,6 @@ class PipeGenInstrSet:
             unfinished_sequences = tensor_buffer.get("unfinished_sequences", micro_batch_id)
             generated_idx = tensor_buffer.get("generated_idx", micro_batch_id)
 
-            
             next_tokens, logprob, logits_mask, terminate, unfinished_sequences = (genstep(
                 logits,
                 tokenizer,
