@@ -67,13 +67,13 @@ def _ppo_actor_loss_from_model_outputs(
     #     eps_clip=eps_clip,
     # ))
     # loss = torch.where(ppo_loss_mask, loss, 0.0).sum() / ppo_loss_mask.count_nonzero()
-    importance_weight = ppo_stat["importance_weight"] * n_tokens
-    clip_ratio = ppo_stat["clip_ratio"] * n_tokens
-    approx_kl = ppo_stat["approx_kl"] * n_tokens
+    importance_weight = ppo_stat["importance_weight"].float() * n_tokens
+    clip_ratio = ppo_stat["clip_ratio"].float() * n_tokens
+    approx_kl = ppo_stat["approx_kl"].float() * n_tokens
 
     # Logging and early stopping according to KL (logp vs ref) or importance ratio (new logp vs old logp).
-    mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum()
-    logging_loss = torch.where(ppo_loss_mask, loss.detach(), 0.0).sum()
+    mean_ref_kl = (kl_rewards.detach().float() * ppo_loss_mask).sum()
+    logging_loss = torch.where(ppo_loss_mask, loss.detach().float(), 0.0).sum()
     dist.all_reduce(n_tokens, group=constants.data_parallel_group())
     dist.all_reduce(mean_ref_kl, group=constants.data_parallel_group())
     dist.all_reduce(importance_weight, group=constants.data_parallel_group())
@@ -163,8 +163,6 @@ class PPOActorInterface(model_api.ModelInterface):
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
 
-        self._last_gen_sd = None
-
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
@@ -190,20 +188,6 @@ class PPOActorInterface(model_api.ModelInterface):
         cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
 
         bs = prompt_lengths.shape[0]
-
-        # logger.info(f"packed_prompts shape {packed_prompts.shape}, bs {bs}")
-
-        sd = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
-        if self._last_gen_sd is not None:
-            param_changed = False
-            changed_keys = []
-            for k, v1, v2 in zip(sd.keys(), sd.values(), self._last_gen_sd.values()):
-                if not torch.allclose(v1, v2):
-                    param_changed = True
-                    changed_keys.append(k)
-            print(">>>>>>>> actor gen param changed?", param_changed)
-        self._last_gen_sd = sd
-        # st = time.monotonic()
 
         res = module.generate(
             seqlens_cpu=data.metadata["seqlens"],
@@ -432,7 +416,6 @@ class PPOActorInterface(model_api.ModelInterface):
         )
         ### Logging code ends. ###
 
-        sd = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
         # NOTE: We cannot randomly shuffle data here because
         # data must have the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
@@ -468,15 +451,6 @@ class PPOActorInterface(model_api.ModelInterface):
             if stats:
                 for k, v in stats.items():
                     train_stats[k] += v
-
-        sd2 = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
-        param_changed = False
-        changed_keys = []
-        for k, v1, v2 in zip(sd.keys(), sd.values(), sd2.values()):
-            if not torch.allclose(v1, v2):
-                param_changed = True
-                changed_keys.append(k)
-        print(">>>>>>>> actor train param changed?", param_changed)
         cur_epoch = model.version.epoch
         model.inc_version()
 
@@ -513,8 +487,8 @@ def _ppo_critic_loss_from_model_outputs(
             device=cu_seqlens.device,
         ) for i in range(cu_seqlens.shape[0] - 1)
     ])
-    new_values = new_values[leave_one_indices].squeeze(-1)
-    values = values[leave_one_indices].squeeze(-1)
+    new_values = new_values[leave_one_indices].squeeze(-1).float()
+    values = values[leave_one_indices].squeeze(-1).float()
 
     loss, loss_stat = ppo_functional.critic_loss_fn(
         value=new_values,
@@ -531,16 +505,14 @@ def _ppo_critic_loss_from_model_outputs(
 
     # Logging.
     n_tokens = ppo_loss_mask.count_nonzero()
-    mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum()
-    logging_loss = loss.detach() * n_tokens
-    clip_ratio = loss_stat["clip_ratio"] * n_tokens
-    normalized_values = torch.where(ppo_loss_mask, new_values, 0.0).sum().detach()
-    denormalized_values = (torch.where(ppo_loss_mask, denormalized_values, 0.0).sum().detach())
+    mean_ref_kl = (kl_rewards.detach().float() * ppo_loss_mask).sum()
+    logging_loss = loss.detach().float() * n_tokens
+    clip_ratio = loss_stat["clip_ratio"].float() * n_tokens
+    denormalized_values = (torch.where(ppo_loss_mask, denormalized_values, 0.0).sum().detach().float())
     dist.all_reduce(n_tokens, group=constants.data_parallel_group())
     dist.all_reduce(mean_ref_kl, group=constants.data_parallel_group())
     dist.all_reduce(logging_loss, group=constants.data_parallel_group())
     dist.all_reduce(clip_ratio, group=constants.data_parallel_group())
-    dist.all_reduce(normalized_values, group=constants.data_parallel_group())
     dist.all_reduce(denormalized_values, group=constants.data_parallel_group())
 
     # Update KL coefficient to be consistent with actor.
@@ -549,7 +521,6 @@ def _ppo_critic_loss_from_model_outputs(
     return loss, dict(
         value_loss=logging_loss,
         value_clip_ratio=clip_ratio,
-        normalized_values=normalized_values,
         denormalized_values=denormalized_values,
     )
 
@@ -591,7 +562,6 @@ class PPOCriticInterface(model_api.ModelInterface):
             else:
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
-        self._last_inf_sd = None
 
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
@@ -613,17 +583,6 @@ class PPOCriticInterface(model_api.ModelInterface):
         cu_seqlens = data["cu_seqlens"].int()
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
-
-        sd = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
-        if self._last_inf_sd is not None:
-            param_changed = False
-            changed_keys = []
-            for k, v1, v2 in zip(sd.keys(), sd.values(), self._last_inf_sd.values()):
-                if not torch.allclose(v1, v2):
-                    param_changed = True
-                    changed_keys.append(k)
-            print(">>>>>>>> critic inf param changed?", param_changed)
-        self._last_inf_sd = sd
 
         scores = module.forward(
             seqlens_cpu=data.metadata["seqlens"],
@@ -733,7 +692,6 @@ class PPOCriticInterface(model_api.ModelInterface):
         dist.all_reduce(n_tokens, group=constants.data_parallel_group())
         global_stats = dict(returns=float(returns), n_tokens=int(n_tokens))
 
-        sd = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
@@ -766,14 +724,6 @@ class PPOCriticInterface(model_api.ModelInterface):
                 for k, v in stats.items():
                     train_stats[k] += v
 
-        sd2 = {k: v.detach().clone() for k, v in module.module.state_dict().items()}
-        param_changed = False
-        changed_keys = []
-        for k, v1, v2 in zip(sd.keys(), sd.values(), sd2.values()):
-            if not torch.allclose(v1, v2):
-                param_changed = True
-                changed_keys.append(k)
-        print(">>>>>>>> critic train param changed?", param_changed)
         cur_epoch = model.version.epoch
         model.inc_version()
 
@@ -781,7 +731,6 @@ class PPOCriticInterface(model_api.ModelInterface):
             train_stats = dict(
                 value_loss=float(train_stats["value_loss"] / n_tokens),
                 value_clip_ratio=float(train_stats["value_clip_ratio"] / n_tokens),
-                normalized_values=float(train_stats["normalized_values"] / n_tokens),
                 denormalized_values=float(train_stats["denormalized_values"] / n_tokens),
                 returns=global_stats["returns"] / int(n_tokens),
                 n_tokens=int(n_tokens),

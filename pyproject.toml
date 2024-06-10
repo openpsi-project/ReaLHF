@@ -21,7 +21,7 @@ dependencies = [
     "torch",
     "flash-attn",
     "transformers",
-    "deepspeed",
+    "deepspeed==0.14.0",
     "hydra-core",
     "pyzmq",
     "megatron_core==0.6.0",
