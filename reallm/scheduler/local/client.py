@@ -6,9 +6,9 @@ import subprocess
 
 import psutil
 
+from reallm.base.constants import LOG_ROOT
 from reallm.scheduler.client import JobInfo, JobState, SchedulerClient, SchedulerError
 import reallm.base.logging as logging
-from reallm.base.constants import LOG_ROOT
 
 logger = logging.getLogger("Local Scheduler")
 
@@ -98,7 +98,11 @@ class LocalSchedulerClient(SchedulerClient):
                 self._job_with_gpu.values(),
                 self._job_env_vars.values(),
         ):
-            os.makedirs(os.path.dirname(self.log_path_of(worker_type)), exist_ok=True, mode=0o775)
+            os.makedirs(
+                os.path.dirname(self.log_path_of(worker_type)),
+                exist_ok=True,
+                mode=0o775,
+            )
             for i in range(count):
                 if use_gpu:
                     available_device_id = self._gpu_counter % len(self._cuda_devices)

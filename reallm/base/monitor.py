@@ -4,7 +4,6 @@ from typing import Callable, List, Optional, TYPE_CHECKING, Union
 import contextlib
 import dataclasses
 import enum
-import pynvml
 import os
 import pickle
 import time
@@ -249,7 +248,6 @@ def summary_time_points(
     plt.tight_layout()
 
     plt.savefig(save_fig_path)
-
 
 
 def gpu_utilization_monitor(worker_idx: int, interval: float, ttl: float):

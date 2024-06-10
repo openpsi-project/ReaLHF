@@ -131,7 +131,7 @@ class ModelTrainEvalConfig:
     """
 
     type: ModelFamily = dataclasses.field(default=ModelFamily("llama", 7, False))
-    backend: str = dataclasses.field(default="megatron",metadata={"choices": ["megatron", "deepspeed"]})
+    backend: str = dataclasses.field(default="megatron", metadata={"choices": ["megatron", "deepspeed"]})
     path: str = ""
     lora: Optional[LoRAConfig] = None
     gradient_checkpointing: bool = True

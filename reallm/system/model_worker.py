@@ -5,13 +5,13 @@ import itertools
 import multiprocessing as mp
 import os
 import queue
-import pynvml
 import socket
 import time
 import uuid
 
 import deepspeed
 import numpy as np
+import pynvml
 import torch
 import torch.distributed as dist
 import torch.utils.data
@@ -623,7 +623,7 @@ class ModelWorker(worker_base.Worker):
             res = self._interface.train_step(self._model, data)  # -> Dict
         elif request.handle_name == "generate":
             res = self._interface.generate(self._model, data)  # -> NamedArray
-            
+
         if res is not None and isinstance(res, namedarray.NamedArray):
             new_res = {}
             for k, v in res.items():
@@ -634,7 +634,7 @@ class ModelWorker(worker_base.Worker):
             new_res = namedarray.from_dict(new_res)
             new_res.register_metadata(**res.metadata)
             res = new_res, buffer_indices, seqlens
-        
+
         utilization = pynvml.nvmlDeviceGetUtilizationRates(self.__nvml_handle)
         memory_info = pynvml.nvmlDeviceGetMemoryInfo(self.__nvml_handle)
         total_memory = memory_info.total / (1024**2)  # Convert bytes to megabytes
@@ -645,6 +645,7 @@ class ModelWorker(worker_base.Worker):
                     f"Total Memory - {total_memory:.2f}MB, Used Memory - {used_memory:.2f}MB, "
                     f"Memory Usage - {memory_usage_percentage:.2f}%")
         return res
+
     @cuda_tmark("data_transfer", CUDATimeMarkType.comm)
     def __data_transfer_among_workers(self, hook_data: Dict[str, Any]):
 
@@ -853,12 +854,12 @@ class ModelWorker(worker_base.Worker):
         st = time.monotonic()
         self.__maybe_receive_requests()
 
-        # NOTE: We ensure that all model workers have the same set of requests 
+        # NOTE: We ensure that all model workers have the same set of requests
         # at any time through a TCP-like protocol, i.e., req -> ack -> syn -> resp.
         # Each request is composed of pre-hooks, the main request, and post-hooks.
         # We execute all pre-hooks first because they involve data transfer
         # among workers. Then, we round-robinly execute hooks and requests.
-        # These are designed to prevent mutual blocking when different requests 
+        # These are designed to prevent mutual blocking when different requests
         # are handled in different but intersected sets of model workers.
         # E.g., If we have a request A and a request B, the execution order will be
         # A.pre_hook -> B.pre_hook -> A -> B -> A.post_hook -> B.post_hook.
