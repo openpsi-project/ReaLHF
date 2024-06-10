@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Dict, Optional
+from typing import *
 import dataclasses
 
 from megatron.core import parallel_state
@@ -12,13 +12,18 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import transformers
 
 from reallm.api.core import model_api
-from reallm.base import constants
+from reallm.base import constants, logging
 from reallm.impl.model.modules.mlp import get_activation_fn
 from reallm.impl.model.nn.real_llm_api import ReaLModel
+from reallm.impl.model.nn.real_llm_generate import GenerationConfig
+from reallm.impl.model.parallelism.pipeline_parallel.pipe_runner import PipelineRunner, MegatronEngine
 
 WITHIN_MEGATRON_CONTEXT = False
+
+logger = logging.getLogger("Megatron Backend", "benchmark")
 
 
 @contextmanager
@@ -39,7 +44,7 @@ def megatron_ctx():
     parallel_state._DATA_PARALLEL_GROUP_GLOO = grid.get_data_parallel_group_gloo()
     parallel_state._DATA_PARALLEL_GLOBAL_RANKS = dist.get_process_group_ranks(g)
     parallel_state._DATA_PARALLEL_GROUP_WITH_CP = g
-    parallel_state._DATA_PARALLEL_GROUP_WITH_CP_GLOO = (grid.get_data_parallel_group_gloo())
+    parallel_state._DATA_PARALLEL_GROUP_WITH_CP_GLOO = grid.get_data_parallel_group_gloo()
     parallel_state._DATA_PARALLEL_GLOBAL_RANKS_WITH_CP = dist.get_process_group_ranks(g)
 
     # Build the context-parallel groups.
@@ -59,10 +64,11 @@ def megatron_ctx():
     parallel_state._PIPELINE_MODEL_PARALLEL_GROUP = g
     parallel_state._PIPELINE_GLOBAL_RANKS = dist.get_process_group_ranks(g)
     parallel_state._EMBEDDING_GROUP = grid.embedding_proc_group
-    parallel_state._EMBEDDING_GLOBAL_RANKS = dist.get_process_group_ranks(grid.embedding_proc_group)
+    parallel_state._EMBEDDING_GLOBAL_RANKS = dist.get_process_group_ranks(grid.embedding_proc_group) if grid.embedding_proc_group is not None else list(range(dist.get_world_size()))
     parallel_state._POSITION_EMBEDDING_GROUP = grid.position_embedding_proc_group
     parallel_state._POSITION_EMBEDDING_GLOBAL_RANKS = dist.get_process_group_ranks(
-        grid.position_embedding_proc_group)
+        grid.position_embedding_proc_group
+    ) if grid.position_embedding_proc_group is not None else list(range(dist.get_world_size()))
 
     # Build the tensor + data parallel groups.
     parallel_state._TENSOR_AND_DATA_PARALLEL_GROUP = grid.tp_dp_proc_group
@@ -73,13 +79,15 @@ def megatron_ctx():
     parallel_state._TENSOR_AND_EXPERT_PARALLEL_GROUP = constants.model_parallel_group()
     g = constants.data_parallel_group()
     parallel_state._DATA_MODULO_EXPERT_PARALLEL_GROUP = g
-    parallel_state._DATA_MODULO_EXPERT_PARALLEL_GROUP_GLOO = (grid.get_data_parallel_group_gloo())
+    parallel_state._DATA_MODULO_EXPERT_PARALLEL_GROUP_GLOO = grid.get_data_parallel_group_gloo()
 
     yield
     WITHIN_MEGATRON_CONTEXT = False
 
 
-def get_megatron_transformer_config(mconfig: model_api.ReaLModelConfig,) -> TransformerConfig:
+def get_megatron_transformer_config(
+    mconfig: model_api.ReaLModelConfig,
+) -> TransformerConfig:
     nq = mconfig.hidden_dim // mconfig.head_dim
     n_group = nq // mconfig.n_kv_heads
     return TransformerConfig(
@@ -101,45 +109,190 @@ def get_megatron_transformer_config(mconfig: model_api.ReaLModelConfig,) -> Tran
     )
 
 
-@dataclasses.dataclass
-class MegatronModelRunner:
-    megatron_module: DistributedDataParallel
-    optimizer: MegatronOptimizer
+class ReaLMegatronEngine:
+    # TODO: merge this with deepspeed and inference engine
 
-    @property
-    def module(self):
-        return self.megatron_module.module
+    def __init__(self, module: ReaLModel, megatron_engine: MegatronEngine):
+        self.module = module
 
-    def zero_grad(self, set_to_none=True):
+        self.device = module.device
+        self.dtype = module.dtype
+
+        self.engine = megatron_engine
+
+        if constants.pipe_parallel_world_size() > 1:
+            self.pipe_runner = PipelineRunner(module)
+
+            model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
+            num_params = sum([p.numel() for p in model_parameters])
+            unique_params = num_params
+
+            params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(self.device)
+            dist.all_reduce(params_tensor, group=constants.grid().get_model_parallel_group())
+            params_tensor = params_tensor.tolist()
+            total_params = params_tensor[0]
+            unique_params = params_tensor[1]
+
+            if constants.parallelism_rank() == 0:
+                logger.info(
+                    f"CONFIG: default_train_mbs={self.pipe_runner.default_train_mbs} "
+                    f"default_inf_mbs={self.pipe_runner.default_inf_mbs} "
+                    f"num_layers(this stage)={self.module.num_layers} "
+                    f"pp_size={constants.pipe_parallel_world_size()} "
+                    f"dp_size={constants.data_parallel_world_size()} "
+                    f"mp_size={constants.model_parallel_world_size()} "
+                )
+            if constants.data_parallel_rank() == 0:
+                logger.info(
+                    f"rank={constants.parallelism_rank()} "
+                    f"stage={constants.pipe_parallel_rank()} "
+                    f"layers={self.module.num_layers} "
+                    f"[{self.module.layer_idx_start}, {self.module.layer_idx_end}) "
+                    f"stage_params={num_params} ({num_params/1e6:0.3f}M) "
+                    f"total_params={total_params} ({total_params/1e6:0.3f}M) "
+                    f"unique_params={unique_params} ({unique_params/1e6:0.3f}M)"
+                )
+
+    def train(self, mode: bool = True):
+        self.module.train(mode)
+        self.engine.ddp.train(mode)
+        return self
+
+    def eval(self):
+        self.module.eval()
+        self.engine.ddp.eval()
+        return self
+
+    def train_batch(
+        self,
+        seqlens_cpu: List[int],
+        packed_input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        loss_fn: Callable,
+        version_steps: int,
+        input_lens_for_partition: Optional[torch.Tensor] = None,
+        num_micro_batches: Optional[int] = None,
+        **loss_fn_kwargs,
+    ):
         with megatron_ctx():
-            self.megatron_module.zero_grad_buffer()
-            self.optimizer.zero_grad(set_to_none=set_to_none)
+            self.engine.zero_grad()
+            if constants.pipe_parallel_world_size() > 1:
+                return self.pipe_runner.train_batch(
+                    engine=self.engine,
+                    seqlens_cpu=seqlens_cpu,
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    loss_fn=loss_fn,
+                    version_steps=version_steps,
+                    input_lens_for_partition=input_lens_for_partition,
+                    num_micro_batches=num_micro_batches,
+                    **loss_fn_kwargs,
+                )
+            else:
+                # FIXME: num_micro_batches is ignored here
+                max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+                model_output = self.engine.ddp(
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                ).logits
+                loss, stat = loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs)
+                self.engine.optim.scale_loss(loss).backward()
+                finalize_model_grads([self.engine.ddp])
+                lr_kwargs = {"epoch": version_steps} if version_steps is not None else None
+                # TODO: lr scheduler here
+                update_successful, grad_norm, _ = self.engine.optim.step()
+                if constants.data_parallel_rank() == 0 and constants.model_parallel_rank() == 0:
+                    logger.info(f"Megatron backend update success? {update_successful}. "
+                                f"Grad Norm: {grad_norm}. "
+                                f"Current loss scale: {self.engine.optim.get_loss_scale()}. ")
+                return stat
 
-    def __call__(self, *args, **kwargs):
+    @torch.no_grad()
+    def eval_batch(
+        self,
+        seqlens_cpu: List[int],
+        packed_input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        loss_fn: Callable,
+        input_lens_for_partition: Optional[torch.Tensor] = None,
+        num_micro_batches: Optional[int] = None,
+        **loss_fn_kwargs,
+    ):
         with megatron_ctx():
-            return self.megatron_module(*args, **kwargs)
+            if constants.pipe_parallel_world_size() > 1:
+                return self.pipe_runner.eval_batch(
+                    seqlens_cpu=seqlens_cpu,
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    loss_fn=loss_fn,
+                    input_lens_for_partition=input_lens_for_partition,
+                    num_micro_batches=num_micro_batches,
+                    **loss_fn_kwargs,
+                )
+            else:
+                max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+                model_output = self.engine.ddp(
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                ).logits
+                _, stat = loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs)
+                return stat
 
-    def forward(self, *args, **kwargs):
+    def forward(
+        self,
+        seqlens_cpu: List[int],
+        packed_input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        num_micro_batches: Optional[int] = None,
+    ):
         with megatron_ctx():
-            return self.megatron_module(*args, **kwargs)
+            if constants.pipe_parallel_world_size() > 1:
+                return self.pipe_runner.forward(
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    seqlens_cpu=seqlens_cpu,
+                    num_micro_batches=num_micro_batches,
+                )
+            else:
+                max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+                return self.engine.ddp(
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                ).logits
 
-    def backward(self, loss: torch.Tensor):
+    @torch.no_grad()
+    def generate(
+        self,
+        seqlens_cpu: List[int],
+        packed_input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        tokenizer: transformers.PreTrainedTokenizerFast,
+        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        num_micro_batches: Optional[int] = None,
+    ):
         with megatron_ctx():
-            loss.backward()
-            finalize_model_grads([self.megatron_module])
-
-    def step(self):
-        with megatron_ctx():
-            # TODO: lr scheduler here
-            return self.optimizer.step()
-
-    def train(self, *args, **kwargs):
-        with megatron_ctx():
-            return self.megatron_module.train(*args, **kwargs)
-
-    def eval(self, *args, **kwargs):
-        with megatron_ctx():
-            return self.megatron_module.eval(*args, **kwargs)
+            if constants.pipe_parallel_world_size() > 1:
+                return self.pipe_runner.generate(
+                    seqlens_cpu=seqlens_cpu,
+                    num_micro_batches=num_micro_batches,
+                    tokenizer=tokenizer,
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    gconfig=gconfig,
+                )
+            else:
+                max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+                res = self.module.generate(
+                    tokenizer=tokenizer,
+                    packed_input_ids=packed_input_ids,
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                    gconfig=gconfig,
+                )
+                return res.sequences, res.scores, res.logits_mask
 
 
 @dataclasses.dataclass
@@ -149,7 +302,8 @@ class MegatronTrainBackend(model_api.ModelBackend):
         default="adam",
     )
     optimizer_config: dict = dataclasses.field(
-        default_factory=lambda: dict(lr=1e-5, weight_decay=0.1, betas=(0.9, 0.95), eps=1e-5))
+        default_factory=lambda: dict(lr=1e-5, weight_decay=0.1, betas=(0.9, 0.95), eps=1e-5)
+    )
     lr_scheduler_type: str = "cosine"
     warmup_steps_proportion: float = 0.0
     min_lr_ratio: float = 0.0  # will be used for linear and cosine schedule
@@ -157,12 +311,13 @@ class MegatronTrainBackend(model_api.ModelBackend):
     enable_bf16: bool = False
     zero_stage: int = 2
     accumulate_allreduce_grads_in_fp32: bool = False
+    initial_loss_scale: float = 4096.0
     # addtional args
     additional_config: Dict = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
-        if self.zero_stage > 2:
-            raise ValueError("Zero stage for Megatron must be in [0, 1, 2].")
+        if 0 < self.zero_stage < 2:
+            raise ValueError("Zero stage for Megatron must be in [1, 2].")
 
     def _initialize(self, model: model_api.Model, spec: model_api.FinetuneSpec) -> model_api.Model:
         module = model.module
@@ -174,7 +329,7 @@ class MegatronTrainBackend(model_api.ModelBackend):
                 module=module,
                 data_parallel_group=constants.data_parallel_group(),
                 accumulate_allreduce_grads_in_fp32=self.accumulate_allreduce_grads_in_fp32,
-                overlap_grad_reduce=self.zero_stage > 1,
+                overlap_grad_reduce=False,  # FIXME
                 use_distributed_optimizer=self.zero_stage > 0,
                 expert_data_parallel_group=None,
                 disable_bucketing=False,
@@ -192,6 +347,7 @@ class MegatronTrainBackend(model_api.ModelBackend):
         # Sanity checks.
         assert real_model._param_size == param_grad_buf.numel
         for n, p in real_model.layers.named_parameters():
+            n = ".".join([str(real_model.layer_idx_start + int(n.split('.')[0])), n.split('.', 1)[1]])
             idx_start, idx_end, _ = param_grad_buf.param_index_map[p]
             assert real_model._param_spec[n].start_idx == idx_start
             assert real_model._param_spec[n].end_idx == idx_end
@@ -207,14 +363,14 @@ class MegatronTrainBackend(model_api.ModelBackend):
             min_lr=self.min_lr_ratio * self.optimizer_config["lr"],
             weight_decay=self.optimizer_config.get("weight_decay", 0.1),
             params_dtype=real_model.dtype,
-            initial_loss_scale=4096.0,
+            initial_loss_scale=self.initial_loss_scale,
             adam_beta1=betas[0],
             adam_beta2=betas[1],
             adam_eps=self.optimizer_config.get("eps", 1e-5),
             sgd_momentum=self.optimizer_config.get("momentum", 0.9),
             use_distributed_optimizer=self.zero_stage > 0,
-            overlap_grad_reduce=self.zero_stage > 1,
-            overlap_param_gather=self.zero_stage > 1,
+            overlap_grad_reduce=False,  # FIXME
+            overlap_param_gather=self.zero_stage > 1, # FIXME
             clip_grad=self.optimizer_config.get("clip_grad", 1.0),
         )
 
@@ -228,6 +384,9 @@ class MegatronTrainBackend(model_api.ModelBackend):
                 scale_lr_cond=None,
                 lr_mult=1.0,
             )
+
+        mg_engine = MegatronEngine(module, optimizer)
+
         # TODO: add lr scheduler
-        model.module = MegatronModelRunner(module, optimizer)
+        model.module = ReaLMegatronEngine(real_model, mg_engine)
         return model

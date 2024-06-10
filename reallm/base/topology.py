@@ -388,6 +388,8 @@ class ParallelGrid:
         # Create new ProcessGroup for pipeline collectives - these are pipe parallel groups
         self.pp_group = []
         self.pp_proc_group = None
+        self.embedding_proc_group = None
+        self.position_embedding_proc_group = None
         self.pipe_groups = self._topo.get_axis_comm_lists("pipe")
         for ranks in self.pipe_groups:
             proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])

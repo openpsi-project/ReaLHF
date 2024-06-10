@@ -104,6 +104,27 @@ class ReaLModel(nn.Module):
         )
         self.contiguous_param = None
 
+    
+    @property
+    def pre_process(self):
+        # A workaround to make Megatron-LM backend happy.
+        if constants.pipe_parallel_rank() == 0:
+            return self.layers[0]
+        elif constants.pipe_parallel_rank() == constants.pipe_parallel_world_size() - 1:
+            return self.layers[-1]
+        return None
+    
+    @property
+    def post_process(self):
+        # A workaround to make Megatron-LM backend happy.
+        if constants.pipe_parallel_rank() == constants.pipe_parallel_world_size() - 1:
+            return self.layers[-1]
+        return None
+    
+    @property
+    def share_embeddings_and_output_weights(self):
+        return self.config.share_embeddings_and_output_weights
+
     def instantiate(self):
         assert not self._instantiated
         layers = []
@@ -256,7 +277,7 @@ class ReaLModel(nn.Module):
     def __forward(self, x: PipeTransferData,
                   ys: List[PipeCacheData]) -> Tuple[PipeTransferData, List[PipeCacheData]]:
         layers = self.layers
-        assert len(ys) == len(layers)
+        assert len(ys) == len(layers), (len(ys), len(layers))
         raw_pp_input = x.pp_input
         for i, (layer, y) in enumerate(zip(layers, ys)):
             x = layer(x, y)

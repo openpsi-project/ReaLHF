@@ -49,6 +49,12 @@ class ReaLModelConfig:
     ### Running configurations. ###
     gradient_accumulation_fusion: bool = False
 
+    # Placeholder, not implemented
+    share_embeddings_and_output_weights: bool = False
+
+    def __post_init__(self):
+        assert not self.share_embeddings_and_output_weights
+
 
 def load_hf_tokenizer(model_name_or_path: str,
                       fast_tokenizer=True,
