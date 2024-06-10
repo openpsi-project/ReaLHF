@@ -97,8 +97,6 @@ class SFTInterface(model_api.ModelInterface):
             **loss_fn_kwargs,
         )
 
-        # FIXME: here the epoch counter is incorrect
-        cur_epoch = model.version.epoch
         model.inc_version()
 
         res = dict()

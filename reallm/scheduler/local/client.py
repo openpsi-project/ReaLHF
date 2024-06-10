@@ -8,6 +8,7 @@ import psutil
 
 from reallm.scheduler.client import JobInfo, JobState, SchedulerClient, SchedulerError
 import reallm.base.logging as logging
+from reallm.base.constants import LOG_ROOT
 
 logger = logging.getLogger("Local Scheduler")
 
@@ -24,10 +25,17 @@ def terminate_process_and_children(pid: int):
 
 
 class LocalSchedulerClient(SchedulerClient):
-    # TODO: log to file
     """Instead of talking to the scheduler server (the typical behaviour), this client starts jobs directly
     on the local host and keeps a collection of job processes.
     """
+
+    def log_path_of(self, worker_type) -> str:
+        return os.path.join(
+            LOG_ROOT,
+            self.expr_name,
+            self.trial_name,
+            f"{worker_type}-0",
+        )
 
     def __init__(self, expr_name, trial_name):
         super().__init__(expr_name, trial_name)
@@ -90,13 +98,14 @@ class LocalSchedulerClient(SchedulerClient):
                 self._job_with_gpu.values(),
                 self._job_env_vars.values(),
         ):
+            os.makedirs(os.path.dirname(self.log_path_of(worker_type)), exist_ok=True, mode=0o775)
             for i in range(count):
                 if use_gpu:
                     available_device_id = self._gpu_counter % len(self._cuda_devices)
                     env_vars["CUDA_VISIBLE_DEVICES"] = str(self._cuda_devices[available_device_id])
                     self._gpu_counter += 1
                 cmd = (" ".join(str(k) + "=" + str(v)
-                                for k, v in env_vars.items()) + " " + self._job_cmd[worker_type])
+                                for k, v in env_vars.items()) + " stdbuf -oL " + self._job_cmd[worker_type])
                 # Run `apps.remote` with a single process.
                 # This simulates a multi-prog slurm job with `count` jobsteps, with each jobstep having a single process.
                 cmd = cmd.format(
@@ -108,6 +117,7 @@ class LocalSchedulerClient(SchedulerClient):
                     wproc_offset=0,
                 )
                 logger.debug("Starting local process with command: %s", cmd)
+                cmd = f"{cmd} | tee -a {self.log_path_of(worker_type)}"
                 process = subprocess.Popen(cmd, shell=isinstance(cmd, str))
                 self._jobs[f"{worker_type}/{i}"] = process
             self._running_worker_types.append(worker_type)

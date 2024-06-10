@@ -93,11 +93,10 @@ class PairedRewardInterface(model_api.ModelInterface):
         scores = (scores - self.output_bias) * self.output_scaling
 
         ###################### logging ######################
-        input_ids = [packed_input_ids[start:end] for start, end in zip(cu_seqlens[:-1], cu_seqlens[1:])]
-        seq_strs = model.tokenizer.batch_decode(input_ids,
-                                                clean_up_tokenization_spaces=False,
-                                                skip_special_tokens=True)
-        # TODO: add it back before merge into main
+        # input_ids = [packed_input_ids[start:end] for start, end in zip(cu_seqlens[:-1], cu_seqlens[1:])]
+        # seq_strs = model.tokenizer.batch_decode(input_ids,
+        #                                         clean_up_tokenization_spaces=False,
+        #                                         skip_special_tokens=True)
         # for seq_str, score in zip(seq_strs, scores):
         #     logger.info(
         #         f"reward is {colorama.Fore.RED}{score.item()}{colorama.Style.RESET_ALL}, "

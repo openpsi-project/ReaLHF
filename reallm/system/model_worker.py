@@ -5,6 +5,7 @@ import itertools
 import multiprocessing as mp
 import os
 import queue
+import pynvml
 import socket
 import time
 import uuid
@@ -45,7 +46,7 @@ TIME_RECORD_RPCS = [
 ]
 
 
-def get_pytorch_profiler():
+def get_pytorch_profiler(with_stack):
     return torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CPU,
@@ -337,7 +338,6 @@ class ModelWorker(worker_base.Worker):
         self.__unwrapped_models: Dict[ModelName, torch.nn.Module | ReaLModel] = dict()
 
         self.__backend_initialized: Dict[ModelName, bool] = dict()
-        self.__profiler_launched = False
 
         for s in self.config.shards:
             with constants.model_scope(s.id.model_name):
@@ -434,25 +434,13 @@ class ModelWorker(worker_base.Worker):
 
     def __handle_one_rpc_hook(self, hook: str, hook_data: Any):
         if hook == "data_transfer":
-            # torch.cuda.synchronize()
-            tik = time.perf_counter()
             self.__data_transfer_among_workers(hook_data)
-            # blogger.debug(
-            #     f"data transfer CPU time: {time.perf_counter() - tik:.4f}s, "
-            #     f"# remaining data in local storage: {sum([len([x for x in xs if isinstance(x, torch.Tensor) and x.device == self.__device]) for xs in self.__data_owner_storage.values()])}, "
-            #     f"# remaining data in receiver cache: {sum([len(xs) for xs in self.__data_receive_cache.values()])}."
-            # )
-            # torch.cuda.synchronize()
         elif hook == "param_realloc":
-            tik = time.perf_counter()
-            # torch.cuda.synchronize()
             from_model_name: ModelName = hook_data["from_model_name"]
             to_model_name: ModelName = hook_data["to_model_name"]
             from_topo: topology.PipeModelDataParallelTopology = hook_data["from_topo"]
             to_topo: topology.PipeModelDataParallelTopology = hook_data["to_topo"]
             to_model_config = hook_data["to_model_config"]
-            # profiler = get_pytorch_profiler()
-            # profiler.start()
             if from_model_name in self.__unwrapped_models:
                 m = self.__unwrapped_models[from_model_name]
             else:
@@ -473,18 +461,13 @@ class ModelWorker(worker_base.Worker):
             if to_model_name in self.__models:
                 self.__unwrapped_models[to_model_name].patch_reparallelization((new_layers, new_param))
                 self.__model_is_handle[to_model_name] = False
-            # FIXME: suppress this log
-            blogger.debug(f"param_realloc CPU time: {time.perf_counter() - tik:.4f}s")
-            # profiler.__exit__(None, None, None)
         elif hook == "offload":
             with cuda_tmarked("offload", CUDATimeMarkType.mem_layout):
-                tik = time.perf_counter()
                 m = self.__unwrapped_models[hook_data["model_name"]]
                 if not isinstance(m, ReaLModel):
                     raise ValueError(f"Model {from_model_name} (type={type(m)}) is not a ReaLModel, "
                                      f"so it can't use offload.")
                 m.async_offload()
-                # blogger.debug(f"async_offload enqueue CUDA request time: {time.perf_counter() - tik:.4f}s")
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
 
@@ -556,8 +539,6 @@ class ModelWorker(worker_base.Worker):
             elif request.handle_name == "model_config":
                 if isinstance(self.__unwrapped_models[request.handler.model_name], ReaLModel):
                     res = self.__unwrapped_models[request.handler.model_name].config
-                else:
-                    res = None
             ############## data loading ##############
             elif request.handle_name == "fetch":
                 fetched_data = data_api.split_sequences(self.__cur_sample)
@@ -590,7 +571,6 @@ class ModelWorker(worker_base.Worker):
                         assert v.device == torch.device("cpu")
                         self.__data_owner_storage[buf_idx][k] = v
                 self.__fetched_sample_cache.clear()
-                res = None
             elif request.handle_name == "spec":
                 res = self.__dataset_n_seqs
             elif request.handle_name == "clear_data_cache":
@@ -614,55 +594,8 @@ class ModelWorker(worker_base.Worker):
                         blogger.debug(f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s")
                 dump_tmark_db(self.__worker_index)
             ############## computation function calls ##############
-            elif request.handle_name == "inference":
-                assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
-                data, buffer_indices, seqlens, output_key_remap = (
-                    self.__compute_input_queues[handler_model_name][request.handle_name].get_nowait())
-                data: namedarray.NamedArray
-                data.register_metadata(seqlens=seqlens)
-                # if constants.model_name().role == "reward":
-                #     profiler = get_pytorch_profiler()
-                #     profiler.start()
-                res = self._interface.inference(self._model, data)  # -> NamedArray
-                # if constants.model_name().role == "reward":
-                #     profiler.__exit__(None, None, None)
-                #     profiler.export_chrome_trace(
-                #         os.path.join(constants.LOG_ROOT, self.__experiment_name, self.__trial_name, f"reward_inf{self.__worker_index}.json")
-                #     )
-                # FIXME: refactor this repetitive code
-                if res is not None:
-                    new_res = {}
-                    for k, v in res.items():
-                        if k in output_key_remap:
-                            new_res[output_key_remap[k]] = v
-                        else:
-                            new_res[k] = v
-                    new_res = namedarray.from_dict(new_res)
-                    new_res.register_metadata(**res.metadata)
-                    assert "seqlens" in new_res.metadata
-                    res = new_res, buffer_indices, seqlens
-            elif request.handle_name == "train_step":
-                assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
-                data, _, seqlens, *_ = self.__compute_input_queues[handler_model_name][
-                    request.handle_name].get_nowait()
-                data.register_metadata(seqlens=seqlens)
-                res = self._interface.train_step(self._model, data)  # -> Dict
-            elif request.handle_name == "generate":
-                assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
-                data, buffer_indices, seqlens, output_key_remap = (
-                    self.__compute_input_queues[handler_model_name][request.handle_name].get_nowait())
-                data.register_metadata(seqlens=seqlens)
-                res = self._interface.generate(self._model, data)  # -> NamedArray
-                if res is not None:
-                    new_res = {}
-                    for k, v in res.items():
-                        if k in output_key_remap:
-                            new_res[output_key_remap[k]] = v
-                        else:
-                            new_res[k] = v
-                    new_res = namedarray.from_dict(new_res)
-                    new_res.register_metadata(**res.metadata)
-                    res = new_res, buffer_indices, seqlens
+            elif request.handle_name in ["inference", "generate", "train_step"]:
+                res = self.__handle_model_function_calls(request, data)
             elif request.handle_name == "evaluate":
                 assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
                 res = self._interface.evaluate(self._model, self._eval_dataloader)  # -> Dict
@@ -678,6 +611,40 @@ class ModelWorker(worker_base.Worker):
 
         self.__request_queue.put_nowait((request, data, True, res))
 
+    def __handle_model_function_calls(self, request: request_reply_stream.Payload, data: Any):
+        assert not self.__model_is_handle[request.handler.model_name], request.handler.model_name
+        input_queue = self.__compute_input_queues[request.handler.model_name][request.handle_name]
+        data, buffer_indices, seqlens, output_key_remap = input_queue.get_nowait()
+        data: namedarray.NamedArray
+        data.register_metadata(seqlens=seqlens)
+        if request.handle_name == "inference":
+            res = self._interface.inference(self._model, data)  # -> NamedArray
+        elif request.handle_name == "train_step":
+            res = self._interface.train_step(self._model, data)  # -> Dict
+        elif request.handle_name == "generate":
+            res = self._interface.generate(self._model, data)  # -> NamedArray
+            
+        if res is not None and isinstance(res, namedarray.NamedArray):
+            new_res = {}
+            for k, v in res.items():
+                if k in output_key_remap:
+                    new_res[output_key_remap[k]] = v
+                else:
+                    new_res[k] = v
+            new_res = namedarray.from_dict(new_res)
+            new_res.register_metadata(**res.metadata)
+            res = new_res, buffer_indices, seqlens
+        
+        utilization = pynvml.nvmlDeviceGetUtilizationRates(self.__nvml_handle)
+        memory_info = pynvml.nvmlDeviceGetMemoryInfo(self.__nvml_handle)
+        total_memory = memory_info.total / (1024**2)  # Convert bytes to megabytes
+        used_memory = memory_info.used / (1024**2)
+        memory_usage_percentage = (used_memory / total_memory) * 100
+        logger.info(f"Worker Index {self.__worker_index}, GPU {self.__pg_info.local_gpu_id}: "
+                    f"Compute Utilization - {utilization.gpu}%, "
+                    f"Total Memory - {total_memory:.2f}MB, Used Memory - {used_memory:.2f}MB, "
+                    f"Memory Usage - {memory_usage_percentage:.2f}%")
+        return res
     @cuda_tmark("data_transfer", CUDATimeMarkType.comm)
     def __data_transfer_among_workers(self, hook_data: Dict[str, Any]):
 
@@ -876,13 +843,9 @@ class ModelWorker(worker_base.Worker):
     def _poll(self):
         if not self.__dist_env_resolved:
             self.__lazy_setup()
+            pynvml.nvmlInit()
+            self.__nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(self.__pg_info.local_gpu_id)
             self.__dist_env_resolved = True
-            # self.tracer.start()
-            # self.__profiler = torch.profiler.profile(
-            #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-            #     # with_stack=True,
-            #     # with_flops=True,
-            # )
 
         if self.__has_dataset:
             self.__prefetch_from_dataset()
@@ -890,56 +853,32 @@ class ModelWorker(worker_base.Worker):
         st = time.monotonic()
         self.__maybe_receive_requests()
 
+        # NOTE: We ensure that all model workers have the same set of requests 
+        # at any time through a TCP-like protocol, i.e., req -> ack -> syn -> resp.
+        # Each request is composed of pre-hooks, the main request, and post-hooks.
+        # We execute all pre-hooks first because they involve data transfer
+        # among workers. Then, we round-robinly execute hooks and requests.
+        # These are designed to prevent mutual blocking when different requests 
+        # are handled in different but intersected sets of model workers.
+        # E.g., If we have a request A and a request B, the execution order will be
+        # A.pre_hook -> B.pre_hook -> A -> B -> A.post_hook -> B.post_hook.
         self.__handle_all_pre_hooks()
         for _ in range(16):
-            # TODO: we can have a smarter scheduling plan, the current plan is basically round-robin
             try:
                 request, data, handled, res = self.__request_queue.get_nowait()
-                if (request.handle_name in ["train_step", "inference", "generate"]
-                        and not self.__profiler_launched):
-                    self.tracer.start()
-                    # self.__profiler.start()
-                    self.__profiler_launched = True
-                    self.__profiler_ctl = timeutil.FrequencyControl(frequency_seconds=10)
                 self.__model_poll_step(request, data, handled, res)
             except queue.Empty:
                 break
 
         r = self.__maybe_post_responses()
 
-        # FIXME: add memory monitoring
-        if r.batch_count > 0:
-            # tik = time.perf_counter()
-            # blogger.debug(("Model worker #{}#: MemAllocated=*{}*GB, MaxMemAllocated=${}$GB".format(
-            #     ",".join(self.model_names),
-            #     round(get_accelerator().memory_allocated() / 1024**3, 2),
-            #     round(get_accelerator().max_memory_allocated() / 1024**3, 2),
-            # )))
-            # blogger.debug(f"monitoring overhead {time.perf_counter()-tik}s")
-            # if os.environ.get("REAL_TRACE", "0") == "1":
-            #     self.tracer.save()
-            if self.__profiler_launched and self.__profiler_ctl.check():
-                self.tracer.save()
-                # import torch.autograd.profiler as prof
-                # self.__profiler.stop()
-                # prof.KinetoStepTracker.erase_step_count("ProfilerStep")
-                # self.__profiler
-                # self.__profiler.stop_trace()
-                # self.__profiler_launched = False
-                # self.__profiler.export_chrome_trace(self._tracer_output_file)
-
         t = time.monotonic() - st
         self.__total_time += t
-
-        # blogger.debug(
-        #     f"Model worker #{','.join(self.model_names)}# poll time: {t:.4f}s, engine poll time {pt:.4f}s, percent {pt/t:.4f}"
-        # )
         return r
 
     def __recover_save(self):
         # store model and dataset states for recover
         if self.__dist_env_resolved:
-            import shutil
 
             for model_name, model in self.__models.items():
                 if self.__model_is_handle[model_name]:
