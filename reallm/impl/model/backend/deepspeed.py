@@ -12,9 +12,9 @@ import torch
 import torch.distributed as dist
 import transformers
 
+from reallm.impl.model.backend.pipe_runner import PipelineRunner
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
-from reallm.impl.model.backend.pipe_runner import PipelineRunner
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
 import reallm.base.logging as logging

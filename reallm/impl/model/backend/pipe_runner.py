@@ -13,6 +13,7 @@ import transformers
 from reallm.api.core import data_api
 from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.base.namedarray import NamedArray
+from reallm.impl.model.backend.utils import MegatronEngine
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from reallm.impl.model.nn.real_llm_generate import (_gather_gen_output_from_list,
@@ -26,7 +27,6 @@ import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.impl.model.parallelism.pipeline_parallel.p2p as p2p
 import reallm.impl.model.parallelism.pipeline_parallel.static_schedule as schedule
-from reallm.impl.model.backend.utils import MegatronEngine
 
 logger = logging.getLogger("Pipeline Runner", "benchmark")
 
@@ -772,9 +772,6 @@ class PipeTrainBackwardReduceInstrSetForDeepSpeed:
         }
 
 
-
-
-
 @dataclasses.dataclass
 class PipeTrainBackwardReduceInstrSetForMegatron:
     # NOTE: merge MegatronDDP and MegatronDistOptim into one class
@@ -878,7 +875,10 @@ class PipeTrainInstrSet:
         elif self.backend == "megatron":
             return {
                 **PipeTrainForwardCommInstrSet.INSTRUCTION_MAP,
-                **PipeTrainBackwardReduceInstrSetForMegatron(self.megatron_engine, num_micro_batches=self.num_micro_batches,).INSTRUCTION_MAP,
+                **PipeTrainBackwardReduceInstrSetForMegatron(
+                    self.megatron_engine,
+                    num_micro_batches=self.num_micro_batches,
+                ).INSTRUCTION_MAP,
             }
         else:
             raise NotImplementedError()
@@ -1081,9 +1081,17 @@ class PipelineRunner:
         )
 
         if isinstance(engine, DeepSpeedEngine):
-            instr_map = PipeTrainInstrSet(backend="deepspeed", ds_engine=engine, num_micro_batches=num_micro_batches,).INSTRUCTION_MAP
+            instr_map = PipeTrainInstrSet(
+                backend="deepspeed",
+                ds_engine=engine,
+                num_micro_batches=num_micro_batches,
+            ).INSTRUCTION_MAP
         elif isinstance(engine, MegatronEngine):
-            instr_map = PipeTrainInstrSet(backend="megatron", megatron_engine=engine, num_micro_batches=num_micro_batches,).INSTRUCTION_MAP
+            instr_map = PipeTrainInstrSet(
+                backend="megatron",
+                megatron_engine=engine,
+                num_micro_batches=num_micro_batches,
+            ).INSTRUCTION_MAP
         else:
             raise NotImplementedError(f"Unknown backend type for training: {type(engine)}")
 

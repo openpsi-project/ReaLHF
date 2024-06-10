@@ -16,11 +16,11 @@ import transformers
 
 from reallm.api.core import model_api
 from reallm.base import constants, logging
+from reallm.impl.model.backend.pipe_runner import PipelineRunner
+from reallm.impl.model.backend.utils import MegatronEngine, OptimizerParamScheduler
 from reallm.impl.model.modules.mlp import get_activation_fn
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
-from reallm.impl.model.backend.pipe_runner import PipelineRunner
-from reallm.impl.model.backend.utils import OptimizerParamScheduler, MegatronEngine
 
 WITHIN_MEGATRON_CONTEXT = False
 
@@ -385,11 +385,11 @@ class MegatronTrainBackend(model_api.ModelBackend):
                 scale_lr_cond=None,
                 lr_mult=1.0,
             )
-            
+
             warmup_steps = int(self.warmup_steps_proportion * spec.total_train_steps)
             lr_scheduler = OptimizerParamScheduler(
                 optimizer,
-                init_lr=0.0 if self.warmup_steps_proportion >0 else lr,
+                init_lr=0.0 if self.warmup_steps_proportion > 0 else lr,
                 max_lr=lr,
                 min_lr=self.min_lr_ratio * lr,
                 lr_warmup_steps=warmup_steps,
@@ -404,5 +404,6 @@ class MegatronTrainBackend(model_api.ModelBackend):
         mg_engine = MegatronEngine(module, optimizer, lr_scheduler)
         model.module = ReaLMegatronEngine(real_model, mg_engine)
         return model
+
 
 model_api.register_backend("megatron", MegatronTrainBackend)

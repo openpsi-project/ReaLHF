@@ -332,7 +332,7 @@ def _test_para_realloc(
                 delta_reduce = delta.clone()
                 dist.all_reduce(delta_reduce, group=constants.data_parallel_group())
                 delta_reduce /= dist.get_world_size(group=constants.data_parallel_group())
-                assert torch.allclose(delta, delta_reduce, atol=2e-4), (delta - delta_reduce).abs().max()
+                assert torch.allclose(delta, delta_reduce, atol=2e-4), ((delta - delta_reduce).abs().max())
                 for i, p3i in enumerate(all_p3):
                     assert torch.allclose(p3i, p3), (
                         i,
@@ -391,9 +391,9 @@ def test_param_realloc(
 
 def decompose_to_three_factors(n: int):
     factors = []
-    for i in range(1, int(n ** (1 / 2)) + 1):
+    for i in range(1, int(n**(1 / 2)) + 1):
         if n % i == 0:
-            for j in range(i, int((n // i) ** (1 / 2)) + 1):
+            for j in range(i, int((n // i)**(1 / 2)) + 1):
                 if (n // i) % j == 0:
                     k = (n // i) // j
                     factors += list(set(itertools.permutations([i, j, k])))
@@ -422,8 +422,7 @@ if __name__ == "__main__":
     #     with open(logfile, "a") as f:
     #         f.write(f"{from_pp_dp_mp}, {to_pp_dp_mp}\n")
     for i, (from_pp_dp_mp, to_pp_dp_mp) in enumerate([[(2, 4, 1), (4, 1, 2)]]):
-        print(
-            ">" * 10 + f" testing with from_pp_dp_mp={from_pp_dp_mp}, to_pp_dp_mp={to_pp_dp_mp} " + "<" * 10
-        )
+        print(">" * 10 + f" testing with from_pp_dp_mp={from_pp_dp_mp}, to_pp_dp_mp={to_pp_dp_mp} " +
+              "<" * 10)
         for model_family_name, path in [("llama", "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/")]:
             test_param_realloc(model_family_name, False, False, from_pp_dp_mp, to_pp_dp_mp, path)
