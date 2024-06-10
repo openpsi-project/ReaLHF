@@ -1,22 +1,23 @@
 from typing import *
 import dataclasses
+import itertools
+import json
 import os
 import shutil
 
 import torch
 import torch.distributed as dist
 import transformers
-import itertools
-import json
+
 from reallm.api.core.config import ModelFamily, ModelName, ModelShardID
 from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, ReaLModelConfig
 from reallm.base import constants, logging
 from reallm.base.testing import clear_name_resolve, init_global_constants, LocalMultiProcessTest
 
 if TYPE_CHECKING:
-    from reallm.impl.model.nn.real_llm_api import ReaLModel
-    from reallm.impl.model.backend.megatron import MegatronTrainBackend, ReaLMegatronEngine
     from reallm.impl.model.backend.inference import PipelinableInferenceEngine, PipelineInferenceBackend
+    from reallm.impl.model.backend.megatron import MegatronTrainBackend, ReaLMegatronEngine
+    from reallm.impl.model.nn.real_llm_api import ReaLModel
 
 logger = logging.getLogger("tests.test_saveload")
 
@@ -32,8 +33,7 @@ def _shrink_mconfig(mconfig: ReaLModelConfig):
 
 def create_model(model_family_name, model_name, hf_path, is_critic, max_pp, instantiate=True) -> "ReaLModel":
     # NOTE: import here to avoid initializing CUDA context in the main process
-    from reallm.impl.model.nn.real_llm_api import ReaLModel
-    from reallm.impl.model.nn.real_llm_api import add_helper_functions
+    from reallm.impl.model.nn.real_llm_api import add_helper_functions, ReaLModel
 
     with constants.model_scope(model_name):
         tokenizer = transformers.AutoTokenizer.from_pretrained(hf_path)
@@ -283,8 +283,8 @@ def _test_para_realloc(
 
     redist.backward()
 
-    from reallm.impl.model.interface.sft_interface import compute_packed_sft_loss
     from reallm.impl.model.backend.megatron import ReaLMegatronEngine
+    from reallm.impl.model.interface.sft_interface import compute_packed_sft_loss
 
     with constants.model_scope(from_model_name):
         max_trials = 20
@@ -328,7 +328,7 @@ def _test_para_realloc(
                 delta_reduce = delta.clone()
                 dist.all_reduce(delta_reduce, group=constants.data_parallel_group())
                 delta_reduce /= dist.get_world_size(group=constants.data_parallel_group())
-                assert torch.allclose(delta, delta_reduce, atol=2e-4), (delta - delta_reduce).abs().max()
+                assert torch.allclose(delta, delta_reduce, atol=2e-4), ((delta - delta_reduce).abs().max())
                 for i, p3i in enumerate(all_p3):
                     assert torch.allclose(p3i, p3), (
                         i,
@@ -387,9 +387,9 @@ def test_param_realloc(
 
 def decompose_to_three_factors(n: int):
     factors = []
-    for i in range(1, int(n ** (1 / 2)) + 1):
+    for i in range(1, int(n**(1 / 2)) + 1):
         if n % i == 0:
-            for j in range(i, int((n // i) ** (1 / 2)) + 1):
+            for j in range(i, int((n // i)**(1 / 2)) + 1):
                 if (n // i) % j == 0:
                     k = (n // i) // j
                     factors += list(set(itertools.permutations([i, j, k])))
@@ -411,9 +411,8 @@ if __name__ == "__main__":
         if to_pp_dp_mp == (8, 1, 1):
             # This case will always overflow
             continue
-        print(
-            ">" * 10 + f" testing with from_pp_dp_mp={from_pp_dp_mp}, to_pp_dp_mp={to_pp_dp_mp} " + "<" * 10
-        )
+        print(">" * 10 + f" testing with from_pp_dp_mp={from_pp_dp_mp}, to_pp_dp_mp={to_pp_dp_mp} " +
+              "<" * 10)
         for model_family_name, path in [("llama", "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/")]:
             test_param_realloc(model_family_name, False, False, from_pp_dp_mp, to_pp_dp_mp, path)
         with open(logfile, "a") as f:
