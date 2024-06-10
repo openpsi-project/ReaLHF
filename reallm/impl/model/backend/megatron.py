@@ -6,7 +6,7 @@ from megatron.core import parallel_state
 from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel
 from megatron.core.distributed.finalize_model_grads import finalize_model_grads
 from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
-from megatron.core.optimizer import get_megatron_optimizer, MegatronOptimizer
+from megatron.core.optimizer import get_megatron_optimizer
 from megatron.core.optimizer.optimizer_config import OptimizerConfig
 from megatron.core.transformer.transformer_config import TransformerConfig
 import torch
@@ -19,7 +19,8 @@ from reallm.base import constants, logging
 from reallm.impl.model.modules.mlp import get_activation_fn
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
-from reallm.impl.model.parallelism.pipeline_parallel.pipe_runner import MegatronEngine, PipelineRunner
+from reallm.impl.model.backend.pipe_runner import PipelineRunner
+from reallm.impl.model.backend.utils import OptimizerParamScheduler, MegatronEngine
 
 WITHIN_MEGATRON_CONTEXT = False
 
@@ -195,9 +196,9 @@ class ReaLMegatronEngine:
                 loss, stat = loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs)
                 self.engine.optim.scale_loss(loss).backward()
                 finalize_model_grads([self.engine.ddp])
-                lr_kwargs = ({"epoch": version_steps} if version_steps is not None else None)
-                # TODO: lr scheduler here
                 update_successful, grad_norm, _ = self.engine.optim.step()
+                if update_successful:
+                    self.engine.lr_scheduler.step_absolute(version_steps)
                 if (constants.data_parallel_rank() == 0 and constants.model_parallel_rank() == 0):
                     logger.info(f"Megatron backend update success? {update_successful}. "
                                 f"Grad Norm: {grad_norm}. "
@@ -304,15 +305,14 @@ class MegatronTrainBackend(model_api.ModelBackend):
     min_lr_ratio: float = 0.0  # will be used for linear and cosine schedule
     enable_fp16: bool = True
     enable_bf16: bool = False
-    zero_stage: int = 2
+    use_zero_optimization: bool = True
+    overlap_grad_reduce: bool = True
+    overlap_param_gather: bool = True
     accumulate_allreduce_grads_in_fp32: bool = False
     initial_loss_scale: float = 4096.0
+    gradient_clipping: float = 1.0
     # addtional args
     additional_config: Dict = dataclasses.field(default_factory=dict)
-
-    def __post_init__(self):
-        if 0 < self.zero_stage < 2:
-            raise ValueError("Zero stage for Megatron must be in [1, 2].")
 
     def _initialize(self, model: model_api.Model, spec: model_api.FinetuneSpec) -> model_api.Model:
         module = model.module
@@ -324,52 +324,55 @@ class MegatronTrainBackend(model_api.ModelBackend):
                 module=module,
                 data_parallel_group=constants.data_parallel_group(),
                 accumulate_allreduce_grads_in_fp32=self.accumulate_allreduce_grads_in_fp32,
-                overlap_grad_reduce=False,  # FIXME
-                use_distributed_optimizer=self.zero_stage > 0,
+                overlap_grad_reduce=self.overlap_grad_reduce,
+                use_distributed_optimizer=self.use_zero_optimization,
                 expert_data_parallel_group=None,
                 disable_bucketing=False,
                 check_for_nan_in_grad=False,
             )
 
-        # Remap parameters.
-        assert len(module.buffers) == 1
-        param_grad_buf: ParamAndGradBuffer = module.buffers[0]
-
-        # Map Megatron flattened parameters to ReaLModel!
         real_model: ReaLModel = module.module
-        real_model.contiguous_param = param_grad_buf.param_data
+        if self.use_zero_optimization:
+            # Remap parameters.
+            assert len(module.buffers) == 1
+            param_grad_buf: ParamAndGradBuffer = module.buffers[0]
 
-        # Sanity checks.
-        assert real_model._param_size == param_grad_buf.numel
-        for n, p in real_model.layers.named_parameters():
-            n = ".".join([
-                str(real_model.layer_idx_start + int(n.split(".")[0])),
-                n.split(".", 1)[1],
-            ])
-            idx_start, idx_end, _ = param_grad_buf.param_index_map[p]
-            assert real_model._param_spec[n].start_idx == idx_start
-            assert real_model._param_spec[n].end_idx == idx_end
-            assert real_model._param_spec[n].shape == p.shape
-            assert torch.allclose(p, real_model.contiguous_param[idx_start:idx_end].view(p.shape))
+            # Map Megatron flattened parameters to ReaLModel!
+            real_model.contiguous_param = param_grad_buf.param_data
+
+            # Sanity checks.
+            assert real_model._param_size == param_grad_buf.numel
+            for n, p in real_model.layers.named_parameters():
+                n = ".".join([
+                    str(real_model.layer_idx_start + int(n.split(".")[0])),
+                    n.split(".", 1)[1],
+                ])
+                idx_start, idx_end, _ = param_grad_buf.param_index_map[p]
+                assert real_model._param_spec[n].start_idx == idx_start
+                assert real_model._param_spec[n].end_idx == idx_end
+                assert real_model._param_spec[n].shape == p.shape
+                assert torch.allclose(p, real_model.contiguous_param[idx_start:idx_end].view(p.shape))
 
         betas = self.optimizer_config.get("betas", (0.9, 0.95))
+        wd = self.optimizer_config.get("weight_decay", 0.1)
+        lr = self.optimizer_config["lr"]
         opt_cfg = OptimizerConfig(
             optimizer=self.optimizer_name,
             fp16=self.enable_fp16,
             bf16=self.enable_bf16,
-            lr=self.optimizer_config["lr"],
-            min_lr=self.min_lr_ratio * self.optimizer_config["lr"],
-            weight_decay=self.optimizer_config.get("weight_decay", 0.1),
+            lr=lr,
+            min_lr=self.min_lr_ratio * lr,
+            weight_decay=wd,
             params_dtype=real_model.dtype,
             initial_loss_scale=self.initial_loss_scale,
             adam_beta1=betas[0],
             adam_beta2=betas[1],
             adam_eps=self.optimizer_config.get("eps", 1e-5),
             sgd_momentum=self.optimizer_config.get("momentum", 0.9),
-            use_distributed_optimizer=self.zero_stage > 0,
-            overlap_grad_reduce=False,  # FIXME
-            overlap_param_gather=self.zero_stage > 1,  # FIXME
-            clip_grad=self.optimizer_config.get("clip_grad", 1.0),
+            use_distributed_optimizer=self.use_zero_optimization,
+            overlap_grad_reduce=self.overlap_grad_reduce,
+            overlap_param_gather=self.overlap_param_gather,
+            clip_grad=self.gradient_clipping,
         )
 
         with megatron_ctx():
@@ -378,13 +381,28 @@ class MegatronTrainBackend(model_api.ModelBackend):
             optimizer = get_megatron_optimizer(
                 opt_cfg,
                 [module],
-                no_weight_decay_cond=None,
+                no_weight_decay_cond=lambda n, p: any(k in n for k in ["bias", "ln.weight", "ln_f.weight"]),
                 scale_lr_cond=None,
                 lr_mult=1.0,
             )
+            
+            warmup_steps = int(self.warmup_steps_proportion * spec.total_train_steps)
+            lr_scheduler = OptimizerParamScheduler(
+                optimizer,
+                init_lr=0.0 if self.warmup_steps_proportion >0 else lr,
+                max_lr=lr,
+                min_lr=self.min_lr_ratio * lr,
+                lr_warmup_steps=warmup_steps,
+                lr_decay_steps=spec.total_train_steps - warmup_steps,
+                lr_decay_style=self.lr_scheduler_type,
+                start_wd=wd,
+                end_wd=wd,
+                wd_incr_steps=spec.total_train_steps,
+                wd_incr_style="constant",
+            )
 
-        mg_engine = MegatronEngine(module, optimizer)
-
-        # TODO: add lr scheduler
+        mg_engine = MegatronEngine(module, optimizer, lr_scheduler)
         model.module = ReaLMegatronEngine(real_model, mg_engine)
         return model
+
+model_api.register_backend("megatron", MegatronTrainBackend)

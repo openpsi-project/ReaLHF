@@ -79,7 +79,11 @@ def build_engine(module, model_name) -> "ReaLMegatronEngine":
                 module.device,
                 module.dtype,
             ),
-            None,
+            model_api.FinetuneSpec(
+                total_train_epochs=1,
+                total_train_steps=20,
+                steps_per_epoch=20,
+            ),
         )
     return _model.module
 
@@ -303,7 +307,7 @@ def _test_para_realloc(
             )
             engine.eval()
 
-            p2 = engine.engine.ddp.buffers[0].param_data.clone().detach()
+            p2 = engine.engine.ddp.module.contiguous_param.clone().detach()
 
             engine: ReaLMegatronEngine
             stats = engine.train_batch(
@@ -316,7 +320,7 @@ def _test_para_realloc(
                 **loss_fn_kwargs,
             )
 
-            p3 = engine.engine.ddp.buffers[0].param_data.clone().detach()
+            p3 = engine.engine.ddp.module.contiguous_param.clone().detach()
 
             all_p3 = [torch.zeros_like(p3) for _ in range(constants.data_parallel_world_size())]
             dist.all_gather(all_p3, p3, group=constants.data_parallel_group())
@@ -328,7 +332,7 @@ def _test_para_realloc(
                 delta_reduce = delta.clone()
                 dist.all_reduce(delta_reduce, group=constants.data_parallel_group())
                 delta_reduce /= dist.get_world_size(group=constants.data_parallel_group())
-                assert torch.allclose(delta, delta_reduce, atol=2e-4), ((delta - delta_reduce).abs().max())
+                assert torch.allclose(delta, delta_reduce, atol=2e-4), (delta - delta_reduce).abs().max()
                 for i, p3i in enumerate(all_p3):
                     assert torch.allclose(p3i, p3), (
                         i,
@@ -387,9 +391,9 @@ def test_param_realloc(
 
 def decompose_to_three_factors(n: int):
     factors = []
-    for i in range(1, int(n**(1 / 2)) + 1):
+    for i in range(1, int(n ** (1 / 2)) + 1):
         if n % i == 0:
-            for j in range(i, int((n // i)**(1 / 2)) + 1):
+            for j in range(i, int((n // i) ** (1 / 2)) + 1):
                 if (n // i) % j == 0:
                     k = (n // i) // j
                     factors += list(set(itertools.permutations([i, j, k])))
@@ -397,23 +401,29 @@ def decompose_to_three_factors(n: int):
 
 
 if __name__ == "__main__":
-    factors = decompose_to_three_factors(8)
-    logfile = "param_realloc_test.log"
-    if os.path.exists(logfile):
-        with open(logfile, "r") as f:
-            tested = f.readlines()
-    else:
-        tested = []
-    for i, (from_pp_dp_mp, to_pp_dp_mp) in enumerate(itertools.product(factors, factors)):
-        if from_pp_dp_mp == (1, 1, 8) and to_pp_dp_mp == (1, 8, 1):
-            # This case will always overflow
-            continue
-        if to_pp_dp_mp == (8, 1, 1):
-            # This case will always overflow
-            continue
-        print(">" * 10 + f" testing with from_pp_dp_mp={from_pp_dp_mp}, to_pp_dp_mp={to_pp_dp_mp} " +
-              "<" * 10)
+    # factors = decompose_to_three_factors(8)
+    # logfile = "param_realloc_test.log"
+    # if os.path.exists(logfile):
+    #     with open(logfile, "r") as f:
+    #         tested = f.readlines()
+    # else:
+    #     tested = []
+    # for i, (from_pp_dp_mp, to_pp_dp_mp) in enumerate(itertools.product(factors, factors)):
+    #     if from_pp_dp_mp == (1, 1, 8) and to_pp_dp_mp == (1, 8, 1):
+    #         # This case will always overflow
+    #         continue
+    #     if to_pp_dp_mp == (8, 1, 1):
+    #         # This case will always overflow
+    #         continue
+    #     print(">" * 10 + f" testing with from_pp_dp_mp={from_pp_dp_mp}, to_pp_dp_mp={to_pp_dp_mp} " +
+    #           "<" * 10)
+    #     for model_family_name, path in [("llama", "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/")]:
+    #         test_param_realloc(model_family_name, False, False, from_pp_dp_mp, to_pp_dp_mp, path)
+    #     with open(logfile, "a") as f:
+    #         f.write(f"{from_pp_dp_mp}, {to_pp_dp_mp}\n")
+    for i, (from_pp_dp_mp, to_pp_dp_mp) in enumerate([[(2, 4, 1), (4, 1, 2)]]):
+        print(
+            ">" * 10 + f" testing with from_pp_dp_mp={from_pp_dp_mp}, to_pp_dp_mp={to_pp_dp_mp} " + "<" * 10
+        )
         for model_family_name, path in [("llama", "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/")]:
             test_param_realloc(model_family_name, False, False, from_pp_dp_mp, to_pp_dp_mp, path)
-        with open(logfile, "a") as f:
-            f.write(f"{from_pp_dp_mp}, {to_pp_dp_mp}\n")

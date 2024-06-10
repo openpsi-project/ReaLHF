@@ -14,7 +14,7 @@ import transformers
 
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
-from reallm.impl.model.parallelism.pipeline_parallel.pipe_runner import PipelineRunner
+from reallm.impl.model.backend.pipe_runner import PipelineRunner
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
 import reallm.base.logging as logging
@@ -289,9 +289,8 @@ def get_eval_ds_config(
 def get_optimizer_grouped_parameters(
     model: torch.nn.Module,
     weight_decay: float,
-    no_decay_name_list: List[str] = ["bias", "LayerNorm.weight"],
+    no_decay_name_list: List[str] = ["bias", "ln.weight", "ln_f.weight"],
 ):
-    # FIXME: fix no_decay_name_list
     optimizer_grouped_parameters = [
         {
             "params": [

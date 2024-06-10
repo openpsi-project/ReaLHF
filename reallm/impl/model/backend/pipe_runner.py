@@ -26,8 +26,9 @@ import reallm.base.constants as constants
 import reallm.base.logging as logging
 import reallm.impl.model.parallelism.pipeline_parallel.p2p as p2p
 import reallm.impl.model.parallelism.pipeline_parallel.static_schedule as schedule
+from reallm.impl.model.backend.utils import MegatronEngine
 
-logger = logging.getLogger("Pipeline Instruction", "benchmark")
+logger = logging.getLogger("Pipeline Runner", "benchmark")
 
 
 class PipelineError(Exception):
@@ -771,14 +772,7 @@ class PipeTrainBackwardReduceInstrSetForDeepSpeed:
         }
 
 
-@dataclasses.dataclass
-class MegatronEngine:
-    ddp: MegatronDDP
-    optim: MegatronDistOptim
 
-    def zero_grad(self, set_to_none=True):
-        self.ddp.zero_grad_buffer()
-        self.optim.zero_grad(set_to_none=set_to_none)
 
 
 @dataclasses.dataclass
@@ -786,6 +780,7 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
     # NOTE: merge MegatronDDP and MegatronDistOptim into one class
     # to remain consistent with DeepSpeed's API
     engine: MegatronEngine
+    num_micro_batches: int
 
     def __post_init__(self):
         self._no_sync_context = None
@@ -811,6 +806,9 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
     ):
         output_x = tensor_buffer.get("batch_output_x", micro_batch_id, remove=True)
 
+        if micro_batch_id == self.num_micro_batches - 1:
+            self.enable_grad_sync()
+
         is_last_stage = constants.is_last_pipe_stage()
         if is_last_stage:
             loss: torch.Tensor = tensor_buffer.get("losses", micro_batch_id, remove=True)
@@ -831,7 +829,6 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
         micro_batch_id: int,
         step_id: int,
     ):
-        self.enable_grad_sync()
         # self.engine.ddp.start_grad_sync()
         finalize_model_grads([self.engine.ddp])
 
@@ -844,6 +841,10 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
         step_id: int,
     ):
         update_successful, grad_norm, num_zeros_in_grad = self.engine.optim.step()
+
+        version_steps = tensor_buffer.get("version_steps", 0)
+        if update_successful:
+            self.engine.lr_scheduler.step_absolute(version_steps)
         if constants.data_parallel_rank() == 0 and constants.model_parallel_rank() == 0:
             logger.info(f"Pipeline rank {constants.pipe_parallel_rank()}. "
                         f"Update success? {update_successful}. "
@@ -863,6 +864,7 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
 @dataclasses.dataclass
 class PipeTrainInstrSet:
     backend: str = dataclasses.field(metadata={"choices": ["deepspeed", "megatron"]})
+    num_micro_batches: int
     ds_engine: Optional[DeepSpeedEngine] = None
     megatron_engine: Optional[MegatronEngine] = None
 
@@ -876,7 +878,7 @@ class PipeTrainInstrSet:
         elif self.backend == "megatron":
             return {
                 **PipeTrainForwardCommInstrSet.INSTRUCTION_MAP,
-                **PipeTrainBackwardReduceInstrSetForMegatron(self.megatron_engine,).INSTRUCTION_MAP,
+                **PipeTrainBackwardReduceInstrSetForMegatron(self.megatron_engine, num_micro_batches=self.num_micro_batches,).INSTRUCTION_MAP,
             }
         else:
             raise NotImplementedError()
@@ -1079,9 +1081,9 @@ class PipelineRunner:
         )
 
         if isinstance(engine, DeepSpeedEngine):
-            instr_map = PipeTrainInstrSet(backend="deepspeed", ds_engine=engine).INSTRUCTION_MAP
+            instr_map = PipeTrainInstrSet(backend="deepspeed", ds_engine=engine, num_micro_batches=num_micro_batches,).INSTRUCTION_MAP
         elif isinstance(engine, MegatronEngine):
-            instr_map = PipeTrainInstrSet(backend="megatron", megatron_engine=engine).INSTRUCTION_MAP
+            instr_map = PipeTrainInstrSet(backend="megatron", megatron_engine=engine, num_micro_batches=num_micro_batches,).INSTRUCTION_MAP
         else:
             raise NotImplementedError(f"Unknown backend type for training: {type(engine)}")
 
