@@ -167,7 +167,7 @@ def make_rpc_exe_list(
     rpc_exe_list = []
     log_flag = False
     for rpc in rpcs:
-        # flash_mqat_config = load_model_config(rpc)
+        # real_model_config = load_model_config(rpc)
         feasible = enumerate_rpc_executions(
             rpc,
             device_mesh,
@@ -214,7 +214,7 @@ def make_model_size_dict(rpcs: List[ModelRPC], if_print: bool = False) -> Dict[s
         if rpc.model_name.role in model_size_dict:
             continue
         # model_configs = load_model_config(rpc)
-        # model_size_dict[rpc.model_name.role] = estimate_model_size(flash_mqat_config)
+        # model_size_dict[rpc.model_name.role] = estimate_model_size(real_model_config)
         model_size_dict[rpc.model_name.role] = rpc.model_type.size
 
         if if_print:
@@ -267,7 +267,7 @@ def print_model_device_mapping_by_index(rpcs: List[ModelRPC], device_mesh: Devic
     from reallm.search_engine.estimate import load_model_config
 
     for i, rpc in enumerate(rpcs):
-        flash_mqat_config = load_model_config(rpc)
+        real_model_config = load_model_config(rpc)
         feasible = enumerate_rpc_executions(rpc, device_mesh)
         print(f"{rpc.name} feasible: {len(feasible)}")
         feasible.sort(key=lambda x: x.time_cost)

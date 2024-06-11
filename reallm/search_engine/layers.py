@@ -33,7 +33,7 @@ def make_layers(config: ReaLModelConfig, dtype, device):
         dtype=dtype,
         device=device,
     )
-    flash_mqat_blocks = [
+    real_model_blocks = [
         ReaLModelBlock(
             config,
             layer_index=i,
@@ -51,7 +51,7 @@ def make_layers(config: ReaLModelConfig, dtype, device):
     )
 
     layer_names = ["embedding_layer", "block_0", "head"]
-    return [embedding_layer] + flash_mqat_blocks + [head], layer_names
+    return [embedding_layer] + real_model_blocks + [head], layer_names
 
 
 class ProfileLayers:
