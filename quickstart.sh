@@ -1,5 +1,5 @@
-# SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep5globalstep50/
-SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/Llama-2-13b-hf
+SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep5globalstep50/
+# SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/Llama-2-13b-hf
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep40globalstep40/
 
 # python3 -m reallm.apps.quickstart sft experiment_name=quickstart-sft-debug trial_name=20240528 \
@@ -61,13 +61,11 @@ RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/def
 
 python3 -m reallm.apps.quickstart ppo experiment_name=debug-quickstart-ppo trial_name=20240606-2 \
     allocation_mode=heuristic \
-    n_nodes=2 \
-    nodelist=\'QH-com[48-49]\'\
-    recover_mode=resume \
-    recover_retries=1 \
+    n_nodes=1 \
+    recover_mode=disabled \
     save_freq_steps=null \
     actor.type._class=llama \
-    actor.type.size=13 \
+    actor.type.size=7 \
     actor.type.is_critic=False \
     actor.path=$SFT_MODEL_PATH \
     actor.gradient_checkpointing=True \
@@ -77,14 +75,14 @@ python3 -m reallm.apps.quickstart ppo experiment_name=debug-quickstart-ppo trial
     critic.path=$RW_MODEL_PATH \
     critic.gradient_checkpointing=True \
     ref.type._class=llama \
-    ref.type.size=13 \
+    ref.type.size=7 \
     ref.type.is_critic=False \
     ref.path=$SFT_MODEL_PATH \
     rew.type._class=llama \
     rew.type.size=7 \
     rew.type.is_critic=True \
     rew.path=$RW_MODEL_PATH \
-    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
+    dataset.path=/lustre/meizy/data/antropic-hh/ppo_prompt_only_short.jsonl \
     dataset.max_prompt_len=256 \
     dataset.train_bs_n_seqs=256 \
     ppo.max_new_tokens=256 \

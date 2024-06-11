@@ -175,3 +175,5 @@ api_key.json
 *.png
 *.jpg
 *.pdf
+
+.vscode/
