@@ -1,24 +1,57 @@
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Union
 import os
 import re
+import signal as signal_module
 import subprocess
+import time
 
 import psutil
 
-from reallm.scheduler.client import JobInfo, JobState, SchedulerClient, SchedulerError
+from reallm.scheduler.client import JobException, JobInfo, JobState, SchedulerClient, SchedulerError
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Local Scheduler")
 
+JOB_STATE_TO_PROCESS_STATUS = {
+    JobState.NOT_FOUND: [],
+    JobState.PENDING: [psutil.STATUS_PARKED],
+    JobState.RUNNING: [
+        psutil.STATUS_RUNNING,
+        psutil.STATUS_SLEEPING,
+        psutil.STATUS_DISK_SLEEP,
+        psutil.STATUS_TRACING_STOP,
+        psutil.STATUS_WAKING,
+        psutil.STATUS_WAITING,
+        psutil.STATUS_LOCKED,
+        psutil.STATUS_IDLE,
+    ],
+    JobState.COMPLETED: [
+        psutil.STATUS_DEAD,
+        psutil.STATUS_STOPPED,
+        psutil.STATUS_ZOMBIE,
+    ],
+    JobState.FAILED: [],
+    JobState.CANCELLED: [],
+}
 
-def terminate_process_and_children(pid: int):
+PROCESS_STATUS_TO_JOB_STATE = {}
+for job_state, process_statuses in JOB_STATE_TO_PROCESS_STATUS.items():
+    for process_status in process_statuses:
+        PROCESS_STATUS_TO_JOB_STATE[process_status] = job_state
+
+
+def terminate_process_and_children(pid: int, signal: Optional[Union[str, int]] = None):
+    if signal is None:
+        signal = signal_module.SIGKILL
+    if isinstance(signal, str):
+        signal = getattr(signal_module, signal)
     try:
         parent = psutil.Process(pid)
         children = parent.children(recursive=True)
         for child in children:
             terminate_process_and_children(child.pid)
-        parent.terminate()
+        parent.send_signal(signal)
     except psutil.NoSuchProcess:
         pass
 
@@ -41,6 +74,7 @@ class LocalSchedulerClient(SchedulerClient):
         self._job_with_gpu: Dict[str, bool] = defaultdict(int)
         self._job_env_vars: Dict[str, Dict] = defaultdict(int)
         self._job_cmd = {}
+        self._job_states = {}
 
         if len(self._cuda_devices) < 1:
             raise RuntimeError(
@@ -112,13 +146,14 @@ class LocalSchedulerClient(SchedulerClient):
                 self._jobs[f"{worker_type}/{i}"] = process
             self._running_worker_types.append(worker_type)
 
-    def stop(self, worker_type):
+    def stop(self, worker_type, signal=None):
         assert any(k.startswith(worker_type) for k in self._jobs)
         keys = [k for k, p in self._jobs.items() if k.startswith(worker_type)]
         procs = [p for k, p in self._jobs.items() if k.startswith(worker_type)]
-        logger.info("Stopping local process, pid: %s", [p.pid for p in procs])
+        logger.info(f"Stopping local process with signal {signal if signal else 'SIGKILL'}, "
+                    f"pid: {[p.pid for p in procs]}")
         for p in procs:
-            terminate_process_and_children(p.pid)
+            terminate_process_and_children(p.pid, signal=signal)
         for p in procs:
             p.wait()
         for k, p in zip(keys, procs):
@@ -129,7 +164,7 @@ class LocalSchedulerClient(SchedulerClient):
     def stop_all(self, signal=None):
         # signal argument is ignored in local stop_all
         for name in self._job_counter:
-            self.stop(name)
+            self.stop(name, signal=signal)
 
     def find(self, job_name):
         if job_name in self._jobs:
@@ -144,31 +179,71 @@ class LocalSchedulerClient(SchedulerClient):
                 rs.append(self.find(name))
         return rs
 
-    def wait(self, timeout=None, update=False, commit=True, **kwargs):
+    def wait(
+            self,
+            timeout=None,
+            check_status: Tuple[JobState, ...] = (
+                JobState.CANCELLED,
+                JobState.FAILED,
+                JobState.NOT_FOUND,
+            ),
+            remove_status: Tuple[JobState, ...] = (JobState.COMPLETED,),
+            update=False,
+            commit=True,
+    ):
         if commit:
             self.__commit_all()
+        deadline = None if timeout is None else time.time() + timeout
         logger.info(
-            "Waiting %d local running processes, pids: %s",
+            "Waiting for %d local running processes, pids: %s",
             len(self._jobs),
             " ".join(str(job.pid) for job in self._jobs.values()),
         )
-        to_remove = []
-        try:
-            for key, job in self._jobs.items():
-                job.wait(timeout)
-                if update:
-                    to_remove.append(key)
-        except subprocess.TimeoutExpired:
-            raise TimeoutError()
-        finally:
-            for k in to_remove:
-                self._jobs.pop(k)
-                worker_type = k.split("/")[0]
-                assert worker_type in self._job_counter
-                assert worker_type in self._job_with_gpu
-                assert worker_type in self._job_env_vars
-                assert worker_type in self._job_cmd
-                self._job_counter.pop(worker_type)
-                self._job_with_gpu.pop(worker_type)
-                self._job_env_vars.pop(worker_type)
-                self._job_cmd.pop(worker_type)
+        left = set(self._jobs.keys())
+        num_jobs_left = len(left)
+
+        while len(left) > 0:
+            to_remove = []
+            if len(left) < num_jobs_left:
+                num_jobs_left = len(left)
+                logger.info(f"Waiting for {num_jobs_left} jobs.")
+            if deadline is not None and time.time() > deadline:
+                raise TimeoutError(f"Timeout waiting for {self.run_name}: {', '.join(sorted(left))}")
+            # update job states
+            for job_name in list(left):
+                job = self._jobs[job_name]
+                pid = job.pid
+                process = psutil.Process(pid)
+                self._job_states[job_name] = PROCESS_STATUS_TO_JOB_STATE.get(process.status(),
+                                                                             JobState.NOT_FOUND)
+
+            for job_name in list(left):
+                state = self._job_states[job_name]
+                if state in check_status:
+                    raise JobException(
+                        run_name=self.run_name,
+                        worker_type=job_name.split("/")[0],
+                        host="local",
+                        reason=state,
+                    )
+                if state in remove_status:
+                    logger.info(f"Job {job_name} is {state}.(Removed)")
+                    left.remove(job_name)
+                    to_remove.append(job_name)
+
+            if update:
+                for k in to_remove:
+                    self._jobs.pop(k)
+                    worker_type = k.split("/")[0]
+                    assert worker_type in self._job_counter
+                    self._job_counter[worker_type] -= 1
+                    if self._job_counter[worker_type] <= 0:
+                        assert worker_type in self._job_with_gpu
+                        assert worker_type in self._job_env_vars
+                        assert worker_type in self._job_cmd
+                        self._job_counter.pop(worker_type)
+                        self._job_with_gpu.pop(worker_type)
+                        self._job_env_vars.pop(worker_type)
+                        self._job_cmd.pop(worker_type)
+
+            time.sleep(2)
