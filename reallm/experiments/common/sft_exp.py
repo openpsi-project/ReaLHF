@@ -44,6 +44,10 @@ class SFTConfig(CommonExperimentConfig):
         return {"default": rpc}
 
     @property
+    def allocations(self):
+        return {"default": self.allocation}
+
+    @property
     def datasets(self):
         return [
             Dataset(

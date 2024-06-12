@@ -83,7 +83,7 @@ python3 -m reallm.apps.quickstart ppo \
     allocation_mode=manual \
     save_freq_steps=null \
     actor.type._class=llama \
-    actor.type.size=13 \
+    actor.type.size=7 \
     actor.type.is_critic=False \
     actor.path=$SFT_MODEL_PATH \
     actor.gradient_checkpointing=True \
@@ -93,14 +93,14 @@ python3 -m reallm.apps.quickstart ppo \
     critic.path=$RW_MODEL_PATH \
     critic.gradient_checkpointing=True \
     ref.type._class=llama \
-    ref.type.size=13 \
+    ref.type.size=7 \
     ref.type.is_critic=False \
     ref.path=$SFT_MODEL_PATH \
     rew.type._class=llama \
     rew.type.size=7 \
     rew.type.is_critic=True \
     rew.path=$RW_MODEL_PATH \
-    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
+    dataset.path=/lustre/meizy/data/antropic-hh/ppo_prompt_only_short.jsonl \
     dataset.max_prompt_len=256 \
     dataset.train_bs_n_seqs=512 \
     ppo.max_new_tokens=256 \
