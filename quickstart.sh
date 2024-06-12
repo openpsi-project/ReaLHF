@@ -78,7 +78,7 @@ SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/d
 
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep15globalstep15/
 python3 -m reallm.apps.quickstart ppo \
-    experiment_name=debug-quickstart-ppo trial_name=20240606-2 \
+    experiment_name=debug-quickstart-ppo trial_name=20240612-1 \
     total_train_epochs=4 \
     allocation_mode=manual \
     save_freq_steps=null \
@@ -100,7 +100,7 @@ python3 -m reallm.apps.quickstart ppo \
     rew.type.size=7 \
     rew.type.is_critic=True \
     rew.path=$RW_MODEL_PATH \
-    dataset.path=/lustre/meizy/data/antropic-hh/ppo_prompt_only_short.jsonl \
+    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
     dataset.max_prompt_len=256 \
     dataset.train_bs_n_seqs=512 \
     ppo.max_new_tokens=256 \

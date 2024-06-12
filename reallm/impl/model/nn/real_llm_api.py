@@ -314,21 +314,19 @@ class ReaLModel(nn.Module):
             x.cu_seqlens = torch.nn.functional.pad(x.cu_seqlens, (0, 1), value=padded_batch_length)
             x.max_seqlen = max(x.max_seqlen, padded_batch_length - batch_length)
             if ys[0].packed_input_ids is not None:
-                input_ids_buf = constants.get_global_memory_buffer().get_tensor(
+                input_ids_buf = torch.zeros(
                     (padded_batch_length,),
                     dtype=torch.long,
-                    name="real_model_input_ids",
-                    force_zero=True,
+                    device=self.device,
                 )
                 input_ids_buf[:batch_length] = ys[0].packed_input_ids
                 ys[0].packed_input_ids = input_ids_buf
 
             if x.pp_input is not None:
-                pp_input_buf = constants.get_global_memory_buffer().get_tensor(
+                pp_input_buf = torch.zeros(
                     (padded_batch_length, *x.pp_input.shape[1:]),
                     dtype=x.pp_input.dtype,
-                    name="real_model_pp_input",
-                    force_zero=True,
+                    device=self.device,
                 )
                 pp_input_buf[:batch_length] = x.pp_input
                 x.pp_input = pp_input_buf
@@ -356,6 +354,9 @@ class ReaLModel(nn.Module):
                         y.k_cache = y.k_cache[:-pad_size]
                     if y.v_cache is not None:
                         y.v_cache = y.v_cache[:-pad_size]
+        
+        # Release the memory used for TP gathering.
+        constants.clear_global_memory_buffer()
         return x, ys
 
     def _forward(
