@@ -1,7 +1,7 @@
 from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 import dataclasses
-import itertools
 import gc
+import itertools
 import queue
 
 import torch
@@ -462,14 +462,21 @@ def _gather_minibatch_gen_outputs(
 
     return (gen_tokens, log_probs, logits_mask)
 
+
 def concat_prompt_to_generation_output(
-        packed_prompts: torch.LongTensor,
-        prompt_lengths: torch.IntTensor,
-        gen_tokens: torch.LongTensor,
-        logprobs: torch.FloatTensor,
-        logits_mask: torch.BoolTensor,
-        gen_lengths: torch.IntTensor,
-) -> Tuple[torch.LongTensor, torch.FloatTensor, torch.BoolTensor, torch.IntTensor, torch.BoolTensor]:
+    packed_prompts: torch.LongTensor,
+    prompt_lengths: torch.IntTensor,
+    gen_tokens: torch.LongTensor,
+    logprobs: torch.FloatTensor,
+    logits_mask: torch.BoolTensor,
+    gen_lengths: torch.IntTensor,
+) -> Tuple[
+        torch.LongTensor,
+        torch.FloatTensor,
+        torch.BoolTensor,
+        torch.IntTensor,
+        torch.BoolTensor,
+]:
     device = packed_prompts.device
 
     prompts_list, prompt_log_probs_list, prompt_logits_mask_list = [], [], []
@@ -495,29 +502,29 @@ def concat_prompt_to_generation_output(
                     logits_mask[i, :gen_len],
                     logits_mask.new_ones(1, logits_mask.shape[-1]),
                 ]))
-            
+
     seq = torch.cat(list(itertools.chain.from_iterable(zip(prompts_list, gen_tokens_list))))
     seq_lengths = prompt_lengths + gen_lengths
     packed_logprobs = torch.cat(
-            list(itertools.chain.from_iterable(zip(prompt_log_probs_list, gen_log_probs_list))))
+        list(itertools.chain.from_iterable(zip(prompt_log_probs_list, gen_log_probs_list))))
     assert seq.shape[0] == packed_logprobs.shape[0] + bs, (
-            seq.shape,
-            packed_logprobs.shape,
-            bs,
-        )
+        seq.shape,
+        packed_logprobs.shape,
+        bs,
+    )
     packed_logits_mask = None
     if gen_logits_mask_list:
         packed_logits_mask = torch.cat(
             list(itertools.chain.from_iterable(zip(prompt_logits_mask_list, gen_logits_mask_list))))
 
     prompt_mask = zip(
-            [torch.ones(plen, dtype=torch.bool, device=device) for plen in prompt_lengths],
-            [torch.zeros(glen, dtype=torch.bool, device=device) for glen in gen_lengths],
-        )
+        [torch.ones(plen, dtype=torch.bool, device=device) for plen in prompt_lengths],
+        [torch.zeros(glen, dtype=torch.bool, device=device) for glen in gen_lengths],
+    )
     prompt_mask = torch.cat(list(itertools.chain.from_iterable(prompt_mask)))
-    
+
     return (seq, packed_logprobs, packed_logits_mask, seq_lengths, prompt_mask)
-    
+
 
 @torch.no_grad()
 def vanilla_packed_generate(

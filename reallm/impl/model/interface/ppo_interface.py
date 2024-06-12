@@ -205,15 +205,16 @@ class PPOActorInterface(model_api.ModelInterface):
         gen_lengths = (gen_tokens != pad_token_id).logical_and(gen_tokens != eos_token_id).sum(dim=-1) + 1
         gen_lengths = gen_lengths.clip(max=gen_tokens.shape[-1])
 
-        
-        (packed_seq, packed_logprobs, packed_logits_mask, seq_lengths, prompt_mask) = concat_prompt_to_generation_output(
-            packed_prompts=packed_prompts,
-            prompt_lengths = prompt_lengths,
-            gen_tokens=gen_tokens,
-            logprobs=logprobs,
-            logits_mask=logits_mask,
-            gen_lengths=gen_lengths,)
-        
+        (packed_seq, packed_logprobs, packed_logits_mask, seq_lengths,
+         prompt_mask) = (concat_prompt_to_generation_output(
+             packed_prompts=packed_prompts,
+             prompt_lengths=prompt_lengths,
+             gen_tokens=gen_tokens,
+             logprobs=logprobs,
+             logits_mask=logits_mask,
+             gen_lengths=gen_lengths,
+         ))
+
         cu_seqlens = torch.nn.functional.pad(gen_lengths.cumsum(0), (1, 0))
 
         res = dict(
@@ -221,7 +222,8 @@ class PPOActorInterface(model_api.ModelInterface):
             packed_seq=packed_seq,
             cu_seqlens=cu_seqlens,
             packed_logprobs=packed_logprobs,
-            packed_logits_mask=(packed_logits_mask.bool() if not self.force_no_logits_mask and packed_logits_mask is not None else None),
+            packed_logits_mask=(packed_logits_mask.bool() if not self.force_no_logits_mask
+                                and packed_logits_mask is not None else None),
             prompt_mask=prompt_mask,
         )
         res = from_dict(res)
