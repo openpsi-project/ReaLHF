@@ -9,7 +9,7 @@ import torch.distributed
 
 from reallm.api.core import system_api
 from reallm.api.core.config import ModelName
-from reallm.base import gpu_utils, name_resolve, names, network, topology
+from reallm.base import constants, gpu_utils, name_resolve, names, network, topology
 
 
 @dataclasses.dataclass
@@ -105,6 +105,14 @@ def setup_global_comm(
     model_groups = {}
     for model_name, ranks in mw_ranks.items():
         model_groups[model_name] = topology.new_or_get_group(ranks, backend="nccl")
+        constants.set_parallelism_group(model_name, model_groups[model_name], ranks)
+
+    self_group = None
+    for i in range(world_size):
+        group = topology.new_or_get_group([i], backend="nccl")
+        if i == global_rank:
+            self_group = group
+            constants.set_self_group(self_group)
 
     # logger.info(f"Setup process group finishes for worker_index={worker_index}")
 

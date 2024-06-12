@@ -112,3 +112,4 @@ class StandaloneModelShard:
     # evaluation
     eval_datasets: Optional[List[Dataset]] = None
     eval_dataloader: Optional[DataLoader] = DataLoader("packed_eval", args=dict(batch_size=128))
+    should_instantiate: bool = True

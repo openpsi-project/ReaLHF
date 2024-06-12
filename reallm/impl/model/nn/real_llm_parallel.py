@@ -8,6 +8,7 @@ from reallm.base import constants, logging
 
 logger = logging.getLogger("ReaL parallel")
 
+# FIXME: gradients of layer norm layers (replicated for tensor parallel) may be incorrect
 # keys used to identify modules
 EMBEDDING_KEYS = [".wte", ".wpe"]  # dim=0 no bias
 COLUMN_LINEAR_KEYS = [

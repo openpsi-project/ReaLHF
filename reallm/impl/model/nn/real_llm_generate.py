@@ -1,6 +1,7 @@
 from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 import dataclasses
 import gc
+import itertools
 import queue
 
 import torch
@@ -206,6 +207,48 @@ def genstep(
 #     return graph, input_buffers, output_buffers
 
 
+def init_kv_cache(
+    module: "ReaLModel",
+    gconfig: GenerationConfig,
+    x: PipeTransferData,
+    ys: List[PipeCacheData],
+):
+    cu_seqlens = x.cu_seqlens
+    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+    assert constants.pipe_parallel_world_size() >= 2
+    layer_indices = range(module.layer_idx_start, module.layer_idx_end)
+    if constants.is_first_pipe_stage():
+        layer_indices = layer_indices[1:]
+    elif constants.is_last_pipe_stage():
+        layer_indices = layer_indices[:-1]
+
+    assert len(layer_indices) == len(ys), (len(ys), layer_indices)
+    bs = input_lens.shape[0]
+    for y, layer_idx in zip(ys, layer_indices):
+        assert (y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None)
+        kvcache_seqlen = max(
+            constants.max_prompt_len() + gconfig.max_new_tokens,
+            module.config.hidden_dim // module.config.head_dim + 10,
+        )
+        k_cache = torch.zeros(
+            (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+            dtype=y.k_cache.dtype,
+            device=y.k_cache.device,
+        )
+        v_cache = torch.zeros(
+            (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+            dtype=y.v_cache.dtype,
+            device=y.v_cache.device,
+        )
+        indices = (torch.arange(kvcache_seqlen, device=module.device, dtype=torch.long)[None, :]
+                   < input_lens[:, None])
+        k_cache[indices] = y.k_cache
+        v_cache[indices] = y.v_cache
+        y.k_cache = k_cache
+        y.v_cache = v_cache
+        y.cache_seqlens = input_lens.clone().to(dtype=torch.int32)
+
+
 @torch.no_grad()
 def generate(
     model: "ReaLModel",
@@ -343,16 +386,144 @@ def generate(
         gen_logits_mask_ph.append(logits_mask)
         generated_idx += 1
 
-    gen_tokens = torch.stack(gen_token_ph, -1)
-    log_probs = torch.stack(gen_logprob_ph, -1)
+    gen_tokens, log_probs, logits_mask = _gather_gen_output_from_list(gen_token_ph, gen_logprob_ph,
+                                                                      gen_logits_mask_ph)
+
+    return gen_tokens, log_probs, logits_mask, ys[1:-1], prompt_logits
+
+
+def _gather_gen_output_from_list(
+    gen_token_ph: List[torch.LongTensor],
+    gen_logprob_ph: List[torch.FloatTensor],
+    gen_logits_mask_ph: List[torch.BoolTensor],
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Stack over the sequence dimension given a list of single-token tensors."""
+    gen_tokens = torch.stack(gen_token_ph, -1)  # [bs, seqlen]
+    log_probs = torch.stack(gen_logprob_ph, -1)  # [bs, seqlen]
     if all([m is None for m in gen_logits_mask_ph]):
         logits_mask = None
     else:
         mm = next(m for m in gen_logits_mask_ph if m is not None)
         gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
-        logits_mask = torch.stack(gen_logits_mask_ph, -2)
+        logits_mask = torch.stack(gen_logits_mask_ph, 1)  # [bs, seqlen, vocab_size]
+    return gen_tokens, log_probs, logits_mask
 
-    return gen_tokens, log_probs, logits_mask, ys[1:-1], prompt_logits
+
+def _gather_minibatch_gen_outputs(
+    all_gen_tokens: List[torch.LongTensor],
+    all_log_probs: List[torch.FloatTensor],
+    all_logits_mask: List[torch.BoolTensor],
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Concate over the batch dimension given multiple [bs, seqlen] mini-batch tensors.
+
+    Since different minibatches may have different generated lengths,
+    we should pad them to the same length.
+    """
+    gen_tokens_lengths = [t.shape[-1] for t in all_gen_tokens]
+    max_gen_tokens_length = max(gen_tokens_lengths)
+
+    padded_gen_tokens = []
+    padded_log_probs = []
+    padded_logits_mask = []
+
+    n_mbs = len(all_gen_tokens)
+    for i in range(n_mbs):
+        assert all_gen_tokens[i].shape == all_log_probs[i].shape
+        gen_len = all_gen_tokens[i].shape[-1]
+
+        gen_token = all_gen_tokens[i]
+        log_probs = all_log_probs[i]
+        logits_mask = all_logits_mask[i]
+
+        if gen_len < max_gen_tokens_length:
+            pad_size = gen_len - max_gen_tokens_length
+            gen_token = torch.nn.functional.pad(gen_token, (0, pad_size))
+            log_probs = torch.nn.functional.pad(log_probs, (0, pad_size))
+            if logits_mask is not None:
+                logits_mask = torch.nn.functional.pad(
+                    logits_mask,
+                    (0, 0, 0, pad_size),
+                    mode="constant",
+                    value=1,
+                )
+
+        padded_gen_tokens.append(gen_token)
+        padded_log_probs.append(log_probs)
+        padded_logits_mask.append(logits_mask)
+
+    gen_tokens = torch.cat(padded_gen_tokens, 0)
+    log_probs = torch.cat(padded_log_probs, 0)
+    if all([m is None for m in padded_logits_mask]):
+        logits_mask = None
+    else:
+        mm = next(m for m in padded_logits_mask if m is not None)
+        padded_logits_mask = [torch.ones_like(mm) if m is None else m for m in padded_logits_mask]
+        logits_mask = torch.cat(padded_logits_mask, 0)  # [bs, seqlen, vocab_size]
+
+    return (gen_tokens, log_probs, logits_mask)
+
+
+def concat_prompt_to_generation_output(
+    packed_prompts: torch.LongTensor,
+    prompt_lengths: torch.IntTensor,
+    gen_tokens: torch.LongTensor,
+    logprobs: torch.FloatTensor,
+    logits_mask: torch.BoolTensor,
+    gen_lengths: torch.IntTensor,
+) -> Tuple[
+        torch.LongTensor,
+        torch.FloatTensor,
+        torch.BoolTensor,
+        torch.IntTensor,
+        torch.BoolTensor,
+]:
+    device = packed_prompts.device
+
+    prompts_list, prompt_log_probs_list, prompt_logits_mask_list = [], [], []
+    gen_tokens_list, gen_log_probs_list, gen_logits_mask_list = [], [], []
+
+    bs = prompt_lengths.shape[0]
+    prompt_cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
+    for i in range(bs):
+        prompt_len, gen_len = prompt_lengths[i].item(), gen_lengths[i].item()
+
+        # log_probs is one-step shorter than token sequences.
+        prompts_list.append(packed_prompts[prompt_cu_seqlens[i]:prompt_cu_seqlens[i + 1]])
+        prompt_log_probs_list.append(logprobs.new_zeros(prompt_len - 1))
+        if logits_mask is not None:
+            prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len - 1, logits_mask.shape[-1])))
+
+        # Generated tokens are right-padded.
+        gen_tokens_list.append(gen_tokens[i, :gen_len])
+        gen_log_probs_list.append(logprobs[i, :gen_len])
+        if logits_mask is not None:
+            gen_logits_mask_list.append(
+                torch.cat([
+                    logits_mask[i, :gen_len],
+                    logits_mask.new_ones(1, logits_mask.shape[-1]),
+                ]))
+
+    seq = torch.cat(list(itertools.chain.from_iterable(zip(prompts_list, gen_tokens_list))))
+    seq_lengths = prompt_lengths + gen_lengths
+    packed_logprobs = torch.cat(
+        list(itertools.chain.from_iterable(zip(prompt_log_probs_list, gen_log_probs_list))))
+    assert seq.shape[0] == packed_logprobs.shape[0] + bs, (
+        seq.shape,
+        packed_logprobs.shape,
+        bs,
+    )
+    packed_logits_mask = None
+    if gen_logits_mask_list:
+        packed_logits_mask = torch.cat(
+            list(itertools.chain.from_iterable(zip(prompt_logits_mask_list, gen_logits_mask_list))))
+
+    prompt_mask = zip(
+        [torch.ones(plen, dtype=torch.bool, device=device) for plen in prompt_lengths],
+        [torch.zeros(glen, dtype=torch.bool, device=device) for glen in gen_lengths],
+    )
+    prompt_mask = torch.cat(list(itertools.chain.from_iterable(prompt_mask)))
+
+    return (seq, packed_logprobs, packed_logits_mask, seq_lengths, prompt_mask)
 
 
 @torch.no_grad()

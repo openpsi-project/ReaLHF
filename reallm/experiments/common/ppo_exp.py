@@ -5,7 +5,8 @@ from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
 from reallm.api.quickstart.device_mesh import AllocationConfig, DeviceMesh, RPCAllocation
 from reallm.api.quickstart.entrypoint import register_quickstart_exp
-from reallm.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
+from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, ParallelismConfig
+from reallm.base.topology import PipeModelDataParallelTopology
 from reallm.experiments.common.common import CommonExperimentConfig
 from reallm.experiments.common.utils import *
 import reallm.base.logging as logging
@@ -195,7 +196,6 @@ class PPOConfig(CommonExperimentConfig):
             input_key_remap={"packed_seq": "packed_input_ids"},
             output_data=["scores"],
             output_key_remap={"scores": "rewards"},
-            # post_hooks=[OffloadHook()],
             min_n_seqs=self.dataset.train_bs_n_seqs,
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
@@ -212,7 +212,6 @@ class PPOConfig(CommonExperimentConfig):
             ],
             output_data=["logprobs"],
             output_key_remap={"logprobs": "packed_ref_logprobs"},
-            # post_hooks=[OffloadHook()],
             min_n_seqs=self.dataset.train_bs_n_seqs,
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )

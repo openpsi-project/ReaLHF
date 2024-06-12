@@ -70,6 +70,10 @@ def actor_loss_fn(
     Returns:
         Tuple[torch.Tensor, Dict]: Scalar loss and statistics.
     """
+    assert logprobs.dtype == torch.float32
+    assert old_logprobs.dtype == torch.float32
+    assert advantages.dtype == torch.float32
+
     # clone inference tensors
     if old_logprobs.is_inference():
         old_logprobs = old_logprobs.clone()
@@ -403,6 +407,10 @@ def critic_loss_fn(
     Returns:
         Tuple[torch.Tensor, Dict]: Scalar loss and statistics.
     """
+    assert value.dtype == torch.float32
+    assert old_value.dtype == torch.float32
+    assert target_value.dtype == torch.float32
+
     if loss_fn_type == "huber":
         loss_fn = functools.partial(_huber_loss, delta=10.0)
     elif loss_fn_type == "mse":

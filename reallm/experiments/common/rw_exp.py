@@ -6,7 +6,7 @@ from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
 from reallm.api.quickstart.device_mesh import AllocationConfig
 from reallm.api.quickstart.entrypoint import register_quickstart_exp
-from reallm.api.quickstart.model import ModelTrainEvalConfig
+from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
 from reallm.experiments.common.common import CommonExperimentConfig
 
 
@@ -24,6 +24,7 @@ class RWConfig(CommonExperimentConfig):
 
     def __post_init__(self):
         assert (not self.is_sft_lora and self.sft_lora_path is None), "LoRA is not supported for now."
+        self.model.init_critic_from_actor = True
 
     @property
     def models(self):

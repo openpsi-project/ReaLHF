@@ -32,7 +32,6 @@ class CommonExperimentConfig(Experiment):
         partition (str): Slurm partition to run the experiment, only effective when mode=="slurm"
         wandb_mode (str): Mode of wandb, "disabled", "online", "offline"
         image_name (Optional[str]): Name of the image used by controller and workers of ray cluster
-        remote_reset (bool): Whether to reset name resolve repo remotely in computation nodes.
         recover_mode (str): Recover mode,
                             'auto': automatically recover the last failed run;
                             'save': save recover states if any error occurs;
@@ -65,7 +64,6 @@ class CommonExperimentConfig(Experiment):
     partition: str = "dev"
     wandb_mode: str = "disabled"
     image_name: Optional[str] = None
-    remote_reset: bool = False
     recover_mode: str = "disabled"
     recover_retries: int = 1
     ignore_worker_error: bool = False

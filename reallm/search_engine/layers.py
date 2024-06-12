@@ -33,7 +33,7 @@ def make_layers(config: ReaLModelConfig, dtype, device):
         dtype=dtype,
         device=device,
     )
-    flash_mqat_blocks = [
+    real_model_blocks = [
         ReaLModelBlock(
             config,
             layer_index=i,
@@ -51,7 +51,7 @@ def make_layers(config: ReaLModelConfig, dtype, device):
     )
 
     layer_names = ["embedding_layer", "block_0", "head"]
-    return [embedding_layer] + flash_mqat_blocks + [head], layer_names
+    return [embedding_layer] + real_model_blocks + [head], layer_names
 
 
 class ProfileLayers:
@@ -67,14 +67,13 @@ class ProfileLayers:
         self.model_name = model_name
         self.config = config
         self.backend_config = config_package.ModelBackend(
-            type_="ds_train",
+            type_="deepspeed",
             args=dict(
                 optimizer_name="adam",
                 optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
                 zero_stage=1,
-                engine_type="deepspeed",
                 enable_fp16=True,
                 enable_bf16=False,
             ),

@@ -86,7 +86,8 @@ model_api.register_interface("sentiment_scoring", SentimentScoringInterface)
 class MyPPOConfig(PPOConfig):
 
     def initial_setup(self) -> ExperimentConfig:
-        if (self.rew.parallel.model_parallel_size > 1 or self.rew.parallel.pipeline_parallel_size > 1):
+        if (self.rew_inf.parallel.model_parallel_size > 1
+                or self.rew_inf.parallel.pipeline_parallel_size > 1):
             raise ValueError(
                 "For this example, the reward model does not support model parallel or pipeline parallel.")
 
@@ -103,7 +104,12 @@ class MyPPOConfig(PPOConfig):
                     s.backend = config_api.ModelBackend("null")
 
         # Change the model function call implementation.
-        inf_reward_rpc = cfg.model_rpcs[2]
+        idx = 0
+        for rpc in cfg.model_rpcs:
+            if rpc.model_name.role == "reward":
+                break
+            idx += 1
+        inf_reward_rpc = cfg.model_rpcs[idx]
         inf_reward_rpc.interface_impl = dfg.ModelInterface("sentiment_scoring")
         inf_reward_rpc.post_hooks = []
 

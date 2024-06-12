@@ -97,7 +97,13 @@ class HFModelRegistry:
             state_dict.pop(f"{model.config.n_layers + 1}.weight")
             model.load_state_dict(state_dict, strict=False)
         else:
-            model.load_state_dict(state_dict, strict=True)
+            try:
+                model.load_state_dict(state_dict, strict=True)
+            except Exception as e:
+                logger.error(f"Loading state dict with strict=True failed. "
+                             f"Have you set init_critic_from_actor=True "
+                             f"in the model config if you are initializing "
+                             f"a critic model from a regular LLM? Err: {e}")
 
         # Some logging info
         copy_time = time.perf_counter() - copy_tik

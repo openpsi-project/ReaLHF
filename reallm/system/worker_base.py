@@ -18,7 +18,6 @@ logger = logging.getLogger("worker")
 _MAX_SOCKET_CONCURRENCY = 1000
 WORKER_WAIT_FOR_CONTROLLER_SECONDS = 3600
 WORKER_JOB_STATUS_LINGER_SECONDS = 60
-TRACER_SAVE_INTERVAL_SECONDS = 60
 
 
 class WorkerException(Exception):
@@ -449,8 +448,6 @@ class Worker:
         self.config = None
         self.__is_configured = False
 
-        self.__tracer_launched = False
-
         self._server = server
         if server is not None:
             server.register_handler("configure", self.configure)
@@ -522,28 +519,6 @@ class Worker:
                 ) for k in keys
             ])
 
-        self._tracer_output_file = os.path.join(
-            cluster.spec.fileroot,
-            "logs",
-            getpass.getuser(),
-            r.experiment_name,
-            r.trial_name,
-            "trace_results",
-            f"{r.worker_type}-{r.worker_index}.json",
-        )
-        os.makedirs(os.path.dirname(self._tracer_output_file), exist_ok=True)
-        self.__tracer = monitor.get_tracer(
-            tracer_entries=int(1e7),
-            # max_stack_depth=25,
-            ignore_c_function=False,
-            ignore_frozen=True,
-            log_async=True,
-            min_duration=25,
-            output_file=self._tracer_output_file,
-        )
-        self.__tracer_save_freqctrl = timeutil.FrequencyControl(
-            frequency_seconds=TRACER_SAVE_INTERVAL_SECONDS)
-
         self.__is_configured = True
         self.logger.debug("Configured successfully")
 
@@ -588,10 +563,6 @@ class Worker:
             scenario="running",
         )
 
-    @property
-    def tracer(self):
-        return self.__tracer
-
     def run(self):
         self._start_time_ns = time.monotonic_ns()
         self.__last_update_ns = None
@@ -604,11 +575,6 @@ class Worker:
                     continue
                 if not self.__is_configured:
                     raise RuntimeError("Worker is not configured")
-                if not self.__tracer_launched:
-                    # self.logger.info("Launching tracer ... ")
-                    self.__tracer.start()
-                    self.__tracer_launched = True
-                    self.__tracer.save()
                 start_time = time.monotonic_ns()
                 r = self._poll()
                 poll_time = (time.monotonic_ns() - start_time) / 1e9
@@ -629,9 +595,6 @@ class Worker:
                             self.__last_update_ns = now
                     else:
                         self.__last_update_ns = now
-                if self.__tracer_save_freqctrl.check():
-                    # self.logger.info("Tracer Save ... ")
-                    self.__tracer.save()
         except KeyboardInterrupt:
             self.exit()
         except Exception as e:

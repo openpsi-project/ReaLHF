@@ -704,8 +704,8 @@ async def model_eval_thread_func(
 ):
     while not stop_ctl.is_set():
         epoch, epoch_step = await eval_queue.get()
-        eval_stats = _gather_stat(await group_rpc_blocked(stream, handlers, "evaluate",
-                                                          [None for _ in handlers]))
+        eval_stats = await group_rpc_blocked(stream, handlers, "evaluate", [None for _ in handlers])
+        eval_stats = _gather_stat(list(filter(lambda x: bool(x), eval_stats)))
         logger.info(f"Evaluation results at epoch {epoch + 1} step {epoch_step + 1}: {eval_stats}")
 
 
@@ -718,10 +718,6 @@ async def model_save_thread_func(
 ):
     while not stop_ctl.is_set():
         epoch, epoch_step, global_step = await save_queue.get()
-
-        # Only save replica ID 0.
-        handlers = list(filter(lambda s: s.model_name.replica_id == 0, handlers))
-
         model_save_dirs = [
             os.path.join(
                 model_save_root,
@@ -857,6 +853,7 @@ class MasterWorker(worker_base.Worker):
         event_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(event_loop)
 
+        # Build some data required for subsequent model function calls.
         self.__all_model_handlers: List[config_pkg.ModelShardID] = []
         self.__dp0_model_handlers: List[config_pkg.ModelShardID] = []
         for model_name, topo in self.config.model_topos.items():
@@ -870,7 +867,8 @@ class MasterWorker(worker_base.Worker):
                 for j in topo.filter_match(data=0)
             ]
 
-        # logger.info("before create task initialize")
+        # Request model configs from model workers.
+        # Return None if the model is not a ReaLModel.
         self.__model_configs: Dict[ModelName, None | ReaLModelConfig] = {}
         for model_name in self.config.model_topos:
             p = request_reply_stream.Payload(
@@ -885,9 +883,45 @@ class MasterWorker(worker_base.Worker):
                 [p.request_id]),
                                                                   block=True).data
 
+        # Initialize model backends.
+        # For models with the same role, they share the same model parameters.
+        # Therefore, we must call reallocate parameters from A to B
+        # before we send requests to initialize B.
         _param_senders = [v[0] for v in self.config.sync_param_pairs]
         _param_recevers = [v[1] for v in self.config.sync_param_pairs]
-        for model_name, topo in self.config.model_topos.items():
+
+        # The parameters are by default held by the trainable model.
+        # If all replicas are not trainable, the parameters are held in replica 0.
+        _model_is_trainable = {
+            rpc.model_name: rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
+            for rpc in self.__model_rpcs
+        }
+        _roles = set([rpc.model_name.role for rpc in self.__model_rpcs])
+        _role_cnt = {
+            role: len([rpc for rpc in self.__model_rpcs if rpc.model_name.role == role])
+            for role in _roles
+        }
+        _reordered_model_names = []
+        for role in _roles:
+            if _role_cnt[role] == 1:
+                _reordered_model_names.append(ModelName(role, 0))
+                continue
+            _indices = list(range(_role_cnt[role]))
+            _trainable_this_role = [_model_is_trainable[ModelName(role, i)] for i in range(_role_cnt[role])]
+            if any(_trainable_this_role):
+                assert sum(_trainable_this_role) == 1
+                _trainable_idx = _trainable_this_role.index(True)
+                _reordered_model_names.append(ModelName(role, _trainable_idx))
+                _indices.remove(_trainable_idx)
+            for i in _indices:
+                _reordered_model_names.append(ModelName(role, i))
+
+        # Send initialization requests.
+        self.logger.info(f"Initialize model backends with order: {_reordered_model_names}.")
+        _initialized_roles = []
+        for model_name in _reordered_model_names:
+            topo = self.config.model_topos[model_name]
+            # Build FinetuneSpec, which is required to initialize backends.
             _handlers = [
                 config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in range(topo.world_size())
@@ -915,7 +949,8 @@ class MasterWorker(worker_base.Worker):
                 )
             model_ft_specs = [ft_spec] * topo.world_size()
 
-            if model_name.replica_id > 0:
+            # Reallocate parameters if necessary.
+            if model_name.role in _initialized_roles:
                 assert model_name in _param_recevers
                 _param_realloc_src = _param_senders[_param_recevers.index(model_name)]
                 _request_parameter_sync(
@@ -937,7 +972,8 @@ class MasterWorker(worker_base.Worker):
                 ))
             event_loop.run_until_complete(asyncio.gather(_task))[0]
 
-            if model_name.replica_id > 0:
+            # Reallocate parameters back.
+            if model_name.role in _initialized_roles:
                 # Reversely sync parameters
                 _request_parameter_sync(
                     stream=self.__stream,
@@ -949,8 +985,11 @@ class MasterWorker(worker_base.Worker):
                     to_model_config=self.__model_configs[_param_realloc_src],
                 )
 
+            _initialized_roles.append(model_name.role)
+
         logger.info("Initializations of models and backends complete.")
 
+        # Create corountine control objects for running the dataflow graph.
         self.__rpc_ctrl = RPCCorountineControl(
             stop=asyncio.Event(),
             train_count=asyncio.Queue(maxsize=len(self.__rpc_dsts)),
@@ -988,10 +1027,9 @@ class MasterWorker(worker_base.Worker):
 
         logger.info(f"Creating asyncio coroutines...")
 
+        # Create coroutines for model RPCs.
         coroutine_tasks = []
         for rpc in self.__model_rpcs:
-            # should be a dict: pp_rank to streams
-
             request_task = event_loop.create_task(
                 model_rpc_request_func(
                     rpc=rpc,
@@ -1018,6 +1056,7 @@ class MasterWorker(worker_base.Worker):
                 reply_tasks.append(_reply_task)
             coroutine_tasks += [request_task] + reply_tasks
 
+        # Append some utilization coroutines to handle data loading, saving, and evaluation.
         load_data_task = event_loop.create_task(
             load_data_func(
                 src_rpc=src_rpc,
@@ -1064,7 +1103,7 @@ class MasterWorker(worker_base.Worker):
             self.__lazy_init()
 
         # Main execution steps. The graph runs under-the-hood in RPC & stream threads.
-        # Wait for the finish of the tranverse of the execution graph.
+        # Wait for the finish of the traversal of the execution graph.
         execution_start = time.perf_counter()
         logger.info("Master worker is waiting for the finish of the execution graph.")
         _rpc_dst_cnt = 0

@@ -8,8 +8,6 @@ import tqdm
 
 from reallm.base import constants
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
-from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (PipelinableModelRunner,
-                                                                  PipelinableModelRunnerWithZeRO)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs
 import reallm.api.core.model_api as model_api
@@ -93,23 +91,13 @@ class DPOInterface(model_api.ModelInterface):
 
         seqlens_cpu = input_lens.cpu().numpy().tolist()
 
-        if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
-            res = module.forward(
-                seqlens_cpu=seqlens_cpu,
-                packed_input_ids=data["packed_input_ids"],
-                cu_seqlens=cu_seqlens,
-            )
-            if res is None:
-                return None
-            logits = res
-        else:
-            if hasattr(module, "module"):
-                module = module.module
-            logits: torch.FloatTensor = module(
-                packed_input_ids=data["packed_input_ids"],
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-            ).logits
+        logits = module.forward(
+            seqlens_cpu=seqlens_cpu,
+            packed_input_ids=data["packed_input_ids"],
+            cu_seqlens=cu_seqlens,
+        )
+        if logits is None:
+            return None
 
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_input_ids"]).float()
 
@@ -145,45 +133,27 @@ class DPOInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
 
-        if isinstance(module, PipelinableModelRunnerWithZeRO):
-            loss_fn_kwargs = dict(
-                input_lens=pair_lens,
-                prompt_lens=prompt_lens,
-                seqlogp=data["seqlogp"],
-                beta=self.beta,
-            )
-            _, stats = module.train_batch(
-                seqlens_cpu=data.metadata["seqlens"],
-                packed_input_ids=packed_input_ids,
-                cu_seqlens=cu_seqlens,
-                input_lens_for_partition=pair_lens,
-                loss_fn=_dpo_loss_from_model_outputs,
-                **loss_fn_kwargs,
-            )
-        else:
-            logits: torch.FloatTensor = module(
-                packed_input_ids=packed_input_ids,
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-            ).logits
-
-            loss, stats = _dpo_loss_from_model_outputs(
-                logits=logits,
-                packed_input_ids=packed_input_ids,
-                cu_seqlens=cu_seqlens,
-                prompt_lens=prompt_lens,
-                seqlogp=data["seqlogp"],
-                beta=self.beta,
-            )
-
-            module.backward(loss)
-            module.step()
+        loss_fn_kwargs = dict(
+            input_lens=pair_lens,
+            prompt_lens=prompt_lens,
+            seqlogp=data["seqlogp"],
+            beta=self.beta,
+        )
+        stats = module.train_batch(
+            seqlens_cpu=data.metadata["seqlens"],
+            packed_input_ids=packed_input_ids,
+            cu_seqlens=cu_seqlens,
+            input_lens_for_partition=pair_lens,
+            version_steps=model.version.global_step,
+            loss_fn=_dpo_loss_from_model_outputs,
+            **loss_fn_kwargs,
+        )
 
         cur_epoch = model.version.epoch
         model.inc_version()
 
         res = {}
-        if stats is not None:
+        if stats:
             res = dict(
                 loss=float(stats["loss"]) / int(stats["n_seqs"]),
                 pos_score=float(stats["pos_score"]) / int(stats["n_seqs"]),

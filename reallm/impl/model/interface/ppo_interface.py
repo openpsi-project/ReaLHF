@@ -9,12 +9,9 @@ import torch
 import torch.distributed as dist
 
 from reallm.api.core import data_api
-from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
-from reallm.impl.model.backend.pipe_engine.ds_pipe_engine import (PipelinableModelRunner,
-                                                                  PipelinableModelRunnerWithZeRO)
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
+from reallm.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output, GenerationConfig
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
 from reallm.impl.model.utils.padding import unpad_input
 import reallm.api.core.model_api as model_api
@@ -69,13 +66,13 @@ def _ppo_actor_loss_from_model_outputs(
     #     eps_clip=eps_clip,
     # ))
     # loss = torch.where(ppo_loss_mask, loss, 0.0).sum() / ppo_loss_mask.count_nonzero()
-    importance_weight = ppo_stat["importance_weight"] * n_tokens
-    clip_ratio = ppo_stat["clip_ratio"] * n_tokens
-    approx_kl = ppo_stat["approx_kl"] * n_tokens
+    importance_weight = ppo_stat["importance_weight"].float() * n_tokens
+    clip_ratio = ppo_stat["clip_ratio"].float() * n_tokens
+    approx_kl = ppo_stat["approx_kl"].float() * n_tokens
 
     # Logging and early stopping according to KL (logp vs ref) or importance ratio (new logp vs old logp).
-    mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum()
-    logging_loss = torch.where(ppo_loss_mask, loss.detach(), 0.0).sum()
+    mean_ref_kl = (kl_rewards.detach().float() * ppo_loss_mask).sum()
+    logging_loss = torch.where(ppo_loss_mask, loss.detach().float(), 0.0).sum()
     dist.all_reduce(n_tokens, group=constants.data_parallel_group())
     dist.all_reduce(mean_ref_kl, group=constants.data_parallel_group())
     dist.all_reduce(importance_weight, group=constants.data_parallel_group())
@@ -187,40 +184,19 @@ class PPOActorInterface(model_api.ModelInterface):
         prompt_lengths = torch.tensor(data.metadata["seqlens"],
                                       dtype=torch.int32,
                                       device=packed_prompts.device)
-        cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
+        prompt_cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
 
-        bs = prompt_lengths.shape[0]
+        res = module.generate(
+            seqlens_cpu=data.metadata["seqlens"],
+            tokenizer=model.tokenizer,
+            packed_input_ids=packed_prompts,
+            cu_seqlens=prompt_cu_seqlens,
+            gconfig=GenerationConfig(**self.generation_config),
+        )
+        if res is None:
+            return None
 
-        # logger.info(f"packed_prompts shape {packed_prompts.shape}, bs {bs}")
-
-        # st = time.monotonic()
-        if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
-            res = module.generate(
-                seqlens_cpu=data.metadata["seqlens"],
-                tokenizer=model.tokenizer,
-                packed_input_ids=packed_prompts,
-                cu_seqlens=cu_seqlens,
-                gconfig=GenerationConfig(**self.generation_config),
-            )
-            if res is None:
-                return None
-
-            gen_tokens, logprobs, logits_mask, *_ = res
-            # logger.info(f"gen_tokens shape {gen_tokens.shape}")
-        else:
-            # unwrap deepspeed engine here
-            if hasattr(module, "module"):
-                module = module.module
-            gen_res = module.generate(
-                tokenizer=model.tokenizer,
-                packed_input_ids=packed_prompts,
-                cu_seqlens=cu_seqlens,
-                max_seqlen=int(max(prompt_lengths)),
-                gconfig=GenerationConfig(**self.generation_config),
-            )
-            gen_tokens = gen_res.sequences
-            logprobs = gen_res.scores
-            logits_mask = gen_res.logits_mask
+        gen_tokens, logprobs, logits_mask, *_ = res
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
@@ -229,61 +205,25 @@ class PPOActorInterface(model_api.ModelInterface):
         gen_lengths = (gen_tokens != pad_token_id).logical_and(gen_tokens != eos_token_id).sum(dim=-1) + 1
         gen_lengths = gen_lengths.clip(max=gen_tokens.shape[-1])
 
-        # TODO: refactor the following whole bunch of sh*t.
-        # Pack generated sequences and logprobs.
-        prompts_list, prompt_log_probs_list, prompt_logits_mask_list = [], [], []
-        gen_tokens_list, gen_log_probs_list, gen_logits_mask_list = [], [], []
-        for i in range(bs):
-            prompt_len, gen_len = prompt_lengths[i].item(), gen_lengths[i].item()
+        (packed_seq, packed_logprobs, packed_logits_mask, seq_lengths,
+         prompt_mask) = (concat_prompt_to_generation_output(
+             packed_prompts=packed_prompts,
+             prompt_lengths=prompt_lengths,
+             gen_tokens=gen_tokens,
+             logprobs=logprobs,
+             logits_mask=logits_mask,
+             gen_lengths=gen_lengths,
+         ))
 
-            # Prompts are left-padded. Besides, prompt_log_probs is one-step shorter than prompts.
-            prompts_list.append(packed_prompts[cu_seqlens[i]:cu_seqlens[i + 1]])
-            prompt_log_probs_list.append(logprobs.new_zeros(prompt_len - 1))
-            if logits_mask is not None:
-                prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len - 1, logits_mask.shape[-1])))
-
-            # Generated tokens are right-padded.
-            gen_tokens_list.append(gen_tokens[i, :gen_len])
-            gen_log_probs_list.append(logprobs[i, :gen_len])
-            if logits_mask is not None:
-                gen_logits_mask_list.append(
-                    torch.cat([
-                        logits_mask[i, :gen_len],
-                        logits_mask.new_ones(1, logits_mask.shape[-1]),
-                    ]))
-
-        # For complete sequences, EOS token is included. Otherwise the sequence may end with arbitrary token.
-        # cu_seqlens marks the boundary of these sequences, no matter whether they are complete or not.
-        packed_seq = torch.cat(list(itertools.chain.from_iterable(zip(prompts_list, gen_tokens_list))))
-        seq_lengths = prompt_lengths + gen_lengths
-        cu_seqlens = torch.cat([
-            torch.zeros(1, dtype=torch.long, device=seq_lengths.device),
-            seq_lengths.cumsum(0),
-        ]).int()
-        packed_logprobs = torch.cat(
-            list(itertools.chain.from_iterable(zip(prompt_log_probs_list, gen_log_probs_list))))
-        assert packed_seq.shape[0] == packed_logprobs.shape[0] + bs, (
-            packed_seq.shape,
-            packed_logprobs.shape,
-            bs,
-        )
-        packed_logits_mask = None
-        if gen_logits_mask_list and not self.force_no_logits_mask:
-            packed_logits_mask = torch.cat(
-                list(itertools.chain.from_iterable(zip(prompt_logits_mask_list, gen_logits_mask_list))))
-
-        prompt_mask = zip(
-            [torch.ones(plen, dtype=torch.bool, device=model.device) for plen in prompt_lengths],
-            [torch.zeros(glen, dtype=torch.bool, device=model.device) for glen in gen_lengths],
-        )
-        prompt_mask = torch.cat(list(itertools.chain.from_iterable(prompt_mask)))
+        cu_seqlens = torch.nn.functional.pad(gen_lengths.cumsum(0), (1, 0))
 
         res = dict(
             seq_no_eos_mask=seq_no_eos_mask,
             packed_seq=packed_seq,
             cu_seqlens=cu_seqlens,
             packed_logprobs=packed_logprobs,
-            packed_logits_mask=(packed_logits_mask.bool() if packed_logits_mask is not None else None),
+            packed_logits_mask=(packed_logits_mask.bool() if not self.force_no_logits_mask
+                                and packed_logits_mask is not None else None),
             prompt_mask=prompt_mask,
         )
         res = from_dict(res)
@@ -301,24 +241,13 @@ class PPOActorInterface(model_api.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
-            res = module.forward(
-                seqlens_cpu=data.metadata["seqlens"],
-                packed_input_ids=data["packed_seq"],
-                cu_seqlens=cu_seqlens,
-            )
-            if res is None:
-                return None
-            logits = res
-        else:
-            if hasattr(module, "module"):
-                module = module.module
-            res = module(
-                packed_input_ids=data["packed_seq"],
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-            )
-            logits = res.logits
+        logits = module.forward(
+            seqlens_cpu=data.metadata["seqlens"],
+            packed_input_ids=data["packed_seq"],
+            cu_seqlens=cu_seqlens,
+        )
+        if logits is None:
+            return None
 
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             packed_logits_mask = data["packed_logits_mask"]
@@ -456,62 +385,33 @@ class PPOActorInterface(model_api.ModelInterface):
             cu_seqlens = data["cu_seqlens"]
             input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
             logits_mask = (data["packed_logits_mask"] if "packed_logits_mask" in data else None)
-            if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
-                module.set_version_steps(model.version.global_step)
-                seqlens = batch_seqlens[offset:offset + input_lens.shape[0]]
-                offset += input_lens.shape[0]
-                loss_fn_kwargs = dict(
-                    input_lens=input_lens,  # used for partition
-                    old_logp=data["old_logp"],
-                    ppo_loss_mask=data["ppo_loss_mask"],
-                    advantages=data["advantages"],
-                    kl_rewards=data["kl_rewards"],
-                    kl_adapter=self.kl_adapter,
-                    eps_clip=self.eps_clip,
-                    early_stop_imp_ratio=self.early_stop_imp_ratio,
-                    early_stop_kl=self.early_stop_kl,
-                    logits_mask=logits_mask,
-                )
+            seqlens = batch_seqlens[offset:offset + input_lens.shape[0]]
+            offset += input_lens.shape[0]
+            loss_fn_kwargs = dict(
+                input_lens=input_lens,  # used for partition
+                old_logp=data["old_logp"],
+                ppo_loss_mask=data["ppo_loss_mask"],
+                advantages=data["advantages"],
+                kl_rewards=data["kl_rewards"],
+                kl_adapter=self.kl_adapter,
+                eps_clip=self.eps_clip,
+                early_stop_imp_ratio=self.early_stop_imp_ratio,
+                early_stop_kl=self.early_stop_kl,
+                logits_mask=logits_mask,
+            )
 
-                loss, stats = module.train_batch(
-                    seqlens_cpu=seqlens,
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=data["cu_seqlens"],
-                    loss_fn=_ppo_actor_loss_from_model_outputs,
-                    **loss_fn_kwargs,
-                )
-            else:
-                max_seqlen = int(max(input_lens))
-                output = module(
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=cu_seqlens,
-                    max_seqlen=max_seqlen,
-                )
-                loss, stats = _ppo_actor_loss_from_model_outputs(
-                    logits=output.logits,
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=cu_seqlens,
-                    old_logp=data["old_logp"],
-                    ppo_loss_mask=data["ppo_loss_mask"],
-                    advantages=data["advantages"],
-                    kl_rewards=data["kl_rewards"],
-                    kl_adapter=self.kl_adapter,
-                    eps_clip=self.eps_clip,
-                    early_stop_imp_ratio=self.early_stop_imp_ratio,
-                    early_stop_kl=self.early_stop_kl,
-                    logits_mask=logits_mask,
-                )
-
-                with cuda_tmarked("bwd", CUDATimeMarkType.backward):
-                    module.backward(loss)
-
-                with cuda_tmarked("optim_step", CUDATimeMarkType.optim_step):
-                    module.step(lr_kwargs={"epoch": model.version.global_step})
+            stats = module.train_batch(
+                seqlens_cpu=seqlens,
+                packed_input_ids=data["packed_seq"],
+                cu_seqlens=data["cu_seqlens"],
+                version_steps=model.version.global_step,
+                loss_fn=_ppo_actor_loss_from_model_outputs,
+                **loss_fn_kwargs,
+            )
 
             if stats:
                 for k, v in stats.items():
                     train_stats[k] += v
-
         cur_epoch = model.version.epoch
         model.inc_version()
 
@@ -548,8 +448,8 @@ def _ppo_critic_loss_from_model_outputs(
             device=cu_seqlens.device,
         ) for i in range(cu_seqlens.shape[0] - 1)
     ])
-    new_values = new_values[leave_one_indices].squeeze(-1)
-    values = values[leave_one_indices].squeeze(-1)
+    new_values = new_values[leave_one_indices].squeeze(-1).float()
+    values = values[leave_one_indices].squeeze(-1).float()
 
     loss, loss_stat = ppo_functional.critic_loss_fn(
         value=new_values,
@@ -566,16 +466,14 @@ def _ppo_critic_loss_from_model_outputs(
 
     # Logging.
     n_tokens = ppo_loss_mask.count_nonzero()
-    mean_ref_kl = (kl_rewards.detach() * ppo_loss_mask).sum()
-    logging_loss = loss.detach() * n_tokens
-    clip_ratio = loss_stat["clip_ratio"] * n_tokens
-    normalized_values = torch.where(ppo_loss_mask, new_values, 0.0).sum().detach()
-    denormalized_values = (torch.where(ppo_loss_mask, denormalized_values, 0.0).sum().detach())
+    mean_ref_kl = (kl_rewards.detach().float() * ppo_loss_mask).sum()
+    logging_loss = loss.detach().float() * n_tokens
+    clip_ratio = loss_stat["clip_ratio"].float() * n_tokens
+    denormalized_values = (torch.where(ppo_loss_mask, denormalized_values, 0.0).sum().detach().float())
     dist.all_reduce(n_tokens, group=constants.data_parallel_group())
     dist.all_reduce(mean_ref_kl, group=constants.data_parallel_group())
     dist.all_reduce(logging_loss, group=constants.data_parallel_group())
     dist.all_reduce(clip_ratio, group=constants.data_parallel_group())
-    dist.all_reduce(normalized_values, group=constants.data_parallel_group())
     dist.all_reduce(denormalized_values, group=constants.data_parallel_group())
 
     # Update KL coefficient to be consistent with actor.
@@ -584,7 +482,6 @@ def _ppo_critic_loss_from_model_outputs(
     return loss, dict(
         value_loss=logging_loss,
         value_clip_ratio=clip_ratio,
-        normalized_values=normalized_values,
         denormalized_values=denormalized_values,
     )
 
@@ -648,22 +545,13 @@ class PPOCriticInterface(model_api.ModelInterface):
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
-        if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
-            scores = module.forward(
-                seqlens_cpu=data.metadata["seqlens"],
-                packed_input_ids=data["packed_seq"],
-                cu_seqlens=cu_seqlens,
-            )
-            if scores is None:
-                return None
-        else:
-            if hasattr(module, "module"):
-                module = module.module
-            scores: torch.FloatTensor = module(
-                packed_input_ids=data["packed_seq"],
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-            ).logits
+        scores = module.forward(
+            seqlens_cpu=data.metadata["seqlens"],
+            packed_input_ids=data["packed_seq"],
+            cu_seqlens=cu_seqlens,
+        )
+        if scores is None:
+            return None
         scores = scores.squeeze(-1)
         res = from_dict(dict(scores=scores))
         res.register_metadata(seqlens=data.metadata["seqlens"])
@@ -770,55 +658,28 @@ class PPOCriticInterface(model_api.ModelInterface):
         offset = 0
         for data in datas:
             input_lens = data["cu_seqlens"][1:] - data["cu_seqlens"][:-1]
-            if isinstance(module, (PipelinableModelRunner, PipelinableModelRunnerWithZeRO)):
-                seqlens_cpu = batch_seqlens[offset:offset + input_lens.shape[0]]
-                offset += input_lens.shape[0]
-                module.set_version_steps(model.version.global_step)
-                module.set_tokenizer(tokenizer)
+            seqlens_cpu = batch_seqlens[offset:offset + input_lens.shape[0]]
+            offset += input_lens.shape[0]
 
-                loss_kwargs = dict(
-                    input_lens=input_lens,
-                    values=data["values"],
-                    ppo_loss_mask=data["ppo_loss_mask"],
-                    returns=data["returns"],
-                    kl_rewards=data["kl_rewards"],
-                    value_eps_clip=self.value_eps_clip,
-                    kl_adapter=self.kl_adapter,
-                    rms=self.rms if self.value_norm else None,
-                )
+            loss_kwargs = dict(
+                input_lens=input_lens,
+                values=data["values"],
+                ppo_loss_mask=data["ppo_loss_mask"],
+                returns=data["returns"],
+                kl_rewards=data["kl_rewards"],
+                value_eps_clip=self.value_eps_clip,
+                kl_adapter=self.kl_adapter,
+                rms=self.rms if self.value_norm else None,
+            )
 
-                loss, stats = module.train_batch(
-                    seqlens_cpu=seqlens_cpu,
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=data["cu_seqlens"],
-                    loss_fn=_ppo_critic_loss_from_model_outputs,
-                    **loss_kwargs,
-                )
-            else:
-                max_seqlen = int(max(input_lens))
-                new_values: torch.FloatTensor = module(
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=data["cu_seqlens"],
-                    max_seqlen=max_seqlen,
-                ).logits.float()
-
-                loss, stats = _ppo_critic_loss_from_model_outputs(
-                    new_values=new_values,
-                    packed_input_ids=data["packed_seq"],
-                    cu_seqlens=data["cu_seqlens"],
-                    values=data["values"],
-                    ppo_loss_mask=data["ppo_loss_mask"],
-                    returns=data["returns"],
-                    kl_rewards=data["kl_rewards"],
-                    value_eps_clip=self.value_eps_clip,
-                    kl_adapter=self.kl_adapter,
-                    rms=self.rms if self.value_norm else None,
-                )
-
-                with cuda_tmarked("bwd", CUDATimeMarkType.backward):
-                    module.backward(loss)
-                with cuda_tmarked("optim_step", CUDATimeMarkType.optim_step):
-                    module.step(lr_kwargs={"epoch": model.version.global_step})
+            stats = module.train_batch(
+                seqlens_cpu=seqlens_cpu,
+                packed_input_ids=data["packed_seq"],
+                cu_seqlens=data["cu_seqlens"],
+                version_steps=model.version.global_step,
+                loss_fn=_ppo_critic_loss_from_model_outputs,
+                **loss_kwargs,
+            )
 
             if stats:
                 for k, v in stats.items():
@@ -831,7 +692,6 @@ class PPOCriticInterface(model_api.ModelInterface):
             train_stats = dict(
                 value_loss=float(train_stats["value_loss"] / n_tokens),
                 value_clip_ratio=float(train_stats["value_clip_ratio"] / n_tokens),
-                normalized_values=float(train_stats["normalized_values"] / n_tokens),
                 denormalized_values=float(train_stats["denormalized_values"] / n_tokens),
                 returns=global_stats["returns"] / int(n_tokens),
                 n_tokens=int(n_tokens),
