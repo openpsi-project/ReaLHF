@@ -9,10 +9,9 @@ import torch
 import torch.distributed as dist
 
 from reallm.api.core import data_api
-from reallm.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_generate import generate, GenerationConfig
+from reallm.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output, GenerationConfig
 from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
 from reallm.impl.model.utils.padding import unpad_input
 import reallm.api.core.model_api as model_api
@@ -185,15 +184,13 @@ class PPOActorInterface(model_api.ModelInterface):
         prompt_lengths = torch.tensor(data.metadata["seqlens"],
                                       dtype=torch.int32,
                                       device=packed_prompts.device)
-        cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
-
-        bs = prompt_lengths.shape[0]
+        prompt_cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
 
         res = module.generate(
             seqlens_cpu=data.metadata["seqlens"],
             tokenizer=model.tokenizer,
             packed_input_ids=packed_prompts,
-            cu_seqlens=cu_seqlens,
+            cu_seqlens=prompt_cu_seqlens,
             gconfig=GenerationConfig(**self.generation_config),
         )
         if res is None:
@@ -208,61 +205,23 @@ class PPOActorInterface(model_api.ModelInterface):
         gen_lengths = (gen_tokens != pad_token_id).logical_and(gen_tokens != eos_token_id).sum(dim=-1) + 1
         gen_lengths = gen_lengths.clip(max=gen_tokens.shape[-1])
 
-        # TODO: refactor the following whole bunch of sh*t.
-        # Pack generated sequences and logprobs.
-        prompts_list, prompt_log_probs_list, prompt_logits_mask_list = [], [], []
-        gen_tokens_list, gen_log_probs_list, gen_logits_mask_list = [], [], []
-        for i in range(bs):
-            prompt_len, gen_len = prompt_lengths[i].item(), gen_lengths[i].item()
-
-            # Prompts are left-padded. Besides, prompt_log_probs is one-step shorter than prompts.
-            prompts_list.append(packed_prompts[cu_seqlens[i]:cu_seqlens[i + 1]])
-            prompt_log_probs_list.append(logprobs.new_zeros(prompt_len - 1))
-            if logits_mask is not None:
-                prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len - 1, logits_mask.shape[-1])))
-
-            # Generated tokens are right-padded.
-            gen_tokens_list.append(gen_tokens[i, :gen_len])
-            gen_log_probs_list.append(logprobs[i, :gen_len])
-            if logits_mask is not None:
-                gen_logits_mask_list.append(
-                    torch.cat([
-                        logits_mask[i, :gen_len],
-                        logits_mask.new_ones(1, logits_mask.shape[-1]),
-                    ]))
-
-        # For complete sequences, EOS token is included. Otherwise the sequence may end with arbitrary token.
-        # cu_seqlens marks the boundary of these sequences, no matter whether they are complete or not.
-        packed_seq = torch.cat(list(itertools.chain.from_iterable(zip(prompts_list, gen_tokens_list))))
-        seq_lengths = prompt_lengths + gen_lengths
-        cu_seqlens = torch.cat([
-            torch.zeros(1, dtype=torch.long, device=seq_lengths.device),
-            seq_lengths.cumsum(0),
-        ]).int()
-        packed_logprobs = torch.cat(
-            list(itertools.chain.from_iterable(zip(prompt_log_probs_list, gen_log_probs_list))))
-        assert packed_seq.shape[0] == packed_logprobs.shape[0] + bs, (
-            packed_seq.shape,
-            packed_logprobs.shape,
-            bs,
-        )
-        packed_logits_mask = None
-        if gen_logits_mask_list and not self.force_no_logits_mask:
-            packed_logits_mask = torch.cat(
-                list(itertools.chain.from_iterable(zip(prompt_logits_mask_list, gen_logits_mask_list))))
-
-        prompt_mask = zip(
-            [torch.ones(plen, dtype=torch.bool, device=model.device) for plen in prompt_lengths],
-            [torch.zeros(glen, dtype=torch.bool, device=model.device) for glen in gen_lengths],
-        )
-        prompt_mask = torch.cat(list(itertools.chain.from_iterable(prompt_mask)))
+        
+        (packed_seq, packed_logprobs, packed_logits_mask, seq_lengths, prompt_mask) = concat_prompt_to_generation_output(
+            packed_prompts=packed_prompts,
+            prompt_lengths = prompt_lengths,
+            gen_tokens=gen_tokens,
+            logprobs=logprobs,
+            logits_mask=logits_mask,
+            gen_lengths=gen_lengths,)
+        
+        cu_seqlens = torch.nn.functional.pad(gen_lengths.cumsum(0), (1, 0))
 
         res = dict(
             seq_no_eos_mask=seq_no_eos_mask,
             packed_seq=packed_seq,
             cu_seqlens=cu_seqlens,
             packed_logprobs=packed_logprobs,
-            packed_logits_mask=(packed_logits_mask.bool() if packed_logits_mask is not None else None),
+            packed_logits_mask=(packed_logits_mask.bool() if not self.force_no_logits_mask and packed_logits_mask is not None else None),
             prompt_mask=prompt_mask,
         )
         res = from_dict(res)
