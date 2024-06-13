@@ -6,6 +6,8 @@ import re
 import socket
 import tempfile
 
+# TODO: eliminate cluster info in open-source code base
+
 
 def get_user_tmp():
     tmp = tempfile.gettempdir()
