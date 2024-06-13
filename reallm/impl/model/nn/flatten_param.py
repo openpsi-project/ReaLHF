@@ -116,10 +116,9 @@ def build_param_spec(
 ) -> Tuple[Dict[str, ContiguousParamSpec], int]:
     if len(layer_indices) == 0:
         return {}, 0
-    param_spec = {}
-    param_size = 0
+
+    sd_keys = []
     for layer_idx in layer_indices:
-        sd_keys = []
         if layer_idx == 0:
             sd_keys += real_model_embedding_param_keys(config)
         elif layer_idx == config.n_layers + 1:
@@ -127,10 +126,15 @@ def build_param_spec(
         else:
             sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
 
-        for k in sd_keys:
-            shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
-            param_spec[k] = ContiguousParamSpec(param_size, param_size + int(np.prod(shape)), shape)
-            param_size += int(np.prod(shape))
+    # In the reverse order as backpropagation, consistent with Megatron.
+    sd_keys = reversed(sd_keys)
+
+    param_spec = {}
+    param_size = 0
+    for k in sd_keys:
+        shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
+        param_spec[k] = ContiguousParamSpec(param_size, param_size + int(np.prod(shape)), shape)
+        param_size += int(np.prod(shape))
     return param_spec, param_size
 
 

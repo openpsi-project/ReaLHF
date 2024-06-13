@@ -139,27 +139,12 @@ def main_start(args, recover_count: int = 0):
 
     logger.info(f"Resetting name resolving repo...")
 
-    if args.remote_reset:
-        sched.submit(
-            "setup",
-            cmd=sched_client.setup_cmd(expr_name, trial_name, args.debug),
-            env_vars=BASE_ENVIRONS,
-            container_image=args.image_name or setup.controller_image,
-            multiprog=False,
-            hostfile=False,
-        )
-        try:
-            sched.wait(timeout=3600, update=True)
-        except Exception as e:
-            logger.warning(f"Resetting name resolving repo failed.")
-            raise e
-    else:
-        try:
-            name_resolve.clear_subtree(
-                names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name))
-        except Exception as e:
-            logger.warning(f"Resetting name resolving repo failed.")
-            raise e
+    try:
+        name_resolve.clear_subtree(
+            names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name))
+    except Exception as e:
+        logger.warning(f"Resetting name resolving repo failed.")
+        raise e
     logger.info(f"Resetting name resolving repo... Done.")
 
     logger.info(f"Running configuration: {experiment.__class__.__name__}")
@@ -364,11 +349,6 @@ def main():
         "--debug",
         action="store_true",
         help="If True, activate all assertions in the code.",
-    )
-    subparser.add_argument(
-        "--remote_reset",
-        action="store_true",
-        help="If True, reset name resolve repo remotely in computation nodes. Otherwise reset locally.",
     )
     subparser.add_argument(
         "--recover_mode",

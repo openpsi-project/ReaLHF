@@ -1,24 +1,205 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import *
 import dataclasses
 import functools
 import math
 
 from deepspeed.runtime import zero
+from deepspeed.runtime.bf16_optimizer import BF16_Optimizer
 from deepspeed.runtime.config import DeepSpeedConfig
 from deepspeed.runtime.engine import DeepSpeedEngine, DeepSpeedOptimizerCallable, DeepSpeedSchedulerCallable
 import deepspeed
 import torch
-import torch.distributed
+import torch.distributed as dist
+import transformers
 
-from reallm.base.constants import (data_parallel_world_size, model_parallel_world_size,
-                                   pipe_parallel_world_size)
-from reallm.impl.model.backend.pipe_engine import PipelinableModelRunnerWithZeRO
+from reallm.impl.model.backend.pipe_runner import PipelineRunner
+from reallm.impl.model.nn.real_llm_api import ReaLModel
+from reallm.impl.model.nn.real_llm_generate import GenerationConfig
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
 import reallm.base.logging as logging
 
-DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU = 32  # A place-holder for inference.
 logger = logging.getLogger("DeepSpeed Backend")
+
+
+class ReaLDeepSpeedEngine:
+
+    def __init__(
+        self,
+        module: ReaLModel,
+        ds_engine: DeepSpeedEngine,
+    ):
+        self.module = module
+
+        self.device = module.device
+        self.dtype = module.dtype
+
+        self.ds_engine = ds_engine
+
+        if constants.pipe_parallel_world_size() > 1:
+            self.pipe_runner = PipelineRunner(module)
+
+            assert (self.ds_engine.zero_optimization_stage()
+                    < 2), "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
+            if self.ds_engine.bfloat16_enabled():
+                assert isinstance(self.ds_engine.optimizer, BF16_Optimizer)
+
+            model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
+            num_params = sum([p.numel() for p in model_parameters])
+            unique_params = num_params
+
+            params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(self.device)
+            dist.all_reduce(params_tensor, group=constants.grid().get_model_parallel_group())
+            params_tensor = params_tensor.tolist()
+            total_params = params_tensor[0]
+            unique_params = params_tensor[1]
+
+            if constants.parallelism_rank() == 0:
+                logger.info(f"CONFIG: default_train_mbs={self.pipe_runner.default_train_mbs} "
+                            f"default_inf_mbs={self.pipe_runner.default_inf_mbs} "
+                            f"num_layers(this stage)={self.module.num_layers} "
+                            f"pp_size={constants.pipe_parallel_world_size()} "
+                            f"dp_size={constants.data_parallel_world_size()} "
+                            f"mp_size={constants.model_parallel_world_size()} "
+                            f"bf16={self.ds_engine.bfloat16_enabled()} ")
+            if constants.data_parallel_rank() == 0:
+                logger.info(f"rank={constants.parallelism_rank()} "
+                            f"stage={constants.pipe_parallel_rank()} "
+                            f"layers={self.module.num_layers} "
+                            f"[{self.module.layer_idx_start}, {self.module.layer_idx_end}) "
+                            f"stage_params={num_params} ({num_params/1e6:0.3f}M) "
+                            f"total_params={total_params} ({total_params/1e6:0.3f}M) "
+                            f"unique_params={unique_params} ({unique_params/1e6:0.3f}M)")
+
+    def train(self, mode: bool = True):
+        self.ds_engine.train(mode)
+        self.module.train(mode)
+        return self
+
+    def eval(self):
+        self.ds_engine.eval()
+        self.module.eval()
+        return self
+
+    def train_batch(
+        self,
+        seqlens_cpu: List[int],
+        packed_input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        loss_fn: Callable,
+        version_steps: int,
+        input_lens_for_partition: Optional[torch.Tensor] = None,
+        num_micro_batches: Optional[int] = None,
+        **loss_fn_kwargs,
+    ):
+        if constants.pipe_parallel_world_size() > 1:
+            return self.pipe_runner.train_batch(
+                engine=self.ds_engine,
+                seqlens_cpu=seqlens_cpu,
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                loss_fn=loss_fn,
+                version_steps=version_steps,
+                input_lens_for_partition=input_lens_for_partition,
+                num_micro_batches=num_micro_batches,
+                **loss_fn_kwargs,
+            )
+        else:
+            # FIXME: num_micro_batches is ignored here
+            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+            model_output = self.ds_engine(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ).logits
+            loss, stat = loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs)
+            self.ds_engine.backward(loss)
+            lr_kwargs = {"epoch": version_steps} if version_steps is not None else None
+            self.ds_engine.step(lr_kwargs=lr_kwargs)
+            return stat
+
+    @torch.no_grad()
+    def eval_batch(
+        self,
+        seqlens_cpu: List[int],
+        packed_input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        loss_fn: Callable,
+        input_lens_for_partition: Optional[torch.Tensor] = None,
+        num_micro_batches: Optional[int] = None,
+        **loss_fn_kwargs,
+    ):
+        if constants.pipe_parallel_world_size() > 1:
+            return self.pipe_runner.eval_batch(
+                seqlens_cpu=seqlens_cpu,
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                loss_fn=loss_fn,
+                input_lens_for_partition=input_lens_for_partition,
+                num_micro_batches=num_micro_batches,
+                **loss_fn_kwargs,
+            )
+        else:
+            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+            model_output = self.ds_engine(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ).logits
+            _, stat = loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs)
+            return stat
+
+    def forward(
+        self,
+        seqlens_cpu: List[int],
+        packed_input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        num_micro_batches: Optional[int] = None,
+    ):
+        if constants.pipe_parallel_world_size() > 1:
+            return self.pipe_runner.forward(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                seqlens_cpu=seqlens_cpu,
+                num_micro_batches=num_micro_batches,
+            )
+        else:
+            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+            return self.ds_engine(
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ).logits
+
+    @torch.no_grad()
+    def generate(
+        self,
+        seqlens_cpu: List[int],
+        packed_input_ids: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        tokenizer: transformers.PreTrainedTokenizerFast,
+        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        num_micro_batches: Optional[int] = None,
+    ):
+        if constants.pipe_parallel_world_size() > 1:
+            return self.pipe_runner.generate(
+                seqlens_cpu=seqlens_cpu,
+                num_micro_batches=num_micro_batches,
+                tokenizer=tokenizer,
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                gconfig=gconfig,
+            )
+        else:
+            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+            res = self.module.generate(
+                tokenizer=tokenizer,
+                packed_input_ids=packed_input_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+                gconfig=gconfig,
+            )
+            return res.sequences, res.scores, res.logits_mask
 
 
 def get_train_ds_config(
@@ -92,9 +273,6 @@ def get_eval_ds_config(
     return {
         "steps_per_print": 10,
         "zero_optimization": zero_opt_dict,
-        "train_micro_batch_size_per_gpu": DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU,
-        "train_batch_size": torch.distributed.get_world_size(group=constants.data_parallel_group()) *
-        DEFAULT_TRAIN_MICRO_BATCH_SIZE_PER_GPU,
         "fp16": {
             "enabled": enable_fp16,
         },
@@ -111,9 +289,8 @@ def get_eval_ds_config(
 def get_optimizer_grouped_parameters(
     model: torch.nn.Module,
     weight_decay: float,
-    no_decay_name_list: List[str] = ["bias", "LayerNorm.weight"],
+    no_decay_name_list: List[str] = ["bias", "ln.weight", "ln_f.weight"],
 ):
-    # FIXME: fix no_decay_name_list
     optimizer_grouped_parameters = [
         {
             "params": [
@@ -136,7 +313,6 @@ def get_optimizer_grouped_parameters(
 def deepspeed_initialize(
     model: torch.nn.Module,
     config: Dict,
-    engine_type: str = "deepspeed",
     optimizer: Optional[Union[torch.optim.Optimizer, DeepSpeedOptimizerCallable]] = None,
     model_parameters: Optional[torch.nn.Module] = None,
     lr_scheduler: Optional[Union[torch.optim.lr_scheduler._LRScheduler, DeepSpeedSchedulerCallable]] = None,
@@ -150,60 +326,44 @@ def deepspeed_initialize(
                 f"train_micro_batch_size_per_gpu={config_class.train_micro_batch_size_per_gpu}, "
                 f"gradient_accumulation_steps={config_class.gradient_accumulation_steps}")
 
-    if engine_type == "deepspeed":
-        # Disable zero.Init context if it's currently enabled
-        zero.partition_parameters.shutdown_init_context()
+    # Disable zero.Init context if it's currently enabled
+    zero.partition_parameters.shutdown_init_context()
 
-        from deepspeed import comm as dist
+    from deepspeed import comm as dist
 
-        deepspeed.dist = dist
+    deepspeed.dist = dist
 
-        engine = DeepSpeedEngine(
-            args=None,
-            model=model,
-            optimizer=optimizer,
-            model_parameters=model_parameters,
-            lr_scheduler=lr_scheduler,
-            mpu=mpu,
-            dist_init_required=False,
-            config=config,
-            config_class=config_class,
-            # dont_change_device=True,
-        )
+    engine = DeepSpeedEngine(
+        args=None,
+        model=model,
+        optimizer=optimizer,
+        model_parameters=model_parameters,
+        lr_scheduler=lr_scheduler,
+        mpu=mpu,
+        dist_init_required=False,
+        config=config,
+        config_class=config_class,
+        # dont_change_device=True,
+    )
 
-        # Restore zero.Init context if necessary
-        zero.partition_parameters.restore_init_context()
-        # logger.info(f"Deepspeed Engine initialze finished.")
-        return_items = [
-            engine,
-            engine.optimizer,
-            engine.training_dataloader,
-            engine.lr_scheduler,
-        ]
-    elif engine_type == "pipe":
-        runner = PipelinableModelRunnerWithZeRO(
-            module=model,
-            inference_only=False,
-            args=None,
-            config=config,
-            config_class=config_class,
-            mpu=mpu,
-            optimizer=optimizer,
-            lr_scheduler=lr_scheduler,
-            dist_init_required=False,
-        )
-        # logger.info(f"Deepspeed Pipeline Engine initialze finished.")
-        return_items = [
-            runner,
-            runner.ds_engine.optimizer,
-            runner.ds_engine.training_dataloader,
-            runner.ds_engine.lr_scheduler,
-        ]
+    # Restore zero.Init context if necessary
+    zero.partition_parameters.restore_init_context()
+
+    runner = ReaLDeepSpeedEngine(
+        module=model,
+        ds_engine=engine,
+    )
+    return_items = [
+        runner,
+        engine.optimizer,
+        engine.training_dataloader,
+        engine.lr_scheduler,
+    ]
     return tuple(return_items)
 
 
 @dataclasses.dataclass
-class DeepspeedTrainBackend(model_api.ModelBackend):
+class DeepspeedBackend(model_api.ModelBackend):
     optimizer_name: str = "adam"
     optimizer_config: dict = dataclasses.field(
         default_factory=lambda: dict(lr=1e-5, weight_decay=0.1, betas=(0.9, 0.95), eps=1e-5))
@@ -217,11 +377,6 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
     zero_stage: int = 2
     # addtional deepspeed args
     additional_ds_config: Dict = dataclasses.field(default_factory=dict)
-    engine_type: str = "deepspeed"
-
-    def __post_init__(self):
-        if self.engine_type == "pipe":
-            assert self.zero_stage < 2
 
     def _initialize(self, model: model_api.Model, spec: model_api.FinetuneSpec):
         deepspeed.init_distributed(auto_mpi_discovery=False)
@@ -249,7 +404,7 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
         )
 
         # NOTE: Just a fake batch size to make DeepSpeed happy.
-        ds_config["train_batch_size"] = data_parallel_world_size()
+        ds_config["train_batch_size"] = constants.data_parallel_world_size()
 
         def warmup_then_cosine_anneal(step, warmup_steps_proportion, total_steps, min_lr_ratio):
             warmup_steps = max(5, int(total_steps * warmup_steps_proportion))
@@ -294,22 +449,10 @@ class DeepspeedTrainBackend(model_api.ModelBackend):
             optimizer=optimizer,
             config=ds_config,
             lr_scheduler=lr_scheduler,
-            engine_type=self.engine_type,
         )
 
         model.module = module
         return model
 
 
-model_api.register_backend("ds_train", DeepspeedTrainBackend)
-
-
-@dataclasses.dataclass
-class PipelineInferenceBackend(model_api.ModelBackend):
-
-    def _initialize(self, model: model_api.Model, spec: model_api.FinetuneSpec):
-        model.module = PipelinableModelRunnerWithZeRO(model.module)
-        return model
-
-
-model_api.register_backend("pipe_inference", PipelineInferenceBackend)
+model_api.register_backend("deepspeed", DeepspeedBackend)

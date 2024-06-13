@@ -27,8 +27,4 @@ def dpo_loss(
     pos_score = beta * (pi_yw_logps - ref_yw_logps).detach().sum()
     neg_score = beta * (pi_yl_logps - ref_yl_logps).detach().sum()
     kl = -(pi_logps - ref_logps).detach().sum()
-    # TODO: here
-    # from reallm.base import constants
-    # if constants.model_parallel_rank() == 0:
-    #     print(pi_logps.flatten()[:50], ref_logps.flatten()[:50])
     return losses, pos_score, neg_score, kl

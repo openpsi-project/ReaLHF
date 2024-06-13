@@ -495,7 +495,8 @@ class NamedArray:
             Exception: To locate in which field the error occurs.
         """
         if isinstance(loc, str):
-            self._fields.append(loc)
+            if loc not in self._fields:
+                self._fields.append(loc)
             setattr(self, loc, value)
         else:
             if not (isinstance(value, NamedArray)  # Check for matching structure.

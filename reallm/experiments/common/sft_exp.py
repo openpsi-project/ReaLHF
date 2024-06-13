@@ -7,7 +7,7 @@ from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptAnswerDatasetConfig
 from reallm.api.quickstart.device_mesh import AllocationConfig
 from reallm.api.quickstart.entrypoint import register_quickstart_exp
-from reallm.api.quickstart.model import ModelTrainEvalConfig
+from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
 from reallm.experiments.common.common import CommonExperimentConfig
 
 
@@ -18,7 +18,7 @@ class SFTConfig(CommonExperimentConfig):
     save_freq_steps: Optional[int] = 50
     eval_freq_epochs: Optional[int] = 1
     model: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
-    allocation_config: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
     dataset: PromptAnswerDatasetConfig = dataclasses.field(default_factory=PromptAnswerDatasetConfig)
 
     @property
@@ -45,7 +45,7 @@ class SFTConfig(CommonExperimentConfig):
 
     @property
     def allocations(self):
-        return {"default": self.allocation_config}
+        return {"default": self.allocation}
 
     @property
     def datasets(self):
@@ -58,6 +58,10 @@ class SFTConfig(CommonExperimentConfig):
                 ),
             )
         ]
+
+    @property
+    def allocations(self):
+        return {"default": self.allocation}
 
     @property
     def eval_datasets(self):
