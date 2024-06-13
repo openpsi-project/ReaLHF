@@ -249,15 +249,16 @@ class PPOActorInterface(model_api.ModelInterface):
         if logits is None:
             return None
 
+        logits /= GenerationConfig(**self.generation_config).temperature
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             packed_logits_mask = data["packed_logits_mask"]
             if constants.model_parallel_world_size() > 1:
+                # FIXME: here we gather it twice?
                 from reallm.impl.model.parallelism.model_parallel.mappings import \
                     gather_from_tensor_model_parallel_region
 
                 logits = gather_from_tensor_model_parallel_region(logits)
             logits.masked_fill_(packed_logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
-        # FIXME: the following line may OOM
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         res = from_dict(dict(logprobs=logprobs))
         res.register_metadata(seqlens=data.metadata["seqlens"])
