@@ -12,7 +12,8 @@ from reallm.api.core import data_api
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output, GenerationConfig
-from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization
+from reallm.impl.model.utils.functional import (apply_logits_mask, gather_packed_shifted_log_probs,
+                                                masked_normalization)
 from reallm.impl.model.utils.padding import unpad_input
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
@@ -41,8 +42,7 @@ def _ppo_actor_loss_from_model_outputs(
     returns loss and logging stats.
     """
     if logits_mask is not None:
-        # inplace operation for logits mask
-        logits.masked_fill_(logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
+        apply_logits_mask(logits, logits_mask)
 
     n_tokens = ppo_loss_mask.count_nonzero()
     logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids).float()
@@ -99,14 +99,6 @@ def _ppo_actor_loss_from_model_outputs(
         actor_clip_ratio=clip_ratio,
         importance_weight=importance_weight,
     )
-
-    if logits_mask is not None:
-        n_valid_vocabs = logits_mask.count_nonzero()
-        total_vocabs = logits_mask.numel()
-        dist.all_reduce(n_valid_vocabs, group=constants.data_parallel_group())
-        dist.all_reduce(total_vocabs, group=constants.data_parallel_group())
-        stats["n_valid_vocabs"] = n_valid_vocabs
-        stats["total_vocabs"] = total_vocabs
 
     return loss, stats
 
@@ -249,15 +241,9 @@ class PPOActorInterface(model_api.ModelInterface):
         if logits is None:
             return None
 
+        logits /= GenerationConfig(**self.generation_config).temperature
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
-            packed_logits_mask = data["packed_logits_mask"]
-            if constants.model_parallel_world_size() > 1:
-                from reallm.impl.model.parallelism.model_parallel.mappings import \
-                    gather_from_tensor_model_parallel_region
-
-                logits = gather_from_tensor_model_parallel_region(logits)
-            logits.masked_fill_(packed_logits_mask.logical_not_(), torch.finfo(logits.dtype).min)
-        # FIXME: the following line may OOM
+            apply_logits_mask(logits, data["packed_logits_mask"])
         logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
         res = from_dict(dict(logprobs=logprobs))
         res.register_metadata(seqlens=data.metadata["seqlens"])
@@ -268,7 +254,6 @@ class PPOActorInterface(model_api.ModelInterface):
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
-        data_ = recursive_apply(data_, lambda x: x.to(model.device))
 
         old_logp: torch.FloatTensor = data_["packed_logprobs"].float()
         ref_logp: torch.FloatTensor = data_["packed_ref_logprobs"].float()
@@ -343,7 +328,7 @@ class PPOActorInterface(model_api.ModelInterface):
                 packed_seq=data_["packed_seq"],
                 cu_seqlens=data_["cu_seqlens"].int(),
                 kl_rewards=kl_rewards,
-                logits_mask=(data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None),
+                packed_logits_mask=(data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None),
             ))
         data_.register_metadata(seqlens=batch_seqlens)
         datas = data_api.split_sequences(data_,
@@ -365,7 +350,6 @@ class PPOActorInterface(model_api.ModelInterface):
         dist.all_reduce(seq_len, group=constants.data_parallel_group())
         dist.all_reduce(_n_tokens, group=constants.data_parallel_group())
         dist.all_reduce(_kl_rewards, group=constants.data_parallel_group())
-
         global_stats = dict(
             task_reward=float(task_reward / _n_seqs),
             kl_reward=float(_kl_rewards / _n_tokens),
@@ -375,6 +359,17 @@ class PPOActorInterface(model_api.ModelInterface):
             n_tokens=int(_n_tokens),
             n_seqs=int(_n_seqs),
         )
+
+        if data_["packed_logits_mask"] is not None:
+            n_masked_vocabs = data_["packed_logits_mask"].count_nonzero()
+            total_vocabs = torch.tensor(
+                data_["packed_logits_mask"].numel(),
+                dtype=torch.long,
+                device=model.device,
+            )
+            dist.all_reduce(n_masked_vocabs, group=constants.data_parallel_group())
+            dist.all_reduce(total_vocabs, group=constants.data_parallel_group())
+            global_stats["valid_vocab_ratio"] = float((total_vocabs - n_masked_vocabs) / total_vocabs)
         ### Logging code ends. ###
 
         # NOTE: We cannot randomly shuffle data here because

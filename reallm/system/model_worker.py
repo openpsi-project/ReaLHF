@@ -63,81 +63,6 @@ class NoRequestToHandle(Exception):
     pass
 
 
-def _get_shape_from_key_and_seqlen(k: str, seqlen: int):
-    if k in [
-            "input_lens",
-            "prompt_lens",
-            "seq_no_eos_mask",
-            "rewards",
-            "reward_score",
-            "group_factor",
-            "pos_input_lens",
-    ]:
-        shape = (1,)
-    elif k in ["cu_seqlens", "prompt_cu_seqlens"]:
-        shape = (2,)
-    # FIXME: problem here if we use groups instead of pairs?
-    elif k in ["seqlogp"]:
-        shape = (1, 2)
-    elif k in [
-            "packed_seq",
-            "prompt_mask",
-            "packed_input_ids",
-            "values",
-            "packed_prompts",
-    ]:
-        shape = (seqlen,)
-    elif k in [
-            "packed_logprobs",
-            "packed_ref_logprobs",
-            "old_logp",
-            "ref_logp",
-            "advantages",
-            "ppo_loss_mask",
-            "kl_rewards",
-            "returns",
-    ]:
-        shape = (seqlen - 1,)
-    else:
-        raise NotImplementedError(f"Unknown key {k} in packed data.")
-    return shape
-
-
-def _get_dtype_from_key(k: str):
-    if k in [
-            "seq_no_eos_mask",
-            "ppo_loss_mask",
-            "prompt_mask",
-    ]:
-        dtype = torch.bool
-    elif k in [
-            "reward_score",
-            "packed_ref_logprobs",
-            "old_logp",
-            "ref_logp",
-            "advantages",
-            "kl_rewards",
-            "returns",
-            "values",
-    ]:
-        dtype = torch.float16
-    elif k in [
-            "input_lens",
-            "prompt_lens",
-            "cu_seqlens",
-            "prompt_cu_seqlens",
-            "pos_input_lens",
-    ]:
-        dtype = torch.int32
-    elif k in ["packed_seq", "packed_input_ids", "packed_prompts"]:
-        dtype = torch.int64
-    elif k in ["rewards", "packed_logprobs", "group_factor", "seqlogp"]:
-        dtype = torch.float32
-    else:
-        raise NotImplementedError(f"Unknown key {k} in packed data.")
-    return dtype
-
-
 class ModelWorker(worker_base.Worker):
 
     def _configure(self, cfg: system_api.ModelWorker):
@@ -664,6 +589,10 @@ class ModelWorker(worker_base.Worker):
         for step in comm_plan:
             if (isinstance(step, data_transfer_comm.DataTransferReceiverStep)
                     and step.rank == dist.get_rank()):
+                if isinstance(self.__unwrapped_models[hook_data["target"]], ReaLModel):
+                    vocab_size = self.__unwrapped_models[hook_data["target"]].config.vocab_size
+                else:
+                    vocab_size = None
                 buf_indices = step.buf_indices
                 seqlens = step.seqlens
                 if step.src == dist.get_rank():
@@ -688,9 +617,9 @@ class ModelWorker(worker_base.Worker):
                     else:
                         total_len = 0
                         for seqlen in seqlens:
-                            shape = _get_shape_from_key_and_seqlen(step.key, seqlen)
+                            shape = data_api.get_shape_from_key_and_seqlen(step.key, seqlen, vocab_size)
                             total_len += int(np.prod(shape))
-                        dtype = _get_dtype_from_key(step.key)
+                        dtype = data_api.get_dtype_from_key(step.key)
                         buf = torch.zeros(
                             (total_len,),
                             dtype=dtype,
@@ -703,7 +632,7 @@ class ModelWorker(worker_base.Worker):
                             self.__data_received_worker_indices[buf_idx][step.key].union(step.dst_ranks)
                 offset = 0
                 for seqlen, buf_idx in zip(seqlens, buf_indices):
-                    shape = _get_shape_from_key_and_seqlen(step.key, seqlen)
+                    shape = data_api.get_shape_from_key_and_seqlen(step.key, seqlen, vocab_size)
                     v = vs[offset:offset + shape[0]]
                     offset += shape[0]
                     data[(buf_idx, step.key)] = (v, seqlen)
@@ -728,10 +657,11 @@ class ModelWorker(worker_base.Worker):
                         [self.__data_owner_storage[buf_idx][step.key] for buf_idx in buf_indices],
                         dim=0,
                     )
-                    if vs.dtype != _get_dtype_from_key(step.key):
-                        raise ValueError(f"Infered dtype of {step.key} ({_get_dtype_from_key(step.key)})"
-                                         f" is not equal to the actual dtype ({vs.dtype}). "
-                                         "Is it correctly set in the dataset implementation?")
+                    if vs.dtype != data_api.get_dtype_from_key(step.key):
+                        raise ValueError(
+                            f"Infered dtype of {step.key} ({data_api.get_dtype_from_key(step.key)})"
+                            f" is not equal to the actual dtype ({vs.dtype}). "
+                            "Is it correctly set in the dataset implementation?")
                     # print(f"{dist.get_rank()} send {step.key} to {step.dst_ranks} with shape {vs.shape}")
                     dist.broadcast(vs, src=step.rank, group=step.group)
                     for buf_idx in buf_indices:

@@ -132,8 +132,8 @@ def genstep(
         unfinished_sequences.logical_and_(generated_idx < gconfig.max_new_tokens - 1)
         terminate = unfinished_sequences.max() == 0
 
-    logits_mask = next_token_logits != torch.finfo(next_token_logits.dtype).min
-    if logits_mask.all():
+    logits_mask = next_token_logits == torch.finfo(next_token_logits.dtype).min
+    if not logits_mask.any():
         logits_mask = None
 
     if constants.model_parallel_world_size() > 1:
