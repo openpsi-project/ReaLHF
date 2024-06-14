@@ -49,7 +49,6 @@ class PPOHyperparameters:
     max_new_tokens: int = 256
     min_new_tokens: int = 256
     greedy: bool = False
-    # FIXME: logits mask
     top_p: float = 0.9
     top_k: int = 200
     temperature: float = 1.0
@@ -69,6 +68,7 @@ class PPOHyperparameters:
     value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
+    force_no_logits_mask: bool = False
 
 
 @dataclasses.dataclass
@@ -148,7 +148,7 @@ class PPOConfig(CommonExperimentConfig):
                 **copy.deepcopy(self.ppo_kwargs),
                 "generation_config": self.generation_kwargs,
                 "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
-                "force_no_logits_mask": True,
+                "force_no_logits_mask": self.ppo.force_no_logits_mask,
                 "adv_norm": self.ppo.adv_norm,
             },
         )
@@ -180,6 +180,7 @@ class PPOConfig(CommonExperimentConfig):
                 "cu_seqlens",
                 "packed_logprobs",
                 "prompt_mask",
+                "packed_logits_mask",
             ],
             balanced_dp=True,
             min_n_seqs=self.dataset.train_bs_n_seqs,
@@ -209,6 +210,7 @@ class PPOConfig(CommonExperimentConfig):
             input_data=[
                 "packed_seq",
                 "cu_seqlens",
+                "packed_logits_mask",
             ],
             output_data=["logprobs"],
             output_key_remap={"logprobs": "packed_ref_logprobs"},
@@ -244,6 +246,7 @@ class PPOConfig(CommonExperimentConfig):
                 "values",
                 "prompt_mask",
                 "seq_no_eos_mask",
+                "packed_logits_mask",
             ],
             log_return_value=True,
             # pre_hooks=[SyncParamHook(source=ModelName("actor", 0))],
