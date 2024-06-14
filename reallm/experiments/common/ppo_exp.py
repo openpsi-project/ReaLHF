@@ -201,17 +201,20 @@ class PPOConfig(CommonExperimentConfig):
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
+        inf_ref_inputs = [
+                "packed_seq",
+                "cu_seqlens"
+                
+            ]
+        if not self.ppo.force_no_logits_mask:
+            inf_ref_inputs.append("packed_logits_mask",)
         inf_ref_logits = ModelRPC(
             model_name=ModelName("ref", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             model_type=self.ref.type,
             model_path=self.ref.path,
             interface_impl=ref_interface,
-            input_data=[
-                "packed_seq",
-                "cu_seqlens",
-                "packed_logits_mask",
-            ],
+            input_data=inf_ref_inputs,
             output_data=["logprobs"],
             output_key_remap={"logprobs": "packed_ref_logprobs"},
             min_n_seqs=self.dataset.train_bs_n_seqs,
@@ -231,13 +234,7 @@ class PPOConfig(CommonExperimentConfig):
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
-        train_actor = ModelRPC(
-            model_name=ModelName("actor", 0),
-            interface_type=ModelInterfaceType.TRAIN_STEP,
-            model_type=self.actor.type,
-            model_path=self.actor.path,
-            interface_impl=actor_interface,
-            input_data=[
+        train_actor_inputs = [
                 "packed_seq",
                 "cu_seqlens",
                 "packed_logprobs",
@@ -247,7 +244,16 @@ class PPOConfig(CommonExperimentConfig):
                 "prompt_mask",
                 "seq_no_eos_mask",
                 "packed_logits_mask",
-            ],
+            ]
+        if self.ppo.force_no_logits_mask:
+            train_actor_inputs.remove("packed_logits_mask")
+        train_actor = ModelRPC(
+            model_name=ModelName("actor", 0),
+            interface_type=ModelInterfaceType.TRAIN_STEP,
+            model_type=self.actor.type,
+            model_path=self.actor.path,
+            interface_impl=actor_interface,
+            input_data=train_actor_inputs,
             log_return_value=True,
             # pre_hooks=[SyncParamHook(source=ModelName("actor", 0))],
             # post_hooks=[SyncParamHook(target=ModelName("actor", 0))],

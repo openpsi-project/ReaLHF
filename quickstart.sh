@@ -107,6 +107,7 @@ python3 -m reallm.apps.quickstart ppo \
     ppo.min_new_tokens=256 \
     ppo.ppo_n_minibatches=4 \
     ppo.kl_ctl=0.1 \
+    ppo.force_no_logits_mask=False \
     ppo.value_eps_clip=0.2 \
     ppo.reward_output_scaling=10.0 \
     ppo.adv_norm=True ppo.value_norm=True \
