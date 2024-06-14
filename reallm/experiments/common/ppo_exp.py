@@ -201,11 +201,7 @@ class PPOConfig(CommonExperimentConfig):
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
-        inf_ref_inputs = [
-                "packed_seq",
-                "cu_seqlens"
-                
-            ]
+        inf_ref_inputs = ["packed_seq", "cu_seqlens"]
         if not self.ppo.force_no_logits_mask:
             inf_ref_inputs.append("packed_logits_mask",)
         inf_ref_logits = ModelRPC(
@@ -235,16 +231,16 @@ class PPOConfig(CommonExperimentConfig):
         )
 
         train_actor_inputs = [
-                "packed_seq",
-                "cu_seqlens",
-                "packed_logprobs",
-                "packed_ref_logprobs",
-                "rewards",
-                "values",
-                "prompt_mask",
-                "seq_no_eos_mask",
-                "packed_logits_mask",
-            ]
+            "packed_seq",
+            "cu_seqlens",
+            "packed_logprobs",
+            "packed_ref_logprobs",
+            "rewards",
+            "values",
+            "prompt_mask",
+            "seq_no_eos_mask",
+            "packed_logits_mask",
+        ]
         if self.ppo.force_no_logits_mask:
             train_actor_inputs.remove("packed_logits_mask")
         train_actor = ModelRPC(
