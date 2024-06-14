@@ -354,7 +354,7 @@ class ReaLModel(nn.Module):
                         y.k_cache = y.k_cache[:-pad_size]
                     if y.v_cache is not None:
                         y.v_cache = y.v_cache[:-pad_size]
-        
+
         # Release the memory used for TP gathering.
         constants.clear_global_memory_buffer()
         return x, ys

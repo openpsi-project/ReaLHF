@@ -12,7 +12,8 @@ from reallm.api.core import data_api
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output, GenerationConfig
-from reallm.impl.model.utils.functional import gather_packed_shifted_log_probs, masked_normalization, apply_logits_mask
+from reallm.impl.model.utils.functional import (apply_logits_mask, gather_packed_shifted_log_probs,
+                                                masked_normalization)
 from reallm.impl.model.utils.padding import unpad_input
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
@@ -361,7 +362,11 @@ class PPOActorInterface(model_api.ModelInterface):
 
         if data_["packed_logits_mask"] is not None:
             n_masked_vocabs = data_["packed_logits_mask"].count_nonzero()
-            total_vocabs = torch.tensor(data_["packed_logits_mask"].numel(), dtype=torch.long, device=model.device)
+            total_vocabs = torch.tensor(
+                data_["packed_logits_mask"].numel(),
+                dtype=torch.long,
+                device=model.device,
+            )
             dist.all_reduce(n_masked_vocabs, group=constants.data_parallel_group())
             dist.all_reduce(total_vocabs, group=constants.data_parallel_group())
             global_stats["valid_vocab_ratio"] = float((total_vocabs - n_masked_vocabs) / total_vocabs)

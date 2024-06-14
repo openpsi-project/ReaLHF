@@ -63,9 +63,6 @@ class NoRequestToHandle(Exception):
     pass
 
 
-
-
-
 class ModelWorker(worker_base.Worker):
 
     def _configure(self, cfg: system_api.ModelWorker):
@@ -661,9 +658,10 @@ class ModelWorker(worker_base.Worker):
                         dim=0,
                     )
                     if vs.dtype != data_api.get_dtype_from_key(step.key):
-                        raise ValueError(f"Infered dtype of {step.key} ({data_api.get_dtype_from_key(step.key)})"
-                                         f" is not equal to the actual dtype ({vs.dtype}). "
-                                         "Is it correctly set in the dataset implementation?")
+                        raise ValueError(
+                            f"Infered dtype of {step.key} ({data_api.get_dtype_from_key(step.key)})"
+                            f" is not equal to the actual dtype ({vs.dtype}). "
+                            "Is it correctly set in the dataset implementation?")
                     # print(f"{dist.get_rank()} send {step.key} to {step.dst_ranks} with shape {vs.shape}")
                     dist.broadcast(vs, src=step.rank, group=step.group)
                     for buf_idx in buf_indices:

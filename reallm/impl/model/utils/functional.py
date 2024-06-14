@@ -203,12 +203,18 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
     )
     return log_probs_labels
 
+
 def apply_logits_mask(logits: torch.HalfTensor, mask: torch.BoolTensor):
-    assert mask.shape[-1] == logits.shape[-1] * constants.model_parallel_world_size(), (constants.model_parallel_world_size(), logits.shape, mask.shape)
+    assert mask.shape[-1] == logits.shape[-1] * constants.model_parallel_world_size(), (
+        constants.model_parallel_world_size(),
+        logits.shape,
+        mask.shape,
+    )
     parallel_vocab_size = logits.shape[-1]
     mp_rank = constants.model_parallel_rank()
     mask = mask[:, mp_rank * parallel_vocab_size:(mp_rank + 1) * parallel_vocab_size]
     logits.masked_fill_(mask, torch.finfo(logits.dtype).min)
+
 
 @torch.no_grad()
 def masked_normalization(

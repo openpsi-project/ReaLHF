@@ -349,6 +349,7 @@ def get_global_memory_buffer():
     assert _global_memory_buffer is not None, "global memory buffer is not set"
     return _global_memory_buffer
 
+
 def clear_global_memory_buffer():
     global _global_memory_buffer
     _global_memory_buffer = GlobalMemoryBuffer()
