@@ -22,39 +22,82 @@ logger = logging.getLogger("CommonExperimentConfig", "colored")
 
 @dataclasses.dataclass
 class CommonExperimentConfig(Experiment):
-    """Common config for quickstart experiments, which is parsed and utilized by apps/main.py
+    """The common config for quickstart experiments.
 
-    Args:
-        experiment_name (str): Name of the experiment
-        trial_name (str): Name of the trial
-        mode (str): Experiment launching mode: "slurm", "local", "ray", "local_ray"
-        debug (bool): Whether to run in debug mode
-        partition (str): Slurm partition to run the experiment, only effective when mode=="slurm"
-        wandb_mode (str): Mode of wandb, "disabled", "online", "offline"
-        image_name (Optional[str]): Name of the image used by controller and workers of ray cluster
-        recover_mode (str): Recover mode,
-                            'auto': automatically recover the last failed run;
-                            'save': save recover states if any error occurs;
-                            'resume': resume from saved recover states and save states if fail again;
-                            'disabled': do nothing when error occurs.
-        recover_retries (int): Number of retries for recovery, only effective when recover_mode=="auto"
-        ignore_worker_error (bool): Whether to ignore worker error, only effective when recover_mode=="disabled".
-                                    When recover_mode!="disabled", ignore_worker_error is always False.
-        allocation_mode (str): Mode of GPU resource/model parallel strategy allocation.
-                             'manual': manually allocate resources with experiment configs;
-                             'search': allocate resources and configure parallel strategies with search.
-                             'heuristic': allocate resources and configure parallel strategies
-                                          with heuristic strategy.
-                             'pipe_data': allocate all models on all cluster nodes available
-                                          and configure parallel strategies with pipe+data parallelism.
-                             'pipe_model': allocate all models on all cluster nodes available
-                                           and configure parallel strategies with pipe+model parallelism.
-        allocation_use_cache (bool): Whether to use cache in allocation search, only effective when
-                                     allocation_mode=="search" and cache is available in the log dir of
-                                     current experiment name and trial.
-        n_nodes (int): Number of nodes to run the experiment, only effective when mode=="slurm"
-        n_gpus_per_node (int): Number of GPUs per node, only effective when mode=="slurm"
-        nodelist (Optional[str]): slurm nodelist, only effective when mode=="slurm"
+    All members can be changed by the user in the command line,
+    e.g.,
+
+    .. code-block:: shell
+
+        $ python3 -m reallm.apps.quickstart sft trial_name=my_trial seed=42 ...
+
+    Recover mode is one of the followings\:
+
+    - ``auto``\: automatically recover the last failed run.
+
+    - ``save``\: save recover states if any error occurs.
+
+    - ``resume``\: resume from saved recover states and save states if fail again.
+
+    - ``disabled``\: do nothing but raise error when error occurs.
+
+    Allocation mode is one of the followings\:
+
+    - ``manual``\: manually allocate resources with experiment configs.
+
+    - ``search``\: allocate resources and configure parallel strategies with search.
+
+    - ``heuristic``\: allocate resources and configure parallel strategies with heuristic strategy.
+
+    - ``pipe_data``\: allocate all models on all cluster nodes available and configure parallel strategies with pipe+data parallelism.
+
+    - ``pipe_model``: allocate all models on all cluster nodes available and configure parallel strategies with pipe+model parallelism.
+
+    :param experiment_name: Name of the experiment.
+    :type experiment_name: str
+    :param trial_name: Name of the trial.
+    :type trial_name: str
+    :param mode: Experiment launching mode.
+        Currently only "local" and "slurm" are supported.
+    :type mode: str
+    :param debug: Whether to run in the debug mode.
+        The non-debug mode will disable all assertions.
+    :type debug: bool
+    :param partition: The slurm partition to run the experiment.
+    :type partition: str
+    :param wandb_mode: The mode of wandb. Currently the wandb logging is not supported.
+    :type wandb_mode: str
+    :param image_name: The name of the docker image used by the controller.
+        Only used in the slurm mode.
+    :type image_name: str or None
+    :param recover_mode: The recover mode.
+    :type recover_mode: str
+    :param recover_retries: The number of retries for recovery.
+        Only effective when recover_mode is "auto".
+    :type recover_retries: int
+    :param ignore_worker_error: Whether to ignore errors raised by
+        workers during runtime. Please do not set it to be True unless
+        the user is sure that some error is ignorable.
+        Only effective when recover_mode is "disabled".
+    :type ignore_worker_error: bool
+    :param allocation_mode: Mode of GPU parallel strategy allocation.
+    :type allocation_mode: str
+    :param allocation_use_cache: Whether to use cache in allocation search.
+        Only effective when allocation_mode=="search"
+        and cache is available in the log dir of current experiment
+        name and trial.
+    :type allocation_use_cache: bool
+    :param n_nodes: Number of nodes to run the experiment.
+        Only effective when mode=="slurm".
+    :type n_nodes: int
+    :param n_gpus_per_node: Number of GPUs per node.
+        Only effective when mode=="slurm".
+    :type n_gpus_per_node: int
+    :param nodelist: Slurm nodelist.
+        Only effective when mode=="slurm".
+    :type nodelist: str or None
+    :param seed: Random seed.
+    :type seed: int
     """
 
     experiment_name: str = MISSING

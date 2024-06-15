@@ -42,7 +42,7 @@ def compute_rlhf_pflops(
         elif model_size == 70:
             path = "/lustre/public/pretrained_model_weights/Llama-2-70b-hf"
         hf_config = transformers.AutoConfig.from_pretrained(path)
-        mconfig =convert_config_llama(hf_config)
+        mconfig = convert_config_llama(hf_config)
         mconfigs[name] = mconfig
     assert (prompt_len + gen_len) * batch_size == 2**17, (
         batch_size,

@@ -10,10 +10,15 @@ Contents
 ----------------
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
 
    install
+   quickstart
    expconfig
+   customization
+   algo
+   arch
+   contributing
 
 
 Introduction
@@ -38,6 +43,10 @@ in the following figure.
 .. "Scale Critic" follows the opposite approach, and
 .. "Scale Both" increases sizes of all models proportionately.
 
+We also show the estimated time for
+completing the entire full-scale 4*70B RLHF training process,
+composed of 4 iterations with 400 steps for each iteration as for LLaMA-2.
+
 .. _est_time_table:
 
 +--------------+---------------+---------------+---------------+
@@ -45,12 +54,6 @@ in the following figure.
 +==============+===============+===============+===============+
 | Time (hours) |     141.5     |    152.8      |  **17.0**     |
 +--------------+---------------+---------------+---------------+
-
-Estimated time for the entire full-scale 4*70B RLHF training process,
-composed of 4 iterations with 400 steps for each iteration as for LLaMA-2.
-
-
-
 
 
 System Details

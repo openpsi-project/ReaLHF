@@ -1,12 +1,12 @@
 Installation
-=====
+==============
 
 In an environment without CUDA, ReaL will only
 import necessary Python modules for launching distributed experiments.
 Customized CUDA kernels will not be installed.
 
 Docker Images
-------------
+--------------
 
 The easiest way to run ReaL is to use the provided Docker images.
 We provide a CPU-only image to launch experiments and a runtime GPU
@@ -28,7 +28,7 @@ To build the images from scratch, run:
    $ docker build --target=gpu -t reallm-gpu .
 
 Install From PyPI or Source
-------------
+----------------------------
 
 If you don't want to use docker, you can also install ReaL from PyPI
 or from source.
@@ -36,11 +36,13 @@ or from source.
 Install from PyPI:
 
 .. code-block:: console
+
    $ pip install reallm --no-build-isolation
 
 Install from source:
 
 .. code-block:: console
+
    $ cd /path/to/reallm/directory
    $ pip install -e . --no-build-isolation
 

@@ -18,32 +18,84 @@ logger = logging.getLogger("PPO exp", "colored")
 class PPOHyperparameters:
     """Configuration of PPO hyperparameters.
 
-    Args:
-        max_new_tokens (int): Maximum number of new tokens to generate in each iteration.
-        min_new_tokens (int): Minimum number of new tokens to generate in each iteration.
-        greedy (bool): Whether to use greedy decoding. PPO may not work if set to True.
-        top_p (float): Top-p sampling ratio.
-        top_k (float): Top-k sampling ratio.
-        temperature (float): Sampling temperature.
-        ppo_n_minibatches (int): Number of minibatches in each PPO update.
-        kl_ctl (float): Coefficient of KL divergence rewards.
-        discount (float): Discount factor.
-        gae_lambda (float): Lambda factor in GAE.
-        eps_clip (float): PPO clipping factor.
-        value_eps_clip (float): PPO value clipping factor.
-        max_reward_clip (float): Maximum reward value.
-        reward_output_scaling (float): Scaling factor of the reward model output.
-        reward_output_bias (float): Bias of the reward model output.
-            The number outputed by the reward model will be
-            CLIP((x - bias) * scaling, -max_reward_clip, max_reward_clip).
-        early_stop_imp_ratio (float): PPO update will be early stopped if importance ratio
-            exceeds this maximum value.
-        use_adaptive_kl_ctl (bool): Whether to use adaptive KL divergence coefficient.
-        adv_norm (bool): Whether use advantage normalization.
-        value_norm (bool): Whether to denormalize valued and normalize return predictions.
-        value_norm_type (str): Type of value normalization. Either exponential moving average or moving average.
-        value_norm_beta (float): Exponential decay factor in exponential moving average.
-        value_norm_eps (float): Epsilon factor in the denominator of exponential moving average.
+    We implement a customized generation function instead of
+    using HuggingFace's to support pipelined generation.
+    As a result, advanced generation techniques like
+    diversity-promoting sampling or repeatition penalty
+    are not supported during PPO training.
+    However, we don't find it to be a problem in practice.
+    Increasing the sampling temperature and enabling
+    top-k/top-p sampling can produce good models.
+
+    :param max_new_tokens: Maximum number of new tokens
+        to generate.
+    :type max_new_tokens: int
+    :param min_new_tokens: Minimum number of new tokens
+        to generate.
+    :type min_new_tokens: int
+    :param greedy: Whether to use greedy decoding.
+        PPO may not work if set to True.
+    :type greedy: bool
+    :param top_p: Tokens will be sampled from a
+        vocabulary subset with probability summation
+        larger than p.
+    :type top_p: float
+    :param top_k: Tokens will be sampled from a
+        vocabulary subset with top-k probabilities.
+    :type top_k: int
+    :param temperature: Sampling temperature.
+    :type temperature: float
+    :param force_no_logits_mask: Whether to omit logits mask.
+        The logits mask will be produced when using top-k or top-p sampling,
+        where it is used to mark tokens that are filtered out.
+        This mask will be used by the reference model and the actor model
+        during training in order to align inferred logits with that during
+        generation and produce accurate KLs.
+        Logits mask with top-k/top-p sampling will largely improve the
+        stability of PPO training because it narrows the action space.
+        However, this benefit does not come for free.
+        The logits mask will occupy a large amount of additional GPU memory.
+        If this option is set to True, logits mask will be forcely omitted to
+        save GPU memory, but the learning performance may also drop.
+    :type force_no_logits_mask: bool
+    :param ppo_n_minibatches: Number of minibatches in each PPO update.
+    :type ppo_n_minibatches: int
+    :param kl_ctl: Coefficient of KL divergence rewards.
+    :type kl_ctl: float
+    :param discount: Discount factor.
+    :type discount: float
+    :param gae_lambda: Lambda factor in GAE.
+    :type gae_lambda: float
+    :param eps_clip: PPO actor probability ratio clipping factor.
+    :type eps_clip: float
+    :param value_eps_clip: PPO value clipping factor.
+    :type value_eps_clip: float
+    :param max_reward_clip: Maximum reward value.
+    :type max_reward_clip: float
+    :param reward_output_scaling: Scaling factor of the reward model output.
+    :type reward_output_scaling: float
+    :param reward_output_bias: Bias of the reward model output.
+        The number outputed by the reward model will be
+        CLIP((x - bias) * scaling, -max_reward_clip, max_reward_clip).
+    :type reward_output_bias: float
+    :param early_stop_imp_ratio: PPO update will be early stopped if importance ratio
+        exceeds this maximum value.
+    :type early_stop_imp_ratio: float
+    :param use_adaptive_kl_ctl: Whether to use adaptive KL divergence coefficient.
+    :type use_adaptive_kl_ctl: bool
+    :param adv_norm: Whether to use advantage normalization.
+    :type adv_norm: bool
+    :param value_norm: Whether to denormalize valued and normalize return predictions.
+    :type value_norm: bool
+    :param value_norm_type: Type of value normalization.
+        Either exponential moving average ("exp") or moving average ("ma").
+    :type value_norm_type: str
+    :param value_norm_beta: Exponential decay factor
+        in exponential moving average.
+    :type value_norm_beta: float
+    :param value_norm_eps: Epsilon factor in the
+        denominator of exponential moving average.
+    :type value_norm_eps: float
     """
 
     max_new_tokens: int = 256
@@ -52,6 +104,7 @@ class PPOHyperparameters:
     top_p: float = 0.9
     top_k: int = 200
     temperature: float = 1.0
+    force_no_logits_mask: bool = False
     ppo_n_minibatches: int = 4
     kl_ctl: float = 0.1
     discount: float = 1.0
@@ -68,11 +121,99 @@ class PPOHyperparameters:
     value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
-    force_no_logits_mask: bool = False
 
 
 @dataclasses.dataclass
 class PPOConfig(CommonExperimentConfig):
+    """PPO experiment configuration.
+
+    It is a subclass of :class:`CommonExperimentConfig`,
+    so all CLI options in the base class are available.
+
+    We don't implement runtime evaluation for PPO.
+
+    We identify that the RLHF process is composed of four
+    distinct models with independent parameters and six
+    *model function calls* upon these models.
+
+    The four models are\:
+
+    - Actor\: The primary LLM that generates text.
+    - Critic\: The value function that estimates the value of a state.
+    - Ref\: The reference LLM that provides KL regularization.
+    - Rew\: The reward model that provides reward signals.
+
+    The four model function calls and their dependencies are\:
+
+    - Rollout\: Generate text from the actor model.
+    - InfReward\: Infer rewards from the reward model given generated text.
+    - InfRef\: Infer log probabilities from the reference model given generated text.
+    - InfValues\: Infer values from the critic model given generated text.
+    - TrainActor\: Train the actor model given generated text, rewards, values, and reference log probabilities.
+    - TrainCritic\: Train the critic model given generated text, rewards, values, and reference log probabilities.
+
+    This class resolves these dependencies under the hood.
+    What the users should specify are the runtime configurations
+    of models and allocations of *each model function call*.
+
+    :param total_train_epochs: Total number of training epochs
+        (i.e., the number of times the training dataset is iterated).
+    :type total_train_epochs: int
+    :param save_freq_steps: Save the model every this number of steps.
+        "step" is a PPO training step, probabily composed of multiple
+        model updates if ppo_n_minibatch > 1.
+        If None, the model will not be saved during training.
+        The directory to save the model will be automatically resolved
+        and prompted in the terminal when the experiment starts.
+    :type save_freq_steps: Optional[int]
+    :param is_sft_lora: Whether LoRA was used for SFT.
+        If so, the saved SFT model should only contain LoRA parameters.
+        Since LoRA is currently not supported for SFT,
+        this option is not used for now.
+    :type is_sft_lora: bool
+    :param sft_lora_path: Path to the LoRA model for SFT.
+        Since LoRA is currently not supported for SFT,
+        this option is not used for now.
+    :param is_rw_lora: Whether LoRA was used for reward modeling.
+        If so, the saved reward model should only contain LoRA parameters
+        and the new reward head.
+        Since LoRA is currently not supported for reward modeling,
+        this option is not used for now.
+    :type is_rw_lora: bool
+    :param rw_lora_path: Path to the LoRA model for reward modeling.
+        Since LoRA is currently not supported for reward modeling,
+        this option is not used for now.
+    :type rw_lora_path: str
+    :param rew_head_path: Path to the new reward head for reward modeling.
+        Since LoRA is currently not supported for reward modeling,
+        this option is not used for now.
+    :type rw_head_path: str
+    :param actor: Runtime configuration of the primary LLM.
+    :type actor: ModelTrainEvalConfig
+    :param critic: Runtime configuration of the critic model of PPO.
+    :type critic: ModelTrainEvalConfig
+    :param ref: Runtime configuration of the reference LLM.
+    :type ref: ModelTrainEvalConfig
+    :param rew: Runtime configuration of the reward LLM.
+    :type rew: ModelTrainEvalConfig
+    :param actor_train: :class:`AllocationConfig` for TrainActor.
+    :type actor_train: AllocationConfig
+    :param critic_train: :class:`AllocationConfig` for TrainCritic.
+    :type critic_train: AllocationConfig
+    :param actor_gen: :class:`AllocationConfig` for Rollout.
+    :type actor_gen: AllocationConfig
+    :param critic_inf: :class:`AllocationConfig` for InfValues.
+    :type critic_inf: AllocationConfig
+    :param rew_inf: :class:`AllocationConfig` for InfReward.
+    :type rew_inf: AllocationConfig
+    :param ref_inf: :class:`AllocationConfig` for InfRef.
+    :type ref_inf: AllocationConfig
+    :param dataset: Dataset configuration.
+    :type dataset: PromptOnlyDatasetConfig
+    :param ppo: Configuration for the PPO algorithm.
+    :type ppo: PPOHyperparameters
+    """
+
     total_train_epochs: int = 1
     save_freq_steps: Optional[int] = 20
 

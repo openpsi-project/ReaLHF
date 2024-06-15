@@ -37,7 +37,9 @@ extensions = [
     "sphinx.ext.doctest",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
+    "sphinx.ext.githubpages",
 ]
 
+
 def setup(app):
-    app.add_css_file('custom.css')
+    app.add_css_file("custom.css")
