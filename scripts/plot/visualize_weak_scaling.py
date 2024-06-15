@@ -11,8 +11,7 @@ import scipy.stats
 import seaborn as sns
 import transformers
 
-from reallm.api.core.model_api import (MODEL_FAMILY_TO_PATH, ModelFamily, ModelName,
-                                       REAL_MODEL_CONFIG_CONVERTER)
+from reallm.api.from_hf.llama import convert_config_llama
 from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
                                  calculate_llama_train_flops)
 
@@ -34,10 +33,16 @@ def compute_rlhf_pflops(
         ("ref", ref_size),
         ("rw", rw_size),
     ]:
-        hf_model_type = "llama" if model_size != 34 else "codellama"
-        path = MODEL_FAMILY_TO_PATH[ModelFamily(hf_model_type, model_size, True)]
+        if model_size == 7:
+            path = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
+        elif model_size == 13:
+            path = "/lustre/public/pretrained_model_weights/Llama-2-13b-hf"
+        elif model_size == 34:
+            path = "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf"
+        elif model_size == 70:
+            path = "/lustre/public/pretrained_model_weights/Llama-2-70b-hf"
         hf_config = transformers.AutoConfig.from_pretrained(path)
-        mconfig = REAL_MODEL_CONFIG_CONVERTER[hf_model_type](hf_config)
+        mconfig =convert_config_llama(hf_config)
         mconfigs[name] = mconfig
     assert (prompt_len + gen_len) * batch_size == 2**17, (
         batch_size,
