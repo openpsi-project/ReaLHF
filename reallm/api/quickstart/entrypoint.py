@@ -41,7 +41,6 @@ QUICKSTART_USERCODE_PATHS = {}
 QUICKSTART_FN = {}
 
 
-
 def register_quickstart_exp(config_name: str, exp_cls: Callable):
     usercode_path = os.path.abspath(inspect.getfile(inspect.currentframe().f_back))
 

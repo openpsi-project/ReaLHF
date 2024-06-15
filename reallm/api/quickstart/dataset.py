@@ -87,5 +87,3 @@ class PromptOnlyDatasetConfig:
     max_prompt_len: int = 256
     train_bs_n_seqs: int = 256
     pad_to_max_length: bool = False
-
-

@@ -40,12 +40,14 @@ def glob(pattern: str):
     root = Path(__name__).parent
     return [str(p) for p in root.glob(pattern)]
 
+
 def get_pybind11_include_path() -> str:
     pybind11_meta = subprocess.check_output("pip show pybind11", shell=True).decode("ascii")
     for line in pybind11_meta.split("\n"):
         line = line.strip()
         if line.startswith("Location: "):
             return os.path.join(line.split(": ")[1], "pybind11", "include")
+
 
 def get_nvcc_cuda_version(cuda_dir: str) -> Version:
     """Get the CUDA version from nvcc.
@@ -180,7 +182,7 @@ if _is_cuda():
         with contextlib.suppress(ValueError):
             torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
 
-with open("requirements.txt", 'r') as f:
+with open("requirements.txt", "r") as f:
     dependencies = f.read().splitlines()
 
 os.makedirs(os.path.join(ROOT_DIR, "reallm", "_C"), exist_ok=True)
@@ -248,8 +250,10 @@ search_extension = setuptools.Extension(
         "-fPIC",
         "-std=c++17",
     ],
-    include_dirs=[os.path.join(os.path.dirname(__file__), "csrc", "search"),
-                  get_pybind11_include_path(),],
+    include_dirs=[
+        os.path.join(os.path.dirname(__file__), "csrc", "search"),
+        get_pybind11_include_path(),
+    ],
 )
 ext_modules.append(search_extension)
 
