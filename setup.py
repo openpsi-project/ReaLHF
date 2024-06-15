@@ -180,8 +180,13 @@ if _is_cuda():
         with contextlib.suppress(ValueError):
             torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
 
+with open("requirements.txt", 'r') as f:
+    dependencies = f.read().splitlines()
+
 os.makedirs(os.path.join(ROOT_DIR, "reallm", "_C"), exist_ok=True)
 if _is_cuda():
+    dependencies.append("flash-attn==2.5.8")
+
     cr_extension = CUDAExtension(
         name="reallm._C.custom_all_reduce",
         sources=[
@@ -253,4 +258,5 @@ setuptools.setup(
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
     packages=setuptools.find_packages(),
+    install_requires=dependencies,
 )

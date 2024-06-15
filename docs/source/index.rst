@@ -11,15 +11,21 @@ Welcome to ReaL-LLM's documentation!
 .. Facts database <https://world.openfoodfacts.org/>`_ and offers a *simple* and
 .. *intuitive* API.
 
-**ReaL-LLM** (or *reallm*) is a highly efficient system for LLM RLHF training.
-It introduces a novel technique called *Parameter ReaLlocation*, which dynamically
+
+
+**ReaL-LLM** (or *reallm*) is a highly efficient system for large-scale LLM RLHF training.
+
+
+It introduces a novel technique called *Parameter Reallocation*, which dynamically
 shifts model parameters and changes the parallelization strategy during training.
 This technique can significantly reduce the communication overhead and improve
 GPU utilization in RLHF training, leading to a substantial speedup over the state-of-the-art
 open-source systems.
 
+
+
 Highlights
-===
+====================================
 
 - **Performant**
 - **Scalable**
@@ -28,6 +34,7 @@ Highlights
 - **Flexible**
 - **Highly efficient**
 
+.. Check out the :doc:`usage` section for further information.
 
 .. note::
    This project is under active development.
@@ -41,10 +48,10 @@ Highlights
    :caption: Contents:
 
 
-
-Indices and tables
+Contents
 ==================
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+.. toctree::
+
+   install
+   expconfig
