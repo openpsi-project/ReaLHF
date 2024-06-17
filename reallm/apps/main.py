@@ -101,18 +101,24 @@ def main_start(args, recover_count: int = 0):
     # Use search cache for recover runs
     force_allocation_use_cache = (recover_count > 1
                                   or args.recover_mode == "resume") and args.allocation_mode == "search"
-
+    # handle args
     args.ignore_worker_error = (args.ignore_worker_error and args.recover_mode == "disabled")
-
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
-    if recover_count == 0:
-        constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
-
     repo_path = get_repo_path()
-
     is_recover_run = (args.recover_mode == "auto" and recover_count > 0) or args.recover_mode == "resume"
     save_recover_states = args.recover_mode != "disabled"
+
+    # set env vars
+    cluster_spec_path = os.environ.get("CLUSTER_SPEC_PATH", None)
+    if not cluster_spec_path: 
+        if args.mode == "slurm":
+            raise ValueError("Environment variable CLUSTER_SPEC_PATH must be set for slurm mode! "
+                            "See example/cluster_config.json for a template.")
+        logger.warning("Environment variable CLUSTER_SPEC_PATH is not set. "
+                        "Files of the experiment (logs, checkpoints, cache ...) "
+                        "will be saved to temporary directory of the system. "
+                        "To change the fileroot, set the fileroot option of your choice in your CLUSTER_SPEC_PATH.")
 
     BASE_ENVIRONS = {
         "PYTHONPATH": repo_path,
@@ -124,10 +130,15 @@ def main_start(args, recover_count: int = 0):
         # identify whether this run is automatically recovering the last failed run
         "RECOVER_RUN": "1" if is_recover_run else "0",
         "SAVE_RECOVER_STATES": "1" if save_recover_states else "0",
+        "CLUSTER_SPEC_PATH": cluster_spec_path if cluster_spec_path else "",
     }
 
     os.environ["IS_REMOTE"] = "0" if not force_allocation_use_cache else "1"
     os.environ["REAL_PACKAGE_PATH"] = repo_path
+    
+    # setup experiments
+    if recover_count == 0:
+        constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
     experiment = config_package.make_experiment(args.experiment_name)
     if args.allocation_mode == "search":
@@ -368,6 +379,14 @@ def main():
         help="Total number of trials for the system to recover automatically when a worker fails. "
         "Only effective when recover_mode is 'auto'.",
     )
+    subparser.add_argument(
+        "--allocation_mode",
+        type=str,
+        required=False,
+        default="pipe_model",
+        choices=["manual", "search", "heuristic", "pipe_model", "pipe_data"],
+        help="Mode of GPU resource/model parallel strategy allocation."
+    )
     subparser.set_defaults(ignore_worker_error=False)
     subparser.set_defaults(func=main_start)
 
@@ -379,6 +398,7 @@ def main():
         required=True,
         help="name of the experiment",
     )
+
     subparser.add_argument("--trial_name", "-f", type=str, required=True, help="name of the trial")
     subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
     subparser.set_defaults(func=main_stop)

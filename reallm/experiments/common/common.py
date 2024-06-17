@@ -299,8 +299,8 @@ class CommonExperimentConfig(Experiment):
                              "please set n_gpus_per_node to 8.")
 
         for rpc_name, rpc in self.rpcs.items():
-            if not check_is_reallm_native_impl(rpc.interface_impl.type_) and self.allocation_mode in [
-                    "search", "heuristic"
+            if not check_is_reallm_native_model_interface(rpc.interface_impl.type_) and self.allocation_mode in [
+                "search", "heuristic"
             ]:
                 raise ValueError(f"RPC {rpc.name} interface is not a Reallm native implementation. "
                                  f"Search and heuristic allocation mode are not available.")

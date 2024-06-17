@@ -14,7 +14,7 @@ import torch
 multiprocessing.set_start_method("spawn", force=True)
 
 from reallm.api.quickstart.entrypoint import QUICKSTART_CONFIG_CLASSES, QUICKSTART_EXPR_CACHE_PATH
-from reallm.base import constants, gpu_utils, importing, logging, name_resolve, names
+from reallm.base import cluster, gpu_utils, importing, logging, name_resolve, names
 
 RAY_HEAD_WAIT_TIME = 500
 logger = logging.getLogger("Main-Workers")
@@ -40,15 +40,8 @@ def _patch_external_impl(exp_name, trial_name):
             exp_cls = QUICKSTART_CONFIG_CLASSES[config_name]
             system_api.register_experiment(exp_name, functools.partial(exp_cls, **exp_cls_args))
 
-
-def main_reset_name_resolve(args):
-    name_resolve.clear_subtree(
-        names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name))
-
-
 def main_worker(args):
     import reallm.base.constants as constants
-
     constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
     _patch_external_impl(args.experiment_name, args.trial_name)
 
@@ -178,6 +171,7 @@ def main_controller(args):
         ignore_worker_error=args.ignore_worker_error,
     )
 
+
     if args.type == "ray":
         subprocess.check_output(f"ray stop", shell=True)
 
@@ -285,11 +279,6 @@ def main():
         "The offset is 0 for the 1st job and 4 for the 2nd job.",
     )
     subparser.set_defaults(func=main_worker)
-
-    subparser = subparsers.add_parser("reset_name_resolve", help="reset name resolve repo for a trial")
-    subparser.add_argument("--experiment_name", "-e", type=str, required=True)
-    subparser.add_argument("--trial_name", "-f", type=str, required=True)
-    subparser.set_defaults(func=main_reset_name_resolve)
 
     subparser = subparsers.add_parser("ray", help="launch ray cluster write ray address to name_resolve")
     subparser.add_argument("--experiment_name", "-e", type=str, required=True)

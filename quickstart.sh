@@ -24,7 +24,6 @@
 #     dataset.train_bs_n_seqs=512 \
 #     dataset.valid_bs_n_seqs=512
 
-SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
 # SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/
 # python3 -m reallm.apps.quickstart rw experiment_name=quickstart-rw-debug trial_name=20240603-1 \
 #     mode=local allocation_mode=manual \
@@ -76,11 +75,13 @@ SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/d
 #     dataset.train_bs_n_seqs=256 \
 #     dataset.valid_bs_n_seqs=256
 
+SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep15globalstep15/
 python3 -m reallm.apps.quickstart ppo \
-    experiment_name=debug-quickstart-ppo trial_name=20240606-2 \
-    total_train_epochs=4 \
-    allocation_mode=manual \
+    experiment_name=debug-quickstart-ppo trial_name=20240614-0 \
+    total_train_epochs=1 \
+    n_nodes=1 \
+    allocation_mode=heuristic \
     save_freq_steps=null \
     actor.type._class=llama \
     actor.type.size=7 \
@@ -110,23 +111,24 @@ python3 -m reallm.apps.quickstart ppo \
     ppo.value_eps_clip=0.2 \
     ppo.reward_output_scaling=10.0 \
     ppo.adv_norm=False ppo.value_norm=False \
-    ppo.top_p=1.0 ppo.top_k=32000 \
-    actor_train.parallel.model_parallel_size=8 \
-    actor_train.parallel.pipeline_parallel_size=1 \
-    actor_train.parallel.data_parallel_size=1 \
-    actor_gen.parallel.model_parallel_size=1 \
-    actor_gen.parallel.pipeline_parallel_size=2 \
-    actor_gen.parallel.data_parallel_size=4 \
-    critic_train.parallel.model_parallel_size=8 \
-    critic_train.parallel.pipeline_parallel_size=1 \
-    critic_train.parallel.data_parallel_size=1 \
-    critic_inf.parallel.model_parallel_size=4 \
-    critic_inf.parallel.pipeline_parallel_size=2 \
-    critic_inf.parallel.data_parallel_size=1 \
-    ref_inf.parallel.model_parallel_size=2 \
-    ref_inf.parallel.pipeline_parallel_size=2 \
-    ref_inf.parallel.data_parallel_size=2 \
-    rew_inf.parallel.model_parallel_size=1 \
-    rew_inf.parallel.pipeline_parallel_size=1 \
-    rew_inf.parallel.data_parallel_size=8 
+    ppo.top_p=1.0 ppo.top_k=32000 
+
+    # actor_train.parallel.model_parallel_size=8 \
+    # actor_train.parallel.pipeline_parallel_size=1 \
+    # actor_train.parallel.data_parallel_size=1 \
+    # actor_gen.parallel.model_parallel_size=1 \
+    # actor_gen.parallel.pipeline_parallel_size=2 \
+    # actor_gen.parallel.data_parallel_size=4 \
+    # critic_train.parallel.model_parallel_size=8 \
+    # critic_train.parallel.pipeline_parallel_size=1 \
+    # critic_train.parallel.data_parallel_size=1 \
+    # critic_inf.parallel.model_parallel_size=4 \
+    # critic_inf.parallel.pipeline_parallel_size=2 \
+    # critic_inf.parallel.data_parallel_size=1 \
+    # ref_inf.parallel.model_parallel_size=2 \
+    # ref_inf.parallel.pipeline_parallel_size=2 \
+    # ref_inf.parallel.data_parallel_size=2 \
+    # rew_inf.parallel.model_parallel_size=1 \
+    # rew_inf.parallel.pipeline_parallel_size=1 \
+    # rew_inf.parallel.data_parallel_size=8 
 

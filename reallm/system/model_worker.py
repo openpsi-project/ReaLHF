@@ -285,11 +285,11 @@ class ModelWorker(worker_base.Worker):
         self.__device = torch.device("cuda:0")
 
         for model_name_, topo_ in self.config.model_topos.items():
-            rpc = [rpc for rpc in self.config.model_rpcs if rpc.model_name == model_name_]
-            assert len(rpc) == 1
-            rpc = rpc[0]
-            param_realloc_comm.set_trainable(model_name_,
-                                             rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP)
+            rpcs = [rpc for rpc in self.config.model_rpcs if rpc.model_name == model_name_]
+            assert len(rpcs) >= 1
+            is_trainable_model = any(
+                [rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP for rpc in rpcs])
+            param_realloc_comm.set_trainable(model_name_, is_trainable_model)
             constants.set_rank_mapping(model_name_, topo_, self.config.msid2mwid)
             grid = topology.ParallelGrid(
                 topology=topo_,
@@ -448,14 +448,21 @@ class ModelWorker(worker_base.Worker):
             if not isinstance(m, ReaLModel):
                 raise ValueError(f"Model {from_model_name} (type={type(m)}) is not a ReaLModel, "
                                  f"so it can't use parameter realloction.")
-            new_layers, new_param, _ = m.build_reparallelized_layers_async(
-                from_model_name=from_model_name,
-                to_model_name=to_model_name,
-                from_topo=from_topo,
-                to_topo=to_topo,
-                to_model_config=to_model_config,
-                pg_info=self.__param_realloc_info,
-            )
+            try:
+                new_layers, new_param, _ = m.build_reparallelized_layers_async(
+                    from_model_name=from_model_name,
+                    to_model_name=to_model_name,
+                    from_topo=from_topo,
+                    to_topo=to_topo,
+                    to_model_config=to_model_config,
+                    pg_info=self.__param_realloc_info,
+                )
+            except RuntimeError as e:
+                if from_model_name in self.__unwrapped_models:
+                    logger.error(f"from model error: {from_model_name}")
+                if to_model_name in self.__unwrapped_models:
+                    logger.info(f"to model error: {to_model_name}")
+                raise e
             if from_model_name in self.__models:
                 self.__model_is_handle[from_model_name] = True
             if to_model_name in self.__models:

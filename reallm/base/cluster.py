@@ -1,13 +1,12 @@
-from typing import List, Optional, Union
-import abc
+from typing import Dict, List, Optional, Union
 import getpass
+import json
 import os
 import re
 import socket
 import tempfile
 
-# TODO: eliminate cluster info in open-source code base
-
+CLUSTER_SPEC_PATH = os.environ.get("CLUSTER_SPEC_PATH", "")
 
 def get_user_tmp():
     tmp = tempfile.gettempdir()
@@ -16,104 +15,105 @@ def get_user_tmp():
     os.makedirs(user_tmp, exist_ok=True)
     return user_tmp
 
-
 def get_random_tmp():
     return tempfile.mkdtemp()
 
+class ClusterSpec:
+    def __init__(self):
+        self.__loaded = False
 
-class ClusterSpec(abc.ABC):
+    def load_spec_from_file(self, file_path: str):
+        try:
+            with open(file_path, "r") as f:
+                spec: Dict = json.load(f)
+        except FileNotFoundError:
+            if file_path == "":
+                spec = dict(
+                    cluster_type="local",
+                    cluster_name="local",
+                    fileroot=get_user_tmp(),
+                )
+            else:
+                raise FileNotFoundError(f"Cluster spec file not found: {file_path}")
 
-    @property
-    @abc.abstractmethod
-    def name(self):
-        ...
-
-    def node_type_from_node_name(self, node_name: str) -> str:
-        ...
-
-    def gpu_type_from_node_name(self, node_name: str) -> str:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def fileroot(self) -> str:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def default_mount(self) -> str:
-        ...
-
-
-class QizhiClusterSpec(ClusterSpec):
-
-    @property
-    def name(self):
-        return "qizhi"
-
-    def node_type_from_node_name(self, node_name: str) -> str:
-        if "frl1g" in node_name:
-            return "g1"
-        if "frl2g" in node_name:
-            return "g2"
-        if "frl8g" in node_name:
-            return "g8"
-        if "frl4a" in node_name or "frl8a" in node_name:
-            return "a100"
-        else:
-            raise NotImplementedError()
-
-    def gpu_type_from_node_name(self, node_name: str) -> str:
-        if "g" in self.node_type_from_node_name(node_name):
-            return "geforce"
-        else:
-            return "tesla"
-
-    @property
-    def fileroot(self) -> str:
-        return "/data/aigc/llm"
-
-    @property
-    def default_mount(self) -> str:
-        return "/lustre:/lustre,/data:/data,/hddlustre:/hddlustre"
-
-
-class QHClusterSpec(ClusterSpec):
+        self.__cluster_type = spec["cluster_type"]
+        self.__cluster_name = spec["cluster_name"]
+        self.__fileroot = spec["fileroot"]
+        self.__node_type_from_node_name_re = spec.get("node_type_from_node_name", None)
+        self.__gpu_type_from_node_name_re = spec.get("gpu_type_from_node_name", None)
+        self.__default_mount = spec.get("default_mount", None)
+        self.__gpu_image = spec.get("gpu_image", None)
+        self.__cpu_image = spec.get("cpu_image", None)
+        self.__node_name_prefix = spec.get("node_name_prefix", "NODE")
+            
+        self.__loaded = True
 
     @property
     def name(self):
-        return "qh"
+        assert self.__loaded
+        return self.__cluster_name 
 
     def node_type_from_node_name(self, node_name: str) -> str:
-        assert "QH-com" in node_name
-        return "a100"
+        """ mapping nodename to slurm node type, including "g1", "g2", "g8", "a100"
+        """
+        if self.__cluster_type != "slurm":
+            raise NotImplementedError("Only slurm cluster uses node_type_from_node_name.")
+        assert self.__loaded
+        for regex, node_type in self.__node_type_from_node_name_re.items():
+            if re.match(regex, node_name):
+                return node_type
+        raise NotImplementedError()
 
     def gpu_type_from_node_name(self, node_name: str) -> str:
-        return "tesla"
+        """ mapping nodename to slurm GPU type, including "geforce" and "tesla"
+        """
+        if self.__cluster_type != "slurm":
+            raise NotImplementedError("Only slurm cluster uses gpu_type_from_node_name.")
+        assert self.__loaded
+        for regex, gpu_type in self.__gpu_type_from_node_name_re.items():
+            if re.match(regex, node_name):
+                return gpu_type
+        raise NotImplementedError()
 
     @property
     def fileroot(self) -> str:
-        return "/lustre/aigc/llm"
+        """ Return the root directory of the file system in the cluster.
+        When running experiments, files such as logs, checkpoints, caches 
+        will be saved under this directory.
+        """
+        assert self.__loaded
+        return self.__fileroot
 
     @property
     def default_mount(self) -> str:
-        return "/lustre:/lustre,/dev/infiniband:/dev/infiniband,/sys/class/infiniband_verbs:/sys/class/infiniband_verbs"
+        """ Directories that should be mounted to container that runs workers.
+        """
+        assert self.__loaded
+        return self.__default_mount
 
-
-hostname = socket.gethostname()
-if not (hostname.startswith("YL-ctrl0") or hostname.startswith("QH-ctrl0") or hostname.startswith("YL-com")
-        or hostname.startswith("QH-com") or hostname.startswith("frl") or hostname.startswith("ctrl0")):
-    raise RuntimeError(f"Unkown cluster with hostname {hostname}. "
-                       "Please properly implement methods of `ClusterSpec` in base/cluster.py.")
-
-spec = None
-if hostname.startswith("QH-ctrl0") or hostname.startswith("QH-com"):
-    spec = QHClusterSpec()
-else:
-    spec = QizhiClusterSpec()
-
+    @property
+    def gpu_image(self) -> str:
+        """ Return the default image for containers of GPU workers.
+        """
+        assert self.__loaded
+        return self.__gpu_image
+    
+    @property
+    def cpu_image(self) -> str:
+        """ Return the default image for containers of CPU workers.
+        """
+        assert self.__loaded
+        return self.__cpu_image
+    
+    @property
+    def node_name_prefix(self) -> str:
+        """ Return the prefix of node names in slurm format
+        """
+        assert self.__loaded
+        return self.__node_name_prefix
 
 def node_name_is_node_type(node_name: str, node_type: Optional[Union[List[str], str]] = None) -> bool:
+    assert spec is not None
     if node_type is None:
         return True
     if not isinstance(node_type, list):
@@ -126,3 +126,6 @@ def node_name_is_node_type(node_name: str, node_type: Optional[Union[List[str], 
             cond = spec.node_type_from_node_name(node_name) == nt
         nt_condition.append(cond)
     return any(nt_condition)
+
+spec = ClusterSpec()
+spec.load_spec_from_file(CLUSTER_SPEC_PATH)

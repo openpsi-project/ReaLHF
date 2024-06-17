@@ -23,12 +23,10 @@ class SentimentScoringInterface(model_api.ModelInterface):
 
     def __post_init__(self):
         super().__post_init__()
-        self.score_model = (transformers.AutoModelForSequenceClassification.from_pretrained(
-            "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english").cuda())
+        self.score_model = (transformers.AutoModelForSequenceClassification.from_pretrained("/path/to/score_model").cuda())
         self.score_model.eval()
 
-        self.score_tokenizer = transformers.AutoTokenizer.from_pretrained(
-            "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english")
+        self.score_tokenizer = transformers.AutoTokenizer.from_pretrained("/path/to/score_model")
 
     @torch.no_grad()
     def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:

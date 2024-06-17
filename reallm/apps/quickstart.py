@@ -5,9 +5,9 @@ import sys
 
 import hydra
 
+# NOTE: Register all implemented experiments inside ReaL.
 from reallm.api.quickstart.entrypoint import QUICKSTART_FN
 from reallm.base.cluster import spec as cluster_spec
-# NOTE: Register all implemented experiments inside ReaL.
 import reallm.experiments.common.dpo_exp
 import reallm.experiments.common.ppo_exp
 import reallm.experiments.common.rw_exp

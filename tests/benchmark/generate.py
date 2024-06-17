@@ -25,8 +25,8 @@ from reallm.impl.model.nn.real_llm_generate import GenerationConfig
 logger = logging.getLogger("tests.test_saveload")
 
 MODEL_FAMILY_TO_PATH = {
-    ModelFamily("llama", 7, is_critic=False): "/lustre/public/pretrained_model_weights/Llama-2-7b-hf",
-    ModelFamily("llama", 13, is_critic=False): "/lustre/public/pretrained_model_weights/Llama-2-13b-hf",
+    ModelFamily("llama", 7, is_critic=False): "/path/to/Llama-2-7b-hf",
+    ModelFamily("llama", 13, is_critic=False): "/path/to/Llama-2-13b-hf",
 }
 
 

@@ -7,6 +7,7 @@ import numpy as np
 
 from reallm.api.core.dfg import ModelRPC
 from reallm.api.quickstart.model import ParallelismConfig
+from reallm.base.cluster import spec as cluster_spec
 from reallm.base.slurm_utils import are_ones_contiguous, nodelist_from_nodes, parse_nodelist
 
 
@@ -147,19 +148,14 @@ def make_device_mesh_from_name(global_mesh_name: str, name: str):
     """
     DeviceMesh name format: <prefix><node_indices>[:<gpu_ids>]
         slurm_nodelist is the name of slurm nodes the mesh is on, should follow slurm convention,
-        for example "QH-com[40-43]" or "QH-com[01,11,13-14]" with prefix QH-com,
+        for example "NODE[40-43]" or "NODE[01,11,13-14]" with prefix NODE,
         if n_nodes=1, gpu_ids are the gpu id list delimited by comma if n_gpus < 8,
         for example "0,1,2,3" or "0,1". An example of full device mesh name
-        in this situation is "QH-com40:0,1,2,3"
+        in this situation is "NODE40:0,1,2,3"
 
     Note: cluster device mesh name must occupy entire nodes.
     """
-    if "QH-com" in global_mesh_name:
-        # slurm
-        prefix = "QH-com"
-    else:
-        # default
-        prefix = "NODE"
+    prefix = cluster_spec.node_name_prefix
     node_list = parse_nodelist(global_mesh_name, prefix)
     n_nodes = len(node_list)
     n_gpus_per_node = 8
@@ -190,12 +186,7 @@ def make_device_mesh_from_name(global_mesh_name: str, name: str):
 
 
 def device_mesh_name_from_mapping(global_mesh_name: str, mapping: np.ndarray):
-    if "QH-com" in global_mesh_name:
-        # slurm
-        prefix = "QH-com"
-    else:
-        # default
-        prefix = "NODE"
+    prefix = cluster_spec.node_name_prefix
     node_list = parse_nodelist(global_mesh_name, prefix)
     n_nodes = len(node_list)
     n_gpus_per_node = 8

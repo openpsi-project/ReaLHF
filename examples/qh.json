@@ -1,0 +1,15 @@
+{
+    "cluster_type": "slurm",
+    "cluster_name": "default",
+    "fileroot": "/lustre/aigc/llm",
+    "default_mount": "/lustre:/lustre,/dev/infiniband:/dev/infiniband,/sys/class/infiniband_verbs:/sys/class/infiniband_verbs",
+    "node_type_from_node_name": {
+        "QH-com\\d{2}$": "a100"
+    },
+    "gpu_type_from_node_name": {
+        "QH-com\\d{2}$": "tesla"
+    },
+    "cpu_image": "llm/llm-cpu:reallm-20240614",
+    "gpu_image": "llm/llm-gpu:reallm-20240614",
+    "node_name_prefix": "QH-com"
+}
