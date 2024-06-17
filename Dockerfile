@@ -45,10 +45,7 @@ RUN pip3 install -U pip
 RUN pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 # set environment variables for building transformer engine
-ENV NVTE_WITH_USERBUFFERS=1
-ENV NVTE_FRAMEWORK=pytorch
-ENV MPI_HOME=/usr/local/mpi
-ENV MAX_JOBS=64
+ENV NVTE_WITH_USERBUFFERS=1 NVTE_FRAMEWORK=pytorch REAL_CUDA=1 MAX_JOBS=8 MPI_HOME=/usr/local/mpi
 ENV PATH="${PATH}:/opt/hpcx/ompi/bin:/opt/hpcx/ucx/bin"
 ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 

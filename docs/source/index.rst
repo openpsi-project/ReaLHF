@@ -16,30 +16,36 @@ Highlights
 **Efficient at all scales**
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Thanks to open-source frameworks
-such as Megatron-LM and DeepSpeed,
-ReaL supports the most advanced
-techniques for LLM training, such as 3D parallelism,
-ZeRO optimization, and offloading.
+ReaL proposes a novel *parameter realloaction* technique.
+It dynamically shifts parameters and changes parallel strategies
+of LLMs during training.
+This technique can largely reduce the communication overhead and improve
+GPU utilization for RLHF.
 
-Together with the proposed *parameter reallocation*
-technique, ReaL can scale RLHF training to
+Together with the most advanced
+techniques for LLM training, such as 3D parallelism,
+ZeRO optimization, and offloading,
+ReaL can scale RLHF training to
 hundreds or thousands of GPUs,
 maintaining high throughput and efficiency.
-On the other extreme, ReaL is also memory-efficient
-and capable of training 70B LLMs with offloading on a single node.
+
+Beyond large-scale training, ReaL is also memory-efficient with limited resources.
+For example, ReaL can train 70B LLMs with offloading on a single node.
+
+For more details, check our `introduction page <intro>`_.
 
 **Easy to use**
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Install with PyPI or use our Docker image, then
 run your experiment with a single command!
+Check our `quickstart guide <quickstart>`_ for more details.
 
 **Flexible**
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-System implementations are fully decoupled with
-algorithm interfaces. Get the best performance of your
+ReaL's system implementations are fully decoupled with
+algorithm interfaces. Get the best performance for your
 customized application within 100 lines of code!
 
 Contents

@@ -13,7 +13,7 @@ of the previous RLHF systems, as shown in the :ref:`timeline`.
 
 .. _timeline:
 
-.. figure:: timeline.svg
+.. figure:: images/timeline.svg
    :alt: timeline
 
    Timeline Figure
@@ -51,7 +51,7 @@ prior solutions.
 We show throughput comparison with the state-of-the-art open-source systems
 in the following figure.
 
-.. image:: vws.svg
+.. image:: images/vws.svg
 
 .. "Scale Actor" maintains the sizes
 .. of Critic and Reward at 7B while increasing the sizes of Actor and Reference with the number of GPUs.

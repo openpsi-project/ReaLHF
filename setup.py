@@ -20,7 +20,7 @@ NVIDIA_SUPPORTED_ARCHS = {"7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
 
 
 def _is_cuda() -> bool:
-    return torch.cuda.is_available()
+    return os.getenv("REAL_CUDA", "0") == "1"
 
 
 # Compiler flags.
@@ -187,9 +187,6 @@ with open("requirements.txt", "r") as f:
 
 os.makedirs(os.path.join(ROOT_DIR, "reallm", "_C"), exist_ok=True)
 if _is_cuda():
-    dependencies.append("transformer_engine @ git+https://github.com/NVIDIA/TransformerEngine.git@v1.6")
-    dependencies.append("flash-attn==2.4.2")
-
     cr_extension = CUDAExtension(
         name="reallm._C.custom_all_reduce",
         sources=[
