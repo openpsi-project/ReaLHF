@@ -187,7 +187,8 @@ with open("requirements.txt", "r") as f:
 
 os.makedirs(os.path.join(ROOT_DIR, "reallm", "_C"), exist_ok=True)
 if _is_cuda():
-    dependencies.append("flash-attn==2.5.8")
+    dependencies.append("transformer_engine @ git+https://github.com/NVIDIA/TransformerEngine.git@v1.6")
+    dependencies.append("flash-attn==2.4.2")
 
     cr_extension = CUDAExtension(
         name="reallm._C.custom_all_reduce",

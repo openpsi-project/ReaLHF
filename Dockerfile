@@ -29,7 +29,7 @@ EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 
 # >>>>>> GPU image
-FROM nvcr.io/nvidia/pytorch:23.10-py3 AS base
+FROM nvcr.io/nvidia/pytorch:23.10-py3 AS gpu
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt update
@@ -44,29 +44,14 @@ RUN apt install -y net-tools \
 RUN pip3 install -U pip
 RUN pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
-COPY . /reallm
-RUN pip3 install -e /reallm --no-build-isolation
-WORKDIR /reallm
-
-ENV PATH="${PATH}:/opt/hpcx/ompi/bin:/opt/hpcx/ucx/bin"
-ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
-
-# >>>>>> GPU image with TransformerEngine
-FROM base AS te
-
 # set environment variables for building transformer engine
 ENV NVTE_WITH_USERBUFFERS=1
 ENV NVTE_FRAMEWORK=pytorch
 ENV MPI_HOME=/usr/local/mpi
 ENV MAX_JOBS=64
+ENV PATH="${PATH}:/opt/hpcx/ompi/bin:/opt/hpcx/ucx/bin"
+ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 
-WORKDIR /tmp
-RUN git clone --depth 1 --branch v1.6 https://github.com/NVIDIA/TransformerEngine.git
-WORKDIR /tmp/TransformerEngine
-RUN pip3 uninstall -y transformer_engine && pip3 install /tmp/TransformerEngine --no-build-isolation
-RUN rm -rf /tmp/TransformerEngine /tmp/flash_attn-2.3.6-cp310-cp310-linux_x86_64.whl /tmp/cugae-0.1.0-cp310-cp310-linux_x86_64.whl /tmp/pytorch
-
-RUN pip install flash-attn --no-build-isolation
-
+COPY . /reallm
+RUN pip3 install -e /reallm --no-build-isolation
 WORKDIR /reallm
-

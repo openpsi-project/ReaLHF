@@ -7,13 +7,15 @@ Installation
 First, please follow the :doc:`installation instructions <install>`
 to install the `reallm` package.
 
-Reproducing RLHF on 7B LLaMA in One Hour
------------------------------------------
+Reproducing RLHF with 4x LLaMA-7B in One Hour
+------------------------------------------------
+
+If you are not familar with the procedure of RLHF,
+please refer to the `InstrctGPT paper <https://arxiv.org/abs/2203.02155>`_.
 
 Stage 1: Supervised Fine-Tuning
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The first stage of RLHF is supervised fine-tuning over an instruction dataset.
 Prepare your customized dataset in a json or jsonl format,
 where each entry should be a dictionary with two keys, "prompt" and "answer".
 For example,
@@ -22,6 +24,11 @@ For example,
 
     {"prompt": "What is the capital of France?", "answer": "The capital of France is ..."}
     {"prompt": "Please make a travel plan for visiting Berlin?", "answer": "..."}
+
+.. note::
+
+    If you don't have one, you can download the our
+    `sample dataset <>`_ for the controled sentiment generation experiment.
 
 Then, run the following command to fine-tune the model on your dataset:
 
@@ -51,7 +58,7 @@ Then, run the following command to fine-tune the model on your dataset:
         dataset.valid_bs_n_seqs=512
 
 ReaL adopts `structured configurations <https://hydra.cc/docs/tutorials/structured_config/intro/>`_
-in `hydra <https://hydra.cc/>`_ to manage command line options.
+in `Hydra <https://hydra.cc/>`_ to manage command line options.
 The above command launches an SFT experiment, which corresponds to a Python
 dataclass object `experiments.common.sft_exp.SFTConfig`.
 The members of this object can also be dataclasses.
@@ -63,6 +70,8 @@ ReaL supports many features from existing libraries,
 including 3D parallelism, sequence parallelism, DeepSpeed ZeRO-3,
 parameter and optimizer offload, etc.
 For all supported options, please check :doc:`expconfig` for details.
+
+.. note::
 
 ReaL loads directly from HuggingFace models and also saves checkpoints
 as HuggingFace models.

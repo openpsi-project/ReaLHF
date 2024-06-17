@@ -1,10 +1,6 @@
 Installation
 ==============
 
-In an environment without CUDA, ReaL will only
-import necessary Python modules for launching distributed experiments.
-Customized CUDA kernels will not be installed.
-
 Docker Images
 --------------
 
@@ -46,3 +42,9 @@ Install from source:
    $ cd /path/to/reallm/directory
    $ pip install -e . --no-build-isolation
 
+.. note::
+
+   In an environment without CUDA, ReaL will only
+   install necessary Python modules for launching distributed experiments.
+   That's why we have two different docker images for
+   launching and deploying ReaL.
