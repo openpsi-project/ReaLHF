@@ -343,3 +343,82 @@ def gather_sequences(src: List[namedarray.NamedArray]) -> namedarray.NamedArray:
 
     res.register_metadata(seqlens=seqlens)
     return res
+
+
+def get_shape_from_key_and_seqlen(k: str, seqlen: int, vocab_size: int):
+    if k in [
+            "input_lens",
+            "prompt_lens",
+            "seq_no_eos_mask",
+            "rewards",
+            "reward_score",
+            "group_factor",
+            "pos_input_lens",
+    ]:
+        shape = (1,)
+    elif k in ["cu_seqlens", "prompt_cu_seqlens"]:
+        shape = (2,)
+    # FIXME: problem here if we use groups instead of pairs?
+    elif k in ["seqlogp"]:
+        shape = (1, 2)
+    elif k in [
+            "packed_seq",
+            "prompt_mask",
+            "packed_input_ids",
+            "values",
+            "packed_prompts",
+    ]:
+        shape = (seqlen,)
+    elif k in [
+            "packed_logprobs",
+            "packed_ref_logprobs",
+            "old_logp",
+            "ref_logp",
+            "advantages",
+            "ppo_loss_mask",
+            "kl_rewards",
+            "returns",
+    ]:
+        shape = (seqlen - 1,)
+    elif k in ["logits_mask", "packed_logits_mask"]:
+        shape = (seqlen, vocab_size)
+    else:
+        raise NotImplementedError(f"Unknown key {k} in packed data.")
+    return shape
+
+
+def get_dtype_from_key(k: str):
+    if k in [
+            "seq_no_eos_mask",
+            "ppo_loss_mask",
+            "prompt_mask",
+            "logits_mask",
+            "packed_logits_mask",
+    ]:
+        dtype = torch.bool
+    elif k in [
+            "reward_score",
+            "packed_ref_logprobs",
+            "old_logp",
+            "ref_logp",
+            "advantages",
+            "kl_rewards",
+            "returns",
+            "values",
+    ]:
+        dtype = torch.float16
+    elif k in [
+            "input_lens",
+            "prompt_lens",
+            "cu_seqlens",
+            "prompt_cu_seqlens",
+            "pos_input_lens",
+    ]:
+        dtype = torch.int32
+    elif k in ["packed_seq", "packed_input_ids", "packed_prompts"]:
+        dtype = torch.int64
+    elif k in ["rewards", "packed_logprobs", "group_factor", "seqlogp"]:
+        dtype = torch.float32
+    else:
+        raise NotImplementedError(f"Unknown key {k} in packed data.")
+    return dtype

@@ -90,6 +90,8 @@ def megatron_ctx():
     parallel_state._DATA_MODULO_EXPERT_PARALLEL_GROUP = g
     parallel_state._DATA_MODULO_EXPERT_PARALLEL_GROUP_GLOO = (grid.get_data_parallel_group_gloo())
 
+    # Remove the global memory buffer for megatron to save GPU memory.
+    parallel_state._GLOBAL_MEMORY_BUFFER = None
     yield
     WITHIN_MEGATRON_CONTEXT = False
 

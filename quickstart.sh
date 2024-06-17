@@ -78,10 +78,9 @@
 SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep15globalstep15/
 python3 -m reallm.apps.quickstart ppo \
-    experiment_name=debug-quickstart-ppo trial_name=20240614-0 \
-    total_train_epochs=1 \
-    n_nodes=1 \
-    allocation_mode=heuristic \
+    experiment_name=debug-quickstart-ppo trial_name=20240606-2 \
+    total_train_epochs=4 \
+    allocation_mode=manual \
     save_freq_steps=null \
     actor.type._class=llama \
     actor.type.size=7 \
@@ -101,34 +100,34 @@ python3 -m reallm.apps.quickstart ppo \
     rew.type.size=7 \
     rew.type.is_critic=True \
     rew.path=$RW_MODEL_PATH \
-    dataset.path=/lustre/meizy/data/antropic-hh/ppo_prompt_only_short.jsonl \
+    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
     dataset.max_prompt_len=256 \
-    dataset.train_bs_n_seqs=512 \
+    dataset.train_bs_n_seqs=128 \
     ppo.max_new_tokens=256 \
     ppo.min_new_tokens=256 \
     ppo.ppo_n_minibatches=4 \
     ppo.kl_ctl=0.1 \
+    ppo.force_no_logits_mask=False \
     ppo.value_eps_clip=0.2 \
     ppo.reward_output_scaling=10.0 \
     ppo.adv_norm=False ppo.value_norm=False \
-    ppo.top_p=1.0 ppo.top_k=32000 
-
-    # actor_train.parallel.model_parallel_size=8 \
-    # actor_train.parallel.pipeline_parallel_size=1 \
-    # actor_train.parallel.data_parallel_size=1 \
-    # actor_gen.parallel.model_parallel_size=1 \
-    # actor_gen.parallel.pipeline_parallel_size=2 \
-    # actor_gen.parallel.data_parallel_size=4 \
-    # critic_train.parallel.model_parallel_size=8 \
-    # critic_train.parallel.pipeline_parallel_size=1 \
-    # critic_train.parallel.data_parallel_size=1 \
-    # critic_inf.parallel.model_parallel_size=4 \
-    # critic_inf.parallel.pipeline_parallel_size=2 \
-    # critic_inf.parallel.data_parallel_size=1 \
-    # ref_inf.parallel.model_parallel_size=2 \
-    # ref_inf.parallel.pipeline_parallel_size=2 \
-    # ref_inf.parallel.data_parallel_size=2 \
-    # rew_inf.parallel.model_parallel_size=1 \
-    # rew_inf.parallel.pipeline_parallel_size=1 \
-    # rew_inf.parallel.data_parallel_size=8 
+    ppo.top_p=1.0 ppo.top_k=32000 \
+    actor_train.parallel.model_parallel_size=8 \
+    actor_train.parallel.pipeline_parallel_size=1 \
+    actor_train.parallel.data_parallel_size=1 \
+    actor_gen.parallel.model_parallel_size=1 \
+    actor_gen.parallel.pipeline_parallel_size=2 \
+    actor_gen.parallel.data_parallel_size=4 \
+    critic_train.parallel.model_parallel_size=8 \
+    critic_train.parallel.pipeline_parallel_size=1 \
+    critic_train.parallel.data_parallel_size=1 \
+    critic_inf.parallel.model_parallel_size=4 \
+    critic_inf.parallel.pipeline_parallel_size=2 \
+    critic_inf.parallel.data_parallel_size=1 \
+    ref_inf.parallel.model_parallel_size=2 \
+    ref_inf.parallel.pipeline_parallel_size=2 \
+    ref_inf.parallel.data_parallel_size=2 \
+    rew_inf.parallel.model_parallel_size=1 \
+    rew_inf.parallel.pipeline_parallel_size=1 \
+    rew_inf.parallel.data_parallel_size=8 
 

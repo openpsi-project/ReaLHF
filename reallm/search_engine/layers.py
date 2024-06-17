@@ -144,18 +144,12 @@ class ProfileLayers:
             assert (y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None)
             kvcache_seqlen = max(max_seqlen + self.max_new_tokens, self.hidden_dim // self.head_dim + 10)
             # fix of a flash attention bug
-            k_cache = constants.get_global_memory_buffer().get_tensor(
-                tensor_shape=(bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+            k_cache = torch.zeros(
+                (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
                 dtype=y.k_cache.dtype,
-                name=f"kv_cache_{layer_idx}_k",
-                force_zero=True,
+                device=self.device,
             )
-            v_cache = constants.get_global_memory_buffer().get_tensor(
-                tensor_shape=(bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-                dtype=y.v_cache.dtype,
-                name=f"kv_cache_{layer_idx}_v",
-                force_zero=True,
-            )
+            v_cache = torch.zeros_like(k_cache)
             indices = (torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
                                     dtype=torch.long)[None, :] < input_lens[:, None])
             k_cache[indices] = y.k_cache
