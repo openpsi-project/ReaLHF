@@ -202,15 +202,9 @@ class ReaLModel(nn.Module):
             )
         return l
 
-    def _requires_contiguous_param(self):
-        valid = self.contiguous_param is not None
-        if not valid:
-            raise RuntimeError("Contiguous parameter is not available.")
-
     def async_offload(self):
         assert not self._offloaded
         assert self._instantiated
-        self._requires_contiguous_param()
         if self._offload_buffer is None:
             self._offload_buffer = torch.empty_like(
                 self.contiguous_param,
@@ -495,7 +489,6 @@ class ReaLModel(nn.Module):
         to_model_config: model_api.ReaLModelConfig,
         pg_info: NCCLProcessGroupInfo,
     ) -> Tuple[nn.ModuleList, torch.Tensor, torch.Tensor]:
-        self._requires_contiguous_param()
         assert not (is_trainable(from_model_name) and is_trainable(to_model_name))
 
         if (from_model_name, to_model_name) not in self._reparallelize_targets:

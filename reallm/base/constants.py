@@ -50,15 +50,24 @@ class GlobalMemoryBuffer:
 MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
 LOG_ROOT = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}"
 RECOVER_ROOT = f"{cluster_spec.fileroot}/recover/{getpass.getuser()}"
-
 SLURM_LOCK_FILE_NAME = f"{cluster_spec.fileroot}/logs/slurm_scheduler.lock"
-
 PYTORCH_KERNEL_CACHE_PATH = (f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/kernels")
 TRITON_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/triton"
 DATASET_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/datasets"
 PROFILER_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/profiler"
 TORCH_EXTENSIONS_DIR = (f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/extensions")
 QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/"
+
+# make directories if does not exist
+os.makedirs(MODEL_SAVE_ROOT, exist_ok=True)
+os.makedirs(LOG_ROOT, exist_ok=True)
+os.makedirs(RECOVER_ROOT, exist_ok=True)
+os.makedirs(PYTORCH_KERNEL_CACHE_PATH, exist_ok=True)
+os.makedirs(TRITON_CACHE_PATH, exist_ok=True)
+os.makedirs(DATASET_CACHE_PATH, exist_ok=True)
+os.makedirs(PROFILER_CACHE_PATH, exist_ok=True)
+os.makedirs(TORCH_EXTENSIONS_DIR, exist_ok=True)
+os.makedirs(QUICKSTART_EXPR_CACHE_PATH, exist_ok=True)
 
 # _model_name will be changed in the model_scope context manager
 _model_name: "ModelName" = None

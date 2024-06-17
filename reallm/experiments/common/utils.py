@@ -125,3 +125,5 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
                     offload_flag = False
             if offload_flag:
                 rpc.post_hooks.append(OffloadHook())
+        
+        print("resolve rpc hooks", rpc.name, rpc.model_name)

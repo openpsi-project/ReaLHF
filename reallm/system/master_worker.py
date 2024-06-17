@@ -1,6 +1,7 @@
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple, Union
 import asyncio
+import collections
 import copy
 import dataclasses
 import getpass
@@ -892,15 +893,18 @@ class MasterWorker(worker_base.Worker):
 
         # The parameters are by default held by the trainable model.
         # If all replicas are not trainable, the parameters are held in replica 0.
+        _model_is_trainable = collections.defaultdict(list)
+        for rpc in self.__model_rpcs:
+            _model_is_trainable[rpc.model_name].append(rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP)
+
         _model_is_trainable = {
-            rpc.model_name: rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
-            for rpc in self.__model_rpcs
+            model_name: any(values)
+            for model_name, values in _model_is_trainable.items()
         }
+
         _roles = set([rpc.model_name.role for rpc in self.__model_rpcs])
-        _role_cnt = {
-            role: len([rpc for rpc in self.__model_rpcs if rpc.model_name.role == role])
-            for role in _roles
-        }
+        _role_cnt = {role: len(set([rpc.model_name for rpc in self.__model_rpcs 
+                                    if rpc.model_name.role == role])) for role in _roles}
         _reordered_model_names = []
         for role in _roles:
             if _role_cnt[role] == 1:

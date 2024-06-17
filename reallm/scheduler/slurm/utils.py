@@ -716,6 +716,4 @@ def show_all():
 
 
 if __name__ == "__main__":
-    # show_all()
-    # print(available_hostnames(node_type=["a100"]))
     show_tesla()

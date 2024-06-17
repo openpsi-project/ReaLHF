@@ -50,8 +50,8 @@ _LLM_ENVVARS = {
 for k, v in _LLM_ENVVARS.items():
     os.environ[k] = v
 
-_LLM_GPU_IMAGE = "llm/llm-gpu:reallm-20240606"
-_LLM_CPU_IMAGE = "llm/llm-cpu:reallm-20240606"  # if cluster_spec.name == 'qizhi' else "meizy/llm-cpu"
+_LLM_GPU_IMAGE = cluster_spec.gpu_image
+_LLM_CPU_IMAGE = cluster_spec.cpu_image 
 
 
 @dataclasses.dataclass
@@ -316,12 +316,18 @@ class ExperimentConfig:
         ######### sanity check of sync param hooks #########
 
         # Mark which shard of the same role should be instantiated.
+        _model_is_trainable = collections.defaultdict(list)
+        for rpc in self.model_rpcs:
+            _model_is_trainable[rpc.model_name].append(rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP)
+
         _model_is_trainable = {
-            rpc.model_name: rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
-            for rpc in _rpc_nodes
+            model_name: any(values)
+            for model_name, values in _model_is_trainable.items()
         }
+
         _roles = set([rpc.model_name.role for rpc in _rpc_nodes])
-        _role_cnt = {role: len([rpc for rpc in _rpc_nodes if rpc.model_name.role == role]) for role in _roles}
+        _role_cnt = {role: len(set([rpc.model_name for rpc in _rpc_nodes 
+                                    if rpc.model_name.role == role])) for role in _roles}
         model_names_to_instantiate = []
         for role in _roles:
             _trainable_this_role = [_model_is_trainable[ModelName(role, i)] for i in range(_role_cnt[role])]

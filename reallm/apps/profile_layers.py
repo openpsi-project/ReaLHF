@@ -48,13 +48,13 @@ def profile_layer_func(
 if __name__ == "__main__":
     st = time.monotonic_ns()
     parser = argparse.ArgumentParser(prog="profile_layers")
-    parser.add_argument("--expr_name", type=str, default="profile")
-    parser.add_argument("--trial_name", type=str, default="profile")
     parser.add_argument(
         "--model_path",
         type=str,
-        default="/lustre/public/pretrained_model_weights/sharded/Llama-2-70b-hf_8pp_3s",
+        required=True,
     )
+    parser.add_argument("--expr_name", type=str, default="profile")
+    parser.add_argument("--trial_name", type=str, default="profile")
     parser.add_argument("--model_name", type=str, default="Llama-2-70b")
     parser.add_argument("--warm_up_rounds", type=int, default=1)
     parser.add_argument("--profile_rounds", type=int, default=3)

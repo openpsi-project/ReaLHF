@@ -23,16 +23,6 @@ MODEL_NAME = "default"
 _DEFAULT_EXPR_NAME = "test"
 _DEFAULT_TRIAL_NAME = "test"
 
-# for testing and profiling only
-MODEL_FAMILY_TO_PATH = {
-    # ModelFamily("llama", 0, True): "/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/",
-    ModelFamily("llama", 7, True): "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/",
-    ModelFamily("llama", 13, True): "/lustre/public/pretrained_model_weights/Llama-2-13b-hf/",
-    ModelFamily("llama", 70, True): "/lustre/public/pretrained_model_weights/Llama-2-70b-hf/",
-    ModelFamily("codellama", 34, True): "/lustre/public/pretrained_model_weights/CodeLlama-34b-hf",
-}
-
-
 class StandaloneTestingProcess(mp.Process):
     """Aims for defining this class:
     + Removing duplicate setup GPU codes in each test.

@@ -13,6 +13,7 @@ from reallm.api.core.system_api import *
 from reallm.api.quickstart.device_mesh import (AllocationConfig, DeviceMesh, make_device_mesh_from_name,
                                                RPCAllocation)
 from reallm.api.quickstart.model import ModelTrainEvalConfig
+from reallm.experiments.common.check import *
 from reallm.experiments.common.utils import *
 from reallm.search_engine.search import search_rpc_allocations
 import reallm.base.logging as logging
@@ -162,6 +163,7 @@ class CommonExperimentConfig(Experiment):
                            "All model RPC will be allocated on GPUs automatically "
                            f"allocated according to n_nodes {self.n_nodes} "
                            f"and n_gpus_per_node {self.n_gpus_per_node}.")
+        self.__check_legal_experiment()
 
         rpcs = self.rpcs
         model_worker = []
@@ -282,3 +284,31 @@ class CommonExperimentConfig(Experiment):
             model_rpcs=[rpc_alloc.rpc for rpc_alloc in rpc_allocs],
             model_worker=model_worker,
         )
+
+    def __check_legal_experiment(self):
+        if self.n_nodes > 1 and self.mode == "local":
+            raise ValueError("Cannot run multi-node experiment in local mode, "
+                             "please setup slurm for distributed runs.")
+
+        if self.n_gpus_per_node != 8 and self.allocation_mode in [
+                "search",
+                "heuristic",
+        ]:
+            raise ValueError(f"Cannot run search or heuristic allocation with "
+                             f"n_gpus_per_node {self.n_gpus_per_node}, "
+                             "please set n_gpus_per_node to 8.")
+
+        for rpc_name, rpc in self.rpcs.items():
+            if not check_is_reallm_native_model_interface(rpc.interface_impl.type_) and self.allocation_mode in [
+                "search", "heuristic"
+            ]:
+                raise ValueError(f"RPC {rpc.name} interface is not a Reallm native implementation. "
+                                 f"Search and heuristic allocation mode are not available.")
+            if self.allocation_mode == "manual" and rpc_name not in self.allocations:
+                if rpc_name not in self.allocations:
+                    raise ValueError(f"RPC {rpc_name} is not in allocations, please implement "
+                                     f"`allocations()` method in your config class to enable "
+                                     f"manual allocation.")
+
+            if rpc.model_name.role not in self.models.keys():
+                raise ValueError(f"RPC {rpc.name} model name {rpc.model_name.role} is not in models.")
