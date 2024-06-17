@@ -2,13 +2,19 @@ from contextlib import contextmanager
 from typing import *
 import dataclasses
 
-from megatron.core import parallel_state
-from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel
-from megatron.core.distributed.finalize_model_grads import finalize_model_grads
-from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
-from megatron.core.optimizer import get_megatron_optimizer
-from megatron.core.optimizer.optimizer_config import OptimizerConfig
-from megatron.core.transformer.transformer_config import TransformerConfig
+try:
+    from megatron.core import parallel_state
+    from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel
+    from megatron.core.distributed.finalize_model_grads import finalize_model_grads
+    from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
+    from megatron.core.optimizer import get_megatron_optimizer
+    from megatron.core.optimizer.optimizer_config import OptimizerConfig
+    from megatron.core.transformer.transformer_config import TransformerConfig
+except ImportError or ModuleNotFoundError:
+    # dummy class for type hint, due to missing files in megatron CPU installation  
+    class TransformerConfig:
+        pass
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn

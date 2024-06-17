@@ -237,8 +237,3 @@ def estimate_param_realloc_time_cost(n_nodes: int,
                                      parallel: int = 4):
     dump_table_parallel(n_nodes, model_family_to_path, parallel)
     merge_tables(n_nodes, model_family_to_path, parallel)
-
-
-if __name__ == "__main__":
-    mf_to_path = {ModelFamily("llama", 7, False): "/lustre/public/pretrained_model_weights/Llama-2-7b-hf/"}
-    estimate_param_realloc_time_cost(4, mf_to_path, parallel=4)

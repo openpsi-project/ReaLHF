@@ -3,9 +3,13 @@ import dataclasses
 
 from deepspeed.runtime.engine import DeepSpeedEngine, MEMORY_OPT_ALLREDUCE_SIZE
 from deepspeed.runtime.zero.config import ZeroStageEnum
-from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel as MegatronDDP
-from megatron.core.distributed.finalize_model_grads import finalize_model_grads
-from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer as MegatronDistOptim
+
+try:
+    from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel as MegatronDDP
+    from megatron.core.distributed.finalize_model_grads import finalize_model_grads
+    from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer as MegatronDistOptim
+except ImportError or ModuleNotFoundError:
+    pass
 import torch
 import torch.distributed as dist
 import transformers

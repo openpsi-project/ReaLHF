@@ -2,8 +2,15 @@ from typing import *
 import dataclasses
 import math
 
-from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel as MegatronDDP
-from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer as MegatronDistOptim
+try:
+    from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel as MegatronDDP
+    from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer as MegatronDistOptim
+except ImportError or ModuleNotFoundError:
+    # dummy class for type hint, due to missing files in megatron CPU installation  
+    class MegatronDDP:
+        pass
+    class MegatronDistOptim:
+        pass
 
 from reallm.base import constants, logging
 

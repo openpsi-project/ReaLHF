@@ -1,0 +1,15 @@
+{
+    "cluster_type": "slurm",
+    "cluster_name": "my_cluster",
+    "fileroot": "/path/to/my/file/system",
+    "default_mount": "/path/to/my/file/system:/path/to/my/file/system,/dev/infiniband:/dev/infiniband,/sys/class/infiniband_verbs:/sys/class/infiniband_verbs",
+    "node_type_from_node_name": {
+        "NODE\\d{2}$": "a100"
+    },
+    "gpu_type_from_node_name": {
+        "NODE\\d{2}$": "tesla"
+    },
+    "cpu_image": "llm/llm-cpu:reallm",
+    "gpu_image": "llm/llm-gpu:reallm",
+    "node_name_prefix": "NODE"
+}

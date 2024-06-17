@@ -77,6 +77,7 @@ python3 -m reallm.apps.quickstart rw \
 #     dataset.train_bs_n_seqs=256 \
 #     dataset.valid_bs_n_seqs=256
 
+SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep15globalstep15/
 # python3 -m reallm.apps.quickstart ppo \
 #     experiment_name=debug-quickstart-ppo trial_name=20240613-1 \
@@ -131,4 +132,57 @@ RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/def
     # rew_inf.parallel.model_parallel_size=1 \
     # rew_inf.parallel.pipeline_parallel_size=4 \
     # rew_inf.parallel.data_parallel_size=2 
+python3 -m reallm.apps.quickstart ppo \
+    experiment_name=debug-quickstart-ppo trial_name=20240606-2 \
+    total_train_epochs=4 \
+    allocation_mode=manual \
+    save_freq_steps=null \
+    actor.type._class=llama \
+    actor.type.size=7 \
+    actor.type.is_critic=False \
+    actor.path=$SFT_MODEL_PATH \
+    actor.gradient_checkpointing=True \
+    critic.type._class=llama \
+    critic.type.size=7 \
+    critic.type.is_critic=True \
+    critic.path=$RW_MODEL_PATH \
+    critic.gradient_checkpointing=True \
+    ref.type._class=llama \
+    ref.type.size=7 \
+    ref.type.is_critic=False \
+    ref.path=$SFT_MODEL_PATH \
+    rew.type._class=llama \
+    rew.type.size=7 \
+    rew.type.is_critic=True \
+    rew.path=$RW_MODEL_PATH \
+    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
+    dataset.max_prompt_len=256 \
+    dataset.train_bs_n_seqs=128 \
+    ppo.max_new_tokens=256 \
+    ppo.min_new_tokens=256 \
+    ppo.ppo_n_minibatches=4 \
+    ppo.kl_ctl=0.1 \
+    ppo.force_no_logits_mask=False \
+    ppo.value_eps_clip=0.2 \
+    ppo.reward_output_scaling=10.0 \
+    ppo.adv_norm=False ppo.value_norm=False \
+    ppo.top_p=1.0 ppo.top_k=32000 \
+    actor_train.parallel.model_parallel_size=8 \
+    actor_train.parallel.pipeline_parallel_size=1 \
+    actor_train.parallel.data_parallel_size=1 \
+    actor_gen.parallel.model_parallel_size=1 \
+    actor_gen.parallel.pipeline_parallel_size=2 \
+    actor_gen.parallel.data_parallel_size=4 \
+    critic_train.parallel.model_parallel_size=8 \
+    critic_train.parallel.pipeline_parallel_size=1 \
+    critic_train.parallel.data_parallel_size=1 \
+    critic_inf.parallel.model_parallel_size=4 \
+    critic_inf.parallel.pipeline_parallel_size=2 \
+    critic_inf.parallel.data_parallel_size=1 \
+    ref_inf.parallel.model_parallel_size=2 \
+    ref_inf.parallel.pipeline_parallel_size=2 \
+    ref_inf.parallel.data_parallel_size=2 \
+    rew_inf.parallel.model_parallel_size=1 \
+    rew_inf.parallel.pipeline_parallel_size=1 \
+    rew_inf.parallel.data_parallel_size=8 
 
