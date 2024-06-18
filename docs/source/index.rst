@@ -55,6 +55,7 @@ Contents
    expconfig
    customization
    arch
+   distributed
    contributing
 
 

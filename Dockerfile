@@ -55,8 +55,8 @@ ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 # However, using `pip install flash_attn -no-build-isolation` will cause the
 # building process to get stuck forever, so we have to pre-compile the wheel
 # and install it locally. If these wheels do not exist in your docker build
-# environment, please copy their source code and build them first.
-# If you can't build these packages, use our provided docker image.
+# environment, please build them first.
+# If you can't build these packages, use our provided docker images.
 
 ENV TE_WHL_NAME=transformer_engine-1.7.0+4e7caa1-cp310-cp310-linux_x86_64.whl
 ENV FLA_WHL_NAME=flash_attn-2.5.9-cp310-cp310-linux_x86_64.whl
