@@ -1,3 +1,4 @@
+/* Copied from the vLLM project: https://github.com/vllm-project/vllm */
 #pragma once
 
 #include <cuda.h>

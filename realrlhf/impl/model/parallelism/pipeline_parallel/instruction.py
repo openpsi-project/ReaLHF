@@ -1,12 +1,6 @@
-from collections import defaultdict
-from enum import IntEnum
-from typing import Iterable, List, Optional, Set, Union
+from typing import *
 import sys
 
-from deepspeed.runtime.utils import call_to_str
-
-
-# schedule executor
 class PipeInstruction:
     """Base class for all instructions to be executed by the pipeline engine.
 

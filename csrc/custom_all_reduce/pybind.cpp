@@ -1,4 +1,4 @@
-
+/* Copied from the vLLM project: https://github.com/vllm-project/vllm */
 #include <torch/extension.h>
 
 using fptr_t = uint64_t;

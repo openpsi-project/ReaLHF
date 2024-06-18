@@ -1,9 +1,4 @@
-# p2p communication utils from deepspeed pipe engine
-
-import pickle
-import typing
-
-# To query whether we have send/recv support
+# Copied from https://github.com/microsoft/DeepSpeed 
 from packaging.version import Version
 import torch
 import torch.distributed as dist

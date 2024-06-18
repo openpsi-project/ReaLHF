@@ -1,4 +1,5 @@
-# From megatron/core/tensor_parallel/mappings.py
+# Copied from Megatron-LM: https://github.com/NVIDIA/Megatron-LM
+# Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 
 import torch
 

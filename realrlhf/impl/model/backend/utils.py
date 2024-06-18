@@ -34,6 +34,7 @@ class MegatronEngine:
         self.optim.zero_grad(set_to_none=set_to_none)
 
 
+# Adopted from Megatron-LM/megatron/training/optimizer_param_scheduler.py
 class OptimizerParamScheduler(object):
     """Anneals learning rate and weight decay.
 

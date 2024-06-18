@@ -1,3 +1,6 @@
+# Copied from Megatron-LM: https://github.com/NVIDIA/Megatron-LM
+# Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+
 from typing import Callable, List, Optional, Tuple, Union
 import itertools
 import os
