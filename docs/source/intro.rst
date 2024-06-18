@@ -65,7 +65,7 @@ composed of 4 iterations with 400 steps for each iteration as for LLaMA-2.
 .. _est_time_table:
 
 +--------------+---------------+---------------+---------------+
-|   System     | DeepSpeedChat |   OpenRLHF    |   ReaL-LLM    |
+|   System     | DeepSpeedChat |   OpenRLHF    |   ReaL    |
 +==============+===============+===============+===============+
 | Time (hours) |     141.5     |    152.8      |  **17.0**     |
 +--------------+---------------+---------------+---------------+

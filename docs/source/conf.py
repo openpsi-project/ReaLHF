@@ -12,10 +12,10 @@ import pathlib
 import sys
 
 sys.path.insert(
-    0, (pathlib.Path(__file__).parents[2] / "reallm").resolve().as_posix()
+    0, (pathlib.Path(__file__).parents[2] / "realrlhf").resolve().as_posix()
 )
 
-project = "ReaL-LLM"
+project = "ReaL"
 copyright = "2024, Wei Fu & Zhiyu Mei"
 author = "Wei Fu & Zhiyu Mei"
 release = "0.1.0"

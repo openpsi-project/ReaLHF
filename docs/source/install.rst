@@ -13,15 +13,24 @@ To pull the images, run:
 
 .. code-block:: console
 
-   $ docker pull garrett4wade/reallm-cpu
-   $ docker pull garrett4wade/reallm-gpu
+   $ docker pull docker.io/garrett4wade/real-cpu
+   $ docker pull docker.io/garrett4wade/real-gpu
+
+.. warning::
+
+   when using these docker images locally, the user should mount the user code directory
+   to path ``/realrlhf`` in the container. This is because the image shifts an editable
+   installation at ``/realrlhf``. When the user code overwrites this path, the change of user
+   code will take effect without re-installing this ``realrlhf`` PyPI package.
+
+   It's also okay to mount to another location and re-install the package in the container.
 
 To build the images from scratch, run:
 
 .. code-block:: console
 
-   $ docker build --target=cpu -t reallm-cpu .
-   $ docker build --target=gpu -t reallm-gpu .
+   $ docker build --target=cpu -t real-cpu .
+   $ docker build --target=gpu -t real-gpu .
 
 Install From PyPI or Source
 ----------------------------
@@ -33,13 +42,19 @@ Install from PyPI:
 
 .. code-block:: console
 
-   $ pip install reallm --no-build-isolation
+   $ pip install realrlhf --no-build-isolation
+
+.. note::
+
+   Installing from the PyPI wheel still requires the user to clone the
+   source code to launch experiments.
 
 Install from source:
 
 .. code-block:: console
 
-   $ cd /path/to/reallm/directory
+   $ $ git clone https://github.com/openpsi-project/ReaLRLHF
+   $ cd ReaLRLHF
    $ pip install -e . --no-build-isolation
 
 .. note::

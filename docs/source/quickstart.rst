@@ -4,29 +4,35 @@ Quickstart
 Installation
 ---------------
 
-First, clone the ReaL repository from GitHub\:
+First, clone the ReaL repository from GitHub:
 
 .. code-block:: shell
 
-    $ git clone xxx
-    $ cd xxx
+    $ git clone https://github.com/openpsi-project/ReaLRLHF
+    $ cd ReaLRLHF
 
-RLHF with 4x LLaMA-7B in One Hour
+RLHF with 4x LLaMA-7B in 30min
 ------------------------------------------------
 
-If you are not familar with the procedure of RLHF,
+If you are not familiar with the procedure of RLHF,
 please refer to the `InstrctGPT paper <https://arxiv.org/abs/2203.02155>`_.
-This tutorial will go over the main stages of RLHF,
-including SFT, reward modeling, and DPO/PPO.
+This tutorial will cover the main stages of RLHF,
+including SFT, reward modeling, and PPO.
 
-We also provide sample datasets for each stage.
+.. note::
+
+    If you have not prepared a dataset for your application, you can download our
+    `sample dataset <https://drive.google.com/drive/folders/1xWIJ9DRLNQZxDrkCfAPE12euLLuWQGE-?usp=sharing>`_
+    to follow this tutorial.
+    The sample dataset is used for controlled sentiment generation,
+    where the LLM learns to generate positive movie comments given a context.
 
 Stage 1: Supervised Fine-Tuning
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Prepare your customized dataset in a json or jsonl format,
-where each entry should be a dictionary with two keys, "prompt" and "answer".
-For example,
+Prepare your customized dataset in a JSON or JSONL format,
+where each entry is a dictionary with two keys: "prompt" and "answer".
+For example:
 
 .. code-block:: json
 
@@ -35,29 +41,26 @@ For example,
 
 .. note::
 
-    If you haved not prepared a dataset for your application, you can download the our
-    `sample dataset <https://drive.google.com/drive/folders/1xWIJ9DRLNQZxDrkCfAPE12euLLuWQGE-?usp=sharing>`_
-    to go through this tutorial.
-    The sample dataset is used for controlled sentiment generation,
-    where the LLM should learn to generate positive movie comments given a context.
-
+    In our provided sample,
     ``sft_pos-train.jsonl`` and ``sft_pos-valid.jsonl`` are the training and validation sets for SFT, respectively.
 
-Then, run the following command to fine-tune the model on your dataset:
+Run the following command to fine-tune the model on your dataset:
 
 .. code-block:: shell
 
-    $ python3 -m reallm.apps.quickstart sft \
+    $ python3 -m realrlhf.apps.quickstart sft \
         experiment_name=quickstart-sft \
-        trial_name=my-trial \
+        trial_name=release \
         allocation_mode=manual \
         mode=local \
+        n_nodes=1 \
         total_train_epochs=8 \
-        save_freq_steps=50 eval_freq_epochs=1 \
+        save_freq_steps=50 \
+        eval_freq_epochs=1 \
         model.type._class=llama \
         model.type.size=7 \
         model.type.is_critic=False \
-        model.path=/path/or/HF-identifier/of/llama \
+        model.path=/path/or/HF-identifier/of/llama-7b \
         model.gradient_checkpointing=True \
         model.optimizer.type=adam \
         dataset.train_path=/path/to/train/dataset.jsonl \
@@ -70,69 +73,87 @@ Then, run the following command to fine-tune the model on your dataset:
         dataset.train_bs_n_seqs=512 \
         dataset.valid_bs_n_seqs=512
 
-ReaL adopts `structured configurations <https://hydra.cc/docs/tutorials/structured_config/intro/>`_
-in `Hydra <https://hydra.cc/>`_ to manage command line options.
-The options in the above command correspond to a Python
-dataclass object :class:`reallm.SFTConfig`.
-The attributes, including the model type, the learning rate, and the parallel strategy,
-can be recursively overwritten via command line options.
-Please check :doc:`expconfig` for more details.
+.. note::
 
-Importantly, the user should choose an appropriate parallel strategy
-as well as a moderate batch size according to the hardware setting.
-In the given example, the experiment will use 8 GPUs in total,
-with parallel strategy (pipe=1, tensor=2, data=4) and a batch size of 512.
+    ReaL adopts `structured configurations <https://hydra.cc/docs/tutorials/structured_config/intro/>`_
+    in `Hydra <https://hydra.cc/>`_ to manage command line options.
+    The options in the above command correspond to a Python
+    dataclass object: :class:`realrlhf.SFTConfig`.
+    The attributes, including the model type, learning rate, and parallel strategy,
+    can be recursively overwritten via command line options.
+    Please check :doc:`expconfig` for more details.
+
+.. note::
+
+    As a reminder, the value `null` should represent `None` in Python.
+
+The user can specify the number of nodes and the parallel strategy to use with
+the above command, in addition to paths and hyperparameters.
+In the given example, the experiment will use 1 node (assuming each node has 8 GPUs),
+with a parallel strategy (pipe=1, tensor=2, data=4) and a batch size of 512.
 
 After the experiment has been successfully launched,
-you will see the training logs in the console like this\:
+you will see the training logs in the console like this:
 
 .. code-block:: console
 
-    xxxx
+    20240618-03:10:56.216 quickstart INFO: Running sft experiment.
+    20240618-03:10:56.216 quickstart INFO: Logs will be dumped to /lustre/aigc/llm/logs/fw/quickstart-sft/release
+    20240618-03:10:56.216 quickstart INFO: Model checkpoints will be saved to /lustre/aigc/llm/checkpoints/fw/quickstart-sft/release
+    ...
 
-The above output prompts the log and the checkpoint paths of this experiment,
+The above output shows the log and checkpoint paths of this experiment,
 according to the given ``experiment_name`` and ``trial_name``.
 
 .. note::
 
-    ReaL loads directly from HuggingFace models and also saves checkpoints
-    as HuggingFace models, which makes it convinent to use the pre-trained models
-    and to deploy trained models with inference engines like vLLM.
+    ReaL directly loads from HuggingFace models and also saves checkpoints
+    as HuggingFace models, making it convenient to use pre-trained checkpoints
+    and to deploy trained models with inference frameworks like vLLM.
 
-The SFT experiment will take about xx minutes to finish using our provided dataset.
+.. image:: images/sft_loss.svg
+    :align: center
+
+.. code-block:: console
+
+    0: 20240618-13:32:19.081 master worker INFO: Execution finished!
+    0: 20240618-13:32:19.083 master worker INFO: Epoch 8/8 step 7/7 ... Total time consumption: 628.051s. ...
+    ...
+    0: 20240618-13:32:34.906 master worker INFO: Execution finished!
+    0: 20240618-13:32:34.906 master worker INFO: Training complete! Yeah!!!
+
+The SFT experiment will take about 10 minutes to finish 
+using our provided dataset and configuration.
 Let's move on to the next stage.
 
-Stage 2: Reward Modeling
+Stage 2.1: Reward Modeling (RM)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Prepare your customized dataset in a json or jsonl format,
-where each entry should be a dictionary with three keys,
+Prepare your customized dataset in a JSON or JSONL format,
+where each entry is a dictionary with three keys:
 "prompt", "pos_answer", and "neg_answers".
 
 "prompt" should be a string, while "pos_answer" and "neg_answers"
-should be lists of strings with the same size, forming pairwise comparisons.
+should be lists of strings of the same size, forming pairwise comparisons.
 
 .. note::
 
-    If you haved not prepared a dataset for your application, you can download the our
-    `sample dataset <https://drive.google.com/drive/folders/1xWIJ9DRLNQZxDrkCfAPE12euLLuWQGE-?usp=sharing>`_
-    to go through this tutorial.
-    The sample dataset is used for controlled sentiment generation,
-    where the LLM should learn to generate positive movie comments given a context.
-
+    In our provided sample,
     ``rm_paired-train.jsonl`` and ``rm_paired-valid.jsonl`` are the 
     training and validation sets for reward modeling, respectively.
 
+Run the following command to train the reward model:
 
 .. code-block:: shell
 
-    $ python3 -m reallm.apps.quickstart rw \
+    $ python3 -m realrlhf.apps.quickstart rw \
         experiment_name=quickstart-rw \
-        trial_name=my-trial \
+        trial_name=release \
         mode=local \
         allocation_mode=manual \
         total_train_epochs=1 \
-        save_freq_steps=5 eval_freq_epochs=1 \
+        save_freq_steps=5 \
+        eval_freq_epochs=1 \
         model.type._class=llama \
         model.type.size=7 \
         model.type.is_critic=True \
@@ -149,28 +170,40 @@ should be lists of strings with the same size, forming pairwise comparisons.
         dataset.train_bs_n_seqs=512 \
         dataset.valid_bs_n_seqs=512
 
-It's a common practice to use the SFT model to initialize the reward model.
+It's common practice to use the SFT model to initialize the reward model.
 Therefore, we can pass the path of the saved SFT model as the ``model.path`` option.
+Using the pre-trained LLaMA checkpoint is also feasible, but it may not perform as well.
+
 In reward modeling, the batch size is the number of paired comparisons.
 With a batch size of 512, there will be 512 positive samples and 512 negative samples in each batch.
 
+.. image:: images/rw_loss.svg
+    :align: center
 
-Training the reward model until convergence can be very fast.
-In the given example, we can preemptively stop the training after 15 steps, which approximately takes xxx minutes.
+Training the reward model to convergence can be very fast.
+In the given example, we can stop the training after 15 steps,
+which takes approximately 5 minutes.
 
-Stage 3.1: Direct Preference Optimization (DPO)
+.. code-block:: console
+
+    0: 20240618-13:53:00.094 master worker INFO: Epoch 1/1 step 15/26 (global step 15) finishes. ... Total time consumption: 294.393s.
+
+Stage 2.2: Direct Preference Optimization (DPO)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Besides the ordinary RLHF procedure with PPO,
-ReaL also supports the DPO algorithm, which avoids reward modeling.
+ReaL also supports the `DPO algorithm <https://arxiv.org/abs/2305.18290>`_, 
+which avoids reward modeling.
 
-The dataset for DPO is exactly the same as reward modeling.
+The dataset for DPO is exactly the same as for reward modeling.
+
+Run the following command to train using DPO:
 
 .. code-block:: shell
 
-    $ python3 -m reallm.apps.quickstart dpo \
+    $ python3 -m realrlhf.apps.quickstart dpo \
         experiment_name=quickstart-dpo \
-        trial_name=my-trial \
+        trial_name=release \
         allocation_mode=manual \
         mode=local \
         total_train_epochs=2 \
@@ -197,50 +230,46 @@ The dataset for DPO is exactly the same as reward modeling.
         dataset.train_bs_n_seqs=512 \
         dataset.valid_bs_n_seqs=512
 
-Note that there's a major difference between DPO and SFT or reward modeling.
+Note that there's a major difference between DPO and SFT/RM.
 DPO involves two different models, the *actor* and the *reference*.
-The former is the primary LLM to be trained and the latter is the freezed SFT
+The former is the primary LLM to be trained and the latter is the frozen SFT
 model to provide KL regularizations.
 
-A training iteration of DPO is composed of two steps\:
+A training iteration of DPO is composed of two steps:
 
-- *RefInf*\: The reference model performs a forward step to compute the log probabilities of positive and negative answers.
+- *RefInf*: The reference model performs a forward step to compute the log probabilities of positive and negative answers.
 
-- *ActorTrain*\: Given the reference log probabilities, the actor model computes the DPO loss, run the backward pass, and update the parameters.
+- *ActorTrain*: Given the reference log probabilities, the actor model computes the DPO loss, runs the backward pass, and updates the parameters.
 
-In ReaL, these two steps can run with different parallel strategies, which allows
-maximizing efficiency of the individual workloads.
-For example, pipelined inference can be faster than tensor-paralleled inference due to
-the reduced communication overhead.
-These parallel strategies can be specified in the ``ref_inf`` and the ``actor_train`` fields.
+In ReaL, these two steps can run with different parallel strategies, maximizing the efficiency of the individual workloads.
+These parallel strategies can be specified in the ``ref_inf`` and ``actor_train`` fields.
+Specifically, pipelined inference can be faster than tensor-paralleled inference due to
+the reduced communication overhead, so assigning a relatively large ``pipeline_parallel_size``
+for ``ref_inf`` can be favorable.
 
-What's more, ReaL can automatically *offload* the parameters of the reference model once *RefInf* is done.
-This does not require any additional configurations.
+Moreover, ReaL can automatically *offload* the parameters of the reference model once *RefInf* is done.
+This offloading fully supports 3D parallelism and does not require DeepSpeed ZeRO-3 or any additional configurations.
 Consequently, **ReaL's DPO is as memory-efficient as training a single model like SFT!**
 
-
-Stage 3.2: PPO
+Stage 3: PPO
 ~~~~~~~~~~~~~~~~~
 
-After the SFT and reward modeling stages, we can proceed to the PPO stage.
-The dataset for PPO should be a json or jsonl file with each entry being a dictionary of a single key "prompt".
+After the SFT and RM stages, we can proceed to the PPO stage.
+The dataset for PPO should be a JSON or JSONL file with each entry being a dictionary with a single key "prompt".
 
 .. note::
 
-    If you haved not prepared a dataset for your application, you can download the our
-    `sample dataset <https://drive.google.com/drive/folders/1xWIJ9DRLNQZxDrkCfAPE12euLLuWQGE-?usp=sharing>`_
-    to go through this tutorial.
-    The sample dataset is used for controlled sentiment generation,
-    where the LLM should learn to generate positive movie comments given a context.
-
+    In our provided sample,
     ``ppo_prompt.jsonl`` is the training set for PPO.
+
+Run the following command to train using PPO:
 
 .. code-block:: shell
 
-    $ python3 -m reallm.apps.quickstart ppo \
+    $ python3 -m realrlhf.apps.quickstart ppo \
         experiment_name=quickstart-ppo \
-        trial_name=my-trial \
-        total_train_epochs=4 \
+        trial_name=release \
+        total_train_epochs=1 \
         allocation_mode=heuristic \
         save_freq_steps=null \
         actor.type._class=llama \
@@ -274,9 +303,13 @@ The dataset for PPO should be a json or jsonl file with each entry being a dicti
         ppo.adv_norm=True ppo.value_norm=True \
         ppo.top_p=0.9 ppo.top_k=1000
 
-The configuration options of PPO is the most complicated one among the three stages.
-PPO involves four different models, namely *Actor*, *Critic*, *Reference*, and *Reward*.
-Each individual model can have different functionalities across a training iteration.
+.. note::
+
+    You can also pass in the trained DPO checkpoint to initialize the PPO policy.
+
+The configuration options of PPO are the most complex among the three stages.
+PPO involves four different models: *Actor*, *Critic*, *Reference*, and *Reward*.
+Each model can have different functionalities across a training iteration.
 For example, the *Actor* should first *generate* responses given prompts and then
 be *trained* given rewards, values, and KL regularizations.
 
@@ -287,25 +320,36 @@ Training iterations of PPO can be illustrated as follows:
     :align: center
 
 We can see that there are six distinct *function calls* on these four models.
-In ReaL, these function calls can have independent allocations and parallel strategies.
+In ReaL, these function calls can have independent *allocations* and *parallel strategies*.
+Each GPU can accommodate parameter shards of multiple models (e.g., both the Actor and the Reward).
 Between two function calls upon the same model, ReaL will automatically re-allocate
 model parameters between source and destination locations and properly remap
 parallel strategies.
-This feature can substantically reduce communication overhead caused by parallelization
+.. The reallocation also includes GPU-to-CPU reallocation, referred to as *offloading*.
+This technique can substantially reduce communication overhead caused by parallelization
 and improve GPU utilization.
 Please check :doc:`intro` for more details.
 
-In the above command, fields ``actor``, ``critic``, ``ref``, and ``rew`` specify the configurations of the four models.
+In the above command, fields ``actor``, ``critic``, ``ref``, and ``rew``
+specify the configurations of the four models.
 The allocations and parallel strategies for function calls are automatically
 handled by the ``heuristic`` allocation mode.
 This is a near-optimal execution strategy found by the search engine in ReaL.
 
 For the details of PPO hyperparameters in the ``ppo`` field, please check
-:class:`reallm.PPOHyperparameters` for detailed explaination.
+:class:`realrlhf.PPOHyperparameters` for a detailed explanation.
 
+.. image:: images/ppo_rwd.svg
+    :align: center
 
-We train PPO on 5000 prompts over 4 epochs, which consumes about xxx minutes.
-Summing up the time of the three stages, we can finish the RLHF process with ReaL
-in just one hour.
+.. code-block:: console
+
+    0: 20240618-14:46:38.007 master worker INFO: Epoch 1/1 step 39/39 (global step 39) finishes. ... Total time consumption: 574.312s. ...
+    ...
+    0: 20240618-14:46:54.387 master worker INFO: Execution finished!
+    0: 20240618-14:46:54.387 master worker INFO: Training complete! Yeah!!!
+
+We train PPO on 5000 prompts over 1 epoch, which consumes about 10 minutes.
+Summing up the time of the three stages, we can finish the RLHF process **within half an hour!**
 This efficiency can largely help algorithm developers to search for the best hyperparameters
-and to iterate on the algorithm design.
+and iterate on the algorithm design.

@@ -17,14 +17,14 @@ RUN pip3 install torch
 COPY ./requirements.txt /requirements.txt
 RUN pip3 install -r /requirements.txt && rm /requirements.txt
 
-COPY . /reallm
-RUN REAL_CUDA=0 pip3 install -e /reallm --no-build-isolation
-WORKDIR /reallm
+COPY . /realrlhf
+RUN REAL_CUDA=0 pip3 install -e /realrlhf --no-build-isolation
+WORKDIR /realrlhf
 
 # >>>>>> Documentation images
 # FROM cpu AS docs-builder
 # RUN pip install -U sphinx sphinx-nefertiti -i https://pypi.tuna.tsinghua.edu.cn/simple
-# RUN sphinx-build -M html /reallm/docs/source/ /reallm/docs/build/
+# RUN sphinx-build -M html /realrlhf/docs/source/ /realrlhf/docs/build/
 FROM nginx:alpine AS docs
 COPY ./docs/build/html /usr/share/nginx/html
 EXPOSE 80
@@ -55,8 +55,8 @@ ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 # However, using `pip install flash_attn -no-build-isolation` will cause the
 # building process to get stuck forever, so we have to pre-compile the wheel
 # and install it locally. If these wheels do not exist in your docker build
-# environment, please copy their source code and build them first.
-# If you can't build these packages, use our provided docker image.
+# environment, please build them first.
+# If you can't build these packages, use our provided docker images.
 
 ENV TE_WHL_NAME=transformer_engine-1.7.0+4e7caa1-cp310-cp310-linux_x86_64.whl
 ENV FLA_WHL_NAME=flash_attn-2.5.9-cp310-cp310-linux_x86_64.whl
@@ -66,6 +66,6 @@ RUN pip3 install /$TE_WHL_NAME --no-dependencies && rm /$TE_WHL_NAME
 COPY ./dist/$FLA_WHL_NAME /$FLA_WHL_NAME
 RUN pip3 install /$FLA_WHL_NAME && rm /$FLA_WHL_NAME
 
-COPY . /reallm
-RUN REAL_CUDA=1 pip3 install -e /reallm --no-build-isolation
-WORKDIR /reallm
+COPY . /realrlhf
+RUN REAL_CUDA=1 pip3 install -e /realrlhf --no-build-isolation
+WORKDIR /realrlhf
