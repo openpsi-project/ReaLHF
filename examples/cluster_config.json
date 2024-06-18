@@ -9,7 +9,7 @@
     "gpu_type_from_node_name": {
         "NODE\\d{2}$": "tesla"
     },
-    "cpu_image": "llm/llm-cpu:reallm",
-    "gpu_image": "llm/llm-gpu:reallm",
+    "cpu_image": "garrett4wade/real-cpu",
+    "gpu_image": "garrett4wade/real-gpu",
     "node_name_prefix": "NODE"
 }

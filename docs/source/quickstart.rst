@@ -47,7 +47,7 @@ Then, run the following command to fine-tune the model on your dataset:
 
 .. code-block:: shell
 
-    $ python3 -m reallm.apps.quickstart sft \
+    $ python3 -m realrlhf.apps.quickstart sft \
         experiment_name=quickstart-sft \
         trial_name=my-trial \
         allocation_mode=manual \
@@ -73,10 +73,13 @@ Then, run the following command to fine-tune the model on your dataset:
 ReaL adopts `structured configurations <https://hydra.cc/docs/tutorials/structured_config/intro/>`_
 in `Hydra <https://hydra.cc/>`_ to manage command line options.
 The options in the above command correspond to a Python
-dataclass object :class:`reallm.SFTConfig`.
+dataclass object :class:`realrlhf.SFTConfig`.
 The attributes, including the model type, the learning rate, and the parallel strategy,
 can be recursively overwritten via command line options.
 Please check :doc:`expconfig` for more details.
+
+.. note::
+    As a kind reminder, the passed-in value should be `null` to represent `None` in python.
 
 Importantly, the user should choose an appropriate parallel strategy
 as well as a moderate batch size according to the hardware setting.
@@ -126,7 +129,7 @@ should be lists of strings with the same size, forming pairwise comparisons.
 
 .. code-block:: shell
 
-    $ python3 -m reallm.apps.quickstart rw \
+    $ python3 -m realrlhf.apps.quickstart rw \
         experiment_name=quickstart-rw \
         trial_name=my-trial \
         mode=local \
@@ -168,7 +171,7 @@ The dataset for DPO is exactly the same as reward modeling.
 
 .. code-block:: shell
 
-    $ python3 -m reallm.apps.quickstart dpo \
+    $ python3 -m realrlhf.apps.quickstart dpo \
         experiment_name=quickstart-dpo \
         trial_name=my-trial \
         allocation_mode=manual \
@@ -237,7 +240,7 @@ The dataset for PPO should be a json or jsonl file with each entry being a dicti
 
 .. code-block:: shell
 
-    $ python3 -m reallm.apps.quickstart ppo \
+    $ python3 -m realrlhf.apps.quickstart ppo \
         experiment_name=quickstart-ppo \
         trial_name=my-trial \
         total_train_epochs=4 \
@@ -301,7 +304,7 @@ handled by the ``heuristic`` allocation mode.
 This is a near-optimal execution strategy found by the search engine in ReaL.
 
 For the details of PPO hyperparameters in the ``ppo`` field, please check
-:class:`reallm.PPOHyperparameters` for detailed explaination.
+:class:`realrlhf.PPOHyperparameters` for detailed explaination.
 
 
 We train PPO on 5000 prompts over 4 epochs, which consumes about xxx minutes.

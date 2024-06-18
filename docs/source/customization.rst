@@ -9,12 +9,12 @@ Customizing Datasets
 Overview
 ~~~~~~~~~~
 
-We provide three types of datasets implementation in ``reallm/impl/dataset/``,
+We provide three types of datasets implementation in ``realrlhf/impl/dataset/``,
 with corresponding configurations
 
-- :class:`reallm.PromptAnswerDatasetConfig`
-- :class:`reallm.PairedComparisonDatasetConfig`
-- :class:`reallm.PromptOnlyDatasetConfig`.
+- :class:`realrlhf.PromptAnswerDatasetConfig`
+- :class:`realrlhf.PairedComparisonDatasetConfig`
+- :class:`realrlhf.PromptOnlyDatasetConfig`.
 
 Please check the corresponding configurations for more details
 about how to use or change these implemented datasets.
@@ -29,13 +29,13 @@ How dataset configuration is parsed
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 We take the SFT experiment as an example.
-The :class:`reallm.PromptAnswerDatasetConfig` class will be converted to a dataset config
-under the system API, i.e., ``reallm.api.core.system_api.Dataset``.
-Please check the ``datasets`` method of :class:`reallm.SFTConfig` for more details.
+The :class:`realrlhf.PromptAnswerDatasetConfig` class will be converted to a dataset config
+under the system API, i.e., ``realrlhf.api.core.system_api.Dataset``.
+Please check the ``datasets`` method of :class:`realrlhf.SFTConfig` for more details.
 This object has a dataset name (in this case, "prompt_answer") and corresponding arguments
 that are passed to the dataset class constructor.
 
-At the end of ``reallm.impl.dataset.prompt_answer_dataset``, we can see a line:
+At the end of ``realrlhf.impl.dataset.prompt_answer_dataset``, we can see a line:
 
 .. code-block:: python
 
@@ -43,33 +43,33 @@ At the end of ``reallm.impl.dataset.prompt_answer_dataset``, we can see a line:
 
 This line properly registers the dataset class with the system API, so that when this name
 is given to system API, ReaL can find this dataset implementation and construct it.
-The ``args`` field in ``reallm.api.core.system_api.Dataset`` will be passed to the ``__init__``
+The ``args`` field in ``realrlhf.api.core.system_api.Dataset`` will be passed to the ``__init__``
 method of the dataset class, except that ReaL preserves a ``util`` field to store some utility objects.
 
 Steps for implementing a new dataset
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- Create a new dataset file under ``reallm/impl/dataset/``.
+- Create a new dataset file under ``realrlhf/impl/dataset/``.
 
 - Implement a map-style PyTorch dataset class with a ``__getitem__`` method. This method returns an ``NamedArray`` object containing the sequence length as metadata.
 
 - Register the class with ``data_api.register_dataset`` at the end of this file, with the name "my-dataset".
 
-- Change the name of the used dataset in experiment configurations, e.g., in the ``datasets`` method of ``reallm.SFTConfig``, to "my-dataset".
+- Change the name of the used dataset in experiment configurations, e.g., in the ``datasets`` method of ``realrlhf.SFTConfig``, to "my-dataset".
 
-- If you would like to pass in more arguments to construct the dataset class, change the quickstart configuration class (in this case, ``reallm.PromptAnswerDatasetConfig``) as well as the ``args`` field in the system API dataset object.
+- If you would like to pass in more arguments to construct the dataset class, change the quickstart configuration class (in this case, ``realrlhf.PromptAnswerDatasetConfig``) as well as the ``args`` field in the system API dataset object.
 
 Reference Manual for ``NamedArray``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass:: reallm.base.namedarray.NamedArray
+.. autoclass:: realrlhf.base.namedarray.NamedArray
     :members:
 
-.. autofunction::reallm.base.namedarray.from_dict
+.. autofunction::realrlhf.base.namedarray.from_dict
 
-.. autofunction::reallm.base.namedarray.recursive_aggregate
+.. autofunction::realrlhf.base.namedarray.recursive_aggregate
 
-.. autofunction::reallm.base.namedarray.recursive_apply
+.. autofunction::realrlhf.base.namedarray.recursive_apply
 
 
 Customizing Models
@@ -84,9 +84,9 @@ additional offload and parameter reallocation APIs.
 
 We provide reference manuals of related classes below.
 
-.. autoclass:: reallm.ReaLModelConfig
+.. autoclass:: realrlhf.ReaLModelConfig
 
-.. autoclass:: reallm.impl.model.nn.real_llm_api.ReaLModel
+.. autoclass:: realrlhf.impl.model.nn.real_llm_api.ReaLModel
     :members:
     :undoc-members:
     :exclude-members: forward, state_dict, load_state_dict, build_reparallelization_plan, build_reparallelized_layers_async, patch_reparallelization, pre_process, post_process, share_embeddings_and_output_weights
@@ -99,7 +99,7 @@ These helper functions are generated *automatically* by registering converting f
 We take ``api/from_hf/llama.py`` as an example.
 To register a convertable HuggingFace model, the user should implement\:
 
-- Two functions that convert model configs between HuggingFace and :class:`reallm.ReaLModelConfig`.
+- Two functions that convert model configs between HuggingFace and :class:`realrlhf.ReaLModelConfig`.
 - Two functions that convert model state dicts between HuggingFace and ReaL, basically key remap.
 - Three functions specifying the names of parameters in the embedding layer, transformer blocks, and the output layer, respectively.
 

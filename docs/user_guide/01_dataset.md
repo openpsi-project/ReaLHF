@@ -15,7 +15,7 @@ To implement a new dataset, uses should
 In configuration, users can define `api.config.Dataset` like this
 
 ```python
-dataset_cfg = reallm.api.config.Dataset(type_="my_cool_dataset",
+dataset_cfg = realrlhf.api.config.Dataset(type_="my_cool_dataset",
                                  args=dict(**other_arguments))
 ```
 
@@ -36,7 +36,7 @@ where we overwrite the arguments of `torch.utils.data.DataLoader` with a customi
 
 In configuration, users can define `api.config.DataLoader` like
 ```python
-dataloader = reallm.api.config.DataLoader(
+dataloader = realrlhf.api.config.DataLoader(
     'excel_propmt',
     args=dict(
         max_token_len=max_prompt_len,

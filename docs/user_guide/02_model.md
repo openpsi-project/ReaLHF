@@ -32,7 +32,7 @@ api.model.register_model("my_model", foo)
 
 To configure such a model, the configuration is
 ```python
-model_cfg = reallm.api.config.Model("my_model", dict=model_kwargs)
+model_cfg = realrlhf.api.config.Model("my_model", dict=model_kwargs)
 ```
 
 See `impl/model/nn/basic.py` for examples.

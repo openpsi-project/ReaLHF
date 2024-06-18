@@ -13,15 +13,15 @@ To pull the images, run:
 
 .. code-block:: console
 
-   $ docker pull garrett4wade/reallm-cpu
-   $ docker pull garrett4wade/reallm-gpu
+   $ docker pull garrett4wade/realrlhf-cpu
+   $ docker pull garrett4wade/realrlhf-gpu
 
 To build the images from scratch, run:
 
 .. code-block:: console
 
-   $ docker build --target=cpu -t reallm-cpu .
-   $ docker build --target=gpu -t reallm-gpu .
+   $ docker build --target=cpu -t realrlhf-cpu .
+   $ docker build --target=gpu -t realrlhf-gpu .
 
 Install From PyPI or Source
 ----------------------------
@@ -33,13 +33,13 @@ Install from PyPI:
 
 .. code-block:: console
 
-   $ pip install reallm --no-build-isolation
+   $ pip install realrlhf --no-build-isolation
 
 Install from source:
 
 .. code-block:: console
 
-   $ cd /path/to/reallm/directory
+   $ cd /path/to/realrlhf/directory
    $ pip install -e . --no-build-isolation
 
 .. note::

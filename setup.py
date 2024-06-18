@@ -214,10 +214,10 @@ if _is_cuda():
 with open("requirements.txt", "r") as f:
     dependencies = f.read().splitlines()
 
-os.makedirs(os.path.join(ROOT_DIR, "reallm", "_C"), exist_ok=True)
+os.makedirs(os.path.join(ROOT_DIR, "realrlhf", "_C"), exist_ok=True)
 if _is_cuda():
     cr_extension = CUDAExtension(
-        name="reallm._C.custom_all_reduce",
+        name="realrlhf._C.custom_all_reduce",
         sources=[
             "csrc/custom_all_reduce/custom_all_reduce.cu",
             "csrc/custom_all_reduce/pybind.cpp",
@@ -231,7 +231,7 @@ if _is_cuda():
     # ext_modules.append(cr_extension)
 
     interval_extension = CUDAExtension(
-        name="reallm._C.interval_op_cuda",
+        name="realrlhf._C.interval_op_cuda",
         sources=[
             "csrc/interval_op/interval_ops.cu",
         ],
@@ -244,7 +244,7 @@ if _is_cuda():
     ext_modules.append(interval_extension)
 
     gae_extension = CUDAExtension(
-        name="reallm._C.cugae",
+        name="realrlhf._C.cugae",
         sources=[
             "csrc/cugae/gae.cu",
         ],
@@ -262,7 +262,7 @@ if _is_cuda():
     ext_modules.append(gae_extension)
 
 search_extension = setuptools.Extension(
-    name="reallm._C.mdm_search",
+    name="realrlhf._C.mdm_search",
     sources=[
         "csrc/search/search.cpp",
         "csrc/search/rpc.cpp",
@@ -286,7 +286,7 @@ search_extension = setuptools.Extension(
 ext_modules.append(search_extension)
 
 setuptools.setup(
-    name="reallm",
+    name="realrlhf",
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
     packages=setuptools.find_packages(),

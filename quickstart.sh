@@ -1,6 +1,6 @@
 # SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep5globalstep50/
 
-# python3 -m reallm.apps.quickstart sft \
+# python3 -m realrlhf.apps.quickstart sft \
 #     experiment_name=quickstart-sft-debug trial_name=20240528 \
 #     allocation_mode=manual \
 #     total_train_epochs=8 \
@@ -26,7 +26,7 @@
 
 # SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
 # SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/testOnly/llama-2-16l/
-# python3 -m reallm.apps.quickstart rw \
+# python3 -m realrlhf.apps.quickstart rw \
 #     experiment_name=quickstart-rw-debug trial_name=20240603-1 \
 #     mode=local allocation_mode=manual \
 #     total_train_epochs=1 \
@@ -50,7 +50,7 @@
 #     dataset.train_bs_n_seqs=512 \
 #     dataset.valid_bs_n_seqs=512
 
-# python3 -m reallm.apps.quickstart dpo experiment_name=quickstart-dpo-debug trial_name=20240605-0 \
+# python3 -m realrlhf.apps.quickstart dpo experiment_name=quickstart-dpo-debug trial_name=20240605-0 \
 #     allocation_mode=manual \
 #     mode=local \
 #     total_train_epochs=2 \
@@ -78,7 +78,7 @@
 #     dataset.valid_bs_n_seqs=256
 SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep15globalstep15/
-CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m reallm.apps.quickstart ppo \
+CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realrlhf.apps.quickstart ppo \
     experiment_name=debug-quickstart-ppo trial_name=20240617-1 \
     total_train_epochs=4 \
     allocation_mode=heuristic \
