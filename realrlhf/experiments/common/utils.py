@@ -4,7 +4,7 @@ import collections
 from realrlhf.api.core.config import ModelBackend
 from realrlhf.api.core.dfg import (
     ModelInterfaceType,
-    ModelRPC,
+    MFCDef,
     OffloadHook,
     SyncParamHook,
 )

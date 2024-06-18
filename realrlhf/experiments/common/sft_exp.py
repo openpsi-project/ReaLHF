@@ -6,7 +6,7 @@ from realrlhf.api.core.dfg import (
     ModelFamily,
     ModelInterface,
     ModelInterfaceType,
-    ModelRPC,
+    MFCDef,
 )
 from realrlhf.api.core.system_api import *
 from realrlhf.api.quickstart.dataset import PromptAnswerDatasetConfig
@@ -69,7 +69,7 @@ class SFTConfig(CommonExperimentConfig):
     @property
     def rpcs(self):
         interface = ModelInterface("sft")
-        rpc = ModelRPC(
+        rpc = MFCDef(
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,

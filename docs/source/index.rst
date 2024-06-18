@@ -54,7 +54,6 @@ Contents
    quickstart
    expconfig
    customization
-   algo
    arch
    contributing
 

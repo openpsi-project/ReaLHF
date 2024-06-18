@@ -1,14 +1,14 @@
 from typing import List, Optional
 import dataclasses
 
-from realrlhf.api.core.dfg import ModelRPC
+from realrlhf.api.core.dfg import MFCDef
 from realrlhf.api.quickstart.device_mesh import DeviceMesh
 from realrlhf.api.quickstart.model import ParallelismConfig
 
 
 @dataclasses.dataclass
 class RPCExecution:
-    rpc: ModelRPC
+    rpc: MFCDef
     device_mesh: DeviceMesh
     parallel_strategy: ParallelismConfig
     time_cost: Optional[int] = None
@@ -31,10 +31,10 @@ class RPCExecution:
 
 @dataclasses.dataclass
 class RPCInstance:
-    rpc: ModelRPC
+    rpc: MFCDef
     iteration_id: int
-    parents: List[ModelRPC]
-    children: List[ModelRPC]
+    parents: List[MFCDef]
+    children: List[MFCDef]
 
     @property
     def name(self):

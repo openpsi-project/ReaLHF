@@ -215,14 +215,7 @@ def tokenizer_only_model(
 
 
 class ModelInterface(abc.ABC):
-
-    def __post_init__(self):
-        self._is_future_interface = False
-        self._hooks = {}
-
-    @property
-    def is_future_interface(self):
-        return self._is_future_interface
+    """Interface for model training, evaluation, inference and generation."""
 
     def save(self, model: Model, save_dir: str):
         pass

@@ -169,7 +169,7 @@ class ModelWorker:
     cuda_cache_cleanliness: bool = True
     cuda_cache_clear_freq: int = 10
     # model_topos and worker_info will be configured automatically
-    model_rpcs: List[dfg.ModelRPC] = None
+    model_rpcs: List[dfg.MFCDef] = None
     model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = None
     msid2mwid: Dict[ModelShardID, int] = None
     data_transfer_pairs: List[Tuple[str, str]] = None
@@ -203,7 +203,7 @@ class ExperimentSaveEvalControl:
 class MasterWorker:
     exp_ctrl: ExperimentSaveEvalControl
     # main components
-    model_rpcs: List[dfg.ModelRPC]
+    model_rpcs: List[dfg.MFCDef]
     n_model_workers: int
     model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology]
     msid2mwid: Dict[ModelShardID, int] = None
@@ -233,7 +233,7 @@ class ExperimentScheduling:
 class ExperimentConfig:
     exp_ctrl: ExperimentSaveEvalControl
     # dataflow
-    model_rpcs: List[dfg.ModelRPC]
+    model_rpcs: List[dfg.MFCDef]
     model_worker: List[ModelWorker] = dataclasses.field(default_factory=list)
     # master_worker will be set automatically
     master_worker: Optional[List[MasterWorker]] = None

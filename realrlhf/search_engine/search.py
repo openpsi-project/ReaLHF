@@ -13,7 +13,7 @@ try:
 except ModuleNotFoundError:
     mdm_search = None
 
-from realrlhf.api.core.dfg import ModelInterfaceType, ModelRPC
+from realrlhf.api.core.dfg import ModelInterfaceType, MFCDef
 from realrlhf.api.core.model_api import ModelFamily
 from realrlhf.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
 from realrlhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
@@ -23,7 +23,7 @@ import realrlhf.base.constants as constants
 
 def search_rpc_allocations(
     device_mesh: DeviceMesh,
-    rpcs: List[ModelRPC],
+    rpcs: List[MFCDef],
     num_gen_tokens: int = 256,
     n_ppo_minibatches: int = 1,
     seq_len: int = 256,
@@ -161,7 +161,7 @@ def search_rpc_allocations(
 
 
 def make_rpc_exe_list(
-    rpcs: List[ModelRPC],
+    rpcs: List[MFCDef],
     device_mesh: DeviceMesh,
     num_gen_tokens: int,
     n_ppo_minibatches: int,
@@ -220,7 +220,7 @@ def make_rpc_exe_list(
 
 
 def make_model_size_dict(
-    rpcs: List[ModelRPC], if_print: bool = False
+    rpcs: List[MFCDef], if_print: bool = False
 ) -> Dict[str, int]:
     model_size_dict = {}
 
