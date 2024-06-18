@@ -1,5 +1,6 @@
 # Legacy codes
 .legacy/
+.data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -641,6 +641,7 @@ class PPOConfig(CommonExperimentConfig):
                 data_parallel_size=2,
                 pipeline_parallel_size=self.n_nodes,
                 model_parallel_size=4,
+                use_sequence_parallel=True,
             ),
         )
         # level 4
@@ -659,6 +660,7 @@ class PPOConfig(CommonExperimentConfig):
                     data_parallel_size=2,
                     pipeline_parallel_size=1,
                     model_parallel_size=2,
+                    use_sequence_parallel=True,
                 ),
             )
             critic_inf = RPCAllocation(
@@ -675,6 +677,7 @@ class PPOConfig(CommonExperimentConfig):
                     data_parallel_size=2,
                     pipeline_parallel_size=1,
                     model_parallel_size=2,
+                    use_sequence_parallel=True,
                 ),
             )
         else:
@@ -693,6 +696,7 @@ class PPOConfig(CommonExperimentConfig):
                     data_parallel_size=2,
                     pipeline_parallel_size=rew_inf_n_nodes,
                     model_parallel_size=4,
+                    use_sequence_parallel=True,
                 ),
             )
 
@@ -711,6 +715,7 @@ class PPOConfig(CommonExperimentConfig):
                     data_parallel_size=2,
                     pipeline_parallel_size=critic_inf_n_nodes,
                     model_parallel_size=4,
+                    use_sequence_parallel=True,
                 ),
             )
         return [

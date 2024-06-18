@@ -69,6 +69,7 @@ class CommonExperimentConfig(Experiment):
     :type trial_name: str
     :param mode: Experiment launching mode.
         Currently only "local" and "slurm" are supported.
+        The "local" mode implies ``n_nodes=1``.
     :type mode: str
     :param debug: Whether to run in the debug mode.
         The non-debug mode will disable all assertions.
